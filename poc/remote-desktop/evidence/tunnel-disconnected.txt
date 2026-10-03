@@ -1,0 +1,24 @@
+### Page
+- Page URL: http://127.0.0.1:17680/vnc.html?autoconnect=1&resize=scale
+- Page Title: noVNC
+- Console: 0 errors, 12 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e3]:
+    - heading "no VNC" [level=1] [ref=f2e4]: noVNC
+    - separator [ref=f2e5]
+    - button "Full screen" [ref=f2e6] [cursor=pointer]
+    - button "Settings" [ref=f2e7] [cursor=pointer]
+    - generic:
+      - option "None"
+      - option "Local scaling" [selected]
+      - option "Remote resizing"
+  - generic [ref=f2e23] [cursor=pointer]: Disconnected
+  - generic [ref=f2e24]:
+    - paragraph [ref=f2e25]: noVNC
+    - button "Connect" [ref=f2e27] [cursor=pointer]
+  - textbox [ref=f2e12]: ___________________________________________________________________________________________________
+```
+### Events
+- New console entries: .playwright-cli/console-2026-10-03T06-28-47-035Z.log#L27-L28

@@ -1,0 +1,20 @@
+SIGSEGV: segmentation violation
+PC=0x7f0f60ea06f4 m=0 sigcode=1 addr=0x7ffe14e8bf38
+signal arrived during cgo execution
+
+goroutine 1 gp=0x59104c061e0 m=0 mp=0x563282451680 [syscall, locked to thread]:
+runtime.cgocall(0x563281fa8440, 0x59104d9f3d8)
+	runtime/cgocall.go:167 +0x4b fp=0x59104d9f3b0 sp=0x59104d9f378 pc=0x563281c3aaab
+cyphar.com/go-pathrs/internal/libpathrs._Cfunc_pathrs_reopen(0x4, 0x80001)
+	_cgo_gotypes.go:462 +0x4a fp=0x59104d9f3d8 sp=0x59104d9f3b0 pc=0x563281db9f0a
+cyphar.com/go-pathrs/internal/libpathrs.Reopen(0x59104d9f458?, 0x563281cb0277?)
+	cyphar.com/go-pathrs@v0.2.5/internal/libpathrs/libpathrs_linux.go:64 +0x1b fp=0x59104d9f408 sp=0x59104d9f3d8 pc=0x563281dba29b
+cyphar.com/go-pathrs.(*Handle).OpenFile.func1(0x0?)
+	cyphar.com/go-pathrs@v0.2.5/handle_linux.go:78 +0x25 fp=0x59104d9f438 sp=0x59104d9f408 pc=0x563281dbb385
+cyphar.com/go-pathrs/internal/fdutils.WithFileFd[...].func1()
+	cyphar.com/go-pathrs@v0.2.5/internal/fdutils/fd_linux.go:47 +0x2c fp=0x59104d9f460 sp=0x59104d9f438 pc=0x563281dbb14c
+internal/poll.(*FD).RawControl(0x7f0f60bc0108?, 0x8?)
+	internal/poll/fd_posix.go:61 +0xe2 fp=0x59104d9f4b0 sp=0x59104d9f460 pc=0x563281cb0262
+os.(*rawConn).Control(0x59104d9f508, 0x8?)
+	os/rawconn.go:22 +0x4a fp=0x59104d9f4d8 sp=0x59104d9f4b0 pc=0x563281cc144a
+cyphar.com/go-pathrs/internal/fdutils.WithFileFd[...](0x59104d9f5a0?, 0x563281c42150?)

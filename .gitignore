@@ -25,3 +25,5 @@ dist/
 *.db-shm
 *.pem
 *.key
+
+.playwright-cli/

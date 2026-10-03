@@ -25,6 +25,7 @@
 
 ## 验证与可追溯性
 
+- [远程 Docker GUI P2 最小切片](validation/remote-docker-gui.md)：真实 noVNC 输入、中文粘贴、重连与持久性，及未测边界。
 - [macOS shell P0/P1 实测](validation/macos-shell.md)：运行入口、真实输入/窗口证据、修复与未测边界。
 
 - [基线实验报告](validation/baseline-report.md)：已测、fixture、文档依据与未测范围。

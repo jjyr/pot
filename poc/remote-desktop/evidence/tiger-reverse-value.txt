@@ -1,0 +1,6 @@
+### Result
+"driver → viewer 中文\nsecond line"
+### Ran Playwright code
+```js
+await page.locator('#noVNC_clipboard_text').evaluate('el => el.value');
+```

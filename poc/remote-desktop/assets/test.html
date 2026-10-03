@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>pot remote desktop P2</title>
+<style>body{font:20px sans-serif;padding:24px;background:#e8eff6;color:#142b3e}textarea{width:92%;height:140px;font:24px sans-serif}button{font:20px sans-serif;padding:12px;margin:8px}#marker{font:16px monospace}#pad{height:600px;background:linear-gradient(#d5eaff,#ffd9aa)}pre{white-space:pre-wrap}</style>
+<h1>pot / real remote Docker desktop</h1><p id="marker"></p>
+<textarea id="text" aria-label="Remote input" placeholder="中文 / English — same browser, same profile"></textarea>
+<p><button id="save">Save profile marker</button><button id="count">Click counter: 0</button></p><pre id="status"></pre><div id="pad">Scroll / pointer test area</div>
+<script>
+const text=document.querySelector('#text');const id=localStorage.sessionId || (localStorage.sessionId=crypto.randomUUID());document.querySelector('#marker').textContent='profile/session: '+id;text.value=localStorage.savedText||'';
+window.potState={session:id,clicks:0,events:[],value:text.value};
+function event(e){potState.value=text.value;potState.events.push({type:e.type,key:e.key,data:e.data,value:text.value,x:e.clientX,y:e.clientY,time:Date.now()});if(potState.events.length>100)potState.events.shift();document.querySelector('#status').textContent=JSON.stringify({session:id,value:text.value,clicks:potState.clicks,last:potState.events.at(-1)},null,2)}
+for(const name of ['input','keydown','compositionstart','compositionend','paste','copy'])text.addEventListener(name,event);
+document.querySelector('#save').onclick=()=>{localStorage.savedText=text.value;event({type:'saved'})};document.querySelector('#count').onclick=()=>{potState.clicks++;document.querySelector('#count').textContent='Click counter: '+potState.clicks;event({type:'click'})};document.querySelector('#pad').onpointerdown=event;event({type:'ready'});
+</script>
