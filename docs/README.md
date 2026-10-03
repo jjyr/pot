@@ -25,6 +25,8 @@
 
 ## 验证与可追溯性
 
+- [macOS shell P0/P1 实测](validation/macos-shell.md)：运行入口、真实输入/窗口证据、修复与未测边界。
+
 - [基线实验报告](validation/baseline-report.md)：已测、fixture、文档依据与未测范围。
 - [基线复现说明](validation/baseline-reproduction.md)：依赖、命令和历史路径限制。
 - [复验记录](validation/baseline-verification-notes.md)：已修复缺陷和验收边界。

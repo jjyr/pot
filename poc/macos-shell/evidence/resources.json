@@ -1,0 +1,10 @@
+{
+  "time": "2026-10-03T06:08:38.314993+00:00",
+  "run_id": "20261003T060741Z-74f6b549",
+  "pid": 98530,
+  "rss_kib": 117936,
+  "threads_ps_M": 8,
+  "numeric_fd_count": 12,
+  "tcp_listeners": "",
+  "scope": "single sample; no 50-cycle leak or WebKit child-process total measurement"
+}

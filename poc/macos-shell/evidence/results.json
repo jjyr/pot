@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-03",
+  "checks_from_real_ui_logs": {
+    "web_pinyin_commit": true,
+    "web_cancel_preserves_text": true,
+    "gpui_pinyin_commit": true,
+    "gpui_mixed_text": true,
+    "web_navigation_fix": true,
+    "web_exact_paste": true,
+    "resize_1130x891": true,
+    "explicit_quit_cleanup": true,
+    "stop_cleanup": true
+  },
+  "tray_human_confirmation": "用户回复：已点击，关闭后可以重新打开；日志同一 window_number 461，06:00:21Z open / 06:00:37Z hide / 06:00:40Z open。",
+  "unmeasured": [
+    "50 tray cycles",
+    "multi-display",
+    "sleep/wake",
+    "memory growth over cycles",
+    "all IME candidates and layouts",
+    "P2 desktop",
+    "P4 helper/VM"
+  ],
+  "baseline_fixture_regression": {
+    "runtime": 22,
+    "adversarial": 4,
+    "oauth": 3,
+    "failures": 0
+  },
+  "raw_logs": [
+    {
+      "file": ".local/poc/20261003T055638Z-6bdb6366.jsonl",
+      "sha256": "9089035deb4757732705c4337feb9032201533c456edf8777ae6202cda413bec"
+    },
+    {
+      "file": ".local/poc/20261003T060148Z-ad1e0411.jsonl",
+      "sha256": "14c6fa9fd1be11c2736736dc2ca3fe7a2c70e74b42a67dec6d180b2534474c46"
+    },
+    {
+      "file": ".local/poc/20261003T060355Z-87a297b2.jsonl",
+      "sha256": "aa240734ae9918923a98f6320a1a3f2b65ded0e91ad0fc0d972865dddac27d02"
+    },
+    {
+      "file": ".local/poc/20261003T060627Z-b978b791.jsonl",
+      "sha256": "4cbe3b251128d1d456145bda8aad581929cb20d58b0249a262fd9fd2f0b3a173"
+    },
+    {
+      "file": ".local/poc/20261003T060740Z-11f2a0b5.jsonl",
+      "sha256": "06fdf1b5feca73aeac6e59379a29e1c4f6c923203e8f3615b5ff8c4fbb8d9676"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+TextInput/TextElement in src/main.rs are adapted from Zed GPUI 0.2.2
+examples/input.rs, licensed under Apache-2.0.
+Source: https://github.com/zed-industries/zed (gpui 0.2.2 crates.io source).
+Changes: POC layout, explicit native focus, input logging, IME selection offset fix.
