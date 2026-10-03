@@ -660,7 +660,7 @@ impl Render for Shell {
                 .child("Switch between this input and WKWebView →")
                 .child("Close / Cmd-W hides; tray reopens.")
                 .child("Cmd-Q / tray Quit exits this POC.")
-                .child("Local input only. No engine or VM."),
+                .child("Viewer backend selected at launch."),
         )
     }
 }

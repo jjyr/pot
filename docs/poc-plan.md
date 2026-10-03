@@ -1,6 +1,6 @@
 # pot 集成 POC 实施计划
 
-状态：P0/P1 最小切片已实施，按用户决定收尾，不再扩展 GPUI/tray 验证。日期：2026-10-03。实测与剩余项见 [macOS shell 验证](validation/macos-shell.md)；P2 远程 Docker GUI 最小切片有限通过，见 [P2 实测](validation/remote-docker-gui.md)；P3/P4 未测。现有基线实验不代表这些阶段已通过。
+状态：P0/P1 最小切片已实施，按用户决定收尾，不再扩展 GPUI/tray 验证。日期：2026-10-03。实测与剩余项见 [macOS shell 验证](validation/macos-shell.md)；P2 远程 Docker GUI 最小切片有限通过，见 [P2 实测](validation/remote-docker-gui.md)；P3/P4 最小切片有限通过，见 [纵向集成](validation/integrated-desktop.md) 与 [本地 helper](validation/native-helper-bundle.md)。阶段完整矩阵未全部验收。
 
 ## 1. 目标与范围
 
@@ -39,13 +39,14 @@ P0 复现与目录规范
 
 P1、P2 的工作可独立推进，但应尽早连接，不等各自做成完整子系统。默认先 P1，再 P2，接着 P3、P4。P4 先采用用户进程 helper，只有真实权限证据要求时才升级方案。
 
-目录安排（macos-shell 已实现，其余按后续阶段创建）：
+目录安排（各阶段最小切片已实现）：
 
 ```text
 poc/macos-shell/        GPUI、Swift native bridge、窗口和事件观测
 poc/remote-desktop/     Dockerfile/Compose、Linux GUI、隧道和 driver
 poc/native-helper/      Swift executable、IPC、Containerization
-poc/scripts/            构建/启动/停止/打包入口
+poc/integrated-desktop/ 共用 viewer、控制权 broker、真实远端协议检查
+各 poc/*/poc            构建/启动/停止/打包入口
 .local/poc/             被忽略的构建、下载、运行状态
 docs/validation/       每个阶段的报告与小型证据索引
 ```
@@ -197,10 +198,15 @@ docs/validation/       每个阶段的报告与小型证据索引
 - P1：有限通过。用户确认真实 tray 关闭后重开；真实 UI 操作验证 GPUI/WebView 焦点、拼音提交/取消、导航键、单屏 2× 缩放和应用菜单 Quit。修复键路由、firstResponder、Edit 菜单和重复运行签名问题。
 - P1 未测：最终构建 50 次 tray 循环、资源趋势、多屏、sleep/wake、完整输入法与快捷键矩阵；不能将最小切片等同完整阶段通过。
 - P2：有限通过。真实远程 Docker + TigerVNC/noVNC 已验证基本键鼠、中文双向 Clipboard、同会话 driver、SSH 重连和同卷 restart/recreate。中文直输失败、原生 IME 未测；远端 framebuffer resize 成功但窗口适配有限，弱网性能矩阵未测。详见 P2 报告。
-- P3/P4：未测；本轮开发 .app 不代表 helper/VM 或可分发 App 已完成。
+- P3：有限通过。真实 WKWebView → 远程 Docker、接管/交回、中文 Clipboard、断隧道保持归属、真实 RFB/CDP 仲裁检查已通过。最终 tray 连续演示、完整 IME/弱网性能矩阵未测。
+- P4：有限通过。自有 Swift helper、相对资源 App 移动后独立运行、真实本地桌面及共用控制、取消/guest/helper/GUI 崩溃恢复、Quit 清理已通过。正常退出 Chromium profile 仍标记 Crashed，干净退出未通过；公开分发、冷安装与完整下载中断矩阵未测。
 
 ### 后续范围收敛（用户决定）
 
 GPUI/tray 最小验证足够，到此收尾。50 次循环、多屏、sleep/wake、资源趋势和完整输入矩阵保留为未测边界，不作为本轮待办或 P2 前置条件；后续集成出现具体问题时再针对性复查。
 
-P2 初查内存不足后，按用户授权停止了 devpc 上 llama-server 对应的用户服务。复查可用内存已满足最小桌面预算，Docker 正常；操作记录、资源数值和恢复命令已写回 Machines。已实施专用远程桌面切片，环境变化写回 Machines。下一步 P3 接入已有 WKWebView 与最小控制权 broker，不追加 P1 泛化验证。
+P2 初查内存不足后，按用户授权停止了 devpc 上 llama-server 对应的用户服务。复查可用内存已满足最小桌面预算，Docker 正常；操作记录、资源数值和恢复命令已写回 Machines。已实施专用远程桌面切片，环境变化写回 Machines。P3 已接入 WKWebView 与最小控制权 broker，P4 已完成本机独立 App 最小闭环；不追加 P1 泛化验证。
+
+### 本轮收尾与下一阶段
+
+保留 GPUI/WKWebView、TigerVNC/noVNC 和用户进程 Swift helper。详细证据与未测边界以上述报告为准。下一阶段进入产品骨架前，确认 Chromium 干净退出/下载恢复、全工具输入隔离和分发签名；原生远端 IME、弱网性能留作针对性验收。用户确认「可以输入」，未说明方法，不升级为完整 IME 结论。

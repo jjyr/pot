@@ -59,6 +59,6 @@ Swift helper 是独立进程，链接固定 Containerization 版本。GPUI 经 U
 
 ## 当前已知与未知
 
-已证：GPUI + Swift tray + WKWebView 可启动；Apple library VM 的 headed Chromium 可显示并接收键；新 Linux VM 中 Codex App Server 可初始化。历史细节在 [基线报告](validation/baseline-report.md)。
+P0–P4 最小切片已实施，结论均按报告限定为有限通过：真实菜单栏操作/原生输入、远程 Docker 在 WKWebView 内操作与接管/交回、自有 Swift helper 管理真实 VM、移动后的 App 独立启动与故障清理。见 [POC 进度](poc-plan.md)、[P3](validation/integrated-desktop.md)、[P4](validation/native-helper-bundle.md)。
 
-未证：真实远程 Docker 网络下的可用性；实际 tray 点击、中文输入、多显示器与完整生命周期；App/helper 自包含打包和异常清理。这些就是下一轮 POC 的决策目标。
+仍未完成：远端完整 IME、弱网/性能矩阵、恶意 shell/CDP 全通道隔离、冷安装与公开分发验收。本地 Chromium 正常退出仍留 Crashed profile 标记，需在产品化前解决。保留当前技术路线，不把最小 POC 等同产品完成。

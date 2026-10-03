@@ -35,6 +35,7 @@ private func record(_ event: String, _ details: [String: Any] = [:]) {
     let web: WKWebView
     var observers: [NSObjectProtocol] = []
     var keyMonitor: Any?
+    var localRuntime: LocalRuntime?
     var termination: DispatchSourceSignal?
     init(host: NSWindow, html: String) {
         self.host = host
@@ -53,18 +54,18 @@ private func record(_ event: String, _ details: [String: Any] = [:]) {
         NSApp.setActivationPolicy(.regular) // Dock + Cmd-Tab deliberately available for P1.
         host.isReleasedWhenClosed = false
         status.button?.title = "pot POC"
-        let menu = NSMenu()
+        let menu = NSMenu(); menu.autoenablesItems = false
         for (title, action) in [("Open pot", #selector(showWindow)), ("Hide pot", #selector(hideWindow)), ("Quit pot POC", #selector(quitApp))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self; item.representedObject = "tray"; menu.addItem(item)
         }
         status.menu = menu
-        let main = NSMenu()
+        let main = NSMenu(); main.autoenablesItems = false
         let appItem = NSMenuItem(); main.addItem(appItem)
         appItem.submenu = menu.copy() as? NSMenu
         appItem.submenu?.items.forEach { $0.representedObject = "app-menu" }
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
-        let edit = NSMenu(title: "Edit")
+        let edit = NSMenu(title: "Edit"); edit.autoenablesItems = false
         for (title, selector, key) in [("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
             edit.addItem(NSMenuItem(title: title, action: NSSelectorFromString(selector), keyEquivalent: key))
         }
@@ -84,7 +85,10 @@ private func record(_ event: String, _ details: [String: Any] = [:]) {
         }
         web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "poc")
-        web.loadHTMLString(html, baseURL: nil)
+        if let address = ProcessInfo.processInfo.environment["POT_VIEWER_URL"],
+           let url = URL(string: address), url.host == "127.0.0.1", url.scheme == "http" {
+            web.load(URLRequest(url: url))
+        } else { web.loadHTMLString(html, baseURL: nil) }
         for name in [NSWindow.didResizeNotification, NSWindow.didChangeBackingPropertiesNotification,
                      NSWindow.didChangeScreenNotification, NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: host, queue: .main) { [weak self] note in
@@ -111,6 +115,9 @@ private func record(_ event: String, _ details: [String: Any] = [:]) {
         termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         termination?.setEventHandler { [weak self] in self?.quitApp() }
         termination?.resume()
+        if FileManager.default.isExecutableFile(atPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/PotHelper").path) {
+            localRuntime = LocalRuntime(view: view, web: web)
+        }
         geometry("bridge.ready")
     }
     func geometry(_ event: String) {
@@ -126,6 +133,7 @@ private func record(_ event: String, _ details: [String: Any] = [:]) {
         guard keyMonitor != nil else { return }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }; keyMonitor = nil
         termination?.cancel(); termination = nil
+        localRuntime?.cleanup(); localRuntime = nil
         web.stopLoading(); web.navigationDelegate = nil
         web.configuration.userContentController.removeScriptMessageHandler(forName: "poc")
         web.removeFromSuperview(); NSStatusBar.system.removeStatusItem(status)

@@ -25,6 +25,9 @@
 
 ## 验证与可追溯性
 
+- [P3 同窗口桌面与控制权](validation/integrated-desktop.md)：真实远端 viewer、接管/交回与重连。
+- [P4 本地 helper 与 App](validation/native-helper-bundle.md)：真实 VM、打包移动运行与故障清理。
+
 - [远程 Docker GUI P2 最小切片](validation/remote-docker-gui.md)：真实 noVNC 输入、中文粘贴、重连与持久性，及未测边界。
 - [macOS shell P0/P1 实测](validation/macos-shell.md)：运行入口、真实输入/窗口证据、修复与未测边界。
 

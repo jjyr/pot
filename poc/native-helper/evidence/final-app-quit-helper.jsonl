@@ -1,0 +1,5 @@
+{"event": "helper.ready", "pid": 88883, "socket": "<runtime-root>/helper.sock", "time": "2026-10-03T07:30:50Z"}
+{"error": "", "event": "runtime.starting", "generation": 1, "ip": "", "phase": "starting", "pid": 88883, "time": "2026-10-03T07:30:56Z", "viewer": ""}
+{"error": "", "event": "runtime.started", "generation": 1, "ip": "<guest-ip>", "phase": "running", "pid": 88883, "time": "2026-10-03T07:30:57Z", "viewer": "<guest-viewer-url-redacted>"}
+{"event": "runtime.guest_exited", "pid": 88883, "status": "ExitStatus(exitCode: 0, exitedAt: 2026-10-03 07:32:29 +0000)", "time": "2026-10-03T07:32:29Z"}
+{"error": "", "event": "runtime.stopped", "generation": 3, "ip": "", "phase": "stopped", "pid": 88883, "time": "2026-10-03T07:32:30Z", "viewer": ""}

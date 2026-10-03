@@ -12,6 +12,7 @@ fn main() {
         ])
         .arg(out.join("swift-modules"))
         .arg("swift/Bridge.swift")
+        .arg("swift/LocalRuntime.swift")
         .arg("-o")
         .arg(out.join("libpot_native.a"))
         .status()
@@ -25,4 +26,5 @@ fn main() {
     println!("cargo:rustc-link-search=native=/usr/lib/swift");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     println!("cargo:rerun-if-changed=swift/Bridge.swift");
+    println!("cargo:rerun-if-changed=swift/LocalRuntime.swift");
 }

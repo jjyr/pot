@@ -1,0 +1,9 @@
+{"event": "helper.ready", "pid": 78553, "socket": "<runtime-root>/helper.sock", "time": "2026-10-03T07:21:36Z"}
+{"error": "", "event": "runtime.starting", "generation": 1, "ip": "", "phase": "starting", "pid": 78553, "time": "2026-10-03T07:21:56Z", "viewer": ""}
+{"error": "", "event": "runtime.started", "generation": 1, "ip": "<guest-ip>", "phase": "running", "pid": 78553, "time": "2026-10-03T07:21:58Z", "viewer": "<guest-viewer-url-redacted>"}
+{"event": "runtime.guest_exited", "pid": 78553, "status": "ExitStatus(exitCode: 137, exitedAt: 2026-10-03 07:23:23 +0000)", "time": "2026-10-03T07:23:23Z"}
+{"error": "", "event": "runtime.stopped", "generation": 2, "ip": "", "phase": "stopped", "pid": 78553, "time": "2026-10-03T07:23:23Z", "viewer": ""}
+{"error": "", "event": "runtime.starting", "generation": 3, "ip": "", "phase": "starting", "pid": 78553, "time": "2026-10-03T07:23:47Z", "viewer": ""}
+{"error": "", "event": "runtime.started", "generation": 3, "ip": "<guest-ip>", "phase": "running", "pid": 78553, "time": "2026-10-03T07:23:48Z", "viewer": "<guest-viewer-url-redacted>"}
+{"event": "runtime.guest_exited", "pid": 78553, "status": "ExitStatus(exitCode: 137, exitedAt: 2026-10-03 07:26:22 +0000)", "time": "2026-10-03T07:26:22Z"}
+{"error": "", "event": "runtime.stopped", "generation": 5, "ip": "", "phase": "stopped", "pid": 78553, "time": "2026-10-03T07:26:22Z", "viewer": ""}

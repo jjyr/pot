@@ -1,0 +1,16 @@
+{
+  "owner": "agent",
+  "phase": "viewing",
+  "epoch": 3,
+  "environment": "local-swift-vm",
+  "observed": {
+    "id": 1,
+    "result": {
+      "result": {
+        "type": "string",
+        "value": "{\"session\":\"48243d8d-665c-4a4f-beb4-546e8e567717\",\"clicks\":0,\"events\":[{\"type\":\"ready\",\"value\":\"\",\"time\":1791012234742},{\"type\":\"input\",\"value\":\"Agent test 中文\",\"time\":1791012278659},{\"type\":\"keydown\",\"key\":\"Control\",\"value\":\"Agent test 中文\",\"time\":1791012319013},{\"type\":\"keydown\",\"key\":\"a\",\"value\":\"Agent test 中文\",\"time\":1791012319013},{\"type\":\"keydown\",\"key\":\"v\",\"value\":\"Agent test 中文\",\"time\":1791012319028},{\"type\":\"paste\",\"value\":\"Agent test 中文\",\"time\":1791012319030},{\"type\":\"input\",\"data\":\"P4 本地桌面 中文 123\",\"value\":\"P4 本地桌面 中文 123\",\"time\":1791012319038},{\"type\":\"saved\",\"value\":\"P4 本地桌面 中文 123\",\"time\":1791012319149}],\"value\":\"P4 本地桌面 中文 123\"}"
+      }
+    }
+  },
+  "connected": 1
+}

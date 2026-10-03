@@ -1,0 +1,14 @@
+{
+  "case": "native Cmd+Q with active desktop",
+  "socket_removed": true,
+  "helper_exited": true,
+  "http_available": false,
+  "http_error": "timeout",
+  "earlier_tcp_only_probe": {
+    "socket_removed": true,
+    "tcp_connected": true,
+    "followup_http_received_bytes": 0,
+    "conclusion": "TCP connect alone is inconclusive"
+  },
+  "chromium_exit_type": "Crashed"
+}

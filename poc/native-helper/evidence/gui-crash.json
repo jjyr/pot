@@ -1,0 +1,8 @@
+{
+  "case": "GUI SIGKILL with active desktop",
+  "socket_removed": true,
+  "cleanup_seconds": 2.54,
+  "helper_exited": true,
+  "http_available": false,
+  "http_error": "timeout"
+}

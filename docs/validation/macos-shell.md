@@ -98,3 +98,7 @@ POC 保留 Dock，便于 Cmd-Tab；当前不是 tray-only 产品策略。测试�
 按用户决定，GPUI/tray 最小切片到此收尾。上文完整 P1 补测清单不再作为本轮待办。
 
 用户明确授权停止 devpc 的 llama-server 后，已停止对应用户服务并验证无残留 llama-server 进程；Docker 仍可用，内存已满足最小桌面预算。未禁用服务开机配置，未改模型配置或其他服务，尚未创建桌面容器。操作和恢复命令记录在 `~/Workspace/Machines/machines/devpc/pot-p2-readiness-20261003.md`。P2 下一步关注镜像/持久卷磁盘预算与真实远程桌面集成。
+
+## P3/P4 集成补充
+
+自有 NSMenu 自动校验触发 GPUI validate_menu_item 重入锁，造成原生查询/菜单冻结。进程采样定位后，将自有主菜单、Edit 与状态菜单 autoenablesItems 设为 false；最终本地 App 原生点击、输入、Quit 正常。不据此补记完整 tray 循环通过。细节与新证据见 [P3](integrated-desktop.md)、[P4](native-helper-bundle.md)。

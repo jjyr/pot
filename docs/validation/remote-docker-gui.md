@@ -67,3 +67,7 @@ poc/remote-desktop/poc tunnel
 ## 下一步
 
 保留 GPUI/WKWebView 与 noVNC 路线，远端组件使用 TigerVNC。P2 最小闭环足以进入 **P3：将标准 viewer 接进已有 WKWebView，并做最小接管/交回 broker**。中文先明确使用 Clipboard fallback，输入法直输和 resize 适配需在集成时针对性确认。当前 CDP driver 可自由操作浏览器，不具备 P3 的控制权仲裁，更不代表任意 shell/CDP 已受隔离。Swift helper/本地运行时 P4 仍是后续独立未知项。
+
+## 后续实测补充
+
+用户亲手确认「可以输入」，未说明输入方法，因此不替代上述 IME 未测/自动化 Unicode 直输失败结论。P3 已完成 WKWebView 集成与合作式控制权最小切片，P4 已完成本地 helper/App 最小切片，见相应报告；上节“下一步”为 P2 当时的阶段记录。
