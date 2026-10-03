@@ -1,0 +1,16 @@
+[
+  {
+    "event": "rfb_connected",
+    "time": 1790997174.668298
+  },
+  {
+    "event": "key",
+    "down": 1,
+    "keysym": 97
+  },
+  {
+    "event": "key",
+    "down": 0,
+    "keysym": 97
+  }
+]

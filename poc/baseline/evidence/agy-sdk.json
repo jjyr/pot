@@ -1,0 +1,32 @@
+{
+  "version": "0.1.20",
+  "no_model_calls": true,
+  "started": true,
+  "conversation_id": null,
+  "conversation_methods": [
+    "cancel",
+    "chat",
+    "clear_history",
+    "compaction_indices",
+    "connection",
+    "conversation_id",
+    "create",
+    "disconnect",
+    "get_last_structured_output",
+    "history",
+    "is_idle",
+    "last_response",
+    "last_turn_usage",
+    "receive_chunks",
+    "receive_steps",
+    "sandbox_status",
+    "send",
+    "total_usage",
+    "trajectory_usages",
+    "turn_count",
+    "wait_for_idle",
+    "wait_for_wakeup"
+  ],
+  "cancel_rpc": true,
+  "clean_shutdown": true
+}

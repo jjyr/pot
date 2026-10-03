@@ -1,0 +1,39 @@
+test_recovery_invalidates_running_binding (__main__.AdversarialTests) ... ok
+test_return_control_cannot_release_inflight_takeover (__main__.AdversarialTests) ... FAIL
+test_unknown_action_cannot_default_to_allow (__main__.AdversarialTests) ... FAIL
+test_unknown_rule_cannot_grant_external_action (__main__.AdversarialTests) ... FAIL
+
+======================================================================
+FAIL: test_return_control_cannot_release_inflight_takeover (__main__.AdversarialTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/jjy/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes/项目/pot-poc/test_adversarial.py", line 13, in test_return_control_cannot_release_inflight_takeover
+    with self.assertRaises(RuntimeError):gate.return_control()
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_unknown_action_cannot_default_to_allow (__main__.AdversarialTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/jjy/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes/项目/pot-poc/test_adversarial.py", line 21, in test_unknown_action_cannot_default_to_allow
+    self.assertEqual(self.r.review('g','account','messages','unrecognized_mutation','allow',True),'deny')
+AssertionError: 'allow' != 'deny'
+- allow
++ deny
+
+
+======================================================================
+FAIL: test_unknown_rule_cannot_grant_external_action (__main__.AdversarialTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/jjy/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes/项目/pot-poc/test_adversarial.py", line 18, in test_unknown_rule_cannot_grant_external_action
+    self.assertEqual(self.r.review('g','account','messages','send','alow',True),'deny')
+AssertionError: 'allow' != 'deny'
+- allow
++ deny
+
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.015s
+
+FAILED (failures=3)

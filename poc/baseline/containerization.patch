@@ -1,0 +1,47 @@
+diff --git a/Sources/cctl/RunCommand.swift b/Sources/cctl/RunCommand.swift
+index 13ec448..8e29a8c 100644
+--- a/Sources/cctl/RunCommand.swift
++++ b/Sources/cctl/RunCommand.swift
+@@ -201,8 +201,9 @@ extension Application {
+             )
+ 
+             // Choose network implementation based on macOS version
++            let useNetwork = ProcessInfo.processInfo.environment["POT_POC_NETWORK"] == "1"
+             let network: Network?
+-            if #available(macOS 26, *) {
++            if #available(macOS 26, *), useNetwork {
+                 network = try VmnetNetwork()
+             } else {
+                 network = nil
+@@ -210,7 +211,8 @@ extension Application {
+ 
+             var manager = try await ContainerManager(
+                 kernel: kernel,
+-                initfsReference: "vminit:latest",
++                initfsReference: "ghcr.io/apple/containerization/vminit:0.47.0",
++                root: URL(fileURLWithPath: "/tmp/pot-research-20261003/vm-state"),
+                 network: network,
+                 rosetta: rosetta
+             )
+@@ -234,7 +236,7 @@ extension Application {
+                 image: image,
+                 rootfsSizeInBytes: fsSizeInMB.mib(),
+                 readOnly: readOnly,
+-                networking: true,
++                networking: useNetwork,
+                 // Give the VM memory headroom for the guest kernel and vminitd.
+                 vm: VMResources(cpus: cpus, memoryInBytes: memory.mib() + VMResources.guestMemoryOverhead)
+             ) { config in
+@@ -340,11 +342,7 @@ extension Application {
+         }
+ 
+         private static let appRoot: URL = {
+-            FileManager.default.urls(
+-                for: .applicationSupportDirectory,
+-                in: .userDomainMask
+-            ).first!
+-            .appendingPathComponent("com.apple.containerization")
++            URL(fileURLWithPath: "/tmp/pot-research-20261003/vm-state")
+         }()
+ 
+         /// Resolve the command from the image config.

@@ -1,0 +1,483 @@
+[
+  {
+    "name": "dot-start",
+    "url": "https://learn.chatgpt.com/docs/dots/getting-started",
+    "final_url": "https://learn.chatgpt.com/docs/dots/getting-started",
+    "bytes": 351506,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "dot-start.html",
+        "sha256": "bafbfabcf004f510b6cbb992acedeaef8ad9ea80e4c3fc13a9947787cd24fca3"
+      },
+      {
+        "file": "dot-start.txt",
+        "sha256": "63cfc38b1ff6177700344b3523923771cba014a5cb56a0f037fea778c8f1edbc"
+      },
+      {
+        "file": "dot-start.md",
+        "sha256": "651233b87a737da52c4178712df1a47c5d08ebc0c77163608f2d080610485ec6"
+      }
+    ]
+  },
+  {
+    "name": "dot-controls",
+    "url": "https://learn.chatgpt.com/docs/dots/controls",
+    "final_url": "https://learn.chatgpt.com/docs/dots/controls",
+    "bytes": 355084,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "dot-controls.html",
+        "sha256": "729080f2621f4214a6527afe5e4e6f88d0b2c84354b19689952a9c104d9952f2"
+      },
+      {
+        "file": "dot-controls.md",
+        "sha256": "a8ff50ccb4b54d24dddea8658bc6ca2eecfff16715c3fe913d40c9d9e62df12f"
+      },
+      {
+        "file": "dot-controls.txt",
+        "sha256": "863c1dc91e33165c950bea9c97ca7b7326c3f8db8e59e3f7b8f089de82dd0b52"
+      }
+    ]
+  },
+  {
+    "name": "dot-computers",
+    "url": "https://learn.chatgpt.com/docs/dots/computers-and-apps",
+    "final_url": "https://learn.chatgpt.com/docs/dots/computers-and-apps",
+    "bytes": 357296,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "dot-computers.txt",
+        "sha256": "f745a2cbf4bd8f0843e4c7ad99a38a6acb59a54078cd04bbcf35531cf52c116c"
+      },
+      {
+        "file": "dot-computers.html",
+        "sha256": "37eef6b270c183f75e4c4daa429f97927f687026ae8f38f645dcfeb8ea2527dc"
+      }
+    ]
+  },
+  {
+    "name": "dot-channels",
+    "url": "https://learn.chatgpt.com/docs/dots/channels",
+    "final_url": "https://learn.chatgpt.com/docs/dots/channels",
+    "bytes": 345468,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "dot-channels.txt",
+        "sha256": "23fe38458a4fc87024f9781090b77c43e010fba79c60c88ee32f22599755430b"
+      },
+      {
+        "file": "dot-channels.html",
+        "sha256": "5f209a9fccc4655a00126824285387459e5bb16c13c519f92e0c52c2ead0b729"
+      }
+    ]
+  },
+  {
+    "name": "claude-sdk",
+    "url": "https://platform.claude.com/docs/en/agent-sdk/overview",
+    "final_url": "https://code.claude.com/docs/en/agent-sdk/overview",
+    "bytes": 412134,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "claude-sdk.html",
+        "sha256": "746782677688567a255e925e8b546c18af85c5953b69bec45aff1343220df58b"
+      },
+      {
+        "file": "claude-sdk.txt",
+        "sha256": "be7bcf8ecf60d9d13129e75db6cca2fff4f0678ae4778cd46e97ec24c3bb96da"
+      }
+    ]
+  },
+  {
+    "name": "claude-permissions",
+    "url": "https://platform.claude.com/docs/en/agent-sdk/permissions",
+    "final_url": "https://code.claude.com/docs/en/agent-sdk/permissions",
+    "bytes": 560989,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "claude-permissions.txt",
+        "sha256": "77c72efc4fd6b48e3babe044ea2d7b0e535e4df12a11b6ab6ac08410c91dfc77"
+      },
+      {
+        "file": "claude-permissions.html",
+        "sha256": "411863f2720142280df49e83cd15b4b140b00e2465a6388e2f4c7c7ef2f9c5ec"
+      }
+    ]
+  },
+  {
+    "name": "opencode-server",
+    "url": "https://opencode.ai/docs/server/",
+    "final_url": "https://opencode.ai/docs/server/",
+    "bytes": 85930,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "opencode-server.html",
+        "sha256": "b066c59bb1d793de309fe490e4f1a484666d7c8ac5086617b0d66dc89a3412e3"
+      },
+      {
+        "file": "opencode-server.txt",
+        "sha256": "ded4910513b618effe499afe6a4fc8f5e852857f0082e69e61bae62a633d61ed"
+      }
+    ]
+  },
+  {
+    "name": "opencode-sdk",
+    "url": "https://opencode.ai/docs/sdk/",
+    "final_url": "https://opencode.ai/docs/sdk/",
+    "bytes": 118442,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "opencode-sdk.html",
+        "sha256": "83f598242d8ae582ce5e4dddc5f4e47be8684ed68c4ca7d0377864e3b3644fd0"
+      },
+      {
+        "file": "opencode-sdk.txt",
+        "sha256": "2cde552df840c73bc2982d13c55ff52467283d2c6c4d322f62159132b192879b"
+      }
+    ]
+  },
+  {
+    "name": "pi-rpc",
+    "url": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/docs/rpc.md",
+    "final_url": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/docs/rpc.md",
+    "bytes": 8897,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "pi-rpc.md",
+        "sha256": "37a03d180115460a0a275022f4aeabef1e5345458df6a9b6e8a6de18474de720"
+      }
+    ]
+  },
+  {
+    "name": "pi-readme",
+    "url": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/README.md",
+    "final_url": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/README.md",
+    "bytes": 4080,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "pi-readme.md",
+        "sha256": "fbc7abec7d0829ac8bc4b217e950794e1ba4d8d1b3e0850f970da318ad72e863"
+      }
+    ]
+  },
+  {
+    "name": "gpui-crate",
+    "url": "https://crates.io/api/v1/crates/gpui",
+    "final_url": "https://crates.io/api/v1/crates/gpui",
+    "bytes": 21647,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "gpui-crate.json",
+        "sha256": "d659dd838c1fe42445280751841c9993654403a858bae806c2dccaaa448e69c8"
+      }
+    ]
+  },
+  {
+    "name": "container-lib-release",
+    "url": "https://api.github.com/repos/apple/containerization/releases/latest",
+    "ok": false,
+    "error": "HTTP Error 404: Not Found",
+    "snapshots": []
+  },
+  {
+    "name": "opencode-release",
+    "url": "https://api.github.com/repos/anomalyco/opencode/releases/latest",
+    "final_url": "https://api.github.com/repos/anomalyco/opencode/releases/latest",
+    "bytes": 64252,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "opencode-release.json",
+        "sha256": "c8e034668e97d55af45b549cfa14ef9c7ceffb7000d5e13927513cfb84ece9de"
+      }
+    ]
+  },
+  {
+    "name": "gpui-repo",
+    "url": "https://api.github.com/repos/zed-industries/zed/commits/main",
+    "final_url": "https://api.github.com/repos/zed-industries/zed/commits/main",
+    "bytes": 17431,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "gpui-repo.json",
+        "sha256": "7c279ceb5ba8f3e2921f620951ddffb376c167071867a59aa1a287e44029d833"
+      }
+    ]
+  },
+  {
+    "name": "container-lib-readme",
+    "url": "https://raw.githubusercontent.com/apple/containerization/0.47.0/README.md",
+    "final_url": "https://raw.githubusercontent.com/apple/containerization/0.47.0/README.md",
+    "bytes": 9289,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "container-lib-readme.md",
+        "sha256": "c4eef297ac079ea4bfae590279d7ad08b7d507a2f1abd6d5096bd83bc547f4d4"
+      }
+    ]
+  },
+  {
+    "name": "google-agy-cli",
+    "url": "https://antigravity.google/docs/cli",
+    "final_url": "https://antigravity.google/docs/cli",
+    "bytes": 415,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "google-agy-cli.txt",
+        "sha256": "9f9baac82fbce5fbd823efdfa46e8339485cde67f0983e8c228b2ec8072b167f"
+      },
+      {
+        "file": "google-agy-cli.html",
+        "sha256": "381aefe05187f3a4183073d92c7b5b1ba2f5e947b7895bda6abf5d2b68ebda50"
+      }
+    ]
+  },
+  {
+    "name": "github-app-permissions",
+    "url": "https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/choosing-permissions-for-a-github-app",
+    "final_url": "https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app",
+    "bytes": 192546,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "github-app-permissions.html",
+        "sha256": "f660b1ac31601b118ba6bcd55869acb28693b9b6f1e8f758e12eedfdbb4e12a3"
+      },
+      {
+        "file": "github-app-permissions.txt",
+        "sha256": "807995827ca9153270501328517d47bf5e567c8d1aed1e2ea43342271021901f"
+      }
+    ]
+  },
+  {
+    "name": "github-revoke",
+    "url": "https://docs.github.com/en/apps/using-github-apps/reviewing-and-modifying-installed-github-apps",
+    "final_url": "https://docs.github.com/en/apps/using-github-apps/reviewing-and-modifying-installed-github-apps",
+    "bytes": 201199,
+    "ok": true,
+    "snapshots": [
+      {
+        "file": "github-revoke.html",
+        "sha256": "75b372c472c246caef4ee79392ce76e22dedcbf21446dc68842ae86e500c50c5"
+      },
+      {
+        "file": "github-revoke.txt",
+        "sha256": "f41f4ff03ee34380b5c729c274682d850134a85754678098ead4ef3671338820"
+      }
+    ]
+  },
+  {
+    "note": "Additional official markdown/sdk/cli sources listed in research report; hash snapshots below",
+    "snapshots": [
+      {
+        "file": "agy-sdk-lifecycle.txt",
+        "sha256": "24edb7fb90be4510e9eed3aa20d8aa197d9a569d54f449aadce1dc14b54201a7"
+      },
+      {
+        "file": "agy-install.sh",
+        "sha256": "62966c07365423bd4dc209355060744058fb30d60f5323e2d360e39de64e5042"
+      },
+      {
+        "file": "github-revoke.html",
+        "sha256": "75b372c472c246caef4ee79392ce76e22dedcbf21446dc68842ae86e500c50c5"
+      },
+      {
+        "file": "agy-sdk-overview.txt",
+        "sha256": "75a960928ca4235feba0a38ec556a972380d08469d671c5948f68b14bd46def7"
+      },
+      {
+        "file": "container-lib-readme.md",
+        "sha256": "c4eef297ac079ea4bfae590279d7ad08b7d507a2f1abd6d5096bd83bc547f4d4"
+      },
+      {
+        "file": "dot-tasks.html",
+        "sha256": "001c6966f3af06690e34da5b6c18fa4c1d354beb8bc23b528b8df1c2106d0018"
+      },
+      {
+        "file": "agy-cli-headless.txt",
+        "sha256": "72b257be4095d3bf6491f333cf0ee2f234ace3925faa677620b62b7d1908493f"
+      },
+      {
+        "file": "claude-sdk.html",
+        "sha256": "746782677688567a255e925e8b546c18af85c5953b69bec45aff1343220df58b"
+      },
+      {
+        "file": "dot-channels.txt",
+        "sha256": "23fe38458a4fc87024f9781090b77c43e010fba79c60c88ee32f22599755430b"
+      },
+      {
+        "file": "dot-channels.html",
+        "sha256": "5f209a9fccc4655a00126824285387459e5bb16c13c519f92e0c52c2ead0b729"
+      },
+      {
+        "file": "agy-start.html",
+        "sha256": "dd6f35361dd21bab6b12319f4e718ec31e5c65acca1c212a25bc3b54ade63b7f"
+      },
+      {
+        "file": "codex-config.rs",
+        "sha256": "df6d6871a35a9e365e36beb3d388c2c39cae59d95bd84834321c8501390ec397"
+      },
+      {
+        "file": "gpui-crate.json",
+        "sha256": "d659dd838c1fe42445280751841c9993654403a858bae806c2dccaaa448e69c8"
+      },
+      {
+        "file": "dot-computers.txt",
+        "sha256": "f745a2cbf4bd8f0843e4c7ad99a38a6acb59a54078cd04bbcf35531cf52c116c"
+      },
+      {
+        "file": "dot-start.html",
+        "sha256": "bafbfabcf004f510b6cbb992acedeaef8ad9ea80e4c3fc13a9947787cd24fca3"
+      },
+      {
+        "file": "agy-cli-install.txt",
+        "sha256": "67c9e48ebd06c24d35da8537355cd2e6e3b1f50d3490b8b0bb1c22170cbf69be"
+      },
+      {
+        "file": "pi-readme.md",
+        "sha256": "fbc7abec7d0829ac8bc4b217e950794e1ba4d8d1b3e0850f970da318ad72e863"
+      },
+      {
+        "file": "agy-sdk-policies.txt",
+        "sha256": "7dc6addec43c1cc657595d92cc07d45fc0e22bd28f9aeddd3e07b62f25fb8067"
+      },
+      {
+        "file": "apple-container-release.json",
+        "sha256": "684bb99b7bdf440527f584b1ac97e709749a1c1f0e9f276b582081e7eb14e3cc"
+      },
+      {
+        "file": "codex-app-server.md",
+        "sha256": "14c29f997cffff66125e710c1746425c53262eb4e636eb0bbcd5c8b4ec7e4464"
+      },
+      {
+        "file": "dot-start.txt",
+        "sha256": "63cfc38b1ff6177700344b3523923771cba014a5cb56a0f037fea778c8f1edbc"
+      },
+      {
+        "file": "dot-controls.html",
+        "sha256": "729080f2621f4214a6527afe5e4e6f88d0b2c84354b19689952a9c104d9952f2"
+      },
+      {
+        "file": "agy-start.txt",
+        "sha256": "f3f4497385eb42e0aa5b499818c15028bb067824fb97f01ea51ad71629f41b88"
+      },
+      {
+        "file": "claude-permissions.txt",
+        "sha256": "77c72efc4fd6b48e3babe044ea2d7b0e535e4df12a11b6ab6ac08410c91dfc77"
+      },
+      {
+        "file": "opencode-server.html",
+        "sha256": "b066c59bb1d793de309fe490e4f1a484666d7c8ac5086617b0d66dc89a3412e3"
+      },
+      {
+        "file": "opencode-server.txt",
+        "sha256": "ded4910513b618effe499afe6a4fc8f5e852857f0082e69e61bae62a633d61ed"
+      },
+      {
+        "file": "codex-config.md",
+        "sha256": "73242945d7891bc09bf95a39d83117025abd8eca61ae5707db38fda40db16d62"
+      },
+      {
+        "file": "dot-controls.md",
+        "sha256": "a8ff50ccb4b54d24dddea8658bc6ca2eecfff16715c3fe913d40c9d9e62df12f"
+      },
+      {
+        "file": "dot-controls.txt",
+        "sha256": "863c1dc91e33165c950bea9c97ca7b7326c3f8db8e59e3f7b8f089de82dd0b52"
+      },
+      {
+        "file": "google-agy-cli.txt",
+        "sha256": "9f9baac82fbce5fbd823efdfa46e8339485cde67f0983e8c228b2ec8072b167f"
+      },
+      {
+        "file": "dot-tasks.md",
+        "sha256": "190a71e142ebef3033362ca4ba566664034504e0c05fab5118850314c4e1eff7"
+      },
+      {
+        "file": "dot-computers.html",
+        "sha256": "37eef6b270c183f75e4c4daa429f97927f687026ae8f38f645dcfeb8ea2527dc"
+      },
+      {
+        "file": "agy-linux-arm64.json",
+        "sha256": "037503a0ab3839bed0b8814b0ed49ae50abd0db7da7f44041609f3b21346f89d"
+      },
+      {
+        "file": "github-revoke.txt",
+        "sha256": "f41f4ff03ee34380b5c729c274682d850134a85754678098ead4ef3671338820"
+      },
+      {
+        "file": "pi-rpc.md",
+        "sha256": "37a03d180115460a0a275022f4aeabef1e5345458df6a9b6e8a6de18474de720"
+      },
+      {
+        "file": "agy-cli-reference.txt",
+        "sha256": "1900b85b9d0a12ff054a513488ce461d0c386ec10e59559f7974865cbcaf8152"
+      },
+      {
+        "file": "claude-sdk.txt",
+        "sha256": "be7bcf8ecf60d9d13129e75db6cca2fff4f0678ae4778cd46e97ec24c3bb96da"
+      },
+      {
+        "file": "claude-permissions.html",
+        "sha256": "411863f2720142280df49e83cd15b4b140b00e2465a6388e2f4c7c7ef2f9c5ec"
+      },
+      {
+        "file": "opencode-sdk.html",
+        "sha256": "83f598242d8ae582ce5e4dddc5f4e47be8684ed68c4ca7d0377864e3b3644fd0"
+      },
+      {
+        "file": "opencode-sdk.txt",
+        "sha256": "2cde552df840c73bc2982d13c55ff52467283d2c6c4d322f62159132b192879b"
+      },
+      {
+        "file": "codex-app-server.txt",
+        "sha256": "ef08abbf468eac9ff7e59508aa540b7e874272577d85d941fbfea719fa5f3de4"
+      },
+      {
+        "file": "codex-app-server.html",
+        "sha256": "d1567ab8b633c6e536c501a4203f5eccc232f67331a424705b4277a149fce545"
+      },
+      {
+        "file": "github-app-permissions.html",
+        "sha256": "f660b1ac31601b118ba6bcd55869acb28693b9b6f1e8f758e12eedfdbb4e12a3"
+      },
+      {
+        "file": "dot-tasks.txt",
+        "sha256": "f46da6e4eb4ad409c2c2733b8d7d68ff79bc12cc41d95ab3ab9437fe5c0aaa09"
+      },
+      {
+        "file": "google-agy-cli.html",
+        "sha256": "381aefe05187f3a4183073d92c7b5b1ba2f5e947b7895bda6abf5d2b68ebda50"
+      },
+      {
+        "file": "dot-start.md",
+        "sha256": "651233b87a737da52c4178712df1a47c5d08ebc0c77163608f2d080610485ec6"
+      },
+      {
+        "file": "github-app-permissions.txt",
+        "sha256": "807995827ca9153270501328517d47bf5e567c8d1aed1e2ea43342271021901f"
+      },
+      {
+        "file": "opencode-release.json",
+        "sha256": "c8e034668e97d55af45b549cfa14ef9c7ceffb7000d5e13927513cfb84ece9de"
+      },
+      {
+        "file": "gpui-repo.json",
+        "sha256": "7c279ceb5ba8f3e2921f620951ddffb376c167071867a59aa1a287e44029d833"
+      }
+    ]
+  }
+]

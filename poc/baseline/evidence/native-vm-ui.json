@@ -1,0 +1,14 @@
+{
+  "gpui_host_window_found" : true,
+  "js_send_key_call" : true,
+  "native_status_item_created" : true,
+  "snapshot_error" : "",
+  "snapshot_saved" : true,
+  "tray_action_reopens_same_window" : true,
+  "web" : {
+    "connected" : true,
+    "viewOnly" : true
+  },
+  "webview_attached_to_gpui_contentview" : true,
+  "window_hidden" : true
+}

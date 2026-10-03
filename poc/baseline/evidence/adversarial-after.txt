@@ -1,0 +1,9 @@
+test_recovery_invalidates_running_binding (__main__.AdversarialTests) ... ok
+test_return_control_cannot_release_inflight_takeover (__main__.AdversarialTests) ... ok
+test_unknown_action_cannot_default_to_allow (__main__.AdversarialTests) ... ok
+test_unknown_rule_cannot_grant_external_action (__main__.AdversarialTests) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.014s
+
+OK

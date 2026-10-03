@@ -1,0 +1,59 @@
+{
+  "import_date": "2026-10-03",
+  "source_workspace": "Obsidian Notes",
+  "documents": [
+    {
+      "source": "项目/本地个人Agent工作环境产品设计.md",
+      "destination": "docs/product-design.md",
+      "source_sha256": "7a1b3eb76dc98aed996af97bd7014001fabc7040dbc48193b3fa33446efc3007"
+    },
+    {
+      "source": "技术/pot产品架构研究与POC验证.md",
+      "destination": "docs/validation/baseline-report.md",
+      "source_sha256": "20e248d2ad26a91c23b7dc4ed108c1fbe8c37d782a2152b9270c489cd094d1e7"
+    },
+    {
+      "source": "技术/Docker容器GUI与可嵌入运行时调研.md",
+      "destination": "docs/research/docker-gui.md",
+      "source_sha256": "ee3c807b5020367639b712735ba70e870637e2761b8414252eae1bdd346de6a8"
+    },
+    {
+      "source": "技术/Apple container能力架构与使用调研.md",
+      "destination": "docs/research/apple-containerization.md",
+      "source_sha256": "ab642ff810a6225ca251cec79f317ddd5e20a2f76f919b42cbe7714aff46afb2"
+    },
+    {
+      "source": "技术/Agent长期身份、记忆与长会话架构调研.md",
+      "destination": "docs/research/identity-memory.md",
+      "source_sha256": "537d66ecbd3153874552447f980eb4cbd4f71fcf6b8c55833af9f0f702dbbd5d"
+    },
+    {
+      "source": "技术/长期Agent的Session与任务协调机制对比.md",
+      "destination": "docs/research/session-coordination.md",
+      "source_sha256": "b8da20bbf42c67fda2408604711cf2054d069be7886c863df18e94bf3ba7f434"
+    },
+    {
+      "source": "技术/Hermes Session 管理架构与机制.md",
+      "destination": "docs/research/hermes-sessions.md",
+      "source_sha256": "edc8b11976791f46e4e569cfd4c07d9299477fc693a45948ed63d86bce1887f5"
+    },
+    {
+      "source": "技术/OpenClaw Session管理架构与机制.md",
+      "destination": "docs/research/openclaw-sessions.md",
+      "source_sha256": "2241940429182f81eb755d7460245f4cc3113a99773b1816459a739784efa9d7"
+    },
+    {
+      "source": "项目/pot-poc/README.md",
+      "destination": "docs/validation/baseline-reproduction.md",
+      "source_sha256": "c27d6640cec8f18e04fa87d9dad291370b3b370a46f2934dd96b395b388639d3"
+    },
+    {
+      "source": "项目/pot-poc/evidence/validation-notes.md",
+      "destination": "docs/validation/baseline-verification-notes.md",
+      "source_sha256": "53982676fb2fd2c094f64df14c5eaafbc6a3297b586128a7c22bc38dc0f21df3"
+    }
+  ],
+  "code_source": "项目/pot-poc",
+  "code_destination": "poc/baseline",
+  "notes": "Copied, not moved. Original notes and historical evidence preserved. Wiki links converted to repository-relative Markdown."
+}

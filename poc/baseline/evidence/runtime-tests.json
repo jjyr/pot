@@ -1,0 +1,11 @@
+{
+  "tests": 22,
+  "failures": 0,
+  "errors": 0,
+  "seconds": 0.148998042,
+  "limitations": [
+    "cooperative desktop broker only",
+    "no semantic memory evaluation",
+    "no real service side effects"
+  ]
+}

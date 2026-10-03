@@ -1,0 +1,161 @@
+{
+  "no_model_calls": true,
+  "results": [
+    {
+      "engine": "codex",
+      "probe": "initialize",
+      "ok": false,
+      "error": "No matching response; process exit=1"
+    },
+    {
+      "engine": "codex",
+      "probe": "duplicate_initialize_rejected",
+      "ok": false,
+      "error": "[Errno 32] Broken pipe"
+    },
+    {
+      "engine": "codex",
+      "probe": "ephemeral_thread_start_no_inference",
+      "ok": false,
+      "error": "[Errno 32] Broken pipe"
+    },
+    {
+      "engine": "pi",
+      "probe": "get_state",
+      "ok": true,
+      "evidence": {
+        "session_file": "/tmp/pot-research-20261003/homes/pi/sessions/2026-10-03T05-34-20-806Z_01a10041-9686-717a-8907-f3a6166cdf78.jsonl",
+        "keys": [
+          "model",
+          "thinkingLevel",
+          "isStreaming",
+          "isCompacting",
+          "steeringMode",
+          "followUpMode",
+          "sessionFile",
+          "sessionId",
+          "autoCompactionEnabled",
+          "messageCount",
+          "pendingMessageCount"
+        ]
+      }
+    },
+    {
+      "engine": "pi",
+      "probe": "get_messages",
+      "ok": true,
+      "evidence": {
+        "command": "get_messages",
+        "data_keys": [
+          "messages"
+        ]
+      }
+    },
+    {
+      "engine": "pi",
+      "probe": "get_session_stats",
+      "ok": true,
+      "evidence": {
+        "command": "get_session_stats",
+        "data_keys": [
+          "sessionFile",
+          "sessionId",
+          "userMessages",
+          "assistantMessages",
+          "toolCalls",
+          "toolResults",
+          "totalMessages",
+          "tokens",
+          "cost",
+          "contextUsage"
+        ]
+      }
+    },
+    {
+      "engine": "pi",
+      "probe": "abort",
+      "ok": true,
+      "evidence": {
+        "command": "abort",
+        "data_keys": "NoneType"
+      }
+    },
+    {
+      "engine": "pi",
+      "probe": "new_session",
+      "ok": true,
+      "evidence": {
+        "command": "new_session",
+        "data_keys": [
+          "cancelled"
+        ]
+      }
+    },
+    {
+      "engine": "pi",
+      "probe": "set_session_name_no_turn",
+      "ok": true,
+      "evidence": {
+        "session_path": "/tmp/pot-research-20261003/homes/pi/sessions/2026-10-03T05-34-20-831Z_01a10041-969f-717a-8907-f3a920ae6ccd.jsonl"
+      }
+    },
+    {
+      "engine": "opencode",
+      "probe": "health",
+      "ok": true,
+      "evidence": {
+        "healthy": true,
+        "version": "1.18.34"
+      }
+    },
+    {
+      "engine": "opencode",
+      "probe": "create_read_abort_delete_session",
+      "ok": true,
+      "evidence": {
+        "session_id": "ses_effbe68ffffeQuyaXgzdlA31eJ",
+        "abort": true,
+        "delete": true
+      }
+    },
+    {
+      "engine": "opencode",
+      "probe": "openapi_available",
+      "ok": true,
+      "evidence": {
+        "openapi": "3.1.0",
+        "path_count": 162
+      }
+    },
+    {
+      "engine": "claude",
+      "probe": "sdk_initialize_without_inference",
+      "ok": true,
+      "evidence": {
+        "keys": [
+          "commands",
+          "agents",
+          "output_style",
+          "available_output_styles",
+          "user_output_styles_dir",
+          "models",
+          "account",
+          "pid",
+          "current_permission_mode",
+          "feedback_mode",
+          "analytics_disabled",
+          "remote_control_auto_enable",
+          "remote_control_auto_connect_default",
+          "remote_control_available",
+          "remote_control_auto_on_by_default",
+          "ide_rc_auto_enable_gate",
+          "fast_mode_state",
+          "fast_mode_disabled_reason",
+          "session_state",
+          "capabilities"
+        ],
+        "model_count": 5
+      }
+    }
+  ]
+}

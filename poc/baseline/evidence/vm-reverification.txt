@@ -1,0 +1,5 @@
+aarch64
+PERSISTENCE_PASS
+cat: can't open '/run/pot-controller/Xauthority': Permission denied
+SEPARATE_UID_BOUNDARY_PASS
+NETWORK_PASS
