@@ -144,6 +144,9 @@ elif cmd == "bundle":
     shutil.copy2(RES / "sandbox-image.json", APP / "Contents/Resources/runtime/sandbox-image.json")
     for name in ["vmlinux"]:
         shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
+    shutil.copytree(
+        REPO / "app/assets/terminal", APP / "Contents/Resources/terminal", dirs_exist_ok=True
+    )
     for name in ["Pot.icns", "PotTray.png"]:
         shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)
     (APP / "Contents/Info.plist").write_bytes(

@@ -79,3 +79,6 @@ Token 输入按十进制：1K=1,000，1M=1,000,000；保存为整数。取消产
 ## Sandbox 桌面
 
 内嵌 noVNC 使用暖白、精简 Xfce 桌面，与 Pot 的克制风格一致。底部常驻栏直接显示 Browser、Files、Terminal，并提供窗口切换；右键菜单保留相同入口。CJK 字体覆盖中日韩。桌面软件随成品镜像预装，构建与主题入口见 [Sandbox 镜像](sandbox-image.md)。
+
+设置导航为“通用 / 助手 / Agent / Sandbox”。Agent 页面显示各 CLI 安装/官方登录状态、刷新入口及 Pi 可执行文件/argv 编辑；命令保存走 profile revision，不发模型测试。
+Sandbox 的 Desktop / Terminal 共用 GPUI 页头，Terminal 渲染由 bundled xterm WKWebView 承担；关闭终端与切换页签分开。状态未知不画成已登录，未经验收的 CLI 不显示为已支持的 Pot 主 Agent。

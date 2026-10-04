@@ -40,3 +40,13 @@ turn interruption 并等待 Codex turn/completed。前者尚无跨 lane 的负�
 设置 GUI；当前通用 profile 操作使用 Runtime API，原设置表单保留。driver fake
 覆盖目前是事件 gate，不替代完整 fake backend 的生命周期/取消测试。尚无按 provider
 预算和按 profile/provider 并发限制。详细进度仅在开发计划维护。
+
+## 2026-10-05 更新要求增量
+
+- Runtime 65 个离线测试、protocol 1 个测试通过；7 个真实 Pi + 本地模拟 provider 测试通过，无付费调用。
+- 新测试覆盖版本诊断不改变新 hash、旧 checksum 防篡改、命令参数冲突、PTY Unicode 输入输出、专用登录去重、会话数量限制与显式关闭。
+- 真实 loopback WebSocket 测试覆盖 bearer 缺失、非原生 Origin、重复连接拒绝、resize、断开保留和缓冲回放；未使用用户凭据。
+- `cargo check --locked -p pot-app`（含 Swift bridge）、Runtime ARM64 Linux/musl zigbuild、格式/lint 通过。
+- 独立 WKWebView smoke 加载 bundled HTML/CSP/xterm，收到 ready，并确认 88×31 字符区和 renderer 创建成功、Unicode 写入无 JS 异常。
+- 终端 UI 尚未做真实 VM/截图验收；未实际登录 Codex/Claude/AGY，没有 guest localhost callback 可达性或登录持久性结论。没有声称完整进程树隔离或新 Driver 验收。
+- 本次未跑完整两页安装/引导矩阵。其余缺口以开发计划为准。

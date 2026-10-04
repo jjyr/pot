@@ -63,3 +63,5 @@ OpenAI Chat codec 沿用 DeepSeek 的预留、输出限制和用量结算。迁�
 `unknown` 协议不解析响应 usage、不修改输出 cap，也不假装消耗为零；请求保留
 未知用量及保守预留。其 ResolvedSpec 明确关闭精确请求预算、usage reporting 和
 safe checkpoint resume。订阅配额仍未接入，不能由 API 请求账本推算。
+
+终端、官方登录状态查询、命令保存不触发模型调用，不创建用量记录；终端文本不进入用量或产品日志。CLI 发现显示“已登录”仅代表官方状态结果，不表示真实请求、模型预算或角色能力已验收。

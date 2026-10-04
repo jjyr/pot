@@ -4,6 +4,10 @@ import Foundation
 /// Configuration service only. GPUI Kit owns the settings interface.
 @MainActor final class SettingsPanel: NSObject {
     weak var bridge: PotBridge?
+    var agentStates: [[String: Any]] = []
+    var invocationExecutable = "pi", invocationArgs = "[]"
+    var profile: [String: Any] = [:]
+    var discovering = false
     var environment: [String: Any] = [:]
     var section = 0, revision = 0
     var setup = false, hasConfiguration = false
@@ -44,7 +48,68 @@ import Foundation
         ["revision": revision, "section": section, "setup": setup, "has_key": hasConfiguration,
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
+         "agents": agentStates, "discovering": discovering, "executable": invocationExecutable, "argv": invocationArgs,
          "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
+    }
+
+    func refreshAgents() {
+        guard let bridge, !discovering else { return }
+        bridge.terminal.show(false, root: root, ip: bridge.guestIP)
+        discovering = true
+        Task {
+            defer { discovering = false }
+            do {
+                let facts = try await bridge.terminal.request("api/v1/agents/refresh", body: [:])
+                agentStates = facts["agents"] as? [[String: Any]] ?? []
+                let agent = try await bridge.terminal.request("api/v1/agent")
+                let bindings = agent["bindings"] as? [[String: Any]] ?? []
+                let active = bindings.first { $0["state"] as? String == "active" }
+                let selectedID = (active?["spec"] as? [String: Any])?["source_profile_id"] as? String
+                if let profiles = agent["profiles"] as? [[String: Any]],
+                   let value = profiles.first(where: { $0["id"] as? String == selectedID }) ?? profiles.first
+                {
+                    profile = value
+                    let launch = value["launch_spec"] as? [String: Any] ?? [:]
+                    invocationExecutable = launch["executable"] as? String ?? "pi"
+                    let argv = launch["argv"] as? [[String: Any]] ?? []
+                    let literals = argv.compactMap { $0["kind"] as? String == "literal" ? $0["value"] as? String : nil }
+                    if let data = try? JSONSerialization.data(withJSONObject: literals), let text = String(
+                        data: data,
+                        encoding: .utf8
+                    ) {
+                        invocationArgs = text
+                    }
+                    revision += 1
+                }
+                result = "状态已刷新。已登录不代表模型调用已验证。"
+            } catch { result = "状态检查失败；可在 Sandbox Terminal 中手动使用 CLI。" }
+        }
+    }
+
+    func saveInvocation(executable: String, arguments: String) {
+        guard let bridge, let data = arguments.data(using: .utf8),
+              let args = try? JSONSerialization.jsonObject(with: data) as? [String],
+              let revision = profile["revision"] as? Int else { result = "参数必须是 JSON 字符串数组，且需先配置 API profile。"; return }
+        var updated = profile
+        updated["revision"] = revision + 1
+        updated["launch_spec"] = ["transport": "pi_rpc", "executable": executable,
+                                  "argv": args
+                                      .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],
+                                  "cwd_policy": "workspace"]
+        Task {
+            do {
+                _ = try await bridge.terminal.request(
+                    "api/v1/agent",
+                    body: [
+                        "profile": updated,
+                        "expected_revision": revision,
+                        "request_id": UUID().uuidString,
+                        "follow_main": true,
+                    ]
+                )
+                result = "命令已保存；在轮次边界迁移，未调用模型。"; refreshAgents()
+            } catch { result = "命令未保存：\(error.localizedDescription)" }
+        }
     }
 
     func load() {
@@ -108,7 +173,7 @@ import Foundation
         let alert = NSAlert(); alert.messageText = setup ? "保存配置并启动 Pot？" : "应用配置并重启 Sandbox？"
         alert.informativeText = "当前没有运行中的任务。聊天、工作文件和用量记录会保留；浏览器将正常关闭。此操作不调用模型。"
         alert.addButton(withTitle: "应用"); alert.addButton(withTitle: "取消")
-        alert.beginSheetModal(for: bridge.host) { [weak self] response in
+        let performApply: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             MainActor.assumeIsolated {
                 guard response == .alertFirstButtonReturn, let self, let bridge = self.bridge else { return }
                 guard !bridge.running else { self.result = "刚有任务开始，请完成后再应用。"; return }
@@ -144,6 +209,11 @@ import Foundation
                     } catch { bridge.isApplying = false; self.result = "保存失败，原配置保留。可从 Sandbox 重新启动环境。" }
                 }
             }
+        }
+        if setup {
+            performApply(.alertFirstButtonReturn)
+        } else {
+            alert.beginSheetModal(for: bridge.host, completionHandler: performApply)
         }
     }
 

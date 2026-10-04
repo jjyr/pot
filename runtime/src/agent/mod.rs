@@ -29,7 +29,7 @@ pub fn pi_config(s: &Service) -> Result<pi::Config> {
         binding.failure.as_deref().unwrap_or("needs rebind")
     );
     anyhow::ensure!(
-        binding.spec.engine == Engine::Pi && binding.spec.engine_version == PI_VERSION,
+        binding.spec.engine == Engine::Pi,
         "Agent engine needs rebind"
     );
     let mut config =
@@ -124,7 +124,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     {
         let mut inner = s.inner.lock().unwrap();
         inner.engine.engine = format!("Pi · {}", spec.model);
-        inner.engine.version = Some(spec.engine_version.clone());
+        inner.engine.version = None;
     }
     let mut user = s
         .inner

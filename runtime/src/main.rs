@@ -1,11 +1,13 @@
 mod agent;
 mod deepseek;
+mod discovery;
 mod gateway;
 mod orchestration;
 mod pi;
 mod schedules;
 mod store;
 mod tasks;
+mod terminal;
 mod tool_bridge;
 mod usage;
 use anyhow::{Result, anyhow, bail};
@@ -60,6 +62,7 @@ struct Service {
     data: PathBuf,
     cancel_notify: Arc<tokio::sync::Notify>,
     tasks: Arc<Mutex<tasks::Hub>>,
+    terminals: Arc<Mutex<terminal::Hub>>,
 }
 impl Service {
     fn snapshot(&self) -> Result<Snapshot> {
@@ -197,6 +200,19 @@ async fn send(
             message_id: old.id,
             duplicate: true,
         }));
+    }
+    if inner
+        .store
+        .get("agent.setup.pending")
+        .map_err(internal)?
+        .as_deref()
+        == Some("true")
+    {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "setup_required",
+            "请先在助手设置中选择并配置主 Agent；Terminal 仍可使用",
+        ));
     }
     if inner
         .store
@@ -495,7 +511,7 @@ async fn main() -> Result<()> {
                 detail: Some(
                     if use_pi {"Pi tools and native session"} else if use_api {"API smoke test: at most 3 requests, 128 output tokens each"} else {"Sign in through the guest AGY terminal; if already signed in, send a message to verify access"}.into(),
                 ),
-                version: if use_pi {Some("0.87.1".into())} else if use_api {None} else {Some("1.2.16".into())},
+                version: None,
                 auth_methods: vec![],
             },
             turn: None,
@@ -515,7 +531,18 @@ async fn main() -> Result<()> {
         data,
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
+            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
     };
+    s.inner.lock().unwrap().store.set(
+        "agent.setup.pending",
+        if use_pi || use_api { "false" } else { "true" },
+    )?;
+    if !use_pi && !use_api {
+        s.phase(
+            EnginePhase::NeedsAuth,
+            Some("请先配置主 Agent；Sandbox Terminal 可独立使用".into()),
+        );
+    }
     s.usage
         .lock()
         .unwrap()
@@ -548,6 +575,17 @@ async fn main() -> Result<()> {
         }
     });
     let router = Router::new()
+        .route(
+            "/api/v1/agents/tools",
+            get(discovery::list).post(discovery::save),
+        )
+        .route("/api/v1/agents/refresh", post(discovery::refresh))
+        .route(
+            "/api/v1/terminals",
+            get(terminal::list).post(terminal::create),
+        )
+        .route("/api/v1/terminals/{id}/socket", get(terminal::connect))
+        .route("/api/v1/terminals/{id}/close", post(terminal::close))
         .route(
             "/api/pi/v1/chat/completions",
             post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
@@ -610,8 +648,12 @@ async fn main() -> Result<()> {
     tasks::start(s.clone());
     eprintln!("pot runtime listening on {}", listener.local_addr()?);
     axum::serve(listener, router)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+        .with_graceful_shutdown(async move {
+            let mut term =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("signal handler");
+            tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+            terminal::shutdown(&s).await;
         })
         .await?;
     Ok(())
@@ -662,6 +704,7 @@ mod tests {
             data: PathBuf::new(),
             cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
+            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
         }
     }
     #[tokio::test]

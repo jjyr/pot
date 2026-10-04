@@ -2,7 +2,7 @@
 
 Rust owns the Control API, SQLite transcript, request ledger and Agent bindings.
 `agent/` owns immutable profile snapshots, epoch migration, driver event filtering
-and product projection; `pi.rs` owns the Pi subprocess transport. Pi 0.87.1 owns its native JSONL session and built-in read/write/edit/
+and product projection; `pi.rs` owns the Pi subprocess transport. Pi (image baseline 0.87.1, not a runtime lock) owns its native JSONL session and built-in read/write/edit/
 bash/grep/find/ls tools. The first MVP uses Pi with DeepSeek Flash; AGY/Codex are
 not required to use it. See [MVP validation](../docs/validation/pi-mvp.md).
 
@@ -215,7 +215,7 @@ and tool_policy `{worker_orchestration:false, summary_read_only:true,
 unattended:"guest_vm"}`. Only accepted engine routes can be selected. Model names
 are validated by the provider, not guessed by the Runtime.
 
-The current native Settings form still edits pi.json and restarts the environment.
+Assistant API settings still edit pi.json and restart the environment. Agent settings edit Pi launch commands through the versioned API without a model call.
 Its model/output-limit edit is imported into this same migration operation on
 startup. General profile management currently uses the authenticated API; the GUI
 has no Codex selector or migration preview.
@@ -270,3 +270,50 @@ DriverHost/SessionHandle currently implement the Pi execution path. Long-lived
 Codex lifecycle/authentication/permissions, guest binary packaging, native thread
 recovery and per-profile scheduling require additional work; see the development
 plan and [Agent validation](../docs/validation/agent-layer.md).
+
+
+## Terminal and explicit CLI discovery
+
+Root bearer only, native bridge only (any browser Origin is rejected):
+
+- `GET /api/v1/terminals`: boot ID and ephemeral session IDs/exit codes.
+- `POST /api/v1/terminals`: `{cols,rows,agent?}`. Without agent creates a Shell;
+  with agent directly executes that catalog's login command in a separate PTY.
+  Repeated clicks reuse a still-running login PTY. Maximum 8 retained sessions.
+- `GET /api/v1/terminals/{id}/socket`: authenticated WebSocket upgrade; one viewer.
+  Binary messages carry raw UTF-8 terminal bytes in either direction; client text
+  messages are resize `{cols,rows}`, server text messages report `{exit_code}`.
+  Frames/messages cap at 16 KiB, dimensions 1–500 columns / 1–300 rows.
+- `POST /api/v1/terminals/{id}/close`: terminate the foreground/session groups and
+  wait for the direct child; remove the PTY. Guest Linux also targets background
+  process groups in the same session. Deliberately daemonized new sessions are
+  not an isolation boundary; stronger process containment remains D4 work.
+
+Disconnect detaches; reconnect replays up to 64 KiB in memory. No terminal output
+is stored in SQLite, disk scrollback or logs; default Shell HISTFILE is disabled.
+Normal Runtime shutdown closes PTYs; VM restart loses them. The native bridge
+uses Authorization headers, never URL credentials or webview JavaScript tokens.
+Bundled xterm 5.5.0 / fit 0.10.0 have adjacent MIT licenses. No remote UI scripts.
+
+- `GET/POST /api/v1/agents/tools`: command catalog; POST edits a known tool's login
+  command using executable + argv. Invocation changes use profiles instead.
+- `POST /api/v1/agents/refresh`: explicit bounded discovery. Codex's official
+  `login status` gets a five-second timeout and bounded, discarded output.
+  Unsupported/custom status interfaces stay unknown. No credential files are
+  opened, no version suite/model test runs, and discovery never changes selection.
+
+Pi launch_spec has `transport: pi_rpc`, an executable, `cwd_policy: workspace`,
+and argv entries `{kind: literal,value: ...}` plus exactly one
+`{kind: runtime_arguments}`. Runtime expands its RPC/session/model/role flags at
+that position; conflicting reserved flags fail validation. Prompts remain RPC
+stdin input. User wrappers are direct exec. `pi` uses the Runtime's configured Pi
+executable default; an explicit wrapper path overrides it. protocol_contract
+requires `events: pi_rpc_v1` and `native_session: pi_jsonl_v3`. No exact CLI version
+check gates turns or saves. Legacy version-bearing checksums are still verified;
+new checksums exclude diagnostic engine_version. Command changes produce a
+profile revision and use the existing turn-boundary migration path.
+
+A fresh Runtime without accepted Pi/API configuration rejects chat with
+`setup_required`; terminal and discovery remain available. Existing API/Pi
+configuration is imported. The complete multi-backend onboarding matrix remains
+listed in the development plan; terminal availability is not Driver acceptance.

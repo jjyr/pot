@@ -165,7 +165,18 @@ pub(super) async fn execute(
             }
         )
     };
-    let mut process = Command::new(&s.pi_program);
+    let launch = spec.launch_spec.clone().unwrap_or_default();
+    launch.validate()?;
+    let executable = if spec
+        .launch_spec
+        .as_ref()
+        .is_some_and(|launch| launch.executable != "pi")
+    {
+        &launch.executable
+    } else {
+        &s.pi_program
+    };
+    let mut process = Command::new(executable);
     let usage_extension = home.join("pot-usage.mjs");
     std::fs::write(&usage_extension, include_str!("pot-usage.mjs"))?;
     process
@@ -193,28 +204,32 @@ pub(super) async fn execute(
             .env_remove("POT_TASK_API")
             .env_remove("POT_TASK_TOKEN");
     }
+    let mut owned: Vec<String> = [
+        "--mode",
+        "rpc",
+        "--provider",
+        &spec.provider,
+        "--model",
+        &config.model,
+        "--thinking",
+        "off",
+        "--tools",
+        tool_names,
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-context-files",
+        "--append-system-prompt",
+        &system_prompt,
+        "--no-approve",
+        "--session",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    owned.push(session.to_string_lossy().into_owned());
     let mut child = process
-        .args([
-            "--mode",
-            "rpc",
-            "--provider",
-            &spec.provider,
-            "--model",
-            &config.model,
-            "--thinking",
-            "off",
-            "--tools",
-            tool_names,
-            "--no-extensions",
-            "--no-skills",
-            "--no-prompt-templates",
-            "--no-context-files",
-            "--append-system-prompt",
-            &system_prompt,
-            "--no-approve",
-            "--session",
-        ])
-        .arg(&session)
+        .args(launch.expand(&owned)?)
         .env("PI_CODING_AGENT_DIR", &home)
         .env("PI_SKIP_VERSION_CHECK", "1")
         .current_dir(&s.workspace)

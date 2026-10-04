@@ -131,10 +131,11 @@ pub struct Settings {
     fields: Vec<Entity<InputState>>,
     revision: Option<i64>,
     pub advanced: bool,
+    commands_open: bool,
 }
 impl Settings {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields = (0..8)
+        let fields = (0..10)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
@@ -151,6 +152,7 @@ impl Settings {
             fields,
             revision: None,
             advanced: false,
+            commands_open: false,
         }
     }
     pub fn sync(&mut self, state: &Value, window: &mut Window, cx: &mut Context<Shell>) {
@@ -160,7 +162,16 @@ impl Settings {
         }
         self.revision = revision;
         for (i, key) in [
-            "key", "limit", "tokens", "per_turn", "cpus", "memory", "disk", "parallel",
+            "key",
+            "limit",
+            "tokens",
+            "per_turn",
+            "cpus",
+            "memory",
+            "disk",
+            "parallel",
+            "executable",
+            "argv",
         ]
         .iter()
         .enumerate()
@@ -258,6 +269,74 @@ impl Settings {
                         ));
                 }
             }
+            2 => {
+                form = form.child(
+                    Field::new().label("登录状态").child(
+                        Button::new("refresh-agents")
+                            .ghost()
+                            .label("刷新状态")
+                            .disabled(state["discovering"].as_bool() == Some(true))
+                            .on_click(|_, _, _| command(json!({"action":"agent-refresh"}))),
+                    ),
+                );
+                for (i, agent) in state["agents"].as_array().into_iter().flatten().enumerate() {
+                    let id = agent["id"].as_str().unwrap_or("").to_owned();
+                    let status = if agent["installation"] == "missing" {
+                        "未安装"
+                    } else if agent["status_check"] == "failed" {
+                        "检查失败"
+                    } else {
+                        match agent["authentication"].as_str() {
+                            Some("authenticated") => "已登录",
+                            Some("required") => "未登录 ↗",
+                            _ => "状态未知 · 打开终端 ↗",
+                        }
+                    };
+                    let name = id.clone();
+                    form = form.child(
+                        Field::new()
+                            .label(name)
+                            .description(if id == "pi" {
+                                "运行环境已随 Pot 提供；通过 API 设置连接模型。"
+                            } else {
+                                "CLI 可在终端使用；Pot Driver 尚待验收。"
+                            })
+                            .child(
+                                Button::new(("agent-login", i))
+                                    .ghost()
+                                    .label(status)
+                                    .disabled(id == "pi" || agent["installation"] == "missing")
+                                    .on_click(move |_, _, _| {
+                                        command(json!({"action":"agent-login","id":id}))
+                                    }),
+                            ),
+                    );
+                }
+                form = form.child(
+                    Field::new().label("Pi").child(
+                        Button::new("pi-command-details")
+                            .ghost()
+                            .label("调用命令")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.settings.commands_open = !this.settings.commands_open;
+                                cx.notify();
+                            })),
+                    ),
+                );
+                if self.commands_open {
+                    form = form
+                        .child(input(
+                            8,
+                            "Pi 调用程序",
+                            "可填可执行文件或 wrapper 路径；直接执行，不经过 shell。",
+                        ))
+                        .child(input(
+                            9,
+                            "额外参数（JSON）",
+                            "字符串数组。Runtime 追加 RPC、会话和工具策略参数；冲突参数会被拒绝。",
+                        ));
+                }
+            }
             _ => {
                 form = form
                     .child(label("环境", "本地 Linux VM · Alpine · ARM64"))
@@ -268,6 +347,14 @@ impl Settings {
         }
         let fields = self.fields.clone();
         let mut actions = div().flex().items_center().justify_end().gap_2();
+        if setup {
+            actions = actions.child(
+                Button::new("setup-later")
+                    .ghost()
+                    .label("稍后设置 · 打开 Terminal")
+                    .on_click(|_, _, _| command(json!({"action":"terminal","value":true}))),
+            );
+        }
         if section == 1 {
             actions=actions.child(Button::new("advanced").ghost()
                 .label(if self.advanced {"收起用量限制"} else {"用量限制"})
@@ -277,6 +364,8 @@ impl Settings {
                         command(json!({"action":"save-agent","key":fields[0].read(cx).value(),"limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}));
                     }));
         } else if section == 2 {
+            actions = actions.child(Button::new("save-invocation").primary().label("保存调用命令").on_click(move|_,_,cx|command(json!({"action":"save-invocation","executable":fields[8].read(cx).value(),"argv":fields[9].read(cx).value()}))));
+        } else if section == 3 {
             actions=actions.child(Button::new("workspace").ghost().label("打开工作目录").on_click(|_,_,_|command(json!({"action":"workspace"}))))
                 .child(Button::new("save-sandbox").primary().label("应用并重启…").on_click(move|_,_,cx|command(json!({"action":"save-sandbox","cpus":fields[4].read(cx).value(),"memory":fields[5].read(cx).value(),"disk":fields[6].read(cx).value()}))));
         }
@@ -285,7 +374,7 @@ impl Settings {
                 .child(title(if setup { "开始使用 Pot" } else { "设置" }))
                 .child(
                     div().flex().gap_2().children(
-                        ["通用", "Agent", "Sandbox"]
+                        ["通用", "助手", "Agent", "Sandbox"]
                             .iter()
                             .enumerate()
                             .map(|(i, name)| {
@@ -304,6 +393,7 @@ impl Settings {
                     match section {
                         0 => "让 Pot 按你的习惯工作。",
                         1 => "Pi 执行任务，DeepSeek 提供模型能力。更改连接会重启 Sandbox。",
+                        2 => "检查登录状态，在终端登录，或编辑调用命令。保存不会调用模型。",
                         _ => "资源调整重启后生效，聊天与工作文件保留。实时用量见环境信息。",
                     },
                     cx,
@@ -403,7 +493,39 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                                 .child(action("more", IconName::Ellipsis, "更多操作")),
                         ),
                 )
-                .child(hint("查看工作进度，或接管桌面继续操作。", cx)),
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("desktop-tab")
+                                .ghost()
+                                .label("Desktop")
+                                .on_click(|_, _, _| {
+                                    command(json!({"action":"terminal","value":false}))
+                                }),
+                        )
+                        .child(
+                            Button::new("terminal-tab")
+                                .ghost()
+                                .label("Terminal")
+                                .on_click(|_, _, _| {
+                                    command(json!({"action":"terminal","value":true}))
+                                }),
+                        )
+                        .child(
+                            Button::new("terminal-shell")
+                                .ghost()
+                                .label("Shell")
+                                .on_click(|_, _, _| command(json!({"action":"terminal-shell"}))),
+                        )
+                        .child(
+                            Button::new("terminal-close")
+                                .ghost()
+                                .label("关闭终端")
+                                .on_click(|_, _, _| command(json!({"action":"terminal-close"}))),
+                        ),
+                ),
         )
         .when(!running, |el| {
             el.child(

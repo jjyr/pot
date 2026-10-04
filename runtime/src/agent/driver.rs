@@ -66,8 +66,8 @@ impl DriverHost for PiHost {
     fn probe(&self, spec: &ResolvedSpec) -> Result<()> {
         spec.validate()?;
         anyhow::ensure!(
-            spec.engine == Engine::Pi && spec.engine_version == PI_VERSION,
-            "Unsupported Pi engine version; needs rebind"
+            spec.engine == Engine::Pi,
+            "Unsupported engine; needs rebind"
         );
         Ok(())
     }

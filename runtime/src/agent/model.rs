@@ -5,13 +5,14 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 pub const SCHEMA_VERSION: u32 = 1;
-pub const PI_VERSION: &str = "0.87.1";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
     Pi,
     Codex,
+    Claude,
+    Agy,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Capabilities {
@@ -42,6 +43,10 @@ pub struct Profile {
     pub revision: u64,
     pub name: String,
     pub engine: Engine,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<LaunchSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_contract: Option<ProtocolContract>,
     pub provider: String,
     pub model: String,
     pub auth_ref: String,
@@ -55,6 +60,8 @@ impl Profile {
             revision: 1,
             name: "Pi · DeepSeek Flash".into(),
             engine: Engine::Pi,
+            launch_spec: None,
+            protocol_contract: None,
             provider: "deepseek".into(),
             model: config.model.clone(),
             auth_ref: "pi.json:api_key".into(),
@@ -98,6 +105,11 @@ impl Profile {
     }
     pub fn resolve(&self) -> Result<ResolvedSpec> {
         self.validate()?;
+        self.launch_spec.clone().unwrap_or_default().validate()?;
+        self.protocol_contract
+            .clone()
+            .unwrap_or_default()
+            .validate()?;
         ensure!(
             self.params.reasoning_effort.is_none(),
             "Reasoning configuration is not accepted for this Pi route"
@@ -105,7 +117,7 @@ impl Profile {
         // Capability declarations must follow accepted transports, never UI guesses.
         ensure!(
             self.engine == Engine::Pi,
-            "Codex has not passed guest acceptance"
+            "Backend has not passed guest acceptance"
         );
         ensure!(
             (self.provider == "deepseek" && self.auth_ref == "pi.json:api_key")
@@ -119,7 +131,9 @@ impl Profile {
         );
         let mut spec = ResolvedSpec {
             engine: self.engine.clone(),
-            engine_version: PI_VERSION.into(),
+            engine_version: String::new(),
+            launch_spec: Some(self.launch_spec.clone().unwrap_or_default()),
+            protocol_contract: Some(self.protocol_contract.clone().unwrap_or_default()),
             provider: self.provider.clone(),
             model: self.model.clone(),
             auth_ref: self.auth_ref.clone(),
@@ -147,7 +161,13 @@ impl Profile {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedSpec {
     pub engine: Engine,
+    /// Legacy diagnostic only; excluded from new checksums and never gates execution.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub engine_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<LaunchSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_contract: Option<ProtocolContract>,
     pub provider: String,
     pub model: String,
     pub auth_ref: String,
@@ -176,11 +196,23 @@ impl ResolvedSpec {
     fn hash(&self) -> Result<String> {
         let mut value = self.clone();
         value.spec_hash.clear();
+        let mut value = serde_json::to_value(value)?;
+        value.as_object_mut().unwrap().remove("engine_version");
+        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
+    }
+    fn legacy_hash(&self) -> Result<String> {
+        let mut value = self.clone();
+        value.spec_hash.clear();
         Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
     }
     pub fn validate(&self) -> Result<()> {
+        self.launch_spec.clone().unwrap_or_default().validate()?;
+        self.protocol_contract
+            .clone()
+            .unwrap_or_default()
+            .validate()?;
         ensure!(
-            self.hash()? == self.spec_hash,
+            self.hash()? == self.spec_hash || self.legacy_hash()? == self.spec_hash,
             "Resolved spec checksum mismatch"
         );
         Ok(())
@@ -220,4 +252,191 @@ pub struct Binding {
     pub model_switches: Vec<ModelSwitch>,
     pub handoff_ref: Option<PathBuf>,
     pub failure: Option<String>,
+}
+
+/// One typed expansion carries all runtime-owned identity and role policy.
+/// Literal arguments are direct argv entries, never shell text.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum LaunchArgument {
+    Literal(String),
+    RuntimeArguments,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LaunchSpec {
+    pub transport: String,
+    pub executable: String,
+    pub argv: Vec<LaunchArgument>,
+    pub cwd_policy: String,
+}
+impl Default for LaunchSpec {
+    fn default() -> Self {
+        Self {
+            transport: "pi_rpc".into(),
+            executable: "pi".into(),
+            argv: vec![LaunchArgument::RuntimeArguments],
+            cwd_policy: "workspace".into(),
+        }
+    }
+}
+impl LaunchSpec {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.transport == "pi_rpc",
+            "Transport has not passed driver acceptance"
+        );
+        ensure!(
+            self.cwd_policy == "workspace",
+            "Only workspace cwd is supported"
+        );
+        ensure!(
+            !self.executable.is_empty()
+                && self.executable.len() <= 4096
+                && !self.executable.contains('\0'),
+            "Invalid executable path"
+        );
+        ensure!(
+            self.argv.len() <= 64
+                && self
+                    .argv
+                    .iter()
+                    .filter(|a| matches!(a, LaunchArgument::RuntimeArguments))
+                    .count()
+                    == 1,
+            "Invocation must contain exactly one runtime_arguments placeholder"
+        );
+        let reserved = [
+            "--mode",
+            "--provider",
+            "--model",
+            "--thinking",
+            "--tools",
+            "--no-tools",
+            "--extension",
+            "-e",
+            "--no-extensions",
+            "--no-skills",
+            "--skill",
+            "--no-prompt-templates",
+            "--prompt-template",
+            "--no-context-files",
+            "--append-system-prompt",
+            "--system-prompt",
+            "--no-approve",
+            "--session",
+            "--session-dir",
+            "--no-session",
+            "--continue",
+            "-c",
+            "--resume",
+            "-r",
+            "--api-key",
+            "--print",
+            "-p",
+            "--",
+            "--help",
+            "-h",
+            "--version",
+            "-v",
+        ];
+        for arg in &self.argv {
+            if let LaunchArgument::Literal(value) = arg {
+                ensure!(
+                    value.len() <= 4096 && !value.contains('\0'),
+                    "Invalid literal argument"
+                );
+                ensure!(
+                    !reserved.contains(&value.split('=').next().unwrap_or_default()),
+                    "Invocation conflicts with a Runtime-owned protocol, session, input or policy argument"
+                );
+            }
+        }
+        Ok(())
+    }
+    pub fn expand(&self, owned: &[String]) -> Result<Vec<String>> {
+        self.validate()?;
+        Ok(self
+            .argv
+            .iter()
+            .flat_map(|arg| match arg {
+                LaunchArgument::Literal(value) => vec![value.clone()],
+                LaunchArgument::RuntimeArguments => owned.to_vec(),
+            })
+            .collect())
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProtocolContract {
+    pub events: String,
+    pub native_session: String,
+}
+impl Default for ProtocolContract {
+    fn default() -> Self {
+        Self {
+            events: "pi_rpc_v1".into(),
+            native_session: "pi_jsonl_v3".into(),
+        }
+    }
+}
+impl ProtocolContract {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.events == "pi_rpc_v1" && self.native_session == "pi_jsonl_v3",
+            "Unsupported protocol/session contract; restore the command or migrate explicitly"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    fn spec() -> ResolvedSpec {
+        Profile::legacy(&crate::pi::Config {
+            api_key: "secret".into(),
+            model: "model".into(),
+            max_tokens: 100,
+            request_limit: 100,
+            max_requests_per_turn: 10,
+            max_parallel_tasks: 2,
+        })
+        .resolve()
+        .unwrap()
+    }
+    #[test]
+    fn version_is_diagnostic_and_command_is_identity() {
+        let mut spec = spec();
+        let original = spec.spec_hash.clone();
+        spec.engine_version = "a compatible future release".into();
+        spec.validate().unwrap();
+        assert_eq!(spec.hash().unwrap(), original);
+        spec.launch_spec = Some(LaunchSpec {
+            executable: "/opt/my wrapper".into(),
+            ..Default::default()
+        });
+        assert!(spec.validate().is_err());
+    }
+    #[test]
+    fn legacy_checksum_still_detects_corruption() {
+        let mut spec = spec();
+        spec.launch_spec = None;
+        spec.protocol_contract = None;
+        spec.engine_version = "0.87.1".into();
+        spec.spec_hash = spec.legacy_hash().unwrap();
+        spec.validate().unwrap();
+        spec.model = "tampered".into();
+        assert!(spec.validate().is_err());
+    }
+    #[test]
+    fn command_requires_runtime_policy_and_never_interpolates_shell() {
+        let mut launch = LaunchSpec::default();
+        let owned = vec!["--session".into(), "/tmp/a b;$(touch unwanted)".into()];
+        assert_eq!(launch.expand(&owned).unwrap(), owned);
+        launch
+            .argv
+            .push(LaunchArgument::Literal("--session=other".into()));
+        assert!(launch.validate().is_err());
+        launch.argv.clear();
+        assert!(launch.validate().is_err());
+    }
 }

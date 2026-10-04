@@ -7,7 +7,7 @@ macOS
   Pot App（GPUI Kit）──── Swift bridge
      │                   ├─ tray / 窄侧栏 / 原生输入框
      │                   ├─ 配置与窗口生命周期
-     │                   └─ WKWebView / noVNC ──────┐
+     │                   └─ WKWebView / noVNC + xterm ──────┐
      ├─ Unix IPC → Swift helper → Containerization │
      │                            Linux VM         │
      └─ bearer HTTP / SSE → Rust Runtime           │
@@ -31,7 +31,7 @@ macOS
 | 网关 / 工具桥 | provider 路由、请求预留、协议 codec；Pi / MCP 共享工具定义和 dispatcher | `gateway.rs`、`pot-tools.json`、`tool_bridge.rs`、`orchestration.rs` |
 | 协议/桌面 | 共享类型；guest 启动、浏览器与输入仲裁 | `protocol/`、`image/` |
 
-GPUI 与 Swift 共用主窗口和事件循环，C ABI 负责桥接。普通页面复用 Kit；原生 NSTextView 负责聊天编辑，WKWebView 负责桌面。关闭窗口保留后台；Quit 正常关闭 Chromium，再停止 helper/VM。
+GPUI 与 Swift 共用主窗口和事件循环，C ABI 负责桥接。普通页面复用 Kit；原生 NSTextView 负责聊天编辑，WKWebView 分别负责桌面和 bundled xterm 终端。终端通过 Swift URLSessionWebSocketTask 连接 Runtime PTY；bearer 仅保留在原生网络层，网页禁止联网和外部导航。关闭窗口保留后台；Quit 正常关闭 Chromium，再停止 helper/VM。
 
 Sandbox 的系统依赖由构建 VM 预装成 OCI 镜像，随 App 发布；Helper 只导入本地镜像并启动，不在启动时安装包。用户数据独立挂载到 `/data`。桌面、字体和镜像大小见 [Sandbox 镜像](sandbox-image.md)。
 
@@ -62,3 +62,13 @@ Sandbox 的系统依赖由构建 VM 预装成 OCI 镜像，随 App 发布；Help
 实际使用本地 VM、Pi + DeepSeek。远程 Docker 是历史 POC，Node Manager、多节点和其他引擎未产品化。
 
 VM 隔离宿主，但 Pi 与 Runtime 仍共享 guest 用户域；worker token 限制 API，不防止同用户文件访问。桌面 broker 只有合作式仲裁，尚无 shell/CDP/X11 全通道隔离。专用浏览器工具、依赖 DAG、长期记忆和服务授权仍见 [开发计划](development-plan.md)。
+
+## Terminal 与命令配置
+
+`runtime/src/terminal.rs` 管理最多 8 个内存 PTY，每个最多一个连接、64 KiB 回放缓存。
+连接断开只 detach，关闭或 Runtime 正常终止会结束会话。终端输入输出不写产品数据库、日志或磁盘 scrollback；默认 Shell 禁用 HISTFILE。
+登录点击直接在专用 PTY exec 登录程序，按 Agent 复用仍在运行的登录会话；不向未知 Shell 状态注入命令。HTTP(S) 链接仅由明确点击打开 Mac 浏览器，guest localhost OAuth 回调没有自动转发。
+
+CLI 与 Runtime 继承同一个 guest 用户和持久 HOME；`~/.local/bin`、`~/.npm-global/bin` 加入共享 PATH。
+`discovery.rs` 仅在显式调用时检查 executable 并查询已支持的官方状态接口；身份、安装、兼容性和运行准备状态分开。
+Profile 的 launch_spec/protocol_contract 进入不可变绑定和 checksum；诊断版本不进入新 checksum，也不启动版本探测。旧快照继续验证原 checksum；兼容升级不因版本字符串而迁移。

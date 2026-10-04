@@ -123,6 +123,10 @@ pub fn validate_pi_session(file: &Path, expected: &str) -> Result<()> {
         header["type"] == "session" && header["id"].as_str() == Some(expected),
         "Pi session changed unexpectedly"
     );
+    ensure!(
+        header["version"] == 3,
+        "Incompatible Pi native session format; restore a compatible command or migrate explicitly"
+    );
     for line in lines {
         let line = line?;
         if !line.trim().is_empty() {
@@ -187,7 +191,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pot-agent-{}", crate::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("pi-session.jsonl");
-        std::fs::write(&file, "{\"type\":\"session\",\"id\":\"native-1\"}\n").unwrap();
+        std::fs::write(
+            &file,
+            "{\"type\":\"session\",\"version\":3,\"id\":\"native-1\"}\n",
+        )
+        .unwrap();
         let path = dir.join("pot.sqlite");
         let mut store = Store::open(&path).unwrap();
         store.set("pi.session", "native-1").unwrap();

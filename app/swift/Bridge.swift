@@ -128,6 +128,9 @@ var bridge: PotBridge?
     var savedSeen: [String]?
     var tick: Double = 0
     var observations: [NSObjectProtocol] = []
+    let terminal = SandboxTerminal()
+    var terminalSelected = false
+    var guestIP = ""
     var localPhase = "starting"
     var isApplying = false
     var seenKey: String {
@@ -165,6 +168,7 @@ var bridge: PotBridge?
             button.wantsLayer = true; button.layer?.cornerRadius = 10
             rail.addSubview(button); navigation.append(button)
         }
+        rootView.addSubview(terminal.web)
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
@@ -318,6 +322,7 @@ var bridge: PotBridge?
         if web.frame != desktopArea {
             web.frame = desktopArea
         }
+        terminal.web.frame = desktopArea
         let width = min(760, area.width - 64)
         composer.layoutManager?.ensureLayout(for: composer.textContainer!)
         let used = (composer.layoutManager?.usedRect(for: composer.textContainer!).height ?? 24) +
@@ -387,7 +392,9 @@ var bridge: PotBridge?
     }
 
     func selectPage(_ value: Int) {
-        page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.loaded.isEmpty != false
+        page = value; bridgeWake?(); web.isHidden = value != 1 || terminalSelected || localRuntime?.loaded
+            .isEmpty != false
+        terminal.show(value == 1 && terminalSelected, root: localRuntime?.root, ip: guestIP)
         gpuiView.isHidden = false; composerBox.isHidden = value != 0 && value != 3
         if value == 0 {
             host.makeFirstResponder(composer)
@@ -489,15 +496,16 @@ var bridge: PotBridge?
 
     func environmentChanged(_ state: [String: Any]) {
         localPhase = state["phase"] as? String ?? "unknown"
+        guestIP = state["ip"] as? String ?? ""
         if page == 1 {
-            web.isHidden = localRuntime?.loaded.isEmpty != false
+            web.isHidden = terminalSelected || localRuntime?.loaded.isEmpty != false
         }
         settings.environment = state; settings.refreshStatus()
     }
 
     func webView(_: WKWebView, didFinish _: WKNavigation!) {
         webDark = nil; layout(); if page == 1 {
-            web.isHidden = false
+            web.isHidden = terminalSelected
         }
     }
 
@@ -509,7 +517,7 @@ var bridge: PotBridge?
         switch action {
         case "viewer-state": viewer = body; bridgeWake?()
         case "workspace": openWorkspace()
-        case "manage": selectPage(2); settings.section = 2
+        case "manage": selectPage(2); settings.section = 3
         case "stop", "restart":
             guard !isApplying else { return }
             let alert = NSAlert(); alert.messageText = action == "stop" ? "停止 Sandbox？" : "重启 Sandbox？"
@@ -716,7 +724,10 @@ private var bridgeWake: (@convention(c) () -> Void)?
               let action = v["action"] as? String else { return }
         let settings = bridge.settings
         switch action {
-        case "section": settings.section = v["value"] as? Int ?? 0; settings.setup = false; settings.result = ""
+        case "section": settings.section = v["value"] as? Int ?? 0; settings.setup = false; settings
+            .result = ""; if settings.section == 2 {
+                settings.refreshAgents()
+            }
         case "appearance": settings.changeAppearance(v["value"] as? Int ?? 0)
         case "save-agent":
             settings.key = v["key"] as? String ?? ""; settings.limit = v["limit"] as? String ?? ""; settings
@@ -728,8 +739,21 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 .saveSandbox()
         case "workspace": bridge.openWorkspace()
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
-        case "manage": settings.section = 2; bridge.selectPage(2)
+        case "manage": settings.section = 3; bridge.selectPage(2)
         case "start": bridge.startSandbox()
+        case "terminal":
+            bridge.terminalSelected = v["value"] as? Bool ?? true; bridge.selectPage(1)
+        case "agent-refresh": settings.refreshAgents()
+        case "agent-login":
+            if let agent = v["id"] as? String {
+                bridge.terminalSelected = true; bridge.selectPage(1); bridge.terminal.login(agent)
+            }
+        case "save-invocation": settings.saveInvocation(
+                executable: v["executable"] as? String ?? "",
+                arguments: v["argv"] as? String ?? ""
+            )
+        case "terminal-shell": bridge.terminal.shell()
+        case "terminal-close": bridge.terminal.close()
         case "viewer":
             if let id = v["id"] as? String, ["take", "info", "more", "connect"].contains(id) {
                 if id == "more" {
