@@ -162,3 +162,11 @@ Claude 最终镜像 `pot.local/sandbox:cd5858f99ca0649d32c6` 已通过打包二�
 `.local/d1/claude-guest-bundled-20261005/data/claude-runtime.json`（23 次本地请求）。
 构建中的 npm 终止经内核日志确认为构建容器默认 1 GiB memory cgroup 限额；
 将构建容器显式设为 3 GiB（VM 仍为 4 GiB）后安装与打包通过。这不改变用户 Sandbox 资源设置。
+
+## 2026-10-05 API-only 设置
+
+新增共享 API 设置表单及私有 provider 保存接口。离线测试覆盖无 pi.json 的初始配置、
+未授权拒绝、UUID 幂等、冲突/旧 revision 拒绝、同 endpoint 空 key 保留、0600 权限、
+公开响应/profile 不含 key，以及旧 binding 的 endpoint 引用不被新配置替换。
+三个新增 codec 的真实 Pi 测试已改为完全无旧 Pi 配置/请求预算的环境，仍通过。
+76 个 Runtime 测试、1 个协议测试及 8 个真实 Pi 离线契约通过；GUI 编译通过，尚未做交互截图验收。

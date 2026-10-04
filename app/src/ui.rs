@@ -135,15 +135,15 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields = (0..14)
+        let fields = (0..17)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
-                        .masked(i == 0)
+                        .masked(i == 0 || i == 15)
                         .placeholder(if i == 0 {
                             "留空保留已保存的密钥"
                         } else {
-                            "请输入数值"
+                            "请输入"
                         })
                 })
             })
@@ -176,6 +176,9 @@ impl Settings {
             "login_executable",
             "login_arguments",
             "claude_model",
+            "api_endpoint",
+            "api_key",
+            "api_model",
         ]
         .iter()
         .enumerate()
@@ -245,6 +248,14 @@ impl Settings {
                             ),
                         );
                 }
+                form = form.child(
+                    Field::new().label("其他模型服务").child(
+                        Button::new("other-api")
+                            .ghost()
+                            .label("设置其他 API →")
+                            .on_click(|_, _, _| command(json!({"action":"section","value":2}))),
+                    ),
+                );
                 form = form
                     .child(label("API 连接", "Pi · 工具调用与任务执行"))
                     .child(label("模型服务", "DeepSeek · DeepSeek Flash"))
@@ -302,6 +313,40 @@ impl Settings {
                 form = form.child(input(13, "Claude 模型", "填写账户可用的模型名称；使用 Sandbox 内 Claude CLI 的登录。"))
                     .child(Field::new().label("主 Agent").child(Button::new("select-claude").label("使用 Claude")
                         .on_click(move |_, _, cx| command(json!({"action":"select-claude","model":fields[13].read(cx).value()})))));
+                form = form.child(label(
+                    "模型 API",
+                    "Pi 可直接连接模型服务；无需 CLI 登录或付费测试。",
+                ));
+                let formats = [
+                    ("openai_chat", "OpenAI 兼容"),
+                    ("openai_responses", "Responses"),
+                    ("anthropic_messages", "Anthropic"),
+                    ("gemini", "Gemini"),
+                ];
+                form = form.child(Field::new().label("API 格式").child(div().flex().flex_wrap().gap_2().children(formats.into_iter().enumerate().map(|(i,(protocol,name))| {
+                    Button::new(("api-format",i)).ghost().label(name)
+                        .toggled(state["api_protocol"] == protocol)
+                        .on_click(move |_,_,_| command(json!({"action":"api-protocol","protocol":protocol})))
+                }))));
+                form = form
+                    .child(input(
+                        14,
+                        "API endpoint",
+                        "完整 HTTPS 请求地址，如 https://api.example.com/v1/chat/completions",
+                    ))
+                    .child(input(
+                        15,
+                        "API key",
+                        if state["has_api_key"] == true {
+                            "已保存；相同 endpoint 留空可保留。"
+                        } else {
+                            "仅保存到 Sandbox 私有配置。"
+                        },
+                    ))
+                    .child(input(16, "API 模型", "填写服务商提供的模型标识。"));
+                let fields = self.fields.clone();
+                form = form.child(Field::new().label("主 Agent").child(Button::new("save-api").label("使用此 API")
+                    .on_click(move |_,_,cx| command(json!({"action":"save-api","endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"model":fields[16].read(cx).value()})))));
                 form = form.child(
                     Field::new().label("登录状态").child(
                         Button::new("refresh-agents")

@@ -748,6 +748,12 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 executable: v["executable"] as? String ?? "",
                 arguments: v["argv"] as? String ?? ""
             )
+        case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
+        case "save-api": settings.saveAPI(
+                endpoint: v["endpoint"] as? String ?? "",
+                key: v["key"] as? String ?? "",
+                model: v["model"] as? String ?? ""
+            )
         case "select-claude": settings.selectNative(engine: "claude", model: v["model"] as? String ?? "")
         case "select-codex": settings.selectNative(engine: "codex", model: v["model"] as? String ?? "")
         case "agent-refresh": settings.refreshAgents()

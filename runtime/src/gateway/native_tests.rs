@@ -92,6 +92,8 @@ async fn real_pi_native_gateway_codecs_preserve_wire_and_account_usage() {
         profile.id = "native-mock".into();
         profile.provider = "mock".into();
         profile.auth_ref = "providers.json:mock".into();
+        s.pi = None;
+        s.api_budget = None;
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
         let settings = serde_json::from_value(

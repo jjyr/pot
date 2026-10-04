@@ -52,7 +52,7 @@ Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定
 | 8 任务路由 | API 显式选择、计划 profile、用户白名单内的 tool hint、worker 默认；创建时能力校验；固定快照及选择原因；全局/profile/provider 并发限制 | 设置 UI；Codex 接入后的跨引擎真实验收 |
 | 9 Terminal / 发现 / 命令 | Runtime PTY + 原生 bearer WebSocket 桥 + bundled xterm；独立登录会话和重复点击去重；显式官方状态查询；调用命令 revision、登录命令编辑、返回页面防抖刷新、App 重连找回 PTY；取消版本锁 | guest 真登录/重启持久性与 UI 验收、完整进程树停止负测 |
 | 10 Claude / AGY | Claude 原生 CLI Driver、独立会话/worker/计划、只读汇总、取消清理、用量和设置入口；官方登录状态查询；原版集成条款已核实 | Claude 打包 guest 离线契约通过；仍需真实账户与升级故障矩阵；AGY Driver 及其官方条款/契约验收 |
-| 11 引导 / 设置 | 通用/助手/Agent/Sandbox 导航；配置前可打开 Terminal；未配置时拒绝主聊天；初始 API 保存取消额外确认 | 两页多选安装及重试、嵌入终端、主 Agent 单选与原子提交、通用 API endpoint/model 表单及完整矩阵 |
+| 11 引导 / 设置 | 通用/助手/Agent/Sandbox 导航；配置前可打开 Terminal；未配置时拒绝主聊天；初始 API 保存取消额外确认 | 两页多选安装及重试、嵌入终端、主 Agent 单选与原子提交、完整引导矩阵（通用 API endpoint/key/model 表单已实现） |
 
 验证证据及局限见 [Agent layer 验证](validation/agent-layer.md)。Codex 已提供显式设置入口，完成了无凭据的真实 CLI / guest 契约验证，仍不等于真实账户验收。
 Claude 已提供显式 profile 设置入口；AGY 暂不启用 profile。Terminal 可用不等于通过 Driver 验收。

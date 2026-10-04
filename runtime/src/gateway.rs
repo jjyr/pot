@@ -2,13 +2,14 @@
 use crate::*;
 use axum::{body::Body, extract::Path, response::Response};
 use futures::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub mod codecs;
+pub mod setup;
 use codecs::{Protocol, UsageObserver};
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 struct Provider {
     id: String,
     endpoint: String,
@@ -83,6 +84,32 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
     anyhow::ensure!(!p.api_key.is_empty(), "Provider credential missing");
     Ok(p)
 }
+/// API profiles keep their own request ledger even when the legacy smoke route exists.
+pub fn pi_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::BudgetSettings> {
+    if let Some(budget) = &s.api_budget {
+        if budget.namespace != "deepseek-attempts" {
+            let mut budget = budget.clone();
+            budget.max_output_tokens = max_output_tokens;
+            return Ok(budget);
+        }
+    }
+    let data = if s.is_worker {
+        s.data
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow!("Invalid worker data path"))?
+            .to_path_buf()
+    } else {
+        s.data.clone()
+    };
+    Ok(deepseek::BudgetSettings {
+        namespace: "pi-attempts",
+        data,
+        limit: s.pi.as_ref().map_or(10000, |c| c.request_limit),
+        max_output_tokens,
+    })
+}
+
 pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedSpec> {
     let mut spec = profile.resolve()?;
     if matches!(spec.engine, agent::Engine::Codex | agent::Engine::Claude) {
@@ -297,10 +324,7 @@ pub async fn forward(
                 "Turn changed before request claim",
             ));
         }
-        let budget = s
-            .api_budget
-            .as_ref()
-            .ok_or_else(|| internal(anyhow!("Request ledger unavailable")))?;
+        let budget = pi_budget(&s, c.max_tokens).map_err(internal)?;
         if deepseek::reserve_in(&budget.data.join(budget.namespace), budget.limit).is_err() {
             s.usage
                 .lock()

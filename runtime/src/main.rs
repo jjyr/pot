@@ -92,8 +92,13 @@ impl Service {
         self.budget_for(&self.inner.lock().unwrap().store)
     }
     fn budget_for(&self, store: &Store) -> Result<Option<RequestBudget>> {
-        if agent::current(store)?.is_some_and(|b| b.spec.engine != agent::Engine::Pi) {
-            return Ok(None);
+        if let Some(binding) = agent::current(store)? {
+            if binding.spec.engine != agent::Engine::Pi {
+                return Ok(None);
+            }
+            return gateway::pi_budget(self, binding.spec.params.max_output_tokens)?
+                .status()
+                .map(Some);
         }
         self.api_budget.as_ref().map(|b| b.status()).transpose()
     }
@@ -599,6 +604,10 @@ async fn main() -> Result<()> {
         )
         .route("/api/v1/terminals/{id}/socket", get(terminal::connect))
         .route("/api/v1/terminals/{id}/close", post(terminal::close))
+        .route(
+            "/api/v1/providers",
+            get(gateway::setup::get).post(gateway::setup::save),
+        )
         .route(
             "/api/pi/v1/chat/completions",
             post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),

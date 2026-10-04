@@ -385,3 +385,14 @@ and normalize usage for the shared ledger. Anthropic cache reads/creation count
 inside input; Gemini thought tokens count inside output. Unknown usage retains
 reservations. Newly added formats do not enable automatic checkpoint resume until
 that backend-specific contract has been validated.
+
+`GET /api/v1/providers` returns the active API connection's endpoint/model/protocol
+and has_key, never its key. `POST /api/v1/providers` accepts request_id (UUID),
+expected_revision, endpoint, model, protocol, api_key, and optional max_output_tokens.
+It creates/updates `api-default` and selects it through the existing migration
+transaction. Blank key retains the current key only for the same endpoint.
+Each save uses a new immutable provider ID so existing bindings keep their route;
+the mode-0600 provider file is persisted before selection. A failed selection may
+leave an unused private route, but cannot mutate an existing route. No model test
+is sent. API-only setup works without pi.json; default Pi limits apply and its
+request reservations never use the legacy direct-API smoke ledger.

@@ -7,6 +7,7 @@ import Foundation
     var agentStates: [[String: Any]] = []
     var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = ""
     var profile: [String: Any] = [:]
+    var apiEndpoint = "", apiModel = "", apiProtocol = "openai_chat", hasAPIKey = false
     var loginAgent = "", loginExecutable = "", loginArguments = "[]"
     var loginTool: [String: Any] = [:]
     var lastDiscovery = Date.distantPast
@@ -59,6 +60,7 @@ import Foundation
          "memory": memoryField, "disk": diskField,
          "login_agent": loginAgent, "login_executable": loginExecutable, "login_arguments": loginArguments,
          "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
+         "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
          "codex_model": codexModel, "claude_model": claudeModel, "agents": agentStates, "discovering": discovering,
          "executable": invocationExecutable, "argv": invocationArgs,
          "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
@@ -89,7 +91,7 @@ import Foundation
                         claudeModel = value["model"] as? String ?? ""
                     }
                     let launch = value["launch_spec"] as? [String: Any] ?? [:]
-                    invocationExecutable = launch["executable"] as? String ?? "pi"
+                    invocationExecutable = launch["executable"] as? String ?? value["engine"] as? String ?? "pi"
                     let argv = launch["argv"] as? [[String: Any]] ?? []
                     let literals = argv.compactMap { $0["kind"] as? String == "literal" ? $0["value"] as? String : nil }
                     if let data = try? JSONSerialization.data(withJSONObject: literals), let text = String(
@@ -99,6 +101,14 @@ import Foundation
                         invocationArgs = text
                     }
                     revision += 1
+                }
+                if let connection = try await bridge.terminal
+                    .request("api/v1/providers")["connection"] as? [String: Any]
+                {
+                    apiEndpoint = connection["endpoint"] as? String ?? ""
+                    apiModel = connection["model"] as? String ?? ""
+                    apiProtocol = connection["protocol"] as? String ?? "openai_chat"
+                    hasAPIKey = connection["has_key"] as? Bool ?? false
                 }
                 result = "状态已刷新。已登录不代表模型调用已验证。"
             } catch { result = "状态检查失败；可在 Sandbox Terminal 中手动使用 CLI。" }
@@ -170,6 +180,30 @@ import Foundation
                 result = "已选择 \(name)；现有轮次结束后生效。请先在 Sandbox Terminal 完成登录。"
                 refreshAgents()
             } catch { result = "\(name) 配置未保存：\(error.localizedDescription)" }
+        }
+    }
+
+    func saveAPI(endpoint: String, key: String, model: String) {
+        guard let bridge else { return }
+        bridge.terminal.show(false, root: root, ip: bridge.guestIP)
+        let endpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !endpoint.isEmpty, !model.isEmpty else { result = "请填写 API endpoint 和模型名称。"; return }
+        let protocolName = apiProtocol
+        Task {
+            do {
+                let state = try await bridge.terminal.request("api/v1/agent")
+                let profiles = state["profiles"] as? [[String: Any]] ?? []
+                let expected = profiles.first { $0["id"] as? String == "api-default" }?["revision"] as? Int ?? 0
+                _ = try await bridge.terminal.request("api/v1/providers", body: [
+                    "request_id": UUID().uuidString, "expected_revision": expected,
+                    "endpoint": endpoint, "api_key": key, "model": model, "protocol": protocolName,
+                ])
+                apiEndpoint = endpoint; apiModel = model; hasAPIKey = true; setup = false
+                revision += 1
+                result = "API 已保存；新配置在当前轮次结束后生效。"
+                refreshAgents()
+            } catch { result = "API 未保存：\(error.localizedDescription)" }
         }
     }
 

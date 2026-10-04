@@ -43,9 +43,7 @@ pub fn pi_config(s: &Service) -> Result<pi::Config> {
         binding.spec.engine == Engine::Pi,
         "Agent engine needs rebind"
     );
-    let mut config =
-        s.pi.clone()
-            .ok_or_else(|| anyhow!("Pi credential is unavailable; needs rebind"))?;
+    let mut config = s.pi.clone().unwrap_or_default();
     config.model = binding.spec.model;
     config.max_tokens = binding.spec.params.max_output_tokens;
     Ok(config)

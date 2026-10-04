@@ -18,6 +18,18 @@ pub struct Config {
 pub fn default_parallel_tasks() -> usize {
     5
 }
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            model: String::new(),
+            request_limit: 10000,
+            max_tokens: 8192,
+            max_requests_per_turn: 100,
+            max_parallel_tasks: 5,
+        }
+    }
+}
 impl Config {
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let c: Self = serde_json::from_slice(&std::fs::read(path)?)?;
