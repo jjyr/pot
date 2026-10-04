@@ -398,7 +398,7 @@ fn busy(hub: &tasks::Hub, sid: &str) -> bool {
         r.task_id.as_ref().is_some_and(|id| {
             matches!(
                 tasks::task_phase(hub, id),
-                Some(TaskPhase::Queued | TaskPhase::Running)
+                Some(TaskPhase::Queued | TaskPhase::Running | TaskPhase::Waiting)
             )
         })
     })
@@ -486,7 +486,10 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
         {
             if let Some(task) = &r.task_id {
                 if let Some(phase) = tasks::task_phase(&hub, task) {
-                    if !matches!(phase, TaskPhase::Running | TaskPhase::Queued) {
+                    if !matches!(
+                        phase,
+                        TaskPhase::Running | TaskPhase::Queued | TaskPhase::Waiting
+                    ) {
                         recovered.push((sid.clone(), index, phase));
                     }
                 }

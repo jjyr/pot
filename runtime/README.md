@@ -134,7 +134,7 @@ POT_TEST_PI_BIN="$(command -v pi)" cargo test --locked -p pot-runtime real_pi --
 
 ## Task state, archive views and bounded search
 
-Task phases remain `queued`, `running`, `complete`, `failed`, `cancelled`,
+Task phases are `queued`, `running`, `waiting` (token allowance), `complete`, `failed`, `cancelled`,
 `interrupted`. Archive is a view over complete/cancelled tasks, not deletion or a
 replacement execution phase. A follow-up queues the same task/session again.
 Failed/interrupted tasks remain in the attention view. Updated timestamps sort
@@ -166,3 +166,7 @@ network/render/model payloads, not the total runtime storage cost.
 ## Scheduled tasks
 
 The Runtime owns a durable scheduler; each occurrence enters the existing task queue with a fresh Pi session. Main-only tools manage plans, and the task page provides a plan editor and paginated run history. Plans and queue insertions persist together in `tasks.v2`, with migration from `tasks.v1`. GET/POST `/api/v1/schedules` expose paginated reads and idempotent commands. See [scheduled task semantics and validation](../docs/scheduled-tasks.md).
+
+## Token accounting and allowance
+
+Request-level usage, task attribution, local calendar quotas and checkpointed Pi continuation are documented in [Token usage](../docs/token-usage.md). The shared `usage.sqlite` is owned exclusively by Runtime; task archive preserves its records. Waiting tasks release their execution slot and remain non-overlapping for scheduled plans. Only an explicitly saved checkpoint may auto-resume after restart.

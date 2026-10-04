@@ -48,7 +48,9 @@ Sandbox 的系统依赖由构建 VM 预装成 OCI 镜像，随 App 发布；Help
 - API 命令携带 request ID；消息事件有持久 cursor。Runtime 提供 SSE；当前 App 使用后台快照/分页轮询（约 500 ms），拒绝过期查询结果，切回对话先用缓存。
 - SQLite 使用 DELETE journal + synchronous=EXTRA，避免已遇到的共享文件系统 WAL 丢失；在线检查走 Runtime API，不能由宿主打开活跃 guest 数据库。
 - 任务与计划共同持久化为 `tasks.v2`，兼容读取 `tasks.v1`。重启保留排队项，运行中任务标为中断，不自动重放未知外部副作用。
-- 模型请求先持久预留额度，再联网；工具续接和失败请求也计次。取消等待 Pi 收敛，不能回滚已完成的外部操作。
+- Token 用量使用共享 SQLite 请求账本，支持时间聚合、任务归属和 Pot 周期限额；额度不足的任务在 Pi 确认停止后保存恢复检查点，进入 waiting 并释放执行槽位。细节见 [Token 用量](token-usage.md)。
+
+模型请求先持久预留额度，再联网；工具续接和失败请求也计次。取消等待 Pi 收敛，不能回滚已完成的外部操作。
 
 具体 API、分页、报告投递与 Pi 约束由 [Runtime README](../runtime/README.md)维护。
 

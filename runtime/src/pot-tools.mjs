@@ -5,7 +5,7 @@ export default function (pi) {
     ["pot_create_task", "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources.", { text: string, resource: { type: "string", enum: ["", "shared"] } }, ["text"]],
     ["pot_list_tasks", "Search task metadata by state and title/ID. Defaults to active tasks, 10 per page; archived tasks keep complete/cancelled status. Use attention for failed/interrupted, archived to find past results, all only with a relevant query. Follow next_offset only when needed; no polling.", {
       scope: { type: "string", enum: ["active", "attention", "archived", "all"] },
-      phase: { type: "string", description: "Exact execution status; overrides scope when provided", enum: ["queued", "running", "complete", "failed", "cancelled", "interrupted"] },
+      phase: { type: "string", description: "Exact execution status; overrides scope when provided", enum: ["queued", "running", "waiting", "complete", "failed", "cancelled", "interrupted"] },
       q: { type: "string", maxLength: 256, description: "Case-insensitive title or task ID substring" },
       offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 50 },
     }, []],

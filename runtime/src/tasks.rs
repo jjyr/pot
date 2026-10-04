@@ -82,7 +82,9 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     )?;
     let (events, _) = broadcast::channel(256);
     let (commands, _) = mpsc::unbounded_channel();
-    Ok(Service {
+    let service = Service {
+        usage: root.usage.clone(),
+        usage_scope: task_id.into(),
         inner: Arc::new(Mutex::new(Inner {
             store: Store::open(&data.join("pot.sqlite"))?,
             engine: root.inner.lock().unwrap().engine.clone(),
@@ -103,7 +105,13 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
         data,
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
         tasks: Arc::new(Mutex::new(Hub::default())),
-    })
+    };
+    service
+        .usage
+        .lock()
+        .unwrap()
+        .import_legacy(task_id, &service.inner.lock().unwrap().store)?;
+    Ok(service)
 }
 pub(super) fn restore(root: &Service) -> Result<()> {
     let inner = root.inner.lock().unwrap();
@@ -128,11 +136,26 @@ pub(super) fn restore(root: &Service) -> Result<()> {
     let mut hub = root.tasks.lock().unwrap();
     hub.schedules = book;
     for mut record in records {
-        if record.active.take().is_some() || record.info.phase == TaskPhase::Running {
-            record.info.phase = TaskPhase::Interrupted;
-            record.info.updated_at_ms = now();
-        }
+        restore_title(&mut record);
         let service = child(root, &record.info.id)?;
+        if let Some(job) = record.active.take() {
+            if usage::paused(&service)?.is_some() {
+                record.queue.push_front(job);
+                record.info.phase = TaskPhase::Waiting;
+            } else {
+                record.info.phase = TaskPhase::Interrupted;
+            }
+            record.info.updated_at_ms = now();
+        } else if record.info.phase == TaskPhase::Running {
+            record.info.phase = TaskPhase::Interrupted;
+        }
+        if record.info.phase == TaskPhase::Waiting && usage::paused(&service)?.is_none() {
+            record.queue.pop_front();
+            record.info.phase = TaskPhase::Interrupted;
+        }
+        if usage::paused(&service)?.is_none() {
+            service.usage.lock().unwrap().clear_wait(&record.info.id)?;
+        }
         hub.lanes
             .insert(record.info.id.clone(), Lane { record, service });
     }
@@ -148,9 +171,26 @@ fn validate(text: &str, request: &str) -> ApiResult<()> {
     }
     Ok(())
 }
+fn task_title(text: &str) -> String {
+    text.lines().next().unwrap_or("任务").to_owned()
+}
+
+fn restore_title(record: &mut Record) {
+    let full = task_title(&record.create_request.text);
+    // Repair only the exact prefix produced by the old 48-character limit.
+    if record.info.title.chars().count() == 48
+        && full.chars().take(48).collect::<String>() == record.info.title
+    {
+        record.info.title = full;
+    }
+}
+
 fn info(record: &Record) -> TaskInfo {
     let mut i = record.info.clone();
-    i.pending = record.queue.len();
+    i.pending = record
+        .queue
+        .len()
+        .saturating_sub(usize::from(record.info.phase == TaskPhase::Waiting));
     i
 }
 fn job(request_id: String, text: String, order: u64) -> Job {
@@ -321,14 +361,7 @@ pub(super) fn enqueue(root: &Service, hub: &mut Hub, req: CreateTask) -> ApiResu
     let record = Record {
         info: TaskInfo {
             id: task_id.clone(),
-            title: req
-                .text
-                .lines()
-                .next()
-                .unwrap_or("任务")
-                .chars()
-                .take(48)
-                .collect(),
+            title: task_title(&req.text),
             phase: TaskPhase::Queued,
             pending: 1,
             created_at_ms: now(),
@@ -419,7 +452,7 @@ pub(super) async fn input(
     lane.record.receipts.push(job);
     // An explicit new instruction resumes a stopped lane. Old unconsumed inputs
     // remain ordered ahead of it; interrupted executing input is never replayed.
-    if lane.record.active.is_none() {
+    if lane.record.active.is_none() && lane.record.info.phase != TaskPhase::Waiting {
         lane.record.info.phase = TaskPhase::Queued;
     }
     if let Err(e) = persist(&root, &hub) {
@@ -446,6 +479,19 @@ pub(super) async fn cancel(
     }
     lane.record.info.updated_at_ms = now();
     lane.record.queue.clear();
+    lane.service
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .set("pi.paused", "")
+        .map_err(internal)?;
+    lane.service
+        .usage
+        .lock()
+        .unwrap()
+        .clear_wait(&task_id)
+        .map_err(internal)?;
     if lane.record.active.is_some() {
         let mut inner = lane.service.inner.lock().unwrap();
         if let Some(t) = inner.turn.as_mut() {
@@ -512,7 +558,14 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         .iter()
         .filter(|(_, l)| {
             l.record.active.is_none()
-                && l.record.info.phase == TaskPhase::Queued
+                && (l.record.info.phase == TaskPhase::Queued
+                    || (l.record.info.phase == TaskPhase::Waiting
+                        && root
+                            .usage
+                            .lock()
+                            .unwrap()
+                            .ready(&l.record.info.id, now())
+                            .unwrap_or(false)))
                 && !l.record.queue.is_empty()
                 && !(shared && l.record.info.resource == "shared")
         })
@@ -563,6 +616,23 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
         .as_ref()
         .ok_or_else(|| anyhow!("No active task"))?
         .clone();
+    if usage::paused(&lane.service)?.is_some()
+        && !lane
+            .service
+            .inner
+            .lock()
+            .unwrap()
+            .turn
+            .as_ref()
+            .is_some_and(|t| t.cancelling)
+    {
+        lane.service.turn(None);
+        lane.record.active = None;
+        lane.record.queue.push_front(job);
+        lane.record.info.phase = TaskPhase::Waiting;
+        lane.record.info.updated_at_ms = now();
+        return persist(root, &hub);
+    }
     if let Err(ref e) = result {
         let message = lane
             .service
@@ -597,6 +667,13 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     };
     // Once stopping is requested, queued follow-ups are never auto-started.
     if stopped {
+        lane.service
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set("pi.paused", "")?;
+        lane.service.usage.lock().unwrap().clear_wait(task_id)?;
         for j in lane.record.queue.drain(..) {
             let mut m = user(&j);
             m.status = MessageStatus::Cancelled;
@@ -683,6 +760,9 @@ pub(super) fn start(root: Service) {
                 }
             }
             ticks = (ticks + 1) % 10;
+            if let Err(e) = usage::resume_main(&root) {
+                eprintln!("usage resume: {e}");
+            }
             if let Err(e) = orchestration::deliver(&root) {
                 eprintln!("task result delivery: {e}");
             }
@@ -707,6 +787,38 @@ pub(super) fn start(root: Service) {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    #[tokio::test]
+    async fn full_task_title_survives_restore_and_repairs_legacy_prefix() {
+        let s = fixture();
+        let title = "获取网页完整标题及内容，保留所有中日韩文字和 URL https://example.com/a/long/path/that/should/not/be/truncated";
+        let task = create(
+            State(s.clone()),
+            headers(),
+            Json(CreateTask {
+                request_id: "full-title".into(),
+                text: format!("{title}\nAdditional instructions"),
+                resource: "".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(task.title, title);
+        {
+            let mut hub = s.tasks.lock().unwrap();
+            let record = &mut hub.lanes.get_mut(&task.id).unwrap().record;
+            record.info.title = title.chars().take(48).collect();
+        }
+        persist(&s, &s.tasks.lock().unwrap()).unwrap();
+        restore(&s).unwrap();
+        let mut hub = s.tasks.lock().unwrap();
+        let record = &mut hub.lanes.get_mut(&task.id).unwrap().record;
+        assert_eq!(record.info.title, title);
+        record.info.title = "用户自定义标题".into();
+        restore_title(record);
+        assert_eq!(record.info.title, "用户自定义标题");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "Runs installed Pi against a local mock provider; set POT_TEST_PI_BIN"]
     async fn real_pi_automatic_routing_and_completion() {
@@ -1366,7 +1478,77 @@ pub(super) mod tests {
         assert_eq!(page(&reopened, &TaskQuery::default()).unwrap().total, 1);
     }
 
-    fn headers() -> HeaderMap {
+    #[tokio::test]
+    async fn allowance_wait_releases_slot_survives_restore_and_cancels() {
+        let mut s = fixture();
+        s.pi.as_mut().unwrap().max_parallel_tasks = 1;
+        let a = add(&s, "waits", "").await;
+        let (_, lane, req) = claim(&s).unwrap().unwrap();
+        let mid = lane
+            .inner
+            .lock()
+            .unwrap()
+            .turn
+            .as_ref()
+            .unwrap()
+            .user_message_id
+            .clone();
+        lane.inner
+            .lock()
+            .unwrap()
+            .store
+            .set("pi.paused", &serde_json::to_string(&req).unwrap())
+            .unwrap();
+        s.usage
+            .lock()
+            .unwrap()
+            .set_policy(&usage::Policy {
+                period: "day".into(),
+                limit: 1,
+                ..usage::Policy::default()
+            })
+            .unwrap();
+        s.usage
+            .lock()
+            .unwrap()
+            .wait(&a.id, &mid, now(), 100)
+            .unwrap();
+        finish(&s, &a.id, Ok(())).unwrap();
+        assert_eq!(
+            task_phase(&s.tasks.lock().unwrap(), &a.id),
+            Some(TaskPhase::Waiting)
+        );
+        assert!(claim(&s).unwrap().is_none());
+        let b = add(&s, "can use the freed slot", "").await;
+        assert_eq!(claim(&s).unwrap().unwrap().0, b.id);
+        s.tasks = Arc::new(Mutex::new(Hub::default()));
+        restore(&s).unwrap();
+        assert_eq!(
+            task_phase(&s.tasks.lock().unwrap(), &a.id),
+            Some(TaskPhase::Waiting)
+        );
+        assert_eq!(
+            task_phase(&s.tasks.lock().unwrap(), &b.id),
+            Some(TaskPhase::Interrupted)
+        );
+        let _ = guide(&s, &a.id, "queued-guidance", "extra guidance").await;
+        assert_eq!(
+            task_phase(&s.tasks.lock().unwrap(), &a.id),
+            Some(TaskPhase::Waiting)
+        );
+        let _ = cancel(State(s.clone()), headers(), Path(a.id.clone()))
+            .await
+            .unwrap();
+        s.usage
+            .lock()
+            .unwrap()
+            .set_policy(&usage::Policy::default())
+            .unwrap();
+        assert!(claim(&s).unwrap().is_none());
+        assert!(s.usage.lock().unwrap().waiting(&a.id).unwrap().is_none());
+        std::fs::remove_dir_all(&s.data).unwrap();
+    }
+    pub(crate) fn headers() -> HeaderMap {
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
         h

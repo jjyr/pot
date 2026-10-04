@@ -190,6 +190,7 @@ pub const PATH_TASKS: &str = "/api/v1/tasks";
 #[serde(rename_all = "snake_case")]
 pub enum TaskPhase {
     Queued,
+    Waiting,
     Running,
     Complete,
     Failed,
@@ -225,7 +226,7 @@ pub struct TaskInput {
 impl TaskPhase {
     pub fn scope(&self) -> &'static str {
         match self {
-            Self::Queued | Self::Running => "active",
+            Self::Queued | Self::Running | Self::Waiting => "active",
             Self::Failed | Self::Interrupted => "attention",
             Self::Complete | Self::Cancelled => "archived",
         }

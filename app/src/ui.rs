@@ -14,6 +14,69 @@ pub const PAGE_WIDTH: f32 = 820.;
 pub const SIDEBAR: f32 = 56.;
 pub const SANDBOX_HEADER: f32 = 112.;
 
+/// Shape against the actual column width: GPUI's intrinsic text measurement can
+/// otherwise clip a child before the inherited ellipsis is painted.
+pub fn single_line_title(
+    text: &str,
+    size: f32,
+    width: Pixels,
+    window: &Window,
+    cx: &App,
+) -> SharedString {
+    let style = TextStyle {
+        font_family: ".AppleSystemUIFont".into(),
+        font_weight: FontWeight::MEDIUM,
+        color: cx.theme().foreground,
+        ..Default::default()
+    };
+    let runs = [style.to_run(text.len())];
+    let text: SharedString = text.to_owned().into();
+    if window
+        .text_system()
+        .shape_line(text.clone(), px(size), &runs, None)
+        .width
+        <= width
+    {
+        return text;
+    }
+    use unicode_segmentation::UnicodeSegmentation;
+    let boundaries: Vec<usize> = text
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .collect();
+    let mut lo = 0;
+    let mut hi = boundaries.len();
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        let end = boundaries.get(mid).copied().unwrap_or(text.len());
+        let candidate: SharedString = format!("{}…", &text[..end]).into();
+        let run = style.to_run(candidate.len());
+        if window
+            .text_system()
+            .shape_line(candidate, px(size), &[run], None)
+            .width
+            <= width
+        {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    format!(
+        "{}…",
+        &text[..boundaries.get(lo).copied().unwrap_or(text.len())]
+    )
+    .into()
+}
+
+pub fn title_tooltip(title: String, window: &mut Window, cx: &mut App) -> AnyView {
+    gpui_kit::component::tooltip::Tooltip::element(move |_, _| {
+        div().w(px(440.)).whitespace_normal().child(title.clone())
+    })
+    .max_w(px(480.))
+    .build(window, cx)
+}
+
 pub fn command(value: Value) {
     if let Ok(json) = CString::new(value.to_string()) {
         unsafe { crate::pot_bridge_command(json.as_ptr()) };
@@ -164,6 +227,18 @@ impl Settings {
                     "同时处理的任务数",
                     "默认 5，可设 1–1000；超出的任务排队，主聊天不占用此额度。应用后重启生效。",
                 ));
+                form = form.child(
+                    Field::new().label("周期 Token 额度").child(
+                        Button::new("agent-usage-policy")
+                            .ghost()
+                            .label("设置额度与自动继续 →")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.usage_ui.open_settings();
+                                command(json!({"action":"page","value":6}));
+                                cx.notify();
+                            })),
+                    ),
+                );
                 if self.advanced {
                     form = form
                         .child(input(

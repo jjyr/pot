@@ -152,6 +152,7 @@ var bridge: PotBridge?
             (0, "bubble.left", "聊天"),
             (3, "list.bullet.rectangle", "任务"),
             (1, "desktopcomputer", "Sandbox"),
+            (4, "chart.bar.xaxis", "用量"),
             (2, "gearshape", "设置"),
         ] {
             let button = RailButton(
@@ -302,7 +303,8 @@ var bridge: PotBridge?
         for button in navigation {
             button.frame = NSRect(
                 x: 8,
-                y: button.tag == 2 ? 16 : b.height - 60 - CGFloat(button.tag == 3 ? 1 : button.tag == 1 ? 2 : 0) * 48,
+                y: button.tag == 2 ? 16 : b
+                    .height - 60 - CGFloat(button.tag == 3 ? 1 : button.tag == 1 ? 2 : button.tag == 4 ? 3 : 0) * 48,
                 width: 40,
                 height: 40
             )
@@ -347,7 +349,8 @@ var bridge: PotBridge?
         composerBox.layer?.backgroundColor = background.cgColor
         composerBox.layer?.borderColor = NSColor(white: dark ? 0.28 : 0.87, alpha: 1).cgColor
         for button in navigation {
-            (button as? RailButton)?.selected = button.tag == page
+            (button as? RailButton)?.selected = button
+                .tag == (page == 6 ? 4 : page == 5 ? (selected.isEmpty ? 0 : 3) : page)
         }
         sendButton.layer?.backgroundColor = (running || ready ? NSColor.systemBlue : NSColor(
             white: dark ? 0.28 : 0.8,
@@ -693,6 +696,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         guard let bridge else { return 0 }
         let state: [String: Any] = [
             "page": bridge.page,
+            "timezone": TimeZone.current.identifier,
             "settings": bridge.settings.publicState,
             "viewer": bridge.viewer,
             "phase": bridge.localPhase,
@@ -723,6 +727,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 .memoryField = v["memory"] as? String ?? ""; settings.diskField = v["disk"] as? String ?? ""; settings
                 .saveSandbox()
         case "workspace": bridge.openWorkspace()
+        case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage": settings.section = 2; bridge.selectPage(2)
         case "start": bridge.startSandbox()
         case "viewer":

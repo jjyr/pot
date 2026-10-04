@@ -15,6 +15,13 @@ use std::{
 
 #[derive(Default, Clone, PartialEq)]
 pub struct View {
+    pub usage_query: Option<(String, u32, usize, String)>,
+    pub usage: Value,
+    pub usage_error: String,
+    pub usage_pending: bool,
+    pub usage_notice: String,
+    usage_fetched: Option<std::time::Instant>,
+    usage_loaded: Option<(String, u32, usize, String)>,
     pub snapshot: Option<Snapshot>,
     /// Connection error is cleared only after a successful snapshot/stream update.
     pub error: String,
@@ -88,6 +95,8 @@ impl View {
             && self.error.is_empty()
             && self.snapshot.as_ref().is_some_and(|s| {
                 (s.turn.is_none() || !self.selected.is_empty())
+                    && (!self.selected.is_empty()
+                        || s.engine.detail.as_deref() != Some("等待 Pot 额度恢复"))
                     && matches!(s.engine.phase, EnginePhase::Ready | EnginePhase::NeedsAuth)
                     && s.budget.as_ref().is_none_or(|b| b.remaining() > 0)
             })
@@ -248,6 +257,41 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     } else {
         None
     };
+    let uq = {
+        let v = view.lock().unwrap();
+        v.usage_query.clone().filter(|q| {
+            v.usage_loaded.as_ref() != Some(q)
+                || v.usage_fetched
+                    .is_none_or(|t| t.elapsed() > Duration::from_secs(3))
+        })
+    };
+    if let Some(q) = uq {
+        let result = (|| -> Result<Value, String> {
+            agent
+                .get(&format!("{url}/api/v1/usage/summary"))
+                .query("scope", &q.0)
+                .query("days", &q.1.to_string())
+                .query("offset", &q.2.to_string())
+                .query("timezone", &q.3)
+                .set("Authorization", &auth)
+                .call()
+                .map_err(|e| e.to_string())?
+                .into_json()
+                .map_err(|e| e.to_string())
+        })();
+        let mut v = view.lock().unwrap();
+        if v.usage_query.as_ref() == Some(&q) {
+            v.usage_fetched = Some(std::time::Instant::now());
+            v.usage_loaded = Some(q);
+            match result {
+                Ok(data) => {
+                    v.usage = data;
+                    v.usage_error.clear();
+                }
+                Err(e) => v.usage_error = e,
+            }
+        }
+    }
     let main: Snapshot = agent
         .get(&format!("{url}{PATH_SNAPSHOT}"))
         .set("Authorization", &auth)
@@ -443,6 +487,48 @@ impl Client {
                     turn.cancelling = false;
                 }
             }
+        });
+    }
+    pub fn usage_action(&self, path: &'static str, body: Value) {
+        {
+            let mut v = self.view.lock().unwrap();
+            if v.usage_pending {
+                return;
+            }
+            v.usage_pending = true;
+            v.usage_notice.clear();
+            v.usage_error.clear();
+        }
+        let view = self.view.clone();
+        let refresh = self.refresh.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(), String> {
+                let (url, token) = endpoint()?;
+                ureq::AgentBuilder::new()
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .post(&format!("{url}/api/v1/usage/{path}"))
+                    .set("Authorization", &format!("Bearer {token}"))
+                    .send_json(body)
+                    .map_err(|e| match e {
+                        ureq::Error::Status(_, r) => r
+                            .into_json::<ApiError>()
+                            .map(|e| e.message)
+                            .unwrap_or("操作被拒绝".into()),
+                        other => other.to_string(),
+                    })?;
+                Ok(())
+            })();
+            let mut v = view.lock().unwrap();
+            v.usage_pending = false;
+            v.usage_fetched = None;
+            if let Err(e) = result {
+                v.usage_error = e;
+            } else {
+                v.usage_notice = "已保存".into();
+            }
+            drop(v);
+            let _ = refresh.try_send(());
         });
     }
     pub fn schedule_select(&self, id: String) {

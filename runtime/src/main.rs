@@ -4,6 +4,7 @@ mod pi;
 mod schedules;
 mod store;
 mod tasks;
+mod usage;
 use anyhow::{Result, anyhow, bail};
 use axum::{
     Json, Router,
@@ -39,6 +40,8 @@ struct Inner {
 }
 #[derive(Clone)]
 struct Service {
+    usage: Arc<Mutex<usage::Ledger>>,
+    usage_scope: String,
     inner: Arc<Mutex<Inner>>,
     events: broadcast::Sender<Event>,
     commands: mpsc::UnboundedSender<SendMessage>,
@@ -66,7 +69,13 @@ impl Service {
             api_version: API_VERSION,
             boot_id: self.boot.clone(),
             cursor: s.store.cursor()?,
-            engine: s.engine.clone(),
+            engine: {
+                let mut engine = s.engine.clone();
+                if s.store.get("pi.paused")?.is_some_and(|v| !v.is_empty()) {
+                    engine.detail = Some("等待 Pot 额度恢复".into());
+                }
+                engine
+            },
             conversation_id: "main".into(),
             messages: s.store.messages()?,
             turn: s.turn.clone(),
@@ -185,6 +194,18 @@ async fn send(
             message_id: old.id,
             duplicate: true,
         }));
+    }
+    if inner
+        .store
+        .get("pi.paused")
+        .map_err(internal)?
+        .is_some_and(|v| !v.is_empty())
+    {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "waiting_allowance",
+            "主聊天正在等待额度；请继续或取消后再发送新消息",
+        ));
     }
     if inner.turn.is_some() {
         return Err(error(
@@ -461,6 +482,8 @@ async fn main() -> Result<()> {
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
     let s = Service {
+        usage: Arc::new(Mutex::new(usage::Ledger::open(&data.join("usage.sqlite"))?)),
+        usage_scope: "main".into(),
         inner: Arc::new(Mutex::new(Inner {
             store: Store::open(&data.join("pot.sqlite"))?,
             engine: EngineStatus {
@@ -490,10 +513,17 @@ async fn main() -> Result<()> {
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
     };
+    s.usage
+        .lock()
+        .unwrap()
+        .import_legacy("main", &s.inner.lock().unwrap().store)?;
+    if usage::paused(&s)?.is_none() {
+        s.usage.lock().unwrap().clear_wait("main")?;
+    }
     let worker = s.clone();
     tokio::spawn(async move {
         while let Some(mut req) = rx.recv().await {
-            if use_pi {
+            if use_pi && usage::paused(&worker).ok().flatten().is_none() {
                 req.text.push_str(&tasks::context(&worker));
             }
             let result = if use_pi {
@@ -504,6 +534,9 @@ async fn main() -> Result<()> {
                 run_agy(&worker, req).await
             };
             if let Err(e) = result {
+                worker.phase(EnginePhase::Failed, Some(e.to_string()));
+            }
+            if let Err(e) = usage::settle_cancelled_pause(&worker) {
                 worker.phase(EnginePhase::Failed, Some(e.to_string()));
             }
             worker.turn(None);
@@ -523,6 +556,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))
         .route(PATH_SNAPSHOT, get(snapshot))
         .route("/api/v1/usage", get(usage))
+        .route("/api/v1/usage/summary", get(usage::summary))
+        .route("/api/v1/usage/policy", post(usage::policy))
+        .route("/api/v1/usage/resume", post(usage::resume))
+        .route("/api/v1/usage/cancel", post(usage::cancel_wait))
         .route(PATH_EVENTS, get(events_handler))
         .route(PATH_MESSAGES, post(send))
         .route(PATH_CANCEL, post(cancel))
@@ -576,6 +613,10 @@ mod tests {
         let (events, _) = broadcast::channel(8);
         let (commands, _rx) = mpsc::unbounded_channel();
         Service {
+            usage: Arc::new(Mutex::new(
+                usage::Ledger::open(std::path::Path::new(":memory:")).unwrap(),
+            )),
+            usage_scope: "main".into(),
             inner: Arc::new(Mutex::new(Inner {
                 store: Store::open(std::path::Path::new(":memory:")).unwrap(),
                 engine: EngineStatus {

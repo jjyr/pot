@@ -75,7 +75,7 @@ pub async fn gateway(
     body["thinking"] = json!({"type":"disabled"});
     body["stream_options"] = json!({"include_usage":true});
     {
-        let mut inner = s.inner.lock().unwrap();
+        let inner = s.inner.lock().unwrap();
         let turn = inner
             .turn
             .as_ref()
@@ -94,14 +94,61 @@ pub async fn gateway(
                 "Turn request limit reached",
             ));
         }
+    }
+    let turn_id = s
+        .inner
+        .lock()
+        .unwrap()
+        .turn
+        .as_ref()
+        .unwrap()
+        .user_message_id
+        .clone();
+    let request_id = id();
+    // UTF-8 bytes are a deliberately conservative input estimate, not billed tokens.
+    let input_estimate = body.to_string().len() as u64 + 1024;
+    let reserved = s
+        .usage
+        .lock()
+        .unwrap()
+        .reserve(
+            &request_id,
+            &s.usage_scope,
+            &turn_id,
+            now(),
+            &c.model,
+            input_estimate,
+            c.max_tokens,
+        )
+        .map_err(internal)?;
+    let Some(output) = reserved else {
+        s.usage
+            .lock()
+            .unwrap()
+            .wait(&s.usage_scope, &turn_id, now(), input_estimate + 1)
+            .map_err(internal)?;
+        return Err(error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "pot_token_limit",
+            "Pot token allowance is unavailable. This turn is paused before sending the model request.",
+        ));
+    };
+    body["max_tokens"] = json!(output);
+    {
+        let mut inner = s.inner.lock().unwrap();
         let budget = s.api_budget.as_ref().unwrap();
-        deepseek::reserve_in(&budget.data.join(budget.namespace), budget.limit).map_err(|_| {
-            error(
+        if deepseek::reserve_in(&budget.data.join(budget.namespace), budget.limit).is_err() {
+            s.usage
+                .lock()
+                .unwrap()
+                .rejected(&request_id)
+                .map_err(internal)?;
+            return Err(error(
                 StatusCode::TOO_MANY_REQUESTS,
                 "budget_exhausted",
                 "Request budget exhausted",
-            )
-        })?;
+            ));
+        }
         inner.model_requests += 1;
     }
     s.publish_budget().map_err(internal)?;
@@ -125,6 +172,11 @@ pub async fn gateway(
             )
         })?;
     if !response.status().is_success() {
+        s.usage
+            .lock()
+            .unwrap()
+            .rejected(&request_id)
+            .map_err(internal)?;
         return Err(error(
             StatusCode::BAD_GATEWAY,
             "provider_rejected",
@@ -146,10 +198,10 @@ pub async fn gateway(
                         if let Some(data) = line.strip_prefix("data:") {
                             if let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
                                 if value["usage"].is_object() {
-                                    let inner = service.inner.lock().unwrap();
-                                    let mut list: Vec<Value> = inner.store.get("pi.usage").ok().flatten().and_then(|v|serde_json::from_str(&v).ok()).unwrap_or_default();
-                                    list.push(value["usage"].clone());
-                                    let _ = inner.store.set("pi.usage",&json!(list).to_string());
+                                    if service.usage.lock().unwrap().settle(&request_id,&value["usage"]).is_err() {
+                                        yield Err(std::io::Error::other("Could not persist model usage"));
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -197,6 +249,23 @@ struct Transcript {
 }
 impl Transcript {
     fn record(&mut self, s: &Service, e: &Value) -> Result<()> {
+        if matches!(
+            e["type"].as_str(),
+            Some("tool_execution_start" | "tool_execution_end")
+        ) {
+            let turn = s
+                .inner
+                .lock()
+                .unwrap()
+                .turn
+                .as_ref()
+                .map(|t| t.user_message_id.clone())
+                .unwrap_or_default();
+            s.usage
+                .lock()
+                .unwrap()
+                .tool(&s.usage_scope, &turn, e, now())?;
+        }
         match e["type"].as_str().unwrap_or("") {
             "message_start" if e["message"]["role"] == "assistant" => {
                 let m = Message {
@@ -322,8 +391,33 @@ pub async fn run(s: &Service, req: SendMessage) -> Result<()> {
         .store
         .duplicate(&req.request_id)?
         .ok_or_else(|| anyhow!("Missing accepted message"))?;
+    let resuming = usage::paused(s)?.is_some_and(|p| p.request_id == req.request_id);
+    s.inner.lock().unwrap().store.set("pi.paused", "")?;
+    s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
     let mut transcript = Transcript::default();
-    let result = execute(s, &req, &mut transcript).await;
+    let result = execute(s, &req, &mut transcript, resuming).await;
+    let waiting = s.usage.lock().unwrap().waiting(&s.usage_scope)?.is_some();
+    let uncertain = result
+        .as_ref()
+        .err()
+        .is_some_and(|e| e.to_string().contains("未确认停止"));
+    if waiting && !cancelled(s) && !uncertain {
+        transcript.finish(s, MessageStatus::Failed, "\n等待 Pot 额度恢复")?;
+        if let Some(m) = transcript.assistant.as_mut() {
+            m.text = "等待 Pot Token 额度恢复。可在此会话的用量详情中继续或取消。".into();
+            s.save(m.clone())?;
+        }
+        user.status = MessageStatus::Accepted;
+        s.save(user)?;
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set("pi.paused", &serde_json::to_string(&req)?)?;
+        s.phase(EnginePhase::Ready, Some("等待 Pot 额度恢复".into()));
+        return Ok(());
+    }
+    s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
     let status = if cancelled(s) && result.is_ok() {
         MessageStatus::Cancelled
     } else if result.is_err() {
@@ -377,7 +471,12 @@ pub async fn run(s: &Service, req: SendMessage) -> Result<()> {
     );
     Ok(())
 }
-async fn execute(s: &Service, req: &SendMessage, transcript: &mut Transcript) -> Result<()> {
+async fn execute(
+    s: &Service,
+    req: &SendMessage,
+    transcript: &mut Transcript,
+    resuming: bool,
+) -> Result<()> {
     if cancelled(s) {
         return Ok(());
     }
@@ -501,7 +600,7 @@ async fn execute(s: &Service, req: &SendMessage, transcript: &mut Transcript) ->
                             std::fs::File::open(&session)?.sync_all()?;
                             s.inner.lock().unwrap().store.set("pi.session",session_id)?;
                             if cancelled(s) {return Ok(());}
-                            command(&mut stdin,json!({"id":req.request_id,"type":"prompt","message":req.text})).await?;started=true;
+                            command(&mut stdin,json!({"id":req.request_id,"type":"prompt","message":if resuming {"Pot allowance is available again. Continue the unfinished user request from the saved session. Preserve completed tool results; do not repeat completed external actions."}else{&req.text}})).await?;started=true;
                         }
                         if e["id"]=="stop" {return Ok(());}
                     }
@@ -835,5 +934,116 @@ mod tests {
         );
         server.abort();
         std::fs::remove_dir_all(data).unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Runs installed Pi against a local mock provider; set POT_TEST_PI_BIN"]
+    async fn real_pi_usage_pause_reopen_and_resume_without_replaying_tools() {
+        let mut s = tasks::tests::fixture();
+        s.pi_program = std::env::var("POT_TEST_PI_BIN").unwrap();
+        s.usage = Arc::new(Mutex::new(
+            usage::Ledger::open(&s.data.join("usage.sqlite")).unwrap(),
+        ));
+        s.api_budget = Some(deepseek::BudgetSettings {
+            namespace: "pi-attempts",
+            data: s.data.clone(),
+            limit: 10,
+            max_output_tokens: 128,
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        s.pi_upstream = format!("http://127.0.0.1:{port}/mock");
+        private_json(
+            &s.data.join(RUNTIME_ENDPOINT_FILE),
+            &json!(RuntimeEndpoint {
+                api_version: API_VERSION,
+                port,
+                token: s.token.clone(),
+                boot_id: s.boot.clone()
+            }),
+        )
+        .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        s.commands = tx;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let ledger = s.usage.clone();
+        let router=Router::new().route("/api/pi/v1/chat/completions",post(gateway)).with_state(s.clone()).route("/mock",post(move|Json(body):Json<Value>|{
+            let count=count.clone();let ledger=ledger.clone();async move {
+                let i=count.fetch_add(1,Ordering::SeqCst);
+                let (delta,reason)=if i==0 {
+                    ledger.lock().unwrap().set_policy(&usage::Policy{period:"day".into(),limit:1,..usage::Policy::default()}).unwrap();
+                    (json!({"role":"assistant","tool_calls":[{"index":0,"id":"once","type":"function","function":{"name":"bash","arguments":json!({"command":"echo APRICOT >> once.txt; cat once.txt"}).to_string()}}]}),"tool_calls")
+                }else{
+                    assert!(body["messages"].to_string().contains("APRICOT"),"tool result must survive session reopen");
+                    (json!({"role":"assistant","content":"Completed from saved tool result."}),"stop")
+                };
+                let chunk=|d:Value,r:Value|json!({"id":format!("usage-{i}"),"object":"chat.completion.chunk","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"delta":d,"finish_reason":r}]}).to_string();
+                let frames=vec![WireEvent::default().data(chunk(delta,Value::Null)),WireEvent::default().data(chunk(json!({}),json!(reason))),WireEvent::default().data(json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"prompt_cache_hit_tokens":4}}).to_string()),WireEvent::default().data("[DONE]")];
+                Sse::new(futures::stream::iter(frames.into_iter().map(Ok::<_,Infallible>)))
+            }
+        }));
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let req = SendMessage {
+            request_id: "paused-main".into(),
+            conversation_id: "main".into(),
+            text: "Write once, then report the result.".into(),
+        };
+        let _ = send(State(s.clone()), tasks::tests::headers(), Json(req))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(30), run(&s, rx.recv().await.unwrap()))
+            .await
+            .unwrap()
+            .unwrap();
+        s.turn(None);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(usage::paused(&s).unwrap().is_some());
+        assert_eq!(
+            std::fs::read_to_string(s.workspace.join("once.txt")).unwrap(),
+            "APRICOT\n"
+        );
+        // Restart product storage; the saved checkpoint is explicit and Pi has exited.
+        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot.sqlite")).unwrap();
+        usage::resume_main(&s).unwrap();
+        assert!(rx.try_recv().is_err());
+        s.usage
+            .lock()
+            .unwrap()
+            .set_policy(&usage::Policy::default())
+            .unwrap();
+        usage::resume_main(&s).unwrap();
+        let req = rx.recv().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(30), run(&s, req))
+            .await
+            .unwrap()
+            .unwrap();
+        s.turn(None);
+        assert!(usage::paused(&s).unwrap().is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            std::fs::read_to_string(s.workspace.join("once.txt")).unwrap(),
+            "APRICOT\n"
+        );
+        let ledger = s.usage.lock().unwrap();
+        assert_eq!(
+            ledger
+                .0
+                .query_row("SELECT SUM(input+output) FROM requests", [], |r| r
+                    .get::<_, u64>(0))
+                .unwrap(),
+            30
+        );
+        assert_eq!(
+            ledger
+                .0
+                .query_row("SELECT COUNT(*) FROM tools", [], |r| r.get::<_, u64>(0))
+                .unwrap(),
+            1
+        );
+        drop(ledger);
+        server.abort();
+        std::fs::remove_dir_all(&s.data).unwrap();
     }
 }

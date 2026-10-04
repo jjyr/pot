@@ -9,6 +9,7 @@
 | Pi + DeepSeek 主聊天 | 已实现真实流式回复、工具、取消、Quit 重开续聊；[Pi MVP](validation/pi-mvp.md) |
 | GPUI / Sandbox / 设置 | Kit 统一界面、原生输入、noVNC 桌面、资源配置、tray；[UI 规范](ui-ux-design.md)、[验收](validation/ui-ux.md) |
 | 多任务与主 Agent 路由 | 独立 session、并发、持久指导、取消、结果汇总、按状态搜索/归档；[多任务验收](validation/multitask.md) |
+| Token 用量与本地额度 | 整体趋势、任务累计与工具统计；日/周额度、等待及检查点续跑；[契约](token-usage.md)、[验收](validation/ui-ux.md) |
 | 定时计划 | 主 Agent 创建；日历/间隔、时区、去重、补跑/跳过、独立执行和变化通知；[契约与验证](scheduled-tasks.md) |
 
 最新界面只通过主 Agent 创建任务和计划；任务页面用于查看与管理。当前没有完整产品或公开发行验收结论。

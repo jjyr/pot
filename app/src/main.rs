@@ -7,10 +7,11 @@ mod schedules_ui;
 #[cfg(test)]
 mod stream;
 mod ui;
+mod usage_ui;
 
 use gpui::{div, prelude::*, px, rgb, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, Theme, ThemeMode,
+    ActiveTheme, Disableable, Icon, IconName, Sizable, Theme, ThemeMode,
     button::{Button, ButtonVariants},
     clipboard::Clipboard,
     input::{Input, InputState},
@@ -56,6 +57,7 @@ struct Shell {
     task_search: Entity<InputState>,
     schedule_tab: bool,
     schedules_ui: schedules_ui::SchedulesUI,
+    usage_ui: usage_ui::UsageUI,
 }
 impl Shell {
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
@@ -111,6 +113,35 @@ impl Shell {
         };
         let native_changed = native != self.native;
         self.native = native;
+        {
+            let mut v = self.client.view.lock().unwrap();
+            let page = self.native["page"].as_u64().unwrap_or(0);
+            let scope = if page == 4 {
+                String::new()
+            } else if v.selected.is_empty() {
+                "main".into()
+            } else {
+                v.selected.clone()
+            };
+            let query = if [0, 3, 4, 5, 6].contains(&page) {
+                Some((
+                    scope,
+                    self.usage_ui.days,
+                    if page == 5 { self.usage_ui.offset } else { 0 },
+                    self.native["timezone"]
+                        .as_str()
+                        .unwrap_or("Asia/Shanghai")
+                        .to_string(),
+                ))
+            } else {
+                None
+            };
+            if v.usage_query != query {
+                v.usage = serde_json::Value::Null;
+                v.usage_error.clear();
+            }
+            v.usage_query = query;
+        }
         let accepted = self.client.view.lock().unwrap().accepted_text.take();
         let view = self.client.view.lock().unwrap().clone();
         let dark = unsafe { pot_bridge_dark() };
@@ -193,6 +224,14 @@ impl Render for Shell {
         }
         self.settings.sync(&self.native["settings"], window, cx);
         match self.native["page"].as_u64() {
+            Some(4 | 5 | 6) => {
+                return self.usage_ui.render(
+                    &view,
+                    self.native["page"].as_u64().unwrap(),
+                    window,
+                    cx,
+                );
+            }
             Some(2) => return self.settings.render(&self.native["settings"], cx),
             Some(1) => return ui::sandbox(&self.native, cx),
             _ => {}
@@ -266,7 +305,7 @@ impl Render for Shell {
                                 let active = matches!(
                                     task.phase,
                                     pot_protocol::TaskPhase::Running
-                                        | pot_protocol::TaskPhase::Queued
+                                        | pot_protocol::TaskPhase::Queued | pot_protocol::TaskPhase::Waiting
                                 );
                                 ListItem::new(SharedString::from(format!("task-{id}")))
                                     .accessibility_label(task.title.clone())
@@ -288,12 +327,17 @@ impl Render for Shell {
                                             .gap_3()
                                             .child(
                                                 div()
+                                                    .id(SharedString::from(format!("task-title-{id}")))
+                                                    .tooltip({
+                                                        let title = task.title.clone();
+                                                        move |window, cx| ui::title_tooltip(title.clone(), window, cx)
+                                                    })
                                                     .flex_1()
                                                     .min_w_0()
-                                                    .truncate()
+                                                    .whitespace_nowrap().overflow_hidden()
                                                     .text_size(px(15.))
                                                     .font_weight(FontWeight::MEDIUM)
-                                                    .child(task.title.clone()),
+                                                    .child(ui::single_line_title(&task.title, 15., (window.viewport_size().width - px(ui::SIDEBAR)).min(px(ui::PAGE_WIDTH)) - px(130.), window, cx)),
                                             )
                                             .child(
                                                 div()
@@ -370,71 +414,140 @@ impl Render for Shell {
             .text_color(rgb(ink))
             .text_size(px(15.))
             .font_family(".AppleSystemUIFont")
+            .when(view.selected.is_empty(), |el| {
+                el.child(
+                    div()
+                        .px_6()
+                        .py_2()
+                        .flex()
+                        .justify_end()
+                        .child(usage_ui::entry(&view, cx)),
+                )
+            })
             .when(!view.selected.is_empty(), |el| {
                 let task = view
                     .selected_task
                     .as_ref()
                     .filter(|t| t.id == view.selected);
+                let title = task.map(|t| t.title.clone()).unwrap_or_else(|| {
+                    if view.selected == "new" {
+                        "新任务 · 输入目标后发送"
+                    } else {
+                        "正在加载任务…"
+                    }
+                    .into()
+                });
                 el.child(
-                    div()
-                        .px_6()
-                        .py_3()
-                        .flex()
-                        .gap_4()
-                        .child(
-                            Button::new("back-tasks")
-                                .ghost()
-                                .cursor_pointer()
-                                .label("‹ 任务")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.show_tasks = true;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            div().flex_1().child(
-                                task.map(|t| {
-                                    format!(
-                                        "{} · {}{}",
-                                        t.title,
-                                        if t.phase.scope() == "archived" {
-                                            "已归档 · "
-                                        } else {
-                                            ""
-                                        },
-                                        task_phase(&t.phase)
-                                    )
-                                })
-                                .unwrap_or(
-                                    if view.selected == "new" {
-                                        "新任务 · 输入目标后发送"
-                                    } else {
-                                        "正在加载任务…"
-                                    }
-                                    .into(),
-                                ),
-                            ),
-                        )
-                        .when(
-                            task.is_some_and(|t| {
-                                matches!(
-                                    t.phase,
-                                    pot_protocol::TaskPhase::Running
-                                        | pot_protocol::TaskPhase::Queued
-                                )
-                            }),
-                            |el| {
-                                el.child(
-                                    Button::new("stop-task")
+                    div().flex_shrink_0().px_8().py_3().child(
+                        div()
+                            .w_full()
+                            .max_w(px(760.))
+                            .mx_auto()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div().flex().child(
+                                    Button::new("back-tasks")
                                         .ghost()
-                                        .cursor_pointer()
-                                        .label("停止")
-                                        .on_click(
-                                            cx.listener(|this, _, _, _| this.client.cancel()),
-                                        ),
-                                )
-                            },
-                        ),
+                                        .small()
+                                        .icon(IconName::ChevronLeft)
+                                        .label("任务")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.show_tasks = true;
+                                            cx.notify();
+                                        })),
+                                ),
+                            )
+                            .child(
+                                div()
+                                    .id("task-conversation-title")
+                                    .w_full()
+                                    .min_w_0()
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_size(px(17.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(ui::single_line_title(
+                                        &title,
+                                        17.,
+                                        (window.viewport_size().width - px(ui::SIDEBAR + 64.))
+                                            .min(px(760.)),
+                                        window,
+                                        cx,
+                                    ))
+                                    .tooltip(move |window, cx| {
+                                        ui::title_tooltip(title.clone(), window, cx)
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .text_size(px(12.))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .when_some(task, |el, task| {
+                                        el.child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .child(
+                                                    Icon::new(
+                                                        if task.phase
+                                                            == pot_protocol::TaskPhase::Complete
+                                                        {
+                                                            IconName::Check
+                                                        } else {
+                                                            IconName::Info
+                                                        },
+                                                    )
+                                                    .size(px(13.)),
+                                                )
+                                                .child(task_phase(&task.phase)),
+                                        )
+                                        .when(
+                                            task.phase.scope() == "archived",
+                                            |el| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap_1()
+                                                        .child(
+                                                            Icon::new(IconName::Inbox)
+                                                                .size(px(13.)),
+                                                        )
+                                                        .child("已归档"),
+                                                )
+                                            },
+                                        )
+                                    })
+                                    .child(usage_ui::entry(&view, cx))
+                                    .when(
+                                        task.is_some_and(|t| {
+                                            matches!(
+                                                t.phase,
+                                                pot_protocol::TaskPhase::Running
+                                                    | pot_protocol::TaskPhase::Queued
+                                                    | pot_protocol::TaskPhase::Waiting
+                                            )
+                                        }),
+                                        |el| {
+                                            el.child(
+                                                Button::new("stop-task")
+                                                    .ghost()
+                                                    .small()
+                                                    .label("停止")
+                                                    .on_click(cx.listener(|this, _, _, _| {
+                                                        this.client.cancel()
+                                                    })),
+                                            )
+                                        },
+                                    ),
+                            ),
+                    ),
                 )
             })
             .child(
@@ -720,6 +833,7 @@ fn task_phase(p: &pot_protocol::TaskPhase) -> &'static str {
     use pot_protocol::TaskPhase::*;
     match p {
         Queued => "排队中",
+        Waiting => "等待额度",
         Running => "执行中",
         Complete => "已完成",
         Failed => "失败 · 可追加指导",
@@ -795,6 +909,7 @@ fn main() {
                             last_at_bottom: true,
                             jumping_to_latest: false,
                             native: serde_json::Value::Null,
+                            usage_ui: usage_ui::UsageUI::new(window, cx),
                             settings: ui::Settings::new(window, cx),
                             schedule_tab: false,
                             schedules_ui: schedules_ui::SchedulesUI::new(window, cx),
