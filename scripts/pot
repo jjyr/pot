@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the product directories; frozen poc/ code is never executed."""
+"""Build and package the product directories."""
 import hashlib, os, pathlib, plistlib, shutil, subprocess, sys
 REPO=pathlib.Path(__file__).resolve().parents[1]
 ROOT=REPO/'.local/d1'; RES=ROOT/'resources'; APP=ROOT/'Pot.app'

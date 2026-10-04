@@ -3,6 +3,8 @@
 ---
 # Final validation (2026-10-03)
 
+> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+
 - Runtime: 22 tests passed; adversarial tests: 4 passed after 3 fixes; OAuth loopback fixture: 3 passed (29 total).
 - Reverification: new VM boot/shared-file persistence/UID denial/network passed; Pi live tool loop/restart/active abort/steer passed with local model fixture.
 - Codex handshake retried: same state-backfill timeout. Four other engine transports/lifecycles passed again.

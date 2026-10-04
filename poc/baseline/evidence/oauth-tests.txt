@@ -1,8 +1,0 @@
-test_account_scope_cannot_be_changed_by_callback (__main__.OAuthTests) ... ok
-test_actual_loopback_callback_single_use_and_revoke (__main__.OAuthTests) ... ok
-test_wrong_state_pkce_expiry (__main__.OAuthTests) ... ok
-
-----------------------------------------------------------------------
-Ran 3 tests in 0.511s
-
-OK

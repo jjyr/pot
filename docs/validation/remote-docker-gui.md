@@ -1,10 +1,14 @@
 # 远程 Docker GUI：P2 最小切片
 
+> 旧 `poc/` 源码已移除，下方实验命令仅适用于链接中的历史提交。
+
+> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+
 日期：2026-10-03。结论：**有限通过**。真实远程 Linux Docker → SSH → 标准 noVNC → headed Chromium 已形成可操作闭环；尚不能称为 GPUI 内远程桌面或完整 P2 验收通过。P1 按用户决定收尾；本报告写作时 P3/P4 未测，后续结果见文末“后续实测补充”。
 
 ## 复现
 
-机器选择、连接与部署事实见 `~/Workspace/Machines/machines/devpc/pot-p2-readiness-20261003.md`，本仓库不保存连接账号。实现入口：[remote-desktop README](../../poc/remote-desktop/README.md)。
+机器选择、连接与部署事实见 `~/Workspace/Machines/machines/devpc/pot-p2-readiness-20261003.md`，本仓库不保存连接账号。实现入口：[remote-desktop README](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/remote-desktop/README.md)。
 
 ```sh
 cd ~/Workspace/pot
@@ -40,7 +44,7 @@ poc/remote-desktop/poc tunnel
 
 ## 实测与证据
 
-操作方式：本机隔离 headed Chrome，使用 Playwright CLI 真实点击 noVNC canvas、发送按键、操作 Clipboard UI；远端 CDP 只用于确定性 driver 和结果读回。不是 fixture，也不是人工输入法验收。证据目录：[evidence](../../poc/remote-desktop/evidence/)。
+操作方式：本机隔离 headed Chrome，使用 Playwright CLI 真实点击 noVNC canvas、发送按键、操作 Clipboard UI；远端 CDP 只用于确定性 driver 和结果读回。不是 fixture，也不是人工输入法验收。证据目录：[evidence](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/remote-desktop/evidence)。
 
 | 项目 | 状态 | 事实与证据 |
 |---|---|---|

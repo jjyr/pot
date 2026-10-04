@@ -3,11 +3,15 @@ tags: [Agent, Architecture, POC, pot]
 ---
 # pot 产品架构研究与 POC 验证
 
+> 旧 `poc/` 源码已移除，下方实验命令仅适用于链接中的历史提交。
+
+> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+
 日期：2026-10-03。对应 [本地个人Agent工作环境产品设计](../product-design.md) v0.11。代码与证据：[POC 复现说明](baseline-reproduction.md)。
 
 本次完成官方文档研究、原生界面/虚拟机实验、五种引擎的真实基础程序化接入及确定性 Runtime 测试。**这些结果证明基础技术路线可继续实施，不代表完整 pot 产品、五引擎执行或 Dot 实机一致性已经验收。** 未调用真实模型，未读取或修改用户账号凭据，也没有连接真实服务账号；复验增加本地固定模型响应 fixture，用实际 Pi 执行工具、保存/恢复 session、取消和 steering。
 
-> 此文记录截至 2026-10-03 的历史实验。文中“剩余验收”包含未来产品验收，不代表当前开发优先级；当前 POC 顺序以 [POC 实施计划](../poc-plan.md) 为准。证据位于 [poc/baseline/evidence](../../poc/baseline/evidence/)，文中未展开的 evidence 文件名均相对此目录。
+> 此文记录截至 2026-10-03 的历史实验。文中“剩余验收”包含未来产品验收，不代表当前开发优先级；当前 POC 顺序以 [POC 实施计划](../poc-plan.md) 为准。证据位于 [poc/baseline/evidence](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/baseline/evidence)，文中未展开的 evidence 文件名均相对此目录。
 
 ## 1. 结论与架构决定
 

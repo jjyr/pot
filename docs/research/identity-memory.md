@@ -4,6 +4,8 @@ tags: [Agent, Architecture, Memory, Research]
 
 # Agent 长期身份、记忆与长会话架构调研
 
+> 历史研究：版本与“当前”均指原文核对日期。实施现状见 [开发计划](../development-plan.md)，不是本报告中的建议或旧状态。
+
 研究日期：2026-10-02  
 状态：资料调研与架构建议；未运行各产品的对照实验，不是实现规范。  
 关联产品：[本地个人Agent工作环境产品设计](../product-design.md)，尤其 Agent 部分的第 4.4–4.5 节。  

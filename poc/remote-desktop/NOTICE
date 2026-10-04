@@ -1,9 +1,0 @@
-seccomp-chromium.json is adapted from Moby profiles (Apache-2.0):
-https://github.com/moby/profiles/blob/2ceae35d351c156cb5a8efc0fdc4a08cf94569d8/seccomp/default.json
-Change: permit clone/setns/unshare/chroot for Chromium user-namespace sandbox
-setup without giving the container host capabilities. Scoped to this POC only.
-The old Playwright v1.55.1 profile was tested and rejected for compatibility
-with this host runtime; it is not used by the final configuration.
-
-noVNC v1.6.0 is downloaded separately and SHA256-verified during build.
-It is MPL-2.0 licensed; upstream source and license remain in the archive.

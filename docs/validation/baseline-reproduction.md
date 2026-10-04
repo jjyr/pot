@@ -3,7 +3,11 @@
 ---
 # pot 研究 POC
 
-[poc/baseline](../../poc/baseline/) 保存可检查的实现和证据，对应 [pot产品架构研究与POC验证](baseline-report.md)。基础 POC，不是完整产品。测试日期 2026-10-03。
+> 旧 `poc/` 源码已移除，下方实验命令仅适用于链接中的历史提交。
+
+> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+
+[poc/baseline](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/baseline) 保存可检查的实现和证据，对应 [pot产品架构研究与POC验证](baseline-report.md)。基础 POC，不是完整产品。测试日期 2026-10-03。
 
 > 本文从笔记迁入，保留原实验条件。以下代码命令在仓库的 `poc/baseline` 目录运行；部分脚本仍依赖历史 `/tmp/pot-research-20261003` 缓存。新 POC 的第一步会消除这些固定路径。
 

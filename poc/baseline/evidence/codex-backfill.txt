@@ -1,3 +1,0 @@
-WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)
-state db backfill is running at <user-home>/.codex; waiting up to 30s before retrying startup initialization
-Error: failed to initialize sqlite state runtime under /tmp/pot-research-20261003/homes/codex-sqlite: timed out waiting for state db backfill at <user-home>/.codex after 30s (status: running)

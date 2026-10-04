@@ -1,8 +1,12 @@
 # macOS shell：P0 / P1 最小切片
 
+> 旧 `poc/` 源码已移除，下方实验命令仅适用于链接中的历史提交。
+
+> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+
 日期：2026-10-03。结论：**有限通过**。可操作原型已实现；真实 tray 打开/关闭后重开有人工确认，真实键盘、拼音、焦点、缩放和显式退出有实测证据。没有把完整 P1 的 50 次循环、多屏、睡眠唤醒标为完成。（本段写于 P2 前：当时 P2 只读检查节点，P4 helper/VM 未实施。）
 
-> 后续状态：用户决定最小验证足够，停止继续 GPUI/tray 验证；下文未测项保留为证据边界，不作为后续阶段前置条件。devpc 内存不足已通过用户授权停止 llama-server 解决。P2–P4 结果见 [文档导航](../README.md#当前状态2026-10-03)，本文末尾有补充。
+> 后续状态：用户决定最小验证足够，停止继续 GPUI/tray 验证；下文未测项保留为证据边界，不作为后续阶段前置条件。devpc 内存不足已通过用户授权停止 llama-server 解决。P2–P4 结果见 [文档导航](../poc-plan.md#10-执行记录)，本文末尾有补充。
 
 ## 复现
 
@@ -49,7 +53,7 @@ POC 保留 Dock，便于 Cmd-Tab；当前不是 tray-only 产品策略。测试�
 
 ## 实测记录
 
-证据：[`results.json`](../../poc/macos-shell/evidence/results.json)、[`native-events.jsonl`](../../poc/macos-shell/evidence/native-events.jsonl)、[`ime-focus.png`](../../poc/macos-shell/evidence/ime-focus.png)、[`resources.json`](../../poc/macos-shell/evidence/resources.json)。JSONL 为实际输入/窗口事件，不是 fixture；原始日志保存在忽略目录，hash 见 results.json。时间统一 UTC，本文日期按 Asia/Shanghai。
+证据：[`results.json`](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/macos-shell/evidence/results.json)、[`native-events.jsonl`](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/macos-shell/evidence/native-events.jsonl)、[`ime-focus.png`](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/macos-shell/evidence/ime-focus.png)、[`resources.json`](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/macos-shell/evidence/resources.json)。JSONL 为实际输入/窗口事件，不是 fixture；原始日志保存在忽略目录，hash 见 results.json。时间统一 UTC，本文日期按 Asia/Shanghai。
 
 | 场景 | 状态 | 方法、观测及边界 |
 |---|---|---|

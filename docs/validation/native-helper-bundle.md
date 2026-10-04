@@ -1,10 +1,14 @@
 # P4：Swift helper、本地 VM 与独立 App
 
+> 旧 `poc/` 源码已移除，下方实验命令仅适用于链接中的历史提交。
+
+> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+
 日期：2026-10-03。结论：**有限通过**。自有 Swift helper 直接链接 Containerization，已从移动后的 App 实际启动、操作、停止本地桌面；不需要用户安装 Docker，也不依赖宿主 Python 或 cctl。当前是本机 ad hoc 签名原型，不能据此宣称可公开分发。
 
 ## 复现、版本与资源
 
-完整入口见 [README](../../poc/native-helper/README.md)：
+完整入口见 [README](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/native-helper/README.md)：
 
 ```sh
 poc/native-helper/poc prepare
@@ -35,7 +39,7 @@ poc/native-helper/poc open
 | 原生 Quit 清理 | 通过 | app-quit.json； 同时核查 helper/socket 和实际 HTTP；不用 TCP connect 单独判断 VM 是否存活 |
 | 分发/完整故障矩阵 | 未测 | Developer ID、notarization、干净机器 Gatekeeper、下载中断、只读数据目录、sleep/wake、长期资源趋势 |
 
-证据目录：[evidence](../../poc/native-helper/evidence/)。`verify_lifecycle.py` 使用独立 fault-runtime 和真实 Alpine VM 的 probe.sh；native viewer 路径单独实测。截图在工具执行记录，未保存完整录像。
+证据目录：[evidence](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/native-helper/evidence)。`verify_lifecycle.py` 使用独立 fault-runtime 和真实 Alpine VM 的 probe.sh；native viewer 路径单独实测。截图在工具执行记录，未保存完整录像。
 
 ## 修复与限制
 

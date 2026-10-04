@@ -5,6 +5,8 @@ updated: 2026-10-02
 
 # Hermes Session 管理架构与机制
 
+> 历史研究：版本与“当前”均指原文核对日期。实施现状见 [开发计划](../development-plan.md)，不是本报告中的建议或旧状态。
+
 Hermes 把 session 管理分成三层：**入口路由决定消息进入哪个会话，持久存储保留会话身份和历史，context engine 决定模型本轮看到哪些内容。** Agent 对象是执行这些状态的运行时，可以缓存、释放或重建；它的生命周期不等于会话生命周期。
 
 本文整理的是 NousResearch **Hermes Agent**，沿用 [此前调研](identity-memory.md) 的固定源码版本 `6dbb7b9ab857842617c2c35b63b49bd6ee77fc56`，于 2026-10-02 核对官方文档与源码。以下是源码与文档分析，未启动 Hermes 做运行实测，也不代表所有后续版本。

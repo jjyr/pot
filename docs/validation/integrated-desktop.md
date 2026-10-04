@@ -1,10 +1,14 @@
 # P3：同窗口远程桌面与控制权
 
+> 旧 `poc/` 源码已移除，下方实验命令仅适用于链接中的历史提交。
+
+> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+
 日期：2026-10-03。结论：**有限通过**。GPUI/WKWebView 已显示并操作真正远程 Docker 桌面，接管、交回、隧道断线恢复已实测。没有把完整输入法、性能矩阵或最终 tray 连续演示算作通过。
 
 ## 复现与固定边界
 
-入口见 [README](../../poc/integrated-desktop/README.md)。先按 P2 启动专用容器和隧道，再运行 `poc/integrated-desktop/poc prepare`、`run`、`open`（构建 GUI 用 `poc/macos-shell/poc build`）。连接参数来自 Machines，沿用 P2 固定镜像、TigerVNC、noVNC 1.6.0、GPUI 0.2.2；Python 依赖固定在 requirements.txt。环境引用：`~/Workspace/Machines/machines/devpc/pot-p2-readiness-20261003.md`。
+入口见 [README](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/integrated-desktop/README.md)。先按 P2 启动专用容器和隧道，再运行 `poc/integrated-desktop/poc prepare`、`run`、`open`（构建 GUI 用 `poc/macos-shell/poc build`）。连接参数来自 Machines，沿用 P2 固定镜像、TigerVNC、noVNC 1.6.0、GPUI 0.2.2；Python 依赖固定在 requirements.txt。环境引用：`~/Workspace/Machines/machines/devpc/pot-p2-readiness-20261003.md`。
 
 本机 broker 监听 loopback 17681；随机 token 写入任务目录的 0600 URL 文件。不要分享该 URL。退出 GUI 不停止远程环境；停止命令见 README。未登录任何真实网页账号。
 
@@ -20,7 +24,7 @@
 | 关闭窗口后 tray 重开完整 P3 序列 | 有限通过 | P1 用户已确认 tray 关闭重开；P3 曾被菜单校验死锁中断。修复后原生窗口可操作，但没有重新完成整段 tray 序列 |
 | 输入法、完整鼠标/缩放矩阵、弱网延迟 | 未测 | 沿用用户收敛范围；不以中文粘贴或协议测试替代 |
 
-小型证据位于 [evidence](../../poc/integrated-desktop/evidence/)。原生日志、完整 broker 日志保留忽略目录 `.local/poc/`，截图在本次工具执行记录，无额外声称已保存录像。
+小型证据位于 [evidence](https://github.com/jjyr/pot/tree/5ed4f40277bceb2f1a62f90c2fdf789f54f3bdb2/poc/integrated-desktop/evidence)。原生日志、完整 broker 日志保留忽略目录 `.local/poc/`，截图在本次工具执行记录，无额外声称已保存录像。
 
 ## 发现与修复
 

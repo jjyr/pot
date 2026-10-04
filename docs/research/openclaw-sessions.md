@@ -4,6 +4,8 @@ tags: [OpenClaw, Agent, Session, Architecture]
 
 # OpenClaw Session 管理架构与机制
 
+> 历史研究：版本与“当前”均指原文核对日期。实施现状见 [开发计划](../development-plan.md)，不是本报告中的建议或旧状态。
+
 整理日期：2026-10-02  
 分类：技术 / Agent 运行时  
 关联：[Agent长期身份、记忆与长会话架构调研](identity-memory.md)
