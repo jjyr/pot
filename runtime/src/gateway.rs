@@ -260,12 +260,13 @@ pub async fn forward(
                 .map_err(internal)?;
         }
         let output = ledger
-            .reserve(
+            .reserve_routed(
                 &request_id,
                 &s.usage_scope,
                 &turn_id,
                 now(),
-                &c.model,
+                &binding.spec,
+                binding.epoch,
                 input_estimate,
                 max_output,
             )
@@ -283,7 +284,13 @@ pub async fn forward(
         s.usage
             .lock()
             .unwrap()
-            .wait(&s.usage_scope, &turn_id, now(), input_estimate + 1)
+            .wait_routed(
+                &s.usage_scope,
+                &turn_id,
+                now(),
+                input_estimate + 1,
+                &binding.spec.provider,
+            )
             .map_err(internal)?;
         return Err(error(
             StatusCode::TOO_MANY_REQUESTS,
@@ -294,16 +301,6 @@ pub async fn forward(
     provider
         .protocol
         .clamp(&mut body, output)
-        .map_err(internal)?;
-    s.usage
-        .lock()
-        .unwrap()
-        .route(
-            &request_id,
-            &binding.spec.provider,
-            binding.epoch,
-            &binding.spec.spec_hash,
-        )
         .map_err(internal)?;
     {
         let mut inner = s.inner.lock().unwrap();

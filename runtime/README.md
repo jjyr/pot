@@ -199,10 +199,11 @@ Authenticated Runtime endpoints (root token only):
 
 - `GET /api/v1/agent?owner=main`: profiles, the owner's binding history, pending
   migration and credential-route rebind reason. `owner` may also be a task ID.
-- `POST /api/v1/agent`: `{request_id, expected_revision, profile, follow_main}`.
+- `POST /api/v1/agent`: `{request_id, expected_revision, profile, follow_main, follow_worker}`.
   New profiles use revision 1 / expected_revision 0. Updates require exactly the
   next revision. `follow_main` defaults true; existing tasks remain pinned. This
-  also selects the profile for new workers. A failed or repeated request does not
+  also selects the fallback profile for new workers unless `follow_worker:false`.
+  An explicit routing `worker_profile` remains authoritative. A failed or repeated request does not
   silently change an existing binding.
 - `POST /api/v1/agent/migrate`: `{request_id, owner, target_profile, reason}`;
   reason is `settings_changed`, `needs_rebind` or `user_requested`. Same-ID retries
@@ -217,8 +218,11 @@ are validated by the provider, not guessed by the Runtime.
 
 Assistant API settings still edit pi.json and restart the environment. Agent settings edit Pi launch commands through the versioned API without a model call.
 Its model/output-limit edit is imported into this same migration operation on
-startup. General profile management currently uses the authenticated API; the GUI
-includes an explicit Codex model/selection entry; general profile management and migration previews remain incomplete.
+startup. The task-routing settings page edits/copies saved profiles, selects a main profile through
+migration, and configures the worker default, tool-hint whitelist and concurrency caps.
+Library-only saves use `follow_main:false, follow_worker:false`; existing bindings remain fixed.
+The task conversation's Change Agent action targets only that owner through the same migration API.
+Migration previews remain incomplete.
 
 Migration persists requested → handoff_written → new_binding_opened → active.
 Candidate files are fsynced before the final SQLite transaction, which also adds
@@ -342,7 +346,7 @@ advertises these capabilities. Unknown gateway protocols cannot satisfy exact bu
 `GET/POST /api/v1/agent/routing` reads/saves the root-authorized policy:
 
 ```json
-{"revision":0,"allowed_tool_profiles":["pi-default"],"profile_limits":{"pi-default":2},"provider_limits":{"deepseek":3}}
+{"revision":0,"worker_profile":null,"allowed_tool_profiles":["pi-default"],"profile_limits":{"pi-default":2},"provider_limits":{"deepseek":3}}
 ```
 
 Save with the last observed revision; a successful save increments it. Limits are
@@ -396,3 +400,22 @@ the mode-0600 provider file is persisted before selection. A failed selection ma
 leave an unused private route, but cannot mutate an existing route. No model test
 is sent. API-only setup works without pi.json; default Pi limits apply and its
 request reservations never use the legacy direct-API smoke ledger.
+
+### Provider allowances
+
+`GET /api/v1/usage/providers` returns known provider routes, current policy/revision,
+usage/reservation totals and enforcement precision. `POST` accepts
+`{provider, revision, policy:{period,limit,timezone,auto_resume}}`; root bearer and
+current revision are required. Only configured gateway routes support hard allowances.
+The gateway atomically reserves tokens and associates the immutable provider route before
+networking. Global and provider allowances both apply; output is capped by the smaller
+available allowance. Unknown requests retain reservations after restart. A paused owner
+resumes only when both policies allow it and the backend supports checkpoint resume.
+Provider service rate limits and native subscription usage are separate from these policies.
+
+Native invocation literals support user wrapper options with direct argv expansion.
+Runtime-owned model, transport, session, MCP, policy and config override flags are rejected,
+including attached short forms. Wrappers are user-trusted executables and must preserve
+the selected protocol; incompatible output fails visibly, without transport fallback.
+Codex extra permission requests are denied by the guest-VM policy and surfaced as a
+credential-free system message; permitted Pot MCP requests still use per-role authorization.

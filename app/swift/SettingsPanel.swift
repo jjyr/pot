@@ -7,6 +7,15 @@ import Foundation
     var agentStates: [[String: Any]] = []
     var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = ""
     var profile: [String: Any] = [:]
+    var savedProfiles: [[String: Any]] = []
+    var routingPolicy: [String: Any] = [:]
+    var routingProfile = "", routingName = "", routingModel = ""
+    var routingProfileLimit = "", routingProviderLimit = ""
+    var routingBusy = false
+    var routingOwner = "main", routingOwnerName = "主会话"
+    var providerAllowances: [[String: Any]] = []
+    var providerAllowance: [String: Any] = [:]
+    var providerPeriod = "none", providerTokens = "2000000", providerAutoResume = true
     var apiEndpoint = "", apiModel = "", apiProtocol = "openai_chat", hasAPIKey = false
     var loginAgent = "", loginExecutable = "", loginArguments = "[]"
     var loginTool: [String: Any] = [:]
@@ -20,6 +29,64 @@ import Foundation
     var cpu = 4, memory = 8, disk = 32
     var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "5"
     var cpuField = "4", memoryField = "8", diskField = "32", result = ""
+    var setupStage = 0, setupChoice = ""
+    var setupItems = Set(["codex", "claude", "agy", "api"])
+    var setupUnknownConfirmed = false, setupAutoPending = false
+    var setupKey: String {
+        "onboarding.\(root.path)"
+    }
+
+    var setupCompleted: Bool {
+        UserDefaults.standard.bool(forKey: setupKey + ".complete")
+    }
+
+    func persistSetup() {
+        UserDefaults.standard.set(setupStage, forKey: setupKey + ".stage")
+        UserDefaults.standard.set(Array(setupItems), forKey: setupKey + ".items")
+        UserDefaults.standard.set(setupChoice, forKey: setupKey + ".choice")
+    }
+
+    func finishSetup() {
+        UserDefaults.standard.set(true, forKey: setupKey + ".complete")
+        setup = false; setupAutoPending = false
+        bridge?.selectPage(0)
+    }
+
+    func setupNavigate(_ stage: Int) {
+        if stage == 1 {
+            let usable = setupItems.contains("api") || agentStates.contains { value in
+                let id = value["id"] as? String ?? ""
+                return setupItems.contains(id) && ["codex", "claude"]
+                    .contains(id) && value["installation"] as? String == "present"
+            }
+            let prepared = setupItems
+                .allSatisfy { id in
+                    id == "api" || agentStates
+                        .contains { $0["id"] as? String == id && $0["installation"] as? String == "present" }
+                }
+            guard !setupItems.isEmpty, usable, prepared, bridge?.snapshot["connected"] as? Bool == true else {
+                result = "请先准备好至少一个可用后端；未准备项目可重试，或取消勾选以稍后安装。"; return
+            }
+        }
+        setup = true; setupAutoPending = false; setupStage = stage == 1 ? 1 : 0; persistSetup()
+        bridge?.selectPage(2)
+        if stage == 1 {
+            refreshAgents()
+        }
+    }
+
+    func chooseSetup(_ id: String) {
+        setupChoice = id; setupUnknownConfirmed = false; persistSetup(); bridge?.selectPage(2)
+    }
+
+    func setupCanStart(_ engine: String) -> Bool {
+        guard setup else { return true }
+        let agent = agentStates.first { $0["id"] as? String == engine }
+        let status = agent?["authentication"] as? String
+        return status == "authenticated" ||
+            (status == "unknown" && agent?["status_check"] as? String == "unsupported" && setupUnknownConfirmed)
+    }
+
     var root: URL {
         bridge?.localRuntime?.root ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/pot")
     }
@@ -29,7 +96,15 @@ import Foundation
     }
 
     func showAgent(setup: Bool = false) {
-        self.setup = setup; section = 1
+        self.setup = setup; section = setup ? 2 : 1
+        if setup {
+            setupAutoPending = true
+            setupStage = UserDefaults.standard.integer(forKey: setupKey + ".stage") == 1 ? 1 : 0
+            if let saved = UserDefaults.standard.stringArray(forKey: setupKey + ".items") {
+                setupItems = Set(saved)
+            }
+            setupChoice = UserDefaults.standard.string(forKey: setupKey + ".choice") ?? ""
+        }
     }
 
     func changeAppearance(_ value: Int) {
@@ -40,12 +115,6 @@ import Foundation
 
     func refreshStatus() {
         guard let bridge else { return }
-        if bridge.snapshot["connected"] as? Bool == true,
-           let engine = bridge.snapshot["engine"] as? [String: Any],
-           let phase = engine["phase"] as? String, phase != "needs_auth"
-        {
-            setup = false
-        }
         if let old = awaitingBoot, let boot = bridge.snapshot["boot_id"] as? String, boot != old,
            bridge.snapshot["connected"] as? Bool == true,
            bridge.localPhase == "running"
@@ -55,7 +124,18 @@ import Foundation
     }
 
     var publicState: [String: Any] {
-        ["revision": revision, "section": section, "setup": setup, "has_key": hasConfiguration,
+        ["revision": revision, "section": section, "setup": setup,
+         "profiles": savedProfiles, "routing": routingPolicy, "routing_profile": routingProfile,
+         "routing_name": routingName, "routing_model": routingModel,
+         "routing_profile_limit": routingProfileLimit, "routing_provider_limit": routingProviderLimit,
+         "routing_owner": routingOwner, "routing_owner_name": routingOwnerName, "routing_busy": routingBusy,
+         "provider_allowance": providerAllowance,
+         "provider_period": providerPeriod, "provider_tokens": providerTokens,
+         "provider_auto_resume": providerAutoResume,
+         "setup_stage": setupStage, "setup_choice": setupChoice, "setup_items": Array(setupItems),
+         "setup_unknown_confirmed": setupUnknownConfirmed,
+         "runtime_ready": bridge?.snapshot["connected"] as? Bool ?? false,
+         "environment_phase": environment["phase"] as? String ?? "等待启动", "has_key": hasConfiguration,
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
          "login_agent": loginAgent, "login_executable": loginExecutable, "login_arguments": loginArguments,
@@ -69,7 +149,11 @@ import Foundation
     func refreshAgents() {
         guard let bridge, !discovering, Date().timeIntervalSince(lastDiscovery) > 1 else { return }
         lastDiscovery = Date()
-        bridge.terminal.show(false, root: root, ip: bridge.guestIP)
+        bridge.terminal.show(
+            bridge.embeddedTerminalVisible || (bridge.page == 1 && bridge.terminalSelected),
+            root: root,
+            ip: bridge.guestIP
+        )
         discovering = true
         Task {
             defer { discovering = false }
@@ -77,8 +161,12 @@ import Foundation
                 let facts = try await bridge.terminal.request("api/v1/agents/refresh", body: [:])
                 agentStates = facts["agents"] as? [[String: Any]] ?? []
                 let agent = try await bridge.terminal.request("api/v1/agent")
+                savedProfiles = agent["profiles"] as? [[String: Any]] ?? []
                 let bindings = agent["bindings"] as? [[String: Any]] ?? []
                 let active = bindings.first { $0["state"] as? String == "active" }
+                if active != nil, setup, setupAutoPending {
+                    finishSetup()
+                }
                 let selectedID = (active?["spec"] as? [String: Any])?["source_profile_id"] as? String
                 if let profiles = agent["profiles"] as? [[String: Any]],
                    let value = profiles.first(where: { $0["id"] as? String == selectedID }) ?? profiles.first
@@ -109,6 +197,14 @@ import Foundation
                     apiModel = connection["model"] as? String ?? ""
                     apiProtocol = connection["protocol"] as? String ?? "openai_chat"
                     hasAPIKey = connection["has_key"] as? Bool ?? false
+                }
+                if setupChoice.isEmpty {
+                    setupChoice = agentStates
+                        .first {
+                            ["codex", "claude"]
+                                .contains($0["id"] as? String ?? "") && $0["authentication"] as? String == "authenticated"
+                        }?["id"] as? String ?? ""
+                    persistSetup()
                 }
                 result = "状态已刷新。已登录不代表模型调用已验证。"
             } catch { result = "状态检查失败；可在 Sandbox Terminal 中手动使用 CLI。" }
@@ -152,22 +248,33 @@ import Foundation
 
     func selectNative(engine: String, model: String) {
         let name = engine == "claude" ? "Claude" : "Codex"
+        guard setupCanStart(engine) else { result = "请先在终端登录并刷新状态。"; return }
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let bridge, !model.isEmpty else { result = "请填写 \(name) 模型名称。"; return }
-        bridge.terminal.show(false, root: root, ip: bridge.guestIP)
+        bridge.terminal.show(
+            bridge.embeddedTerminalVisible || (bridge.page == 1 && bridge.terminalSelected),
+            root: root,
+            ip: bridge.guestIP
+        )
         Task {
             do {
                 let state = try await bridge.terminal.request("api/v1/agent")
                 let profiles = state["profiles"] as? [[String: Any]] ?? []
                 let previous = profiles.first { $0["id"] as? String == "\(engine)-default" }
                 let revision = previous?["revision"] as? Int ?? 0
-                let profile: [String: Any] = [
+                var profile: [String: Any] = [
                     "id": "\(engine)-default", "revision": revision + 1, "name": name,
                     "engine": engine, "provider": engine == "claude" ? "anthropic" : "openai", "model": model,
                     "auth_ref": "cli:\(engine)",
                     "params": ["max_output_tokens": 8192],
                     "tool_policy": ["worker_orchestration": false, "summary_read_only": true, "unattended": "guest_vm"],
                 ]
+                if let launch = previous?["launch_spec"] {
+                    profile["launch_spec"] = launch
+                }
+                if let contract = previous?["protocol_contract"] {
+                    profile["protocol_contract"] = contract
+                }
                 _ = try await bridge.terminal.request("api/v1/agent", body: [
                     "profile": profile, "expected_revision": revision,
                     "request_id": UUID().uuidString, "follow_main": true,
@@ -176,7 +283,9 @@ import Foundation
                     claudeModel = model
                 } else {
                     codexModel = model
-                }; setup = false
+                }; if setup {
+                    finishSetup()
+                }
                 result = "已选择 \(name)；现有轮次结束后生效。请先在 Sandbox Terminal 完成登录。"
                 refreshAgents()
             } catch { result = "\(name) 配置未保存：\(error.localizedDescription)" }
@@ -185,7 +294,11 @@ import Foundation
 
     func saveAPI(endpoint: String, key: String, model: String) {
         guard let bridge else { return }
-        bridge.terminal.show(false, root: root, ip: bridge.guestIP)
+        bridge.terminal.show(
+            bridge.embeddedTerminalVisible || (bridge.page == 1 && bridge.terminalSelected),
+            root: root,
+            ip: bridge.guestIP
+        )
         let endpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !endpoint.isEmpty, !model.isEmpty else { result = "请填写 API endpoint 和模型名称。"; return }
@@ -199,7 +312,9 @@ import Foundation
                     "request_id": UUID().uuidString, "expected_revision": expected,
                     "endpoint": endpoint, "api_key": key, "model": model, "protocol": protocolName,
                 ])
-                apiEndpoint = endpoint; apiModel = model; hasAPIKey = true; setup = false
+                apiEndpoint = endpoint; apiModel = model; hasAPIKey = true; if setup {
+                    finishSetup()
+                }
                 revision += 1
                 result = "API 已保存；新配置在当前轮次结束后生效。"
                 refreshAgents()
@@ -344,5 +459,163 @@ import Foundation
 
     @objc func openWorkspace() {
         bridge?.openWorkspace()
+    }
+}
+
+@MainActor extension SettingsPanel {
+    func refreshRouting() {
+        guard let bridge, !routingBusy else { return }
+        routingBusy = true
+        Task {
+            defer { routingBusy = false }
+            do {
+                let state = try await bridge.terminal.request("api/v1/agent")
+                savedProfiles = state["profiles"] as? [[String: Any]] ?? []
+                routingPolicy = try await bridge.terminal.request("api/v1/agent/routing")
+                providerAllowances = try await bridge.terminal
+                    .request("api/v1/usage/providers")["providers"] as? [[String: Any]] ?? []
+                if !savedProfiles.contains(where: { $0["id"] as? String == routingProfile }) {
+                    routingProfile = savedProfiles.first?["id"] as? String ?? ""
+                }
+                editRoutingProfile(routingProfile)
+                result = "配置已加载。已有任务保持创建时的选择；汇总沿用主会话。"
+            } catch { result = "配置读取失败：\(error.localizedDescription)" }
+        }
+    }
+
+    func editRoutingProfile(_ id: String) {
+        guard let selected = savedProfiles.first(where: { $0["id"] as? String == id }) else { return }
+        routingProfile = id
+        routingName = selected["name"] as? String ?? ""
+        routingModel = selected["model"] as? String ?? ""
+        let provider = selected["provider"] as? String ?? ""
+        providerAllowance = providerAllowances.first { $0["provider"] as? String == provider } ?? [:]
+        let quota = providerAllowance["policy"] as? [String: Any] ?? [:]
+        providerPeriod = quota["period"] as? String ?? "none"
+        providerTokens = (quota["limit"] as? UInt64).map(String.init) ?? "2000000"
+        providerAutoResume = quota["auto_resume"] as? Bool ?? true
+        routingProfileLimit = (routingPolicy["profile_limits"] as? [String: Int])?[id].map(String.init) ?? ""
+        routingProviderLimit = (routingPolicy["provider_limits"] as? [String: Int])?[provider].map(String.init) ?? ""
+        revision += 1
+    }
+
+    func routingChoice(_ kind: String, _ id: String) {
+        if kind == "worker" {
+            routingPolicy["worker_profile"] = id.isEmpty ? NSNull() : id as Any
+        } else {
+            var allowed = Set(routingPolicy["allowed_tool_profiles"] as? [String] ?? [])
+            if allowed.contains(id) {
+                allowed.remove(id)
+            } else {
+                allowed.insert(id)
+            }
+            routingPolicy["allowed_tool_profiles"] = Array(allowed).sorted()
+        }
+    }
+
+    func saveRouting(profileLimit: String, providerLimit: String) {
+        guard let bridge, !routingBusy,
+              let selected = savedProfiles.first(where: { $0["id"] as? String == routingProfile }) else { return }
+        func parse(_ value: String) throws -> Int? {
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return nil
+            }
+            guard let limit = Int(value), (1 ... 1000).contains(limit) else {
+                throw NSError(
+                    domain: "Pot",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "并发上限应为 1–1000，留空表示仅受全局上限约束。"]
+                )
+            }
+            return limit
+        }
+        var update = routingPolicy
+        do {
+            var profiles = update["profile_limits"] as? [String: Int] ?? [:]
+            var providers = update["provider_limits"] as? [String: Int] ?? [:]
+            profiles[routingProfile] = try parse(profileLimit)
+            providers[selected["provider"] as? String ?? ""] = try parse(providerLimit)
+            update["profile_limits"] = profiles; update["provider_limits"] = providers
+        } catch { result = error.localizedDescription; return }
+        routingBusy = true
+        Task {
+            defer { routingBusy = false }
+            do {
+                routingPolicy = try await bridge.terminal.request("api/v1/agent/routing", body: update)
+                result = "路由已保存；新任务使用新默认，已有任务保持固定。"
+            } catch { result = "路由未保存：\(error.localizedDescription)；可刷新后重试。" }
+        }
+    }
+
+    func saveProfile(name: String, model: String, copy: Bool) {
+        guard let bridge, !routingBusy,
+              var selected = savedProfiles.first(where: { $0["id"] as? String == routingProfile }) else { return }
+        let expected = copy ? 0 : selected["revision"] as? Int ?? 0
+        if copy {
+            selected["id"] = "profile-" + UUID().uuidString.lowercased()
+        }
+        selected["name"] = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        selected["model"] = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        selected["revision"] = expected + 1
+        routingBusy = true
+        Task {
+            do {
+                _ = try await bridge.terminal.request("api/v1/agent", body: [
+                    "profile": selected, "expected_revision": expected,
+                    "request_id": UUID().uuidString, "follow_main": false,
+                    "follow_worker": false,
+                ])
+                routingProfile = selected["id"] as? String ?? ""
+                routingBusy = false; refreshRouting()
+            } catch { routingBusy = false; result = "Profile 未保存：\(error.localizedDescription)" }
+        }
+    }
+
+    func useProfileForOwner() {
+        guard let bridge, !routingBusy, !routingProfile.isEmpty else { return }
+        routingBusy = true
+        let target = routingProfile
+        let owner = routingOwner
+        Task {
+            defer { routingBusy = false }
+            do {
+                _ = try await bridge.terminal.request("api/v1/agent/migrate", body: [
+                    "request_id": UUID().uuidString, "target_profile": target,
+                    "owner": owner, "reason": "settings_changed",
+                ])
+                result = "已请求此会话迁移；当前轮次结束或下次恢复时生效，其他任务保持固定。"
+                refreshAgents()
+            } catch { result = "会话未切换：\(error.localizedDescription)" }
+        }
+    }
+}
+
+@MainActor extension SettingsPanel {
+    func saveProviderAllowance(tokens: String) {
+        guard let bridge, !routingBusy,
+              let provider = providerAllowance["provider"] as? String,
+              let limit = UInt64(tokens), limit > 0, limit <= 9_007_199_254_740_991
+        else {
+            result = "请填写有效的正整数 Token 额度。"; return
+        }
+        let old = providerAllowance["policy"] as? [String: Any] ?? [:]
+        let update: [String: Any] = ["provider": provider, "revision": providerAllowance["revision"] as? Int ?? 0,
+                                     "policy": [
+                                         "period": providerPeriod,
+                                         "limit": limit,
+                                         "timezone": old["timezone"] as? String ?? "Asia/Shanghai",
+                                         "auto_resume": providerAutoResume,
+                                     ]]
+        routingBusy = true
+        Task {
+            defer { routingBusy = false }
+            do {
+                providerAllowance = try await bridge.terminal.request("api/v1/usage/providers", body: update)
+                providerAllowance["enforcement"] = "pre_request"
+                providerAllowances.removeAll { $0["provider"] as? String == provider }
+                providerAllowances.append(providerAllowance)
+                result = "服务商额度已保存；与全局额度同时生效，自动继续仅适用于支持检查点恢复的后端。"
+            } catch { result = "额度未保存：\(error.localizedDescription)" }
+        }
     }
 }

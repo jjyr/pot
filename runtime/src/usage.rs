@@ -1,5 +1,6 @@
 //! One shared, request-level ledger for the main agent and every task.
 use super::*;
+pub mod providers;
 use chrono::{Datelike, Days, TimeZone, Utc};
 use chrono_tz::Tz;
 use rusqlite::{Connection, params};
@@ -110,7 +111,9 @@ impl Ledger {
         CREATE INDEX IF NOT EXISTS tools_scope ON tools(scope,at);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0);")?;
-        c.execute_batch("CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL);")?;
+        c.execute_batch("CREATE TABLE IF NOT EXISTS wait_routes(scope TEXT PRIMARY KEY,provider TEXT NOT NULL);
+        CREATE TRIGGER IF NOT EXISTS clear_wait_route AFTER DELETE ON waits BEGIN DELETE FROM wait_routes WHERE scope=OLD.scope; END;
+        CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL);")?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS compactions(id TEXT PRIMARY KEY, scope TEXT NOT NULL, turn_id TEXT NOT NULL, at INTEGER NOT NULL, end_at INTEGER, reason TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'running', tokens_before INTEGER, tokens_after INTEGER, entry_id TEXT);
         CREATE INDEX IF NOT EXISTS compaction_scope ON compactions(scope,at);")?;
         let has_column = c
@@ -254,7 +257,8 @@ impl Ledger {
         };
         let p = self.policy()?;
         let q = self.quota(at)?;
-        Ok((p.auto_resume || released)
+        Ok((p.period == "none" || p.auto_resume || released)
+            && self.provider_wait_ready(scope, at, required, released)?
             && (q["active"] != true || q["remaining"].as_u64().unwrap_or(0) >= required))
     }
     pub fn clear_wait(&self, scope: &str) -> Result<()> {

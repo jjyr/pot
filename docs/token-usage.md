@@ -85,3 +85,13 @@ Responses codec 读取 response.completed/incomplete/failed 内的 usage；Messa
 合并 message_start 输入与 message_delta 输出，不在初始 output=0 时提前释放预留；
 Gemini codec 读取 usageMetadata，输出包含 candidatesTokenCount + thoughtsTokenCount。
 各格式均保留缓存命中为输入子集；缺字段保留未知值。新增格式尚不开启自动检查点恢复。
+
+## 服务商额度
+
+任务路由设置可为已配置的 API provider 设置日/周 Token 额度、时区和自动继续策略。
+界面沿用已有策略时区（新策略默认 Asia/Shanghai）；API 支持配置其他合法时区。
+全局额度与服务商额度同时生效，所有主会话/worker 请求共享同一账本。
+预留与 provider 归属在同一事务提交，输出上限取两个额度可用量的较小值；
+重启后未知请求继续占用预留。暂停恢复同时检查两项策略，且仅对支持检查点的引擎自动继续。
+每个保存的 API 路由有独立不可变身份；更换 endpoint 的新路由需要单独配置额度。
+CLI 订阅路线只统计原生报告用量，不宣称请求前硬限制；服务商限流不等于 Pot 额度耗尽。

@@ -23,6 +23,11 @@ fn limited(text: String) -> String {
 impl Transcript {
     pub fn record(&mut self, s: &Service, update: &Update) -> Result<()> {
         match update {
+            Update::PolicyDenied => s.save(Message {
+                id: id(), conversation_id: "main".into(), role: Role::System,
+                text: "Agent 请求的额外权限已被当前 Sandbox 策略拒绝。Pot 只允许本轮角色授权的工具；此请求未获批准。".into(),
+                status: MessageStatus::Complete, created_at_ms: now(), request_id: None,
+            })?,
             Update::MessageStarted => {
                 let message = Message {
                     id: id(),

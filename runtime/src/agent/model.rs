@@ -416,13 +416,6 @@ impl LaunchSpec {
                     == 1,
             "Invocation must contain exactly one runtime_arguments placeholder"
         );
-        if matches!(self.transport.as_str(), "codex_app_server" | "claude_json") {
-            ensure!(
-                self.argv == vec![LaunchArgument::RuntimeArguments],
-                "Native wrappers must expose the configured transport without policy overrides"
-            );
-            return Ok(());
-        }
         let reserved = [
             "--mode",
             "--provider",
@@ -457,14 +450,88 @@ impl LaunchSpec {
             "--version",
             "-v",
         ];
+        let native_reserved = [
+            "--config",
+            "--profile",
+            "--enable",
+            "--disable",
+            "--sandbox",
+            "-s",
+            "--ask-for-approval",
+            "-a",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--dangerously-skip-permissions",
+            "--allow-dangerously-skip-permissions",
+            "--permission-mode",
+            "--permission-prompt-tool",
+            "--allowedTools",
+            "--allowed-tools",
+            "--disallowedTools",
+            "--disallowed-tools",
+            "--mcp-config",
+            "--strict-mcp-config",
+            "--mcp-debug",
+            "--settings",
+            "--setting-sources",
+            "--agent",
+            "--agents",
+            "--plugin-dir",
+            "--input-format",
+            "--output-format",
+            "--include-partial-messages",
+            "--json-schema",
+            "--session-id",
+            "--fork-session",
+            "--no-session-persistence",
+            "--resume-session-at",
+            "--fallback-model",
+            "--effort",
+            "--max-turns",
+            "--max-budget-usd",
+            "--system-prompt-snapshot",
+            "--append-system-prompt-file",
+            "--system-prompt-file",
+            "--add-dir",
+            "--chrome",
+            "--no-chrome",
+            "--dangerously-load-development-channels",
+            "--channels",
+            "--teammate-mode",
+            "--team-name",
+            "--agent-id",
+            "--permission-prompt-target",
+            "--remote",
+            "--teleport",
+            "--worktree",
+            "-w",
+            "--listen",
+            "--auth-file",
+            "--login-server",
+            "--api-key",
+            "--oss",
+            "--local-provider",
+            "--disable-slash-commands",
+            "--no-prompt-suggestions",
+            "--file",
+        ];
         for arg in &self.argv {
             if let LaunchArgument::Literal(value) = arg {
                 ensure!(
                     value.len() <= 4096 && !value.contains('\0'),
                     "Invalid literal argument"
                 );
+                let flag = value.split('=').next().unwrap_or_default();
+                let native = self.transport != "pi_rpc";
                 ensure!(
-                    !reserved.contains(&value.split('=').next().unwrap_or_default()),
+                    !reserved
+                        .iter()
+                        .chain(native_reserved.iter().filter(|_| native))
+                        .any(|blocked| {
+                            flag == *blocked
+                                || (blocked.len() == 2
+                                    && *blocked != "--"
+                                    && value.starts_with(blocked))
+                        }),
                     "Invocation conflicts with a Runtime-owned protocol, session, input or policy argument"
                 );
             }
@@ -558,6 +625,37 @@ mod launch_tests {
         spec.validate().unwrap();
         spec.model = "tampered".into();
         assert!(spec.validate().is_err());
+    }
+    #[test]
+    fn native_wrapper_arguments_are_preserved_but_managed_flags_are_rejected() {
+        for mut launch in [LaunchSpec::codex(), LaunchSpec::claude()] {
+            launch.executable = "/opt/my wrapper".into();
+            launch.argv = vec![
+                LaunchArgument::Literal("--wrapper-label".into()),
+                LaunchArgument::Literal("a b;$(no shell)".into()),
+                LaunchArgument::RuntimeArguments,
+            ];
+            assert_eq!(
+                launch.expand(&["managed".into()]).unwrap(),
+                ["--wrapper-label", "a b;$(no shell)", "managed"]
+            );
+            for flag in [
+                "--config=x",
+                "-cfoo=bar",
+                "--mcp-config",
+                "--allowedTools=Agent",
+                "--session-id",
+                "--input-format",
+                "--effort",
+                "--model=x",
+            ] {
+                launch.argv = vec![
+                    LaunchArgument::Literal(flag.into()),
+                    LaunchArgument::RuntimeArguments,
+                ];
+                assert!(launch.validate().is_err(), "accepted {flag}");
+            }
+        }
     }
     #[test]
     fn command_requires_runtime_policy_and_never_interpolates_shell() {

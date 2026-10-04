@@ -100,6 +100,14 @@ async def run(args):
             raise AssertionError("Turn did not finish")
 
         try:
+            wrapper = root / "fixture-wrapper"
+            wrapper.write_text(
+                "#!/bin/sh\n"
+                '[ "$1" = "--wrapper-label" ] && [ "$2" = "a b" ] || exit 91\n'
+                "shift 2\n"
+                'exec codex "$@"\n'
+            )
+            wrapper.chmod(0o700)
             profile = {
                 "id": "codex-test",
                 "revision": 1,
@@ -108,6 +116,16 @@ async def run(args):
                 "provider": "pot_mock",
                 "model": "pot-mock",
                 "auth_ref": "cli:codex",
+                "launch_spec": {
+                    "transport": "codex_app_server",
+                    "executable": str(wrapper),
+                    "cwd_policy": "workspace",
+                    "argv": [
+                        {"kind": "literal", "value": "--wrapper-label"},
+                        {"kind": "literal", "value": "a b"},
+                        {"kind": "runtime_arguments"},
+                    ],
+                },
                 "params": {"max_output_tokens": 256, "reasoning_effort": None},
                 "tool_policy": {
                     "worker_orchestration": False,

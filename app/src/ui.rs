@@ -1,4 +1,6 @@
 //! Shared page structure and Kit settings/Sandbox surfaces.
+mod routing;
+mod setup;
 use crate::{Shell, gpui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
@@ -135,7 +137,7 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields = (0..17)
+        let fields = (0..22)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
@@ -179,6 +181,11 @@ impl Settings {
             "api_endpoint",
             "api_key",
             "api_model",
+            "routing_name",
+            "routing_model",
+            "routing_profile_limit",
+            "routing_provider_limit",
+            "provider_tokens",
         ]
         .iter()
         .enumerate()
@@ -190,6 +197,9 @@ impl Settings {
     pub fn render(&self, state: &Value, cx: &mut Context<Shell>) -> Div {
         let section = state["section"].as_u64().unwrap_or(0);
         let setup = state["setup"].as_bool().unwrap_or(false);
+        if setup {
+            return self.render_setup(state, cx);
+        }
         let mut form = Form::horizontal().label_width(px(160.));
         let label = |name: &'static str, value: &'static str| {
             Field::new().label(name).child(div().py_2().child(value))
@@ -390,6 +400,8 @@ impl Settings {
                                 "运行环境已随 Pot 提供；通过 API 设置连接模型。"
                             } else if id == "codex" {
                                 "使用原生 App Server；先在 Sandbox Terminal 完成登录。"
+                            } else if id == "claude" {
+                                "使用原生 CLI；先在 Sandbox Terminal 完成登录。"
                             } else {
                                 "CLI 可在终端使用；Pot Driver 尚待验收。"
                             })
@@ -435,6 +447,9 @@ impl Settings {
                         ));
                 }
             }
+            4 => {
+                form = self.routing_form(state, cx);
+            }
             _ => {
                 form = form
                     .child(label("环境", "本地 Linux VM · Alpine · ARM64"))
@@ -462,6 +477,12 @@ impl Settings {
                         command(json!({"action":"save-agent","key":fields[0].read(cx).value(),"limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}));
                     }));
         } else if section == 2 {
+            actions = actions.child(
+                Button::new("reopen-setup")
+                    .ghost()
+                    .label("安装其他 Agent")
+                    .on_click(|_, _, _| command(json!({"action":"setup-stage","value":0}))),
+            );
             actions = actions.child(Button::new("save-invocation").primary().label("保存调用命令").on_click(move|_,_,cx|command(json!({"action":"save-invocation","executable":fields[8].read(cx).value(),"argv":fields[9].read(cx).value()}))));
         } else if section == 3 {
             actions=actions.child(Button::new("workspace").ghost().label("打开工作目录").on_click(|_,_,_|command(json!({"action":"workspace"}))))
@@ -472,7 +493,7 @@ impl Settings {
                 .child(title(if setup { "开始使用 Pot" } else { "设置" }))
                 .child(
                     div().flex().gap_2().children(
-                        ["通用", "助手", "Agent", "Sandbox"]
+                        ["通用", "助手", "Agent", "Sandbox", "任务路由"]
                             .iter()
                             .enumerate()
                             .map(|(i, name)| {
@@ -492,6 +513,7 @@ impl Settings {
                         0 => "让 Pot 按你的习惯工作。",
                         1 => "Pi 执行任务，DeepSeek 提供模型能力。更改连接会重启 Sandbox。",
                         2 => "检查登录状态，在终端登录，或编辑调用命令。保存不会调用模型。",
+                        4 => "管理已保存的配置、后台任务默认和并发限制。汇总沿用主会话。",
                         _ => "资源调整重启后生效，聊天与工作文件保留。实时用量见环境信息。",
                     },
                     cx,

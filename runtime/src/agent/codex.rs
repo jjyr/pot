@@ -471,8 +471,10 @@ async fn execute(
                     && p["_meta"]["codex_approval_kind"] == "mcp_tool_call" && !cancelled(s) {
                     json!({"id":id,"result":{"action":"accept","content":{}}})
                 } else if method == "mcpServer/elicitation/request" {
+                    emit(Update::PolicyDenied)?;
                     json!({"id":id,"result":{"action":"decline"}})
                 } else {
+                    emit(Update::PolicyDenied)?;
                     json!({"id":id,"error":{"code":-32601,"message":"Pot does not grant this permission under the selected policy"}})
                 };
                 host.write(response).await?;

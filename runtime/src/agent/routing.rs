@@ -8,6 +8,8 @@ const POLICY: &str = "agent.routing.v1";
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     #[serde(default)]
+    pub worker_profile: Option<String>,
+    #[serde(default)]
     pub revision: u64,
     #[serde(default)]
     pub allowed_tool_profiles: BTreeSet<String>,
@@ -61,6 +63,16 @@ pub async fn configure(
         ));
     }
     let profiles = profiles(&inner.store).map_err(internal)?;
+    if p.worker_profile
+        .iter()
+        .any(|id| !profiles.iter().any(|v| &v.id == id))
+    {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "invalid_worker_profile",
+            "Use a known worker profile",
+        ));
+    }
     if p.allowed_tool_profiles
         .iter()
         .chain(p.profile_limits.keys())
@@ -121,12 +133,14 @@ pub fn resolve(
             },
         ),
         None => (
-            root.inner
-                .lock()
-                .unwrap()
-                .store
-                .get("agent.default.worker")?
-                .unwrap_or_else(|| "pi-default".into()),
+            policy(root)?.worker_profile.unwrap_or(
+                root.inner
+                    .lock()
+                    .unwrap()
+                    .store
+                    .get("agent.default.worker")?
+                    .unwrap_or_else(|| "pi-default".into()),
+            ),
             "worker_default",
         ),
     };

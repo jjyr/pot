@@ -512,6 +512,8 @@ pub struct Settings {
     request_id: String,
     #[serde(default = "follow")]
     follow_main: bool,
+    #[serde(default = "follow")]
+    follow_worker: bool,
     #[serde(skip)]
     imported_config: Option<String>,
 }
@@ -568,7 +570,11 @@ pub async fn settings(
         None
     };
     let mut inner = s.inner.lock().unwrap();
-    let fingerprint=json!({"profile":settings.profile,"expected_revision":settings.expected_revision,"follow_main":settings.follow_main}).to_string();
+    let mut fingerprint = json!({"profile":settings.profile,"expected_revision":settings.expected_revision,"follow_main":settings.follow_main});
+    if !settings.follow_worker {
+        fingerprint["follow_worker"] = json!(false);
+    }
+    let fingerprint = fingerprint.to_string();
     if let Some(old) = inner.store.get(&key).map_err(internal)? {
         if old != fingerprint {
             return Err(error(
@@ -637,9 +643,11 @@ pub async fn settings(
         inner
             .store
             .set(storage::PROFILES, &serde_json::to_string(&profiles)?)?;
-        inner
-            .store
-            .set("agent.default.worker", &settings.profile.id)?;
+        if settings.follow_worker {
+            inner
+                .store
+                .set("agent.default.worker", &settings.profile.id)?;
+        }
         if let Some(imported) = &settings.imported_config {
             inner.store.set("agent.legacy.config", imported)?;
         }
@@ -782,6 +790,129 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[tokio::test]
+    async fn profile_library_edits_preserve_defaults_and_explicit_worker_routing() {
+        let (dir, store, _, _) = fixture();
+        let mut s = crate::tests::service();
+        s.data = dir.clone();
+        s.workspace = dir.clone();
+        s.pi = Some(config());
+        s.inner.lock().unwrap().store = store;
+        let original = binding(&s).unwrap();
+        let mut profile = Profile::legacy(&config());
+        profile.id = "separate-worker".into();
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer test-token".parse().unwrap());
+        let request = json!({"profile":profile,"expected_revision":0,"request_id":"library-copy","follow_main":false,"follow_worker":false});
+        for _ in 0..2 {
+            settings(
+                State(s.clone()),
+                h.clone(),
+                Json(serde_json::from_value(request.clone()).unwrap()),
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(binding(&s).unwrap(), original);
+        assert_eq!(
+            routing::resolve(
+                &s,
+                None,
+                routing::Source::User,
+                &TaskRequirements::default()
+            )
+            .unwrap()
+            .0
+            .source_profile_id,
+            "pi-default"
+        );
+        let p = routing::Policy {
+            worker_profile: Some(profile.id.clone()),
+            ..Default::default()
+        };
+        assert!(
+            routing::configure(State(s.clone()), HeaderMap::new(), Json(p.clone()))
+                .await
+                .is_err()
+        );
+        let saved = routing::configure(State(s.clone()), h.clone(), Json(p.clone()))
+            .await
+            .unwrap()
+            .0;
+        assert!(
+            routing::configure(State(s.clone()), h.clone(), Json(p))
+                .await
+                .is_err()
+        );
+        let mut invalid = saved.clone();
+        invalid.worker_profile = Some("missing".into());
+        assert!(
+            routing::configure(State(s.clone()), h.clone(), Json(invalid))
+                .await
+                .is_err()
+        );
+        let (spec, _) = routing::resolve(
+            &s,
+            None,
+            routing::Source::User,
+            &TaskRequirements::default(),
+        )
+        .unwrap();
+        assert_eq!(spec.source_profile_id, profile.id);
+        // Later connection saves may change the legacy fallback, but not an explicit role choice.
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set("agent.default.worker", "pi-default")
+            .unwrap();
+        assert_eq!(
+            routing::resolve(
+                &s,
+                None,
+                routing::Source::User,
+                &TaskRequirements::default()
+            )
+            .unwrap()
+            .0,
+            spec
+        );
+        assert_eq!(
+            routing::resolve(
+                &s,
+                Some("pi-default"),
+                routing::Source::User,
+                &TaskRequirements::default()
+            )
+            .unwrap()
+            .0
+            .source_profile_id,
+            "pi-default"
+        );
+        let restored: routing::Policy =
+            serde_json::from_str(&serde_json::to_string(&routing::policy(&s).unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(restored.worker_profile, Some(profile.id));
+        let mut follow = saved;
+        follow.worker_profile = None;
+        routing::configure(State(s.clone()), h, Json(follow))
+            .await
+            .unwrap();
+        assert_eq!(
+            routing::resolve(
+                &s,
+                None,
+                routing::Source::User,
+                &TaskRequirements::default()
+            )
+            .unwrap()
+            .0
+            .source_profile_id,
+            "pi-default"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn settings_wait_for_running_turn_and_keep_snapshot_immutable_until_settled() {
         let (dir, store, _, _) = fixture();
         let mut s = crate::tests::service();
@@ -808,6 +939,7 @@ mod tests {
                 expected_revision: 1,
                 request_id: "change".into(),
                 follow_main: true,
+                follow_worker: true,
                 imported_config: None,
             }),
         )
@@ -893,6 +1025,7 @@ pub async fn sync_legacy_settings(s: &Service) -> Result<()> {
             expected_revision,
             request_id: format!("legacy-settings-{}", id()),
             follow_main,
+            follow_worker: true,
             imported_config: Some(fingerprint.clone()),
         }),
     )

@@ -525,6 +525,12 @@ impl Render for Shell {
                                         )
                                     })
                                     .child(usage_ui::entry(&view, cx))
+                                    .when_some(task, |el, task| {
+                                        let owner = task.id.clone();
+                                        let title = task.title.clone();
+                                        el.child(Button::new("task-profile").ghost().small().label("更换 Agent")
+                                            .on_click(move |_,_,_|ui::command(serde_json::json!({"action":"task-profile","owner":owner,"title":title}))))
+                                    })
                                     .when(
                                         task.is_some_and(|t| {
                                             matches!(

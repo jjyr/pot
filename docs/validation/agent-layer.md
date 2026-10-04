@@ -170,3 +170,49 @@ Claude 最终镜像 `pot.local/sandbox:cd5858f99ca0649d32c6` 已通过打包二�
 公开响应/profile 不含 key，以及旧 binding 的 endpoint 引用不被新配置替换。
 三个新增 codec 的真实 Pi 测试已改为完全无旧 Pi 配置/请求预算的环境，仍通过。
 76 个 Runtime 测试、1 个协议测试及 8 个真实 Pi 离线契约通过；GUI 编译通过，尚未做交互截图验收。
+
+## 2026-10-05 两页引导与 API-only GUI
+
+独立 `dev.pot.setup-check` 应用和 `setup-ui-check-20261005` 数据目录，未改动用户运行中的 Pot。
+实际界面检查通过：取消全选时不能继续；全选后进入第二页，同一 Runtime PTY 正常嵌入；
+未登录的 Codex 不可开始；API-only 使用 `example.invalid` 和虚构密钥保存后进入空聊天。
+通过 Runtime API 确认消息数和请求数都是 0；正常退出重启后保留完成状态和模型选择，仍为 0 请求。
+
+首次主 Agent 选择只保存元数据，原生会话延迟至第一条真实消息创建；已有会话迁移保留预检。
+Codex/Claude 宿主离线契约均回归通过（各 23 次本地模拟请求）。
+工具准备使用镜像预装并检测复用；缺失工具可进入 Terminal 修复或取消勾选后稍后处理。
+此证据不包括真实登录、下载中断恢复及完整浅/深色布局矩阵。
+
+## 2026-10-05 设置、路由及生命周期补充
+
+- Profile 编辑/复制不改变主绑定及 worker fallback；显式 worker profile 不随后续连接设置覆盖。
+  新增授权、未知 profile、revision 冲突及显式用户选择优先的回归测试。
+- 可注入 fake session 验证并发事件隔离、重复/迟到过滤、取消后清理失败和缺失终止事件。
+  缺失终态标为 stop unconfirmed，不释放并发容量。
+- Provider 额度验证跨 scope 共享、provider 隔离、全局/局部共同约束、手动恢复、重启预留保留、
+  事务回滚及 wait route 清理；真实 Pi 的 8 个本地模拟 provider 测试通过。
+- Codex/Claude 宿主契约加入自定义 wrapper 参数验证，各 23 个本地请求全部通过。
+  Runtime 管理参数冲突拒绝；wrapper 字符串不经 shell 展开。
+
+### AGY 尚未解决的接入条件
+
+阅读官方 [CLI headless](https://antigravity.google/docs/cli/headless/)、
+[CLI reference](https://antigravity.google/docs/cli/reference/)、
+[subagents](https://antigravity.google/docs/subagents/)、[MCP](https://antigravity.google/docs/mcp/)
+和 [Additional Terms](https://antigravity.google/terms)（2026-10-05）。
+官方 headless 文档有结构化事件和用量，subagent 配置支持 tools；CLI help 本身未提供
+已验收的每 lane 禁用原生委派、独立 MCP 与取消收敛组合。尚未据此启用 Driver。
+条款明确包含使用第三方产品接入服务的限制；企业路径适用不同协议。
+这些资料不足以确认 Pot 的原版 CLI 托管调用符合适用授权，需发行主体或服务商确认。
+仅保留现有 Terminal 可用状态，不把它当作技术/条款验收通过。
+
+最终增量验证：82 个 Runtime 测试、1 个协议测试、10 个 App 测试及 8 个真实 Pi/mock 测试通过。
+`mise run check` 和构建打包通过；镜像 `pot.local/sandbox:4247db1d941e1045cb89` 内的
+Codex/Claude 原生契约均通过（各 23 次本地模拟请求，含 wrapper 参数）。
+证据目录为 `.local/d1/codex-guest-final-20261005/data` 与
+`.local/d1/claude-guest-final-20261005/data`。
+
+隔离测试应用的最终 Sandbox API 验证 profile 复制幂等、原绑定不变、路由/provider 额度保存、
+旧 revision 拒绝，模型请求数为 0。新任务路由/额度设置和任务“更换 Agent”界面通过编译；
+实际交互检查遇到 Mac 锁屏，已请求用户解锁，未将其记为 GUI 验收通过。
+之前两页引导 GUI 验证不替代这次新增页面的交互验收。测试 Sandbox 已通过 helper 正常停止。

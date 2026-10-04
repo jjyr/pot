@@ -642,6 +642,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/usage", get(usage))
         .route("/api/v1/usage/summary", get(usage::summary))
         .route("/api/v1/usage/policy", post(usage::policy))
+        .route(
+            "/api/v1/usage/providers",
+            get(usage::providers::inspect).post(usage::providers::configure),
+        )
         .route("/api/v1/usage/resume", post(usage::resume))
         .route("/api/v1/usage/cancel", post(usage::cancel_wait))
         .route(PATH_EVENTS, get(events_handler))

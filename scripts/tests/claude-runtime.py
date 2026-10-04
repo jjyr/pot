@@ -249,6 +249,14 @@ async def run(args):
             raise AssertionError("Turn did not settle")
 
         try:
+            wrapper = root / "fixture-wrapper"
+            wrapper.write_text(
+                "#!/bin/sh\n"
+                '[ "$1" = "--wrapper-label" ] && [ "$2" = "a b" ] || exit 91\n'
+                "shift 2\n"
+                'exec claude "$@"\n'
+            )
+            wrapper.chmod(0o700)
             profile = {
                 "id": "claude-test",
                 "revision": 1,
@@ -257,6 +265,16 @@ async def run(args):
                 "provider": "anthropic",
                 "model": "claude-mock",
                 "auth_ref": "cli:claude",
+                "launch_spec": {
+                    "transport": "claude_json",
+                    "executable": str(wrapper),
+                    "cwd_policy": "workspace",
+                    "argv": [
+                        {"kind": "literal", "value": "--wrapper-label"},
+                        {"kind": "literal", "value": "a b"},
+                        {"kind": "runtime_arguments"},
+                    ],
+                },
                 "params": {"max_output_tokens": 256, "reasoning_effort": None},
                 "tool_policy": {
                     "worker_orchestration": False,

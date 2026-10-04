@@ -82,3 +82,14 @@ Token 输入按十进制：1K=1,000，1M=1,000,000；保存为整数。取消产
 
 设置导航为“通用 / 助手 / Agent / Sandbox”。Agent 页面显示各 CLI 安装/官方登录状态、刷新入口及 Pi 可执行文件/argv 编辑；命令保存走 profile revision，不发模型测试。
 Sandbox 的 Desktop / Terminal 共用 GPUI 页头，Terminal 渲染由 bundled xterm WKWebView 承担；关闭终端与切换页签分开。状态未知不画成已登录，未经验收的 CLI 不显示为已支持的 Pot 主 Agent。
+
+首次启动显示两页引导：第一步选择工具、准备环境并检测预装结果；第二步嵌入同一 Terminal，
+在已安装的 Codex/Claude 中单选主 Agent，或填写 API 连接。已知未登录和检查失败均不可开始；
+只有不支持官方状态查询的自定义登录流程才允许手动确认“状态未验证”。
+引导进度、工具选择和完成状态按数据目录保存，不保存输入密钥。首次选择不创建原生会话或调用模型。
+Agent 设置的“安装其他 Agent”可重新进入引导。
+
+任务路由设置列出已保存的 profile，可编辑/复制模型配置、选择后台默认、允许 Agent 指定的
+profile 白名单，以及 profile/provider 的后台并发上限。API provider 可配置独立日/周 Token
+额度，与全局额度同时生效；CLI 订阅只显示事后用量能力。任务会话中的“更换 Agent”打开
+同一设置页并显示迁移对象，提交只迁移该任务；普通设置入口作用于主会话。

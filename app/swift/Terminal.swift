@@ -36,9 +36,12 @@ import WebKit
     }
 
     func show(_ value: Bool, root: URL?, ip: String) {
+        let newlyVisible = value && !visible
         visible = value; self.root = root; self.ip = ip; web.isHidden = !value
         if value {
-            connect(); web.evaluateJavaScript("window.potTerminal?.focus()", completionHandler: nil)
+            connect(); if newlyVisible {
+                web.evaluateJavaScript("window.potTerminal?.focus()", completionHandler: nil)
+            }
         }
     }
 
