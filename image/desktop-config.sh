@@ -5,7 +5,7 @@ home=/data/engine-home
 revision=1
 [ "$(cat "$home/.pot-desktop-version" 2>/dev/null || true)" != "$revision" ] || exit 0
 mkdir -p "$home/.config/fontconfig" "$home/.config/gtk-3.0" "$home/.config/xfce4/terminal" "$home/.config/menus" "$home/.local/share/applications" "$home/Desktop"
-cat > "$home/.config/fontconfig/fonts.conf" <<'XML'
+cat >"$home/.config/fontconfig/fonts.conf" <<'XML'
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
@@ -17,7 +17,7 @@ cat > "$home/.config/fontconfig/fonts.conf" <<'XML'
   <match target="font"><edit name="antialias" mode="assign"><bool>true</bool></edit><edit name="hintstyle" mode="assign"><const>hintslight</const></edit><edit name="rgba" mode="assign"><const>none</const></edit></match>
 </fontconfig>
 XML
-cat > "$home/.config/gtk-3.0/settings.ini" <<'INI'
+cat >"$home/.config/gtk-3.0/settings.ini" <<'INI'
 [Settings]
 gtk-theme-name=adw-gtk3
 gtk-icon-theme-name=Adwaita
@@ -27,7 +27,7 @@ gtk-cursor-theme-size=24
 gtk-application-prefer-dark-theme=false
 gtk-enable-animations=false
 INI
-cat > "$home/.config/xfce4/terminal/terminalrc" <<'INI'
+cat >"$home/.config/xfce4/terminal/terminalrc" <<'INI'
 [Configuration]
 FontName=Adwaita Mono 12
 FontUseSystem=FALSE
@@ -44,12 +44,24 @@ MiscAlwaysShowTabs=FALSE
 ScrollingBar=TERMINAL_SCROLLBAR_NONE
 INI
 for app in browser files terminal; do
- case "$app" in
- browser) name=Browser; command=/usr/local/bin/pot-browser; icon=web-browser;;
- files) name=Files; command='thunar /data/workspace'; icon=system-file-manager;;
- terminal) name=Terminal; command='xfce4-terminal --working-directory=/data/workspace'; icon=utilities-terminal;;
- esac
- cat > "$home/.local/share/applications/pot-$app.desktop" <<DESKTOP
+  case "$app" in
+    browser)
+      name=Browser
+      command=/usr/local/bin/pot-browser
+      icon=web-browser
+      ;;
+    files)
+      name=Files
+      command='thunar /data/workspace'
+      icon=system-file-manager
+      ;;
+    terminal)
+      name=Terminal
+      command='xfce4-terminal --working-directory=/data/workspace'
+      icon=utilities-terminal
+      ;;
+  esac
+  cat >"$home/.local/share/applications/pot-$app.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=$name
@@ -59,9 +71,9 @@ Terminal=false
 Categories=Pot;
 DESKTOP
 done
-cat > "$home/.config/menus/xfce-applications.menu" <<'XML'
+cat >"$home/.config/menus/xfce-applications.menu" <<'XML'
 <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN" "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">
 <Menu><Name>Pot</Name><DefaultAppDirs/><Include><Filename>pot-browser.desktop</Filename><Filename>pot-files.desktop</Filename><Filename>pot-terminal.desktop</Filename></Include><Layout><Filename>pot-browser.desktop</Filename><Filename>pot-files.desktop</Filename><Filename>pot-terminal.desktop</Filename></Layout></Menu>
 XML
-printf '%s\n' "$revision" > "$home/.pot-desktop-version"
+printf '%s\n' "$revision" >"$home/.pot-desktop-version"
 chown -R potdesktop "$home/.config" "$home/.local" "$home/Desktop" "$home/.pot-desktop-version"

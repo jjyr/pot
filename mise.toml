@@ -1,0 +1,58 @@
+[tools]
+rust = "1.98.1"
+python = "3.12.13"
+zig = "0.15.2"
+"cargo:cargo-zigbuild" = "0.23.4"
+hk = "2.4.0"
+pkl = "0.32.1"
+ruff = "0.16.10"
+shfmt = "3.14.1"
+shellcheck = "0.11.0"
+swiftformat = "0.63.1"
+
+[env]
+CARGO_TARGET_DIR = "{{config_root}}/.local/poc/cargo-target"
+
+[tasks.doctor]
+description = "Check macOS, Xcode and cross-compilation prerequisites"
+run = "python scripts/dev-check doctor"
+
+[tasks.setup]
+description = "Prepare Rust components and install repository-local Git hooks"
+run = ["rustup component add rustfmt", "rustup target add aarch64-unknown-linux-musl", "hk install --mise", "mise run doctor"]
+
+[tasks.fmt]
+description = "Format Rust, Swift, Python and Shell sources"
+run = "python scripts/dev-check fmt"
+
+[tasks.lint]
+description = "Check source formatting and basic script correctness"
+run = "python scripts/dev-check lint"
+
+[tasks."check:rust"]
+run = "cargo check --workspace --locked -j 4"
+
+[tasks.check]
+description = "Run formatting, script and Rust compilation checks"
+depends = ["lint", "check:rust", "check:swift"]
+
+[tasks.test]
+description = "Run core Runtime and protocol tests without model calls"
+run = "cargo test --locked -p pot-runtime -p pot-protocol -j 4"
+
+[tasks."test:app"]
+run = "cargo test --locked -p pot-app -j 4"
+
+[tasks.prepare]
+run = "scripts/pot prepare"
+[tasks.build]
+run = "scripts/pot build"
+[tasks.bundle]
+run = "scripts/pot bundle"
+[tasks.open]
+run = "scripts/pot open"
+
+[tasks."check:swift"]
+description = "Compile Helper executables without starting a VM"
+run = "swift build -c release --package-path helper --disable-sandbox --scratch-path .local/d1/helper-build --force-resolved-versions -j 4"
+env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/d1/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/d1/clang-modules" }

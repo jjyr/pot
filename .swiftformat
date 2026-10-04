@@ -1,0 +1,4 @@
+--swiftversion 6
+--indent 4
+--maxwidth 120
+--disable redundantSelf

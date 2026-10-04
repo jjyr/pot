@@ -269,10 +269,7 @@ impl SchedulesUI {
                         .min_h_0()
                         .overflow_y_scroll()
                         .when(v.schedules.items.is_empty(), |el| {
-                            el.child(ui::hint(
-                                "暂无计划。请在主聊天中告诉 Pot 何时做什么。",
-                                cx,
-                            ))
+                            el.child(ui::hint("暂无计划。请在主聊天中告诉 Pot 何时做什么。", cx))
                         })
                         .children(v.schedules.items.iter().map(|plan| {
                             let id = plan.id.clone();

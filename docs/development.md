@@ -2,14 +2,17 @@
 
 ## 开发与运行
 
-需要 Apple Silicon、macOS 26+、Xcode/Swift 6.2+、Rust、cargo-zigbuild 和 Zig。
+需要 Apple Silicon、macOS 26+、Xcode/Swift 6.2+ 和 [mise](https://mise.jdx.dev/)。Rust、Python、Zig、cargo-zigbuild 与检查工具的版本由 `mise.toml` 固定；Swift 使用当前选中的 Xcode。
 
 ```sh
-scripts/pot prepare
-scripts/configure-pi
-scripts/pot build
-scripts/pot bundle
-scripts/pot open
+mise trust
+mise install
+mise run setup        # Rust 组件、Linux target、本仓库 hk hooks、环境检查
+mise run prepare
+mise exec -- scripts/configure-pi
+mise run build
+mise run bundle
+mise run open
 ```
 
 `bundle` 会在独立 VM 内预装依赖并生成完整 Sandbox OCI 镜像；只有构建阶段需要下载软件，App 启动直接加载镜像。镜像缓存、桌面字体与大小对比见 [Sandbox 镜像](sandbox-image.md)。
@@ -21,11 +24,24 @@ scripts/pot open
 ## 验证
 
 ```sh
-CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-app -p pot-runtime -p pot-protocol
-POT_TEST_PI_BIN="$(command -v pi)" CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-runtime real_pi -- --ignored
+mise run fmt           # 显式修复格式
+mise run check         # 格式、脚本、Rust workspace 和 Swift Helper 编译
+mise run test          # Runtime / protocol，无真实模型调用
+mise run test:app
+POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runtime real_pi -- --ignored
 ```
 
-第二条使用宿主已安装的 Pi 和本地模拟模型，无付费调用。真实 App/VM/模型验证记录见 [文档索引](README.md)，旧 POC fixture 不代表当前产品验收。
+最后一条使用宿主已安装的 Pi 和本地模拟模型，无付费调用。真实 App/VM/模型验证记录见 [文档索引](README.md)，旧 POC fixture 不代表当前产品验收。
+
+### Git hooks
+
+`mise run setup` 安装本仓库的 hk pre-commit / pre-push，不修改全局 hooks。每个新 clone 都需要运行一次。Git 调用 hook 时通过 mise 加载工具，无需先激活 shell（mise 本身需在 PATH）。
+
+- pre-commit：按改动文件检查格式和脚本；Rust 格式检查覆盖 workspace，规则或检查入口变更触发全量轻量检查。检查 staged diff 的空白错误。
+- pre-push：相关 Rust/Swift 改动触发 `check:rust` 和核心测试；Helper 改动另触发 `check:swift`。
+- hooks 只检查、不自动修复或暂存，源码检查读取当前工作树。部分暂存时，应保证提交内容也已格式化。镜像构建、VM 和付费模型测试不进入 hooks。新机器的编译检查可能耗时，后续复用缓存。
+
+手动验证入口：`mise exec -- hk run pre-commit --all`。完整本地检查用 `mise run check`；需要修复时执行 `mise run fmt`。基础规则集中在 `ruff.toml`、`.swiftformat` 和 `scripts/dev-check`，hook 只负责筛选和调用。
 
 ## 代码入口
 

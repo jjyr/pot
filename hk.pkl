@@ -1,0 +1,29 @@
+amends "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Config.pkl"
+
+hooks {
+  ["pre-commit"] {
+    fix = false
+    steps {
+      ["sources"] {
+        glob = List("**/*.rs", "**/*.swift", "**/*.py", "**/*.sh", "scripts/*", "mise.toml", "ruff.toml", ".swiftformat", "hk.pkl")
+        check = "mise exec -- python scripts/dev-check lint {{files}}"
+      }
+      ["whitespace"] {
+        check = "git diff --cached --check"
+      }
+    }
+  }
+  ["pre-push"] {
+    fix = false
+    steps {
+      ["helper"] {
+        glob = List("helper/**", "mise.toml", "hk.pkl")
+        check = "mise run check:swift"
+      }
+      ["rust"] {
+        glob = List("**/*.rs", "**/*.swift", "**/Cargo.toml", "Cargo.toml", "Cargo.lock", "mise.toml", "hk.pkl")
+        check = "mise run check:rust && mise run test"
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-exec > /data/check.log 2>&1
+exec >/data/check.log 2>&1
 /bin/sh /opt/pot/desktop.sh &
 desktop=$!
 trap 'kill -TERM "$desktop" 2>/dev/null || true' EXIT

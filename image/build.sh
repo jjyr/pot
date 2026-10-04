@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
-exec > /build/build.log 2>&1
+exec >/build/build.log 2>&1
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 mkdir -p /cache/apk /cache/npm
+# Each lockfile entry is intentionally passed as a separate package argument.
+# shellcheck disable=SC2046
 apk --cache-dir /cache/apk add $(cat /build/assets/packages.lock)
 adduser -D -H -h /data/engine-home potdesktop
 mkdir -p /opt/pot /opt/pi /opt/pot/novnc /data
@@ -19,7 +21,7 @@ ln -sf /opt/pi/node_modules/.bin/pi /usr/local/bin/pi
 ln -sf /opt/pot/agy /usr/local/bin/agy
 ln -sf /opt/pot/open-browser.sh /usr/local/bin/pot-browser
 fc-cache -f
-apk info -v | sort > /build/installed-packages.txt
+apk info -v | sort >/build/installed-packages.txt
 python3 - <<'PY'
 import json,pathlib
 blocks=pathlib.Path('/lib/apk/db/installed').read_text().split('\n\n')
