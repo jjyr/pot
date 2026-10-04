@@ -100,30 +100,13 @@ impl SchedulesUI {
     pub fn render(&self, v: &client::View, cx: &mut Context<Shell>) -> Div {
         let mut body = ui::content()
             .child(navigation(true, cx))
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .items_center()
-                    .child(ui::title(if self.open {
-                        "编辑定时计划"
-                    } else {
-                        "定时计划"
-                    }))
-                    .when(!self.open, |el| {
-                        el.child(
-                            Button::new("new-schedule")
-                                .primary()
-                                .label("新建计划")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.schedules_ui.edit(None, window, cx);
-                                    cx.notify();
-                                })),
-                        )
-                    }),
-            )
+            .child(ui::title(if self.open {
+                "编辑定时计划"
+            } else {
+                "定时计划"
+            }))
             .child(ui::hint(
-                "隐藏窗口后仍可执行；Quit、睡眠或关机期间不执行，恢复后按计划补跑或跳过。",
+                "请在主聊天中描述目标和时间来创建计划。隐藏窗口后仍可执行；Quit、睡眠或关机期间不执行，恢复后按计划补跑或跳过。",
                 cx,
             ));
         if !v.schedule_error.is_empty() || !self.error.is_empty() {
@@ -242,7 +225,7 @@ impl SchedulesUI {
                         let e=&mut this.schedules_ui;let values:Vec<String>=e.fields.iter().map(|f|f.read(cx).value().to_string()).collect();
                         let minutes=if e.kind=="interval" {match values[4].parse::<u64>() {Ok(n)=>n,Err(_)=>{e.error="间隔必须是整数分钟".into();cx.notify();return;}}}else{60};
                         let days:Vec<u32>=if e.kind=="weekly" {match values[6].split(',').map(|s|s.trim().parse()).collect::<Result<Vec<_>,_>>() {Ok(v)=>v,Err(_)=>{e.error="星期格式应为 1,2,3,4,5".into();cx.notify();return;}}}else{vec![]};
-                        this.client.schedule_action(json!({"action":if e.editing.is_some(){"update"}else{"create"},"schedule_id":e.editing,"spec":{"title":values[0],"goal":values[1],"timezone":values[2],"kind":e.kind,"at":values[3],"every_minutes":minutes,"time":values[5],"weekdays":days,"misfire":e.misfire,"notify":e.notify,"enabled":e.enabled}}));cx.notify();
+                        this.client.schedule_action(json!({"action":"update","schedule_id":e.editing,"spec":{"title":values[0],"goal":values[1],"timezone":values[2],"kind":e.kind,"at":values[3],"every_minutes":minutes,"time":values[5],"weekdays":days,"misfire":e.misfire,"notify":e.notify,"enabled":e.enabled}}));cx.notify();
                     })))
                     .child(Button::new("cancel-schedule-edit").ghost().label("取消").disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx|{this.schedules_ui.open=false;cx.notify();})))
                 );
@@ -287,7 +270,7 @@ impl SchedulesUI {
                         .overflow_y_scroll()
                         .when(v.schedules.items.is_empty(), |el| {
                             el.child(ui::hint(
-                                "暂无计划。可以在这里新建，也可以直接告诉 Pot 何时做什么。",
+                                "暂无计划。请在主聊天中告诉 Pot 何时做什么。",
                                 cx,
                             ))
                         })

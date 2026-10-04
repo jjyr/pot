@@ -18,7 +18,7 @@ Runtime 调度器 → SQLite tasks.v2（计划 + 触发记录 + 任务队列）
 
 ## 使用
 
-在「任务 → 定时计划」新建计划，填写目标、时区与频率；也可以在主聊天描述计划。主 Agent 可使用 `pot_list_schedules`、`pot_get_schedule`、`pot_manage_schedule`。列表默认只返回摘要，详情和执行历史按需读取。
+在主聊天描述目标、时间、时区与频率，由主 Agent 创建计划。「任务 → 定时计划」只查看和管理已有计划，不提供手动新建入口。主 Agent 可使用 `pot_list_schedules`、`pot_get_schedule`、`pot_manage_schedule`。列表默认只返回摘要，详情和执行历史按需读取。
 
 - 一次：当地日期时间 `YYYY-MM-DD HH:MM`。
 - 间隔：正整数分钟，从创建或恢复时起计算。

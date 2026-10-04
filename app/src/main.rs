@@ -213,28 +213,10 @@ impl Render for Shell {
             return ui::page(cx).child(
                 ui::content()
                     .child(schedules_ui::navigation(false,cx))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(ui::title("任务"))
-                            .child(
-                                Button::new("new-task")
-                                    .primary()
-                                    .icon(IconName::Plus)
-                                    .label("新任务")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.show_tasks = false;
-                                        this.client.select("new".into());
-                                        this.first = true;
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
+                    .child(ui::title("任务"))
                     .child(ui::hint(
                         format!(
-                            "独立对话，后台执行。最多同时处理 {} 个任务。",
+                            "向主 Agent 描述目标即可创建任务。最多同时处理 {} 个任务。",
                             self.native["settings"]["parallel"].as_str().unwrap_or("5")
                         ),
                         cx,
@@ -477,7 +459,9 @@ impl Render for Shell {
                                 .child("有什么想交给 Pot 的？"),
                         )
                     })
-                    .children(messages.into_iter().map(|m| {
+                    .children(messages.iter().enumerate().map(|(index, m)| {
+                        let latest_reply =
+                            !running && index + 1 == messages.len() && m.role == Role::Assistant;
                         let artifact = artifacts::from_message(
                             &m,
                             &if view.selected.is_empty() {
@@ -512,16 +496,17 @@ impl Render for Shell {
                             .max_w(px(760.))
                             .mx_auto()
                             .flex()
-                            .when(user, |el| el.justify_end())
+                            .flex_col()
+                            .group(SharedString::from(format!("message-{}", m.id)))
+                            .when(user, |el| el.items_end())
+                            .when(!user, |el| el.items_start())
                             .child(
                                 div()
                                     .id(SharedString::from(m.id.clone()))
-                                    .group(SharedString::from(format!("message-{}", m.id)))
                                     .relative()
                                     .max_w(px(if user { 620. } else { 720. }))
                                     .min_w_0()
-                                    .pl_4()
-                                    .pr_10()
+                                    .px_4()
                                     .py_3()
                                     .rounded(px(18.))
                                     .bg(rgb(if user { 0x079fee } else { bubble }))
@@ -617,127 +602,117 @@ impl Render for Shell {
                                                 .text_size(px(11.))
                                                 .child("已接收 · 等待下一轮应用"),
                                         )
-                                    })
-                                    .when(m.id.starts_with("task-report-"), |el| {
-                                        let task = m
-                                            .text
-                                            .rsplit("任务编号：")
-                                            .next()
-                                            .unwrap_or("")
-                                            .trim()
-                                            .to_string();
-                                        el.child(
-                                            Button::new(SharedString::from(format!(
-                                                "open-{}",
-                                                m.id
-                                            )))
-                                            .ghost()
-                                            .mt_2()
-                                            .cursor_pointer()
-                                            .text_color(rgb(0x079fee))
-                                            .label("查看任务 →")
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.client.select(task.clone());
-                                                this.show_tasks = false;
-                                                this.first = true;
-                                                cx.notify();
-                                            })),
-                                        )
-                                    })
-                                    .when(!tool, |el| {
-                                        el.child(
-                                            div()
-                                                .absolute()
-                                                .right_2()
-                                                .top_2()
-                                                .invisible()
-                                                .group_hover(
-                                                    SharedString::from(format!("message-{}", m.id)),
-                                                    |style| style.visible(),
-                                                )
-                                                .rounded_md()
-                                                .bg(rgb(if user { 0x079fee } else { bubble }))
-                                                .when(!user, |button| {
-                                                    button
-                                                        .bg(rgb(if dark {
-                                                            0x454953
-                                                        } else {
-                                                            0xffffff
-                                                        }))
-                                                        .border_1()
-                                                        .border_color(rgb(if dark {
-                                                            0x737986
-                                                        } else {
-                                                            0xb8bec9
-                                                        }))
-                                                        .shadow_sm()
-                                                        .hover(|style| {
-                                                            style.bg(rgb(if dark {
-                                                                0x535d70
-                                                            } else {
-                                                                0xe7f1ff
-                                                            }))
-                                                        })
-                                                })
-                                                .child(
-                                                    Clipboard::new(SharedString::from(format!(
-                                                        "copy-{}",
-                                                        m.id
-                                                    )))
-                                                    .value(m.text.clone())
-                                                    .tooltip("复制消息")
-                                                    .small(),
-                                                ),
-                                        )
                                     }),
                             )
+                            .when(!tool, |el| {
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .mt_1()
+                                        .text_color(rgb(muted))
+                                        // Reserve the row so hovering never moves messages.
+                                        .when(!latest_reply, |row| {
+                                            row.invisible().group_hover(
+                                                SharedString::from(format!("message-{}", m.id)),
+                                                |style| style.visible(),
+                                            )
+                                        })
+                                        .child(
+                                            Clipboard::new(SharedString::from(format!(
+                                                "copy-{}",
+                                                m.id
+                                            )))
+                                            .value(m.text.clone())
+                                            .tooltip("复制消息")
+                                            .small(),
+                                        )
+                                        .when_some(
+                                            m.id.starts_with("task-report-")
+                                                .then(|| {
+                                                    m.text
+                                                        .rsplit_once("任务编号：")
+                                                        .map(|(_, id)| id.trim().to_string())
+                                                })
+                                                .flatten()
+                                                .filter(|id| !id.is_empty()),
+                                            |row, task| {
+                                                row.child(
+                                                    Button::new(SharedString::from(format!(
+                                                        "open-{}",
+                                                        m.id
+                                                    )))
+                                                    .ghost()
+                                                    .small()
+                                                    .icon(IconName::ExternalLink)
+                                                    .tooltip("查看任务")
+                                                    .accessibility_label("查看任务")
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.client.select(task.clone());
+                                                        this.show_tasks = false;
+                                                        this.first = true;
+                                                        cx.notify();
+                                                    })),
+                                                )
+                                            },
+                                        ),
+                                )
+                            })
                     })),
             )
             .child(
-                div()
-                    .w_full()
-                    .max_w(px(760.))
-                    .mx_auto()
-                    .px_4()
-                    .text_size(px(12.))
-                    .text_color(rgb(muted))
-                    .when(!at_bottom && !self.jumping_to_latest, |el| {
-                        el.child(
-                            div().w_full().flex().justify_center().child(
+                div().w_full().px_8().flex_shrink_0().child(
+                    div()
+                        .w_full()
+                        .max_w(px(760.))
+                        .mx_auto()
+                        .text_size(px(12.))
+                        .text_color(rgb(muted))
+                        .when(!error.is_empty(), |el| el.child(div().py_2().child(error)))
+                        .when(running, |el| {
+                            el.child(div().py_2().child(if stopping {
+                                "正在停止…"
+                            } else {
+                                "Pot 正在处理…"
+                            }))
+                        })
+                        .when(
+                            snapshot
+                                .and_then(|s| s.budget.as_ref())
+                                .is_some_and(|b| b.remaining() == 0),
+                            |el| el.child("请求额度已用完，可在设置 → Agent 中调整。"),
+                        )
+                        .when(!at_bottom && !self.jumping_to_latest, |el| {
+                            el.child(
                                 Button::new("latest")
                                     .ghost()
+                                    .w_full()
+                                    .h(px(32.))
+                                    .bg(rgb(bubble))
                                     .cursor_pointer()
-                                    .py_2()
                                     .label("↓ 最新消息")
+                                    .accessibility_label("滚动到最新消息")
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        // Hide in this render; scroll_to_bottom is applied
-                                        // by the subsequent layout pass.
                                         this.jumping_to_latest = true;
                                         this.scroll.scroll_to_bottom();
                                         cx.notify();
                                     })),
-                            ),
-                        )
-                    })
-                    .when(!error.is_empty(), |el| el.child(div().py_2().child(error)))
-                    .when(running, |el| {
-                        el.child(div().py_2().child(if stopping {
-                            "正在停止…"
-                        } else {
-                            "Pot 正在处理…"
-                        }))
-                    })
-                    .when(
-                        snapshot
-                            .and_then(|s| s.budget.as_ref())
-                            .is_some_and(|b| b.remaining() == 0),
-                        |el| el.child("请求额度已用完，可在设置 → Agent 中调整。"),
-                    ),
+                            )
+                        }),
+                ),
             )
             .child(
                 div()
                     .flex_shrink_0()
-                    .h(px(unsafe { pot_bridge_composer_height() } as f32)),
+                    // Native composer: 24 px bottom inset. Remove its extra
+                    // 24 px top clearance while the latest-message bar is shown.
+                    .h(px(unsafe { pot_bridge_composer_height() } as f32
+                        - if !at_bottom && !self.jumping_to_latest {
+                            24.
+                        } else {
+                            0.
+                        })),
             )
     }
 }
