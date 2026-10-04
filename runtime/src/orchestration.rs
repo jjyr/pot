@@ -41,10 +41,7 @@ pub(super) async fn invoke(
             .ok_or_else(|| error(StatusCode::CONFLICT, "no_request", "Main request missing"))?
     };
     if request.starts_with(RESULT_PREFIX)
-        && !matches!(
-            call.name.as_str(),
-            "pot_list_tasks" | "pot_get_task" | "pot_list_schedules" | "pot_get_schedule"
-        )
+        && !matches!(call.name.as_str(), "pot_list_tasks" | "pot_get_task")
     {
         return Err(error(
             StatusCode::FORBIDDEN,

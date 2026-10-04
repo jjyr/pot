@@ -1,7 +1,8 @@
 # Product runtime
 
-Rust owns the Control API, SQLite transcript, request ledger and Pi subprocess
-lifecycle. Pi 0.87.1 owns its native JSONL session and built-in read/write/edit/
+Rust owns the Control API, SQLite transcript, request ledger and Agent bindings.
+`agent/` owns immutable profile snapshots, epoch migration, driver event filtering
+and product projection; `pi.rs` owns the Pi subprocess transport. Pi 0.87.1 owns its native JSONL session and built-in read/write/edit/
 bash/grep/find/ls tools. The first MVP uses Pi with DeepSeek Flash; AGY/Codex are
 not required to use it. See [MVP validation](../docs/validation/pi-mvp.md).
 
@@ -15,7 +16,8 @@ requests. Defaults: `deepseek-v4-flash`, 8192 output tokens/request, 100 request
 The provider still enforces its own output limit. Explicit flags can adjust these;
 re-importing never deletes reservations. Restart the App after changing config.
 
-The Rust gateway has a fixed HTTPS DeepSeek upstream, disables redirects/retries,
+The Rust gateway defaults to HTTPS DeepSeek and supports configured, allow-listed
+provider endpoints. It disables redirects/retries,
 overrides output limits and disables thinking. Each HTTP request, including tool
 continuation or a failed request, consumes an fsynced `pi-attempts/N` reservation
 before networking. It rejects requests without an active turn, cancelled turns,
@@ -23,6 +25,7 @@ oversized request bodies (>16 MiB), and exhausted budgets. Actual provider usage
 separately. Request counts and token usage have different meanings.
 
 Pi gets a local gateway token, not the provider key, in its private models.json.
+`gateway.rs` routes only the active binding’s provider and model.
 The real key is absent from its normal RPC messages, sessions and the App bundle.
 This is not a separate security boundary against guest tools: Pi and Runtime
 currently share the guest user; D4 will isolate Agent/controller access.
@@ -174,3 +177,96 @@ The Runtime owns a durable scheduler; each occurrence enters the existing task q
 ## Token accounting and allowance
 
 Request-level usage, task attribution, local calendar quotas and checkpointed Pi continuation are documented in [Token usage](../docs/token-usage.md). The shared `usage.sqlite` is owned exclusively by Runtime; task archive preserves its records. Waiting tasks release their execution slot and remain non-overlapping for scheduled plans. Only an explicitly saved checkpoint may auto-resume after restart.
+
+
+## Agent profiles and epoch migration
+
+`agent.profiles.v1` stores editable revisioned profiles. `agent.bindings.v1` stores
+owner, epoch, immutable resolved spec/hash, native reference and state. The spec
+pins the engine version, provider, model, credential reference, output limit,
+context window, tool policy, gateway protocol and accepted capabilities. Secrets
+are never copied into these records. Each actual turn records its epoch/spec hash,
+provider and model in `agent.turn:<request_id>`.
+
+Legacy `pi.session`, `pi.paused`, Pi config and task stores remain readable and are
+not deleted. Native Pi headers and JSONL records are validated on resume; missing
+or corrupt sessions become broken and never silently start from empty context.
+Existing task snapshots survive config edits and restarts. A missing credential
+route records `agent.needs_rebind`; restoring the route permits retry, or the
+settings migration endpoint can explicitly choose another profile.
+
+Authenticated Runtime endpoints (root token only):
+
+- `GET /api/v1/agent?owner=main`: profiles, the owner's binding history, pending
+  migration and credential-route rebind reason. `owner` may also be a task ID.
+- `POST /api/v1/agent`: `{request_id, expected_revision, profile, follow_main}`.
+  New profiles use revision 1 / expected_revision 0. Updates require exactly the
+  next revision. `follow_main` defaults true; existing tasks remain pinned. This
+  also selects the profile for new workers. A failed or repeated request does not
+  silently change an existing binding.
+- `POST /api/v1/agent/migrate`: `{request_id, owner, target_profile, reason}`;
+  reason is `settings_changed`, `needs_rebind` or `user_requested`. Same-ID retries
+  return the saved receipt; conflicting content is rejected. Retry a failed
+  migration with a new request ID after fixing its cause.
+
+Profile shape is returned by GET. Pi profiles use engine `pi`, an accepted
+provider/model, an `auth_ref`, `{max_output_tokens, reasoning_effort: null}` params,
+and tool_policy `{worker_orchestration:false, summary_read_only:true,
+unattended:"guest_vm"}`. Only accepted engine routes can be selected. Model names
+are validated by the provider, not guessed by the Runtime.
+
+The current native Settings form still edits pi.json and restarts the environment.
+Its model/output-limit edit is imported into this same migration operation on
+startup. General profile management currently uses the authenticated API; the GUI
+has no Codex selector or migration preview.
+
+Migration persists requested → handoff_written → new_binding_opened → active.
+Candidate files are fsynced before the final SQLite transaction, which also adds
+the transcript marker. Failure preserves the source binding. Active turns defer
+migration; waiting tasks apply it at the next turn boundary. No interrupted turn
+is automatically replayed. Deterministic handoffs under `.pot/handoff/<owner>/`
+include the original goal, 8 recent messages (32 KiB text bound), older IDs,
+workspace/state references and uncertain-side-effect notes. Configured keys,
+Runtime tokens and sensitive transcript lines are redacted. Transcript material
+is explicitly untrusted data. The next real turn receives the bootstrap pointer.
+Narrative generation and in-place switching are disabled.
+
+## Provider configuration and tool facade
+
+The default `pi.json:api_key` route retains `pi-attempts` and the old internal URL.
+Additional bearer-key providers live in private root `providers.json`:
+
+```json
+[
+  {
+    "id": "example",
+    "endpoint": "https://api.example.com/v1/chat/completions",
+    "allowed_hosts": ["api.example.com"],
+    "api_key": "<private credential>",
+    "protocol": "openai_chat"
+  }
+]
+```
+
+A profile references `provider: "example"`, `auth_ref: "providers.json:example"`.
+Pi receives `/gw/example/v1` as its base URL; callers cannot choose an arbitrary
+upstream path or host. Production custom routes require HTTPS. The OpenAI Chat
+codec clamps output and reads usage without message-format translation. Protocol
+`unknown` passes JSON and response bytes through, reserves a request, leaves usage
+unknown, and disables exact-budget/usage/checkpoint-resume capabilities. It is
+currently useful for opaque OpenAI-shaped streams; it does not make Pi speak an
+arbitrary new protocol. Responses, Messages and Gemini codecs are not present.
+
+`pot-tools.json` is shared by the Pi extension and `POST /api/v1/mcp`. The MCP facade
+implements JSON-RPC initialize/ping/tools/list/tools/call over HTTP (protocol
+2025-03-26). Initialize requires an active lane and returns `Mcp-Session-Id`, bound
+to that lane's current request. Subsequent calls require that header and the lane
+bearer; reuse in another turn fails. Workers cannot orchestrate; summaries expose
+only task list/read. Tool calls use the existing durable dispatcher receipts,
+including conflicting-ID rejection. A future Codex client must reinitialize its
+MCP session at each turn boundary; this has not been accepted with Codex yet.
+
+DriverHost/SessionHandle currently implement the Pi execution path. Long-lived
+Codex lifecycle/authentication/permissions, guest binary packaging, native thread
+recovery and per-profile scheduling require additional work; see the development
+plan and [Agent validation](../docs/validation/agent-layer.md).

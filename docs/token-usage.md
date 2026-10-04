@@ -6,7 +6,7 @@
 
 ## 计量
 
-Rust Runtime 通过 Pi 网关捕获 provider usage。共享 SQLite `product/usage.sqlite` 存储请求 ID、会话/任务、轮次、时间、模型、输入/输出/缓存及预留；工具事件按会话+轮次+调用 ID 去重。各任务共享账本，归档不删除记录。沿用 DELETE journal 和 synchronous=EXTRA，仅 Runtime 访问在线数据库。
+Rust Runtime 通过通用模型网关捕获 provider usage。共享 SQLite `product/usage.sqlite` 存储请求 ID、会话/任务、轮次、时间、模型、输入/输出/缓存及预留；工具事件按会话+轮次+调用 ID 去重。各任务共享账本，归档不删除记录。沿用 DELETE journal 和 synchronous=EXTRA，仅 Runtime 访问在线数据库。
 
 - 实际合计 = 输入 + 输出。缓存命中是输入的子集，不再相加。
 - 同一请求多个 usage 帧更新一条记录；缺失用量显示未知，不能按零消耗处理。
@@ -51,3 +51,15 @@ Pi 是执行引擎，模型服务决定计费方式。当前 API 连接默认没
 - `POST /api/v1/usage/cancel`：取消主聊天等待；任务取消沿用任务取消接口。
 
 旧 `/api/v1/usage` 保留用于旧请求次数诊断，新界面使用 summary。
+
+
+## Agent 绑定归属
+
+网关仅接受当前 binding 的 provider/model。`request_routes` 通过 request ID 关联
+provider、epoch 和 spec hash；原请求表继续记录实际模型和轮次，旧账本不重置。
+OpenAI Chat codec 沿用 DeepSeek 的预留、输出限制和用量结算。迁移后的请求使用
+新快照，旧 epoch 的用量保留。当前用量 UI 仍按模型聚合，尚未新增 provider 分组。
+
+`unknown` 协议不解析响应 usage、不修改输出 cap，也不假装消耗为零；请求保留
+未知用量及保守预留。其 ResolvedSpec 明确关闭精确请求预算、usage reporting 和
+safe checkpoint resume。订阅配额仍未接入，不能由 API 请求账本推算。

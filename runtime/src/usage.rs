@@ -92,6 +92,14 @@ fn midnight(tz: Tz, day: chrono::NaiveDate) -> Result<i64> {
     bail!("Date does not exist in timezone")
 }
 impl Ledger {
+    pub fn route(&self, request: &str, provider: &str, epoch: u64, spec_hash: &str) -> Result<()> {
+        self.0.execute(
+            "INSERT INTO request_routes(request_id,provider,epoch,spec_hash) VALUES (?,?,?,?)",
+            params![request, provider, epoch, spec_hash],
+        )?;
+        Ok(())
+    }
+
     pub fn open(path: &std::path::Path) -> Result<Self> {
         let c = Connection::open(path)?;
         c.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=EXTRA;
@@ -102,6 +110,7 @@ impl Ledger {
         CREATE INDEX IF NOT EXISTS tools_scope ON tools(scope,at);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0);")?;
+        c.execute_batch("CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL);")?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS compactions(id TEXT PRIMARY KEY, scope TEXT NOT NULL, turn_id TEXT NOT NULL, at INTEGER NOT NULL, end_at INTEGER, reason TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'running', tokens_before INTEGER, tokens_after INTEGER, entry_id TEXT);
         CREATE INDEX IF NOT EXISTS compaction_scope ON compactions(scope,at);")?;
         let has_column = c

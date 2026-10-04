@@ -1,9 +1,12 @@
+mod agent;
 mod deepseek;
+mod gateway;
 mod orchestration;
 mod pi;
 mod schedules;
 mod store;
 mod tasks;
+mod tool_bridge;
 mod usage;
 use anyhow::{Result, anyhow, bail};
 use axum::{
@@ -520,6 +523,8 @@ async fn main() -> Result<()> {
     if usage::paused(&s)?.is_none() {
         s.usage.lock().unwrap().clear_wait("main")?;
     }
+    agent::initialize(&s)?;
+    agent::migration::sync_legacy_settings(&s).await?;
     let worker = s.clone();
     tokio::spawn(async move {
         while let Some(mut req) = rx.recv().await {
@@ -527,7 +532,7 @@ async fn main() -> Result<()> {
                 req.text.push_str(&tasks::context(&worker));
             }
             let result = if use_pi {
-                pi::run(&worker, req).await
+                agent::run(&worker, req).await
             } else if use_api {
                 deepseek::run(&worker, req, &provider_path).await
             } else {
@@ -547,8 +552,13 @@ async fn main() -> Result<()> {
             "/api/pi/v1/chat/completions",
             post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
         )
+        .route(
+            "/gw/{provider}/v1/chat/completions",
+            post(gateway::routed).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
+        )
         .route("/api/pi/compactions", post(pi::compaction_event))
         .route("/api/v1/orchestration", post(orchestration::invoke))
+        .route("/api/v1/mcp", post(tool_bridge::mcp))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/query", get(tasks::query))
         .route(
@@ -558,6 +568,11 @@ async fn main() -> Result<()> {
         .route("/api/v1/tasks/{id}", get(tasks::snapshot))
         .route("/api/v1/tasks/{id}/messages", post(tasks::input))
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))
+        .route(
+            "/api/v1/agent",
+            get(agent::inspect).post(agent::migration::settings),
+        )
+        .route("/api/v1/agent/migrate", post(agent::migration::migrate))
         .route(PATH_SNAPSHOT, get(snapshot))
         .route("/api/v1/usage", get(usage))
         .route("/api/v1/usage/summary", get(usage::summary))

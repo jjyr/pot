@@ -68,6 +68,7 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     );
     let data = root.data.join("tasks").join(task_id);
     let workspace = root.workspace.join("tasks").join(task_id);
+    let existing = data.join("pot.sqlite").exists();
     std::fs::create_dir_all(&data)?;
     std::fs::create_dir_all(&workspace)?;
     let endpoint: RuntimeEndpoint =
@@ -111,6 +112,20 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
         .lock()
         .unwrap()
         .import_legacy(task_id, &service.inner.lock().unwrap().store)?;
+    agent::initialize(&service)?;
+    if !existing {
+        let inner = root.inner.lock().unwrap();
+        if let Some(selected) = inner.store.get("agent.default.worker")? {
+            let profile = agent::profiles(&inner.store)?
+                .into_iter()
+                .find(|p| p.id == selected)
+                .ok_or_else(|| anyhow!("Default worker profile missing"))?;
+            agent::assign_new(
+                &mut service.inner.lock().unwrap().store,
+                crate::gateway::resolve(root, &profile)?,
+            )?;
+        }
+    }
     Ok(service)
 }
 pub(super) fn restore(root: &Service) -> Result<()> {
@@ -512,7 +527,7 @@ pub(super) async fn gateway(
     h: HeaderMap,
     body: Json<Value>,
 ) -> ApiResult<axum::response::Response> {
-    pi::gateway(State(pi_service(&root, &h)?), h, body).await
+    crate::gateway::forward(State(pi_service(&root, &h)?), h, body).await
 }
 
 pub(super) fn pi_service(root: &Service, h: &HeaderMap) -> ApiResult<Service> {
@@ -753,6 +768,18 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     let _ = root.events.send(event);
     Ok(())
 }
+pub(super) fn owner(root: &Service, owner: &str) -> ApiResult<Service> {
+    if owner == "main" {
+        return Ok(root.clone());
+    }
+    root.tasks
+        .lock()
+        .unwrap()
+        .lanes
+        .get(owner)
+        .map(|lane| lane.service.clone())
+        .ok_or_else(|| error(StatusCode::NOT_FOUND, "owner_missing", "Owner not found"))
+}
 pub(super) fn start(root: Service) {
     tokio::spawn(async move {
         let mut ticks = 0u8;
@@ -763,6 +790,9 @@ pub(super) fn start(root: Service) {
                 }
             }
             ticks = (ticks + 1) % 10;
+            if let Err(e) = agent::migration::apply_pending(&root, false) {
+                eprintln!("agent migration: {e}");
+            }
             if let Err(e) = usage::resume_main(&root) {
                 eprintln!("usage resume: {e}");
             }
@@ -773,7 +803,7 @@ pub(super) fn start(root: Service) {
                 Ok(Some((task_id, service, req))) => {
                     let root = root.clone();
                     tokio::spawn(async move {
-                        let result = pi::run(&service, req).await;
+                        let result = agent::run(&service, req).await;
                         if let Err(e) = finish(&root, &task_id, result) {
                             eprintln!("task completion: {e}");
                         }
@@ -2142,6 +2172,46 @@ pub(super) mod tests {
                 .contains("COST_MARKER")
         );
         server.abort();
+    }
+    #[tokio::test]
+    async fn new_tasks_inherit_profile_changes_but_existing_and_restored_tasks_stay_pinned() {
+        let s = fixture();
+        agent::initialize(&s).unwrap();
+        let old = add(&s, "old snapshot", "").await;
+        let before = agent::binding(&owner(&s, &old.id).unwrap()).unwrap().spec;
+        let mut profile = agent::Profile::legacy(s.pi.as_ref().unwrap());
+        profile.revision = 2;
+        profile.params.max_output_tokens = 77;
+        let settings=serde_json::from_value(json!({"profile":profile,"expected_revision":1,"request_id":"edit","follow_main":false})).unwrap();
+        let _ = agent::migration::settings(State(s.clone()), headers(), Json(settings))
+            .await
+            .unwrap();
+        let new = add(&s, "new snapshot", "").await;
+        assert_eq!(
+            agent::binding(&owner(&s, &old.id).unwrap()).unwrap().spec,
+            before
+        );
+        assert_eq!(
+            agent::binding(&owner(&s, &new.id).unwrap())
+                .unwrap()
+                .spec
+                .params
+                .max_output_tokens,
+            77
+        );
+        restore(&s).unwrap();
+        assert_eq!(
+            agent::binding(&owner(&s, &old.id).unwrap()).unwrap().spec,
+            before
+        );
+        assert_eq!(
+            agent::binding(&owner(&s, &new.id).unwrap())
+                .unwrap()
+                .spec
+                .params
+                .max_output_tokens,
+            77
+        );
     }
 }
 

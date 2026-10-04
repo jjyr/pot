@@ -1,9 +1,8 @@
 //! Pi is a guest subprocess. Rust owns the API, request ledger and UI transcript;
 //! Pi owns its native JSONL session and built-in tools.
 use super::*;
-use axum::{body::Body, response::Response};
-use futures::StreamExt;
-use std::{collections::HashMap, io::Write, os::unix::fs::OpenOptionsExt, time::Duration};
+use crate::agent::cancelled;
+use std::{io::Write, os::unix::fs::OpenOptionsExt, time::Duration};
 use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, Deserialize)]
@@ -78,199 +77,13 @@ pub async fn compaction_event(
     Ok(Json(json!({"ok":true})))
 }
 
-// The gateway has a fixed upstream and never follows redirects. The real API
-// key is not passed to Pi or included in its session files.
+#[cfg(test)]
 pub async fn gateway(
-    State(s): State<Service>,
-    h: HeaderMap,
-    Json(mut body): Json<Value>,
-) -> ApiResult<Response> {
-    s.authorized(&h)?;
-    let c =
-        s.pi.as_ref()
-            .ok_or_else(|| error(StatusCode::NOT_FOUND, "pi_disabled", "Pi is not configured"))?;
-    if body["model"] != c.model || body["stream"] != true || body.to_string().len() > MAX_MODEL_BODY
-    {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            "invalid_model_request",
-            "Model, stream or context limit exceeded",
-        ));
-    }
-    // Respect Pi's smaller summarization budget as well as the user's upper limit.
-    let max_output = body["max_tokens"]
-        .as_u64()
-        .or_else(|| body["max_completion_tokens"].as_u64())
-        .unwrap_or(c.max_tokens)
-        .max(1)
-        .min(c.max_tokens);
-    body["max_tokens"] = json!(max_output);
-    body.as_object_mut()
-        .ok_or_else(|| error(StatusCode::BAD_REQUEST, "invalid_body", "Expected object"))?
-        .remove("max_completion_tokens");
-    body["thinking"] = json!({"type":"disabled"});
-    body["stream_options"] = json!({"include_usage":true});
-    {
-        let inner = s.inner.lock().unwrap();
-        let turn = inner
-            .turn
-            .as_ref()
-            .ok_or_else(|| error(StatusCode::CONFLICT, "no_turn", "No active turn"))?;
-        if turn.cancelling {
-            return Err(error(
-                StatusCode::CONFLICT,
-                "cancelling",
-                "Turn is stopping",
-            ));
-        }
-        if inner.model_requests >= c.max_requests_per_turn {
-            return Err(error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "turn_budget",
-                "Turn request limit reached",
-            ));
-        }
-    }
-    let turn_id = s
-        .inner
-        .lock()
-        .unwrap()
-        .turn
-        .as_ref()
-        .unwrap()
-        .user_message_id
-        .clone();
-    let request_id = id();
-    // UTF-8 bytes are a deliberately conservative input estimate, not billed tokens.
-    let input_estimate = body.to_string().len() as u64 + 1024;
-    let reserved = {
-        let ledger = s.usage.lock().unwrap();
-        let operation = h
-            .get("x-pot-compaction")
-            .and_then(|v| v.to_str().ok())
-            .filter(|id| *id != "conversation");
-        if let Some(operation) = operation {
-            ledger
-                .validate_compaction(&s.usage_scope, &turn_id, operation)
-                .map_err(internal)?;
-        }
-        let output = ledger
-            .reserve(
-                &request_id,
-                &s.usage_scope,
-                &turn_id,
-                now(),
-                &c.model,
-                input_estimate,
-                max_output,
-            )
-            .map_err(internal)?;
-        if output.is_some() {
-            if let Some(operation) = operation {
-                ledger
-                    .tag_compaction(&request_id, operation)
-                    .map_err(internal)?;
-            }
-        }
-        output
-    };
-    let Some(output) = reserved else {
-        s.usage
-            .lock()
-            .unwrap()
-            .wait(&s.usage_scope, &turn_id, now(), input_estimate + 1)
-            .map_err(internal)?;
-        return Err(error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "pot_token_limit",
-            "Pot token allowance is unavailable. This turn is paused before sending the model request.",
-        ));
-    };
-    body["max_tokens"] = json!(output);
-    {
-        let mut inner = s.inner.lock().unwrap();
-        let budget = s.api_budget.as_ref().unwrap();
-        if deepseek::reserve_in(&budget.data.join(budget.namespace), budget.limit).is_err() {
-            s.usage
-                .lock()
-                .unwrap()
-                .rejected(&request_id)
-                .map_err(internal)?;
-            return Err(error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "budget_exhausted",
-                "Request budget exhausted",
-            ));
-        }
-        inner.model_requests += 1;
-    }
-    s.publish_budget().map_err(internal)?;
-    let response = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| internal(e.into()))?
-        .post(&s.pi_upstream)
-        .bearer_auth(&c.api_key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|_| {
-            error(
-                StatusCode::BAD_GATEWAY,
-                "provider_connection",
-                "DeepSeek connection failed",
-            )
-        })?;
-    if !response.status().is_success() {
-        s.usage
-            .lock()
-            .unwrap()
-            .rejected(&request_id)
-            .map_err(internal)?;
-        return Err(error(
-            StatusCode::BAD_GATEWAY,
-            "provider_rejected",
-            &format!("DeepSeek returned HTTP {}", response.status().as_u16()),
-        ));
-    }
-    let mut incoming = response.bytes_stream();
-    let service = s.clone();
-    let stream = async_stream::stream! {
-        let mut pending = String::new();
-        while let Some(chunk) = incoming.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    // Usage fields are ASCII; partial UTF-8 text is only forwarded,
-                    // never reconstructed here. Bound diagnostics independently.
-                    pending.push_str(&String::from_utf8_lossy(&bytes));
-                    while let Some(end) = pending.find('\n') {
-                        let line = pending[..end].trim().to_owned(); pending.drain(..=end);
-                        if let Some(data) = line.strip_prefix("data:") {
-                            if let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
-                                if value["usage"].is_object() {
-                                    if service.usage.lock().unwrap().settle(&request_id,&value["usage"]).is_err() {
-                                        yield Err(std::io::Error::other("Could not persist model usage"));
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if pending.len()>1024*1024 { pending.clear(); }
-                    yield Ok::<_,std::io::Error>(bytes);
-                }
-                Err(_) => {yield Err(std::io::Error::other("Provider stream interrupted")); break;}
-            }
-        }
-    };
-    Ok(Response::builder()
-        .header("content-type", "text/event-stream")
-        .header("cache-control", "no-cache")
-        .body(Body::from_stream(stream))
-        .unwrap())
+    state: State<Service>,
+    headers: HeaderMap,
+    body: Json<Value>,
+) -> ApiResult<axum::response::Response> {
+    crate::gateway::forward(state, headers, body).await
 }
 fn text(value: &Value) -> String {
     value
@@ -284,148 +97,6 @@ fn text(value: &Value) -> String {
         })
         .unwrap_or_default()
 }
-fn limited(s: String) -> String {
-    if s.len() <= 24000 {
-        s
-    } else {
-        format!(
-            "{}\n…（输出已截断，完整结果在 Pi 会话中）",
-            s.chars().take(6000).collect::<String>()
-        )
-    }
-}
-#[derive(Default)]
-struct Transcript {
-    assistant: Option<Message>,
-    tools: HashMap<String, Message>,
-    failure: Option<String>,
-}
-impl Transcript {
-    fn record(&mut self, s: &Service, e: &Value) -> Result<()> {
-        if matches!(
-            e["type"].as_str(),
-            Some("tool_execution_start" | "tool_execution_end")
-        ) {
-            let turn = s
-                .inner
-                .lock()
-                .unwrap()
-                .turn
-                .as_ref()
-                .map(|t| t.user_message_id.clone())
-                .unwrap_or_default();
-            s.usage
-                .lock()
-                .unwrap()
-                .tool(&s.usage_scope, &turn, e, now())?;
-        }
-        match e["type"].as_str().unwrap_or("") {
-            "message_start" if e["message"]["role"] == "assistant" => {
-                let m = Message {
-                    id: id(),
-                    conversation_id: "main".into(),
-                    role: Role::Assistant,
-                    text: String::new(),
-                    status: MessageStatus::Streaming,
-                    created_at_ms: now(),
-                    request_id: None,
-                };
-                s.save(m.clone())?;
-                self.assistant = Some(m);
-            }
-            "message_update" if e["assistantMessageEvent"]["type"] == "text_delta" => {
-                if let Some(m) = self.assistant.as_mut() {
-                    m.text
-                        .push_str(e["assistantMessageEvent"]["delta"].as_str().unwrap_or(""));
-                    s.save(m.clone())?;
-                }
-            }
-            "message_end" if e["message"]["role"] == "assistant" => {
-                if let Some(m) = self.assistant.as_mut() {
-                    let final_message = &e["message"];
-                    m.text = text(&final_message["content"]);
-                    m.status = if cancelled(s) {
-                        MessageStatus::Cancelled
-                    } else {
-                        match final_message["stopReason"].as_str() {
-                            Some("aborted") => MessageStatus::Cancelled,
-                            Some("error") => MessageStatus::Failed,
-                            Some("length") => MessageStatus::Failed,
-                            _ => MessageStatus::Complete,
-                        }
-                    };
-                    if m.status == MessageStatus::Failed {
-                        let detail = final_message["errorMessage"]
-                            .as_str()
-                            .unwrap_or("模型输出达到上限，请缩小任务后继续")
-                            .to_string();
-                        m.text.push_str(&format!("\n{detail}"));
-                        self.failure = Some(detail);
-                    }
-                    if m.status == MessageStatus::Complete {
-                        self.failure = None;
-                    }
-                    if m.text.is_empty() && m.status == MessageStatus::Cancelled {
-                        m.text = "已停止".into();
-                    }
-                    if m.text.is_empty() && m.status == MessageStatus::Complete {
-                        m.text = "调用工具".into();
-                    }
-                    s.save(m.clone())?;
-                }
-            }
-            "compaction_end" if e["result"].is_object() && e["willRetry"] == true => {
-                self.failure = None;
-            }
-            "tool_execution_start" => {
-                let key = e["toolCallId"]
-                    .as_str()
-                    .ok_or_else(|| anyhow!("Missing tool ID"))?
-                    .to_string();
-                let m = Message {
-                    id: id(),
-                    conversation_id: "main".into(),
-                    role: Role::Tool,
-                    text: limited(format!(
-                        "{}\n{}",
-                        e["toolName"].as_str().unwrap_or("tool"),
-                        e["args"]
-                    )),
-                    status: MessageStatus::Streaming,
-                    created_at_ms: now(),
-                    request_id: None,
-                };
-                s.save(m.clone())?;
-                self.tools.insert(key, m);
-            }
-            "tool_execution_end" => {
-                if let Some(m) = self.tools.get_mut(e["toolCallId"].as_str().unwrap_or("")) {
-                    m.text = limited(format!("{}\n{}", m.text, text(&e["result"]["content"])));
-                    m.status = if cancelled(s) {
-                        MessageStatus::Cancelled
-                    } else if e["isError"] == true {
-                        MessageStatus::Failed
-                    } else {
-                        MessageStatus::Complete
-                    };
-                    s.save(m.clone())?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-    fn finish(&mut self, s: &Service, status: MessageStatus, detail: &str) -> Result<()> {
-        for m in self.assistant.iter_mut().chain(self.tools.values_mut()) {
-            if m.status == MessageStatus::Streaming {
-                m.status = status;
-                m.text.push_str(detail);
-                s.save(m.clone())?;
-            }
-        }
-        Ok(())
-    }
-}
 async fn command(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<()> {
     let mut bytes = serde_json::to_vec(&value)?;
     bytes.push(b'\n');
@@ -433,130 +104,25 @@ async fn command(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result
     stdin.flush().await?;
     Ok(())
 }
-fn cancelled(s: &Service) -> bool {
-    s.inner
-        .lock()
-        .unwrap()
-        .turn
-        .as_ref()
-        .is_some_and(|t| t.cancelling)
-}
-
+#[cfg(test)]
 pub async fn run(s: &Service, req: SendMessage) -> Result<()> {
-    let mut user = s
-        .inner
-        .lock()
-        .unwrap()
-        .store
-        .duplicate(&req.request_id)?
-        .ok_or_else(|| anyhow!("Missing accepted message"))?;
-    let resuming = usage::paused(s)?.is_some_and(|p| p.request_id == req.request_id);
-    s.inner.lock().unwrap().store.set("pi.paused", "")?;
-    s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
-    s.usage
-        .lock()
-        .unwrap()
-        .interrupt_compactions(&s.usage_scope, "interrupted", now())?;
-    let mut transcript = Transcript::default();
-    let result = execute(s, &req, &mut transcript, resuming).await;
-    let interrupted_state = if cancelled(s) {
-        "cancelled"
-    } else {
-        "interrupted"
-    };
-    s.usage
-        .lock()
-        .unwrap()
-        .interrupt_compactions(&s.usage_scope, interrupted_state, now())?;
-    let waiting = s.usage.lock().unwrap().waiting(&s.usage_scope)?.is_some();
-    let uncertain = result
-        .as_ref()
-        .err()
-        .is_some_and(|e| e.to_string().contains("未确认停止"));
-    if waiting && !cancelled(s) && !uncertain {
-        transcript.finish(s, MessageStatus::Failed, "\n等待 Pot 额度恢复")?;
-        if let Some(m) = transcript.assistant.as_mut() {
-            m.text = "等待 Pot Token 额度恢复。可在此会话的用量详情中继续或取消。".into();
-            s.save(m.clone())?;
-        }
-        user.status = MessageStatus::Accepted;
-        s.save(user)?;
-        s.inner
-            .lock()
-            .unwrap()
-            .store
-            .set("pi.paused", &serde_json::to_string(&req)?)?;
-        s.phase(EnginePhase::Ready, Some("等待 Pot 额度恢复".into()));
-        return Ok(());
-    }
-    s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
-    let status = if cancelled(s) && result.is_ok() {
-        MessageStatus::Cancelled
-    } else if result.is_err() {
-        MessageStatus::Failed
-    } else {
-        MessageStatus::Complete
-    };
-    let detail = result
-        .as_ref()
-        .err()
-        .map(|e| format!("\n{e}"))
-        .unwrap_or_default();
-    transcript.finish(s, status, &detail)?;
-    user.status = status;
-    if req.request_id.starts_with(orchestration::RESULT_PREFIX) {
-        user.text = if status == MessageStatus::Complete {
-            "后台任务结果已整理。"
-        } else {
-            "后台任务汇总未完成，原始结果保留在任务报告中。"
-        }
-        .into();
-    }
-    s.save(user)?;
-    let uncertain = result
-        .as_ref()
-        .err()
-        .is_some_and(|e| e.to_string().contains("未确认停止"));
-    if let Err(e) = result {
-        s.save(Message {
-            id: id(),
-            conversation_id: "main".into(),
-            role: Role::System,
-            text: format!("任务未完成：{e}"),
-            status,
-            created_at_ms: now(),
-            request_id: None,
-        })?;
-    }
-    // A failed request is recoverable; keep the composer usable for a correction.
-    s.phase(
-        if uncertain {
-            EnginePhase::Failed
-        } else {
-            EnginePhase::Ready
-        },
-        if uncertain {
-            Some("Pi 未确认停止，请 Quit 后重开环境".into())
-        } else {
-            None
-        },
-    );
-    Ok(())
+    agent::run(s, req).await
 }
-async fn execute(
+pub(super) async fn execute(
     s: &Service,
     req: &SendMessage,
-    transcript: &mut Transcript,
-    resuming: bool,
+    emit: &mut (dyn FnMut(agent::driver::Update) -> Result<()> + Send),
+    _resuming: bool,
 ) -> Result<()> {
     if cancelled(s) {
         return Ok(());
     }
-    let config = s.pi.as_ref().unwrap();
+    let config = agent::pi_config(s)?;
+    let spec = agent::binding(s)?.spec;
+    agent::record_turn(s, &req.request_id)?;
     let home = s.data.join("pi-home");
     std::fs::create_dir_all(&home)?;
-    let session = s.data.join("pi-session.jsonl");
-    let previous = s.inner.lock().unwrap().store.get("pi.session")?;
+    let (session, previous) = agent::native_session(s)?;
     if previous.is_none() && !session.exists() {
         std::fs::OpenOptions::new()
             .create_new(true)
@@ -572,7 +138,7 @@ async fn execute(
         serde_json::from_slice(&std::fs::read(s.data.join(RUNTIME_ENDPOINT_FILE))?)?;
     private_json(
         &home.join("models.json"),
-        &json!({"providers":{"deepseek":{"baseUrl":format!("http://127.0.0.1:{}/api/pi/v1",endpoint.port),"api":"openai-completions","apiKey":s.token,"models":[{"id":config.model,"name":"DeepSeek Flash","reasoning":false,"input":["text"],"contextWindow":32768,"maxTokens":config.max_tokens,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}}}),
+        &json!({"providers":{(spec.provider.clone()):{"baseUrl":if spec.provider == "deepseek" && spec.auth_ref == "pi.json:api_key" {format!("http://127.0.0.1:{}/api/pi/v1",endpoint.port)}else{format!("http://127.0.0.1:{}/gw/{}/v1",endpoint.port,spec.provider)},"api":"openai-completions","apiKey":s.token,"models":[{"id":config.model,"name":spec.model,"reasoning":false,"input":["text"],"contextWindow":spec.context_window,"maxTokens":config.max_tokens,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}}}),
     )?;
     private_json(
         &home.join("settings.json"),
@@ -613,6 +179,7 @@ async fn execute(
     if !s.is_worker {
         let extension = home.join("pot-tools.mjs");
         std::fs::write(&extension, include_str!("pot-tools.mjs"))?;
+        std::fs::write(home.join("pot-tools.json"), include_str!("pot-tools.json"))?;
         process
             .arg("--extension")
             .arg(extension)
@@ -631,7 +198,7 @@ async fn execute(
             "--mode",
             "rpc",
             "--provider",
-            "deepseek",
+            &spec.provider,
             "--model",
             &config.model,
             "--thinking",
@@ -662,7 +229,7 @@ async fn execute(
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
     let result=async {
         command(&mut stdin,json!({"id":"init","type":"get_state"})).await?;
-        let mut started=false;let mut abort_sent=false;
+        let mut started=false;let mut abort_sent=false;let mut failure=None;
         let deadline=tokio::time::sleep(Duration::from_secs(180));tokio::pin!(deadline);
         loop {
             tokio::select! {
@@ -680,9 +247,9 @@ async fn execute(
                             let session_id=e["data"]["sessionId"].as_str().ok_or_else(||anyhow!("Pi session ID missing"))?;
                             if let Some(old)=&previous {anyhow::ensure!(old==session_id,"Pi session changed unexpectedly");}
                             std::fs::File::open(&session)?.sync_all()?;
-                            s.inner.lock().unwrap().store.set("pi.session",session_id)?;
+                            agent::bind_pi_session(s,session_id)?;
                             if cancelled(s) {return Ok(());}
-                            command(&mut stdin,json!({"id":req.request_id,"type":"prompt","message":if resuming {"Pot allowance is available again. Continue the unfinished user request from the saved session. Preserve completed tool results; do not repeat completed external actions."}else{&req.text}})).await?;started=true;
+                            command(&mut stdin,json!({"id":req.request_id,"type":"prompt","message":&req.text})).await?;started=true;
                         }
                         if e["id"]=="stop" {return Ok(());}
                     }
@@ -690,9 +257,16 @@ async fn execute(
                         let message=s.inner.lock().unwrap().store.duplicate(&req.request_id)?;
                         if let Some(mut message)=message {message.status=MessageStatus::Streaming;s.save(message)?;}
                     }
-                    transcript.record(s,&e)?;
+                    if let Some(update) = normalize(&e) {
+                        match &update {
+                            agent::driver::Update::MessageFinished { outcome: agent::driver::Outcome::Failed(reason), .. } => failure=Some(reason.clone()),
+                            agent::driver::Update::MessageFinished { outcome: agent::driver::Outcome::Success, .. } | agent::driver::Update::CompactionObserved { recovered: true } => failure=None,
+                            _=>{}
+                        }
+                        emit(update)?;
+                    }
                     if started && e["type"]=="agent_settled" && !abort_sent {
-                        if let Some(e)=&transcript.failure {bail!("{e}");}return Ok(());
+                        if let Some(e)=&failure {bail!("{e}");}return Ok(());
                     }
                 }
             }
@@ -720,6 +294,49 @@ async fn execute(
         std::fs::File::open(&session)?.sync_all()?;
     }
     result
+}
+
+fn normalize(e: &Value) -> Option<agent::driver::Update> {
+    use agent::driver::{Outcome, Update};
+    Some(match e["type"].as_str()? {
+        "message_start" if e["message"]["role"] == "assistant" => Update::MessageStarted,
+        "message_update" if e["assistantMessageEvent"]["type"] == "text_delta" => {
+            Update::TextDelta(
+                e["assistantMessageEvent"]["delta"]
+                    .as_str()
+                    .unwrap_or("")
+                    .into(),
+            )
+        }
+        "message_end" if e["message"]["role"] == "assistant" => Update::MessageFinished {
+            text: text(&e["message"]["content"]),
+            outcome: match e["message"]["stopReason"].as_str() {
+                Some("aborted") => Outcome::Cancelled,
+                Some("error" | "length") => Outcome::Failed(
+                    e["message"]["errorMessage"]
+                        .as_str()
+                        .unwrap_or("模型输出达到上限，请缩小任务后继续")
+                        .into(),
+                ),
+                _ => Outcome::Success,
+            },
+        },
+        "tool_execution_start" => Update::ToolStarted {
+            id: e["toolCallId"].as_str()?.into(),
+            name: e["toolName"].as_str().unwrap_or("tool").into(),
+            args: e["args"].clone(),
+        },
+        "tool_execution_end" => Update::ToolFinished {
+            id: e["toolCallId"].as_str()?.into(),
+            name: e["toolName"].as_str().unwrap_or("tool").into(),
+            result: e["result"].clone(),
+            failed: e["isError"] == true,
+        },
+        "compaction_end" => Update::CompactionObserved {
+            recovered: e["result"].is_object() && e["willRetry"] == true,
+        },
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -756,19 +373,19 @@ mod tests {
     #[test]
     fn authoritative_message_and_tool_failures_replace_partial_output() {
         let s = crate::tests::service();
-        let mut t = Transcript::default();
+        let mut t = agent::transcript::Transcript::default();
         t.record(
             &s,
-            &json!({"type":"message_start","message":{"role":"assistant"}}),
+            &normalize(&json!({"type":"message_start","message":{"role":"assistant"}})).unwrap(),
         )
         .unwrap();
-        t.record(&s,&json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"partial"}})).unwrap();
-        t.record(&s,&json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final"}],"stopReason":"error","errorMessage":"provider offline"}})).unwrap();
+        t.record(&s,&normalize(&json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"partial"}})).unwrap()).unwrap();
+        t.record(&s,&normalize(&json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final"}],"stopReason":"error","errorMessage":"provider offline"}})).unwrap()).unwrap();
         assert_eq!(t.assistant.as_ref().unwrap().status, MessageStatus::Failed);
         assert!(!t.assistant.as_ref().unwrap().text.contains("partial"));
         assert!(t.failure.is_some());
-        t.record(&s,&json!({"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"false"}})).unwrap();
-        t.record(&s,&json!({"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","isError":true,"result":{"content":[{"type":"text","text":"exit 1"}]}})).unwrap();
+        t.record(&s,&normalize(&json!({"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"false"}})).unwrap()).unwrap();
+        t.record(&s,&normalize(&json!({"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","isError":true,"result":{"content":[{"type":"text","text":"exit 1"}]}})).unwrap()).unwrap();
         assert_eq!(t.tools["t1"].status, MessageStatus::Failed);
     }
     #[tokio::test]

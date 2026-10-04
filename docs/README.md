@@ -13,7 +13,7 @@
 | 修改 Token 统计、周期额度或额度恢复 | [Token 用量](token-usage.md) |
 | 修改计划触发、时区或通知 | [定时计划](scheduled-tasks.md) |
 | 确认长期产品边界与验收目标 | [产品设计](product-design.md) |
-| 查已跑过的测试和局限 | [Pi MVP](validation/pi-mvp.md)、[多任务](validation/multitask.md)、[UI](validation/ui-ux.md)、[Sandbox 镜像](validation/sandbox-image.md) |
+| 查已跑过的测试和局限 | [Agent 层](validation/agent-layer.md)、[Pi MVP](validation/pi-mvp.md)、[多任务](validation/multitask.md)、[UI](validation/ui-ux.md)、[Sandbox 镜像](validation/sandbox-image.md) |
 | 排查旧集成或追溯技术选择 | [历史 POC 索引](poc-plan.md) |
 
 ## 按需研究

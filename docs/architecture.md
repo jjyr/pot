@@ -12,7 +12,7 @@ macOS
      │                            Linux VM         │
      └─ bearer HTTP / SSE → Rust Runtime           │
                               ├─ SQLite / 请求账本 │
-                              ├─ 主 Pi 会话         │
+                              ├─ Agent binding → 主 Pi 会话         │
                               ├─ 任务队列 → Pi workers
                               └─ 定时调度           │
                                   桌面 / broker ←──┘
@@ -27,7 +27,8 @@ macOS
 | Helper | 用户进程，管理 VM、资源和正常/异常关闭 | `helper/` |
 | Runtime | 权威任务状态、消息事件、API、用量、恢复 | `runtime/src/main.rs`、`store.rs` |
 | 编排/调度 | 单层委派、队列、完成回流、定时触发 | `tasks.rs`、`orchestration.rs`、`schedules.rs` |
-| 引擎 | Pi RPC、独立原生 JSONL session、内置工具循环 | `pi.rs`、`pot-tools.mjs` |
+| Agent / 引擎 | Profile 快照、epoch 绑定与迁移；DriverHost / SessionHandle；Pi RPC 与原生上下文 | `agent/`、`pi.rs` |
+| 网关 / 工具桥 | provider 路由、请求预留、协议 codec；Pi / MCP 共享工具定义和 dispatcher | `gateway.rs`、`pot-tools.json`、`tool_bridge.rs`、`orchestration.rs` |
 | 协议/桌面 | 共享类型；guest 启动、浏览器与输入仲裁 | `protocol/`、`image/` |
 
 GPUI 与 Swift 共用主窗口和事件循环，C ABI 负责桥接。普通页面复用 Kit；原生 NSTextView 负责聊天编辑，WKWebView 负责桌面。关闭窗口保留后台；Quit 正常关闭 Chromium，再停止 helper/VM。
@@ -44,7 +45,9 @@ Sandbox 的系统依赖由构建 VM 预装成 OCI 镜像，随 App 发布；Help
 
 ## 状态与恢复
 
-- Runtime 保存产品消息/任务状态，Pi 保存原生执行上下文；binding 显式关联，不能把聊天记录当作引擎会话恢复。
+- Runtime 保存产品消息/任务状态，Pi 保存原生执行上下文。`agent.bindings.v1` 为每个 owner 保存不可变 ResolvedSpec、SHA-256、epoch 和 native_ref；旧 Pi 元数据幂等导入 epoch 1，仍保留旧字段。恢复只使用绑定快照。
+- Profile 设置通过持久迁移操作切换主聊天，运行中等待本轮停止；既有任务默认固定，新任务解析当前 worker 默认值。外部 handoff 与新会话先落盘，随后在同一 SQLite 事务归档旧绑定、激活新绑定并插入对话边界。确定性 handoff 有界、脱敏，下一次真实输入引导读取，不额外调用模型。
+- Pi transport 事件转换为带 epoch/turn/seq 的驱动事件后投影到产品记录。取消仍须等待 Pi 退出，未确认停止禁止再启动该 owner；其他引擎不能仅凭实现 enum 声称支持。
 - API 命令携带 request ID；消息事件有持久 cursor。Runtime 提供 SSE；当前 App 使用后台快照/分页轮询（约 500 ms），拒绝过期查询结果，切回对话先用缓存。
 - SQLite 使用 DELETE journal + synchronous=EXTRA，避免已遇到的共享文件系统 WAL 丢失；在线检查走 Runtime API，不能由宿主打开活跃 guest 数据库。
 - 任务与计划共同持久化为 `tasks.v2`，兼容读取 `tasks.v1`。重启保留排队项，运行中任务标为中断，不自动重放未知外部副作用。
