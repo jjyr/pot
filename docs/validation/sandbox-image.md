@@ -10,3 +10,5 @@
 本地证据在 `.local/d1/xfce-check/` 与 `.local/d1/offline-image-check*/data/`；不提交用户数据、日志中的 token 或构建产物。
 
 最终镜像 `pot.local/sandbox:989970b5d23191baf89f`：无网络完整检查（含导入/解包、服务检查、正常退出）冷启动 10 秒，复用数据再启动 8 秒。修复了旧数据目录残留 socket 引起的递归 chown 失败。最终 App 内确认暖白 Pot 背景、三项右键菜单、Thunar 和终端可用，简繁中文、日文、韩文与 emoji 显示正常；既有任务与配置可继续读取。
+
+启动栏修正：无网络检查新增 `xfce4-panel` 进程断言。实际 App 已验证 Browser 关闭后重开、Files 打开工作目录、Terminal 启动及浏览器最小化后的窗口恢复。旧用户目录通过独立 panel 版本标记迁移，不重置原主题配置。

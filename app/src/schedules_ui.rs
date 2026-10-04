@@ -305,31 +305,45 @@ impl SchedulesUI {
                 .child(
                     div()
                         .flex()
-                        .gap_2()
-                        .child(ui::hint(format!("共 {} 个计划", v.schedules.total), cx))
+                        .items_center()
+                        .justify_between()
+                        .child(ui::hint(
+                            format!(
+                                "共 {} 个计划 · 第 {} 页",
+                                v.schedules.total,
+                                v.schedule_offset / 20 + 1
+                            ),
+                            cx,
+                        ))
                         .child(
-                            Button::new("schedule-prev")
-                                .ghost()
-                                .label("上一页")
-                                .disabled(v.schedule_offset == 0)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    let mut v = this.client.view.lock().unwrap();
-                                    v.schedule_offset = v.schedule_offset.saturating_sub(20);
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("schedule-next")
-                                .ghost()
-                                .label("下一页")
-                                .disabled(v.schedules.next_offset.is_none())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    let mut v = this.client.view.lock().unwrap();
-                                    if let Some(offset) = v.schedules.next_offset {
-                                        v.schedule_offset = offset;
-                                    }
-                                    cx.notify();
-                                })),
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("schedule-prev")
+                                        .ghost()
+                                        .label("上一页")
+                                        .disabled(v.schedule_offset == 0)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            let mut v = this.client.view.lock().unwrap();
+                                            v.schedule_offset =
+                                                v.schedule_offset.saturating_sub(20);
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("schedule-next")
+                                        .ghost()
+                                        .label("下一页")
+                                        .disabled(v.schedules.next_offset.is_none())
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            let mut v = this.client.view.lock().unwrap();
+                                            if let Some(offset) = v.schedules.next_offset {
+                                                v.schedule_offset = offset;
+                                            }
+                                            cx.notify();
+                                        })),
+                                ),
                         ),
                 );
         }

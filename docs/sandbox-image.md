@@ -17,11 +17,11 @@ Sandbox 从 App 内置的 Linux ARM64 OCI 成品镜像启动。桌面、字体�
 
 ## 桌面与字体
 
-使用精简 Xfce：`xfwm4`、`xfsettingsd`、`xfdesktop`、Thunar、Xfce Terminal；无面板、登录管理器、屏保或合成器。暖白 Pot 背景，adw-gtk3 控件，Adwaita 图标，右键菜单提供 Browser / Files / Terminal。主题默认值按版本迁移，不在每次启动覆盖用户字体和应用偏好。
+使用精简 Xfce：`xfwm4`、`xfsettingsd`、`xfdesktop`、Thunar、Xfce Terminal 与底部常驻面板；无登录管理器、屏保或合成器。暖白 Pot 背景，adw-gtk3 控件，Adwaita 图标，底部直接提供 Browser / Files / Terminal 启动按钮、窗口切换和时钟，右键菜单也保留相同应用入口。在 Pot 中先点击「接管」再操作桌面。主题默认值按版本迁移，不在每次启动覆盖用户字体和应用偏好。
 
 UTF-8 locale 配合 Noto Sans、Noto CJK 的 SC/TC/JP/KR 字形与 emoji fallback，覆盖简体中文、繁体中文、日文和韩文。字体显示支持不等于输入法支持；尚未预装 CJK IME，也不承诺覆盖所有 Unicode 字符。
 
-## 大小对比（2026-10-04，ARM64）
+## 大小对比（2026-10-04，ARM64，初版无面板）
 
 | 口径 | 原 Fluxbox | 新 Xfce | 增量 |
 |---|---:|---:|---:|
@@ -41,3 +41,5 @@ codesign --force --sign - --entitlements helper/virtualization.entitlements .loc
 ```
 
 `PotImageCheck` 在全新镜像仓库与数据目录导入本地镜像，用 `networking: false` 启动 VM。检查 broker、Chromium CDP、Runtime、Pi 版本、桌面进程、四种语言的示例字形和浏览器正常退出；结果位于验证目录 `data/offline-result.json`，不调用模型。重跑时使用新的验证目录，确保验证冷启动。
+
+后续可用性修正：增加底部常驻启动栏和窗口列表，新增 4 个锁定系统包。当前镜像 `pot.local/sandbox:b637617123a0ce749783` 的压缩层为 657,315,671 bytes（626.87 MiB）。上表保留初版无面板的验收口径。

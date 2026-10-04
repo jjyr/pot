@@ -1,5 +1,5 @@
 #!/bin/sh
-# A minimal Xfce session: no panel, login manager, screensaver or compositor.
+# A minimal Xfce session: a launcher panel, no login manager, screensaver or compositor.
 set -eu
 export DISPLAY=:99 LANG=C.UTF-8 LC_ALL=C.UTF-8
 export XDG_CURRENT_DESKTOP=XFCE XDG_SESSION_TYPE=x11
@@ -32,6 +32,7 @@ xfsettingsd --sm-client-disable &
 xfwm4 --compositor=off --sm-client-disable &
 wm=$!
 xfdesktop --disable-wm-check &
+xfce4-panel --disable-wm-check &
 # xfdesktop uses defaults until a monitor property is explicitly created.
 paths=$(xrandr --query | awk '$2 == "connected" {print "/backdrop/screen0/monitor" $1 "/workspace0/last-image"}')
 for path in $paths; do
