@@ -543,7 +543,11 @@ async fn main() -> Result<()> {
         }
     });
     let router = Router::new()
-        .route("/api/pi/v1/chat/completions", post(tasks::gateway))
+        .route(
+            "/api/pi/v1/chat/completions",
+            post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
+        )
+        .route("/api/pi/compactions", post(pi::compaction_event))
         .route("/api/v1/orchestration", post(orchestration::invoke))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/query", get(tasks::query))

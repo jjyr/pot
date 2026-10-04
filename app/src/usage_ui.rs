@@ -38,16 +38,14 @@ pub fn entry(v: &client::View, cx: &mut Context<Shell>) -> Button {
         })
         .tooltip("查看此会话的累计用量")
         .on_click(cx.listener(|this, _, _, cx| {
-            this.usage_ui.offset = 0;
-            this.usage_ui.tab = 0;
+            this.usage_ui.show_all_tools = false;
             ui::command(json!({"action":"page","value":5}));
             cx.notify();
         }))
 }
 pub struct UsageUI {
     pub days: u32,
-    pub offset: usize,
-    pub tab: usize,
+    show_all_tools: bool,
     limit: Entity<InputState>,
     period: String,
     timezone: String,
@@ -63,8 +61,7 @@ impl UsageUI {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         Self {
             days: 7,
-            offset: 0,
-            tab: 0,
+            show_all_tools: false,
             limit: cx.new(|cx| InputState::new(window, cx).placeholder("例如 2M、500K")),
             period: "none".into(),
             timezone: "Asia/Shanghai".into(),
@@ -269,94 +266,195 @@ impl UsageUI {
                 )),
         );
         if detail {
-            scroll = scroll.child(
-                div().flex().gap_2().children(
-                    ["模型请求", "工具", "Skills", "上下文压缩"]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, label)| {
-                            Button::new(("usage-tab", i))
-                                .ghost()
-                                .label(label)
-                                .when(self.tab == i, |b| b.bg(cx.theme().secondary))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.usage_ui.tab = i;
-                                    cx.notify();
-                                }))
+            let compression = &d["compaction_total"];
+            let total_tokens = tokens(total);
+            let compressed = tokens(compression).min(total_tokens);
+            let conversation = total_tokens.saturating_sub(compressed);
+            let primary = cx.theme().blue.opacity(0.7);
+            let secondary = cx.theme().muted_foreground.opacity(0.65);
+            let mut model = ui::card(cx).child(div().child("模型消耗"));
+            if total_tokens > 0 {
+                model = model.child(
+                    div()
+                        .flex()
+                        .w_full()
+                        .h(px(12.))
+                        .rounded_full()
+                        .overflow_hidden()
+                        .when(conversation > 0, |el| {
+                            el.child(
+                                div()
+                                    .h_full()
+                                    .w(relative(conversation as f32 / total_tokens as f32))
+                                    .rounded_l_full()
+                                    .when(compressed == 0, |el| el.rounded_r_full())
+                                    .bg(primary),
+                            )
+                        })
+                        .when(compressed > 0, |el| {
+                            el.child(
+                                div()
+                                    .h_full()
+                                    .w(relative(compressed as f32 / total_tokens as f32))
+                                    .rounded_r_full()
+                                    .when(conversation == 0, |el| el.rounded_l_full())
+                                    .bg(secondary),
+                            )
                         }),
-                ),
-            );
-            match self.tab {
-                0 => {
-                    let rows = d["requests"].as_array().cloned().unwrap_or_default();
-                    if rows.is_empty() {
-                        scroll = scroll.child(ui::hint("暂无已记录的模型请求。", cx));
+                );
+                for (id, label, amount, color, input, output, cache) in [
+                    (
+                        "conversation",
+                        "任务对话",
+                        conversation,
+                        primary,
+                        n(total, "input").saturating_sub(n(compression, "input")),
+                        n(total, "output").saturating_sub(n(compression, "output")),
+                        n(total, "cache").saturating_sub(n(compression, "cache")),
+                    ),
+                    (
+                        "compaction",
+                        "上下文压缩",
+                        compressed,
+                        secondary,
+                        n(compression, "input"),
+                        n(compression, "output"),
+                        n(compression, "cache"),
+                    ),
+                ] {
+                    if amount == 0 {
+                        continue;
                     }
-                    for r in rows {
-                        scroll = scroll.child(
-                            ui::card(cx)
-                                .child(ui::hint(
-                                    format!(
-                                        "{} · {}",
-                                        r["label"].as_str().unwrap_or(""),
-                                        r["model"].as_str().unwrap_or("")
-                                    ),
-                                    cx,
-                                ))
-                                .child(div().child(format!(
-                                    "输入 {} · 输出 {}",
-                                    r["input"].as_u64().map(count).unwrap_or("未知".into()),
-                                    r["output"].as_u64().map(count).unwrap_or("未知".into())
-                                )))
-                                .child(ui::hint(
-                                    r["turn_label"].as_str().unwrap_or("历史未分类").to_string(),
-                                    cx,
-                                )),
-                        );
-                    }
+                    let tooltip = format!(
+                        "输入 {} · 输出 {} · 输入中缓存命中 {}",
+                        count(input),
+                        count(output),
+                        count(cache)
+                    );
+                    model = model.child(
+                        div()
+                            .id(id)
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().size(px(8.)).rounded_full().bg(color))
+                            .child(ui::hint(
+                                format!(
+                                    "{label}  {} · {:.1}%",
+                                    count(amount),
+                                    amount as f64 / total_tokens as f64 * 100.
+                                ),
+                                cx,
+                            ))
+                            .tooltip(move |window, cx| {
+                                ui::title_tooltip(tooltip.clone(), window, cx)
+                            }),
+                    );
                 }
-                1 => {
-                    scroll=scroll.child(ui::hint("工具内容会进入后续模型请求。以下为返回内容大小估算，不与实际 tokens 相加；估算采用 UTF-8 字节数 ÷ 4。",cx));
-                    let rows = d["tools"].as_array().cloned().unwrap_or_default();
-                    if rows.is_empty() {
-                        scroll = scroll.child(ui::hint("暂无工具调用。", cx));
-                    }
-                    for r in rows {
-                        scroll = scroll.child(
-                            ui::card(cx)
-                                .child(
-                                    div().child(r["name"].as_str().unwrap_or("tool").to_string()),
-                                )
-                                .child(ui::hint(
-                                    format!(
-                                        "{} 次调用 · {} 次失败 · {:.1} 秒 · 输出约 {} tokens{}",
-                                        n(&r, "calls"),
-                                        n(&r, "failed"),
-                                        n(&r, "duration_ms") as f64 / 1000.,
-                                        count(n(&r, "bytes").div_ceil(4)),
-                                        if n(&r, "unfinished") > 0 {
-                                            format!(" · {} 次未结束", n(&r, "unfinished"))
-                                        } else {
-                                            String::new()
-                                        }
-                                    ),
-                                    cx,
-                                )),
-                        );
-                    }
-                }
-                2 => {
-                    scroll = scroll.child(ui::card(cx).child(ui::hint(
-                        "当前 Pi 未启用 Skills，暂无可统计的加载用量。",
+            } else {
+                model = model.child(ui::hint("暂无已确认的模型用量", cx));
+            }
+            scroll = scroll.child(model);
+            let mut tools = d["tools"].as_array().cloned().unwrap_or_default();
+            tools.sort_by(|a, b| {
+                n(b, "bytes")
+                    .cmp(&n(a, "bytes"))
+                    .then_with(|| a["name"].as_str().cmp(&b["name"].as_str()))
+            });
+            if !tools.is_empty() {
+                let sum: u64 = tools.iter().map(|r| n(r, "bytes")).sum();
+                let max = tools
+                    .iter()
+                    .map(|r| n(r, "bytes"))
+                    .max()
+                    .unwrap_or(0)
+                    .max(1);
+                let mut card = ui::card(cx)
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .child(div().child("工具输出量"))
+                            .child(ui::hint(
+                                format!("约 {} tokens", count(sum.div_ceil(4))),
+                                cx,
+                            )),
+                    )
+                    .child(ui::hint(
+                        "按返回内容 UTF-8 字节数 ÷ 4 估算；不与模型消耗相加。",
                         cx,
-                    )))
+                    ));
+                for (index, r) in tools
+                    .iter()
+                    .take(if self.show_all_tools { tools.len() } else { 5 })
+                    .enumerate()
+                {
+                    let name = r["name"].as_str().unwrap_or("tool").to_string();
+                    let tooltip = format!(
+                        "{} · {} 次失败 · {:.1} 秒 · {} 次未结束",
+                        name,
+                        n(r, "failed"),
+                        n(r, "duration_ms") as f64 / 1000.,
+                        n(r, "unfinished")
+                    );
+                    card = card.child(
+                        div()
+                            .id(("tool-output", index))
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(div().flex_1().min_w_0().truncate().child(name))
+                                    .child(ui::hint(
+                                        format!(
+                                            "约 {} tokens · {} 次",
+                                            count(n(r, "bytes").div_ceil(4)),
+                                            n(r, "calls")
+                                        ),
+                                        cx,
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .h(px(6.))
+                                    .w_full()
+                                    .rounded_full()
+                                    .bg(cx.theme().secondary)
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .h_full()
+                                            .w(relative(n(r, "bytes") as f32 / max as f32))
+                                            .rounded_full()
+                                            .bg(primary),
+                                    ),
+                            )
+                            .tooltip(move |window, cx| {
+                                ui::title_tooltip(tooltip.clone(), window, cx)
+                            }),
+                    );
                 }
-                _ => {
-                    scroll = scroll.child(ui::card(cx).child(ui::hint(
-                        "当前 Pi 未启用自动上下文压缩，暂无压缩请求用量。",
-                        cx,
-                    )))
+                if tools.len() > 5 {
+                    card = card.child(
+                        Button::new("usage-more-tools")
+                            .ghost()
+                            .small()
+                            .label(if self.show_all_tools {
+                                "收起".into()
+                            } else {
+                                format!("显示全部 {} 个工具", tools.len())
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.usage_ui.show_all_tools = !this.usage_ui.show_all_tools;
+                                cx.notify();
+                            })),
+                    );
                 }
+                scroll = scroll.child(card);
             }
         } else {
             let data = d["buckets"].as_array().cloned().unwrap_or_default();
@@ -498,15 +596,6 @@ impl UsageUI {
                     })),
             );
         }
-        if n(&d["historical"], "requests") > 0 {
-            scroll = scroll.child(ui::hint(
-                format!(
-                    "另有 {} 次历史请求缺少时间；已保留到会话累计，未计入时间图表。",
-                    n(&d["historical"], "requests")
-                ),
-                cx,
-            ));
-        }
         if d["waiting"].is_object()
             && d["quota"]["active"] == true
             && n(&d["waiting"], "required") > n(&d["quota"]["policy"], "limit")
@@ -517,41 +606,6 @@ impl UsageUI {
             ));
         }
         body = body.child(scroll);
-        if detail && self.tab == 0 {
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(ui::hint(format!("第 {} 页", self.offset / 20 + 1), cx))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                Button::new("usage-prev")
-                                    .ghost()
-                                    .label("上一页")
-                                    .disabled(self.offset == 0)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.usage_ui.offset =
-                                            this.usage_ui.offset.saturating_sub(20);
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("usage-next")
-                                    .ghost()
-                                    .label("下一页")
-                                    .disabled(d["next_offset"].is_null())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.usage_ui.offset += 20;
-                                        cx.notify();
-                                    })),
-                            ),
-                    ),
-            );
-        }
         ui::page(cx).child(body)
     }
 }

@@ -127,7 +127,7 @@ impl Shell {
                 Some((
                     scope,
                     self.usage_ui.days,
-                    if page == 5 { self.usage_ui.offset } else { 0 },
+                    0,
                     self.native["timezone"]
                         .as_str()
                         .unwrap_or("Asia/Shanghai")

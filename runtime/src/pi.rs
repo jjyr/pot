@@ -50,6 +50,34 @@ pub fn private_json(path: &std::path::Path, value: &Value) -> Result<()> {
     Ok(())
 }
 
+pub const MAX_MODEL_BODY: usize = 16 * 1024 * 1024;
+
+pub async fn compaction_event(
+    State(root): State<Service>,
+    h: HeaderMap,
+    Json(event): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let s = tasks::pi_service(&root, &h)?;
+    let inner = s.inner.lock().unwrap();
+    let turn = inner
+        .turn
+        .as_ref()
+        .ok_or_else(|| error(StatusCode::CONFLICT, "no_turn", "No active turn"))?;
+    if turn.cancelling && event["action"] == "start" {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "cancelling",
+            "Turn is stopping",
+        ));
+    }
+    s.usage
+        .lock()
+        .unwrap()
+        .compaction(&s.usage_scope, &turn.user_message_id, &event, now())
+        .map_err(internal)?;
+    Ok(Json(json!({"ok":true})))
+}
+
 // The gateway has a fixed upstream and never follows redirects. The real API
 // key is not passed to Pi or included in its session files.
 pub async fn gateway(
@@ -61,14 +89,22 @@ pub async fn gateway(
     let c =
         s.pi.as_ref()
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "pi_disabled", "Pi is not configured"))?;
-    if body["model"] != c.model || body["stream"] != true || body.to_string().len() > 96000 {
+    if body["model"] != c.model || body["stream"] != true || body.to_string().len() > MAX_MODEL_BODY
+    {
         return Err(error(
             StatusCode::BAD_REQUEST,
             "invalid_model_request",
             "Model, stream or context limit exceeded",
         ));
     }
-    body["max_tokens"] = json!(c.max_tokens);
+    // Respect Pi's smaller summarization budget as well as the user's upper limit.
+    let max_output = body["max_tokens"]
+        .as_u64()
+        .or_else(|| body["max_completion_tokens"].as_u64())
+        .unwrap_or(c.max_tokens)
+        .max(1)
+        .min(c.max_tokens);
+    body["max_tokens"] = json!(max_output);
     body.as_object_mut()
         .ok_or_else(|| error(StatusCode::BAD_REQUEST, "invalid_body", "Expected object"))?
         .remove("max_completion_tokens");
@@ -107,20 +143,37 @@ pub async fn gateway(
     let request_id = id();
     // UTF-8 bytes are a deliberately conservative input estimate, not billed tokens.
     let input_estimate = body.to_string().len() as u64 + 1024;
-    let reserved = s
-        .usage
-        .lock()
-        .unwrap()
-        .reserve(
-            &request_id,
-            &s.usage_scope,
-            &turn_id,
-            now(),
-            &c.model,
-            input_estimate,
-            c.max_tokens,
-        )
-        .map_err(internal)?;
+    let reserved = {
+        let ledger = s.usage.lock().unwrap();
+        let operation = h
+            .get("x-pot-compaction")
+            .and_then(|v| v.to_str().ok())
+            .filter(|id| *id != "conversation");
+        if let Some(operation) = operation {
+            ledger
+                .validate_compaction(&s.usage_scope, &turn_id, operation)
+                .map_err(internal)?;
+        }
+        let output = ledger
+            .reserve(
+                &request_id,
+                &s.usage_scope,
+                &turn_id,
+                now(),
+                &c.model,
+                input_estimate,
+                max_output,
+            )
+            .map_err(internal)?;
+        if output.is_some() {
+            if let Some(operation) = operation {
+                ledger
+                    .tag_compaction(&request_id, operation)
+                    .map_err(internal)?;
+            }
+        }
+        output
+    };
     let Some(output) = reserved else {
         s.usage
             .lock()
@@ -309,6 +362,9 @@ impl Transcript {
                         m.text.push_str(&format!("\n{detail}"));
                         self.failure = Some(detail);
                     }
+                    if m.status == MessageStatus::Complete {
+                        self.failure = None;
+                    }
                     if m.text.is_empty() && m.status == MessageStatus::Cancelled {
                         m.text = "已停止".into();
                     }
@@ -317,6 +373,9 @@ impl Transcript {
                     }
                     s.save(m.clone())?;
                 }
+            }
+            "compaction_end" if e["result"].is_object() && e["willRetry"] == true => {
+                self.failure = None;
             }
             "tool_execution_start" => {
                 let key = e["toolCallId"]
@@ -394,8 +453,21 @@ pub async fn run(s: &Service, req: SendMessage) -> Result<()> {
     let resuming = usage::paused(s)?.is_some_and(|p| p.request_id == req.request_id);
     s.inner.lock().unwrap().store.set("pi.paused", "")?;
     s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
+    s.usage
+        .lock()
+        .unwrap()
+        .interrupt_compactions(&s.usage_scope, "interrupted", now())?;
     let mut transcript = Transcript::default();
     let result = execute(s, &req, &mut transcript, resuming).await;
+    let interrupted_state = if cancelled(s) {
+        "cancelled"
+    } else {
+        "interrupted"
+    };
+    s.usage
+        .lock()
+        .unwrap()
+        .interrupt_compactions(&s.usage_scope, interrupted_state, now())?;
     let waiting = s.usage.lock().unwrap().waiting(&s.usage_scope)?.is_some();
     let uncertain = result
         .as_ref()
@@ -504,7 +576,7 @@ async fn execute(
     )?;
     private_json(
         &home.join("settings.json"),
-        &json!({"retry":{"enabled":false,"provider":{"maxRetries":0}},"compaction":{"enabled":false},"enableInstallTelemetry":false,"enableAnalytics":false,"shellPath":"/bin/bash"}),
+        &json!({"retry":{"enabled":false,"provider":{"maxRetries":0}},"compaction":{"enabled":true,"reserveTokens":8192,"keepRecentTokens":8192},"enableInstallTelemetry":false,"enableAnalytics":false,"shellPath":"/bin/bash"}),
     )?;
     let summarizing = req.request_id.starts_with(orchestration::RESULT_PREFIX);
     let tool_names = if s.is_worker {
@@ -528,6 +600,16 @@ async fn execute(
         )
     };
     let mut process = Command::new(&s.pi_program);
+    let usage_extension = home.join("pot-usage.mjs");
+    std::fs::write(&usage_extension, include_str!("pot-usage.mjs"))?;
+    process
+        .arg("--extension")
+        .arg(usage_extension)
+        .env(
+            "POT_USAGE_API",
+            format!("http://127.0.0.1:{}/api/pi/compactions", endpoint.port),
+        )
+        .env("POT_USAGE_TOKEN", &s.token);
     if !s.is_worker {
         let extension = home.join("pot-tools.mjs");
         std::fs::write(&extension, include_str!("pot-tools.mjs"))?;
@@ -1045,5 +1127,197 @@ mod tests {
         drop(ledger);
         server.abort();
         std::fs::remove_dir_all(&s.data).unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Runs installed Pi against a local mock provider; set POT_TEST_PI_BIN"]
+    async fn real_pi_compaction_usage_and_allowance_resume() {
+        for scenario in ["normal", "pause", "cancel", "overflow"] {
+            let pause = scenario == "pause";
+            let cancel_summary = scenario == "cancel";
+            let overflow = scenario == "overflow";
+            let mut s = tasks::tests::fixture();
+            s.pi_program = std::env::var("POT_TEST_PI_BIN").unwrap();
+            s.usage = Arc::new(Mutex::new(
+                usage::Ledger::open(&s.data.join("usage.sqlite")).unwrap(),
+            ));
+            s.api_budget = Some(deepseek::BudgetSettings {
+                namespace: "pi-attempts",
+                data: s.data.clone(),
+                limit: 30,
+                max_output_tokens: 256,
+            });
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            s.commands = tx;
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            s.pi_upstream = format!("http://127.0.0.1:{port}/mock");
+            private_json(
+                &s.data.join(RUNTIME_ENDPOINT_FILE),
+                &json!(RuntimeEndpoint {
+                    api_version: API_VERSION,
+                    port,
+                    token: s.token.clone(),
+                    boot_id: s.boot.clone()
+                }),
+            )
+            .unwrap();
+            let started = Arc::new(tokio::sync::Notify::new());
+            let summary_started = started.clone();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let count = calls.clone();
+            let summaries = Arc::new(AtomicUsize::new(0));
+            let summary_count = summaries.clone();
+            let ledger = s.usage.clone();
+            let router=Router::new().route("/api/pi/v1/chat/completions",post(gateway)).route("/api/pi/compactions",post(compaction_event)).with_state(s.clone())
+                .route("/mock",post(move |Json(_body):Json<Value>|{
+                    let summary_started=summary_started.clone();
+                    let index=count.fetch_add(1,Ordering::SeqCst);
+                    let is_summary:bool=ledger.lock().unwrap().0.query_row("SELECT compaction_id IS NOT NULL FROM requests ORDER BY rowid DESC LIMIT 1",[],|r|r.get(0)).unwrap();
+                    if is_summary {summary_count.fetch_add(1,Ordering::SeqCst);}
+                    if pause && index==0 { ledger.lock().unwrap().set_policy(&usage::Policy{period:"day".into(),limit:28006,..Default::default()}).unwrap(); }
+                    async move {
+                        let content=if is_summary {"Summary: preserve APRICOT and continue the latest request.".to_string()}else if index==0 {format!("Remembered APRICOT. {}", "history ".repeat(9000))}else{"Remembered APRICOT.".to_string()};
+                        let chunk=|delta:Value,finish:Value|json!({"id":format!("compact-{index}"),"object":"chat.completion.chunk","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"delta":delta,"finish_reason":finish}]}).to_string();
+                        let usage=if index==0 {json!({"prompt_tokens":28000,"completion_tokens":5,"prompt_cache_hit_tokens":100})}else if is_summary {json!({"prompt_tokens":40,"completion_tokens":8,"prompt_cache_hit_tokens":4})}else{json!({"prompt_tokens":10,"completion_tokens":5})};
+                        let frames=vec![WireEvent::default().data(chunk(json!({"role":"assistant","content":content}),Value::Null)),WireEvent::default().data(chunk(json!({}),json!(if overflow && index==0 { "length" } else { "stop" }))),WireEvent::default().data(json!({"choices":[],"usage":usage}).to_string()),WireEvent::default().data("[DONE]")];
+                        Sse::new(async_stream::stream! {
+                            if is_summary && cancel_summary && index==1 {
+                                summary_started.notify_one();
+                                std::future::pending::<()>().await;
+                            }
+                            for frame in frames { yield Ok::<_,Infallible>(frame); }
+                        })
+                    }
+                }));
+            let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+            let submit = |id: &str, text: String| SendMessage {
+                request_id: id.into(),
+                conversation_id: "main".into(),
+                text,
+            };
+            let _ = send(
+                State(s.clone()),
+                tasks::tests::headers(),
+                Json(submit(
+                    "seed",
+                    format!("Remember APRICOT. {}", "context ".repeat(5000)),
+                )),
+            )
+            .await
+            .unwrap();
+            let req = rx.recv().await.unwrap();
+            if cancel_summary {
+                let runner = s.clone();
+                let running = tokio::spawn(async move { run(&runner, req).await });
+                tokio::time::timeout(Duration::from_secs(20), started.notified())
+                    .await
+                    .unwrap();
+                let turn = s.snapshot().unwrap().turn.unwrap();
+                let _ = cancel(
+                    State(s.clone()),
+                    tasks::tests::headers(),
+                    Json(CancelTurn {
+                        request_id: "cancel-compaction".into(),
+                        user_message_id: turn.user_message_id,
+                    }),
+                )
+                .await
+                .unwrap();
+                tokio::time::timeout(Duration::from_secs(20), running)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                let cancelled_count: u64 = s
+                    .usage
+                    .lock()
+                    .unwrap()
+                    .0
+                    .query_row(
+                        "SELECT COUNT(*) FROM compactions WHERE state='cancelled'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(cancelled_count, 1);
+                assert!(usage::paused(&s).unwrap().is_none());
+            } else {
+                tokio::time::timeout(Duration::from_secs(40), run(&s, req))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+            s.turn(None);
+            if pause {
+                assert!(usage::paused(&s).unwrap().is_some());
+                assert_eq!(calls.load(Ordering::SeqCst), 1);
+                s.inner.lock().unwrap().store = Store::open(&s.data.join("pot.sqlite")).unwrap();
+                s.usage = Arc::new(Mutex::new(
+                    usage::Ledger::open(&s.data.join("usage.sqlite")).unwrap(),
+                ));
+                // Keep the live test server's shared ledger; reopening above verifies durable storage.
+                s.usage
+                    .lock()
+                    .unwrap()
+                    .set_policy(&usage::Policy::default())
+                    .unwrap();
+                usage::resume_main(&s).unwrap();
+                tokio::time::timeout(Duration::from_secs(40), run(&s, rx.recv().await.unwrap()))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                s.turn(None);
+                assert!(usage::paused(&s).unwrap().is_none());
+            }
+            let _ = send(
+                State(s.clone()),
+                tasks::tests::headers(),
+                Json(submit("continue", "Continue and recall APRICOT.".into())),
+            )
+            .await
+            .unwrap();
+            tokio::time::timeout(Duration::from_secs(40), run(&s, rx.recv().await.unwrap()))
+                .await
+                .unwrap()
+                .unwrap();
+            s.turn(None);
+            let summary_calls = summaries.load(Ordering::SeqCst) as u64;
+            assert!(summary_calls > 0, "auto-compaction did not run");
+            let l = s.usage.lock().unwrap();
+            let (count, total): (u64, u64) =
+                l.0.query_row(
+                    "SELECT COUNT(*),SUM(COALESCE(input,0)+COALESCE(output,0)) FROM requests",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(count, calls.load(Ordering::SeqCst) as u64);
+            assert_eq!(
+                total,
+                28005
+                    + 48 * (summary_calls - u64::from(cancel_summary))
+                    + 15 * (count - 1 - summary_calls)
+            );
+            let complete:u64=l.0.query_row("SELECT COUNT(*) FROM compactions WHERE state='complete' AND tokens_after IS NOT NULL",[],|r|r.get(0)).unwrap();
+            assert!(complete > 0, "missing completed compaction");
+            assert!(
+                std::fs::read_to_string(s.data.join("pi-session.jsonl"))
+                    .unwrap()
+                    .contains("\"type\":\"compaction\"")
+            );
+            if overflow {
+                let n:u64=l.0.query_row("SELECT COUNT(*) FROM compactions WHERE reason='overflow' AND state='complete'",[],|r|r.get(0)).unwrap();
+                assert!(n > 0);
+                assert!(
+                    s.snapshot()
+                        .unwrap()
+                        .messages
+                        .iter()
+                        .filter(|m| m.role == Role::User)
+                        .all(|m| m.status == MessageStatus::Complete)
+                );
+            }
+            server.abort();
+        }
     }
 }

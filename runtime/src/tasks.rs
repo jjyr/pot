@@ -512,15 +512,19 @@ pub(super) async fn gateway(
     h: HeaderMap,
     body: Json<Value>,
 ) -> ApiResult<axum::response::Response> {
-    let service = if root.authorized(&h).is_ok() {
-        root.clone()
+    pi::gateway(State(pi_service(&root, &h)?), h, body).await
+}
+
+pub(super) fn pi_service(root: &Service, h: &HeaderMap) -> ApiResult<Service> {
+    if root.authorized(h).is_ok() {
+        Ok(root.clone())
     } else {
         root.tasks
             .lock()
             .unwrap()
             .lanes
             .values()
-            .find(|l| l.service.authorized(&h).is_ok())
+            .find(|l| l.service.authorized(h).is_ok())
             .map(|l| l.service.clone())
             .ok_or_else(|| {
                 error(
@@ -528,9 +532,8 @@ pub(super) async fn gateway(
                     "unauthorized",
                     "Runtime token required",
                 )
-            })?
-    };
-    pi::gateway(State(service), h, body).await
+            })
+    }
 }
 
 /// Claim durably before launching; configured background concurrency and one worker
@@ -787,6 +790,91 @@ pub(super) fn start(root: Service) {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    #[tokio::test]
+    async fn compaction_events_are_authorized_and_confined_to_the_active_lane() {
+        let s = fixture();
+        let op = id();
+        let event = json!({"id":op,"action":"start","reason":"threshold","tokens_before":28000});
+        assert_eq!(
+            pi::compaction_event(State(s.clone()), HeaderMap::new(), Json(event.clone()))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            pi::compaction_event(State(s.clone()), headers(), Json(event.clone()))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::CONFLICT
+        );
+        let task = add(&s, "compact worker", "").await;
+        let (_, worker, _) = claim(&s).unwrap().unwrap();
+        let mut h = HeaderMap::new();
+        h.insert(
+            "authorization",
+            format!("Bearer {}", worker.token).parse().unwrap(),
+        );
+        let _ = pi::compaction_event(State(s.clone()), h.clone(), Json(event.clone()))
+            .await
+            .unwrap();
+        main_turn(&s, "main-compaction");
+        assert!(
+            pi::compaction_event(State(s.clone()), headers(), Json(event.clone()))
+                .await
+                .is_err()
+        );
+        assert!(
+            pi::compaction_event(
+                State(s.clone()),
+                headers(),
+                Json(json!({"id":op,"action":"complete"}))
+            )
+            .await
+            .is_err()
+        );
+        worker
+            .inner
+            .lock()
+            .unwrap()
+            .turn
+            .as_mut()
+            .unwrap()
+            .cancelling = true;
+        assert_eq!(
+            pi::compaction_event(
+                State(s.clone()),
+                h.clone(),
+                Json(json!({"id":id(),"action":"start","reason":"threshold"}))
+            )
+            .await
+            .unwrap_err()
+            .0,
+            StatusCode::CONFLICT
+        );
+        let _ = pi::compaction_event(
+            State(s.clone()),
+            h,
+            Json(json!({"id":op,"action":"cancelled"})),
+        )
+        .await
+        .unwrap();
+        let (scope, state): (String, String) = s
+            .usage
+            .lock()
+            .unwrap()
+            .0
+            .query_row(
+                "SELECT scope,state FROM compactions WHERE id=?",
+                [op],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(scope, task.id);
+        assert_eq!(state, "cancelled");
+    }
+
     #[tokio::test]
     async fn full_task_title_survives_restore_and_repairs_legacy_prefix() {
         let s = fixture();

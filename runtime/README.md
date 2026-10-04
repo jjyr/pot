@@ -19,7 +19,7 @@ The Rust gateway has a fixed HTTPS DeepSeek upstream, disables redirects/retries
 overrides output limits and disables thinking. Each HTTP request, including tool
 continuation or a failed request, consumes an fsynced `pi-attempts/N` reservation
 before networking. It rejects requests without an active turn, cancelled turns,
-oversized context (>96 KB), and exhausted budgets. Actual provider usage is saved
+oversized request bodies (>16 MiB), and exhausted budgets. Actual provider usage is saved
 separately. Request counts and token usage have different meanings.
 
 Pi gets a local gateway token, not the provider key, in its private models.json.
@@ -32,7 +32,10 @@ The session ID is saved in SQLite and validated on every reopen. A missing file
 or changed ID fails visibly, never silently creates a replacement conversation.
 The transcript is driven by message/tool events, completion waits for
 `agent_settled`, and the process is disposed after each turn. Project extensions,
-skills/context files, automatic compaction and retries are disabled for this MVP.
+skills/context files and retries are disabled for this MVP. Automatic compaction
+is enabled for main and worker sessions, using the same gateway and token limits.
+The explicitly loaded Pot usage extension records compaction operations and tags
+summary requests; provider usage is counted only once. See [Token usage](../docs/token-usage.md).
 The bundled Pot task extension is explicitly loaded for the main session only.
 Previous AGY/direct-API model context is not uploaded into the Pi session.
 
@@ -58,6 +61,7 @@ Bearer token comes from mode-0600 `product/runtime.json`:
 - `GET /api/v1/usage`: durable request counts and saved provider token usage.
 - `POST /api/v1/engine/authenticate`: 501; GUI credential setup belongs to D2.
 - `/api/pi/v1/chat/completions`: internal bearer-authenticated Pi gateway.
+- `POST /api/pi/compactions`: lane-authenticated compaction lifecycle events during an active turn; no cross-lane writes.
 
 The App consumes SSE independently of its send worker, deduplicates events,
 resynchronizes gaps and preserves command errors across background updates.

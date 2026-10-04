@@ -102,6 +102,21 @@ impl Ledger {
         CREATE INDEX IF NOT EXISTS tools_scope ON tools(scope,at);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0);")?;
+        c.execute_batch("CREATE TABLE IF NOT EXISTS compactions(id TEXT PRIMARY KEY, scope TEXT NOT NULL, turn_id TEXT NOT NULL, at INTEGER NOT NULL, end_at INTEGER, reason TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'running', tokens_before INTEGER, tokens_after INTEGER, entry_id TEXT);
+        CREATE INDEX IF NOT EXISTS compaction_scope ON compactions(scope,at);")?;
+        let has_column = c
+            .prepare("PRAGMA table_info(requests)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .iter()
+            .any(|name| name == "compaction_id");
+        if !has_column {
+            c.execute_batch("ALTER TABLE requests ADD COLUMN compaction_id TEXT;")?;
+        }
+        c.execute_batch(
+            "CREATE INDEX IF NOT EXISTS request_compaction ON requests(compaction_id);
+            UPDATE compactions SET state='interrupted' WHERE state='running';",
+        )?;
         // Unknown interrupted requests retain their reservations for this window.
         c.execute(
             "UPDATE requests SET state='unknown' WHERE state='pending'",
@@ -273,6 +288,79 @@ impl Ledger {
         }
         Ok(())
     }
+    pub fn compaction(&self, scope: &str, turn: &str, event: &Value, at: i64) -> Result<()> {
+        let id = event["id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing compaction ID"))?;
+        uuid::Uuid::parse_str(id)?;
+        let number = |key: &str| -> Result<Option<u64>> {
+            if event[key].is_null() {
+                return Ok(None);
+            }
+            let n = event[key]
+                .as_u64()
+                .ok_or_else(|| anyhow!("Invalid context size"))?;
+            anyhow::ensure!(n <= 9_007_199_254_740_991, "Invalid context size");
+            Ok(Some(n))
+        };
+        let before = number("tokens_before")?;
+        let after = number("tokens_after")?;
+        match event["action"].as_str().unwrap_or("") {
+            "start" => {
+                let reason = event["reason"].as_str().unwrap_or("");
+                anyhow::ensure!(
+                    ["manual", "threshold", "overflow"].contains(&reason),
+                    "Invalid compaction reason"
+                );
+                use rusqlite::OptionalExtension;
+                let owner: Option<(String, String)> = self
+                    .0
+                    .query_row(
+                        "SELECT scope,turn_id FROM compactions WHERE id=?",
+                        [id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                if let Some(owner) = owner {
+                    anyhow::ensure!(
+                        owner == (scope.into(), turn.into()),
+                        "Compaction belongs to another turn"
+                    );
+                    return Ok(());
+                }
+                self.interrupt_compactions(scope, "interrupted", at)?;
+                self.0.execute("INSERT INTO compactions(id,scope,turn_id,at,reason,tokens_before) VALUES (?,?,?,?,?,?)",params![id,scope,turn,at,reason,before])?;
+            }
+            state @ ("complete" | "failed" | "cancelled") => {
+                let entry = event["entry_id"].as_str();
+                anyhow::ensure!(entry.is_none_or(|v| v.len() <= 128), "Invalid entry ID");
+                let changed = self.0.execute("UPDATE compactions SET state=?,end_at=COALESCE(end_at,?),tokens_before=COALESCE(?,tokens_before),tokens_after=COALESCE(?,tokens_after),entry_id=COALESCE(?,entry_id) WHERE id=? AND scope=? AND turn_id=? AND (state='running' OR state=?)",params![state,at,before,after,entry,id,scope,turn,state])?;
+                anyhow::ensure!(changed == 1, "Unknown or finished compaction");
+            }
+            _ => bail!("Invalid compaction event"),
+        }
+        Ok(())
+    }
+    pub fn interrupt_compactions(&self, scope: &str, state: &str, at: i64) -> Result<()> {
+        self.0.execute(
+            "UPDATE compactions SET state=?,end_at=? WHERE scope=? AND state='running'",
+            params![state, at, scope],
+        )?;
+        Ok(())
+    }
+    pub fn validate_compaction(&self, scope: &str, turn: &str, id: &str) -> Result<()> {
+        let valid: bool = self.0.query_row("SELECT EXISTS(SELECT 1 FROM compactions WHERE id=? AND scope=? AND turn_id=? AND state='running')",params![id,scope,turn],|r|r.get(0))?;
+        anyhow::ensure!(valid, "Unknown or inactive compaction");
+        Ok(())
+    }
+    pub fn tag_compaction(&self, request: &str, operation: &str) -> Result<()> {
+        self.0.execute(
+            "UPDATE requests SET compaction_id=? WHERE id=?",
+            params![operation, request],
+        )?;
+        Ok(())
+    }
+
     pub fn summary(&self, q: &QueryArgs, at: i64) -> Result<Value> {
         anyhow::ensure!(
             [7, 30, 90, 365].contains(&q.days),
@@ -323,8 +411,8 @@ impl Ledger {
         let mut requests = vec![];
         let mut tools = vec![];
         if !q.scope.is_empty() {
-            let mut stmt=self.0.prepare("SELECT id,turn_id,at,model,input,output,cache,state FROM requests WHERE scope=? ORDER BY at DESC,id DESC LIMIT 20 OFFSET ?")?;
-            for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"turn":r.get::<_,String>(1)?,"at":r.get::<_,i64>(2)?,"label":if r.get::<_,i64>(2)?==0 {"历史 · 时间未知".into()}else{Utc.timestamp_millis_opt(r.get::<_,i64>(2)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string()},"model":r.get::<_,String>(3)?,"input":r.get::<_,Option<u64>>(4)?,"output":r.get::<_,Option<u64>>(5)?,"cache":r.get::<_,u64>(6)?,"state":r.get::<_,String>(7)?})))? {requests.push(row?);}
+            let mut stmt=self.0.prepare("SELECT id,turn_id,at,model,input,output,cache,state,compaction_id FROM requests WHERE scope=? ORDER BY at DESC,id DESC LIMIT 20 OFFSET ?")?;
+            for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"turn":r.get::<_,String>(1)?,"at":r.get::<_,i64>(2)?,"label":if r.get::<_,i64>(2)?==0 {"历史 · 时间未知".into()}else{Utc.timestamp_millis_opt(r.get::<_,i64>(2)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string()},"model":r.get::<_,String>(3)?,"input":r.get::<_,Option<u64>>(4)?,"output":r.get::<_,Option<u64>>(5)?,"cache":r.get::<_,u64>(6)?,"state":r.get::<_,String>(7)?,"purpose":if r.get::<_,Option<String>>(8)?.is_some(){"compaction"}else{"conversation"}})))? {requests.push(row?);}
             let mut labels = std::collections::HashMap::new();
             let mut rounds=self.0.prepare("SELECT turn_id,DENSE_RANK() OVER (ORDER BY MIN(at),turn_id) FROM requests WHERE scope=? AND at>0 GROUP BY turn_id")?;
             for row in rounds.query_map([&q.scope], |r| {
@@ -341,11 +429,22 @@ impl Ledger {
                         .unwrap_or("历史未分类".into())
                 );
             }
-            let mut stmt=self.0.prepare("SELECT name,COUNT(*),SUM(failed),COALESCE(SUM(bytes),0),COALESCE(SUM(end_at-at),0),SUM(CASE WHEN end_at IS NULL THEN 1 ELSE 0 END) FROM tools WHERE scope=? GROUP BY name ORDER BY COUNT(*) DESC LIMIT 100")?;
+            let mut stmt=self.0.prepare("SELECT name,COUNT(*),SUM(failed),COALESCE(SUM(bytes),0),COALESCE(SUM(end_at-at),0),SUM(CASE WHEN end_at IS NULL THEN 1 ELSE 0 END) FROM tools WHERE scope=? GROUP BY name ORDER BY COALESCE(SUM(bytes),0) DESC,name")?;
             for row in stmt.query_map([&q.scope],|r|Ok(json!({"name":r.get::<_,String>(0)?,"calls":r.get::<_,u64>(1)?,"failed":r.get::<_,u64>(2)?,"bytes":r.get::<_,u64>(3)?,"duration_ms":r.get::<_,u64>(4)?,"unfinished":r.get::<_,u64>(5)?})))? {tools.push(row?);}
         }
+        let mut compactions = vec![];
+        let compaction_count: u64 = self.0.query_row(
+            "SELECT COUNT(*) FROM compactions WHERE scope=?",
+            [&q.scope],
+            |r| r.get(0),
+        )?;
+        let compaction_totals: Totals = self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL THEN 1 ELSE 0 END),0) FROM requests WHERE scope=? AND compaction_id IS NOT NULL",[&q.scope],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?;
+        if !q.scope.is_empty() {
+            let mut stmt = self.0.prepare("SELECT c.id,c.at,c.reason,c.state,c.tokens_before,c.tokens_after,COUNT(r.id),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.id IS NOT NULL AND (r.input IS NULL OR r.output IS NULL) THEN 1 ELSE 0 END),0) FROM compactions c LEFT JOIN requests r ON r.compaction_id=c.id WHERE c.scope=? GROUP BY c.id ORDER BY c.at DESC,c.id DESC LIMIT 20 OFFSET ?")?;
+            for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"label":Utc.timestamp_millis_opt(r.get::<_,i64>(1)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string(),"reason":r.get::<_,String>(2)?,"state":r.get::<_,String>(3)?,"tokens_before":r.get::<_,Option<u64>>(4)?,"tokens_after":r.get::<_,Option<u64>>(5)?,"requests":r.get::<_,u64>(6)?,"input":r.get::<_,u64>(7)?,"output":r.get::<_,u64>(8)?,"cache":r.get::<_,u64>(9)?,"unknown":r.get::<_,u64>(10)?})))? { compactions.push(row?); }
+        }
         Ok(
-            json!({"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"capabilities":{"skills":false,"compaction":false,"provider_quota":false}}),
+            json!({"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
         )
     }
 }
@@ -480,6 +579,83 @@ mod tests {
             offset: 0,
         }
     }
+    #[test]
+    fn compaction_usage_is_a_subset_and_lifecycle_is_scoped_and_durable() {
+        let dir = std::env::temp_dir().join(format!("pot-compaction-{}", id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("usage.sqlite");
+        let l = Ledger::open(&path).unwrap();
+        let at = now();
+        let op = id();
+        let start = json!({"id":op,"action":"start","reason":"threshold","tokens_before":28000});
+        l.compaction("task", "turn", &start, at).unwrap();
+        l.compaction("task", "turn", &start, at).unwrap();
+        assert!(l.compaction("other", "turn", &start, at).is_err());
+        assert!(l.validate_compaction("other", "turn", &op).is_err());
+        for (request, usage) in [
+            (
+                "summary-a",
+                json!({"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":30}),
+            ),
+            (
+                "summary-b",
+                json!({"prompt_tokens":50,"completion_tokens":10}),
+            ),
+        ] {
+            l.reserve(request, "task", "turn", at, "mock", 200, 100)
+                .unwrap();
+            l.tag_compaction(request, &op).unwrap();
+            l.settle(request, &usage).unwrap();
+            l.settle(request, &usage).unwrap();
+        }
+        l.reserve("conversation", "task", "turn", at, "mock", 100, 50)
+            .unwrap();
+        l.settle(
+            "conversation",
+            &json!({"prompt_tokens":10,"completion_tokens":5}),
+        )
+        .unwrap();
+        let end = json!({"id":op,"action":"complete","tokens_after":4000,"usage":{"input":999999}});
+        l.compaction("task", "turn", &end, at + 1).unwrap();
+        l.compaction("task", "turn", &end, at + 1).unwrap();
+        assert!(l.validate_compaction("task", "turn", &op).is_err());
+        let unfinished = id();
+        l.compaction(
+            "task",
+            "next",
+            &json!({"id":unfinished,"action":"start","reason":"overflow"}),
+            at + 2,
+        )
+        .unwrap();
+        drop(l);
+        let l = Ledger::open(&path).unwrap();
+        let d = l.summary(&query("task", 7), at + 3).unwrap();
+        assert_eq!(d["lifetime"]["input"], 160);
+        assert_eq!(d["lifetime"]["output"], 35);
+        assert_eq!(d["compaction_total"]["input"], 150);
+        assert_eq!(d["compaction_total"]["output"], 30);
+        assert_eq!(d["compaction_total"]["cache"], 30);
+        assert_eq!(d["compaction_count"], 2);
+        assert_eq!(d["compactions"][0]["state"], "interrupted");
+        assert_eq!(d["compactions"][1]["tokens_after"], 4000);
+        assert!(d["capabilities"].get("skills").is_none());
+    }
+
+    #[test]
+    fn old_usage_schema_migrates_without_losing_requests() {
+        let dir = std::env::temp_dir().join(format!("pot-usage-migrate-{}", id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("usage.sqlite");
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending'); INSERT INTO requests(id,scope,turn_id,at,model,input,output,state) VALUES ('old','main','turn',0,'mock',10,5,'reported');").unwrap();
+        drop(c);
+        let l = Ledger::open(&path).unwrap();
+        let d = l.summary(&query("main", 7), now()).unwrap();
+        assert_eq!(d["lifetime"]["input"], 10);
+        assert_eq!(d["requests"][0]["purpose"], "conversation");
+        assert_eq!(d["compaction_count"], 0);
+    }
+
     #[test]
     fn usage_is_idempotent_scoped_and_excludes_cache_from_total() {
         let l = ledger();
