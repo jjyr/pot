@@ -9,8 +9,10 @@ not required to use it. See [MVP validation](../docs/validation/pi-mvp.md).
 
 `scripts/configure-pi` imports only DeepSeek from the host Pi configuration into
 private guest `product/pi.json`. It neither prints credentials nor makes model
-requests. Defaults: `deepseek-v4-flash`, 512 output tokens/request, 6 requests/turn,
-100 cumulative requests. Explicit flags can adjust these within bounded ranges;
+requests. Defaults: `deepseek-v4-flash`, 8192 output tokens/request, 100 requests/turn,
+10000 cumulative requests. The output token limit accepts integers and decimal K/M suffixes (128K, 1M,
+1.5M); there is no model-specific product cap, only the JSON safe integer limit.
+The provider still enforces its own output limit. Explicit flags can adjust these;
 re-importing never deletes reservations. Restart the App after changing config.
 
 The Rust gateway has a fixed HTTPS DeepSeek upstream, disables redirects/retries,
@@ -31,6 +33,7 @@ or changed ID fails visibly, never silently creates a replacement conversation.
 The transcript is driven by message/tool events, completion waits for
 `agent_settled`, and the process is disposed after each turn. Project extensions,
 skills/context files, automatic compaction and retries are disabled for this MVP.
+The bundled Pot task extension is explicitly loaded for the main session only.
 Previous AGY/direct-API model context is not uploaded into the Pi session.
 
 Cancellation names the target user message, so a stale command cannot cancel a
@@ -82,3 +85,80 @@ otherwise Runtime falls back to AGY CLI. The smoke adapter keeps its separate
 `deepseek-attempts` ledger (3 requests, 128 output tokens, restricted write_file).
 Its original ledger is exhausted and must not be reset. AGY's Google login and
 native engine flow remain unaccepted; no AGY or Codex claim is implied by Pi MVP.
+
+## Web access
+
+Pi can use its enabled bash tool with the guest's curl/Python and outbound network.
+The appended Pot system instructions ask it to retrieve current information and
+cite sources before claiming it cannot browse. A site may still return 403 or a
+browser challenge; this is distinct from network unavailability. Dedicated web
+search and browser-control tools are not yet in Pi's configured tool list.
+
+Background concurrency is configured by `max_parallel_tasks` in pi.json (default 5 for existing configs without the field, range 1–1000). Settings → Agent exposes this separately from per-turn model requests. Excess tasks queue FIFO; the main chat keeps an independent slot and shared-resource tasks remain serialized. Apply restarts the environment after active-task checks. The importer accepts `--parallel-tasks`.
+
+## Automatic task routing
+
+The main Pi agent chooses direct replies for short questions and delegates research,
+current-data retrieval, reports and multi-step execution through `pot_create_task`.
+`pot_list_tasks`, `pot_get_task`, `pot_guide_task` and `pot_cancel_task` support reuse,
+inspection, queued follow-ups and cancellation. A task receives only its explicit
+brief, not the main chat history. Workers have the built-in tools and cannot delegate.
+This is model-driven routing, not a keyword classifier or a guarantee that every
+model response makes the optimal split.
+
+`POST /api/v1/orchestration` accepts `{name, call_id, args}` only with the main
+Runtime token during an active non-cancelled main turn. Tool receipts scope Pi call
+IDs by main request, reject conflicting arguments, and reuse durable task/input IDs.
+The existing FIFO scheduler enforces configured concurrency (default 5), resource
+leases and per-lane sessions. Worker bearer tokens cannot invoke the route. These
+are API boundaries, not guest-user filesystem isolation.
+
+Completion report cards and task state commit together. An idle-main dispatcher
+batches up to 8 unseen reports, atomically records delivery with a System turn,
+and resumes the main Pi session for synthesis. User and synthesis turns share one
+slot. Synthesis only has task list/read tools, and its API rejects task mutations.
+A busy main turn or exhausted budget leaves notifications pending. On the first
+upgrade, historical report cards are marked seen without spending model requests.
+
+Unclaimed notifications survive restart. A claimed but interrupted synthesis is
+marked failed and is not replayed automatically, preventing duplicate autonomous
+work/spend; the original report remains visible and the user can request a summary.
+Guidance waits for the current worker turn; dependency DAGs, recursive workers and
+automatic side-effect retries are not implemented.
+
+Offline end-to-end verification (real installed Pi, local mock model, no paid calls):
+
+```sh
+POT_TEST_PI_BIN="$(command -v pi)" cargo test --locked -p pot-runtime real_pi -- --ignored
+```
+
+## Task state, archive views and bounded search
+
+Task phases remain `queued`, `running`, `complete`, `failed`, `cancelled`,
+`interrupted`. Archive is a view over complete/cancelled tasks, not deletion or a
+replacement execution phase. A follow-up queues the same task/session again.
+Failed/interrupted tasks remain in the attention view. Updated timestamps sort
+recently changed tasks first, with stable ID tie-breaking; old records fall back
+to creation time without migration.
+
+`GET /api/v1/tasks/query` and `pot_list_tasks` accept:
+
+- `scope`: `active` (default), `attention`, `archived`, `all`.
+- `phase`: optional exact phase; overrides scope when supplied.
+- `q`: case-insensitive title or ID substring (max 256 bytes).
+- `limit`: default 10, range 1–50; `offset`: default 0.
+
+The response contains `items`, filtered `total`, effective `offset`, `next_offset`,
+and global `counts` for all three scopes. Out-of-range pages clamp to the last
+page after tasks move between scopes. UI uses 20 per page and the optional
+`selected` parameter to retain metadata for a conversation outside that page.
+The original unpaged `GET /api/v1/tasks` remains for older diagnostics; App and
+Agent now use the bounded query path. `pot_get_task` includes execution metadata
+and bounded recent messages, making completed versus failed results explicit.
+
+Main prompt additions contain counts and at most eight active/attention metadata
+entries, no archived titles/results and no worker transcript reads. Archive
+results are fetched on demand. This reduces new prompt injection/tool output;
+it does not remove older messages already in Pi's persistent session history.
+The current 1000-task storage cap and in-memory task hub remain; pagination bounds
+network/render/model payloads, not the total runtime storage cost.

@@ -71,7 +71,7 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields = (0..7)
+        let fields = (0..8)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
@@ -97,7 +97,7 @@ impl Settings {
         }
         self.revision = revision;
         for (i, key) in [
-            "key", "limit", "tokens", "per_turn", "cpus", "memory", "disk",
+            "key", "limit", "tokens", "per_turn", "cpus", "memory", "disk", "parallel",
         ]
         .iter()
         .enumerate()
@@ -144,11 +144,6 @@ impl Settings {
                             ),
                         ),
                     )
-                    .child(label(
-                        "窗口与后台",
-                        "关闭窗口后继续运行；退出 Pot 会停止环境。",
-                    ))
-                    .child(label("未读消息", "菜单栏图标旁显示未读数，阅读后清除。"))
                     .child(label("快捷键", "⌘D Sandbox · ⌘, 设置 · Shift+Enter 换行"));
             }
             1 => {
@@ -164,31 +159,36 @@ impl Settings {
                             "为 Pi 连接模型服务，凭据仅保存在本机。"
                         },
                     ));
+                form = form.child(input(
+                    7,
+                    "同时处理的任务数",
+                    "默认 5，可设 1–1000；超出的任务排队，主聊天不占用此额度。应用后重启生效。",
+                ));
                 if self.advanced {
                     form = form
                         .child(input(
                             1,
                             "累计请求上限",
-                            "0–10000，包含已使用的请求；0 表示不允许请求。",
+                            "0–1000000，包含已使用的请求；0 表示不允许请求。",
                         ))
                         .child(input(
                             2,
                             "输出 token 上限",
-                            "1–4096，每次模型响应的输出上限。",
+                            "自定义每次输出上限，如 128K、1M、1.5M（K=1000，M=1000000）；实际支持量取决于模型服务。",
                         ))
                         .child(input(
                             3,
                             "每轮请求上限",
-                            "1–12，单轮工具执行可使用的模型请求数。",
+                            "1–1000，单轮工具执行可使用的模型请求数。",
                         ));
                 }
             }
             _ => {
                 form = form
                     .child(label("环境", "本地 Linux VM · Alpine · ARM64"))
-                    .child(input(4, "vCPU", "1–8 个核心"))
-                    .child(input(5, "内存", "1–16 GiB"))
-                    .child(input(6, "系统盘", "4–32 GiB，工作文件独立持久保存。"));
+                    .child(input(4, "vCPU", "1–32 个核心，受本机可用资源限制"))
+                    .child(input(5, "内存", "1–128 GiB，受本机可用资源限制"))
+                    .child(input(6, "系统盘", "4–512 GiB，工作文件独立持久保存。"));
             }
         }
         let fields = self.fields.clone();
@@ -199,7 +199,7 @@ impl Settings {
                 .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced=!this.settings.advanced;cx.notify();})))
                 .child(Button::new("save-agent").primary().label(if setup {"保存并开始"} else {"应用更改…"})
                     .on_click(move|_,_,cx|{
-                        command(json!({"action":"save-agent","key":fields[0].read(cx).value(),"limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value()}));
+                        command(json!({"action":"save-agent","key":fields[0].read(cx).value(),"limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}));
                     }));
         } else if section == 2 {
             actions=actions.child(Button::new("workspace").ghost().label("打开工作目录").on_click(|_,_,_|command(json!({"action":"workspace"}))))

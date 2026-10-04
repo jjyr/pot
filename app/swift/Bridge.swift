@@ -33,6 +33,25 @@ var bridge: PotBridge?
 @MainActor final class Composer: NSTextView {
     var submit: (() -> Void)?
     override func keyDown(with event: NSEvent) {
+        // Route navigation as editing commands, never as printable control codes.
+        // Leave marked-text navigation to the input method.
+        if !hasMarkedText(),[123,124,125,126,115,119].contains(event.keyCode) {
+            let shift=event.modifierFlags.contains(.shift)
+            let word=event.modifierFlags.contains(.option)
+            let edge=event.modifierFlags.contains(.command)
+            let action:String
+            switch event.keyCode {
+            case 123:action=edge ? "moveToBeginningOfLine":word ? "moveWordLeft":"moveLeft"
+            case 124:action=edge ? "moveToEndOfLine":word ? "moveWordRight":"moveRight"
+            case 125:action=edge ? "moveToEndOfDocument":word ? "moveToEndOfParagraph":"moveDown"
+            case 126:action=edge ? "moveToBeginningOfDocument":word ? "moveToBeginningOfParagraph":"moveUp"
+            case 115:action="moveToBeginningOfDocument"
+            default:action="moveToEndOfDocument"
+            }
+            let selector=NSSelectorFromString(action+(shift ? "AndModifySelection:":":"))
+            if responds(to:selector) {perform(selector,with:nil)}
+            return
+        }
         if event.keyCode == 36 && !event.modifierFlags.contains(.shift) && !hasMarkedText() {
             submit?(); return
         }
@@ -54,6 +73,7 @@ var bridge: PotBridge?
     let settings = SettingsPanel()
     var navigation: [NSButton] = []
     var page = 0
+    var composerDark:Bool?
     var webDark:Bool?
     var viewer:[String:Any]=[:]
     var localRuntime: LocalRuntime?
@@ -142,6 +162,12 @@ var bridge: PotBridge?
                     default:break
                     }
                 }
+                // GPUI's window also handles key equivalents. Deliver events to
+                // the focused native editor before that path can reinterpret them.
+                if event.window === self.host,self.host.firstResponder === self.composer {
+                    self.composer.keyDown(with:event)
+                    return nil
+                }
                 return event
             }
         }
@@ -187,9 +213,12 @@ var bridge: PotBridge?
         composer.layoutManager?.ensureLayout(for:composer.textContainer!)
         let used=(composer.layoutManager?.usedRect(for:composer.textContainer!).height ?? 24)+(composer.string.hasSuffix("\n") ? composer.layoutManager?.extraLineFragmentRect.height ?? 0:0)
         let height=min(150,max(48,used+20))
-        composerBox.frame=NSRect(x:56+(area.width-width)/2,y:24,width:width,height:height)
-        composerScroll.frame=NSRect(x:8,y:2,width:width-58,height:height-4)
-        composer.frame.size=NSSize(width:composerScroll.contentSize.width,height:max(height-4,used+20))
+        let boxFrame=NSRect(x:56+(area.width-width)/2,y:24,width:width,height:height)
+        if composerBox.frame != boxFrame {composerBox.frame=boxFrame}
+        let scrollFrame=NSRect(x:8,y:2,width:width-58,height:height-4)
+        if composerScroll.frame != scrollFrame {composerScroll.frame=scrollFrame}
+        let textSize=NSSize(width:composerScroll.contentSize.width,height:max(height-4,used+20))
+        if composer.frame.size != textSize {composer.setFrameSize(textSize)}
         placeholder.frame=NSRect(x:18,y:height-33,width:width-90,height:22)
         sendButton.frame=NSRect(x:width-42,y:8,width:32,height:32)
         let dark=NSApp.effectiveAppearance.bestMatch(from:[.darkAqua,.aqua]) == .darkAqua
@@ -206,7 +235,13 @@ var bridge: PotBridge?
         for button in navigation {(button as? RailButton)?.selected = button.tag == page}
         sendButton.layer?.backgroundColor=(running || ready ? NSColor.systemBlue:NSColor(white:dark ? 0.28:0.8,alpha:1)).cgColor
         sendButton.contentTintColor = .white
-        composer.textColor = .labelColor
+        // Runtime snapshots arrive every 200 ms. Reassigning text attributes
+        // restarts NSTextView's insertion-point blink even when nothing changed.
+        if composerDark != dark {
+            composerDark=dark
+            composer.textColor = .labelColor
+            composer.insertionPointColor = .labelColor
+        }
     }
     func textDidChange(_ notification:Notification) {placeholder.isHidden = !composer.string.isEmpty;layout()}
     @objc func sendMessage() {
@@ -223,6 +258,30 @@ var bridge: PotBridge?
         layout()
     }
     @objc func navigate(_ sender:NSButton) {if sender.tag == 0 {events.append(["action":"main"])};if sender.tag == 3 {events.append(["action":"tasks"])};selectPage(sender.tag)}
+    // The toolbar is GPUI, above WKWebView. A web menu cannot extend into
+    // that header, so use an AppKit popup in the same window coordinate space.
+    func showSandboxMenu() {
+        guard page == 1,localPhase == "running" else{return}
+        let menu=NSMenu();menu.autoenablesItems=false
+        let human=viewer["human"] as? Bool == true
+        for (title,id) in [("重新连接桌面","connect"),("打开浏览器","browser"),("剪贴板…","clipboardOpen"),("",""),("打开工作目录","workspace"),("管理环境…","manage"),("",""),("停止环境…","stop"),("重启环境…","restart")] {
+            if id.isEmpty {menu.addItem(.separator());continue}
+            let item=NSMenuItem(title:title,action:#selector(sandboxMenuAction(_:)),keyEquivalent:"")
+            item.target=self;item.representedObject=id
+            item.isEnabled = !["browser","clipboardOpen"].contains(id) || human
+            menu.addItem(item)
+        }
+        menu.minimumWidth=200
+        // Toolbar: 32 pt right inset, 24 pt top inset, 32 pt button height.
+        // Include AppKit popup padding so the visible menu clears the button.
+        let x=max(56,rootView.bounds.maxX-32-menu.size.width)
+        menu.popUp(positioning:nil,at:NSPoint(x:x,y:rootView.bounds.maxY-68),in:rootView)
+    }
+    @objc func sandboxMenuAction(_ item:NSMenuItem) {
+        guard page == 1,let id=item.representedObject as? String,
+            ["connect","browser","clipboardOpen","workspace","manage","stop","restart"].contains(id) else{return}
+        web.evaluateJavaScript("document.getElementById('\(id)').click()",completionHandler:nil)
+    }
     @objc func toggleDesktop(){selectPage(page == 1 ? 0:1)}
     @objc func openSettings(){selectPage(2)}
     @objc func showWindow(){host.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)}
@@ -340,7 +399,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "section":settings.section=v["value"] as? Int ?? 0;settings.setup=false;settings.result=""
         case "appearance":settings.changeAppearance(v["value"] as? Int ?? 0)
         case "save-agent":
-            settings.key=v["key"] as? String ?? "";settings.limit=v["limit"] as? String ?? "";settings.tokens=v["tokens"] as? String ?? "";settings.perTurn=v["per_turn"] as? String ?? "";settings.saveAgent();settings.key=""
+            settings.key=v["key"] as? String ?? "";settings.limit=v["limit"] as? String ?? "";settings.tokens=v["tokens"] as? String ?? "";settings.perTurn=v["per_turn"] as? String ?? "";settings.parallel=v["parallel"] as? String ?? "";settings.saveAgent();settings.key=""
         case "save-sandbox":
             settings.cpuField=v["cpus"] as? String ?? "";settings.memoryField=v["memory"] as? String ?? "";settings.diskField=v["disk"] as? String ?? "";settings.saveSandbox()
         case "workspace":bridge.openWorkspace()
@@ -348,7 +407,8 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "start":bridge.startSandbox()
         case "viewer":
             if let id=v["id"] as? String,["take","info","more","connect"].contains(id) {
-                bridge.web.evaluateJavaScript("document.getElementById('\(id)').click()",completionHandler:nil)
+                if id == "more" {bridge.showSandboxMenu()}
+                else {bridge.web.evaluateJavaScript("document.getElementById('\(id)').click()",completionHandler:nil)}
             }
         default:break
         }

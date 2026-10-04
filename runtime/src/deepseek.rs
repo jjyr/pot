@@ -9,7 +9,7 @@ pub struct Config {
     pub api_key: String,
     pub model: String,
     pub request_limit: u64,
-    pub max_tokens: u32,
+    pub max_tokens: u64,
 }
 impl Config {
     pub fn load(path: &std::path::Path) -> Result<Self> {
@@ -31,7 +31,7 @@ pub struct BudgetSettings {
     pub namespace: &'static str,
     pub data: PathBuf,
     pub limit: u64,
-    pub max_output_tokens: u32,
+    pub max_output_tokens: u64,
 }
 impl BudgetSettings {
     pub fn status(&self) -> Result<RequestBudget> {

@@ -9,9 +9,10 @@ mod ui;
 
 use gpui::{div, prelude::*, px, rgb, *};
 use gpui_kit::component::{
-    ActiveTheme, IconName, Sizable, Theme, ThemeMode,
+    ActiveTheme, Disableable, IconName, Sizable, Theme, ThemeMode,
     button::{Button, ButtonVariants},
     clipboard::Clipboard,
+    input::{Input, InputState},
     list::ListItem,
 };
 use pot_protocol::{MessageStatus, Role};
@@ -47,12 +48,20 @@ struct Shell {
     last_view: Option<client::View>,
     last_dark: bool,
     last_height: f64,
+    last_at_bottom: bool,
+    jumping_to_latest: bool,
     native: serde_json::Value,
     settings: ui::Settings,
+    task_search: Entity<InputState>,
 }
 impl Shell {
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
         let old_tasks = self.show_tasks;
+        let search = self.task_search.read(cx).value().to_string();
+        let query = self.client.view.lock().unwrap().task_query.clone();
+        if search != query.q {
+            self.client.filter_tasks(query.scope, search, 0);
+        }
         let mut buffer = vec![0i8; 524288];
         while unsafe { pot_bridge_event(buffer.as_mut_ptr(), buffer.len() as i32) } > 0 {
             let event: serde_json::Value =
@@ -94,7 +103,7 @@ impl Shell {
         let view = self.client.view.lock().unwrap().clone();
         let dark = unsafe { pot_bridge_dark() };
         let height = unsafe { pot_bridge_composer_height() };
-        let changed = native_changed
+        let mut changed = native_changed
             || self.last_view.as_ref() != Some(&view)
             || old_tasks != self.show_tasks
             || dark != self.last_dark
@@ -110,6 +119,14 @@ impl Shell {
             snapshot.map(|s| s.messages.clone()).unwrap_or_default()
         };
         let at_bottom = self.scroll.max_offset().y + self.scroll.offset().y <= px(32.);
+        // Scrolling changes the handle during layout, after render. Observe it
+        // independently of Runtime snapshots so hover is not required to redraw.
+        changed |= at_bottom != self.last_at_bottom;
+        self.last_at_bottom = at_bottom;
+        if at_bottom {
+            self.jumping_to_latest = false;
+        }
+
         // Include streaming text changes, not just durable event cursors.
         let content = messages
             .iter()
@@ -124,7 +141,7 @@ impl Shell {
         }
         self.last_content = content;
         let state = serde_json::json!({
-            "boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":running || view.main_snapshot.as_ref().is_some_and(|s|s.turn.is_some()) || view.tasks.iter().any(|t|matches!(t.phase,pot_protocol::TaskPhase::Running | pot_protocol::TaskPhase::Queued)),"selected_running":running,"selected":view.selected,"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
+            "boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":running || view.main_snapshot.as_ref().is_some_and(|s|s.turn.is_some()) || view.task_page.counts.active > 0,"selected_running":running,"selected":view.selected,"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_auth":snapshot.is_some_and(|s|s.engine.phase == pot_protocol::EnginePhase::NeedsAuth),
             "error":snapshot.is_some_and(|s|s.engine.phase == pot_protocol::EnginePhase::Failed),
             "engine":snapshot.map(|s|s.engine.engine.as_str()).unwrap_or("正在连接"),
@@ -199,27 +216,54 @@ impl Render for Shell {
                                     })),
                             ),
                     )
-                    .child(ui::hint("独立对话，后台执行。最多同时处理 2 个任务。", cx))
+                    .child(ui::hint(
+                        format!(
+                            "独立对话，后台执行。最多同时处理 {} 个任务。",
+                            self.native["settings"]["parallel"].as_str().unwrap_or("5")
+                        ),
+                        cx,
+                    ))
+                    .child(
+                        div().flex().gap_2().children([
+                            ("active", "进行中", view.task_page.counts.active),
+                            ("attention", "需处理", view.task_page.counts.attention),
+                            ("archived", "已归档", view.task_page.counts.archived),
+                        ].into_iter().map(|(scope,label,count)| {
+                            Button::new(SharedString::from(format!("task-scope-{scope}")))
+                                .ghost().label(format!("{label} {count}"))
+                                .when(view.task_query.scope==scope, |b|b.bg(cx.theme().secondary))
+                                .on_click(cx.listener(move |this,_,_,cx| {
+                                    let q=this.client.view.lock().unwrap().task_query.q.clone();
+                                    this.client.filter_tasks(scope.into(),q,0);cx.notify();
+                                }))
+                        }))
+                    )
+                    .child(Input::new(&self.task_search).aria_label("搜索任务标题或编号"))
                     .child(
                         div()
-                            .id("task-list")
+                            .id(SharedString::from(format!("task-list-{}-{}-{}",view.task_query.scope,view.task_query.q,view.task_query.offset)))
                             .flex_1()
                             .min_h_0()
                             .overflow_y_scroll()
                             .when(view.tasks.is_empty(), |el| {
                                 el.child(
                                     div().py_12().text_color(cx.theme().muted_foreground).child(
-                                        if view.main_snapshot.is_none() {
-                                            "正在连接 Sandbox，读取任务…"
-                                        } else if !view.error.is_empty() {
+                                        if !view.error.is_empty() && view.main_snapshot.is_some() {
                                             "暂时无法读取任务，请检查 Sandbox 状态。"
+                                        } else if view.tasks_loading || view.main_snapshot.is_none() {
+                                            "正在连接 Sandbox，读取任务…"
                                         } else {
-                                            "还没有任务。添加一个目标，让 Pot 开始处理。"
+                                            if !view.task_query.q.is_empty() { "当前分组没有匹配任务。可切换分组查找历史任务。" }
+                                            else { match view.task_query.scope.as_str() {
+                                                "archived" => "还没有归档任务。完成或取消的任务会自动移到这里。",
+                                                "attention" => "没有需要处理的任务。失败或中断的任务会显示在这里。",
+                                                _ => "没有进行中的任务。直接聊天或新建一个任务。",
+                                            }}
                                         },
                                     ),
                                 )
                             })
-                            .children(view.tasks.iter().rev().map(|task| {
+                            .children(view.tasks.iter().map(|task| {
                                 let id = task.id.clone();
                                 let active = matches!(
                                     task.phase,
@@ -269,6 +313,8 @@ impl Render for Shell {
                                                     .text_size(px(12.))
                                                     .text_color(rgb(if active {
                                                         0x168bd2
+                                                    } else if task.phase.scope()=="attention" {
+                                                        0xb7791f
                                                     } else {
                                                         muted
                                                     }))
@@ -293,6 +339,27 @@ impl Render for Shell {
                                         cx.notify();
                                     }))
                             })),
+                    )
+                    .child(div().flex().items_center().justify_between()
+                        .child(ui::hint(if view.tasks_loading { "正在加载…".into() } else {
+                            format!("共 {} 项 · 第 {} 页", view.task_page.total, view.task_query.offset / view.task_query.limit + 1)
+                        },cx))
+                        .child(div().flex().gap_2()
+                            .child(Button::new("tasks-previous").ghost().label("上一页")
+                                .disabled(view.tasks_loading || view.task_query.offset==0)
+                                .on_click(cx.listener(|this,_,_,cx| {
+                                    let q=this.client.view.lock().unwrap().task_query.clone();
+                                    this.client.filter_tasks(q.scope,q.q,q.offset.saturating_sub(q.limit));cx.notify();
+                                })))
+                            .child(Button::new("tasks-next").ghost().label("下一页")
+                                .disabled(view.tasks_loading || view.task_page.next_offset.is_none())
+                                .on_click(cx.listener(|this,_,_,cx| {
+                                    let v=this.client.view.lock().unwrap().clone();
+                                    if let Some(offset)=v.task_page.next_offset {
+                                        this.client.filter_tasks(v.task_query.scope,v.task_query.q,offset);cx.notify();
+                                    }
+                                })))
+                        )
                     ),
             );
         }
@@ -306,7 +373,10 @@ impl Render for Shell {
             .text_size(px(15.))
             .font_family(".AppleSystemUIFont")
             .when(!view.selected.is_empty(), |el| {
-                let task = view.tasks.iter().find(|t| t.id == view.selected);
+                let task = view
+                    .selected_task
+                    .as_ref()
+                    .filter(|t| t.id == view.selected);
                 el.child(
                     div()
                         .px_6()
@@ -325,8 +395,26 @@ impl Render for Shell {
                         )
                         .child(
                             div().flex_1().child(
-                                task.map(|t| format!("{} · {}", t.title, task_phase(&t.phase)))
-                                    .unwrap_or("新任务 · 输入目标后发送".into()),
+                                task.map(|t| {
+                                    format!(
+                                        "{} · {}{}",
+                                        t.title,
+                                        if t.phase.scope() == "archived" {
+                                            "已归档 · "
+                                        } else {
+                                            ""
+                                        },
+                                        task_phase(&t.phase)
+                                    )
+                                })
+                                .unwrap_or(
+                                    if view.selected == "new" {
+                                        "新任务 · 输入目标后发送"
+                                    } else {
+                                        "正在加载任务…"
+                                    }
+                                    .into(),
+                                ),
                             ),
                         )
                         .when(
@@ -597,17 +685,22 @@ impl Render for Shell {
                     .px_4()
                     .text_size(px(12.))
                     .text_color(rgb(muted))
-                    .when(!at_bottom, |el| {
+                    .when(!at_bottom && !self.jumping_to_latest, |el| {
                         el.child(
-                            Button::new("latest")
-                                .ghost()
-                                .cursor_pointer()
-                                .py_2()
-                                .label("↓ 最新消息")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.scroll.scroll_to_bottom();
-                                    cx.notify();
-                                })),
+                            div().w_full().flex().justify_center().child(
+                                Button::new("latest")
+                                    .ghost()
+                                    .cursor_pointer()
+                                    .py_2()
+                                    .label("↓ 最新消息")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        // Hide in this render; scroll_to_bottom is applied
+                                        // by the subsequent layout pass.
+                                        this.jumping_to_latest = true;
+                                        this.scroll.scroll_to_bottom();
+                                        cx.notify();
+                                    })),
+                            ),
                         )
                     })
                     .when(!error.is_empty(), |el| el.child(div().py_2().child(error)))
@@ -708,8 +801,13 @@ fn main() {
                             last_view: None,
                             last_dark: false,
                             last_height: 0.,
+                            last_at_bottom: true,
+                            jumping_to_latest: false,
                             native: serde_json::Value::Null,
                             settings: ui::Settings::new(window, cx),
+                            task_search: cx.new(|cx| {
+                                InputState::new(window, cx).placeholder("搜索任务标题或编号…")
+                            }),
                         }
                     })
                 },

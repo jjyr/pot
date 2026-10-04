@@ -95,7 +95,7 @@ pub struct TurnState {
 pub struct RequestBudget {
     pub used: u64,
     pub limit: u64,
-    pub max_output_tokens: u32,
+    pub max_output_tokens: u64,
 }
 impl RequestBudget {
     pub fn remaining(&self) -> u64 {
@@ -203,6 +203,8 @@ pub struct TaskInfo {
     pub phase: TaskPhase,
     pub pending: usize,
     pub created_at_ms: i64,
+    #[serde(default)]
+    pub updated_at_ms: i64,
     /// Explicit cooperative resource name; empty means a private task directory.
     pub resource: String,
 }
@@ -217,4 +219,64 @@ pub struct CreateTask {
 pub struct TaskInput {
     pub request_id: String,
     pub text: String,
+}
+
+/// Execution phase is preserved when a task moves into the archive view.
+impl TaskPhase {
+    pub fn scope(&self) -> &'static str {
+        match self {
+            Self::Queued | Self::Running => "active",
+            Self::Failed | Self::Interrupted => "attention",
+            Self::Complete | Self::Cancelled => "archived",
+        }
+    }
+}
+fn active_scope() -> String {
+    "active".into()
+}
+fn task_page_limit() -> usize {
+    10
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskQuery {
+    #[serde(default = "active_scope")]
+    pub scope: String,
+    #[serde(default)]
+    pub phase: Option<TaskPhase>,
+    #[serde(default)]
+    pub q: String,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default = "task_page_limit")]
+    pub limit: usize,
+    /// UI may retain selected task metadata even when it is outside this page.
+    #[serde(default)]
+    pub selected: String,
+}
+impl Default for TaskQuery {
+    fn default() -> Self {
+        Self {
+            scope: active_scope(),
+            phase: None,
+            q: String::new(),
+            offset: 0,
+            limit: task_page_limit(),
+            selected: String::new(),
+        }
+    }
+}
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskCounts {
+    pub active: usize,
+    pub attention: usize,
+    pub archived: usize,
+}
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskPage {
+    pub items: Vec<TaskInfo>,
+    pub total: usize,
+    pub offset: usize,
+    pub next_offset: Option<usize>,
+    pub counts: TaskCounts,
+    pub selected: Option<TaskInfo>,
 }

@@ -24,10 +24,29 @@ pub struct View {
     pub accepted_text: Option<String>,
     pub selected: String,
     pub tasks: Vec<TaskInfo>,
+    pub task_query: TaskQuery,
+    pub task_page: TaskPage,
+    pub selected_task: Option<TaskInfo>,
+    pub tasks_loading: bool,
     pub main_snapshot: Option<Snapshot>,
     cached_tasks: HashMap<String, Arc<Snapshot>>,
 }
 impl View {
+    fn apply_task_page(&mut self, query: &TaskQuery, selected: &str, page: TaskPage) {
+        // Counts describe all tasks, never just the visible page. Keep lifecycle
+        // guards correct when a running task is hidden by a search or archive tab.
+        self.task_page.counts = page.counts.clone();
+        if self.selected == selected {
+            self.selected_task = page.selected.clone();
+        }
+        if &self.task_query == query {
+            self.task_query.offset = page.offset;
+            self.tasks = page.items.clone();
+            self.task_page = page;
+            self.tasks_loading = false;
+        }
+    }
+
     fn select(&mut self, id: String) -> bool {
         if self.pending || self.selected == id {
             return false;
@@ -46,6 +65,7 @@ impl View {
         } else {
             self.cached_tasks.get(&id).map(|s| s.as_ref().clone())
         };
+        self.selected_task = self.tasks.iter().find(|t| t.id == id).cloned();
         self.selected = id;
         self.command_error.clear();
         if self.snapshot.is_none() && self.error.is_empty() {
@@ -175,13 +195,21 @@ fn endpoint() -> Result<(String, String), String> {
 }
 fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String> {
     let (url, token) = endpoint()?;
-    let selected = view.lock().unwrap().selected.clone();
+    let (selected, query) = {
+        let v = view.lock().unwrap();
+        (v.selected.clone(), v.task_query.clone())
+    };
     let auth = format!("Bearer {token}");
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(3))
         .build();
-    let tasks: Vec<TaskInfo> = agent
-        .get(&format!("{url}{PATH_TASKS}"))
+    let task_page: TaskPage = agent
+        .get(&format!("{url}{PATH_TASKS}/query"))
+        .query("scope", &query.scope)
+        .query("q", &query.q)
+        .query("offset", &query.offset.to_string())
+        .query("limit", &query.limit.to_string())
+        .query("selected", &selected)
         .set("Authorization", &auth)
         .call()
         .map_err(|e| e.to_string())?
@@ -221,7 +249,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         v.cached_tasks.clear();
     }
     v.main_snapshot = Some(main);
-    v.tasks = tasks;
+    v.apply_task_page(&query, &selected, task_page);
     if v.selected == selected {
         v.replace(snapshot)?;
     }
@@ -231,6 +259,11 @@ impl Client {
     pub fn start() -> Self {
         let view = Arc::new(Mutex::new(View {
             error: "正在连接环境…".into(),
+            task_query: TaskQuery {
+                limit: 20,
+                ..Default::default()
+            },
+            tasks_loading: true,
             ..Default::default()
         }));
         let running = Arc::new(AtomicBool::new(true));
@@ -367,6 +400,18 @@ impl Client {
             }
         });
     }
+    pub fn filter_tasks(&self, scope: String, q: String, offset: usize) {
+        let mut v = self.view.lock().unwrap();
+        if v.task_query.scope == scope && v.task_query.q == q && v.task_query.offset == offset {
+            return;
+        }
+        v.task_query.scope = scope;
+        v.task_query.q = q;
+        v.task_query.offset = offset;
+        v.tasks.clear();
+        v.tasks_loading = true;
+        let _ = self.refresh.try_send(());
+    }
     pub fn select(&self, id: String) {
         if self.view.lock().unwrap().select(id) {
             let _ = self.refresh.try_send(());
@@ -403,6 +448,46 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stale_task_search_pages_do_not_replace_current_results_or_selection() {
+        let mut v = View::default();
+        let old = v.task_query.clone();
+        v.task_query.scope = "archived".into();
+        v.selected = "chosen".into();
+        v.tasks_loading = true;
+        v.apply_task_page(
+            &old,
+            "old-selection",
+            TaskPage {
+                total: 100,
+                counts: TaskCounts {
+                    active: 5,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        assert!(v.tasks_loading);
+        assert_eq!(v.task_page.total, 0);
+        assert_eq!(v.task_page.counts.active, 5);
+        let query = v.task_query.clone();
+        v.apply_task_page(
+            &query,
+            "chosen",
+            TaskPage {
+                offset: 0,
+                total: 0,
+                counts: TaskCounts {
+                    active: 5,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        assert!(!v.tasks_loading);
+        assert_eq!(v.task_page.counts.active, 5);
+    }
+
     use super::*;
     fn view() -> View {
         View {

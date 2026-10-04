@@ -25,13 +25,13 @@ func event(_ name:String,_ details:[String:Any] = [:]) {
 actor Runtime {
  var manager:ContainerManager?;var container:LinuxContainer?;var phase="stopped";var generation=0;var error:String?;var ip="";var task:Task<Void,Never>?
  let id="pot-local"
- var cpus=2;var memoryGiB=3;var diskGiB=4
+ var cpus=4;var memoryGiB=8;var diskGiB=32
  let imageReference="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
  func loadConfiguration() throws {
   let path=root.appendingPathComponent("sandbox.json")
   guard FileManager.default.fileExists(atPath:path.path) else{return}
   let values=try JSONSerialization.jsonObject(with:Data(contentsOf:path)) as? [String:Int] ?? [:]
-  guard let c=values["cpus"],let m=values["memory_gib"],let d=values["disk_gib"],(1...8).contains(c),(1...16).contains(m),(4...32).contains(d) else {throw NSError(domain:"pot",code:4,userInfo:[NSLocalizedDescriptionKey:"Invalid Sandbox resource configuration"])}
+  guard let c=values["cpus"],let m=values["memory_gib"],let d=values["disk_gib"],(1...32).contains(c),(1...128).contains(m),(4...512).contains(d) else {throw NSError(domain:"pot",code:4,userInfo:[NSLocalizedDescriptionKey:"Invalid Sandbox resource configuration"])}
   cpus=c;memoryGiB=m;diskGiB=d
  }
  func status()->[String:Any] {

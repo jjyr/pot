@@ -9,9 +9,9 @@ import Foundation
     var setup=false, hasConfiguration=false
     var config:[String:Any]=[:]
     var awaitingBoot:String?
-    var cpu=2, memory=3, disk=4
-    var key="", limit="100", tokens="512", perTurn="6"
-    var cpuField="2", memoryField="3", diskField="4", result=""
+    var cpu=4, memory=8, disk=32
+    var key="", limit="10000", tokens="8192", perTurn="100", parallel="5"
+    var cpuField="4", memoryField="8", diskField="32", result=""
     var root:URL {bridge?.localRuntime?.root ?? URL(fileURLWithPath:NSHomeDirectory()+"/Library/Application Support/pot")}
     override init(){super.init();changeAppearance(UserDefaults.standard.integer(forKey:"appearance"))}
     func showAgent(setup:Bool=false){self.setup=setup;section=1}
@@ -26,30 +26,31 @@ import Foundation
     }
     var publicState:[String:Any] {
         ["revision":revision,"section":section,"setup":setup,"has_key":hasConfiguration,
-         "limit":limit,"tokens":tokens,"per_turn":perTurn,"cpus":cpuField,"memory":memoryField,"disk":diskField,
+         "limit":limit,"tokens":tokens,"per_turn":perTurn,"parallel":parallel,"cpus":cpuField,"memory":memoryField,"disk":diskField,
          "appearance":UserDefaults.standard.integer(forKey:"appearance"),"result":result]
     }
     func load(){
         config=((try? Data(contentsOf:root.appendingPathComponent("workspace/product/pi.json"))).flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String:Any]) ?? [:]
         hasConfiguration = !(config["api_key"] as? String ?? "").isEmpty
         key="";
-        limit=String(config["request_limit"] as? Int ?? 100)
-        tokens=String(config["max_tokens"] as? Int ?? 512)
-        perTurn=String(config["max_requests_per_turn"] as? Int ?? 6)
-        if let data=try? Data(contentsOf:root.appendingPathComponent("sandbox.json")),let value=(try? JSONSerialization.jsonObject(with:data)) as? [String:Int] {cpu=value["cpus"] ?? 2;memory=value["memory_gib"] ?? 3;disk=value["disk_gib"] ?? 4}
+        limit=String(config["request_limit"] as? Int ?? 10000)
+        tokens=String(config["max_tokens"] as? Int ?? 8192)
+        perTurn=String(config["max_requests_per_turn"] as? Int ?? 100)
+        parallel=String(config["max_parallel_tasks"] as? Int ?? 5)
+        if let data=try? Data(contentsOf:root.appendingPathComponent("sandbox.json")),let value=(try? JSONSerialization.jsonObject(with:data)) as? [String:Int] {cpu=value["cpus"] ?? 4;memory=value["memory_gib"] ?? 8;disk=value["disk_gib"] ?? 32}
         cpuField=String(cpu);memoryField=String(memory);diskField=String(disk)
         revision += 1
     }
     func parsed(_ field:String,_ range:ClosedRange<Int>)->Int?{guard let value=Int(field),range.contains(value) else{return nil};return value}
     @objc func saveAgent(){
-        guard let l=parsed(limit,0...10000),let t=parsed(tokens,1...4096),let p=parsed(perTurn,1...12) else{result="请检查请求与 token 上限的范围。";return}
+        guard let l=parsed(limit,0...1000000),let t=TokenCount.parse(tokens),let p=parsed(perTurn,1...1000),let n=parsed(parallel,1...1000) else{result="请检查请求上限；输出 token 可填正整数或 K/M，例如 128K、1M、1.5M。";return}
         let credential=key.isEmpty ? config["api_key"] as? String ?? "":key.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !credential.isEmpty,!credential.contains("\n") else{result="需要有效的 DeepSeek API key；密钥不会显示或写入日志。";return}
-        let value:[String:Any]=["api_key":credential,"model":"deepseek-v4-flash","request_limit":l,"max_tokens":t,"max_requests_per_turn":p]
+        let value:[String:Any]=["api_key":credential,"model":"deepseek-v4-flash","request_limit":l,"max_tokens":t,"max_requests_per_turn":p,"max_parallel_tasks":n]
         apply(value,to:root.appendingPathComponent("workspace/product/pi.json"))
     }
     @objc func saveSandbox(){
-        guard let c=parsed(cpuField,1...8),let m=parsed(memoryField,1...16),let d=parsed(diskField,4...32) else{result="请输入范围内的 CPU、内存与系统盘容量。";return}
+        guard let c=parsed(cpuField,1...32),let m=parsed(memoryField,1...128),let d=parsed(diskField,4...512) else{result="请输入范围内的 CPU、内存与系统盘容量。";return}
         apply(["cpus":c,"memory_gib":m,"disk_gib":d],to:root.appendingPathComponent("sandbox.json"))
     }
     func apply(_ value:[String:Any],to path:URL){

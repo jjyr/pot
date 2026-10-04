@@ -59,6 +59,22 @@ impl Store {
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
     }
+    pub fn message(&self, message_id: &str) -> Result<Option<Message>> {
+        let body: Option<String> = self
+            .0
+            .query_row("SELECT body FROM messages WHERE id=?", [message_id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        body.map(|s| Ok(serde_json::from_str(&s)?)).transpose()
+    }
+    pub fn task_reports(&self) -> Result<Vec<Message>> {
+        let mut stmt = self
+            .0
+            .prepare("SELECT body FROM messages WHERE id LIKE 'task-report-%' ORDER BY rowid")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
+    }
     pub fn duplicate(&self, request: &str) -> Result<Option<Message>> {
         let body: Option<String> = self
             .0

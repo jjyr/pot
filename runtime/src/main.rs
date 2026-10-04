@@ -1,4 +1,5 @@
 mod deepseek;
+mod orchestration;
 mod pi;
 mod store;
 mod tasks;
@@ -48,6 +49,7 @@ struct Service {
     pi: Option<pi::Config>,
     pi_program: String,
     pi_upstream: String,
+    is_worker: bool,
     data: PathBuf,
     cancel_notify: Arc<tokio::sync::Notify>,
     tasks: Arc<Mutex<tasks::Hub>>,
@@ -482,6 +484,7 @@ async fn main() -> Result<()> {
         pi: pi_config,
         pi_program: std::env::var("POT_PI_BIN").unwrap_or_else(|_|"pi".into()),
         pi_upstream: "https://api.deepseek.com/chat/completions".into(),
+        is_worker: false,
         data,
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
@@ -507,7 +510,9 @@ async fn main() -> Result<()> {
     });
     let router = Router::new()
         .route("/api/pi/v1/chat/completions", post(tasks::gateway))
+        .route("/api/v1/orchestration", post(orchestration::invoke))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
+        .route("/api/v1/tasks/query", get(tasks::query))
         .route("/api/v1/tasks/{id}", get(tasks::snapshot))
         .route("/api/v1/tasks/{id}/messages", post(tasks::input))
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))
@@ -539,6 +544,7 @@ async fn main() -> Result<()> {
         .open(&temp)?;
     f.write_all(&serde_json::to_vec(&endpoint)?)?;
     std::fs::rename(temp, &path)?;
+    orchestration::initialize(&s)?;
     tasks::restore(&s)?;
     tasks::start(s.clone());
     eprintln!("pot runtime listening on {}", listener.local_addr()?);
@@ -587,6 +593,7 @@ mod tests {
             pi: None,
             pi_program: String::new(),
             pi_upstream: String::new(),
+            is_worker: false,
             data: PathBuf::new(),
             cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),

@@ -15,6 +15,7 @@ fn main() {
         .arg("swift/LocalRuntime.swift")
         .arg("swift/SettingsPanel.swift")
         .arg("swift/UnreadTracker.swift")
+        .arg("swift/TokenCount.swift")
         .arg("-o")
         .arg(out.join("libpot_native.a"))
         .status()
@@ -31,4 +32,5 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/LocalRuntime.swift");
     println!("cargo:rerun-if-changed=swift/SettingsPanel.swift");
     println!("cargo:rerun-if-changed=swift/UnreadTracker.swift");
+    println!("cargo:rerun-if-changed=swift/TokenCount.swift");
 }
