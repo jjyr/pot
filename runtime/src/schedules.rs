@@ -279,6 +279,13 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             let spec: ScheduleSpec =
                 serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
             validate(&spec).map_err(invalid)?;
+            agent::routing::resolve(
+                root,
+                spec.profile.as_deref(),
+                agent::routing::Source::Schedule,
+                &spec.requirements,
+            )
+            .map_err(invalid)?;
             let due = if spec.enabled {
                 next(&spec, at).map_err(invalid)?
             } else {
@@ -337,6 +344,13 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                 let spec: ScheduleSpec =
                     serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
                 validate(&spec).map_err(invalid)?;
+                agent::routing::resolve(
+                    root,
+                    spec.profile.as_deref(),
+                    agent::routing::Source::Schedule,
+                    &spec.requirements,
+                )
+                .map_err(invalid)?;
                 let due = if spec.enabled {
                     next(&spec, at).map_err(invalid)?
                 } else {
@@ -424,6 +438,8 @@ fn launch(
             request_id: format!("schedule:{}", id()),
             text: brief,
             resource: String::new(),
+            profile: plan.info.spec.profile.clone(),
+            requirements: plan.info.spec.requirements.clone(),
         },
     )?;
     let plan = hub.schedules.plans.get_mut(sid).unwrap();

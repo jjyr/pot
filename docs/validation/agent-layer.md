@@ -50,3 +50,41 @@ turn interruption 并等待 Codex turn/completed。前者尚无跨 lane 的负�
 - 独立 WKWebView smoke 加载 bundled HTML/CSP/xterm，收到 ready，并确认 88×31 字符区和 renderer 创建成功、Unicode 写入无 JS 异常。
 - 终端 UI 尚未做真实 VM/截图验收；未实际登录 Codex/Claude/AGY，没有 guest localhost callback 可达性或登录持久性结论。没有声称完整进程树隔离或新 Driver 验收。
 - 本次未跑完整两页安装/引导矩阵。其余缺口以开发计划为准。
+
+## 2026-10-05 任务路由增量
+
+- Runtime 69 个离线测试、protocol 1 个测试通过；7 个真实 Pi + 本地模拟 provider 测试通过，无付费调用。
+- 新增覆盖提示白名单及策略写入鉴权/revision 冲突、固定快照与重启、能力不匹配拒绝、重复创建冲突、计划逐次解析、profile/provider/global 上限和跨 provider 排队。
+- 取消请求保留槽位；未确认停止的引擎保留全部并发租约直到 Runtime 重启，有确定性回归测试。
+- `mise run check` 的格式/脚本、Rust workspace 和 Swift Helper 编译通过。尚无路由设置 GUI 或 Codex 跨引擎验收。
+
+## 2026-10-05 Codex 传输对照（宿主，无凭据/付费调用）
+
+`scripts/tests/codex-contract.py` 使用独立临时 HOME/CODEX_HOME、显式最小环境和
+仅 loopback 的 Responses/MCP 模拟服务器。没有加载用户 CLI 配置、登录态或历史。
+探测结束关闭整个进程组；版本只是结果中的诊断，不作为运行时门禁。
+
+对照 Codex 0.159.1、codex-acp 2.1.1：
+
+- 两个并发会话各自配置同名 `pot` MCP server，但使用不同 HTTP 身份。两次工具调用和
+  输出均进入正确 lane；官方 MCP approval 往返只允许测试生成的无副作用身份探针。
+- 原生 App Server：两轮各两次模型请求、一次 resume 后续轮次、一次被取消请求；
+  共 6 次，未出现其他模型。累计用量 50→75，最后一次请求 25；Pot 应按累计差值计量，
+  不能把每次累计值相加。
+- ACP：除上述调用外还创建临时线程，使用固定 `gpt-5.6-luna` 生成两个标题；这不服从
+  所选主模型。轮次 `usage` 为最后一次请求的 25，而这一轮实际模拟请求合计 50。
+  因此当前候选不能直接满足模型固定和完整计量要求，后续 CodexDriver 选择原生
+  App Server（#2 已允许此备用路线）。没有在会话中静默切换传输。
+- 续聊保持 thread/session ID。取消测试同时等到终止事件与模拟模型 HTTP 连接断开；
+  **不等于 shell 子进程/后台终端全部停止**，尚需专门 guest 负测。
+- 模型可见工具中没有 native spawn/send/wait agent 工具。此结论仅覆盖探测调用。
+- `mise run test:app` 的 10 个测试通过。
+
+复现（传入已安装的可执行文件；脚本不会安装/升级）：
+
+```sh
+mise exec -- python scripts/tests/codex-contract.py --codex /path/to/codex
+mise exec -- python scripts/tests/codex-contract.py --codex /path/to/codex --acp /path/to/codex-acp
+```
+
+这是传输选择证据，**不是已交付 CodexDriver 或真实登录/guest 验收**。

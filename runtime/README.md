@@ -268,7 +268,7 @@ MCP session at each turn boundary; this has not been accepted with Codex yet.
 
 DriverHost/SessionHandle currently implement the Pi execution path. Long-lived
 Codex lifecycle/authentication/permissions, guest binary packaging, native thread
-recovery and per-profile scheduling require additional work; see the development
+recovery require additional work; see the development
 plan and [Agent validation](../docs/validation/agent-layer.md).
 
 
@@ -317,3 +317,36 @@ A fresh Runtime without accepted Pi/API configuration rejects chat with
 `setup_required`; terminal and discovery remain available. Existing API/Pi
 configuration is imported. The complete multi-backend onboarding matrix remains
 listed in the development plan; terminal availability is not Driver acceptance.
+
+## Task profile routing
+
+`POST /api/v1/tasks` accepts optional `profile` (explicit user choice) and
+`requirements: {tools, desktop, exact_budget, live_steering}` (all default false).
+A schedule stores the same optional fields in its spec; each occurrence resolves
+its configured profile at creation. `pot_create_task.profile` is a lower-authority
+hint, restricted to the user's allow-list. Omission uses `agent.default.worker`,
+then legacy `pi-default`. These entry points preserve selection precedence without
+allowing tool input to masquerade as an explicit user selection. Tool-created or
+updated schedule profile references use the same allow-list.
+
+Task metadata includes `routing` with creation-time profile, revision, provider
+and reason (`user_requested`, `schedule`, `tool_hint`, `worker_default`). Existing
+tasks keep their immutable binding across profile edits and restart. A repeated
+create request must match profile, requirements and caller source as well as text.
+Migration accepts reason `routing` and checks the task's requirements again.
+Desktop and live steering requirements are currently rejected; no accepted driver
+advertises these capabilities. Unknown gateway protocols cannot satisfy exact budgets.
+
+`GET/POST /api/v1/agent/routing` reads/saves the root-authorized policy:
+
+```json
+{"revision":0,"allowed_tool_profiles":["pi-default"],"profile_limits":{"pi-default":2},"provider_limits":{"deepseek":3}}
+```
+
+Save with the last observed revision; a successful save increments it. Limits are
+1–1000; omitted entries add no limit beyond global background concurrency. Limits
+count active binding identities across profile revisions; pending task migrations
+are applied before claiming a slot. FIFO applies among eligible tasks, so a capped
+provider does not block another. Cancelling tasks retain capacity until settled;
+unconfirmed engine shutdown holds the lane and all its leases until Runtime restart.
+These limits apply to background workers; the main/summary lane remains separate.

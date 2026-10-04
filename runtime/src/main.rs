@@ -611,6 +611,10 @@ async fn main() -> Result<()> {
             get(agent::inspect).post(agent::migration::settings),
         )
         .route("/api/v1/agent/migrate", post(agent::migration::migrate))
+        .route(
+            "/api/v1/agent/routing",
+            get(agent::routing::inspect).post(agent::routing::configure),
+        )
         .route(PATH_SNAPSHOT, get(snapshot))
         .route("/api/v1/usage", get(usage))
         .route("/api/v1/usage/summary", get(usage::summary))

@@ -47,9 +47,9 @@ Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定
 | 3 网关 | 通用请求核心、OpenAI Chat/unknown、provider 路由和用量归属 | Responses/Messages/Gemini codec、provider 维度的预算策略与 UI |
 | 4 工具桥 | 共享 schema/dispatcher，Pi 薄适配器，带 lane/turn 身份的 HTTP MCP facade | Codex 的 MCP 重连/多 lane 实测；权限 UI |
 | 5 迁移 | 事务化 handoff、新 epoch、重启恢复、API 设置及既有 pi.json 设置触发、任务默认固定 | 完整 profile/role 设置 UI、rebind 选择 UI；原地切换与可选 narrative 未开启 |
-| 6 Codex 主聊天 | ACP 2.1.1 + Codex 0.159.1 仅无凭据握手探测 | CodexDriver、guest 登录与发行基线、真实工具/取消/后台资源停止/恢复验收 |
+| 6 Codex 主聊天 | 宿主原生 App Server + 本地模拟模型通过并发、MCP 身份隔离、续聊、HTTP 取消和累计用量验证；ACP 额外标题调用及轮次用量缺口已复现，选择原生传输 | CodexDriver 产品接入、guest 登录与发行基线、后台资源停止及真实 guest 验收 |
 | 7 Codex workers/计划 | 未实现 | 独立 native threads、角色隔离、无重复计量、并发实测 |
-| 8 任务路由 | 新任务继承所选 worker 默认 profile，旧任务固定 | 显式/计划/tool hint 的优先级、能力要求校验、profile/provider 并发上限 |
+| 8 任务路由 | API 显式选择、计划 profile、用户白名单内的 tool hint、worker 默认；创建时能力校验；固定快照及选择原因；全局/profile/provider 并发限制 | 设置 UI；Codex 接入后的跨引擎真实验收 |
 | 9 Terminal / 发现 / 命令 | Runtime PTY + 原生 bearer WebSocket 桥 + bundled xterm；独立登录会话和重复点击去重；显式官方状态查询；Pi 调用命令编辑与 revision；取消版本锁 | guest 真登录/重启持久性验收、登录命令编辑 UI、回到页面的防抖刷新、App 重开附着现有 PTY、完整进程树停止负测 |
 | 10 Claude / AGY | 纳入数据模型和 CLI 发现列表；未知状态不冒充登录 | 两个 Driver、官方条款、角色/权限/取消/恢复及真实 guest 验收 |
 | 11 引导 / 设置 | 通用/助手/Agent/Sandbox 导航；配置前可打开 Terminal；未配置时拒绝主聊天；初始 API 保存取消额外确认 | 两页多选安装及重试、嵌入终端、主 Agent 单选与原子提交、通用 API endpoint/model 表单及完整矩阵 |

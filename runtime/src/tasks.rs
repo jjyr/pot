@@ -18,6 +18,8 @@ struct Job {
 struct Record {
     info: TaskInfo,
     create_request: CreateTask,
+    #[serde(default)]
+    route_source: agent::routing::Source,
     queue: VecDeque<Job>,
     active: Option<Job>,
     /// Persistent request receipts survive completion and cancellation.
@@ -68,7 +70,6 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     );
     let data = root.data.join("tasks").join(task_id);
     let workspace = root.workspace.join("tasks").join(task_id);
-    let existing = data.join("pot.sqlite").exists();
     std::fs::create_dir_all(&data)?;
     std::fs::create_dir_all(&workspace)?;
     let endpoint: RuntimeEndpoint =
@@ -114,19 +115,6 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
         .unwrap()
         .import_legacy(task_id, &service.inner.lock().unwrap().store)?;
     agent::initialize(&service)?;
-    if !existing {
-        let inner = root.inner.lock().unwrap();
-        if let Some(selected) = inner.store.get("agent.default.worker")? {
-            let profile = agent::profiles(&inner.store)?
-                .into_iter()
-                .find(|p| p.id == selected)
-                .ok_or_else(|| anyhow!("Default worker profile missing"))?;
-            agent::assign_new(
-                &mut service.inner.lock().unwrap().store,
-                crate::gateway::resolve(root, &profile)?,
-            )?;
-        }
-    }
     Ok(service)
 }
 pub(super) fn restore(root: &Service) -> Result<()> {
@@ -321,10 +309,18 @@ pub(super) async fn create(
     h: HeaderMap,
     Json(req): Json<CreateTask>,
 ) -> ApiResult<Json<TaskInfo>> {
+    create_from(root, h, req, agent::routing::Source::User).await
+}
+pub(super) async fn create_from(
+    root: Service,
+    h: HeaderMap,
+    req: CreateTask,
+    source: agent::routing::Source,
+) -> ApiResult<Json<TaskInfo>> {
     root.authorized(&h)?;
     let mut hub = root.tasks.lock().unwrap();
     let existing: std::collections::BTreeSet<_> = hub.lanes.keys().cloned().collect();
-    let result = enqueue(&root, &mut hub, req)?;
+    let result = enqueue_from(&root, &mut hub, req, source)?;
     if let Err(e) = persist(&root, &hub) {
         if !existing.contains(&result.id) {
             hub.lanes.remove(&result.id);
@@ -334,6 +330,14 @@ pub(super) async fn create(
     Ok(Json(result))
 }
 pub(super) fn enqueue(root: &Service, hub: &mut Hub, req: CreateTask) -> ApiResult<TaskInfo> {
+    enqueue_from(root, hub, req, agent::routing::Source::Schedule)
+}
+fn enqueue_from(
+    root: &Service,
+    hub: &mut Hub,
+    req: CreateTask,
+    source: agent::routing::Source,
+) -> ApiResult<TaskInfo> {
     validate(&req.text, &req.request_id)?;
     if root.pi.is_none() {
         return Err(error(
@@ -354,9 +358,7 @@ pub(super) fn enqueue(root: &Service, hub: &mut Hub, req: CreateTask) -> ApiResu
         .values()
         .find(|l| l.record.create_request.request_id == req.request_id)
     {
-        if lane.record.create_request.text != req.text
-            || lane.record.create_request.resource != req.resource
-        {
+        if lane.record.create_request != req || lane.record.route_source != source {
             return Err(error(
                 StatusCode::CONFLICT,
                 "request_conflict",
@@ -372,6 +374,9 @@ pub(super) fn enqueue(root: &Service, hub: &mut Hub, req: CreateTask) -> ApiResu
             "任务数量达到上限",
         ));
     }
+    let (spec, routing) =
+        agent::routing::resolve(root, req.profile.as_deref(), source, &req.requirements)
+            .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     let task_id = id();
     let first = job(req.request_id.clone(), req.text.clone(), next_order(&hub));
     let record = Record {
@@ -383,13 +388,16 @@ pub(super) fn enqueue(root: &Service, hub: &mut Hub, req: CreateTask) -> ApiResu
             created_at_ms: now(),
             updated_at_ms: now(),
             resource: req.resource.clone(),
+            routing: Some(routing),
         },
         create_request: req,
+        route_source: source,
         queue: VecDeque::from([first.clone()]),
         active: None,
         receipts: vec![first],
     };
     let service = child(&root, &task_id).map_err(internal)?;
+    agent::assign_new(&mut service.inner.lock().unwrap().store, spec).map_err(internal)?;
     let result = info(&record);
     hub.lanes.insert(task_id.clone(), Lane { record, service });
     Ok(result)
@@ -557,6 +565,9 @@ pub(super) fn pi_service(root: &Service, h: &HeaderMap) -> ApiResult<Service> {
 /// exclusive cooperative lease against other shared-resource tasks.
 pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessage)>> {
     let mut hub = root.tasks.lock().unwrap();
+    for lane in hub.lanes.values().filter(|l| l.record.active.is_none()) {
+        agent::migration::apply_pending(&lane.service, false)?;
+    }
     let active: Vec<_> = hub
         .lanes
         .values()
@@ -571,6 +582,11 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
     {
         return Ok(None);
     }
+    let policy = agent::routing::policy(root)?;
+    let active_specs = active
+        .iter()
+        .map(|l| agent::binding(&l.service).map(|b| b.spec))
+        .collect::<Result<Vec<_>>>()?;
     let shared = active.iter().any(|l| l.record.info.resource == "shared");
     let candidate = hub
         .lanes
@@ -586,6 +602,9 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
                             .ready(&l.record.info.id, now())
                             .unwrap_or(false)))
                 && !l.record.queue.is_empty()
+                // Let the normal execution path report a corrupt binding visibly.
+                && agent::binding(&l.service)
+                    .map(|b| policy.admits(&b.spec, &active_specs)).unwrap_or(true)
                 && !(shared && l.record.info.resource == "shared")
         })
         .min_by_key(|(_, l)| l.record.queue.front().unwrap().order)
@@ -675,6 +694,13 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
         })?;
     }
     let snap = lane.service.snapshot()?;
+    // Unconfirmed resource shutdown keeps every scheduling lease until Runtime
+    // restart. A cancellation request alone must never release capacity.
+    if snap.engine.phase == EnginePhase::Failed {
+        lane.record.info.phase = TaskPhase::Failed;
+        lane.record.info.updated_at_ms = now();
+        return persist(root, &hub);
+    }
     let stopped = snap.turn.as_ref().is_some_and(|t| t.cancelling);
     let message = snap.messages.iter().find(|m| m.id == job.message_id);
     let mut status = if stopped {
@@ -780,6 +806,21 @@ pub(super) fn owner(root: &Service, owner: &str) -> ApiResult<Service> {
         .get(owner)
         .map(|lane| lane.service.clone())
         .ok_or_else(|| error(StatusCode::NOT_FOUND, "owner_missing", "Owner not found"))
+}
+pub(super) fn validate_migration(
+    root: &Service,
+    owner: &str,
+    spec: &agent::ResolvedSpec,
+) -> Result<()> {
+    if owner == "main" {
+        return Ok(());
+    }
+    let hub = root.tasks.lock().unwrap();
+    let lane = hub
+        .lanes
+        .get(owner)
+        .ok_or_else(|| anyhow!("Task missing"))?;
+    agent::routing::check_requirements(spec, &lane.record.create_request.requirements)
 }
 pub(super) fn start(root: Service) {
     tokio::spawn(async move {
@@ -917,6 +958,7 @@ pub(super) mod tests {
                 request_id: "full-title".into(),
                 text: format!("{title}\nAdditional instructions"),
                 resource: "".into(),
+                ..Default::default()
             }),
         )
         .await
@@ -1672,6 +1714,308 @@ pub(super) mod tests {
         h.insert("authorization", "Bearer test-token".parse().unwrap());
         h
     }
+    fn routing_profiles(s: &Service) {
+        agent::initialize(s).unwrap();
+        let base = agent::Profile::legacy(s.pi.as_ref().unwrap());
+        let mut alternate = base.clone();
+        alternate.id = "alternate".into();
+        let mut other = base.clone();
+        other.id = "other".into();
+        other.provider = "other".into();
+        other.auth_ref = "providers.json:other".into();
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                "agent.profiles.v1",
+                &serde_json::to_string(&vec![base, alternate, other]).unwrap(),
+            )
+            .unwrap();
+        pi::private_json(&s.data.join("providers.json"), &json!([{"id":"other","endpoint":"https://example.com/model","allowed_hosts":["example.com"],"api_key":"test-only","protocol":"unknown"}])).unwrap();
+    }
+    #[tokio::test]
+    async fn profile_routes_are_pinned_authorized_and_idempotent() {
+        let s = fixture();
+        routing_profiles(&s);
+        let request = CreateTask {
+            request_id: "routed".into(),
+            text: "test".into(),
+            profile: Some("alternate".into()),
+            ..Default::default()
+        };
+        assert!(
+            create_from(
+                s.clone(),
+                headers(),
+                request.clone(),
+                agent::routing::Source::Tool
+            )
+            .await
+            .is_err()
+        );
+        assert!(s.tasks.lock().unwrap().lanes.is_empty());
+        let policy = agent::routing::Policy {
+            allowed_tool_profiles: ["alternate".into()].into(),
+            ..Default::default()
+        };
+        assert!(
+            agent::routing::configure(State(s.clone()), HeaderMap::new(), Json(policy.clone()))
+                .await
+                .is_err()
+        );
+        let _ = agent::routing::configure(State(s.clone()), headers(), Json(policy.clone()))
+            .await
+            .unwrap();
+        assert!(
+            agent::routing::configure(State(s.clone()), headers(), Json(policy))
+                .await
+                .is_err()
+        );
+        let task = create_from(
+            s.clone(),
+            headers(),
+            request.clone(),
+            agent::routing::Source::Tool,
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(task.routing.as_ref().unwrap().reason, "tool_hint");
+        assert_eq!(
+            create_from(
+                s.clone(),
+                headers(),
+                request.clone(),
+                agent::routing::Source::Tool
+            )
+            .await
+            .unwrap()
+            .0
+            .id,
+            task.id
+        );
+        let mut conflicting = request.clone();
+        conflicting.profile = None;
+        assert_eq!(
+            create_from(
+                s.clone(),
+                headers(),
+                conflicting,
+                agent::routing::Source::Tool
+            )
+            .await
+            .unwrap_err()
+            .0,
+            StatusCode::CONFLICT
+        );
+        let mut profiles = agent::profiles(&s.inner.lock().unwrap().store).unwrap();
+        profiles[1].revision = 2;
+        profiles[1].model = "new-model".into();
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                "agent.profiles.v1",
+                &serde_json::to_string(&profiles).unwrap(),
+            )
+            .unwrap();
+        restore(&s).unwrap();
+        let worker = owner(&s, &task.id).unwrap();
+        assert_eq!(
+            agent::binding(&worker)
+                .unwrap()
+                .spec
+                .source_profile_revision,
+            1
+        );
+        assert_eq!(
+            s.tasks.lock().unwrap().lanes[&task.id].record.info.routing,
+            task.routing
+        );
+        for requirements in [
+            TaskRequirements {
+                desktop: true,
+                ..Default::default()
+            },
+            TaskRequirements {
+                live_steering: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(
+                create(
+                    State(s.clone()),
+                    headers(),
+                    Json(CreateTask {
+                        request_id: id(),
+                        requirements,
+                        ..request.clone()
+                    })
+                )
+                .await
+                .is_err()
+            );
+        }
+        assert!(
+            create(
+                State(s.clone()),
+                headers(),
+                Json(CreateTask {
+                    request_id: id(),
+                    profile: Some("other".into()),
+                    requirements: TaskRequirements {
+                        exact_budget: true,
+                        ..Default::default()
+                    },
+                    ..request
+                })
+            )
+            .await
+            .is_err()
+        );
+    }
+    #[tokio::test]
+    async fn profile_and_provider_caps_skip_blocked_lanes_and_hold_cancelling_slots() {
+        let mut s = fixture();
+        s.pi.as_mut().unwrap().max_parallel_tasks = 3;
+        routing_profiles(&s);
+        let policy = agent::routing::Policy {
+            profile_limits: [("pi-default".into(), 1)].into(),
+            provider_limits: [("deepseek".into(), 2)].into(),
+            ..Default::default()
+        };
+        let _ = agent::routing::configure(State(s.clone()), headers(), Json(policy))
+            .await
+            .unwrap();
+        let mut tasks = Vec::new();
+        for profile in [
+            "pi-default",
+            "pi-default",
+            "alternate",
+            "alternate",
+            "other",
+        ] {
+            tasks.push(
+                create(
+                    State(s.clone()),
+                    headers(),
+                    Json(CreateTask {
+                        request_id: id(),
+                        text: "job".into(),
+                        profile: Some(profile.into()),
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .unwrap()
+                .0,
+            );
+        }
+        let a = claim(&s).unwrap().unwrap();
+        assert_eq!(a.0, tasks[0].id);
+        let b = claim(&s).unwrap().unwrap();
+        assert_eq!(b.0, tasks[2].id);
+        let c = claim(&s).unwrap().unwrap();
+        assert_eq!(c.0, tasks[4].id);
+        assert!(claim(&s).unwrap().is_none());
+        let _ = cancel(State(s.clone()), headers(), Path(a.0.clone()))
+            .await
+            .unwrap();
+        succeed(&s, &c.0, &c.1, &c.2);
+        assert!(
+            claim(&s).unwrap().is_none(),
+            "cancelling lane still holds profile/provider capacity"
+        );
+        finish(&s, &a.0, Ok(())).unwrap();
+        assert_eq!(claim(&s).unwrap().unwrap().0, tasks[1].id);
+    }
+    #[tokio::test]
+    async fn schedule_resolves_each_occurrence_and_overrides_worker_default() {
+        let s = fixture();
+        routing_profiles(&s);
+        let created = schedules::apply(&s, json!({"request_id":"schedule-profile","action":"create","spec":{"title":"plan","goal":"goal","kind":"interval","every_minutes":1,"profile":"alternate"}}), now()).unwrap();
+        let sid = created["id"].as_str().unwrap();
+        let first = schedules::apply(
+            &s,
+            json!({"request_id":"run-one","action":"run","schedule_id":sid}),
+            now(),
+        )
+        .unwrap();
+        let tid = first["task_id"].as_str().unwrap();
+        assert_eq!(
+            agent::binding(&owner(&s, tid).unwrap())
+                .unwrap()
+                .spec
+                .source_profile_id,
+            "alternate"
+        );
+        assert_eq!(
+            s.tasks.lock().unwrap().lanes[tid]
+                .record
+                .info
+                .routing
+                .as_ref()
+                .unwrap()
+                .reason,
+            "schedule"
+        );
+        let _ = cancel(State(s.clone()), headers(), Path(tid.into()))
+            .await
+            .unwrap();
+        let mut profiles = agent::profiles(&s.inner.lock().unwrap().store).unwrap();
+        profiles[1].revision = 2;
+        profiles[1].model = "later".into();
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                "agent.profiles.v1",
+                &serde_json::to_string(&profiles).unwrap(),
+            )
+            .unwrap();
+        let second = schedules::apply(
+            &s,
+            json!({"request_id":"run-two","action":"run","schedule_id":sid}),
+            now(),
+        )
+        .unwrap();
+        let binding =
+            agent::binding(&owner(&s, second["task_id"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(binding.spec.source_profile_revision, 2);
+        assert_eq!(binding.spec.model, "later");
+        assert_eq!(
+            agent::binding(&owner(&s, tid).unwrap())
+                .unwrap()
+                .spec
+                .source_profile_revision,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn unconfirmed_stop_holds_capacity_until_restart() {
+        let mut s = fixture();
+        s.pi.as_mut().unwrap().max_parallel_tasks = 1;
+        let first = add(&s, "first", "").await;
+        let second = add(&s, "second", "").await;
+        let (_, worker, _) = claim(&s).unwrap().unwrap();
+        worker.phase(EnginePhase::Failed, Some("stop unconfirmed".into()));
+        finish(&s, &first.id, Ok(())).unwrap();
+        assert_eq!(
+            s.tasks.lock().unwrap().lanes[&first.id].record.info.phase,
+            TaskPhase::Failed
+        );
+        assert!(claim(&s).unwrap().is_none());
+        restore(&s).unwrap();
+        assert_eq!(
+            s.tasks.lock().unwrap().lanes[&first.id].record.info.phase,
+            TaskPhase::Interrupted
+        );
+        assert_eq!(claim(&s).unwrap().unwrap().0, second.id);
+    }
     pub(crate) fn fixture() -> Service {
         let mut s = crate::tests::service();
         s.data = std::env::temp_dir().join(format!("pot-tasks-{}", id()));
@@ -1706,6 +2050,7 @@ pub(super) mod tests {
                 request_id: text.into(),
                 text: text.into(),
                 resource: resource.into(),
+                ..Default::default()
             }),
         )
         .await
@@ -2034,7 +2379,8 @@ pub(super) mod tests {
                 Json(CreateTask {
                     request_id: "x".into(),
                     text: "x".into(),
-                    resource: "".into()
+                    resource: "".into(),
+                    ..Default::default()
                 })
             )
             .await

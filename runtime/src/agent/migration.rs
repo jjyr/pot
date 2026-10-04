@@ -54,7 +54,7 @@ fn queue(
     anyhow::ensure!(
         matches!(
             request.reason.as_str(),
-            "settings_changed" | "needs_rebind" | "user_requested"
+            "settings_changed" | "needs_rebind" | "user_requested" | "routing"
         ),
         "Invalid migration reason"
     );
@@ -449,6 +449,8 @@ pub async fn migrate(
     };
     let spec = gateway::resolve(&root, &profile).map_err(internal)?;
     gateway::validate_spec(&root, &spec).map_err(internal)?;
+    crate::tasks::validate_migration(&root, &request.owner, &spec)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     let owner = crate::tasks::owner(&root, &request.owner)?;
     initialize(&owner).map_err(internal)?;
     let migration = queue(

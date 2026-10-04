@@ -15,6 +15,29 @@
             "",
             "shared"
           ]
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional user-allow-listed profile hint; omitted uses the worker default."
+        },
+        "requirements": {
+          "type": "object",
+          "properties": {
+            "tools": {
+              "type": "boolean"
+            },
+            "desktop": {
+              "type": "boolean"
+            },
+            "exact_budget": {
+              "type": "boolean"
+            },
+            "live_steering": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -264,6 +287,29 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "profile": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional user-allow-listed profile hint; omitted uses the worker default."
+            },
+            "requirements": {
+              "type": "object",
+              "properties": {
+                "tools": {
+                  "type": "boolean"
+                },
+                "desktop": {
+                  "type": "boolean"
+                },
+                "exact_budget": {
+                  "type": "boolean"
+                },
+                "live_steering": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "required": [

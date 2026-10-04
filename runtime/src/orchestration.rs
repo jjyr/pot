@@ -113,17 +113,34 @@ pub(super) async fn invoke(
         "pot_manage_schedule" => {
             let mut args = call.args.clone();
             args["request_id"] = json!(request_id);
+            if matches!(args["action"].as_str(), Some("create" | "update")) {
+                agent::routing::allow_hint(&s, args["spec"]["profile"].as_str())
+                    .map_err(|e| error(StatusCode::BAD_REQUEST, "profile_hint", &e.to_string()))?;
+            }
             Ok(schedules::apply(&s, args, now())?)
         }
         "pot_create_task" => serde_json::to_value(
-            tasks::create(
-                State(s),
+            tasks::create_from(
+                s,
                 h,
-                Json(CreateTask {
+                CreateTask {
                     request_id,
                     text: field(&call.args, "text")?,
                     resource: call.args["resource"].as_str().unwrap_or("").into(),
-                }),
+                    profile: serde_json::from_value(call.args["profile"].clone()).map_err(|e| {
+                        error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string())
+                    })?,
+                    requirements: serde_json::from_value(
+                        call.args
+                            .get("requirements")
+                            .cloned()
+                            .unwrap_or_else(|| json!({})),
+                    )
+                    .map_err(|e| {
+                        error(StatusCode::BAD_REQUEST, "task_requirements", &e.to_string())
+                    })?,
+                },
+                agent::routing::Source::Tool,
             )
             .await?
             .0,

@@ -1,5 +1,6 @@
 pub(super) mod driver;
 pub(super) mod migration;
+pub(super) mod routing;
 pub(super) mod transcript;
 // Runtime owns profile snapshots and bindings; engines own native context.
 mod model;
