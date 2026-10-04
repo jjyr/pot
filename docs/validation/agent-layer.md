@@ -157,3 +157,8 @@ TCP reset 与正常 EOF 均作为取消连接已关闭；summary 以工具白名
 Anthropic message_start 不提前释放输出预留；message_delta 累计值覆盖，不重复相加。
 8 个 `real_pi` 测试全部通过（含原 DeepSeek、第二 provider 迁移、取消、额度恢复、压缩、worker/计划）。
 新增格式尚未验证真实服务商、压缩/额度检查点矩阵，因此其 safe_checkpoint_resume 保持关闭。
+
+Claude 最终镜像 `pot.local/sandbox:cd5858f99ca0649d32c6` 已通过打包二进制 guest 验证：
+`.local/d1/claude-guest-bundled-20261005/data/claude-runtime.json`（23 次本地请求）。
+构建中的 npm 终止经内核日志确认为构建容器默认 1 GiB memory cgroup 限额；
+将构建容器显式设为 3 GiB（VM 仍为 4 GiB）后安装与打包通过。这不改变用户 Sandbox 资源设置。

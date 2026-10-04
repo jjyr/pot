@@ -13,7 +13,11 @@ tar xzf /opt/pot/novnc.tar.gz -C /opt/pot/novnc --strip-components=1
 rm /opt/pot/novnc.tar.gz
 cp /opt/pot/pi-package.json /opt/pi/package.json
 cp /opt/pot/pi-package-lock.json /opt/pi/package-lock.json
-NODE_OPTIONS=--max-old-space-size=512 npm ci --maxsockets=2 --cache /cache/npm --prefix /opt/pi --ignore-scripts --omit=dev --no-audit --no-fund
+if ! NODE_OPTIONS=--max-old-space-size=512 npm ci --maxsockets=2 --cache /cache/npm --prefix /opt/pi --ignore-scripts --omit=dev --no-audit --no-fund; then
+  free -m
+  dmesg | tail -40
+  exit 1
+fi
 rm -rf /root/.npm /var/cache/apk/*
 chmod -R a+rX /opt/pot /opt/pi
 chmod +x /opt/pot/pot-runtime /opt/pot/agy /opt/pot/open-browser.sh
