@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["app", "protocol", "runtime"]
+default-members = ["app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+pot-protocol = { path = "protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+strip = true

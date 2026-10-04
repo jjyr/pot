@@ -1,0 +1,56 @@
+# Pot UI 规范
+
+更新：2026-10-04。本文是当前 MVP 的界面规范；历史验收见 [UI 验证](validation/ui-ux.md)，能力范围见 [开发计划](development-plan.md)。
+
+## 统一布局
+
+任务、设置、Sandbox 使用 **gpui-kit 0.7.0**（gpui-pre 0.3.7）。共享布局定义在 `app/src/ui.rs`，新页面直接复用，避免分别维护颜色和尺寸。
+
+| 元素 | 规范 |
+| --- | --- |
+| 侧栏 | 56 px，仅图标；hover 提示名称，选中/hover 有背景 |
+| 页面 | `ui::page(cx)`：预留侧栏，使用 Kit 主题背景与文字色 |
+| 普通内容 | `ui::content()`：居中，最大宽 820 px，内边距 32 px，区块间距 20 px |
+| 标题 / 说明 | `ui::title()`：24 px 半粗；`ui::hint()`：13 px 次要文字 |
+| 卡片 | `ui::card(cx)`：20 px 内边距、8 px 圆角、1 px 主题边框 |
+| 表单 | Kit `Form::horizontal().label_width(px(160.))` + `Field` + `Input` |
+| 操作 | Kit `Button`：主要操作用 `primary()`，次要操作用 `ghost()` |
+| 图标操作 | Kit `IconName`，同时提供 tooltip 和 accessibility label |
+| 列表 | Kit `ListItem`，使用同样的卡片边框、圆角、20 px 内边距 |
+
+颜色优先取 `cx.theme()` 的 background、foreground、muted_foreground、border、secondary；状态色才使用绿色、琥珀色、红色。选中背景不能只靠 hover。浅色、深色、跟随系统在通用设置中切换。
+
+内容区域滚动，标题和主要导航保留。最小窗口 800 × 700；表单较长时必须能滚动到操作按钮。
+
+## 页面与交互
+
+- **聊天**：Pot 图标就是聊天入口，无中央头像。用户蓝色气泡、助手中性气泡；复制使用小图标，仅 hover 出现，助手气泡上的图标需要清晰对比。保留原生输入法与编辑快捷键。切换已打开的对话先显示缓存，再后台刷新。
+- **任务**：统一标题与“新任务”按钮；卡片展示标题、阶段、待处理指导数量。点击进入独立对话；最多两个任务同时执行，主聊天保留。空、加载、错误状态显示明确文案。
+- **设置**：通用 / Agent / Sandbox 三个分组，复用同一表单结构。当前执行 Agent 是 Pi，模型服务是 DeepSeek，API key 属于模型服务；只展示真实支持的选项。用量限制按需展开。Setup 复用 Agent 表单。
+- **Sandbox**：Kit 标题和工具栏高 112 px，桌面占满余下空间；不限制为 820 px，优先留出操作空间。连接圆点绿色，文字在 hover 提示。接管是主要操作，环境信息、重连、设置、更多使用图标。环境信息显示镜像、状态、CPU、内存、系统盘和工作文件大小。
+- **Tray**：一个 Pot 锅形状态图标，点击直接打开窗口；没有菜单。未读数显示在图标旁。关闭窗口继续后台运行，Quit 正常停止环境。
+
+## 实现边界
+
+- Rust / Kit：聊天、任务、设置、Sandbox 标题/工具栏及未就绪状态。
+- Swift：窗口、侧栏、tray、原生聊天输入框、配置读写与环境生命周期；`SettingsPanel.swift` 仅作为配置服务，不再绘制设置页面。重启确认继续使用原生 sheet。
+- WKWebView / noVNC：桌面画布、环境信息、更多菜单、剪贴板和显示比例。这些保留网页实现以复用独立 viewer；使用中性配色、8 px 控件圆角、13–14 px 正文，与应用主题同步。应用内隐藏网页标题栏，避免重复工具栏。
+
+Rust 通过 `pot_bridge_ui` 读取非敏感状态，通过 `pot_bridge_command` 发送白名单操作。保存的密钥不回传界面；用户输入用 masked Input，留空保留原值。表单仅在配置 revision 变化时同步，后台刷新不能覆盖未保存输入。保存前校验范围、运行中任务和连接状态，确认后正常停机、原子写入并重启。
+
+## 新增界面的方法
+
+1. 从 `ui::page(cx).child(ui::content()…)` 开始，复用 title、hint、card。
+2. 优先找 Kit 的 Button、Form、Field、Input、ListItem；不要新写一套 AppKit/HTML 普通设置控件。
+3. 将输入状态保存在 Entity 中；渲染只读取状态，后台任务通过更新通知重绘。
+4. 图标按钮提供名称、tooltip、禁用态；耗时操作显示进度，失败给出可恢复提示。
+5. 验收浅/深色、最小窗口、滚动、键盘输入/粘贴、切页后的草稿和错误状态；纯 UI 变更无需调用模型。
+
+```rust
+ui::page(cx).child(
+    ui::content()
+        .child(ui::title("页面名称"))
+        .child(ui::hint("一句话说明", cx))
+        .child(ui::card(cx).child(form))
+)
+```

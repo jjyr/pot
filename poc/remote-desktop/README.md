@@ -10,7 +10,7 @@ export POT_REMOTE_SSH='user@your-test-node'
 ./poc/remote-desktop/poc tunnel
 ```
 
-Open the printed loopback URL in a browser. The SSH tunnel is the authenticated boundary. Only port 6080 is published on the remote host's loopback; raw VNC and CDP are not published. This is a trusted single-owner POC, not public WSS authentication.
+Open the printed loopback URL in a browser. The SSH tunnel is the authenticated boundary. Only the container's noVNC port 6080 is published, on remote host loopback port 17680 (`POT_REMOTE_PORT`); raw VNC and CDP are not published. This is a trusted single-owner POC, not public WSS authentication.
 
 `POT_POC_ROOT` defaults to repository `.local/poc`. `POT_REMOTE_PORT` / `POT_LOCAL_PORT` default to 17680. Build context lives under the remote SSH user's `deployments/pot-poc/remote-desktop`; all managed Docker resources are named `pot-p2-desktop` with a POC ownership label. Built image ID is recorded and used for launch rather than a mutable tag. Base image, apt snapshot and noVNC archive are fixed by source/checksum.
 

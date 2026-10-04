@@ -1,29 +1,52 @@
+# macOS and local tooling
 .DS_Store
+.local/
+.cache/
+.playwright-cli/
+*.local
+
+# Rust, Swift, and build output (keep dependency lockfiles)
+target/
+.build/
+.swiftpm/
+build/
+dist/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Node and Python dependencies/caches
+node_modules/
 __pycache__/
 *.py[cod]
 .venv/
-node_modules/
-target/
-build/
-dist/
-.cache/
-.local/
+.pytest_cache/
+
+# Local configuration and credentials
 .env
 .env.*
 !.env.example
-*.local
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+pi.json
+deepseek.json
+sandbox.json
+
+# App bundles and VM images
+*.app/
 *.dmg
 *.pkg
-*.app/
 *.dylib
 *.qcow2
 *.raw
 *.ext4
+
+# Runtime databases and logs
 *.sqlite*
 *.db
 *.db-wal
 *.db-shm
-*.pem
-*.key
-
-.playwright-cli/
+*.log

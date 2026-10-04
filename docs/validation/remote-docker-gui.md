@@ -1,6 +1,6 @@
 # 远程 Docker GUI：P2 最小切片
 
-日期：2026-10-03。结论：**有限通过**。真实远程 Linux Docker → SSH → 标准 noVNC → headed Chromium 已形成可操作闭环；尚不能称为 GPUI 内远程桌面或完整 P2 验收通过。P1 按用户决定收尾，P3/P4 未测。
+日期：2026-10-03。结论：**有限通过**。真实远程 Linux Docker → SSH → 标准 noVNC → headed Chromium 已形成可操作闭环；尚不能称为 GPUI 内远程桌面或完整 P2 验收通过。P1 按用户决定收尾；本报告写作时 P3/P4 未测，后续结果见文末“后续实测补充”。
 
 ## 复现
 

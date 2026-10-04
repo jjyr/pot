@@ -1,0 +1,10 @@
+[package]
+name = "pot-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Control API and event types shared by the pot client and runtime"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

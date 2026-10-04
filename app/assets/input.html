@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:16px system-ui;padding:24px;background:#f4f6fa;color:#18232d}textarea{box-sizing:border-box;width:100%;height:130px;font:22px system-ui;padding:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}button{padding:8px;margin:8px 4px 8px 0}</style>
+<h2>WKWebView / 中文输入测试</h2><p>请用拼音输入「你好，Pot！中文 English 123」，选择候选、取消组合，再切回左侧 GPUI。粘贴不能代替 IME 测试。</p>
+<textarea id="input" aria-label="Web 中文输入" placeholder="在这里输入中文 / English"></textarea>
+<button id="clear">清空</button><button id="check">核对标准文本</button><p id="result"></p><pre id="events"></pre>
+<script>
+const field=document.querySelector('#input'), output=document.querySelector('#events');
+let seq=0; const history=[];
+function log(e){if(['input','clear'].includes(e.type))document.querySelector('#result').textContent='';const row={case_id:'manual-input',seq:++seq,type:e.type,key:e.key??null,data:e.data??null,inputType:e.inputType??null,isComposing:e.isComposing??false,value:field.value,width:innerWidth,height:innerHeight,dpr:devicePixelRatio};history.push(row);if(history.length>60)history.shift();output.textContent=history.map(x=>JSON.stringify(x)).join('\n');output.scrollTop=output.scrollHeight;window.webkit.messageHandlers.poc.postMessage(row)}
+for(const type of ['keydown','keyup','beforeinput','input','compositionstart','compositionupdate','compositionend','copy','cut','paste','focus','blur'])field.addEventListener(type,log);
+window.addEventListener('resize',log);
+document.querySelector('#clear').onclick=()=>{field.value='';log({type:'clear'});field.focus()};
+document.querySelector('#check').onclick=()=>{document.querySelector('#result').textContent=field.value==='你好，Pot！中文 English 123'?'逐字相同':'不同：'+JSON.stringify(field.value);log({type:'compare'})};
+log({type:'ready'});
+</script></html>

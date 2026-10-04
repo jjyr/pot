@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Import only Pi's DeepSeek credential into the dedicated development guest."""
+import json, os, pathlib, re
+repo=pathlib.Path(__file__).resolve().parents[1]
+p=json.loads((pathlib.Path.home()/'.pi/agent/models.json').read_text())['providers']['deepseek']
+if p.get('baseUrl','').rstrip('/')!='https://api.deepseek.com':raise SystemExit('Unexpected endpoint; configuration not imported')
+if not any(m.get('id')=='deepseek-v4-flash' for m in p.get('models',[])):raise SystemExit('Configured Flash model missing')
+key=p.get('apiKey','')
+if key.startswith('!'):raise SystemExit('Command-based credentials require a reviewed resolver')
+if re.fullmatch(r'[A-Z_][A-Z0-9_]*',key):key=os.environ.get(key,'')
+if not key:raise SystemExit('DeepSeek credential unavailable')
+root=pathlib.Path(os.environ.get('POT_LOCAL_ROOT',repo/'.local/d1/local-runtime'))
+path=root/'workspace/product/deepseek.json';path.parent.mkdir(parents=True,exist_ok=True)
+fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+os.fchmod(fd,0o600)
+with os.fdopen(fd,'w') as f:json.dump(dict(base_url='https://api.deepseek.com',api_key=key,model='deepseek-v4-flash',request_limit=3,max_tokens=128),f)
+print('Imported DeepSeek configuration privately; model=deepseek-v4-flash, total request cap=3, output cap=128. No API call made.')

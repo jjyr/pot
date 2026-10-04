@@ -1,6 +1,6 @@
 # pot 集成 POC 实施计划
 
-状态：P0/P1 最小切片已实施，按用户决定收尾，不再扩展 GPUI/tray 验证。日期：2026-10-03。实测与剩余项见 [macOS shell 验证](validation/macos-shell.md)；P2 远程 Docker GUI 最小切片有限通过，见 [P2 实测](validation/remote-docker-gui.md)；P3/P4 最小切片有限通过，见 [纵向集成](validation/integrated-desktop.md) 与 [本地 helper](validation/native-helper-bundle.md)。阶段完整矩阵未全部验收。
+日期：2026-10-03。状态：P0–P4 最小切片均已实施，结论均为**有限通过**，各阶段完整矩阵未全部验收。进度见 [§10 执行记录](#10-执行记录)，进入产品骨架前的门槛见 [§11 下一阶段](#11-下一阶段)。§1–9 是原计划，保留作为方法、通过条件与决策分支的依据；其中“需验证”的条目不因计划写出而视为已测。
 
 ## 1. 目标与范围
 
@@ -43,7 +43,7 @@ P1、P2 的工作可独立推进，但应尽早连接，不等各自做成完整
 
 ```text
 poc/macos-shell/        GPUI、Swift native bridge、窗口和事件观测
-poc/remote-desktop/     Dockerfile/Compose、Linux GUI、隧道和 driver
+poc/remote-desktop/     Dockerfile、启动脚本、Linux GUI、隧道和 driver（无 Compose）
 poc/native-helper/      Swift executable、IPC、Containerization
 poc/integrated-desktop/ 共用 viewer、控制权 broker、真实远端协议检查
 各 poc/*/poc            构建/启动/停止/打包入口
@@ -188,25 +188,38 @@ docs/validation/       每个阶段的报告与小型证据索引
 
 完成后写技术决策：保留 GPUI/WKWebView/noVNC 还是替换具体组件，保留的限制是什么，哪些接口可进入产品骨架。不要把尚未解决的桥接问题留给完整产品开发后再发现。
 
-## 10. 第一项可直接执行的工作
+## 10. 执行记录
 
-从 **P0 + P1 最小切片** 开始：新建 `poc/macos-shell`，复用现有 GPUI/Swift bridge，消除硬编码路径，取消实验程序的自动退出，加入真实 tray 打开/关闭和事件日志；先完成“点击 tray → 输入测试页 → 关闭窗口 → 再打开 → 显式退出”。同时确认 P2 可用远程 Docker 节点，随后连接实际远端桌面。
+起点（已完成）：从 P0 + P1 最小切片开始，新建 `poc/macos-shell`，复用 GPUI/Swift bridge，消除硬编码路径，加入真实 tray 打开/关闭与事件日志；同时确认 P2 远程 Docker 节点。
 
 ### 2026-10-03 执行进度
 
-- P0：有限通过。macos-shell 具备 doctor/build/run/status/stop、锁定依赖、任务根目录和嵌入资源；默认目录构建/运行成功，29 项 baseline fixture 回归通过。全新机器/冷 registry 未测。
-- P1：有限通过。用户确认真实 tray 关闭后重开；真实 UI 操作验证 GPUI/WebView 焦点、拼音提交/取消、导航键、单屏 2× 缩放和应用菜单 Quit。修复键路由、firstResponder、Edit 菜单和重复运行签名问题。
-- P1 未测：最终构建 50 次 tray 循环、资源趋势、多屏、sleep/wake、完整输入法与快捷键矩阵；不能将最小切片等同完整阶段通过。
-- P2：有限通过。真实远程 Docker + TigerVNC/noVNC 已验证基本键鼠、中文双向 Clipboard、同会话 driver、SSH 重连和同卷 restart/recreate。中文直输失败、原生 IME 未测；远端 framebuffer resize 成功但窗口适配有限，弱网性能矩阵未测。详见 P2 报告。
-- P3：有限通过。真实 WKWebView → 远程 Docker、接管/交回、中文 Clipboard、断隧道保持归属、真实 RFB/CDP 仲裁检查已通过。最终 tray 连续演示、完整 IME/弱网性能矩阵未测。
-- P4：有限通过。自有 Swift helper、相对资源 App 移动后独立运行、真实本地桌面及共用控制、取消/guest/helper/GUI 崩溃恢复、Quit 清理已通过。正常退出 Chromium profile 仍标记 Crashed，干净退出未通过；公开分发、冷安装与完整下载中断矩阵未测。
+| 阶段 | 结论 | 已实测 | 未测 / 未通过 | 报告 |
+|---|---|---|---|---|
+| P0 | 有限通过 | doctor/build/run/status/stop、锁定依赖、任务根目录、嵌入资源；默认目录构建/运行；29 项 baseline fixture 回归 | 全新机器/冷 registry | [macOS shell](validation/macos-shell.md) |
+| P1 | 有限通过 | 用户确认真实 tray 关闭后重开；GPUI/WebView 焦点、拼音提交/取消、导航键、单屏 2× 缩放、应用菜单 Quit；修复键路由、firstResponder、Edit 菜单、重复运行签名 | 最终构建 50 次 tray 循环、资源趋势、多屏、sleep/wake、完整输入法与快捷键矩阵 | [macOS shell](validation/macos-shell.md) |
+| P2 | 有限通过 | 真实远程 Docker + TigerVNC/noVNC：基本键鼠、中文双向 Clipboard、同会话 driver、SSH 重连、同卷 restart/recreate、Chromium sandbox | 中文直输失败、原生 IME 未测；远端 resize 窗口适配有限；弱网性能矩阵 | [远程 Docker GUI](validation/remote-docker-gui.md) |
+| P3 | 有限通过 | 真实 WKWebView → 远程 Docker、接管/交回、中文 Clipboard、断隧道保持归属、真实 RFB/CDP 仲裁检查 | 修复后完整 tray 连续演示、完整 IME/弱网矩阵、shell/CDP 绕过隔离 | [纵向集成](validation/integrated-desktop.md) |
+| P4 | 有限通过 | 自有 Swift helper、App 移动后独立运行、真实本地桌面及共用控制、取消/guest/helper/GUI 崩溃恢复、Quit 清理 | **Chromium 干净退出未通过**（profile 仍为 Crashed）；本地 chrome://sandbox、公开分发、冷安装、完整下载中断矩阵 | [本地 helper](validation/native-helper-bundle.md) |
 
-### 后续范围收敛（用户决定）
+最小切片不等同完整阶段通过。
 
-GPUI/tray 最小验证足够，到此收尾。50 次循环、多屏、sleep/wake、资源趋势和完整输入矩阵保留为未测边界，不作为本轮待办或 P2 前置条件；后续集成出现具体问题时再针对性复查。
+### 范围收敛（用户决定）
 
-P2 初查内存不足后，按用户授权停止了 devpc 上 llama-server 对应的用户服务。复查可用内存已满足最小桌面预算，Docker 正常；操作记录、资源数值和恢复命令已写回 Machines。已实施专用远程桌面切片，环境变化写回 Machines。P3 已接入 WKWebView 与最小控制权 broker，P4 已完成本机独立 App 最小闭环；不追加 P1 泛化验证。
+- GPUI/tray 最小验证足够，到此收尾。50 次循环、多屏、sleep/wake、资源趋势和完整输入矩阵保留为未测边界，不作为待办或后续阶段前置条件；集成出现具体问题时再针对性复查。
+- P2 初查 devpc 内存不足，按用户授权停止其 llama-server 用户服务；操作、资源数值和恢复命令记录在 Machines。
+- 用户确认「可以输入」但未说明方法，不升级为 IME 结论。
 
-### 本轮收尾与下一阶段
+## 11. 下一阶段
 
-保留 GPUI/WKWebView、TigerVNC/noVNC 和用户进程 Swift helper。详细证据与未测边界以上述报告为准。下一阶段进入产品骨架前，确认 Chromium 干净退出/下载恢复、全工具输入隔离和分发签名；原生远端 IME、弱网性能留作针对性验收。用户确认「可以输入」，未说明方法，不升级为完整 IME 结论。
+后续产品实施顺序与三个场景验收统一在 [产品开发计划](development-plan.md) 维护。
+
+保留 GPUI + Swift bridge + WKWebView、TigerVNC/noVNC 和用户进程 Swift helper + Containerization。共用 viewer/control 协议与 helper IPC 可作为产品骨架的输入，详细证据与边界以各报告为准。
+
+原列为“进入产品骨架前”的三项门槛已按开发计划 v2 分配到首次可真实测试的阶段，不再整体阻塞骨架：
+
+1. Chromium 干净退出 → D1；首次下载/中断的失败反馈与恢复 → D2 Setup。
+2. 全输入通道隔离与负测 → D4（需有真实 Agent 进程与 broker 集成后才能有效测试）。
+3. 分发签名、notarization 与冷安装 → 并行轨道，阻塞 D6 发行。
+
+针对性验收（不阻塞骨架，但产品承诺前须有结论）：远端原生中文 IME、远端 resize 适配、弱网/性能矩阵、本地 chrome://sandbox 状态。长期身份/记忆/任务仍以 OpenClaw/Hermes 研究为参考，不在本阶段展开。

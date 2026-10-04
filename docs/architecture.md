@@ -32,12 +32,12 @@ flowchart TB
 - GPUI 拥有主窗口、产品状态和主事件循环；Swift bridge 操作同一个 NSApplication/NSWindow，不启动第二套 App 主循环。
 - Swift bridge 包装 tray、窗口显隐、激活/焦点与 WKWebView。所有 AppKit/WebKit 操作回到主线程，生命周期和 delegate 持有关系明确。
 - Rust 与 Swift 之间采用小型 C ABI。传值和回调的内存所有权须显式定义；PoC 验证销毁后回调不会访问旧窗口。
-- Viewer 首选 WKWebView/noVNC，已证基础连通。真实键盘、IME、剪贴板、resize 和重连是否够用决定是否保留该方案。
+- Viewer 采用 WKWebView + noVNC（远端 TigerVNC）。P2/P3 已实测基本键鼠、中文 Clipboard、断线重连与接管/交回，决定保留；远端中文直输/原生 IME 与 resize 适配仍是针对性验收项，Clipboard 是当前明确的中文 fallback。
 - 关闭主窗口保持菜单栏可用；显式 Quit 的 helper/VM 处置必须有确定语义。POC 先定义 Quit 停止本次自有 helper/VM，后续长期后台模式另行设计。
 
 ## 远程 Docker 桌面
 
-远程主机需要 Docker。POC 首先选择最少组件的 headed Chromium + Xvfb/窗口管理器 + VNC/WebSocket bridge；必要时对照成熟桌面镜像。固定 image digest，工作区及 profile 使用 volume。
+远程主机需要 Docker。P2 采用最少组件：headed Chromium + TigerVNC（X 服务器与 VNC 合一）+ fluxbox + websockify/noVNC；最初的 Xvfb + x11vnc 在中文 Clipboard 上失败，已替换。固定 base digest、apt snapshot 与 noVNC 归档，按构建出的 image ID 启动；workspace 与 profile 使用独立 volume；Chromium 保留自身 sandbox（专用 seccomp profile，不用 `--no-sandbox`）。
 
 第一次通过 SSH tunnel 或等价受认证私有通道验证远程连接：远端 VNC/WebSocket 只监听 loopback，Mac 建立隧道后 viewer 连本地入口。此阶段不用公开裸 VNC/CDP，不需要自建公网认证平台。若产品需要直接 WSS，再单独验证证书、token、origin 与撤销。
 
@@ -59,6 +59,6 @@ Swift helper 是独立进程，链接固定 Containerization 版本。GPUI 经 U
 
 ## 当前已知与未知
 
-P0–P4 最小切片已实施，结论均按报告限定为有限通过：真实菜单栏操作/原生输入、远程 Docker 在 WKWebView 内操作与接管/交回、自有 Swift helper 管理真实 VM、移动后的 App 独立启动与故障清理。见 [POC 进度](poc-plan.md)、[P3](validation/integrated-desktop.md)、[P4](validation/native-helper-bundle.md)。
+P0–P4 最小切片已实施，结论均按报告限定为有限通过：真实菜单栏操作/原生输入、远程 Docker 在 WKWebView 内操作与接管/交回、自有 Swift helper 管理真实 VM、移动后的 App 独立启动与故障清理。见 [POC 进度](poc-plan.md#10-执行记录)、[P3](validation/integrated-desktop.md)、[P4](validation/native-helper-bundle.md)。
 
-仍未完成：远端完整 IME、弱网/性能矩阵、恶意 shell/CDP 全通道隔离、冷安装与公开分发验收。本地 Chromium 正常退出仍留 Crashed profile 标记，需在产品化前解决。保留当前技术路线，不把最小 POC 等同产品完成。
+仍未完成：远端完整 IME、弱网/性能矩阵、恶意 shell/CDP 全通道隔离、冷安装与公开分发验收。本地 Chromium 正常退出仍留 Crashed profile 标记，需在产品化前解决。保留当前技术路线，不把最小 POC 等同产品完成；进入产品骨架前的门槛见 [下一阶段](poc-plan.md#11-下一阶段)。
