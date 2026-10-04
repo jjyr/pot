@@ -5,8 +5,11 @@ import Foundation
 @MainActor final class SettingsPanel: NSObject {
     weak var bridge: PotBridge?
     var agentStates: [[String: Any]] = []
-    var invocationExecutable = "pi", invocationArgs = "[]"
+    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = ""
     var profile: [String: Any] = [:]
+    var loginAgent = "", loginExecutable = "", loginArguments = "[]"
+    var loginTool: [String: Any] = [:]
+    var lastDiscovery = Date.distantPast
     var discovering = false
     var environment: [String: Any] = [:]
     var section = 0, revision = 0
@@ -36,6 +39,12 @@ import Foundation
 
     func refreshStatus() {
         guard let bridge else { return }
+        if bridge.snapshot["connected"] as? Bool == true,
+           let engine = bridge.snapshot["engine"] as? [String: Any],
+           let phase = engine["phase"] as? String, phase != "needs_auth"
+        {
+            setup = false
+        }
         if let old = awaitingBoot, let boot = bridge.snapshot["boot_id"] as? String, boot != old,
            bridge.snapshot["connected"] as? Bool == true,
            bridge.localPhase == "running"
@@ -48,12 +57,16 @@ import Foundation
         ["revision": revision, "section": section, "setup": setup, "has_key": hasConfiguration,
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
-         "agents": agentStates, "discovering": discovering, "executable": invocationExecutable, "argv": invocationArgs,
+         "login_agent": loginAgent, "login_executable": loginExecutable, "login_arguments": loginArguments,
+         "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
+         "codex_model": codexModel, "agents": agentStates, "discovering": discovering,
+         "executable": invocationExecutable, "argv": invocationArgs,
          "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
     }
 
     func refreshAgents() {
-        guard let bridge, !discovering else { return }
+        guard let bridge, !discovering, Date().timeIntervalSince(lastDiscovery) > 1 else { return }
+        lastDiscovery = Date()
         bridge.terminal.show(false, root: root, ip: bridge.guestIP)
         discovering = true
         Task {
@@ -69,6 +82,9 @@ import Foundation
                    let value = profiles.first(where: { $0["id"] as? String == selectedID }) ?? profiles.first
                 {
                     profile = value
+                    if value["engine"] as? String == "codex" {
+                        codexModel = value["model"] as? String ?? ""
+                    }
                     let launch = value["launch_spec"] as? [String: Any] ?? [:]
                     invocationExecutable = launch["executable"] as? String ?? "pi"
                     let argv = launch["argv"] as? [[String: Any]] ?? []
@@ -86,16 +102,81 @@ import Foundation
         }
     }
 
+    func editLogin(_ agent: String) {
+        guard let bridge else { return }
+        Task {
+            do {
+                let catalog = try await bridge.terminal.request("api/v1/agents/tools")
+                let tools = catalog["tools"] as? [[String: Any]] ?? []
+                guard let tool = tools.first(where: { $0["id"] as? String == agent }),
+                      let login = tool["login"] as? [String: Any] else { return }
+                loginTool = tool; loginAgent = agent
+                loginExecutable = login["executable"] as? String ?? ""
+                let data = try JSONSerialization.data(withJSONObject: login["argv"] as? [String] ?? [])
+                loginArguments = String(data: data, encoding: .utf8) ?? "[]"
+                revision += 1
+            } catch { result = "登录命令读取失败：\(error.localizedDescription)" }
+        }
+    }
+
+    func saveLogin(executable: String, arguments: String) {
+        guard let bridge, !loginTool.isEmpty, let data = arguments.data(using: .utf8),
+              let args = try? JSONSerialization.jsonObject(with: data) as? [String]
+        else {
+            result = "登录参数必须是 JSON 字符串数组。"; return
+        }
+        var tool = loginTool
+        tool["login"] = ["executable": executable, "argv": args]
+        Task {
+            do {
+                _ = try await bridge.terminal.request("api/v1/agents/tools", body: tool)
+                loginTool = tool; loginExecutable = executable; loginArguments = arguments
+                result = "登录命令已保存；下次新建登录终端时生效。"
+                revision += 1
+            } catch { result = "登录命令未保存：\(error.localizedDescription)" }
+        }
+    }
+
+    func selectCodex(model: String) {
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let bridge, !model.isEmpty else { result = "请填写 Codex 模型名称。"; return }
+        bridge.terminal.show(false, root: root, ip: bridge.guestIP)
+        Task {
+            do {
+                let state = try await bridge.terminal.request("api/v1/agent")
+                let profiles = state["profiles"] as? [[String: Any]] ?? []
+                let previous = profiles.first { $0["id"] as? String == "codex-default" }
+                let revision = previous?["revision"] as? Int ?? 0
+                let profile: [String: Any] = [
+                    "id": "codex-default", "revision": revision + 1, "name": "Codex",
+                    "engine": "codex", "provider": "openai", "model": model, "auth_ref": "cli:codex",
+                    "params": ["max_output_tokens": 8192],
+                    "tool_policy": ["worker_orchestration": false, "summary_read_only": true, "unattended": "guest_vm"],
+                ]
+                _ = try await bridge.terminal.request("api/v1/agent", body: [
+                    "profile": profile, "expected_revision": revision,
+                    "request_id": UUID().uuidString, "follow_main": true,
+                ])
+                codexModel = model; setup = false
+                result = "已选择 Codex；现有轮次结束后生效。请先在 Sandbox Terminal 完成登录。"
+                refreshAgents()
+            } catch { result = "Codex 配置未保存：\(error.localizedDescription)" }
+        }
+    }
+
     func saveInvocation(executable: String, arguments: String) {
         guard let bridge, let data = arguments.data(using: .utf8),
               let args = try? JSONSerialization.jsonObject(with: data) as? [String],
               let revision = profile["revision"] as? Int else { result = "参数必须是 JSON 字符串数组，且需先配置 API profile。"; return }
         var updated = profile
         updated["revision"] = revision + 1
-        updated["launch_spec"] = ["transport": "pi_rpc", "executable": executable,
-                                  "argv": args
-                                      .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],
-                                  "cwd_policy": "workspace"]
+        updated["launch_spec"] = [
+            "transport": profile["engine"] as? String == "codex" ? "codex_app_server" : "pi_rpc",
+            "executable": executable,
+            "argv": args
+                .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],
+            "cwd_policy": "workspace",
+        ]
         Task {
             do {
                 _ = try await bridge.terminal.request(

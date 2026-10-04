@@ -172,7 +172,11 @@ pub async fn execute(
         "Engine does not support checkpoint resume"
     );
     let mut gate = EventGate::new(binding.epoch, &request.request_id);
-    let mut session = PiHost.session(s.clone(), binding)?;
+    let mut session = match binding.spec.engine {
+        Engine::Pi => PiHost.session(s.clone(), binding)?,
+        Engine::Codex => super::codex::CodexHost.session(s.clone(), binding)?,
+        _ => bail!("Engine has not passed driver acceptance"),
+    };
     let result = session
         .start_turn(request, resuming, &mut |event| {
             if gate.accept(&event) {

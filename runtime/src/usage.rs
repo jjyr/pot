@@ -398,7 +398,7 @@ impl Ledger {
             json!({"label":a.format("%m-%d").to_string(),"range":format!("{a} — {b}"),"input":0,"output":0,"cache":0,"unknown":0})
         }).collect();
         let aggregate = |from: i64, to: i64| -> Result<Totals> {
-            Ok(self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL THEN 1 ELSE 0 END),0) FROM requests WHERE (?='' OR scope=?) AND at>=? AND at<?",params![q.scope,q.scope,from,to],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?)
+            Ok(self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL OR state='native_incomplete' THEN 1 ELSE 0 END),0) FROM requests WHERE (?='' OR scope=?) AND at>=? AND at<?",params![q.scope,q.scope,from,to],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?)
         };
         let lifetime = aggregate(0, i64::MAX)?;
         let historical = aggregate(0, 1)?;
@@ -447,13 +447,16 @@ impl Ledger {
             [&q.scope],
             |r| r.get(0),
         )?;
-        let compaction_totals: Totals = self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL THEN 1 ELSE 0 END),0) FROM requests WHERE scope=? AND compaction_id IS NOT NULL",[&q.scope],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?;
+        let compaction_totals: Totals = self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL OR state='native_incomplete' THEN 1 ELSE 0 END),0) FROM requests WHERE scope=? AND compaction_id IS NOT NULL",[&q.scope],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?;
         if !q.scope.is_empty() {
-            let mut stmt = self.0.prepare("SELECT c.id,c.at,c.reason,c.state,c.tokens_before,c.tokens_after,COUNT(r.id),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.id IS NOT NULL AND (r.input IS NULL OR r.output IS NULL) THEN 1 ELSE 0 END),0) FROM compactions c LEFT JOIN requests r ON r.compaction_id=c.id WHERE c.scope=? GROUP BY c.id ORDER BY c.at DESC,c.id DESC LIMIT 20 OFFSET ?")?;
+            let mut stmt = self.0.prepare("SELECT c.id,c.at,c.reason,c.state,c.tokens_before,c.tokens_after,COUNT(r.id),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.id IS NOT NULL AND (r.input IS NULL OR r.output IS NULL OR r.state='native_incomplete') THEN 1 ELSE 0 END),0) FROM compactions c LEFT JOIN requests r ON r.compaction_id=c.id WHERE c.scope=? GROUP BY c.id ORDER BY c.at DESC,c.id DESC LIMIT 20 OFFSET ?")?;
             for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"label":Utc.timestamp_millis_opt(r.get::<_,i64>(1)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string(),"reason":r.get::<_,String>(2)?,"state":r.get::<_,String>(3)?,"tokens_before":r.get::<_,Option<u64>>(4)?,"tokens_after":r.get::<_,Option<u64>>(5)?,"requests":r.get::<_,u64>(6)?,"input":r.get::<_,u64>(7)?,"output":r.get::<_,u64>(8)?,"cache":r.get::<_,u64>(9)?,"unknown":r.get::<_,u64>(10)?})))? { compactions.push(row?); }
         }
+        let native_turn_usage: bool = self.0.query_row(
+            "SELECT EXISTS(SELECT 1 FROM requests WHERE (?='' OR scope=?) AND state LIKE 'native_%')",
+            params![q.scope,q.scope], |row| row.get(0))?;
         Ok(
-            json!({"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
+            json!({"native_turn_usage":native_turn_usage,"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
         )
     }
 }
@@ -575,6 +578,42 @@ mod tests {
     fn ledger() -> Ledger {
         Ledger::open(std::path::Path::new(":memory:")).unwrap()
     }
+    #[test]
+    fn native_cumulative_usage_is_atomic_and_requires_a_known_baseline() {
+        let l = ledger();
+        l.0.execute(
+            "INSERT INTO requests(id,scope,turn_id,at,model) VALUES ('r','main','turn',0,'mock')",
+            [],
+        )
+        .unwrap();
+        let totals = json!({"inputTokens":20,"outputTokens":5,"cachedInputTokens":4});
+        assert!(l.native_usage("r", "thread", &totals).is_err());
+        l.initialize_native_usage("thread").unwrap();
+        l.native_usage("r", "thread", &totals).unwrap();
+        l.native_usage("r", "thread", &totals).unwrap();
+        let newer = json!({"inputTokens":40,"outputTokens":10,"cachedInputTokens":8});
+        assert!(l.native_usage("missing", "thread", &newer).is_err());
+        l.native_usage("r", "thread", &newer).unwrap();
+        assert!(l.native_usage("r", "thread", &totals).is_err());
+        assert!(
+            l.native_usage("r", "thread", &json!({"inputTokens":50,"outputTokens":15}))
+                .is_err()
+        );
+        let usage: (u64, u64, u64) =
+            l.0.query_row(
+                "SELECT input,output,cache FROM requests WHERE id='r'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(usage, (40, 10, 8));
+        l.native_incomplete("r").unwrap();
+        let summary = l.summary(&query("main", 7), now()).unwrap();
+        assert_eq!(summary["lifetime"]["unknown"], 1);
+        assert_eq!(summary["lifetime"]["input"], 40);
+        assert_eq!(summary["native_turn_usage"], true);
+    }
+
     fn at(s: &str) -> i64 {
         chrono::DateTime::parse_from_rfc3339(s)
             .unwrap()
@@ -889,4 +928,86 @@ pub fn settle_cancelled_pause(s: &Service) -> Result<()> {
         s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
     }
     Ok(())
+}
+
+impl Ledger {
+    /// CLI subscription usage is post-hoc. A pending turn has unknown usage, not zero.
+    pub fn begin_native(
+        &self,
+        id: &str,
+        scope: &str,
+        turn: &str,
+        spec: &agent::ResolvedSpec,
+        epoch: u64,
+    ) -> Result<()> {
+        let quota = self.quota(now())?;
+        anyhow::ensure!(
+            quota["active"] != true || quota["remaining"].as_u64().unwrap_or(0) > 0,
+            "Pot allowance is exhausted; native CLI turns require manual continuation after it resets"
+        );
+        let tx = self.0.unchecked_transaction()?;
+        self.0.execute("INSERT INTO requests(id,scope,turn_id,at,model,state) VALUES (?,?,?,?,?,'native_pending')", params![id,scope,turn,now(),spec.model])?;
+        self.route(id, &spec.provider, epoch, &spec.spec_hash)?;
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn native_incomplete(&self, request: &str) -> Result<()> {
+        self.0.execute(
+            "UPDATE requests SET state='native_incomplete' WHERE id=?",
+            [request],
+        )?;
+        Ok(())
+    }
+
+    pub fn initialize_native_usage(&self, native: &str) -> Result<()> {
+        self.0.execute_batch("CREATE TABLE IF NOT EXISTS native_usage(native TEXT PRIMARY KEY,input INTEGER NOT NULL,output INTEGER NOT NULL,cache INTEGER NOT NULL)")?;
+        self.0.execute(
+            "INSERT OR IGNORE INTO native_usage VALUES (?,0,0,0)",
+            [native],
+        )?;
+        Ok(())
+    }
+    /// Persist the cumulative baseline and per-turn difference atomically. Duplicate
+    /// notifications cannot add usage twice, including after Runtime restart.
+    pub fn native_usage(&self, request: &str, native: &str, totals: &Value) -> Result<()> {
+        self.0.execute_batch("CREATE TABLE IF NOT EXISTS native_usage(native TEXT PRIMARY KEY,input INTEGER NOT NULL,output INTEGER NOT NULL,cache INTEGER NOT NULL)")?;
+        let input = totals["inputTokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing native input usage"))?;
+        let output = totals["outputTokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing native output usage"))?;
+        let cache = totals["cachedInputTokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing native cached usage"))?;
+        anyhow::ensure!(cache <= input, "Invalid native cached usage");
+        anyhow::ensure!(
+            input <= i64::MAX as u64 && output <= i64::MAX as u64,
+            "Invalid native usage"
+        );
+        let tx = self.0.unchecked_transaction()?;
+        let previous = self
+            .0
+            .query_row(
+                "SELECT input,output,cache FROM native_usage WHERE native=?",
+                [native],
+                |r| {
+                    Ok((
+                        r.get::<_, u64>(0)?,
+                        r.get::<_, u64>(1)?,
+                        r.get::<_, u64>(2)?,
+                    ))
+                },
+            )
+            .map_err(|_| anyhow!("Native usage baseline unavailable; historical usage cannot be attributed to this turn"))?;
+        anyhow::ensure!(
+            input >= previous.0 && output >= previous.1 && cache >= previous.2,
+            "Native usage counter reset; usage precision unavailable"
+        );
+        let changed = self.0.execute("UPDATE requests SET input=COALESCE(input,0)+?,output=COALESCE(output,0)+?,cache=cache+?,state='native_reported' WHERE id=?", params![input-previous.0,output-previous.1,cache-previous.2,request])?;
+        anyhow::ensure!(changed == 1, "Native usage request missing");
+        self.0.execute("INSERT INTO native_usage VALUES (?,?,?,?) ON CONFLICT(native) DO UPDATE SET input=excluded.input,output=excluded.output,cache=excluded.cache",params![native,input,output,cache])?;
+        tx.commit()?;
+        Ok(())
+    }
 }

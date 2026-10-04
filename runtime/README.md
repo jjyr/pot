@@ -59,7 +59,7 @@ Bearer token comes from mode-0600 `product/runtime.json`:
 - `POST /api/v1/messages`: `{request_id, conversation_id: "main", text}`.
   Retries reuse the ID. Conflicting content and concurrent turns are rejected.
   Exhausted budget returns 429 before messages are inserted.
-- `POST /api/v1/turn/cancel`: `{request_id, user_message_id}`. Pi only; repeat
+- `POST /api/v1/turn/cancel`: `{request_id, user_message_id}`. Pi and Codex; repeat
   cancellation is safe and a stale target is rejected.
 - `GET /api/v1/usage`: durable request counts and saved provider token usage.
 - `POST /api/v1/engine/authenticate`: 501; GUI credential setup belongs to D2.
@@ -218,7 +218,7 @@ are validated by the provider, not guessed by the Runtime.
 Assistant API settings still edit pi.json and restart the environment. Agent settings edit Pi launch commands through the versioned API without a model call.
 Its model/output-limit edit is imported into this same migration operation on
 startup. General profile management currently uses the authenticated API; the GUI
-has no Codex selector or migration preview.
+includes an explicit Codex model/selection entry; general profile management and migration previews remain incomplete.
 
 Migration persists requested → handoff_written → new_binding_opened → active.
 Candidate files are fsynced before the final SQLite transaction, which also adds
@@ -263,13 +263,15 @@ implements JSON-RPC initialize/ping/tools/list/tools/call over HTTP (protocol
 to that lane's current request. Subsequent calls require that header and the lane
 bearer; reuse in another turn fails. Workers cannot orchestrate; summaries expose
 only task list/read. Tool calls use the existing durable dispatcher receipts,
-including conflicting-ID rejection. A future Codex client must reinitialize its
-MCP session at each turn boundary; this has not been accepted with Codex yet.
+including conflicting-ID rejection. The Codex driver unsubscribes after resource settlement and resumes at the next turn, forcing MCP initialization with the new turn identity. This passed real CLI tests in an offline ARM64 guest.
 
-DriverHost/SessionHandle currently implement the Pi execution path. Long-lived
-Codex lifecycle/authentication/permissions, guest binary packaging, native thread
-recovery require additional work; see the development
-plan and [Agent validation](../docs/validation/agent-layer.md).
+DriverHost/SessionHandle implement Pi and native Codex App Server. Codex hosts multiplex independent
+threads, preserve native IDs, record cumulative usage deltas, and wait for turn termination plus
+background-terminal cleanup. A missing native session is marked broken without replacement.
+Settings prepare and persist a native candidate before committing a migration; CLI-owned history
+is initialized with `thread/inject_items`, without a model call. Codex usage is post-hoc, not
+request-level budget enforcement. Native account acceptance and permission UI remain incomplete;
+see the development plan and [Agent validation](../docs/validation/agent-layer.md).
 
 
 ## Terminal and explicit CLI discovery

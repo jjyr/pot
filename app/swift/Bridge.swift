@@ -743,6 +743,12 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "start": bridge.startSandbox()
         case "terminal":
             bridge.terminalSelected = v["value"] as? Bool ?? true; bridge.selectPage(1)
+        case "edit-login": settings.editLogin(v["id"] as? String ?? "")
+        case "save-login": settings.saveLogin(
+                executable: v["executable"] as? String ?? "",
+                arguments: v["argv"] as? String ?? ""
+            )
+        case "select-codex": settings.selectCodex(model: v["model"] as? String ?? "")
         case "agent-refresh": settings.refreshAgents()
         case "agent-login":
             if let agent = v["id"] as? String {

@@ -86,6 +86,7 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     let (commands, _) = mpsc::unbounded_channel();
     let service = Service {
         terminals: root.terminals.clone(),
+        codex: root.codex.clone(),
         usage: root.usage.clone(),
         usage_scope: task_id.into(),
         inner: Arc::new(Mutex::new(Inner {
@@ -339,11 +340,11 @@ fn enqueue_from(
     source: agent::routing::Source,
 ) -> ApiResult<TaskInfo> {
     validate(&req.text, &req.request_id)?;
-    if root.pi.is_none() {
+    if !agent::configured(root) {
         return Err(error(
             StatusCode::NOT_IMPLEMENTED,
-            "pi_required",
-            "后台任务需要 Pi",
+            "agent_required",
+            "后台任务需要主 Agent 配置",
         ));
     }
     if !["", "shared"].contains(&req.resource.as_str()) {
@@ -397,7 +398,15 @@ fn enqueue_from(
         receipts: vec![first],
     };
     let service = child(&root, &task_id).map_err(internal)?;
-    agent::assign_new(&mut service.inner.lock().unwrap().store, spec).map_err(internal)?;
+    {
+        let mut inner = service.inner.lock().unwrap();
+        if agent::current(&inner.store).map_err(internal)?.is_none() {
+            agent::select_initial(&mut inner.store, &task_id, &service.data, spec)
+                .map_err(internal)?;
+        } else {
+            agent::assign_new(&mut inner.store, spec).map_err(internal)?;
+        }
+    }
     let result = info(&record);
     hub.lanes.insert(task_id.clone(), Lane { record, service });
     Ok(result)

@@ -210,13 +210,14 @@ pub(super) fn deliver(s: &Service) -> Result<()> {
     if usage::paused(s)?.is_some() {
         return Ok(());
     }
-    if s.pi.is_none() || s.commands.is_closed() {
+    if !agent::configured(s) || s.commands.is_closed() {
         return Ok(());
     }
     let mut inner = s.inner.lock().unwrap();
     if inner.turn.is_some()
         || inner.engine.phase != EnginePhase::Ready
-        || s.budget()?.is_some_and(|b| b.remaining() == 0)
+        || s.budget_for(&inner.store)?
+            .is_some_and(|b| b.remaining() == 0)
     {
         return Ok(());
     }

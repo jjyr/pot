@@ -124,7 +124,9 @@ class Acp:
 
 
 class Mock:
-    def __init__(self):
+    def __init__(self, runtime_tools=False):
+        self.runtime_tools = runtime_tools
+        self.summary_calls = 0
         self.requests = []
         self.calls = []
         self.errors = []
@@ -208,24 +210,102 @@ class Mock:
                         )
                     else:
                         tools.append(tool.get("name", ""))
+                if self.runtime_tools:
+                    assert not any("unmanaged" in name for name in tools), (
+                        "Inherited MCP server bypassed managed policy"
+                    )
+                current_user = next(
+                    (item for item in reversed(body["input"]) if item.get("role") == "user"), {}
+                )
+                is_summary = "Pot task completion notification." in json.dumps(current_user)
+                if self.runtime_tools and is_summary:
+                    assert "Summarize background task results." in json.dumps(body["input"]), (
+                        "Runtime role instructions missing"
+                    )
+                    self.summary_calls += 1
+                    assert not any(
+                        name.rsplit("__", 1)[-1]
+                        in ["exec_command", "shell", "shell_command", "apply_patch"]
+                        for name in tools
+                    ), tools
                 assert not any(
                     name.rsplit("__", 1)[-1] in ["spawn_agent", "send_input", "wait_agent"]
                     for name in tools
                 )
                 text = json.dumps(body["input"])
                 lane = "a" if "LANE_A" in text else "b"
-                probe = next((name for name in tools if "pot_probe" in name), None)
-                has_output = any(
-                    item.get("type") == "function_call_output" for item in body["input"]
+                probe_name = "pot_list_tasks" if self.runtime_tools else "pot_probe"
+                probe = next((name for name in tools if probe_name in name), None)
+                inputs = body["input"]
+                if self.runtime_tools:
+                    last_user = max(
+                        (i for i, item in enumerate(inputs) if item.get("role") == "user"),
+                        default=0,
+                    )
+                    inputs = inputs[last_user:]
+                has_output = any(item.get("type") == "function_call_output" for item in inputs)
+                background = (
+                    self.runtime_tools
+                    and hasattr(self, "background_pid")
+                    and "BACKGROUND_TEST" in json.dumps(inputs)
                 )
-                if probe and not has_output and not auxiliary:
+                scheduled = (
+                    self.runtime_tools
+                    and "This is one independent scheduled run." in json.dumps(inputs)
+                )
+                if scheduled and not has_output:
+                    command = next(
+                        name for name in tools if name.rsplit("__", 1)[-1] == "exec_command"
+                    )
+                    report = json.dumps(
+                        {
+                            "summary": "mock observation",
+                            "fingerprint": "stable-v1",
+                            "evidence": ["loopback fixture"],
+                            "artifacts": [],
+                        }
+                    )
+                    item = {
+                        "type": "function_call",
+                        "id": "fc_schedule",
+                        "call_id": "call_schedule",
+                        "name": command.rsplit("__", 1)[-1],
+                        "arguments": json.dumps(
+                            {
+                                "cmd": "printf '%s' '" + report + "' > .pot-schedule-result.json",
+                                "max_output_tokens": 32,
+                            }
+                        ),
+                    }
+                    if "__" in command:
+                        item["namespace"] = command.rsplit("__", 1)[0]
+                elif background and not has_output:
+                    command = next(
+                        name for name in tools if name.rsplit("__", 1)[-1] == "exec_command"
+                    )
+                    item = {
+                        "type": "function_call",
+                        "id": "fc_background",
+                        "call_id": "call_background",
+                        "name": command.rsplit("__", 1)[-1],
+                        "arguments": json.dumps(
+                            {
+                                "cmd": f"echo $$ > '{self.background_pid}'; exec sleep 60",
+                                "yield_time_ms": 1000,
+                                "max_output_tokens": 32,
+                            }
+                        ),
+                    }
+                    if "__" in command:
+                        item["namespace"] = command.rsplit("__", 1)[0]
+                elif probe and not has_output and not auxiliary:
                     item = {
                         "type": "function_call",
                         "id": f"fc_{lane}",
                         "call_id": f"call_{lane}",
                         "name": probe.rsplit("__", 1)[-1],
                         "namespace": probe.rsplit("__", 1)[0],
-                        "arguments": json.dumps({"lane": lane}),
+                        "arguments": json.dumps({} if self.runtime_tools else {"lane": lane}),
                     }
                 else:
                     item = {
@@ -353,6 +433,7 @@ async def run(args):
                     {
                         "protocolVersion": 1,
                         "clientCapabilities": {},
+                        "capabilities": {"experimentalApi": True},
                         "clientInfo": {"name": "pot-contract-probe", "version": "1"},
                     },
                 )
@@ -522,6 +603,13 @@ async def run(args):
                         "turn/completed", sessions[0][0], turn["turn"]["id"]
                     )
                     assert stopped["turn"]["status"] == "interrupted"
+                if not args.acp:
+                    for session_id, *_ in sessions:
+                        terminals = await acp.request(
+                            "thread/backgroundTerminals/list",
+                            {"threadId": session_id, "limit": 100},
+                        )
+                        assert terminals["data"] == [], terminals
                 await asyncio.wait_for(mock.model_stopped.wait(), 10)
                 assert not mock.errors, mock.errors
                 print(

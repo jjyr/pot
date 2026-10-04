@@ -27,7 +27,7 @@ fn defaults() -> Vec<Tool> {
         Tool {
             id: "codex".into(),
             invocation: CommandSpec {
-                executable: "codex-acp".into(),
+                executable: "codex".into(),
                 argv: vec![],
             },
             login: Some(CommandSpec {

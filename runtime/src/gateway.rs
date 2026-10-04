@@ -92,6 +92,9 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
 }
 pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedSpec> {
     let mut spec = profile.resolve()?;
+    if spec.engine == agent::Engine::Codex {
+        return Ok(spec);
+    }
     let route = provider(s, &spec)?;
     spec.set_gateway_protocol(match route.protocol {
         Protocol::OpenaiChat => "openai_chat",
@@ -100,6 +103,9 @@ pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedS
     Ok(spec)
 }
 pub fn validate_spec(s: &Service, spec: &agent::ResolvedSpec) -> Result<()> {
+    if spec.engine == agent::Engine::Codex {
+        return spec.validate();
+    }
     let route = provider(s, spec)?;
     anyhow::ensure!(
         spec.gateway_protocol

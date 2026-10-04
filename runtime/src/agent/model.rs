@@ -105,6 +105,9 @@ impl Profile {
     }
     pub fn resolve(&self) -> Result<ResolvedSpec> {
         self.validate()?;
+        if self.engine == Engine::Codex {
+            return self.resolve_codex();
+        }
         self.launch_spec.clone().unwrap_or_default().validate()?;
         self.protocol_contract
             .clone()
@@ -113,6 +116,11 @@ impl Profile {
         ensure!(
             self.params.reasoning_effort.is_none(),
             "Reasoning configuration is not accepted for this Pi route"
+        );
+        ensure!(
+            self.launch_spec.clone().unwrap_or_default().transport == "pi_rpc"
+                && self.protocol_contract.clone().unwrap_or_default().events == "pi_rpc_v1",
+            "Pi requires the Pi RPC contract"
         );
         // Capability declarations must follow accepted transports, never UI guesses.
         ensure!(
@@ -147,6 +155,55 @@ impl Profile {
                 usage_reporting: true,
                 request_level_budget_enforcement: true,
                 tool_policy_enforcement: true,
+                subagents_disableable: true,
+                ..Default::default()
+            },
+            source_profile_id: self.id.clone(),
+            source_profile_revision: self.revision,
+            spec_hash: String::new(),
+        };
+        spec.spec_hash = spec.hash()?;
+        Ok(spec)
+    }
+    fn resolve_codex(&self) -> Result<ResolvedSpec> {
+        ensure!(
+            self.auth_ref == "cli:codex"
+                && !self.provider.is_empty()
+                && self.provider.len() <= 128
+                && self
+                    .provider
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            "Codex currently requires its native login context"
+        );
+        let launch = self.launch_spec.clone().unwrap_or_else(LaunchSpec::codex);
+        let protocol = self
+            .protocol_contract
+            .clone()
+            .unwrap_or_else(ProtocolContract::codex);
+        launch.validate()?;
+        protocol.validate()?;
+        ensure!(
+            launch.transport == "codex_app_server" && protocol.events == "codex_app_server_v2",
+            "Codex requires the native App Server contract"
+        );
+        let mut spec = ResolvedSpec {
+            engine: Engine::Codex,
+            engine_version: String::new(),
+            launch_spec: Some(launch),
+            protocol_contract: Some(protocol),
+            provider: self.provider.clone(),
+            model: self.model.clone(),
+            auth_ref: self.auth_ref.clone(),
+            params: self.params.clone(),
+            tool_policy: self.tool_policy.clone(),
+            gateway_protocol: "native_reported".into(),
+            context_window: 0,
+            capabilities: Capabilities {
+                native_compaction: true,
+                usage_reporting: true,
+                tool_policy_enforcement: true,
+                mcp_tools: true,
                 subagents_disableable: true,
                 ..Default::default()
             },
@@ -211,6 +268,18 @@ impl ResolvedSpec {
             .clone()
             .unwrap_or_default()
             .validate()?;
+        let launch = self.launch_spec.clone().unwrap_or_default();
+        let protocol = self.protocol_contract.clone().unwrap_or_default();
+        ensure!(
+            match self.engine {
+                Engine::Pi => launch.transport == "pi_rpc" && protocol.events == "pi_rpc_v1",
+                Engine::Codex =>
+                    launch.transport == "codex_app_server"
+                        && protocol.events == "codex_app_server_v2",
+                _ => false,
+            },
+            "Engine and transport contract mismatch"
+        );
         ensure!(
             self.hash()? == self.spec_hash || self.legacy_hash()? == self.spec_hash,
             "Resolved spec checksum mismatch"
@@ -226,7 +295,7 @@ pub enum NativeRef {
         session_id: Option<String>,
     },
     Codex {
-        thread_id: String,
+        thread_id: Option<String>,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -280,9 +349,16 @@ impl Default for LaunchSpec {
     }
 }
 impl LaunchSpec {
+    pub fn codex() -> Self {
+        Self {
+            transport: "codex_app_server".into(),
+            executable: "codex".into(),
+            ..Default::default()
+        }
+    }
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.transport == "pi_rpc",
+            matches!(self.transport.as_str(), "pi_rpc" | "codex_app_server"),
             "Transport has not passed driver acceptance"
         );
         ensure!(
@@ -305,6 +381,13 @@ impl LaunchSpec {
                     == 1,
             "Invocation must contain exactly one runtime_arguments placeholder"
         );
+        if self.transport == "codex_app_server" {
+            ensure!(
+                self.argv == vec![LaunchArgument::RuntimeArguments],
+                "Codex wrappers must expose the native app-server command without policy overrides"
+            );
+            return Ok(());
+        }
         let reserved = [
             "--mode",
             "--provider",
@@ -379,9 +462,16 @@ impl Default for ProtocolContract {
     }
 }
 impl ProtocolContract {
+    pub fn codex() -> Self {
+        Self {
+            events: "codex_app_server_v2".into(),
+            native_session: "codex_thread".into(),
+        }
+    }
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.events == "pi_rpc_v1" && self.native_session == "pi_jsonl_v3",
+            (self.events == "pi_rpc_v1" && self.native_session == "pi_jsonl_v3")
+                || (self.events == "codex_app_server_v2" && self.native_session == "codex_thread"),
             "Unsupported protocol/session contract; restore the command or migrate explicitly"
         );
         Ok(())

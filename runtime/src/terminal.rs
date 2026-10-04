@@ -83,7 +83,7 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     authorize(&s, &h)?;
     let hub = s.terminals.lock().unwrap();
     Ok(Json(
-        json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow()})).collect::<Vec<_>>()}),
+        json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow(),"agent":p.login_agent,"attached":p.attached.load(Ordering::SeqCst)})).collect::<Vec<_>>()}),
     ))
 }
 pub async fn create(

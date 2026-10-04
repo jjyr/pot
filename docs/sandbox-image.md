@@ -1,12 +1,12 @@
 # Sandbox 镜像
 
-Sandbox 从 App 内置的 Linux ARM64 OCI 成品镜像启动。桌面、字体、Chromium、noVNC、Pi、AGY 和 Pot Runtime 都在构建时装入；启动不执行 `apk add` / `npm ci`，不拉取 Alpine 基础镜像。内核与 vminit 也随 App 提供。
+Sandbox 从 App 内置的 Linux ARM64 OCI 成品镜像启动。桌面、字体、Chromium、noVNC、Pi、Codex、AGY 和 Pot Runtime 都在构建时装入；启动不执行 `apk add` / `npm ci`，不拉取 Alpine 基础镜像。内核与 vminit 也随 App 提供。
 
 ## 构建与启动
 
 运行入口见[开发指南](development.md)。`scripts/pot bundle` 调用 `scripts/build-image`：
 
-1. 在独立构建 VM 中，以锁定的 Alpine digest 为基础，按 `image/packages.lock` 安装系统包，按 npm lock 安装 Pi。
+1. 在独立构建 VM 中，以锁定的 Alpine digest 为基础，按 `image/packages.lock` 安装系统包，按 npm lock 安装 Pi 和官方 Codex CLI（含平台原生二进制）。
 2. 写入 `/opt/pot` 和 `/opt/pi`，导出 rootfs 并生成 OCI 镜像及 `sandbox-image.json`。
 3. 将镜像、vminit 和内核打入 App。构建输入 hash 用作本地镜像版本；相同输入复用缓存，APK/npm 下载另有缓存。
 4. Helper 首次导入本地镜像，创建 VM 并运行 `/opt/pot/desktop.sh`。首次导入/解包仍有成本，但不依赖软件源或 npm 在线可用。

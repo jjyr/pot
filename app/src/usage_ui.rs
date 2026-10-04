@@ -250,7 +250,7 @@ impl UsageUI {
                 )
                 .child(ui::hint(
                     format!(
-                        "输入中缓存命中 {} · {} 次请求{}",
+                        "输入中缓存命中 {} · {} 条用量记录{}",
                         count(n(total, "cache")),
                         n(total, "requests"),
                         if n(total, "unknown") > 0 {
@@ -265,6 +265,9 @@ impl UsageUI {
                     cx,
                 )),
         );
+        if d["native_turn_usage"] == true {
+            scroll = scroll.child(ui::hint("Codex 用量按轮次累计差额记录，包含原生压缩；不代表模型请求次数或订阅余额。Pot 额度只在新轮次开始前检查，轮次内可能超出。", cx));
+        }
         if detail {
             let compression = &d["compaction_total"];
             let total_tokens = tokens(total);

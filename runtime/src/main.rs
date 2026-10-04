@@ -63,6 +63,7 @@ struct Service {
     cancel_notify: Arc<tokio::sync::Notify>,
     tasks: Arc<Mutex<tasks::Hub>>,
     terminals: Arc<Mutex<terminal::Hub>>,
+    codex: Arc<agent::codex::Hosts>,
 }
 impl Service {
     fn snapshot(&self) -> Result<Snapshot> {
@@ -71,7 +72,7 @@ impl Service {
     }
     fn snapshot_locked(&self, s: &Inner) -> Result<Snapshot> {
         Ok(Snapshot {
-            budget: self.budget()?,
+            budget: self.budget_for(&s.store)?,
             api_version: API_VERSION,
             boot_id: self.boot.clone(),
             cursor: s.store.cursor()?,
@@ -88,11 +89,17 @@ impl Service {
         })
     }
     fn budget(&self) -> Result<Option<RequestBudget>> {
+        self.budget_for(&self.inner.lock().unwrap().store)
+    }
+    fn budget_for(&self, store: &Store) -> Result<Option<RequestBudget>> {
+        if agent::current(store)?.is_some_and(|b| b.spec.engine == agent::Engine::Codex) {
+            return Ok(None);
+        }
         self.api_budget.as_ref().map(|b| b.status()).transpose()
     }
     fn publish_budget(&self) -> Result<()> {
         let _inner = self.inner.lock().unwrap();
-        if let Some(budget) = self.budget()? {
+        if let Some(budget) = self.budget_for(&_inner.store)? {
             let _ = self.events.send(Event {
                 event_id: id(),
                 cursor: None,
@@ -243,7 +250,7 @@ async fn send(
             "Authenticate the guest engine, then restart the environment",
         ));
     }
-    if s.budget()
+    if s.budget_for(&inner.store)
         .map_err(internal)?
         .is_some_and(|b| b.remaining() == 0)
     {
@@ -335,11 +342,11 @@ async fn cancel(
     Json(req): Json<CancelTurn>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    if s.pi.is_none() {
+    if !agent::configured(&s) {
         return Err(error(
             StatusCode::NOT_IMPLEMENTED,
             "cancel_unavailable",
-            "Cancellation requires Pi",
+            "Cancellation requires an Agent binding",
         ));
     }
     let mut inner = s.inner.lock().unwrap();
@@ -366,7 +373,7 @@ async fn cancel(
 async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     let inner = s.inner.lock().unwrap();
-    let budget = s.budget().map_err(internal)?;
+    let budget = s.budget_for(&inner.store).map_err(internal)?;
     let usage = inner
         .store
         .get(if s.pi.is_some() {
@@ -532,12 +539,17 @@ async fn main() -> Result<()> {
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
+            codex: Arc::new(agent::codex::Hosts::default()),
     };
+    let configured = agent::configured(&s) || use_api;
     s.inner.lock().unwrap().store.set(
         "agent.setup.pending",
-        if use_pi || use_api { "false" } else { "true" },
+        if configured { "false" } else { "true" },
     )?;
-    if !use_pi && !use_api {
+    if configured {
+        s.phase(EnginePhase::Ready, None);
+    }
+    if !configured {
         s.phase(
             EnginePhase::NeedsAuth,
             Some("请先配置主 Agent；Sandbox Terminal 可独立使用".into()),
@@ -555,10 +567,11 @@ async fn main() -> Result<()> {
     let worker = s.clone();
     tokio::spawn(async move {
         while let Some(mut req) = rx.recv().await {
-            if use_pi && usage::paused(&worker).ok().flatten().is_none() {
+            let use_agent = agent::configured(&worker);
+            if use_agent && usage::paused(&worker).ok().flatten().is_none() {
                 req.text.push_str(&tasks::context(&worker));
             }
-            let result = if use_pi {
+            let result = if use_agent {
                 agent::run(&worker, req).await
             } else if use_api {
                 deepseek::run(&worker, req, &provider_path).await
@@ -658,6 +671,7 @@ async fn main() -> Result<()> {
                     .expect("signal handler");
             tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
             terminal::shutdown(&s).await;
+            s.codex.shutdown().await;
         })
         .await?;
     Ok(())
@@ -709,6 +723,7 @@ mod tests {
             cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
+            codex: Arc::new(agent::codex::Hosts::default()),
         }
     }
     #[tokio::test]

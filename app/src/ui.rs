@@ -135,7 +135,7 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields = (0..10)
+        let fields = (0..13)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
@@ -172,6 +172,9 @@ impl Settings {
             "parallel",
             "executable",
             "argv",
+            "codex_model",
+            "login_executable",
+            "login_arguments",
         ]
         .iter()
         .enumerate()
@@ -221,8 +224,24 @@ impl Settings {
                     .child(label("快捷键", "⌘D Sandbox · ⌘, 设置 · Shift+Enter 换行"));
             }
             1 => {
+                if state["selected_engine"] == "codex" {
+                    form = form
+                        .child(Field::new().label("当前主 Agent").child(div().py_2().child(
+                            format!("Codex · {}", state["selected_model"].as_str().unwrap_or("")),
+                        )))
+                        .child(
+                            Field::new().label("修改 Codex").child(
+                                Button::new("codex-settings")
+                                    .ghost()
+                                    .label("打开 Agent 设置 →")
+                                    .on_click(|_, _, _| {
+                                        command(json!({"action":"section","value":2}))
+                                    }),
+                            ),
+                        );
+                }
                 form = form
-                    .child(label("执行 Agent", "Pi · 工具调用与任务执行"))
+                    .child(label("API 连接", "Pi · 工具调用与任务执行"))
                     .child(label("模型服务", "DeepSeek · DeepSeek Flash"))
                     .child(input(
                         0,
@@ -270,6 +289,10 @@ impl Settings {
                 }
             }
             2 => {
+                let fields = self.fields.clone();
+                form = form.child(input(10, "Codex 模型", "填写当前账户可用的模型名称；使用 Sandbox 内 Codex CLI 的登录。"))
+                    .child(Field::new().label("主 Agent").child(Button::new("select-codex").primary().label("使用 Codex")
+                        .on_click(move |_, _, cx| command(json!({"action":"select-codex","model":fields[10].read(cx).value()})))));
                 form = form.child(
                     Field::new().label("登录状态").child(
                         Button::new("refresh-agents")
@@ -293,11 +316,26 @@ impl Settings {
                         }
                     };
                     let name = id.clone();
+                    if id != "pi" {
+                        let login_id = id.clone();
+                        form = form.child(
+                            Field::new().label(format!("{} 登录命令", id)).child(
+                                Button::new(("edit-login", i))
+                                    .ghost()
+                                    .label("编辑命令")
+                                    .on_click(move |_, _, _| {
+                                        command(json!({"action":"edit-login","id":login_id}))
+                                    }),
+                            ),
+                        );
+                    }
                     form = form.child(
                         Field::new()
                             .label(name)
                             .description(if id == "pi" {
                                 "运行环境已随 Pot 提供；通过 API 设置连接模型。"
+                            } else if id == "codex" {
+                                "使用原生 App Server；先在 Sandbox Terminal 完成登录。"
                             } else {
                                 "CLI 可在终端使用；Pot Driver 尚待验收。"
                             })
@@ -312,8 +350,14 @@ impl Settings {
                             ),
                     );
                 }
+                if !state["login_agent"].as_str().unwrap_or("").is_empty() {
+                    let fields = self.fields.clone();
+                    form = form.child(input(11,"登录程序","可执行文件或 wrapper；不经 shell 执行。"))
+                        .child(input(12,"登录参数（JSON）","字符串数组；不填写密码或 token，认证在终端完成。"))
+                        .child(Field::new().label("登录命令").child(Button::new("save-login").primary().label("保存登录命令").on_click(move |_,_,cx| command(json!({"action":"save-login","executable":fields[11].read(cx).value(),"argv":fields[12].read(cx).value()})))));
+                }
                 form = form.child(
-                    Field::new().label("Pi").child(
+                    Field::new().label("当前 Agent").child(
                         Button::new("pi-command-details")
                             .ghost()
                             .label("调用命令")
@@ -327,7 +371,7 @@ impl Settings {
                     form = form
                         .child(input(
                             8,
-                            "Pi 调用程序",
+                            "调用程序",
                             "可填可执行文件或 wrapper 路径；直接执行，不经过 shell。",
                         ))
                         .child(input(

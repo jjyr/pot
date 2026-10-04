@@ -98,6 +98,23 @@ import WebKit
             }
             do {
                 if sessionID == nil {
+                    let existing = try await request("api/v1/terminals")
+                    guard current == generation else { return }
+                    let sessions = existing["sessions"] as? [[String: Any]] ?? []
+                    for session in sessions where session["exit_code"] is NSNull {
+                        if let agent = session["agent"] as? String, let id = session["id"] as? String {
+                            loginIDs[agent] = id
+                        }
+                    }
+                    if let shell = sessions
+                        .first(where: {
+                            $0["agent"] is NSNull && $0["exit_code"] is NSNull && $0["attached"] as? Bool == false
+                        })
+                    {
+                        shellID = shell["id"] as? String; sessionID = shellID
+                    }
+                }
+                if sessionID == nil {
                     let result = try await request("api/v1/terminals", body: ["cols": cols, "rows": rows])
                     guard current == generation else { return }
                     sessionID = result["id"] as? String

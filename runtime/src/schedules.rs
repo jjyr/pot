@@ -263,8 +263,8 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
     let mut inserted = None;
     let result = (|| -> ApiResult<Value> {
         if action == "create" {
-            if root.pi.is_none() {
-                return Err(invalid("定时任务需要 Pi"));
+            if !agent::configured(root) {
+                return Err(invalid("定时任务需要主 Agent 配置"));
             }
             if hub
                 .schedules
@@ -553,7 +553,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
             }
         }
     }
-    if root.pi.is_none()
+    if !agent::configured(root)
         || root.inner.lock().unwrap().engine.phase != EnginePhase::Ready
         || root.budget()?.is_some_and(|b| b.remaining() == 0)
     {

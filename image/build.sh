@@ -18,6 +18,7 @@ rm -rf /root/.npm /var/cache/apk/*
 chmod -R a+rX /opt/pot /opt/pi
 chmod +x /opt/pot/pot-runtime /opt/pot/agy /opt/pot/open-browser.sh
 ln -sf /opt/pi/node_modules/.bin/pi /usr/local/bin/pi
+ln -sf /opt/pi/node_modules/.bin/codex /usr/local/bin/codex
 ln -sf /opt/pot/agy /usr/local/bin/agy
 ln -sf /opt/pot/open-browser.sh /usr/local/bin/pot-browser
 fc-cache -f

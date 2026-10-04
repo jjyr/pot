@@ -1,3 +1,4 @@
+pub(super) mod codex;
 pub(super) mod driver;
 pub(super) mod migration;
 pub(super) mod routing;
@@ -15,6 +16,14 @@ pub fn initialize(s: &Service) -> Result<()> {
     let mut inner = s.inner.lock().unwrap();
     initialize_store(&mut inner.store, &s.usage_scope, &s.data, config)?;
     Ok(())
+}
+
+pub fn configured(s: &Service) -> bool {
+    s.pi.is_some()
+        || current(&s.inner.lock().unwrap().store)
+            .ok()
+            .flatten()
+            .is_some()
 }
 
 pub fn binding(s: &Service) -> Result<Binding> {
@@ -124,7 +133,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     let spec = binding(s)?.spec;
     {
         let mut inner = s.inner.lock().unwrap();
-        inner.engine.engine = format!("Pi · {}", spec.model);
+        inner.engine.engine = format!("{:?} · {}", spec.engine, spec.model);
         inner.engine.version = None;
     }
     let mut user = s
@@ -157,10 +166,9 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
         .unwrap()
         .interrupt_compactions(&s.usage_scope, interrupted_state, now())?;
     let waiting = s.usage.lock().unwrap().waiting(&s.usage_scope)?.is_some();
-    let uncertain = result
-        .as_ref()
-        .err()
-        .is_some_and(|e| e.to_string().contains("未确认停止"));
+    let uncertain = result.as_ref().err().is_some_and(|e| {
+        e.to_string().contains("未确认停止") || e.to_string().contains("stop unconfirmed")
+    });
     if waiting && spec.capabilities.safe_checkpoint_resume && !cancelled(s) && !uncertain {
         transcript.finish(s, MessageStatus::Failed, "\n等待 Pot 额度恢复")?;
         if let Some(m) = transcript.assistant.as_mut() {
@@ -201,10 +209,9 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
         .into();
     }
     s.save(user)?;
-    let uncertain = result
-        .as_ref()
-        .err()
-        .is_some_and(|e| e.to_string().contains("未确认停止"));
+    let uncertain = result.as_ref().err().is_some_and(|e| {
+        e.to_string().contains("未确认停止") || e.to_string().contains("stop unconfirmed")
+    });
     if let Err(e) = result {
         s.save(Message {
             id: id(),
@@ -224,7 +231,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
             EnginePhase::Ready
         },
         if uncertain {
-            Some("Pi 未确认停止，请 Quit 后重开环境".into())
+            Some("Agent 未确认停止，请 Quit 后重开环境".into())
         } else {
             None
         },

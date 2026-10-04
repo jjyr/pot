@@ -9,7 +9,7 @@ mise trust
 mise install
 mise run setup        # Rust 组件、Linux target、本仓库 hk hooks、环境检查
 mise run prepare
-mise exec -- scripts/configure-pi
+mise exec -- scripts/configure-pi # 可选：仅 Pi + DeepSeek 路线
 mise run build
 mise run bundle
 mise run open
@@ -32,6 +32,27 @@ POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runti
 ```
 
 最后一条使用宿主已安装的 Pi 和本地模拟模型，无付费调用。真实 App/VM/模型验证记录见 [文档索引](README.md)，旧 POC fixture 不代表当前产品验收。
+
+### Codex 验证
+
+设置 → Agent 填写账户可用的模型名称并选择 Codex；在 Sandbox Terminal 运行
+`codex login --device-auth`。登录态只由 guest CLI 管理，保存在持久 engine-home。
+
+无凭据集成测试（显式指定安装好的官方 Codex CLI，不调用付费模型）：
+
+```sh
+mise exec -- cargo build -p pot-runtime
+mise exec -- python scripts/tests/codex-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime --codex /absolute/path/to/codex
+```
+
+构建最新镜像后，可在独立无网络 VM 中运行同一契约：
+
+```sh
+codesign --force --sign - --entitlements helper/virtualization.entitlements .local/d1/helper-build/release/PotImageCheck
+.local/d1/helper-build/release/PotImageCheck .local/d1/codex-guest-check .local/d1/resources scripts/tests codex-guest.sh
+```
+
+每次冷验证使用新的结果目录。该测试验证真实 CLI 与本地模拟模型的行为，不代替真实登录和模型验收。
 
 ### Git hooks
 

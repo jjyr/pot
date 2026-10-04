@@ -88,3 +88,32 @@ mise exec -- python scripts/tests/codex-contract.py --codex /path/to/codex --acp
 ```
 
 这是传输选择证据，**不是已交付 CodexDriver 或真实登录/guest 验收**。
+
+
+## 2026-10-05 原生 Codex Runtime 与 ARM64 guest
+
+已接入原生 App Server 长驻 host，按 launch spec 共享进程、按 lane 绑定独立 thread。
+主聊天、worker、自动汇总与取消走统一 Driver 事件。设置可在无 pi.json 时选择 Codex；
+先打开原生候选并通过官方 `thread/inject_items` 写入初始化记录，再提交新绑定。
+空线程不持久化的行为已在真实 CLI 中复现，因此不能仅保存 thread/start 返回的 ID。
+
+`scripts/tests/codex-runtime.py` 使用真实 Runtime + Codex 0.159.1 + 本地 Responses mock，
+隔离 HOME/CODEX_HOME，无宿主凭据、无付费调用。已通过：
+
+- 无 Pi 首次配置、首次发消息前重启、连续轮次及 Runtime 重启后的原生续聊。
+- 设置迁移、新 epoch、重复提交不调用模型、迁移后重启及缺失原生文件拒绝静默新建。
+- 三次主轮次各有独立 MCP 回执；两 worker、同一计划两次手动触发及主会话的 thread ID 互不相同。
+- 用量按原生累计值差额记账，原子更新基线；缺少基线、计数器回退及不完整数据不伪造零用量。
+- 模型流取消等待终态；实际启动 `sleep 60` 后，轮次收尾终止原生后台终端，并检查进程消失。
+- native subagent 工具不出现在模型 schema；汇总轮次明确携带 Runtime 的角色指令且不暴露 shell / apply_patch；继承的无关 MCP server 被管理会话禁用。
+
+发现并修复了跨轮 MCP 连接复用：仅 thread/resume 会保留前一轮的 MCP 身份。
+现在在资源收尾后 thread/unsubscribe，再在下一轮恢复，确保重新初始化 turn 身份。
+
+以上测试在无网络 Linux ARM64/musl VM 中也通过，使用镜像内官方 Codex CLI 与交叉编译 Runtime。
+证据输出保留 `guest_acceptance:false`：表示**尚未验证真实账户认证、模型服务或订阅额度**，
+并非没有在 guest 执行。隔离 VM 不含用户登录态。
+
+回归：70 个 Runtime 测试、1 个 protocol 测试、10 个 App 测试及 7 个真实 Pi/mock 集成测试通过；
+`mise run check` 通过。Codex CLI 已由 npm lock 固定为构建基线并装入镜像，运行时不锁版本。
+当前仍不能关闭 Issue #2：Claude/AGY Driver、其他网关 codec、完整设置/引导和真实账户矩阵未完成。
