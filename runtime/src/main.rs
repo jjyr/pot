@@ -1,6 +1,7 @@
 mod deepseek;
 mod orchestration;
 mod pi;
+mod schedules;
 mod store;
 mod tasks;
 use anyhow::{Result, anyhow, bail};
@@ -513,6 +514,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/orchestration", post(orchestration::invoke))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/query", get(tasks::query))
+        .route(
+            "/api/v1/schedules",
+            get(schedules::list).post(schedules::command),
+        )
         .route("/api/v1/tasks/{id}", get(tasks::snapshot))
         .route("/api/v1/tasks/{id}/messages", post(tasks::input))
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))

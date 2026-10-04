@@ -280,3 +280,75 @@ pub struct TaskPage {
     pub counts: TaskCounts,
     pub selected: Option<TaskInfo>,
 }
+
+fn default_zone() -> String {
+    "Asia/Shanghai".into()
+}
+fn default_misfire() -> String {
+    "coalesce".into()
+}
+fn default_notify() -> String {
+    "changes".into()
+}
+fn enabled() -> bool {
+    true
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduleSpec {
+    pub title: String,
+    pub goal: String,
+    #[serde(default = "default_zone")]
+    pub timezone: String,
+    /// once / interval / daily / weekly
+    pub kind: String,
+    #[serde(default)]
+    pub at: String,
+    #[serde(default)]
+    pub every_minutes: u64,
+    #[serde(default)]
+    pub time: String,
+    #[serde(default)]
+    pub weekdays: Vec<u32>,
+    #[serde(default = "default_misfire")]
+    pub misfire: String,
+    #[serde(default = "default_notify")]
+    pub notify: String,
+    #[serde(default = "enabled")]
+    pub enabled: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduleInfo {
+    pub id: String,
+    pub spec: ScheduleSpec,
+    pub next_at_ms: Option<i64>,
+    pub next_label: String,
+    pub deleted: bool,
+    pub last_error: String,
+    pub baseline: Option<String>,
+    pub created_at_ms: i64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduleRun {
+    pub id: String,
+    pub scheduled_for_ms: i64,
+    #[serde(default)]
+    pub scheduled_label: String,
+    #[serde(default)]
+    pub generation: u64,
+    pub task_id: Option<String>,
+    pub state: String,
+    pub summary: String,
+    pub changed: Option<bool>,
+    pub finished_at_ms: Option<i64>,
+    pub notify: String,
+}
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedulePage {
+    pub items: Vec<ScheduleInfo>,
+    pub total: usize,
+    pub offset: usize,
+    pub next_offset: Option<usize>,
+    pub selected: Option<ScheduleInfo>,
+    pub runs: Vec<ScheduleRun>,
+    pub runs_next_offset: Option<usize>,
+}

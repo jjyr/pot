@@ -162,3 +162,7 @@ results are fetched on demand. This reduces new prompt injection/tool output;
 it does not remove older messages already in Pi's persistent session history.
 The current 1000-task storage cap and in-memory task hub remain; pagination bounds
 network/render/model payloads, not the total runtime storage cost.
+
+## Scheduled tasks
+
+The Runtime owns a durable scheduler; each occurrence enters the existing task queue with a fresh Pi session. Main-only tools manage plans, and the task page provides a plan editor and paginated run history. Plans and queue insertions persist together in `tasks.v2`, with migration from `tasks.v1`. GET/POST `/api/v1/schedules` expose paginated reads and idempotent commands. See [scheduled task semantics and validation](../docs/scheduled-tasks.md).

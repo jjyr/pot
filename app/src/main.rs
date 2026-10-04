@@ -3,6 +3,7 @@ extern crate gpui_kit as gpui;
 mod artifacts;
 mod client;
 mod markdown;
+mod schedules_ui;
 #[cfg(test)]
 mod stream;
 mod ui;
@@ -53,10 +54,21 @@ struct Shell {
     native: serde_json::Value,
     settings: ui::Settings,
     task_search: Entity<InputState>,
+    schedule_tab: bool,
+    schedules_ui: schedules_ui::SchedulesUI,
 }
 impl Shell {
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
         let old_tasks = self.show_tasks;
+        {
+            let mut v = self.client.view.lock().unwrap();
+            v.schedules_visible = self.show_tasks && self.schedule_tab;
+        }
+        let success = self.client.view.lock().unwrap().schedule_success;
+        if success != self.schedules_ui.success {
+            self.schedules_ui.success = success;
+            self.schedules_ui.open = false;
+        }
         let search = self.task_search.read(cx).value().to_string();
         let query = self.client.view.lock().unwrap().task_query.clone();
         if search != query.q {
@@ -194,9 +206,13 @@ impl Render for Shell {
         } else {
             view.error.clone()
         };
+        if self.show_tasks && self.schedule_tab {
+            return self.schedules_ui.render(&view, cx);
+        }
         if self.show_tasks {
             return ui::page(cx).child(
                 ui::content()
+                    .child(schedules_ui::navigation(false,cx))
                     .child(
                         div()
                             .flex()
@@ -805,6 +821,8 @@ fn main() {
                             jumping_to_latest: false,
                             native: serde_json::Value::Null,
                             settings: ui::Settings::new(window, cx),
+                            schedule_tab: false,
+                            schedules_ui: schedules_ui::SchedulesUI::new(window, cx),
                             task_search: cx.new(|cx| {
                                 InputState::new(window, cx).placeholder("搜索任务标题或编号…")
                             }),

@@ -28,6 +28,14 @@ pub struct View {
     pub task_page: TaskPage,
     pub selected_task: Option<TaskInfo>,
     pub tasks_loading: bool,
+    pub schedules_visible: bool,
+    pub schedules: SchedulePage,
+    pub schedule_selected: String,
+    pub schedule_offset: usize,
+    pub runs_offset: usize,
+    pub schedule_pending: bool,
+    pub schedule_success: u64,
+    pub schedule_error: String,
     pub main_snapshot: Option<Snapshot>,
     cached_tasks: HashMap<String, Arc<Snapshot>>,
 }
@@ -199,6 +207,15 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         let v = view.lock().unwrap();
         (v.selected.clone(), v.task_query.clone())
     };
+    let sq = {
+        let v = view.lock().unwrap();
+        (
+            v.schedules_visible,
+            v.schedule_selected.clone(),
+            v.schedule_offset,
+            v.runs_offset,
+        )
+    };
     let auth = format!("Bearer {token}");
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(3))
@@ -215,6 +232,22 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .map_err(|e| e.to_string())?
         .into_json()
         .map_err(|e| e.to_string())?;
+    let schedules: Option<SchedulePage> = if sq.0 {
+        Some(
+            agent
+                .get(&format!("{url}/api/v1/schedules"))
+                .query("selected", &sq.1)
+                .query("offset", &sq.2.to_string())
+                .query("runs_offset", &sq.3.to_string())
+                .set("Authorization", &auth)
+                .call()
+                .map_err(|e| e.to_string())?
+                .into_json()
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
     let main: Snapshot = agent
         .get(&format!("{url}{PATH_SNAPSHOT}"))
         .set("Authorization", &auth)
@@ -247,6 +280,18 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .is_some_and(|old| old.boot_id != main.boot_id)
     {
         v.cached_tasks.clear();
+    }
+    if let Some(page) = schedules {
+        if (
+            v.schedules_visible,
+            v.schedule_selected.clone(),
+            v.schedule_offset,
+            v.runs_offset,
+        ) == sq
+        {
+            v.schedule_offset = page.offset;
+            v.schedules = page;
+        }
     }
     v.main_snapshot = Some(main);
     v.apply_task_page(&query, &selected, task_page);
@@ -398,6 +443,80 @@ impl Client {
                     turn.cancelling = false;
                 }
             }
+        });
+    }
+    pub fn schedule_select(&self, id: String) {
+        let mut v = self.view.lock().unwrap();
+        v.schedule_selected = id;
+        v.runs_offset = 0;
+        v.schedules.selected = None;
+        v.schedules.runs.clear();
+        v.schedule_error.clear();
+        let _ = self.refresh.try_send(());
+    }
+    pub fn schedule_action(&self, mut req: Value) {
+        {
+            let mut v = self.view.lock().unwrap();
+            if v.schedule_pending {
+                return;
+            }
+            v.schedule_pending = true;
+            v.schedule_error.clear();
+        }
+        req["request_id"] = json!(uuid::Uuid::new_v4().to_string());
+        let view = self.view.clone();
+        let active = self.running.clone();
+        let refresh = self.refresh.clone();
+        std::thread::spawn(move || {
+            let agent = ureq::AgentBuilder::new()
+                .timeout(Duration::from_secs(5))
+                .build();
+            while active.load(Ordering::Relaxed) {
+                let result = (|| -> Result<Value, String> {
+                    let (url, token) = endpoint()?;
+                    match agent
+                        .post(&format!("{url}/api/v1/schedules"))
+                        .set("Authorization", &format!("Bearer {token}"))
+                        .send_json(req.clone())
+                    {
+                        Ok(r) => r.into_json().map_err(|e| e.to_string()),
+                        Err(ureq::Error::Status(_, r)) => {
+                            let detail = r
+                                .into_json::<ApiError>()
+                                .map(|e| e.message)
+                                .unwrap_or("计划操作被拒绝".into());
+                            Ok(json!({"rejected":detail}))
+                        }
+                        Err(e) => Err(e.to_string()),
+                    }
+                })();
+                match result {
+                    Ok(reply) => {
+                        let mut v = view.lock().unwrap();
+                        v.schedule_pending = false;
+                        if let Some(detail) = reply["rejected"].as_str() {
+                            v.schedule_error = detail.into();
+                        } else {
+                            v.schedule_success += 1;
+                            v.schedule_error.clear();
+                            if req["action"] == "delete" {
+                                v.schedule_selected.clear();
+                                v.schedules.selected = None;
+                            } else if let Some(id) = reply["id"].as_str() {
+                                v.schedule_selected = id.into();
+                            }
+                        }
+                        break;
+                    }
+                    Err(_) => {
+                        view.lock().unwrap().schedule_error =
+                            "连接中断，正在用同一请求编号重试…".into();
+                        std::thread::sleep(Duration::from_millis(1000));
+                    }
+                }
+            }
+            let _ = refresh.try_send(());
+            crate::wake_ui();
         });
     }
     pub fn filter_tasks(&self, scope: String, q: String, offset: usize) {
