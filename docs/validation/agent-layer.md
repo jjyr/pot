@@ -148,3 +148,12 @@ Linux ARM64/musl guest 补充：原版 2.1.289 + 最新交叉编译 Runtime 在�
 TCP reset 与正常 EOF 均作为取消连接已关闭；summary 以工具白名单和 Runtime MCP 权限控制，
 避免 CLI plan 模式连只读 MCP 也拒绝。测试要求每个模拟工具结果成功，不能用最终文字掩盖工具拒绝。
 此轮 guest 使用检查目录挂载最新 Runtime，最终 bundled Runtime 仍需单独验证。
+
+## 2026-10-05 原生 API codec
+
+新增 Responses、Anthropic Messages、Gemini 的输出上限及 usage 观察器；Pi 直接使用相应
+原生 API，不进行消息格式翻译。真实已安装 Pi 对三个本地模拟服务通过完整一轮请求，验证
+路径/模型约束、真实 key 注入、输出 cap、缓存命中及 Gemini 思考 token 归账。
+Anthropic message_start 不提前释放输出预留；message_delta 累计值覆盖，不重复相加。
+8 个 `real_pi` 测试全部通过（含原 DeepSeek、第二 provider 迁移、取消、额度恢复、压缩、worker/计划）。
+新增格式尚未验证真实服务商、压缩/额度检查点矩阵，因此其 safe_checkpoint_resume 保持关闭。

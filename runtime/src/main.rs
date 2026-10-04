@@ -604,8 +604,9 @@ async fn main() -> Result<()> {
             post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
         )
         .route(
-            "/gw/{provider}/v1/chat/completions",
-            post(gateway::routed).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
+            "/gw/{provider}/{*path}",
+            post(gateway::routed_protocol)
+                .layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
         )
         .route("/api/pi/compactions", post(pi::compaction_event))
         .route("/api/v1/orchestration", post(orchestration::invoke))

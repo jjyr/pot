@@ -138,7 +138,7 @@ pub(super) async fn execute(
         serde_json::from_slice(&std::fs::read(s.data.join(RUNTIME_ENDPOINT_FILE))?)?;
     private_json(
         &home.join("models.json"),
-        &json!({"providers":{(spec.provider.clone()):{"baseUrl":if spec.provider == "deepseek" && spec.auth_ref == "pi.json:api_key" {format!("http://127.0.0.1:{}/api/pi/v1",endpoint.port)}else{format!("http://127.0.0.1:{}/gw/{}/v1",endpoint.port,spec.provider)},"api":"openai-completions","apiKey":s.token,"models":[{"id":config.model,"name":spec.model,"reasoning":false,"input":["text"],"contextWindow":spec.context_window,"maxTokens":config.max_tokens,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}}}),
+        &json!({"providers":{(spec.provider.clone()):{"baseUrl":if spec.provider == "deepseek" && spec.auth_ref == "pi.json:api_key" {format!("http://127.0.0.1:{}/api/pi/v1",endpoint.port)}else{format!("http://127.0.0.1:{}/gw/{}{}",endpoint.port,spec.provider,if spec.gateway_protocol == "anthropic_messages" {""} else {"/v1"})},"api":crate::gateway::codecs::Protocol::from_name(&spec.gateway_protocol)?.pi_api(),"apiKey":s.token,"models":[{"id":config.model,"name":spec.model,"reasoning":false,"input":["text"],"contextWindow":spec.context_window,"maxTokens":config.max_tokens,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}}}),
     )?;
     private_json(
         &home.join("settings.json"),

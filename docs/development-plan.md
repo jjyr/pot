@@ -44,7 +44,7 @@ Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定
 | --- | --- | --- |
 | 1 数据模型 | Profile/ResolvedSpec/Binding、epoch 1 导入、不可变快照和损坏检测 | 产品化 profile 管理界面 |
 | 2 Pi 驱动 | 主聊天/worker 走 DriverHost/SessionHandle，事件隔离与产品投影抽离，原真实 Pi 测试通过 | 完整 host start/shutdown/auth、permission、可注入 fake-driver 取消验收；真实账户认证/限流及故障 UI |
-| 3 网关 | 通用请求核心、OpenAI Chat/unknown、provider 路由和用量归属 | Responses/Messages/Gemini codec、provider 维度的预算策略与 UI |
+| 3 网关 | 通用请求核心、Chat/Responses/Messages/Gemini/unknown codec、provider 路由和用量归属；三个新增格式真实 Pi + 本地模拟服务通过 | 真实服务商/额度恢复矩阵、provider 维度的预算策略与 UI |
 | 4 工具桥 | 共享 schema/dispatcher，Pi 薄适配器，带 lane/turn 身份的 HTTP MCP facade | 权限 UI；其他引擎 MCP 验收 |
 | 5 迁移 | 事务化 handoff、新 epoch、重启恢复、API 设置及既有 pi.json 设置触发、任务默认固定 | 完整 profile/role 设置 UI、rebind 选择 UI；原地切换与可选 narrative 未开启 |
 | 6 Codex 主聊天 | 宿主原生 App Server + 本地模拟模型通过并发、MCP 身份隔离、续聊、HTTP 取消和累计用量验证；ACP 额外标题调用及轮次用量缺口已复现，选择原生传输 | 已接入主聊天/独立 worker、设置入口与镜像；guest 本地模拟模型契约通过。仍需真实登录/模型、权限 UI 和故障矩阵 |

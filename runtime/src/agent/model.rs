@@ -256,12 +256,15 @@ pub struct ResolvedSpec {
 impl ResolvedSpec {
     pub fn set_gateway_protocol(&mut self, protocol: &str) -> Result<()> {
         ensure!(
-            matches!(protocol, "openai_chat" | "unknown"),
+            matches!(
+                protocol,
+                "openai_chat" | "openai_responses" | "anthropic_messages" | "gemini" | "unknown"
+            ),
             "Unsupported gateway protocol"
         );
         self.gateway_protocol = protocol.into();
-        self.capabilities.request_level_budget_enforcement = protocol == "openai_chat";
-        self.capabilities.usage_reporting = protocol == "openai_chat";
+        self.capabilities.request_level_budget_enforcement = protocol != "unknown";
+        self.capabilities.usage_reporting = protocol != "unknown";
         self.capabilities.safe_checkpoint_resume = protocol == "openai_chat";
         self.spec_hash = self.hash()?;
         Ok(())

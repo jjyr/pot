@@ -370,3 +370,18 @@ execution on that lane. Usage comes from the final cumulative turn report, with
 cache read/create tokens included in input. Missing/failed/cancelled usage remains
 incomplete; request-level budget enforcement and safe checkpoint replay are disabled.
 CLI login is `claude auth login`, and discovery uses official `claude auth status --json`.
+
+## Native provider codecs
+
+`providers.json` supports `openai_chat`, `openai_responses`, `anthropic_messages`,
+`gemini`, and `unknown`. Each entry has id, full HTTPS endpoint, allowed_hosts,
+api_key, and protocol. Gemini's full endpoint may contain `{model}` in
+`/models/{model}:streamGenerateContent`; the expanded model must match the binding.
+Pi uses its corresponding native provider API through `/gw/<provider>/...`.
+The gateway injects Bearer, x-api-key, or x-goog-api-key upstream; SDK local keys
+are accepted only as Runtime lane authentication and are never forwarded upstream.
+Codecs preserve request/response wire formats, clamp their native output field,
+and normalize usage for the shared ledger. Anthropic cache reads/creation count
+inside input; Gemini thought tokens count inside output. Unknown usage retains
+reservations. Newly added formats do not enable automatic checkpoint resume until
+that backend-specific contract has been validated.

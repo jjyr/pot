@@ -80,3 +80,8 @@ Claude 使用最终 result 的轮次累计 usage。输入 = input_tokens + cache
 cache_creation_input_tokens；缓存命中为 cache_read_input_tokens，是输入的子集。
 重复结果覆盖同一轮次，不重复相加；失败/取消保留已知用量并标记 incomplete。
 与 Codex 一样只在新轮次前检查 Pot 额度，不提供 CLI 内逐请求硬预算或自动检查点恢复。
+
+Responses codec 读取 response.completed/incomplete/failed 内的 usage；Messages codec
+合并 message_start 输入与 message_delta 输出，不在初始 output=0 时提前释放预留；
+Gemini codec 读取 usageMetadata，输出包含 candidatesTokenCount + thoughtsTokenCount。
+各格式均保留缓存命中为输入子集；缺字段保留未知值。新增格式尚不开启自动检查点恢复。

@@ -2,35 +2,12 @@
 use crate::*;
 use axum::{body::Body, extract::Path, response::Response};
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::time::Duration;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Protocol {
-    OpenaiChat,
-    Unknown,
-}
-impl Protocol {
-    fn clamp(&self, body: &mut Value, cap: u64) -> Result<u64> {
-        anyhow::ensure!(body.is_object(), "Expected object");
-        if *self == Self::Unknown {
-            return Ok(cap);
-        }
-        let requested = body["max_tokens"]
-            .as_u64()
-            .or_else(|| body["max_completion_tokens"].as_u64())
-            .unwrap_or(cap)
-            .max(1)
-            .min(cap);
-        body["max_tokens"] = json!(requested);
-        body.as_object_mut()
-            .unwrap()
-            .remove("max_completion_tokens");
-        body["stream_options"] = json!({"include_usage":true});
-        Ok(requested)
-    }
-}
+pub mod codecs;
+use codecs::{Protocol, UsageObserver};
+
 #[derive(Clone, Deserialize)]
 struct Provider {
     id: String,
@@ -70,10 +47,26 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
     };
     let providers: Vec<Provider> =
         serde_json::from_slice(&std::fs::read(root.join("providers.json"))?)?;
-    let p = providers
+    let mut p = providers
         .into_iter()
         .find(|p| p.id == spec.provider)
         .ok_or_else(|| anyhow!("Provider unavailable; needs rebind"))?;
+    if p.protocol == Protocol::Gemini {
+        anyhow::ensure!(
+            spec.model
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)),
+            "Unsupported Gemini model path"
+        );
+        p.endpoint = p.endpoint.replace("{model}", &spec.model);
+        let parsed = reqwest::Url::parse(&p.endpoint)?;
+        anyhow::ensure!(
+            parsed
+                .path()
+                .ends_with(&format!("/models/{}:streamGenerateContent", spec.model)),
+            "Gemini endpoint model differs from binding"
+        );
+    }
     let url = reqwest::Url::parse(&p.endpoint)?;
     let secure = url.scheme() == "https"
         || (cfg!(test) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1"));
@@ -96,10 +89,7 @@ pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedS
         return Ok(spec);
     }
     let route = provider(s, &spec)?;
-    spec.set_gateway_protocol(match route.protocol {
-        Protocol::OpenaiChat => "openai_chat",
-        Protocol::Unknown => "unknown",
-    })?;
+    spec.set_gateway_protocol(route.protocol.name())?;
     Ok(spec)
 }
 pub fn validate_spec(s: &Service, spec: &agent::ResolvedSpec) -> Result<()> {
@@ -108,16 +98,13 @@ pub fn validate_spec(s: &Service, spec: &agent::ResolvedSpec) -> Result<()> {
     }
     let route = provider(s, spec)?;
     anyhow::ensure!(
-        spec.gateway_protocol
-            == match route.protocol {
-                Protocol::OpenaiChat => "openai_chat",
-                Protocol::Unknown => "unknown",
-            },
+        spec.gateway_protocol == route.protocol.name(),
         "Provider protocol changed; needs rebind"
     );
     Ok(())
 }
 
+#[cfg(test)]
 pub async fn routed(
     State(root): State<Service>,
     Path(provider_id): Path<String>,
@@ -135,6 +122,43 @@ pub async fn routed(
     }
     forward(State(s), h, body).await
 }
+/// Pi speaks each provider's native protocol; authenticate its local SDK key only.
+pub async fn routed_protocol(
+    State(root): State<Service>,
+    Path((provider_id, path)): Path<(String, String)>,
+    mut h: HeaderMap,
+    body: Json<Value>,
+) -> ApiResult<Response> {
+    if !h.contains_key("authorization") {
+        let key = h
+            .get("x-api-key")
+            .or_else(|| h.get("x-goog-api-key"))
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                error(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthorized",
+                    "Local gateway token missing",
+                )
+            })?;
+        let bearer = format!("Bearer {key}")
+            .parse()
+            .map_err(|_| error(StatusCode::UNAUTHORIZED, "unauthorized", "Invalid token"))?;
+        h.insert("authorization", bearer);
+    }
+    let s = tasks::pi_service(&root, &h)?;
+    let binding = agent::binding(&s).map_err(internal)?;
+    let protocol = Protocol::from_name(&binding.spec.gateway_protocol).map_err(internal)?;
+    if binding.spec.provider != provider_id || !protocol.path_matches(&path, &binding.spec.model) {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "provider_mismatch",
+            "Provider protocol or model path differs from binding",
+        ));
+    }
+    forward(State(s), h, body).await
+}
+
 // The gateway has a fixed upstream and never follows redirects. The real API
 // key is not passed to Pi or included in its session files.
 pub async fn forward(
@@ -147,8 +171,8 @@ pub async fn forward(
     let binding = agent::binding(&s).map_err(internal)?;
     validate_spec(&s, &binding.spec).map_err(internal)?;
     let provider = provider(&s, &binding.spec).map_err(internal)?;
-    if body["model"] != c.model
-        || body["stream"] != true
+    if (provider.protocol != Protocol::Gemini
+        && (body["model"] != c.model || body["stream"] != true))
         || body.to_string().len() > pi::MAX_MODEL_BODY
     {
         return Err(error(
@@ -292,25 +316,36 @@ pub async fn forward(
         inner.model_requests += 1;
     }
     s.publish_budget().map_err(internal)?;
-    let response = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never())
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(120))
         .build()
-        .map_err(|e| internal(e.into()))?
-        .post(&provider.endpoint)
-        .bearer_auth(&provider.api_key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|_| {
-            error(
-                StatusCode::BAD_GATEWAY,
-                "provider_connection",
-                "Model provider connection failed",
-            )
-        })?;
+        .map_err(|e| internal(e.into()))?;
+    let mut upstream = client.post(&provider.endpoint);
+    upstream = match provider.protocol {
+        Protocol::AnthropicMessages => {
+            let mut req = upstream
+                .header("x-api-key", &provider.api_key)
+                .header("anthropic-version", "2023-06-01");
+            if let Some(beta) = h.get("anthropic-beta") {
+                req = req.header("anthropic-beta", beta);
+            }
+            req
+        }
+        Protocol::Gemini => upstream
+            .header("x-goog-api-key", &provider.api_key)
+            .query(&[("alt", "sse")]),
+        _ => upstream.bearer_auth(&provider.api_key),
+    };
+    let response = upstream.json(&body).send().await.map_err(|_| {
+        error(
+            StatusCode::BAD_GATEWAY,
+            "provider_connection",
+            "Model provider connection failed",
+        )
+    })?;
     if !response.status().is_success() {
         s.usage
             .lock()
@@ -335,6 +370,7 @@ pub async fn forward(
     let service = s.clone();
     let stream = async_stream::stream! {
         let mut pending = String::new();
+        let mut observer = UsageObserver::default();
         while let Some(chunk) = incoming.next().await {
             match chunk {
                 Ok(bytes) => {
@@ -345,11 +381,13 @@ pub async fn forward(
                         let line = pending[..end].trim().to_owned(); pending.drain(..=end);
                         if let Some(data) = line.strip_prefix("data:") {
                             if let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
-                                if provider.protocol == Protocol::OpenaiChat && value["usage"].is_object() {
-                                    if service.usage.lock().unwrap().settle(&request_id,&value["usage"]).is_err() {
-                                        yield Err(std::io::Error::other("Could not persist model usage"));
-                                        break;
-                                    }
+                                let result = observer.observe(&provider.protocol,&value).and_then(|usage| {
+                                    if let Some(usage) = usage { service.usage.lock().unwrap().settle(&request_id,&usage)?; }
+                                    Ok(())
+                                });
+                                if result.is_err() {
+                                    yield Err(std::io::Error::other("Could not persist model usage"));
+                                    return;
                                 }
                             }
                         }
@@ -376,8 +414,8 @@ mod tests {
         let mut body =
             json!({"messages":[{"role":"user","content":"test"}],"max_completion_tokens":20});
         assert_eq!(Protocol::OpenaiChat.clamp(&mut body, 10).unwrap(), 10);
-        assert_eq!(body["max_tokens"], 10);
-        assert!(body.get("max_completion_tokens").is_none());
+        assert_eq!(body["max_completion_tokens"], 10);
+        assert!(body.get("max_tokens").is_none());
         assert_eq!(body["messages"][0]["content"], "test");
         let original = body.clone();
         Protocol::Unknown.clamp(&mut body, 1).unwrap();
@@ -631,3 +669,6 @@ mod opaque_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[cfg(test)]
+mod native_tests;
