@@ -92,7 +92,7 @@ impl Service {
         self.budget_for(&self.inner.lock().unwrap().store)
     }
     fn budget_for(&self, store: &Store) -> Result<Option<RequestBudget>> {
-        if agent::current(store)?.is_some_and(|b| b.spec.engine == agent::Engine::Codex) {
+        if agent::current(store)?.is_some_and(|b| b.spec.engine != agent::Engine::Pi) {
             return Ok(None);
         }
         self.api_budget.as_ref().map(|b| b.status()).transpose()

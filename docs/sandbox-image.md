@@ -43,3 +43,8 @@ codesign --force --sign - --entitlements helper/virtualization.entitlements .loc
 `PotImageCheck` 在全新镜像仓库与数据目录导入本地镜像，用 `networking: false` 启动 VM。检查 broker、Chromium CDP、Runtime、Pi 版本、桌面进程、四种语言的示例字形和浏览器正常退出；结果位于验证目录 `data/offline-result.json`，不调用模型。重跑时使用新的验证目录，确保验证冷启动。
 
 后续可用性修正：增加底部常驻启动栏和窗口列表，新增 4 个锁定系统包。当前镜像 `pot.local/sandbox:b637617123a0ce749783` 的压缩层为 657,315,671 bytes（626.87 MiB）。上表保留初版无面板的验收口径。
+
+Claude Code 镜像基线为官方 `@anthropic-ai/claude-code-linux-arm64-musl` 2.1.289 原版二进制。
+安装禁用 npm 生命周期脚本，`claude` 直接链接到平台包的二进制；不链接包内其他平台的占位文件。
+该版本是构建基线而非 Runtime 锁；升级须满足 required flags / 生命周期能力契约。
+登录与执行共用 guest 持久 HOME，安装和启动不导入宿主 Claude 凭据。

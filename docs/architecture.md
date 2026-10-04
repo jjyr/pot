@@ -27,7 +27,7 @@ macOS
 | Helper | 用户进程，管理 VM、资源和正常/异常关闭 | `helper/` |
 | Runtime | 权威任务状态、消息事件、API、用量、恢复 | `runtime/src/main.rs`、`store.rs` |
 | 编排/调度 | 单层委派、队列、完成回流、定时触发 | `tasks.rs`、`orchestration.rs`、`schedules.rs` |
-| Agent / 引擎 | Profile 快照、epoch 绑定与迁移；DriverHost / SessionHandle；Pi RPC 与原生上下文 | `agent/`、`pi.rs` |
+| Agent / 引擎 | Profile 快照、epoch 绑定与迁移；DriverHost / SessionHandle；Pi RPC、Codex App Server、Claude 原生 CLI 与各自上下文 | `agent/`、`pi.rs` |
 | 网关 / 工具桥 | provider 路由、请求预留、协议 codec；Pi / MCP 共享工具定义和 dispatcher | `gateway.rs`、`pot-tools.json`、`tool_bridge.rs`、`orchestration.rs` |
 | 协议/桌面 | 共享类型；guest 启动、浏览器与输入仲裁 | `protocol/`、`image/` |
 
@@ -45,7 +45,7 @@ Sandbox 的系统依赖由构建 VM 预装成 OCI 镜像，随 App 发布；Help
 
 ## 状态与恢复
 
-- Runtime 保存产品消息/任务状态，Pi 保存原生执行上下文。`agent.bindings.v1` 为每个 owner 保存不可变 ResolvedSpec、SHA-256、epoch 和 native_ref；旧 Pi 元数据幂等导入 epoch 1，仍保留旧字段。恢复只使用绑定快照。
+- Runtime 保存产品消息/任务状态，各 CLI 保存原生执行上下文。`agent.bindings.v1` 为每个 owner 保存不可变 ResolvedSpec、SHA-256、epoch 和 native_ref；旧 Pi 元数据幂等导入 epoch 1，仍保留旧字段。恢复只使用绑定快照。
 - Profile 设置通过持久迁移操作切换主聊天，运行中等待本轮停止；既有任务默认固定，新任务解析当前 worker 默认值。外部 handoff 与新会话先落盘，随后在同一 SQLite 事务归档旧绑定、激活新绑定并插入对话边界。确定性 handoff 有界、脱敏，下一次真实输入引导读取，不额外调用模型。
 - Pi transport 事件转换为带 epoch/turn/seq 的驱动事件后投影到产品记录。取消仍须等待 Pi 退出，未确认停止禁止再启动该 owner；其他引擎不能仅凭实现 enum 声称支持。
 - API 命令携带 request ID；消息事件有持久 cursor。Runtime 提供 SSE；当前 App 使用后台快照/分页轮询（约 500 ms），拒绝过期查询结果，切回对话先用缓存。
@@ -72,3 +72,8 @@ VM 隔离宿主，但 Pi 与 Runtime 仍共享 guest 用户域；worker token �
 CLI 与 Runtime 继承同一个 guest 用户和持久 HOME；`~/.local/bin`、`~/.npm-global/bin` 加入共享 PATH。
 `discovery.rs` 仅在显式调用时检查 executable 并查询已支持的官方状态接口；身份、安装、兼容性和运行准备状态分开。
 Profile 的 launch_spec/protocol_contract 进入不可变绑定和 checksum；诊断版本不进入新 checksum，也不启动版本探测。旧快照继续验证原 checksum；兼容升级不因版本字符串而迁移。
+
+Claude 每轮运行一个原版 CLI 进程，以固定 UUID 恢复。严格 MCP 配置与内置工具白名单
+按 lane 限制工具；summary 与 worker 的 Runtime token 不允许编排。
+结果事件之后仍等待后台任务清理与进程退出；无法确认停止时保留占用并阻止新轮次。
+官方 auth status 只查询登录状态，不读取或导出凭据。用量按 CLI 轮次累计报告归账。

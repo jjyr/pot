@@ -1,3 +1,4 @@
+pub(super) mod claude;
 pub(super) mod codex;
 pub(super) mod driver;
 pub(super) mod migration;

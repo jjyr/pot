@@ -117,3 +117,34 @@ mise exec -- python scripts/tests/codex-contract.py --codex /path/to/codex --acp
 回归：70 个 Runtime 测试、1 个 protocol 测试、10 个 App 测试及 7 个真实 Pi/mock 集成测试通过；
 `mise run check` 通过。Codex CLI 已由 npm lock 固定为构建基线并装入镜像，运行时不锁版本。
 当前仍不能关闭 Issue #2：Claude/AGY Driver、其他网关 codec、完整设置/引导和真实账户矩阵未完成。
+
+## 2026-10-05 Claude 原生 CLI 契约
+
+原版 Claude Code 2.1.289，临时 HOME/CLAUDE_CONFIG_DIR 与本地 Anthropic SSE 模拟服务；
+不读取宿主真实凭据，不调用付费模型。`scripts/tests/claude-runtime.py` 验证：
+
+- 无 Pi 配置时选择 Claude；连续对话和 Runtime 重启沿用同一原生 UUID。
+- 配置迁移不调用模型，重复请求幂等；新 epoch 创建独立 UUID；原生 JSONL 丢失时 binding 变为 broken。
+- 两个 worker 和两次计划执行使用独立原生会话；只读汇总不能使用 Bash/Write/Edit。
+- 显式 built-in 白名单排除原生 Agent/Task/SendMessage/Cron；Pot MCP 正常调用。
+- 原生后台 `sleep 60` 在轮次完成前退出；取消等待模型请求后确认进程退出。
+- 23 次本地模拟模型请求；无额外模型。结果 usage 为轮次累计量；缓存读写归入输入，缓存命中不重复累加。
+
+旧宿主 Claude 构建在探针中出现辅助模型调用、结果只含最后请求用量及后台进程存活，
+因此没有作为可用基线。Runtime 通过 help 控制项和 init 生命周期能力进行兼容性校验，
+不锁死版本；用户升级仍须满足契约。取消/异常不能确认资源清理时保留“stop unconfirmed”。
+Codex 原生契约回归通过（23 次本地模拟请求）。真实 Claude 账户、认证过期、服务商限流和升级矩阵仍未验收。
+
+### 官方集成条款核实
+
+2026-10-05 阅读 [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)。
+当前页面明确说明产品可预装/运行原版 CLI，但要求适用 Commercial Terms、不得修改二进制或限制其认证方式、
+用户自行认证并由服务商直接计费，不得代付/转售/中介用量。页面另明确区分原版 CLI 内用户自行登录订阅
+与第三方应用收集/中介 Claude.ai 凭据。Pot 使用原版二进制及官方登录，未抽取 token；
+这不是 Anthropic 对 Pot 的授权或背书，也不替代发行主体接受适用条款。
+
+Linux ARM64/musl guest 补充：原版 2.1.289 + 最新交叉编译 Runtime 在非 root 用户下通过同一
+完整契约（`.local/d1/claude-guest-20261005/data/claude-runtime.json`；23 次本地请求）。
+TCP reset 与正常 EOF 均作为取消连接已关闭；summary 以工具白名单和 Runtime MCP 权限控制，
+避免 CLI plan 模式连只读 MCP 也拒绝。测试要求每个模拟工具结果成功，不能用最终文字掩盖工具拒绝。
+此轮 guest 使用检查目录挂载最新 Runtime，最终 bundled Runtime 仍需单独验证。

@@ -614,6 +614,24 @@ mod tests {
         assert_eq!(summary["native_turn_usage"], true);
     }
 
+    #[test]
+    fn claude_usage_counts_cache_once_and_preserves_incomplete_totals() {
+        let l = ledger();
+        l.0.execute("INSERT INTO requests(id,scope,turn_id,at,model,state) VALUES ('c','main','turn',0,'mock','native_pending')", []).unwrap();
+        let usage = json!({"input_tokens":20,"output_tokens":5,"cache_read_input_tokens":10,"cache_creation_input_tokens":3});
+        assert!(l.settle_claude("missing", &usage).is_err());
+        l.settle_claude("c", &usage).unwrap();
+        l.settle_claude("c", &usage).unwrap();
+        assert!(l.settle_claude("c", &json!({"input_tokens":1})).is_err());
+        assert!(l.settle_claude("c", &json!({"input_tokens":u64::MAX,"output_tokens":5,"cache_read_input_tokens":1,"cache_creation_input_tokens":0})).is_err());
+        l.native_incomplete("c").unwrap();
+        let summary = l.summary(&query("main", 7), now()).unwrap();
+        assert_eq!(summary["lifetime"]["input"], 33);
+        assert_eq!(summary["lifetime"]["output"], 5);
+        assert_eq!(summary["lifetime"]["cache"], 10);
+        assert_eq!(summary["lifetime"]["unknown"], 1);
+    }
+
     fn at(s: &str) -> i64 {
         chrono::DateTime::parse_from_rfc3339(s)
             .unwrap()
@@ -951,6 +969,36 @@ impl Ledger {
         tx.commit()?;
         Ok(())
     }
+    pub fn settle_claude(&self, request: &str, usage: &Value) -> Result<()> {
+        let input = usage["input_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing Claude input usage"))?;
+        let output = usage["output_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing Claude output usage"))?;
+        let cache = usage["cache_read_input_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing Claude cache usage"))?;
+        let created = usage["cache_creation_input_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing Claude cache creation usage"))?;
+        let input = input
+            .checked_add(cache)
+            .and_then(|v| v.checked_add(created))
+            .ok_or_else(|| anyhow!("Claude usage overflow"))?;
+        let tx = self.0.unchecked_transaction()?;
+        self.settle(request,&json!({"prompt_tokens":input,"completion_tokens":output,"prompt_cache_hit_tokens":cache}))?;
+        anyhow::ensure!(
+            self.0.execute(
+                "UPDATE requests SET state='native_reported' WHERE id=?",
+                [request],
+            )? == 1,
+            "Missing native usage request"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn native_incomplete(&self, request: &str) -> Result<()> {
         self.0.execute(
             "UPDATE requests SET state='native_incomplete' WHERE id=?",

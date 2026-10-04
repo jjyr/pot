@@ -5,7 +5,7 @@ import Foundation
 @MainActor final class SettingsPanel: NSObject {
     weak var bridge: PotBridge?
     var agentStates: [[String: Any]] = []
-    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = ""
+    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = ""
     var profile: [String: Any] = [:]
     var loginAgent = "", loginExecutable = "", loginArguments = "[]"
     var loginTool: [String: Any] = [:]
@@ -59,7 +59,7 @@ import Foundation
          "memory": memoryField, "disk": diskField,
          "login_agent": loginAgent, "login_executable": loginExecutable, "login_arguments": loginArguments,
          "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
-         "codex_model": codexModel, "agents": agentStates, "discovering": discovering,
+         "codex_model": codexModel, "claude_model": claudeModel, "agents": agentStates, "discovering": discovering,
          "executable": invocationExecutable, "argv": invocationArgs,
          "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
     }
@@ -84,6 +84,9 @@ import Foundation
                     profile = value
                     if value["engine"] as? String == "codex" {
                         codexModel = value["model"] as? String ?? ""
+                    }
+                    if value["engine"] as? String == "claude" {
+                        claudeModel = value["model"] as? String ?? ""
                     }
                     let launch = value["launch_spec"] as? [String: Any] ?? [:]
                     invocationExecutable = launch["executable"] as? String ?? "pi"
@@ -137,19 +140,21 @@ import Foundation
         }
     }
 
-    func selectCodex(model: String) {
+    func selectNative(engine: String, model: String) {
+        let name = engine == "claude" ? "Claude" : "Codex"
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let bridge, !model.isEmpty else { result = "请填写 Codex 模型名称。"; return }
+        guard let bridge, !model.isEmpty else { result = "请填写 \(name) 模型名称。"; return }
         bridge.terminal.show(false, root: root, ip: bridge.guestIP)
         Task {
             do {
                 let state = try await bridge.terminal.request("api/v1/agent")
                 let profiles = state["profiles"] as? [[String: Any]] ?? []
-                let previous = profiles.first { $0["id"] as? String == "codex-default" }
+                let previous = profiles.first { $0["id"] as? String == "\(engine)-default" }
                 let revision = previous?["revision"] as? Int ?? 0
                 let profile: [String: Any] = [
-                    "id": "codex-default", "revision": revision + 1, "name": "Codex",
-                    "engine": "codex", "provider": "openai", "model": model, "auth_ref": "cli:codex",
+                    "id": "\(engine)-default", "revision": revision + 1, "name": name,
+                    "engine": engine, "provider": engine == "claude" ? "anthropic" : "openai", "model": model,
+                    "auth_ref": "cli:\(engine)",
                     "params": ["max_output_tokens": 8192],
                     "tool_policy": ["worker_orchestration": false, "summary_read_only": true, "unattended": "guest_vm"],
                 ]
@@ -157,10 +162,14 @@ import Foundation
                     "profile": profile, "expected_revision": revision,
                     "request_id": UUID().uuidString, "follow_main": true,
                 ])
-                codexModel = model; setup = false
-                result = "已选择 Codex；现有轮次结束后生效。请先在 Sandbox Terminal 完成登录。"
+                if engine == "claude" {
+                    claudeModel = model
+                } else {
+                    codexModel = model
+                }; setup = false
+                result = "已选择 \(name)；现有轮次结束后生效。请先在 Sandbox Terminal 完成登录。"
                 refreshAgents()
-            } catch { result = "Codex 配置未保存：\(error.localizedDescription)" }
+            } catch { result = "\(name) 配置未保存：\(error.localizedDescription)" }
         }
     }
 
@@ -171,7 +180,8 @@ import Foundation
         var updated = profile
         updated["revision"] = revision + 1
         updated["launch_spec"] = [
-            "transport": profile["engine"] as? String == "codex" ? "codex_app_server" : "pi_rpc",
+            "transport": profile["engine"] as? String == "codex" ? "codex_app_server" :
+                (profile["engine"] as? String == "claude" ? "claude_json" : "pi_rpc"),
             "executable": executable,
             "argv": args
                 .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],

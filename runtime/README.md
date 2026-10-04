@@ -352,3 +352,21 @@ are applied before claiming a slot. FIFO applies among eligible tasks, so a capp
 provider does not block another. Cancelling tasks retain capacity until settled;
 unconfirmed engine shutdown holds the lane and all its leases until Runtime restart.
 These limits apply to background workers; the main/summary lane remains separate.
+
+## Claude native sessions
+
+Claude uses the original CLI's stream-json print mode, one process per turn with an
+explicit UUID (`--session-id`, then `--resume`). A fresh UUID is marked unstarted
+until init confirms it; a previously started session that cannot resume becomes
+broken. Settings prepare checks required CLI controls without a model request.
+`--system-prompt-snapshot off` keeps current lane/summary instructions effective
+across resume. Strict MCP configuration carries the lane bearer; an explicit
+built-in tool whitelist excludes native delegation and scheduling. Summary turns
+also exclude shell and mutation tools. Guest VM is the unattended boundary.
+
+Completion waits for process exit and an empty native background-task list after
+the result. Cancellation sends SIGINT and waits; uncertain cleanup blocks further
+execution on that lane. Usage comes from the final cumulative turn report, with
+cache read/create tokens included in input. Missing/failed/cancelled usage remains
+incomplete; request-level budget enforcement and safe checkpoint replay are disabled.
+CLI login is `claude auth login`, and discovery uses official `claude auth status --json`.

@@ -78,3 +78,15 @@ codesign --force --sign - --entitlements helper/virtualization.entitlements .loc
 `poc/` 已移除，实验代码和证据可从 Git 历史查阅。`.local/poc/` 只是沿用的本机构建/下载缓存路径，不依赖旧实验源码。
 
 机器连接与部署记录统一在 `~/Workspace/Machines`；不要提交凭据、用户会话或构建产物。在线检查走 Runtime API，不从宿主打开运行中 guest 的 SQLite。
+
+### Claude 离线契约
+
+Sandbox Terminal 使用 `claude auth login` 完成官方登录；在 Agent 设置填写模型并选择 Claude。
+无需真实账户的开发验证使用原版 CLI + 本地模拟 Anthropic 服务：
+
+```sh
+mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime --claude /absolute/path/to/claude
+.local/d1/helper-build/release/PotImageCheck .local/d1/claude-guest-check .local/d1/resources scripts/tests claude-guest.sh
+```
+
+guest 检查遵循上面的 Helper 签名及 VM 执行前提。测试使用独立临时 HOME，不复用宿主凭据。

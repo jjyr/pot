@@ -25,7 +25,7 @@ D1–D6 保留为范围编号，后续能力已提前实现，不要求重新顺
 | D3 报告场景 S1 | 任务执行与自动编排已有 | 两份附件→追加部署成本→报告/来源→重启追问的完整验收；结构化产物、明确偏好 |
 | D4 网页接管 S2 | 桌面查看与合作式接管已有 | 浏览器 Agent 工具、桌面资源排队、独立 controller 权限域、真实 Pi shell/CDP/X11 绕过负测 |
 | D5 持久计划 S3 | 调度及本地模拟端到端已实现 | 真实来源变化与证据、实际 sleep/wake 错过触发和重复唤醒完整场景验收 |
-| D6 多引擎与发行 | 未完成 | 按 #2 完成原生 Codex App Server 的真实账户验收；ClaudeDriver / AgyDriver 纳入计划，技术验收与官方集成条款分别核实；记忆更正/遗忘、服务授权与 review、升级恢复、签名公证与冷安装 |
+| D6 多引擎与发行 | 未完成 | 按 #2 完成原生 Codex App Server 的真实账户验收；ClaudeDriver 已完成原生 CLI 离线契约；AgyDriver 与真实账户矩阵待验收；记忆更正/遗忘、服务授权与 review、升级恢复、签名公证与冷安装 |
 
 完整 S1–S3 通过标准见 [产品设计](product-design.md#产品验收场景)。当前无 Developer ID，发行签名公证暂缓，只阻塞发行；开发包保留必要的 ad hoc 签名。
 
@@ -51,8 +51,8 @@ Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定
 | 7 Codex workers/计划 | 独立 native threads、多 worker 与只读汇总、原生累计差额计量；Pi 前置门槛移除 | 手动触发的两次计划执行已验证独立线程；仍需真实时钟触发与账户验收 |
 | 8 任务路由 | API 显式选择、计划 profile、用户白名单内的 tool hint、worker 默认；创建时能力校验；固定快照及选择原因；全局/profile/provider 并发限制 | 设置 UI；Codex 接入后的跨引擎真实验收 |
 | 9 Terminal / 发现 / 命令 | Runtime PTY + 原生 bearer WebSocket 桥 + bundled xterm；独立登录会话和重复点击去重；显式官方状态查询；调用命令 revision、登录命令编辑、返回页面防抖刷新、App 重连找回 PTY；取消版本锁 | guest 真登录/重启持久性与 UI 验收、完整进程树停止负测 |
-| 10 Claude / AGY | 纳入数据模型和 CLI 发现列表；未知状态不冒充登录 | 两个 Driver、官方条款、角色/权限/取消/恢复及真实 guest 验收 |
+| 10 Claude / AGY | Claude 原生 CLI Driver、独立会话/worker/计划、只读汇总、取消清理、用量和设置入口；官方登录状态查询；原版集成条款已核实 | Claude guest 离线契约通过；仍需最终打包验证、真实账户与升级故障矩阵；AGY Driver 及其官方条款/契约验收 |
 | 11 引导 / 设置 | 通用/助手/Agent/Sandbox 导航；配置前可打开 Terminal；未配置时拒绝主聊天；初始 API 保存取消额外确认 | 两页多选安装及重试、嵌入终端、主 Agent 单选与原子提交、通用 API endpoint/model 表单及完整矩阵 |
 
 验证证据及局限见 [Agent layer 验证](validation/agent-layer.md)。Codex 已提供显式设置入口，完成了无凭据的真实 CLI / guest 契约验证，仍不等于真实账户验收。
-Claude / AGY 暂不启用 profile；Terminal 可用不等于通过 Driver 验收。
+Claude 已提供显式 profile 设置入口；AGY 暂不启用 profile。Terminal 可用不等于通过 Driver 验收。

@@ -13,12 +13,13 @@ tar xzf /opt/pot/novnc.tar.gz -C /opt/pot/novnc --strip-components=1
 rm /opt/pot/novnc.tar.gz
 cp /opt/pot/pi-package.json /opt/pi/package.json
 cp /opt/pot/pi-package-lock.json /opt/pi/package-lock.json
-npm ci --cache /cache/npm --prefix /opt/pi --ignore-scripts --omit=dev --no-audit --no-fund
+NODE_OPTIONS=--max-old-space-size=512 npm ci --maxsockets=2 --cache /cache/npm --prefix /opt/pi --ignore-scripts --omit=dev --no-audit --no-fund
 rm -rf /root/.npm /var/cache/apk/*
 chmod -R a+rX /opt/pot /opt/pi
 chmod +x /opt/pot/pot-runtime /opt/pot/agy /opt/pot/open-browser.sh
 ln -sf /opt/pi/node_modules/.bin/pi /usr/local/bin/pi
 ln -sf /opt/pi/node_modules/.bin/codex /usr/local/bin/codex
+ln -sf /opt/pi/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude /usr/local/bin/claude
 ln -sf /opt/pot/agy /usr/local/bin/agy
 ln -sf /opt/pot/open-browser.sh /usr/local/bin/pot-browser
 fc-cache -f

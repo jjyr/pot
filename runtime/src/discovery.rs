@@ -43,7 +43,7 @@ fn defaults() -> Vec<Tool> {
             },
             login: Some(CommandSpec {
                 executable: "claude".into(),
-                argv: vec![],
+                argv: vec!["auth".into(), "login".into()],
             }),
         },
         Tool {
@@ -164,10 +164,9 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
         };
         let mut auth = "unknown";
         let mut check = "unsupported";
-        // Only the documented Codex command is queried. Custom login wrappers,
-        // Claude and AGY stay unknown until a supported status contract is accepted.
-        if tool.id == "codex" && name == "codex" && present {
-            match codex_status(&s.workspace).await {
+        // Only official, documented status commands are queried; wrappers stay unknown.
+        if matches!(tool.id.as_str(), "codex" | "claude") && name == tool.id && present {
+            match native_status(&tool.id, &s.workspace).await {
                 Ok(Some(true)) => {
                     auth = "authenticated";
                     check = "complete";
@@ -187,9 +186,14 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
     }
     Ok(Json(json!({"agents":results})))
 }
-async fn codex_status(cwd: &std::path::Path) -> Result<Option<bool>> {
-    let mut child = Command::new("codex")
-        .args(["login", "status"])
+async fn native_status(engine: &str, cwd: &std::path::Path) -> Result<Option<bool>> {
+    let args: &[&str] = if engine == "claude" {
+        &["auth", "status", "--json"]
+    } else {
+        &["login", "status"]
+    };
+    let mut child = Command::new(engine)
+        .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -214,6 +218,14 @@ async fn codex_status(cwd: &std::path::Path) -> Result<Option<bool>> {
             String::from_utf8_lossy(&out),
             String::from_utf8_lossy(&err)
         );
+        if engine == "claude" {
+            let value: Value = serde_json::from_slice(&out)?;
+            return Ok::<_, anyhow::Error>(match value["loggedIn"].as_bool() {
+                Some(true) if status.success() => Some(true),
+                Some(false) if status.code() == Some(1) => Some(false),
+                _ => None,
+            });
+        }
         Ok::<_, anyhow::Error>(if status.success() && text.contains("Logged in") {
             Some(true)
         } else if !status.success() && text.trim() == "Not logged in" {

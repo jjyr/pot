@@ -748,7 +748,8 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 executable: v["executable"] as? String ?? "",
                 arguments: v["argv"] as? String ?? ""
             )
-        case "select-codex": settings.selectCodex(model: v["model"] as? String ?? "")
+        case "select-claude": settings.selectNative(engine: "claude", model: v["model"] as? String ?? "")
+        case "select-codex": settings.selectNative(engine: "codex", model: v["model"] as? String ?? "")
         case "agent-refresh": settings.refreshAgents()
         case "agent-login":
             if let agent = v["id"] as? String {

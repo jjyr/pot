@@ -92,7 +92,7 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
 }
 pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedSpec> {
     let mut spec = profile.resolve()?;
-    if spec.engine == agent::Engine::Codex {
+    if matches!(spec.engine, agent::Engine::Codex | agent::Engine::Claude) {
         return Ok(spec);
     }
     let route = provider(s, &spec)?;
@@ -103,7 +103,7 @@ pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedS
     Ok(spec)
 }
 pub fn validate_spec(s: &Service, spec: &agent::ResolvedSpec) -> Result<()> {
-    if spec.engine == agent::Engine::Codex {
+    if matches!(spec.engine, agent::Engine::Codex | agent::Engine::Claude) {
         return spec.validate();
     }
     let route = provider(s, spec)?;

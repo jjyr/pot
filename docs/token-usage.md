@@ -73,3 +73,10 @@ OpenAI Chat codec 沿用 DeepSeek 的预留、输出限制和用量结算。迁�
 safe checkpoint resume。订阅配额仍未接入，不能由 API 请求账本推算。
 
 终端、官方登录状态查询、命令保存不触发模型调用，不创建用量记录；终端文本不进入用量或产品日志。CLI 发现显示“已登录”仅代表官方状态结果，不表示真实请求、模型预算或角色能力已验收。
+
+## Claude 原生计量
+
+Claude 使用最终 result 的轮次累计 usage。输入 = input_tokens + cache_read_input_tokens +
+cache_creation_input_tokens；缓存命中为 cache_read_input_tokens，是输入的子集。
+重复结果覆盖同一轮次，不重复相加；失败/取消保留已知用量并标记 incomplete。
+与 Codex 一样只在新轮次前检查 Pot 额度，不提供 CLI 内逐请求硬预算或自动检查点恢复。

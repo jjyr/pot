@@ -85,6 +85,11 @@ fn queue(
         epoch,
         native_ref: if spec.engine == Engine::Codex {
             native.ok_or_else(|| anyhow!("Codex candidate must be opened before migration"))?
+        } else if spec.engine == Engine::Claude {
+            NativeRef::Claude {
+                session_id: id(),
+                started: false,
+            }
         } else {
             NativeRef::Pi {
                 file: data.join(format!("pi-session-{epoch}-{}.jsonl", id())),
@@ -474,7 +479,7 @@ pub async fn migrate(
                 .native_ref,
         )
     } else {
-        codex::prepare(&owner, &spec).await.map_err(internal)?
+        driver::prepare(&owner, &spec).await.map_err(internal)?
     };
     let migration = queue(
         &mut owner.inner.lock().unwrap().store,
@@ -558,7 +563,7 @@ pub async fn settings(
         }
     }
     let native = if settings.follow_main && !already_saved {
-        codex::prepare(&s, &spec).await.map_err(internal)?
+        driver::prepare(&s, &spec).await.map_err(internal)?
     } else {
         None
     };

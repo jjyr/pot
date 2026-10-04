@@ -175,6 +175,7 @@ pub async fn execute(
     let mut session = match binding.spec.engine {
         Engine::Pi => PiHost.session(s.clone(), binding)?,
         Engine::Codex => super::codex::CodexHost.session(s.clone(), binding)?,
+        Engine::Claude => super::claude::ClaudeHost.session(s.clone(), binding)?,
         _ => bail!("Engine has not passed driver acceptance"),
     };
     let result = session
@@ -221,5 +222,15 @@ mod tests {
         assert!(!gate.accept(&event));
         assert_eq!(gate.finish(), Outcome::Cancelled);
         assert_eq!(EventGate::new(1, "missing").finish(), Outcome::Unknown);
+    }
+}
+
+/// Validate a candidate before settings commit; preparation never calls a model.
+pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRef>> {
+    if spec.engine == Engine::Claude {
+        claude::prepare(spec).await?;
+        Ok(None)
+    } else {
+        codex::prepare(s, spec).await
     }
 }

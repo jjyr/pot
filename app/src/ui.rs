@@ -135,7 +135,7 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields = (0..13)
+        let fields = (0..14)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
@@ -175,6 +175,7 @@ impl Settings {
             "codex_model",
             "login_executable",
             "login_arguments",
+            "claude_model",
         ]
         .iter()
         .enumerate()
@@ -224,13 +225,17 @@ impl Settings {
                     .child(label("快捷键", "⌘D Sandbox · ⌘, 设置 · Shift+Enter 换行"));
             }
             1 => {
-                if state["selected_engine"] == "codex" {
+                if matches!(state["selected_engine"].as_str(), Some("codex" | "claude")) {
                     form = form
                         .child(Field::new().label("当前主 Agent").child(div().py_2().child(
-                            format!("Codex · {}", state["selected_model"].as_str().unwrap_or("")),
+                            format!(
+                                "{} · {}",
+                                state["selected_engine"].as_str().unwrap_or(""),
+                                state["selected_model"].as_str().unwrap_or("")
+                            ),
                         )))
                         .child(
-                            Field::new().label("修改 Codex").child(
+                            Field::new().label("修改主 Agent").child(
                                 Button::new("codex-settings")
                                     .ghost()
                                     .label("打开 Agent 设置 →")
@@ -293,6 +298,10 @@ impl Settings {
                 form = form.child(input(10, "Codex 模型", "填写当前账户可用的模型名称；使用 Sandbox 内 Codex CLI 的登录。"))
                     .child(Field::new().label("主 Agent").child(Button::new("select-codex").primary().label("使用 Codex")
                         .on_click(move |_, _, cx| command(json!({"action":"select-codex","model":fields[10].read(cx).value()})))));
+                let fields = self.fields.clone();
+                form = form.child(input(13, "Claude 模型", "填写账户可用的模型名称；使用 Sandbox 内 Claude CLI 的登录。"))
+                    .child(Field::new().label("主 Agent").child(Button::new("select-claude").label("使用 Claude")
+                        .on_click(move |_, _, cx| command(json!({"action":"select-claude","model":fields[13].read(cx).value()})))));
                 form = form.child(
                     Field::new().label("登录状态").child(
                         Button::new("refresh-agents")
