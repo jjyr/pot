@@ -12,6 +12,8 @@ scripts/pot bundle
 scripts/pot open
 ```
 
+`bundle` 会在独立 VM 内预装依赖并生成完整 Sandbox OCI 镜像；只有构建阶段需要下载软件，App 启动直接加载镜像。镜像缓存、桌面字体与大小对比见 [Sandbox 镜像](sandbox-image.md)。
+
 开发包为 `.local/d1/Pot.app`。`scripts/pot open` 使用 `.local/d1/local-runtime`（可用 `POT_LOCAL_ROOT` 覆盖）；直接双击默认使用 `~/Library/Application Support/pot`，两者数据不同。
 
 `configure-pi` 仅从宿主 Pi 导入 DeepSeek 凭据到 guest 私有配置，不调用模型，不把密钥打入 App。模型为 `deepseek-v4-flash`；配置入口、默认额度和 K/M token 输入规则见 [UI 规范](ui-ux-design.md#配置额度)。已有配置不会自动覆盖，用量账本不重置。

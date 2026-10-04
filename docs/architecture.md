@@ -32,6 +32,8 @@ macOS
 
 GPUI 与 Swift 共用主窗口和事件循环，C ABI 负责桥接。普通页面复用 Kit；原生 NSTextView 负责聊天编辑，WKWebView 负责桌面。关闭窗口保留后台；Quit 正常关闭 Chromium，再停止 helper/VM。
 
+Sandbox 的系统依赖由构建 VM 预装成 OCI 镜像，随 App 发布；Helper 只导入本地镜像并启动，不在启动时安装包。用户数据独立挂载到 `/data`。桌面、字体和镜像大小见 [Sandbox 镜像](sandbox-image.md)。
+
 ## 主助手、任务和计划
 
 主 Pi 根据目标选择直接回复或调用任务工具。Runtime 执行并发限制、幂等与状态转换；每个任务有独立目录和 Pi session。Worker 只获得明确任务说明，不复制主聊天历史，也不能通过编排 API 递归委派。

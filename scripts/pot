@@ -28,20 +28,28 @@ if cmd=='prepare':
  verify(RES/'agy-musl.tar.gz','3f5ef952365b58c358ed79e0bb61768b17afdfd8fd00ccfd39b06f50789c8c0069890cf88583e0edfa194c1ddd9640211f02a8daac58a41f9bd73bac786e414c','sha512')
  call(['tar','xzf',RES/'agy-musl.tar.gz','-C',RES])
  shutil.copy2(RES/'antigravity',RES/'agy')
- for name in ['desktop.sh','packages.lock','test.html','home.html','driver.py','broker.py','index.html','close-browser.py','open-browser.sh']:shutil.copy2(REPO/'image'/name,RES/name)
+ for name in ['desktop.sh','desktop-config.sh','desktop-session.sh','pot-wallpaper.svg','packages.lock','test.html','home.html','driver.py','broker.py','index.html','close-browser.py','open-browser.sh']:shutil.copy2(REPO/'image'/name,RES/name)
  for name in ['package.json','package-lock.json']:shutil.copy2(REPO/'image/pi'/name,RES/('pi-'+name))
 elif cmd=='build':
  call(['cargo','build','--locked','-p','pot-app','-j','4'],cwd=REPO,env=env)
  call(['cargo','zigbuild','--locked','-p','pot-runtime','--target','aarch64-unknown-linux-musl','-j','4'],cwd=REPO,env=env)
- call(['swift','build','--package-path',REPO/'helper','--disable-sandbox','--scratch-path',ROOT/'helper-build','--force-resolved-versions','-j','4'],env=dict(os.environ,SWIFTPM_MODULECACHE_OVERRIDE=str(ROOT/'swift-modules'),CLANG_MODULE_CACHE_PATH=str(ROOT/'clang-modules')))
+ call(['swift','build','-c','release','--package-path',REPO/'helper','--disable-sandbox','--scratch-path',ROOT/'helper-build','--force-resolved-versions','-j','4'],env=dict(os.environ,SWIFTPM_MODULECACHE_OVERRIDE=str(ROOT/'swift-modules'),CLANG_MODULE_CACHE_PATH=str(ROOT/'clang-modules')))
 elif cmd=='bundle':
  legacy=ROOT/'pot.app'
  if legacy.exists() and (not APP.exists() or legacy.samefile(APP)):legacy.rename(APP)
  for sub in ['MacOS','Helpers','Resources/runtime']:(APP/'Contents'/sub).mkdir(parents=True,exist_ok=True)
- for src,dest in [(pathlib.Path(env['CARGO_TARGET_DIR'])/'debug/pot-app',APP/'Contents/MacOS/pot-app'),(ROOT/'helper-build/debug/PotHelper',APP/'Contents/Helpers/PotHelper')]:
+ for src,dest in [(pathlib.Path(env['CARGO_TARGET_DIR'])/'debug/pot-app',APP/'Contents/MacOS/pot-app'),(ROOT/'helper-build/release/PotHelper',APP/'Contents/Helpers/PotHelper')]:
   tmp=dest.with_suffix('.new');shutil.copy2(src,tmp);tmp.replace(dest)
  shutil.copy2(pathlib.Path(env['CARGO_TARGET_DIR'])/'aarch64-unknown-linux-musl/debug/pot-runtime',RES/'pot-runtime')
- for name in ['vmlinux','novnc.tar.gz','pot-runtime','agy','desktop.sh','packages.lock','test.html','home.html','driver.py','broker.py','index.html','close-browser.py','open-browser.sh','pi-package.json','pi-package-lock.json']:shutil.copy2(RES/name,APP/'Contents/Resources/runtime'/name)
+ call([REPO/'scripts/build-image'])
+ shutil.rmtree(APP/'Contents/Resources/runtime')
+ (APP/'Contents/Resources/runtime').mkdir()
+ for name in ['sandbox-image','init-image']:
+  dest=APP/'Contents/Resources/runtime'/name
+  if dest.exists():shutil.rmtree(dest)
+  shutil.copytree(RES/name,dest)
+ shutil.copy2(RES/'sandbox-image.json',APP/'Contents/Resources/runtime/sandbox-image.json')
+ for name in ['vmlinux']:shutil.copy2(RES/name,APP/'Contents/Resources/runtime'/name)
  for name in ['Pot.icns','PotTray.png']:shutil.copy2(REPO/'app/assets'/name,APP/'Contents/Resources'/name)
  (APP/'Contents/Info.plist').write_bytes(plistlib.dumps(dict(CFBundleIdentifier='dev.pot.app',CFBundleName='Pot',CFBundleDisplayName='Pot',CFBundleIconFile='Pot.icns',CFBundleExecutable='pot-app',CFBundlePackageType='APPL',CFBundleVersion='1',NSHighResolutionCapable=True,NSAppTransportSecurity={'NSAllowsLocalNetworking':True})))
  call(['codesign','--force','--sign','-','--entitlements',REPO/'helper/virtualization.entitlements',APP/'Contents/Helpers/PotHelper'])

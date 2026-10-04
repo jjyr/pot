@@ -1,48 +1,27 @@
 #!/bin/sh
 set -eu
 umask 077
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
 exec > /data/desktop.log 2>&1
-mkdir -p /data/apk-cache
-apk --cache-dir /data/apk-cache add $(cat /data/packages.lock)
-apk info -v > /data/packages.txt
-adduser -D -h /data/engine-home potdesktop
+# Immutable software comes from the bundled OCI image; /data holds user state.
+for name in desktop-config.sh desktop-session.sh pot-wallpaper.svg packages.lock test.html home.html driver.py broker.py index.html close-browser.py open-browser.sh pot-runtime agy; do
+ ln -sf "/opt/pot/$name" "/data/$name"
+done
+# Older versions unpacked noVNC into /data; preserve it, but serve image assets.
 mkdir -p /data/engine-home /data/product /data/workspace
-chown -R potdesktop /data/engine-home /data/product /data/workspace
-mkdir -p /data/profile /data/logs /data/novnc
-chown -R potdesktop /data/profile /data/logs
-chmod +x /data/open-browser.sh
-ln -sf /data/open-browser.sh /usr/local/bin/pot-browser
-mkdir -p /data/engine-home/.fluxbox
-cat > /data/engine-home/.fluxbox/menu <<'MENU'
-[begin] (Sandbox)
-  [exec] (Chromium) {/usr/local/bin/pot-browser}
-  [exec] (Terminal) {xterm}
-[end]
-MENU
-chown -R potdesktop /data/engine-home/.fluxbox
+chown potdesktop /data/engine-home /data/product /data/workspace
+mkdir -p /data/profile /data/logs
+chown potdesktop /data/profile /data/logs
+sh /data/desktop-config.sh
+su potdesktop -c "fc-cache -f"
 rm -f /data/profile/browser.pid
-tar xzf /data/novnc.tar.gz -C /data/novnc --strip-components=1
 su potdesktop -c 'Xvnc :99 -geometry 1280x800 -depth 24 -localhost -SecurityTypes None -rfbport 5900 > /data/logs/vnc.log 2>&1 &'
 sleep 2
-su potdesktop -c 'DISPLAY=:99 fluxbox > /data/logs/wm.log 2>&1 &'
+su potdesktop -c 'dbus-run-session -- sh /data/desktop-session.sh > /data/logs/wm.log 2>&1 &'
 python3 -m http.server 8081 --bind 127.0.0.1 --directory /data > /data/logs/page.log 2>&1 &
-websockify --web=/data/novnc 127.0.0.1:6080 127.0.0.1:5900 > /data/logs/websockify.log 2>&1 &
+websockify --web=/opt/pot/novnc 127.0.0.1:6080 127.0.0.1:5900 > /data/logs/websockify.log 2>&1 &
 POT_BACKEND=local POT_INTEGRATED_ROOT=/data POT_BROKER_BIND=0.0.0.0 POT_UPSTREAM_WS=http://127.0.0.1:6080/websockify POT_VIEWER_HTML=/data/index.html python3 /data/broker.py > /data/logs/broker.log 2>&1 &
 # Product runtime and engine run as an unprivileged guest user.
-chmod +x /data/pot-runtime /data/agy
-ln -sf /data/agy /usr/local/bin/agy
-# Install the integrity-locked Pi distribution once per lockfile. Its cache is
-# persistent, so reopening does not redownload packages or change versions.
-mkdir -p /data/pi-install
-cp /data/pi-package.json /data/pi-install/package.json
-cp /data/pi-package-lock.json /data/pi-install/package-lock.json
-pi_hash=$(sha256sum /data/pi-package-lock.json | cut -d ' ' -f 1)
-if [ "$(cat /data/pi-install/installed-lock 2>/dev/null || true)" != "$pi_hash" ]; then
- npm ci --prefix /data/pi-install --cache /data/npm-cache --ignore-scripts --omit=dev --no-audit --no-fund
- echo "$pi_hash" > /data/pi-install/installed-lock
-fi
-chmod -R a+rX /data/pi-install
-ln -sf /data/pi-install/node_modules/.bin/pi /usr/local/bin/pi
 su potdesktop -c 'exec /data/pot-runtime' > /data/logs/runtime.log 2>&1 &
 runtime_pid=$!
 # Wait for an actual browser process exit before acknowledging clean shutdown.

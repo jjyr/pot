@@ -177,7 +177,7 @@ async def rfb(request):
   except Exception as e:log('rfb.error',reason=str(e))
  await ws.close();return ws
 app=web.Application(middlewares=[auth],client_max_size=8192);app.router.add_get('/api/status',status);app.router.add_get('/api/metrics',metrics);app.router.add_post('/api/browser',open_browser);app.router.add_post('/api/control',control);app.router.add_post('/api/driver',write);app.router.add_get('/rfb',rfb)
-app.router.add_static('/novnc/',ROOT/'novnc');app.router.add_get('/',lambda r:web.FileResponse(pathlib.Path(os.environ.get('POT_VIEWER_HTML',str(pathlib.Path(__file__).parent/'assets/index.html')))))
+app.router.add_static('/novnc/',pathlib.Path('/opt/pot/novnc') if LOCAL else ROOT/'novnc');app.router.add_get('/',lambda r:web.FileResponse(pathlib.Path(os.environ.get('POT_VIEWER_HTML',str(pathlib.Path(__file__).parent/'assets/index.html')))))
 (ROOT/'url').write_text('http://127.0.0.1:17681/#'+TOKEN);os.chmod(ROOT/'url',0o600)
 async def shutdown(app):
  for peer in list(peers):await peer.up.close()

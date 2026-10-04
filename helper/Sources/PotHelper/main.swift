@@ -26,7 +26,7 @@ actor Runtime {
  var manager:ContainerManager?;var container:LinuxContainer?;var phase="stopped";var generation=0;var error:String?;var ip="";var task:Task<Void,Never>?
  let id="pot-local"
  var cpus=4;var memoryGiB=8;var diskGiB=32
- let imageReference="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+ var imageReference="pot.local/sandbox"
  func loadConfiguration() throws {
   let path=root.appendingPathComponent("sandbox.json")
   guard FileManager.default.fileExists(atPath:path.path) else{return}
@@ -41,7 +41,14 @@ actor Runtime {
  func prepare() async throws {
   guard FileManager.default.isReadableFile(atPath:resources.appendingPathComponent("vmlinux").path) else { throw NSError(domain:"pot",code:1,userInfo:[NSLocalizedDescriptionKey:"Missing bundled kernel"]) }
   if manager == nil {
-   manager = try await ContainerManager(kernel:Kernel(path:resources.appendingPathComponent("vmlinux"),platform:.linuxArm),initfsReference:"ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",root:root.appendingPathComponent("store"),network:try VmnetNetwork())
+   let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: resources.appendingPathComponent("sandbox-image.json"))) as? [String:Any]
+   guard let reference = metadata?["reference"] as? String else {throw NSError(domain:"pot",code:5,userInfo:[NSLocalizedDescriptionKey:"Bundled Sandbox image missing; run scripts/pot bundle"])}
+   imageReference = reference
+   let store = try ImageStore(path: root.appendingPathComponent("store"))
+   let initReference = "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df"
+   if (try? await store.get(reference: initReference)) == nil { _ = try await store.load(from: resources.appendingPathComponent("init-image")) }
+   if (try? await store.get(reference: imageReference)) == nil { _ = try await store.load(from: resources.appendingPathComponent("sandbox-image")) }
+   manager = try await ContainerManager(kernel:Kernel(path:resources.appendingPathComponent("vmlinux"),platform:.linuxArm),initfsReference:initReference,imageStore:store,network:try VmnetNetwork())
   }
  }
  func start()->[String:Any] {
@@ -56,19 +63,15 @@ actor Runtime {
    try? manager?.delete(id)
    let workspace=root.appendingPathComponent("workspace")
    try FileManager.default.createDirectory(at:workspace,withIntermediateDirectories:true)
-   for name in ["desktop.sh","test.html","home.html","novnc.tar.gz","packages.lock","broker.py","driver.py","index.html","pot-runtime","agy","close-browser.py","open-browser.sh","pi-package.json","pi-package-lock.json"] {
-    let dest=workspace.appendingPathComponent(name);try? FileManager.default.removeItem(at:dest)
-    try FileManager.default.copyItem(at:resources.appendingPathComponent(name),to:dest)
-   }
    try? FileManager.default.removeItem(at:workspace.appendingPathComponent("browser-stopped"))
    var metadata:[String:Any]=["image":imageReference,"cpus":cpus,"memory_gib":memoryGiB,"disk_gib":diskGiB]
-   let image=try await manager!.imageStore.get(reference:imageReference,pull:true)
+   let image=try await manager!.imageStore.get(reference:imageReference,pull:false)
    if let manifest=try? await image.manifest(for:.current) {metadata["image_bytes"]=manifest.layers.reduce(Int64(0)){$0+$1.size}}
    try JSONSerialization.data(withJSONObject:metadata).write(to:workspace.appendingPathComponent("environment.json"),options:.atomic)
    var creatingManager=manager!
    let c=try await creatingManager.create(id,image:image,rootfsSizeInBytes:UInt64(diskGiB)*1024*1024*1024,networking:true,vm:VMResources(cpus:cpus,memoryInBytes:UInt64(memoryGiB)*1024*1024*1024+VMResources.guestMemoryOverhead)) {config in
     config.cpus=cpus;config.memoryInBytes=UInt64(memoryGiB)*1024*1024*1024
-    config.process.arguments=["/bin/sh","/data/desktop.sh"]
+    config.process.arguments=["/bin/sh","/opt/pot/desktop.sh"]
     config.mounts.append(.share(source:workspace.path,destination:"/data"))
     config.dns=DNS(nameservers:["1.1.1.1"])
    }
