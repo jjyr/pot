@@ -64,17 +64,28 @@ import Foundation
         secretRevision += 1; profile = [:]; connectionKind = kind; aiScreen = "manage"
         checkMessage = ""; modelOptions = []; hasAPIKey = false
         switch kind {
-        case "deepseek": connectionName = "DeepSeek"; apiEndpoint =
-            "https://api.deepseek.com/chat/completions"; apiProtocol = "openai_chat"
-        case "openai": connectionName = "OpenAI"; apiEndpoint = "https://api.openai.com/v1/responses"; apiProtocol = "openai_responses"
-        case "anthropic": connectionName = "Anthropic"; apiEndpoint =
-            "https://api.anthropic.com/v1/messages"; apiProtocol = "anthropic_messages"
-        case "gemini": connectionName = "Gemini"; apiEndpoint =
-            "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent"; apiProtocol = "gemini"
-        case "custom": connectionName = "自定义 Agent"; apiEndpoint = ""; apiProtocol = "openai_chat"
-        default: connectionName = kind == "agy" ? "AGY" : kind.capitalized; apiEndpoint = ""
+        case "codex", "claude", "agy":
+            connectionName = kind == "agy" ? "AGY" : kind.capitalized; apiEndpoint = ""
+        default:
+            connectionName = "OpenAI API"; apiEndpoint = "https://api.openai.com/v1"; apiProtocol = "openai_chat"
         }
         connectionModel = ""; revision += 1
+    }
+
+    /// Accept a compatible base URL as well as an existing full request endpoint.
+    func connectionEndpoint(_ value: String) -> String {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ["openai_chat", "openai_responses"].contains(apiProtocol),
+              var parts = URLComponents(string: value), parts.host != nil,
+              parts.query == nil, parts.fragment == nil else { return value }
+        let path = parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if path.hasSuffix("chat/completions") || path.hasSuffix("responses") {
+            return value
+        }
+        guard path.isEmpty || path == "v1" || path.hasSuffix("/v1") else { return value }
+        let suffix = apiProtocol == "openai_responses" ? "/responses" : "/chat/completions"
+        parts.path = (path.isEmpty ? "/v1" : "/" + path) + suffix
+        return parts.string ?? value
     }
 
     func checkAPI(endpoint: String, key: String) {
@@ -84,7 +95,7 @@ import Foundation
             defer { aiBusy = false }
             do {
                 let response = try await bridge.terminal.request("api/v1/providers/check", body: [
-                    "endpoint": endpoint.trimmingCharacters(in: .whitespacesAndNewlines), "api_key": key,
+                    "endpoint": connectionEndpoint(endpoint), "api_key": key,
                     "protocol": apiProtocol, "profile_id": profile["id"] as? String ?? "",
                 ])
                 modelOptions = response["models"] as? [String] ?? []
@@ -146,7 +157,7 @@ import Foundation
                             "name": name,
                             "expected_revision": expected,
                             "request_id": UUID().uuidString,
-                            "endpoint": endpoint.trimmingCharacters(in: .whitespacesAndNewlines),
+                            "endpoint": connectionEndpoint(endpoint),
                             "api_key": key,
                             "model": model,
                             "protocol": protocolName,

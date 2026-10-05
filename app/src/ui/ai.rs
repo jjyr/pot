@@ -38,31 +38,28 @@ impl Settings {
             .gap_4();
         if screen == "add" {
             body = body
-                .child(title("添加 Agent"))
+                .child(title("集成 Agent"))
                 .child(hint("选择你想使用的 Agent，Pot 会引导你完成相应连接。", cx));
+            let mut choices = card(cx).p_0();
             for (i, (id, name, description)) in [
-                ("codex", "Codex", "在专用 Terminal 完成官方登录。"),
-                ("claude", "Claude", "在专用 Terminal 完成官方登录。"),
-                ("agy", "AGY", "按原版 CLI 指引登录；状态检测暂不可用。"),
-                (
-                    "deepseek",
-                    "DeepSeek",
-                    "提供 API key，Pot 自动填写服务配置。",
-                ),
-                ("openai", "OpenAI", "提供 API key，Pot 自动填写服务配置。"),
-                (
-                    "anthropic",
-                    "Anthropic",
-                    "提供 API key，Pot 自动填写服务配置。",
-                ),
-                ("gemini", "Gemini", "提供 API key，Pot 自动填写服务配置。"),
-                ("custom", "自定义 Agent", "连接其他支持的模型服务。"),
+                ("codex", "Codex", "通过 Terminal 登录"),
+                ("claude", "Claude", "通过 Terminal 登录"),
+                ("agy", "AGY", "按原版 CLI 指引连接"),
+                ("openai", "OpenAI API", "连接 OpenAI 或兼容 API 服务"),
             ]
             .into_iter()
             .enumerate()
             {
-                body = body.child(
-                    card(cx)
+                choices = choices.child(
+                    div()
+                        .px_4()
+                        .py_3()
+                        .flex()
+                        .items_center()
+                        .gap_4()
+                        .when(i > 0, |row| {
+                            row.border_t_1().border_color(cx.theme().border)
+                        })
                         .child(
                             Button::new(("ai-add-kind", i))
                                 .label(name)
@@ -71,9 +68,19 @@ impl Settings {
                                     command(json!({"action":"ai-new","kind":id}))
                                 }),
                         )
-                        .child(hint(description, cx)),
+                        .child(div().flex_1().child(hint(description, cx)))
+                        .child(
+                            Button::new(("ai-add-open", i))
+                                .ghost()
+                                .label("配置 →")
+                                .disabled(busy)
+                                .on_click(move |_, _, _| {
+                                    command(json!({"action":"ai-new","kind":id}))
+                                }),
+                        ),
                 );
             }
+            body = body.child(choices);
         } else if screen == "manage" {
             let native = matches!(
                 state["connection_kind"].as_str(),
@@ -120,19 +127,22 @@ impl Settings {
                     ),
                 );
             } else {
-                if state["connection_kind"] == "custom" || self.api_advanced {
-                    form = form.child(
-                        Field::new()
-                            .label("服务地址")
-                            .description("完整 HTTPS 模型请求地址。")
-                            .child(Input::new(&self.fields[14]).aria_label("服务地址")),
-                    );
-                    let mut formats = div().flex().flex_wrap().gap_2();
+                form = form.child(
+                    Field::new()
+                        .label("API 地址")
+                        .description("填写 HTTPS 基础地址或完整请求地址，Pot 会补全必要路径。")
+                        .child(Input::new(&self.fields[14]).aria_label("API 地址")),
+                );
+                if self.api_advanced
+                    && matches!(
+                        state["api_protocol"].as_str(),
+                        Some("openai_chat" | "openai_responses")
+                    )
+                {
+                    let mut formats = div().flex().gap_2();
                     for (i, (protocol, label)) in [
-                        ("openai_chat", "OpenAI 兼容"),
+                        ("openai_chat", "Chat Completions"),
                         ("openai_responses", "Responses"),
-                        ("anthropic_messages", "Anthropic"),
-                        ("gemini", "Gemini"),
                     ]
                     .into_iter()
                     .enumerate()
@@ -148,14 +158,18 @@ impl Settings {
                                 }),
                         );
                     }
-                    form = form.child(Field::new().label("接口格式").child(formats));
+                    form = form.child(Field::new().label("请求格式").child(formats));
                 }
-                form = form.child(Field::new().label("API key").description(if state["has_api_key"] == true {"已保存；同一地址留空可保留。"}else{"只需提供服务凭据，Pot 帮你完成配置。"})
-                    .child(Input::new(&self.fields[15]).aria_label("API key")))
-                    .child(Field::new().label("连接检查").description("只读取模型列表，不发送推理请求；不支持查询时可手动填模型。")
-                        .child(Button::new("ai-api-check").label(if busy {"正在处理…"}else{"检查连接并获取模型"}).disabled(busy).on_click({let fields=self.fields.clone();move|_,_,cx|
-                            command(json!({"action":"ai-api-check","endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value()}))})))
-                    .child(Field::new().label("检查结果").child(div().whitespace_normal().child(state["check_message"].as_str().unwrap_or("").to_owned())));
+                form = form.child(
+                    Field::new()
+                        .label("API key")
+                        .description(if state["has_api_key"] == true {
+                            "已保存；同一地址留空可保留。"
+                        } else {
+                            "提供服务凭据，Pot 帮你完成配置。"
+                        })
+                        .child(Input::new(&self.fields[15]).aria_label("API key")),
+                );
             }
             if let Some(models) = state["model_options"].as_array().filter(|m| !m.is_empty()) {
                 let models: Vec<String> = models
@@ -195,25 +209,68 @@ impl Settings {
                     .child(Input::new(&self.fields[16]).aria_label("连接模型")),
             );
             let fields = self.fields.clone();
-            body = body.child(card(cx).child(form)
-                .child(Button::new("ai-save-connection").primary().label("保存连接").disabled(busy)
-                    .on_click(move|_,_,cx|command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value()})))));
-            body = body.child(
-                Button::new("ai-advanced")
-                    .ghost()
-                    .label(if native {
-                        "高级调用命令"
+            let check_fields = self.fields.clone();
+            let mut actions = div().flex().flex_wrap().justify_end().gap_2();
+            if !native {
+                actions = actions.child(Button::new("ai-api-check").label(if busy {"正在处理…"} else {"检查连接"})
+                    .disabled(busy).on_click(move |_, _, cx| command(json!({"action":"ai-api-check","endpoint":check_fields[14].read(cx).value(),"key":check_fields[15].read(cx).value()}))));
+            }
+            actions = actions.child(Button::new("ai-save-connection").primary().label("保存连接").disabled(busy)
+                .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value()}))));
+            let mut details =
+                card(cx).child(title(if native { "配置 Agent" } else { "配置 API" }));
+            if !native {
+                details = details.child(hint(
+                    if matches!(
+                        state["api_protocol"].as_str(),
+                        Some("anthropic_messages" | "gemini")
+                    ) {
+                        "此连接沿用已保存的接口格式。"
                     } else {
-                        "高级连接设置"
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if native {
-                            this.settings.commands_open = !this.settings.commands_open;
-                        } else {
-                            this.settings.api_advanced = !this.settings.api_advanced;
-                        }
-                        cx.notify();
-                    })),
+                        "连接 OpenAI 或支持 OpenAI 兼容接口的服务。"
+                    },
+                    cx,
+                ));
+            }
+            details = details.child(form);
+            if !native {
+                details =
+                    details
+                        .child(hint(
+                            "检查只读取模型列表，不发送推理请求；也可以直接保存配置。",
+                            cx,
+                        ))
+                        .when(
+                            !state["check_message"].as_str().unwrap_or("").is_empty(),
+                            |el| {
+                                el.child(div().whitespace_normal().child(
+                                    state["check_message"].as_str().unwrap_or("").to_owned(),
+                                ))
+                            },
+                        );
+            }
+            body = body.child(
+                details.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .child(
+                            Button::new("ai-advanced")
+                                .ghost()
+                                .label("高级设置")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if native {
+                                        this.settings.commands_open = !this.settings.commands_open;
+                                    } else {
+                                        this.settings.api_advanced = !this.settings.api_advanced;
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                        .child(actions),
+                ),
             );
             if native && self.commands_open {
                 let fields = self.fields.clone();
@@ -284,58 +341,77 @@ impl Settings {
                 }
             }
             let active = &state["active_spec"];
-            body=body.child(card(cx).child(title("聊天使用的 Agent"))
-                .child(hint(if active["model"].as_str().is_some() {format!("当前生效：{} · {}",state["active_name"].as_str().unwrap_or("Agent"),active["model"].as_str().unwrap_or(""))}else{"尚未配置。添加 Agent 后选择模型，即可开始聊天。".into()},cx))
+            body=body.child(card(cx).child(title("主 Agent"))
+                .child(hint("Pot 将使用此 Agent 进行主要对话，并默认用于新任务。已有任务保持原配置。",cx))
+                .child(hint(if active["model"].as_str().is_some() {format!("当前生效：{} · {}",state["active_name"].as_str().unwrap_or("Agent"),active["model"].as_str().unwrap_or(""))}else{"尚未配置。集成 Agent 后选择模型，即可开始聊天。".into()},cx))
                 .child(form).child(Button::new("ai-save-main").primary().label(if state["return_to_chat"] == true {"保存并开始聊天"}else{"保存更改"})
                     .disabled(busy || profiles.is_empty()).on_click(move|_,_,cx|command(json!({"action":"ai-save-main","model":field.read(cx).value()})))))
-                .child(div().flex().justify_between().child(title("已添加的 Agent"))
-                    .child(Button::new("ai-add").label("＋ 添加 Agent").disabled(busy).on_click(|_,_,_|command(json!({"action":"ai-screen","screen":"add"})))))
+                .child(div().flex().justify_between().child(title("已集成 Agent"))
+                    .child(Button::new("ai-add").label("＋ 集成 Agent").disabled(busy).on_click(|_,_,_|command(json!({"action":"ai-screen","screen":"add"})))))
                 .child(Button::new("ai-refresh").ghost().label(if state["discovering"] == true {"正在检查…"}else{"刷新连接状态"}).disabled(busy || state["discovering"] == true)
                     .on_click(|_,_,_|command(json!({"action":"agent-refresh"}))));
             if profiles.is_empty() {
                 body = body.child(hint(
-                    "尚未添加 Agent。可以选择 Codex、Claude 或模型服务。",
+                    "尚未集成 Agent。可以选择 Codex、Claude 或 OpenAI 兼容 API。",
                     cx,
                 ));
             }
+            let mut integrated = card(cx).p_0();
             for (i, p) in profiles.iter().enumerate() {
                 let id = p["id"].as_str().unwrap_or("").to_owned();
-                body = body.child(
-                    card(cx).child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
+                let status = agent_status(state, p["engine"].as_str().unwrap_or(""));
+                integrated = integrated.child(
+                    div()
+                        .px_4()
+                        .py_3()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .when(i > 0, |row| {
+                            row.border_t_1().border_color(cx.theme().border)
+                        })
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(p["name"].as_str().unwrap_or("Agent").to_owned())
+                                .child(hint(
+                                    format!("{} · {}", status, p["model"].as_str().unwrap_or("")),
+                                    cx,
+                                )),
+                        )
+                        .when(active["source_profile_id"] == id, |row| {
+                            row.child(
                                 div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(p["name"].as_str().unwrap_or("Agent").to_owned())
-                                    .child(hint(
-                                        format!(
-                                            "{} · {}{}",
-                                            agent_status(state, p["engine"].as_str().unwrap_or("")),
-                                            p["model"].as_str().unwrap_or(""),
-                                            if active["source_profile_id"] == id {
-                                                " · 聊天当前使用"
-                                            } else {
-                                                ""
-                                            }
-                                        ),
-                                        cx,
-                                    )),
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .bg(cx.theme().secondary)
+                                    .text_sm()
+                                    .child("主 Agent"),
                             )
-                            .child(
-                                Button::new(("ai-manage", i))
-                                    .label("管理")
-                                    .disabled(busy)
-                                    .on_click(move |_, _, _| {
-                                        command(json!({"action":"ai-manage","id":id}))
-                                    }),
-                            ),
-                    ),
+                        })
+                        .child(
+                            Button::new(("ai-manage", i))
+                                .ghost()
+                                .label(if status == "需要登录" {
+                                    "去登录"
+                                } else {
+                                    "配置"
+                                })
+                                .disabled(busy)
+                                .on_click(move |_, _, _| {
+                                    command(json!({"action":"ai-manage","id":id}))
+                                }),
+                        ),
                 );
+            }
+            if !profiles.is_empty() {
+                body = body.child(integrated);
             }
         }
         page(cx).child(

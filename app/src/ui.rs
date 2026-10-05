@@ -211,6 +211,7 @@ impl Settings {
             let value = state[key].as_str().unwrap_or("").to_owned();
             if first
                 || self.synced_values[i] != value
+                || (i == 22 && reset_model)
                 || (clear_secrets && matches!(i, 0 | 8 | 9 | 14 | 15 | 16 | 23))
             {
                 self.synced_values[i] = value.clone();

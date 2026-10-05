@@ -47,3 +47,15 @@ The illustrated Chinese report and original PNGs are local acceptance artifacts 
 - Persisted saved configuration is verified across App restart. Unsaved Chat/form drafts are protected during navigation, not newly made durable across application termination.
 
 These results do not mark all issue #7 acceptance boxes as complete. No real-provider result is inferred from fixture configuration or local tests.
+
+## UI refinement — 2026-10-05
+
+Native revalidation of Main Agent wording, compact integrated rows, direct CLI configuration entry, and the simplified OpenAI-compatible API form. Check connection and Save connection are separate adjacent footer buttons. The updated focused Chinese report contains eight native screenshots at `/Users/jjy/Workspace/pot/.local/validation/ai-configuration-20261005/refinement/index.html`; the previous report links to it and remains historical evidence.
+
+- Selecting Codex directly opened its configuration with sign-in-required status. No real login was performed.
+- New API configuration defaulted to OpenAI API and `https://api.openai.com/v1`; no Anthropic/Gemini new-connection choices.
+- Missing-key Check showed an inline error while preserving name, base URL and model; no connection was saved.
+- Saving Company API with a fake credential and `fixture-model` added a compact row while retaining UI fixture as the main Agent. No provider check or inference was triggered by Save.
+- Reopening confirmed the `/v1` base URL expanded to `/v1/chat/completions`; saved credentials were absent from the visible field. Existing custom full endpoint paths remain preserved.
+- Advanced interface choices were Chat Completions and Responses.
+- Build, bundle, formatting/compilation checks, and all 11 App tests passed. This refinement does not establish real-provider acceptance; no additional dark-theme or keyboard-only matrix was performed.
