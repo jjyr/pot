@@ -274,7 +274,10 @@ threads, preserve native IDs, record cumulative usage deltas, and wait for turn 
 background-terminal cleanup. A missing native session is marked broken without replacement.
 Settings prepare and persist a native candidate before committing a migration; CLI-owned history
 is initialized with `thread/inject_items`, without a model call. Codex usage is post-hoc, not
-request-level budget enforcement. Native account acceptance and permission UI remain incomplete;
+request-level budget enforcement. Each turn explicitly restores shell/file tool feature overrides after
+a read-only summary; native resume otherwise retains the previous disabled values. Snapshot labels
+come from the persisted binding before the first turn after restart. Codex main/MCP, workers,
+restart resume and settled shell cancellation passed native account acceptance; permission UI remains incomplete;
 see the development plan and [Agent validation](../docs/validation/agent-layer.md).
 
 
@@ -283,9 +286,9 @@ see the development plan and [Agent validation](../docs/validation/agent-layer.m
 Root bearer only, native bridge only (any browser Origin is rejected):
 
 - `GET /api/v1/terminals`: boot ID and ephemeral session IDs/exit codes.
-- `POST /api/v1/terminals`: `{cols,rows,agent?}`. Without agent creates a Shell;
-  with agent directly executes that catalog's login command in a separate PTY.
-  Repeated clicks reuse a still-running login PTY. Maximum 8 retained sessions.
+- `POST /api/v1/terminals`: `{cols,rows}` opens an interactive shell only.
+  Legacy requests with an agent are rejected; no login command is configured or
+  launched. Navigation reconnects an existing PTY without sending input. Maximum 8 retained sessions.
 - `GET /api/v1/terminals/{id}/socket`: authenticated WebSocket upgrade; one viewer.
   Binary messages carry raw UTF-8 terminal bytes in either direction; client text
   messages are resize `{cols,rows}`, server text messages report `{exit_code}`.
@@ -301,8 +304,9 @@ Normal Runtime shutdown closes PTYs; VM restart loses them. The native bridge
 uses Authorization headers, never URL credentials or webview JavaScript tokens.
 Bundled xterm 5.5.0 / fit 0.10.0 have adjacent MIT licenses. No remote UI scripts.
 
-- `GET/POST /api/v1/agents/tools`: command catalog; POST edits a known tool's login
-  command using executable + argv. Invocation changes use profiles instead.
+- `GET /api/v1/agents/tools`: read-only executable catalog; versioned default-profile
+  invocation overrides historical catalog entries; no login-command field
+  or POST editor. Invocation changes use versioned profiles instead.
 - `POST /api/v1/agents/refresh`: explicit bounded discovery. Codex's official
   `login status` gets a five-second timeout and bounded, discarded output.
   Unsupported/custom status interfaces stay unknown. No credential files are
@@ -373,6 +377,13 @@ the result. Cancellation sends SIGINT and waits; uncertain cleanup blocks furthe
 execution on that lane. Usage comes from the final cumulative turn report, with
 cache read/create tokens included in input. Missing/failed/cancelled usage remains
 incomplete; request-level budget enforcement and safe checkpoint replay are disabled.
+An observed `system/api_retry` with `error: authentication_failed` uses the same
+SIGINT lifecycle rather than waiting through native authentication retries. After
+a terminal result and resource shutdown, Runtime reports authentication required
+and keeps the native binding for an explicit retry after login. Provider diagnostic
+text is not copied into this error; usage remains incomplete. Synthetic assistant
+API-error events also use a generic failure message instead of the provider diagnostic. Missing terminal or
+unconfirmed shutdown still blocks the lane.
 CLI login is `claude auth login`, and discovery uses official `claude auth status --json`.
 
 ## Native provider codecs

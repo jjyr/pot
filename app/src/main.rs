@@ -234,6 +234,7 @@ impl Render for Shell {
             }
             Some(2) => return self.settings.render(&self.native["settings"], cx),
             Some(1) => return ui::sandbox(&self.native, cx),
+            Some(7) => return ui::terminal(&self.native, cx),
             _ => {}
         }
         let bg = if dark { 0x191a1d } else { 0xffffff };

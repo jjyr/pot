@@ -78,6 +78,9 @@ impl Service {
             cursor: s.store.cursor()?,
             engine: {
                 let mut engine = s.engine.clone();
+                if let Some(binding) = agent::current(&s.store)? {
+                    engine.engine = format!("{:?} · {}", binding.spec.engine, binding.spec.model);
+                }
                 if s.store.get("pi.paused")?.is_some_and(|v| !v.is_empty()) {
                     engine.detail = Some("等待 Pot 额度恢复".into());
                 }
@@ -593,10 +596,7 @@ async fn main() -> Result<()> {
         }
     });
     let router = Router::new()
-        .route(
-            "/api/v1/agents/tools",
-            get(discovery::list).post(discovery::save),
-        )
+        .route("/api/v1/agents/tools", get(discovery::list))
         .route("/api/v1/agents/refresh", post(discovery::refresh))
         .route(
             "/api/v1/terminals",
@@ -739,6 +739,27 @@ mod tests {
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
             codex: Arc::new(agent::codex::Hosts::default()),
         }
+    }
+    #[test]
+    fn snapshot_reports_persisted_binding_before_first_turn() {
+        let s = service();
+        agent::initialize_store(
+            &mut s.inner.lock().unwrap().store,
+            "main",
+            std::path::Path::new("/tmp"),
+            &pi::Config {
+                model: "deepseek-v4-flash".into(),
+                ..pi::Config::default()
+            },
+        )
+        .unwrap();
+        let binding = agent::current(&s.inner.lock().unwrap().store)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            s.snapshot().unwrap().engine.engine,
+            format!("{:?} · {}", binding.spec.engine, binding.spec.model)
+        );
     }
     #[tokio::test]
     async fn request_retry_is_idempotent_and_conflicting_reuse_is_rejected() {

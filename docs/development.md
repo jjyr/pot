@@ -35,8 +35,10 @@ POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runti
 
 ### Codex 验证
 
-设置 → Agent 填写账户可用的模型名称并选择 Codex；在 Sandbox Terminal 运行
-`codex login --device-auth`。登录态只由 guest CLI 管理，保存在持久 engine-home。
+用户需要登录时，自行在独立 Terminal 运行官方 CLI 登录命令（Codex 支持
+`codex login --device-auth`）；Pot 仅在设置 → Agent 检测状态。
+在设置 → 助手填写账户可用的模型名称并明确选择 Codex。
+登录态只由 guest CLI 管理，保存在持久 engine-home。
 
 无凭据集成测试（显式指定安装好的官方 Codex CLI，不调用付费模型）：
 

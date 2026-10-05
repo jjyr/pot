@@ -67,7 +67,7 @@ VM 隔离宿主，但 Pi 与 Runtime 仍共享 guest 用户域；worker token �
 
 `runtime/src/terminal.rs` 管理最多 8 个内存 PTY，每个最多一个连接、64 KiB 回放缓存。
 连接断开只 detach，关闭或 Runtime 正常终止会结束会话。终端输入输出不写产品数据库、日志或磁盘 scrollback；默认 Shell 禁用 HISTFILE。
-登录点击直接在专用 PTY exec 登录程序，按 Agent 复用仍在运行的登录会话；不向未知 Shell 状态注入命令。HTTP(S) 链接仅由明确点击打开 Mac 浏览器，guest localhost OAuth 回调没有自动转发。
+Terminal 与 Sandbox 是两个独立侧栏入口，导航与重连复用同一 PTY，不向 Shell 或忙碌 CLI 注入命令。Pot 不维护登录命令或专用登录终端，只查询官方登录状态；认证由用户自行在 Terminal 处理。HTTP(S) 链接仅由明确点击打开 Mac 浏览器，guest localhost OAuth 回调没有自动转发。
 
 CLI 与 Runtime 继承同一个 guest 用户和持久 HOME；`~/.local/bin`、`~/.npm-global/bin` 加入共享 PATH。
 `discovery.rs` 仅在显式调用时检查 executable 并查询已支持的官方状态接口；身份、安装、兼容性和运行准备状态分开。

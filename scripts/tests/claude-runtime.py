@@ -15,6 +15,7 @@ import urllib.request
 
 async def run(args):
     requests = []
+    fault_status = None
     errors = []
     model_started = asyncio.Event()
     model_stopped = asyncio.Event()
@@ -22,7 +23,7 @@ async def run(args):
     pidfile = None
 
     async def handle(reader, writer):
-        nonlocal summary_checks
+        nonlocal summary_checks, fault_status
         try:
             head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
             lines = head.decode().split("\r\n")
@@ -36,6 +37,27 @@ async def run(args):
                 await writer.drain()
                 return
             requests.append(body)
+            if fault_status is not None:
+                fault = fault_status
+                response = json.dumps(
+                    {
+                        "type": "error",
+                        "error": {
+                            "type": "authentication_error"
+                            if fault == 401
+                            else "invalid_request_error",
+                            "message": "Fixture authentication expired",
+                        },
+                    }
+                ).encode()
+                writer.write(
+                    (
+                        f"HTTP/1.1 {fault} Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {len(response)}\r\nConnection: close\r\n\r\n"
+                    ).encode()
+                    + response
+                )
+                await writer.drain()
+                return
             assert len(requests) < 50, "Mock request loop"
             assert body["model"] == "claude-mock", "Unexpected auxiliary model"
             names = [tool["name"] for tool in body.get("tools", [])]
@@ -234,17 +256,20 @@ async def run(args):
 
             return await asyncio.to_thread(call)
 
-        async def turn(text):
+        async def turn(text, expected="complete"):
             accepted = await api(
                 "messages", {"conversation_id": "main", "request_id": text, "text": text}
             )
-            for _ in range(800):
+            for _ in range(4800 if expected == "failed" else 800):
                 snapshot = await api("snapshot")
                 user = next(m for m in snapshot["messages"] if m["id"] == accepted["message_id"])
                 if user["status"] in ("complete", "failed", "cancelled"):
-                    assert user["status"] == "complete", snapshot
-                    assert any("POT_CLAUDE_OK" in m["text"] for m in snapshot["messages"]), snapshot
-                    return
+                    assert user["status"] == expected, snapshot
+                    if expected == "complete":
+                        assert any("POT_CLAUDE_OK" in m["text"] for m in snapshot["messages"]), (
+                            snapshot
+                        )
+                    return snapshot
                 await asyncio.sleep(0.05)
             raise AssertionError("Turn did not settle")
 
@@ -296,6 +321,43 @@ async def run(args):
                     "SELECT input,output,state FROM requests WHERE scope='main'"
                 ).fetchall()
                 assert rows == [(40, 10, "native_reported")] * 3, rows
+            # A provider authentication failure must retain the original native session.
+            fault_status = 401
+            failure_started = asyncio.get_running_loop().time()
+            failed = await turn("authentication-expired", expected="failed")
+            assert asyncio.get_running_loop().time() - failure_started < 20, (
+                "Authentication retry did not settle promptly"
+            )
+            assert any("Claude authentication required" in m["text"] for m in failed["messages"]), (
+                failed
+            )
+            fault_status = None
+            assert failed["engine"]["phase"] == "ready" and failed["turn"] is None, failed
+            assert not any(
+                "Fixture authentication expired" in m["text"] for m in failed["messages"]
+            ), failed
+            with sqlite3.connect(data / "usage.sqlite") as db:
+                assert (
+                    db.execute(
+                        "SELECT COUNT(*) FROM requests WHERE scope='main' AND state='native_incomplete'"
+                    ).fetchone()[0]
+                    == 1
+                )
+            failed_binding = (await api("agent"))["bindings"][0]
+            assert failed_binding["native_ref"] == before and failed_binding["state"] == "active", (
+                failed_binding
+            )
+            await turn("authentication-restored")
+            assert (await api("agent"))["bindings"][0]["native_ref"] == before
+            # A non-retryable provider error must not quote provider diagnostic text.
+            fault_status = 400
+            rejected = await turn("invalid-provider-request", expected="failed")
+            fault_status = None
+            assert not any(
+                "Fixture authentication expired" in m["text"] for m in rejected["messages"]
+            ), rejected
+            assert (await api("agent"))["bindings"][0]["native_ref"] == before
+            await turn("provider-request-restored")
             profile["revision"] = 2
             profile["params"]["max_output_tokens"] = 512
             migration = {"profile": profile, "expected_revision": 1, "request_id": "switch-profile"}
@@ -352,7 +414,7 @@ async def run(args):
                         "goal": "Observe mock source",
                         "kind": "interval",
                         "every_minutes": 1,
-                        "enabled": False,
+                        "enabled": True,
                         "profile": "claude-test",
                     },
                 },
@@ -376,6 +438,24 @@ async def run(args):
                 b = (await api("agent?owner=" + fired["task_id"]))["bindings"][0]
                 schedule_threads.append(b["native_ref"]["session_id"])
             assert len(set(schedule_threads + sessions)) == 5
+            # Wait for the real scheduler clock, without invoking action=run.
+            for _ in range(1400):
+                clock = await api("schedules?selected=" + plan["id"])
+                automatic = [
+                    r for r in clock["runs"] if r["task_id"] and not r["id"].startswith("manual:")
+                ]
+                if automatic and automatic[0]["state"] == "complete":
+                    break
+                assert not any(r["state"] == "failed" for r in automatic), clock
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Native scheduled run did not fire from the clock")
+            scheduled_binding = (await api("agent?owner=" + automatic[0]["task_id"]))["bindings"][0]
+            assert scheduled_binding["native_ref"]["session_id"] not in schedule_threads
+            await api(
+                "schedules",
+                {"request_id": "pause-clock", "action": "pause", "schedule_id": plan["id"]},
+            )
             idle = 0
             for _ in range(800):
                 snapshot = await api("snapshot")
@@ -441,6 +521,9 @@ async def run(args):
                         "missing_native_rejected": True,
                         "independent_workers": True,
                         "independent_schedule_runs": True,
+                        "native_clock_trigger": True,
+                        "authentication_failure_recovery": True,
+                        "provider_diagnostic_redacted": True,
                         "summary_checks": summary_checks,
                         "background_stopped": True,
                         "cancelled": True,

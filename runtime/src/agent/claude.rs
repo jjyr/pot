@@ -217,6 +217,7 @@ async fn execute(
     let mut tasks = HashSet::new();
     let mut tools = HashMap::<String, String>::new();
     let mut streaming = false;
+    let mut authentication_failed = false;
     let execution:Result<()>=async {
         stdin.write_all(request.text.as_bytes()).await?; stdin.shutdown().await?; drop(stdin);
         let deadline=tokio::time::sleep(Duration::from_secs(1800)); tokio::pin!(deadline);
@@ -244,6 +245,16 @@ async fn execute(
                     save_claude_session(&mut s.inner.lock().unwrap().store,session_id)?;
                     initialized=true;
                 },
+                "system" if event["subtype"]=="api_retry" && event["error"]=="authentication_failed"=>{
+                    // The original CLI retries authentication errors for minutes. Stop through
+                    // its accepted interrupt lifecycle, then retain the existing native binding.
+                    authentication_failed=true;
+                    if !stopping {
+                        unsafe{libc::kill(-pid,libc::SIGINT);}
+                        stopping=true;
+                        deadline.as_mut().reset(tokio::time::Instant::now()+Duration::from_secs(15));
+                    }
+                },
                 "system" if event["subtype"]=="background_tasks_changed"=>{
                     tasks=event["tasks"].as_array().ok_or_else(||anyhow!("Invalid Claude background task list"))?.iter()
                         .filter_map(|v|v["task_id"].as_str().map(String::from)).collect();
@@ -255,6 +266,14 @@ async fn execute(
                         if !streaming {emit(Update::MessageStarted)?;streaming=true;}
                         emit(Update::TextDelta(e["delta"]["text"].as_str().unwrap_or("").into()))?;
                     }
+                },
+                "assistant" if event["error"].is_string()=>{
+                    anyhow::ensure!(event["parent_tool_use_id"].is_null(),"Native Claude subagent output is forbidden; stop unconfirmed");
+                    // Synthetic API-error messages may quote provider diagnostics. Keep them
+                    // out of the product transcript, including when no retry event precedes them.
+                    emit(Update::MessageStarted)?;
+                    emit(Update::MessageFinished{text:"Claude request failed; check authentication, provider limits and compatibility in Sandbox Terminal".into(),outcome:Outcome::Failed("Claude request failed".into())})?;
+                    streaming=false;
                 },
                 "assistant"=>{
                     anyhow::ensure!(event["parent_tool_use_id"].is_null(),"Native Claude subagent output is forbidden; stop unconfirmed");
@@ -280,7 +299,7 @@ async fn execute(
                     }
                 },
                 "result"=>{
-                    if event["is_error"]==false {
+                    if event["is_error"]==false && !authentication_failed {
                         s.usage.lock().unwrap().settle_claude(&ledger_id,&event["usage"])?;
                         terminal=Some(Outcome::Success);
                     } else {terminal=Some(Outcome::Failed("Claude turn failed; check authentication, provider limits and native compatibility in Terminal".into()));}
@@ -307,7 +326,12 @@ async fn execute(
         bail!("Claude resources did not confirm shutdown; stop unconfirmed");
     }
     let status = status.unwrap()?;
-    if execution.is_err() || cancelled(s) || !status.success() || terminal.is_none() {
+    if execution.is_err()
+        || cancelled(s)
+        || authentication_failed
+        || !status.success()
+        || terminal.is_none()
+    {
         s.usage.lock().unwrap().native_incomplete(&ledger_id)?;
     }
     if !initialized && *started {
@@ -319,6 +343,9 @@ async fn execute(
     execution.map_err(|e| anyhow!("{e}; stop unconfirmed"))?;
     if cancelled(s) {
         return Ok(Outcome::Cancelled);
+    }
+    if authentication_failed && initialized && terminal.is_some() {
+        return Ok(Outcome::Failed("Claude authentication required; sign in using the official Sandbox Terminal login, then retry this conversation".into()));
     }
     anyhow::ensure!(
         status.success() && initialized,

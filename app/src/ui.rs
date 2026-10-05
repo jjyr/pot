@@ -175,8 +175,8 @@ impl Settings {
             "executable",
             "argv",
             "codex_model",
-            "login_executable",
-            "login_arguments",
+            "",
+            "",
             "claude_model",
             "api_endpoint",
             "api_key",
@@ -210,6 +210,17 @@ impl Settings {
                 .description(description)
                 .child(Input::new(&self.fields[i]).aria_label(name))
         };
+        let native_available = |engine: &str| {
+            state["agents"].as_array().is_some_and(|agents| {
+                agents.iter().any(|a| {
+                    a["id"] == engine
+                        && a["installation"] == "present"
+                        && a["status_check"] != "failed"
+                        && (a["authentication"] == "authenticated"
+                            || a["authentication"] == "unknown")
+                })
+            })
+        };
         match section {
             0 => {
                 form = form
@@ -238,34 +249,48 @@ impl Settings {
                     .child(label("快捷键", "⌘D Sandbox · ⌘, 设置 · Shift+Enter 换行"));
             }
             1 => {
-                if matches!(state["selected_engine"].as_str(), Some("codex" | "claude")) {
-                    form = form
-                        .child(Field::new().label("当前主 Agent").child(div().py_2().child(
-                            format!(
-                                "{} · {}",
-                                state["selected_engine"].as_str().unwrap_or(""),
-                                state["selected_model"].as_str().unwrap_or("")
-                            ),
-                        )))
-                        .child(
-                            Field::new().label("修改主 Agent").child(
-                                Button::new("codex-settings")
-                                    .ghost()
-                                    .label("打开 Agent 设置 →")
-                                    .on_click(|_, _, _| {
-                                        command(json!({"action":"section","value":2}))
-                                    }),
-                            ),
-                        );
-                }
-                form = form.child(
-                    Field::new().label("其他模型服务").child(
-                        Button::new("other-api")
-                            .ghost()
-                            .label("设置其他 API →")
-                            .on_click(|_, _, _| command(json!({"action":"section","value":2}))),
-                    ),
-                );
+                let fields = self.fields.clone();
+                form = form.child(input(10, "Codex 模型", "填写当前账户可用的模型标识；状态只通过官方查询检测。"))
+                    .child(Field::new().label("主 Agent").child(Button::new("select-codex").primary().label("使用 Codex").disabled(!native_available("codex"))
+                        .on_click(move |_, _, cx| command(json!({"action":"select-codex","model":fields[10].read(cx).value()})))));
+                let fields = self.fields.clone();
+                form = form.child(input(13, "Claude 模型", "填写当前账户可用的模型标识；状态只通过官方查询检测。"))
+                    .child(Field::new().label("主 Agent").child(Button::new("select-claude").label("使用 Claude").disabled(!native_available("claude"))
+                        .on_click(move |_, _, cx| command(json!({"action":"select-claude","model":fields[13].read(cx).value()})))));
+                form = form.child(label(
+                    "模型 API",
+                    "Pi 可直接连接模型服务；无需 CLI 登录或付费测试。",
+                ));
+                let formats = [
+                    ("openai_chat", "OpenAI 兼容"),
+                    ("openai_responses", "Responses"),
+                    ("anthropic_messages", "Anthropic"),
+                    ("gemini", "Gemini"),
+                ];
+                form = form.child(Field::new().label("API 格式").child(div().flex().flex_wrap().gap_2().children(formats.into_iter().enumerate().map(|(i,(protocol,name))| {
+                    Button::new(("api-format",i)).ghost().label(name)
+                        .toggled(state["api_protocol"] == protocol)
+                        .on_click(move |_,_,_| command(json!({"action":"api-protocol","protocol":protocol})))
+                }))));
+                form = form
+                    .child(input(
+                        14,
+                        "API endpoint",
+                        "完整 HTTPS 请求地址，如 https://api.example.com/v1/chat/completions",
+                    ))
+                    .child(input(
+                        15,
+                        "API key",
+                        if state["has_api_key"] == true {
+                            "已保存；相同 endpoint 留空可保留。"
+                        } else {
+                            "仅保存到 Sandbox 私有配置。"
+                        },
+                    ))
+                    .child(input(16, "API 模型", "填写服务商提供的模型标识。"));
+                let fields = self.fields.clone();
+                form = form.child(Field::new().label("主 Agent").child(Button::new("save-api").label("使用此 API")
+                    .on_click(move |_,_,cx| command(json!({"action":"save-api","endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"model":fields[16].read(cx).value()})))));
                 form = form
                     .child(label("API 连接", "Pi · 工具调用与任务执行"))
                     .child(label("模型服务", "DeepSeek · DeepSeek Flash"))
@@ -315,48 +340,6 @@ impl Settings {
                 }
             }
             2 => {
-                let fields = self.fields.clone();
-                form = form.child(input(10, "Codex 模型", "填写当前账户可用的模型名称；使用 Sandbox 内 Codex CLI 的登录。"))
-                    .child(Field::new().label("主 Agent").child(Button::new("select-codex").primary().label("使用 Codex")
-                        .on_click(move |_, _, cx| command(json!({"action":"select-codex","model":fields[10].read(cx).value()})))));
-                let fields = self.fields.clone();
-                form = form.child(input(13, "Claude 模型", "填写账户可用的模型名称；使用 Sandbox 内 Claude CLI 的登录。"))
-                    .child(Field::new().label("主 Agent").child(Button::new("select-claude").label("使用 Claude")
-                        .on_click(move |_, _, cx| command(json!({"action":"select-claude","model":fields[13].read(cx).value()})))));
-                form = form.child(label(
-                    "模型 API",
-                    "Pi 可直接连接模型服务；无需 CLI 登录或付费测试。",
-                ));
-                let formats = [
-                    ("openai_chat", "OpenAI 兼容"),
-                    ("openai_responses", "Responses"),
-                    ("anthropic_messages", "Anthropic"),
-                    ("gemini", "Gemini"),
-                ];
-                form = form.child(Field::new().label("API 格式").child(div().flex().flex_wrap().gap_2().children(formats.into_iter().enumerate().map(|(i,(protocol,name))| {
-                    Button::new(("api-format",i)).ghost().label(name)
-                        .toggled(state["api_protocol"] == protocol)
-                        .on_click(move |_,_,_| command(json!({"action":"api-protocol","protocol":protocol})))
-                }))));
-                form = form
-                    .child(input(
-                        14,
-                        "API endpoint",
-                        "完整 HTTPS 请求地址，如 https://api.example.com/v1/chat/completions",
-                    ))
-                    .child(input(
-                        15,
-                        "API key",
-                        if state["has_api_key"] == true {
-                            "已保存；相同 endpoint 留空可保留。"
-                        } else {
-                            "仅保存到 Sandbox 私有配置。"
-                        },
-                    ))
-                    .child(input(16, "API 模型", "填写服务商提供的模型标识。"));
-                let fields = self.fields.clone();
-                form = form.child(Field::new().label("主 Agent").child(Button::new("save-api").label("使用此 API")
-                    .on_click(move |_,_,cx| command(json!({"action":"save-api","endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"model":fields[16].read(cx).value()})))));
                 form = form.child(
                     Field::new().label("登录状态").child(
                         Button::new("refresh-agents")
@@ -366,61 +349,36 @@ impl Settings {
                             .on_click(|_, _, _| command(json!({"action":"agent-refresh"}))),
                     ),
                 );
-                for (i, agent) in state["agents"].as_array().into_iter().flatten().enumerate() {
+                for agent in state["agents"].as_array().into_iter().flatten() {
                     let id = agent["id"].as_str().unwrap_or("").to_owned();
-                    let status = if agent["installation"] == "missing" {
+                    let status = if state["discovering"] == true {
+                        "检测中"
+                    } else if agent["installation"] == "missing" {
                         "未安装"
                     } else if agent["status_check"] == "failed" {
                         "检查失败"
                     } else {
                         match agent["authentication"].as_str() {
                             Some("authenticated") => "已登录",
-                            Some("required") => "未登录 ↗",
-                            _ => "状态未知 · 打开终端 ↗",
+                            Some("required") => "未登录",
+                            _ => "状态未知",
                         }
                     };
                     let name = id.clone();
-                    if id != "pi" {
-                        let login_id = id.clone();
-                        form = form.child(
-                            Field::new().label(format!("{} 登录命令", id)).child(
-                                Button::new(("edit-login", i))
-                                    .ghost()
-                                    .label("编辑命令")
-                                    .on_click(move |_, _, _| {
-                                        command(json!({"action":"edit-login","id":login_id}))
-                                    }),
-                            ),
-                        );
-                    }
                     form = form.child(
                         Field::new()
                             .label(name)
                             .description(if id == "pi" {
                                 "运行环境已随 Pot 提供；通过 API 设置连接模型。"
                             } else if id == "codex" {
-                                "使用原生 App Server；先在 Sandbox Terminal 完成登录。"
+                                "原生 App Server · 官方登录状态只读检测。"
                             } else if id == "claude" {
-                                "使用原生 CLI；先在 Sandbox Terminal 完成登录。"
+                                "原生 CLI · 官方登录状态只读检测。"
                             } else {
                                 "CLI 可在终端使用；Pot Driver 尚待验收。"
                             })
-                            .child(
-                                Button::new(("agent-login", i))
-                                    .ghost()
-                                    .label(status)
-                                    .disabled(id == "pi" || agent["installation"] == "missing")
-                                    .on_click(move |_, _, _| {
-                                        command(json!({"action":"agent-login","id":id}))
-                                    }),
-                            ),
+                            .child(div().py_2().child(status)),
                     );
-                }
-                if !state["login_agent"].as_str().unwrap_or("").is_empty() {
-                    let fields = self.fields.clone();
-                    form = form.child(input(11,"登录程序","可执行文件或 wrapper；不经 shell 执行。"))
-                        .child(input(12,"登录参数（JSON）","字符串数组；不填写密码或 token，认证在终端完成。"))
-                        .child(Field::new().label("登录命令").child(Button::new("save-login").primary().label("保存登录命令").on_click(move |_,_,cx| command(json!({"action":"save-login","executable":fields[11].read(cx).value(),"argv":fields[12].read(cx).value()})))));
                 }
                 form = form.child(
                     Field::new().label("当前 Agent").child(
@@ -478,6 +436,12 @@ impl Settings {
                     }));
         } else if section == 2 {
             actions = actions.child(
+                Button::new("open-terminal")
+                    .ghost()
+                    .label("打开 Terminal")
+                    .on_click(|_, _, _| command(json!({"action":"terminal"}))),
+            );
+            actions = actions.child(
                 Button::new("reopen-setup")
                     .ghost()
                     .label("安装其他 Agent")
@@ -511,8 +475,8 @@ impl Settings {
                 .child(hint(
                     match section {
                         0 => "让 Pot 按你的习惯工作。",
-                        1 => "Pi 执行任务，DeepSeek 提供模型能力。更改连接会重启 Sandbox。",
-                        2 => "检查登录状态，在终端登录，或编辑调用命令。保存不会调用模型。",
+                        1 => "明确选择主 Agent 或配置模型 API，并设置任务与用量额度。",
+                        2 => "查看 Agent 状态或编辑调用命令。保存不会调用模型。",
                         4 => "管理已保存的配置、后台任务默认和并发限制。汇总沿用主会话。",
                         _ => "资源调整重启后生效，聊天与工作文件保留。实时用量见环境信息。",
                     },
@@ -612,39 +576,6 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                                 )
                                 .child(action("more", IconName::Ellipsis, "更多操作")),
                         ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(
-                            Button::new("desktop-tab")
-                                .ghost()
-                                .label("Desktop")
-                                .on_click(|_, _, _| {
-                                    command(json!({"action":"terminal","value":false}))
-                                }),
-                        )
-                        .child(
-                            Button::new("terminal-tab")
-                                .ghost()
-                                .label("Terminal")
-                                .on_click(|_, _, _| {
-                                    command(json!({"action":"terminal","value":true}))
-                                }),
-                        )
-                        .child(
-                            Button::new("terminal-shell")
-                                .ghost()
-                                .label("Shell")
-                                .on_click(|_, _, _| command(json!({"action":"terminal-shell"}))),
-                        )
-                        .child(
-                            Button::new("terminal-close")
-                                .ghost()
-                                .label("关闭终端")
-                                .on_click(|_, _, _| command(json!({"action":"terminal-close"}))),
-                        ),
                 ),
         )
         .when(!running, |el| {
@@ -654,6 +585,58 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                         .child(hint("Sandbox 尚未就绪，启动后将在这里显示桌面。", cx))
                         .child(
                             Button::new("start-sandbox")
+                                .primary()
+                                .label("启动 Sandbox")
+                                .disabled(!matches!(
+                                    state["phase"].as_str(),
+                                    Some("stopped" | "failed")
+                                ))
+                                .on_click(|_, _, _| command(json!({"action":"start"}))),
+                        ),
+                ),
+            )
+        })
+}
+
+pub fn terminal(state: &Value, cx: &mut Context<Shell>) -> Div {
+    let running = state["phase"] == "running";
+    page(cx)
+        .child(
+            div()
+                .h(px(SANDBOX_HEADER))
+                .px_8()
+                .py_6()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(title("Terminal"))
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("terminal-reconnect")
+                                .ghost()
+                                .label("重新连接")
+                                .disabled(!running)
+                                .on_click(|_, _, _| command(json!({"action":"terminal"}))),
+                        )
+                        .child(
+                            Button::new("terminal-close")
+                                .ghost()
+                                .label("关闭终端")
+                                .disabled(!running)
+                                .on_click(|_, _, _| command(json!({"action":"terminal-close"}))),
+                        ),
+                ),
+        )
+        .when(!running, |el| {
+            el.child(
+                content().h_auto().child(
+                    card(cx)
+                        .child(hint("Sandbox Runtime 尚未就绪，启动后可使用终端。", cx))
+                        .child(
+                            Button::new("terminal-start")
                                 .primary()
                                 .label("启动 Sandbox")
                                 .disabled(!matches!(

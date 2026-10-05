@@ -85,17 +85,18 @@ async def run(args):
 
             return await asyncio.to_thread(call)
 
-        async def turn(text):
+        async def turn(text, expected="complete"):
             receipt = await api(
                 "messages", {"conversation_id": "main", "request_id": text, "text": text}
             )
-            for _ in range(600):
+            for _ in range(4800 if expected == "failed" else 600):
                 snapshot = await api("snapshot")
                 user = next(m for m in snapshot["messages"] if m["id"] == receipt["message_id"])
                 if user["status"] in ("complete", "failed", "cancelled"):
-                    assert user["status"] == "complete", snapshot
-                    assert any("POT_CODEX" in m["text"] for m in snapshot["messages"]), snapshot
-                    return
+                    assert user["status"] == expected, snapshot
+                    if expected == "complete":
+                        assert any("POT_CODEX" in m["text"] for m in snapshot["messages"]), snapshot
+                    return snapshot
                 await asyncio.sleep(0.05)
             raise AssertionError("Turn did not finish")
 
@@ -160,6 +161,28 @@ async def run(args):
                     "SELECT input,output,state FROM requests WHERE scope='main'"
                 ).fetchall()
                 assert rows == [(40, 10, "native_reported")] * 3, rows
+            # A provider authentication failure must retain the original native session.
+            mock.fault_status = 401
+            failed = await turn("LANE_A authentication-expired", expected="failed")
+            assert any("Codex turn failed" in m["text"] for m in failed["messages"]), failed
+            mock.fault_status = None
+            assert failed["engine"]["phase"] == "ready" and failed["turn"] is None, failed
+            assert not any(
+                "Fixture authentication expired" in m["text"] for m in failed["messages"]
+            ), failed
+            with sqlite3.connect(data / "usage.sqlite") as db:
+                assert (
+                    db.execute(
+                        "SELECT COUNT(*) FROM requests WHERE scope='main' AND state='native_incomplete'"
+                    ).fetchone()[0]
+                    == 1
+                )
+            failed_binding = (await api("agent"))["bindings"][0]
+            assert failed_binding["native_ref"] == before and failed_binding["state"] == "active", (
+                failed_binding
+            )
+            await turn("LANE_A authentication-restored")
+            assert (await api("agent"))["bindings"][0]["native_ref"] == before
             profile["revision"] = 2
             profile["params"]["max_output_tokens"] = 512
             migration = {"profile": profile, "expected_revision": 1, "request_id": "switch-profile"}
@@ -218,7 +241,7 @@ async def run(args):
                         "goal": "Observe mock source",
                         "kind": "interval",
                         "every_minutes": 1,
-                        "enabled": False,
+                        "enabled": True,
                         "profile": "codex-test",
                     },
                 },
@@ -242,6 +265,24 @@ async def run(args):
                 b = (await api("agent?owner=" + fired["task_id"]))["bindings"][0]
                 schedule_threads.append(b["native_ref"]["thread_id"])
             assert len(set(schedule_threads + threads + [before["thread_id"]])) == 5
+            # Wait for the real scheduler clock, without invoking action=run.
+            for _ in range(1400):
+                clock = await api("schedules?selected=" + plan["id"])
+                automatic = [
+                    r for r in clock["runs"] if r["task_id"] and not r["id"].startswith("manual:")
+                ]
+                if automatic and automatic[0]["state"] == "complete":
+                    break
+                assert not any(r["state"] == "failed" for r in automatic), clock
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Native scheduled run did not fire from the clock")
+            scheduled_binding = (await api("agent?owner=" + automatic[0]["task_id"]))["bindings"][0]
+            assert scheduled_binding["native_ref"]["thread_id"] not in schedule_threads
+            await api(
+                "schedules",
+                {"request_id": "pause-clock", "action": "pause", "schedule_id": plan["id"]},
+            )
             # Require a stable idle boundary after worker report delivery.
             idle = 0
             for _ in range(200):
@@ -251,6 +292,15 @@ async def run(args):
                     break
                 await asyncio.sleep(0.05)
             assert mock.summary_calls > 0, "Read-only summary policy was not exercised"
+            mock.background_pid.unlink()
+            await turn("BACKGROUND_TEST after summary")
+            assert mock.background_pid.exists(), "Main shell tools did not recover after summary"
+            try:
+                os.kill(int(mock.background_pid.read_text()), 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise AssertionError("Post-summary native background process survived cleanup")
             accepted = await api(
                 "messages",
                 {"conversation_id": "main", "request_id": "cancel-test", "text": "CANCEL_WAIT"},
@@ -307,6 +357,9 @@ async def run(args):
                         "summary_policy_checks": mock.summary_calls,
                         "independent_worker_threads": True,
                         "independent_schedule_runs": True,
+                        "native_clock_trigger": True,
+                        "authentication_failure_recovery": True,
+                        "main_tools_restored_after_summary": True,
                         "cancellation": True,
                         "background_process_stopped": True,
                         "model_requests": len(mock.requests),

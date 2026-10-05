@@ -74,7 +74,7 @@ impl Settings {
                     .child(Input::new(&self.fields[index]).aria_label(label)),
             );
         }
-        form = form.child(Field::new().label("无人值守权限").child("Agent 可在 Sandbox 内执行文件和命令操作；主 Agent 可创建任务，worker 不可委派，汇总只读。额外权限请求会被拒绝并显示在会话中。"));
+        form = form.child(Field::new().label("无人值守权限").child(div().w_full().min_w_0().whitespace_normal().child("Agent 可在 Sandbox 内执行文件和命令操作；主 Agent 可创建任务，worker 不可委派，汇总只读。额外权限请求会被拒绝并显示在会话中。")));
         form = form.child(
             Field::new().label("迁移对象").child(
                 state["routing_owner_name"]
@@ -136,11 +136,12 @@ impl Settings {
             form = form.child(Field::new().label("服务商额度").child(Button::new("provider-save").label("保存服务商额度").disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"provider-save","tokens":fields[21].read(cx).value()})))));
         } else {
-            form = form.child(
-                Field::new()
-                    .label("服务商 Token 额度")
-                    .child("CLI 登录路线仅统计原生报告的用量；无法在每次模型请求前执行硬额度。"),
-            );
+            form =
+                form.child(Field::new().label("服务商 Token 额度").child(
+                    div().w_full().min_w_0().whitespace_normal().child(
+                        "CLI 登录路线仅统计原生报告的用量；无法在每次模型请求前执行硬额度。",
+                    ),
+                ));
         }
         let mut actions = div().flex().flex_wrap().gap_2();
         for (i, copy) in [false, true].into_iter().enumerate() {

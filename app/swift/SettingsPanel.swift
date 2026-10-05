@@ -17,8 +17,6 @@ import Foundation
     var providerAllowance: [String: Any] = [:]
     var providerPeriod = "none", providerTokens = "2000000", providerAutoResume = true
     var apiEndpoint = "", apiModel = "", apiProtocol = "openai_chat", hasAPIKey = false
-    var loginAgent = "", loginExecutable = "", loginArguments = "[]"
-    var loginTool: [String: Any] = [:]
     var lastDiscovery = Date.distantPast
     var discovering = false
     var environment: [String: Any] = [:]
@@ -29,9 +27,9 @@ import Foundation
     var cpu = 4, memory = 8, disk = 32
     var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "5"
     var cpuField = "4", memoryField = "8", diskField = "32", result = ""
-    var setupStage = 0, setupChoice = ""
+    var setupStage = 0
     var setupItems = Set(["codex", "claude", "agy", "api"])
-    var setupUnknownConfirmed = false, setupAutoPending = false
+    var setupAutoPending = false
     var setupKey: String {
         "onboarding.\(root.path)"
     }
@@ -43,7 +41,6 @@ import Foundation
     func persistSetup() {
         UserDefaults.standard.set(setupStage, forKey: setupKey + ".stage")
         UserDefaults.standard.set(Array(setupItems), forKey: setupKey + ".items")
-        UserDefaults.standard.set(setupChoice, forKey: setupKey + ".choice")
     }
 
     func finishSetup() {
@@ -54,37 +51,24 @@ import Foundation
 
     func setupNavigate(_ stage: Int) {
         if stage == 1 {
-            let usable = setupItems.contains("api") || agentStates.contains { value in
-                let id = value["id"] as? String ?? ""
-                return setupItems.contains(id) && ["codex", "claude"]
-                    .contains(id) && value["installation"] as? String == "present"
-            }
-            let prepared = setupItems
-                .allSatisfy { id in
-                    id == "api" || agentStates
-                        .contains { $0["id"] as? String == id && $0["installation"] as? String == "present" }
-                }
-            guard !setupItems.isEmpty, usable, prepared, bridge?.snapshot["connected"] as? Bool == true else {
-                result = "请先准备好至少一个可用后端；未准备项目可重试，或取消勾选以稍后安装。"; return
-            }
+            setup = false; section = 1
+        } else {
+            setup = true; setupStage = 0; section = 2
         }
-        setup = true; setupAutoPending = false; setupStage = stage == 1 ? 1 : 0; persistSetup()
-        bridge?.selectPage(2)
-        if stage == 1 {
-            refreshAgents()
-        }
+        setupAutoPending = false; persistSetup(); bridge?.selectPage(2); refreshAgents()
     }
 
-    func chooseSetup(_ id: String) {
-        setupChoice = id; setupUnknownConfirmed = false; persistSetup(); bridge?.selectPage(2)
+    func deferSetup() {
+        UserDefaults.standard.set(true, forKey: setupKey + ".complete")
+        setup = false; setupAutoPending = false; bridge?.selectPage(7)
     }
 
     func setupCanStart(_ engine: String) -> Bool {
-        guard setup else { return true }
-        let agent = agentStates.first { $0["id"] as? String == engine }
-        let status = agent?["authentication"] as? String
-        return status == "authenticated" ||
-            (status == "unknown" && agent?["status_check"] as? String == "unsupported" && setupUnknownConfirmed)
+        guard let agent = agentStates.first(where: { $0["id"] as? String == engine }),
+              agent["installation"] as? String == "present",
+              agent["status_check"] as? String != "failed" else { return false }
+        let status = agent["authentication"] as? String
+        return status == "authenticated" || status == "unknown"
     }
 
     var root: URL {
@@ -99,11 +83,10 @@ import Foundation
         self.setup = setup; section = setup ? 2 : 1
         if setup {
             setupAutoPending = true
-            setupStage = UserDefaults.standard.integer(forKey: setupKey + ".stage") == 1 ? 1 : 0
+            setupStage = 0
             if let saved = UserDefaults.standard.stringArray(forKey: setupKey + ".items") {
                 setupItems = Set(saved)
             }
-            setupChoice = UserDefaults.standard.string(forKey: setupKey + ".choice") ?? ""
         }
     }
 
@@ -132,13 +115,11 @@ import Foundation
          "provider_allowance": providerAllowance,
          "provider_period": providerPeriod, "provider_tokens": providerTokens,
          "provider_auto_resume": providerAutoResume,
-         "setup_stage": setupStage, "setup_choice": setupChoice, "setup_items": Array(setupItems),
-         "setup_unknown_confirmed": setupUnknownConfirmed,
+         "setup_stage": setupStage, "setup_items": Array(setupItems),
          "runtime_ready": bridge?.snapshot["connected"] as? Bool ?? false,
          "environment_phase": environment["phase"] as? String ?? "等待启动", "has_key": hasConfiguration,
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
-         "login_agent": loginAgent, "login_executable": loginExecutable, "login_arguments": loginArguments,
          "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
          "codex_model": codexModel, "claude_model": claudeModel, "agents": agentStates, "discovering": discovering,
@@ -150,7 +131,7 @@ import Foundation
         guard let bridge, !discovering, Date().timeIntervalSince(lastDiscovery) > 1 else { return }
         lastDiscovery = Date()
         bridge.terminal.show(
-            bridge.embeddedTerminalVisible || (bridge.page == 1 && bridge.terminalSelected),
+            bridge.page == 7 && bridge.localPhase == "running",
             root: root,
             ip: bridge.guestIP
         )
@@ -198,67 +179,25 @@ import Foundation
                     apiProtocol = connection["protocol"] as? String ?? "openai_chat"
                     hasAPIKey = connection["has_key"] as? Bool ?? false
                 }
-                if setupChoice.isEmpty {
-                    setupChoice = agentStates
-                        .first {
-                            ["codex", "claude"]
-                                .contains($0["id"] as? String ?? "") && $0["authentication"] as? String == "authenticated"
-                        }?["id"] as? String ?? ""
-                    persistSetup()
-                }
                 result = "状态已刷新。已登录不代表模型调用已验证。"
             } catch { result = "状态检查失败；可在 Sandbox Terminal 中手动使用 CLI。" }
         }
     }
 
-    func editLogin(_ agent: String) {
-        guard let bridge else { return }
-        Task {
-            do {
-                let catalog = try await bridge.terminal.request("api/v1/agents/tools")
-                let tools = catalog["tools"] as? [[String: Any]] ?? []
-                guard let tool = tools.first(where: { $0["id"] as? String == agent }),
-                      let login = tool["login"] as? [String: Any] else { return }
-                loginTool = tool; loginAgent = agent
-                loginExecutable = login["executable"] as? String ?? ""
-                let data = try JSONSerialization.data(withJSONObject: login["argv"] as? [String] ?? [])
-                loginArguments = String(data: data, encoding: .utf8) ?? "[]"
-                revision += 1
-            } catch { result = "登录命令读取失败：\(error.localizedDescription)" }
-        }
-    }
-
-    func saveLogin(executable: String, arguments: String) {
-        guard let bridge, !loginTool.isEmpty, let data = arguments.data(using: .utf8),
-              let args = try? JSONSerialization.jsonObject(with: data) as? [String]
-        else {
-            result = "登录参数必须是 JSON 字符串数组。"; return
-        }
-        var tool = loginTool
-        tool["login"] = ["executable": executable, "argv": args]
-        Task {
-            do {
-                _ = try await bridge.terminal.request("api/v1/agents/tools", body: tool)
-                loginTool = tool; loginExecutable = executable; loginArguments = arguments
-                result = "登录命令已保存；下次新建登录终端时生效。"
-                revision += 1
-            } catch { result = "登录命令未保存：\(error.localizedDescription)" }
-        }
-    }
-
     func selectNative(engine: String, model: String) {
         let name = engine == "claude" ? "Claude" : "Codex"
-        guard setupCanStart(engine) else { result = "请先在终端登录并刷新状态。"; return }
+        guard setupCanStart(engine) else { result = "当前后端不可用；请查看 Agent 状态或选择其他后端。"; return }
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let bridge, !model.isEmpty else { result = "请填写 \(name) 模型名称。"; return }
         bridge.terminal.show(
-            bridge.embeddedTerminalVisible || (bridge.page == 1 && bridge.terminalSelected),
+            bridge.page == 7 && bridge.localPhase == "running",
             root: root,
             ip: bridge.guestIP
         )
         Task {
             do {
                 let state = try await bridge.terminal.request("api/v1/agent")
+                let firstSelection = (state["bindings"] as? [[String: Any]] ?? []).isEmpty
                 let profiles = state["profiles"] as? [[String: Any]] ?? []
                 let previous = profiles.first { $0["id"] as? String == "\(engine)-default" }
                 let revision = previous?["revision"] as? Int ?? 0
@@ -283,10 +222,10 @@ import Foundation
                     claudeModel = model
                 } else {
                     codexModel = model
-                }; if setup {
+                }; if setup || firstSelection {
                     finishSetup()
                 }
-                result = "已选择 \(name)；现有轮次结束后生效。请先在 Sandbox Terminal 完成登录。"
+                result = "已选择 \(name)；现有轮次结束后生效。"
                 refreshAgents()
             } catch { result = "\(name) 配置未保存：\(error.localizedDescription)" }
         }
@@ -295,7 +234,7 @@ import Foundation
     func saveAPI(endpoint: String, key: String, model: String) {
         guard let bridge else { return }
         bridge.terminal.show(
-            bridge.embeddedTerminalVisible || (bridge.page == 1 && bridge.terminalSelected),
+            bridge.page == 7 && bridge.localPhase == "running",
             root: root,
             ip: bridge.guestIP
         )
@@ -306,13 +245,14 @@ import Foundation
         Task {
             do {
                 let state = try await bridge.terminal.request("api/v1/agent")
+                let firstSelection = (state["bindings"] as? [[String: Any]] ?? []).isEmpty
                 let profiles = state["profiles"] as? [[String: Any]] ?? []
                 let expected = profiles.first { $0["id"] as? String == "api-default" }?["revision"] as? Int ?? 0
                 _ = try await bridge.terminal.request("api/v1/providers", body: [
                     "request_id": UUID().uuidString, "expected_revision": expected,
                     "endpoint": endpoint, "api_key": key, "model": model, "protocol": protocolName,
                 ])
-                apiEndpoint = endpoint; apiModel = model; hasAPIKey = true; if setup {
+                apiEndpoint = endpoint; apiModel = model; hasAPIKey = true; if setup || firstSelection {
                     finishSetup()
                 }
                 revision += 1

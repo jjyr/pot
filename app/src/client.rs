@@ -97,7 +97,7 @@ impl View {
                 (s.turn.is_none() || !self.selected.is_empty())
                     && (!self.selected.is_empty()
                         || s.engine.detail.as_deref() != Some("等待 Pot 额度恢复"))
-                    && matches!(s.engine.phase, EnginePhase::Ready | EnginePhase::NeedsAuth)
+                    && s.engine.phase == EnginePhase::Ready
                     && s.budget.as_ref().is_none_or(|b| b.remaining() > 0)
             })
     }
@@ -780,6 +780,17 @@ mod tests {
             },
         );
         assert!(v.snapshot.as_ref().unwrap().turn.is_none());
+        assert!(v.can_send());
+    }
+    #[test]
+    fn unconfigured_or_auth_required_blocks_send_until_ready() {
+        let mut v = view();
+        v.snapshot.as_mut().unwrap().engine.phase = EnginePhase::NeedsAuth;
+        assert!(!v.can_send());
+        v.selected = "task-a".into();
+        assert!(!v.can_send());
+        v.selected.clear();
+        v.snapshot.as_mut().unwrap().engine.phase = EnginePhase::Ready;
         assert!(v.can_send());
     }
     #[test]

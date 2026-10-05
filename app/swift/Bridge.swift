@@ -129,7 +129,6 @@ var bridge: PotBridge?
     var tick: Double = 0
     var observations: [NSObjectProtocol] = []
     let terminal = SandboxTerminal()
-    var terminalSelected = false
     var guestIP = ""
     var localPhase = "starting"
     var isApplying = false
@@ -154,6 +153,7 @@ var bridge: PotBridge?
         for (index, symbol, title) in [
             (0, "bubble.left", "聊天"),
             (3, "list.bullet.rectangle", "任务"),
+            (7, "terminal", "Terminal"),
             (1, "desktopcomputer", "Sandbox"),
             (4, "chart.bar.xaxis", "用量"),
             (2, "gearshape", "设置"),
@@ -304,11 +304,10 @@ var bridge: PotBridge?
     func layout() {
         let b = rootView.bounds
         rail.frame = NSRect(x: 0, y: 0, width: 56, height: b.height)
-        for button in navigation {
+        for (index, button) in navigation.enumerated() {
             button.frame = NSRect(
                 x: 8,
-                y: button.tag == 2 ? 16 : b
-                    .height - 60 - CGFloat(button.tag == 3 ? 1 : button.tag == 1 ? 2 : button.tag == 4 ? 3 : 0) * 48,
+                y: button.tag == 2 ? 16 : b.height - 60 - CGFloat(index) * 48,
                 width: 40,
                 height: 40
             )
@@ -322,17 +321,7 @@ var bridge: PotBridge?
         if web.frame != desktopArea {
             web.frame = desktopArea
         }
-        if embeddedTerminalVisible {
-            let column = min(820, area.width)
-            terminal.web.frame = NSRect(
-                x: 56 + (area.width - column) / 2 + 32,
-                y: b.height - 344,
-                width: max(0, column - 64),
-                height: 220
-            )
-        } else {
-            terminal.web.frame = desktopArea
-        }
+        terminal.web.frame = desktopArea
         let width = min(760, area.width - 64)
         composer.layoutManager?.ensureLayout(for: composer.textContainer!)
         let used = (composer.layoutManager?.usedRect(for: composer.textContainer!).height ?? 24) +
@@ -401,15 +390,12 @@ var bridge: PotBridge?
         events.append(["action": "send", "text": composer.string])
     }
 
-    var embeddedTerminalVisible: Bool {
-        page == 2 && settings.setup && settings.setupStage == 1 && settings.setupChoice != "api"
-    }
-
     func selectPage(_ value: Int) {
-        page = value; bridgeWake?(); web.isHidden = value != 1 || terminalSelected || localRuntime?.loaded
+        let returningFromTerminal = page == 7 && value != 7
+        page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.loaded
             .isEmpty != false
         terminal.show(
-            (value == 1 && terminalSelected) || embeddedTerminalVisible,
+            value == 7 && localPhase == "running",
             root: localRuntime?.root,
             ip: guestIP
         )
@@ -419,6 +405,9 @@ var bridge: PotBridge?
         }
         if value == 2 {
             settings.refreshStatus()
+        }
+        if returningFromTerminal {
+            settings.refreshAgents()
         }
         layout()
     }
@@ -516,18 +505,21 @@ var bridge: PotBridge?
         localPhase = state["phase"] as? String ?? "unknown"
         guestIP = state["ip"] as? String ?? ""
         if page == 1 {
-            web.isHidden = terminalSelected || localRuntime?.loaded.isEmpty != false
+            web.isHidden = localRuntime?.loaded.isEmpty != false
         }
         settings.environment = state; settings.refreshStatus()
+        if page == 7 {
+            terminal.show(localPhase == "running", root: localRuntime?.root, ip: guestIP)
+        }
         if settings.setup, localPhase == "running" {
-            terminal.show(embeddedTerminalVisible, root: localRuntime?.root, ip: guestIP)
+            terminal.show(page == 7 && localPhase == "running", root: localRuntime?.root, ip: guestIP)
             settings.refreshAgents()
         }
     }
 
     func webView(_: WKWebView, didFinish _: WKNavigation!) {
         webDark = nil; layout(); if page == 1 {
-            web.isHidden = terminalSelected
+            web.isHidden = false
         }
     }
 
@@ -767,8 +759,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
             settings.routingOwnerName = v["title"] as? String ?? "此任务"
             settings.setup = false; settings.section = 4; bridge.selectPage(2); settings.refreshRouting()
         case "setup-stage": settings.setupNavigate(v["value"] as? Int ?? 0)
-        case "setup-choice": settings.chooseSetup(v["id"] as? String ?? "")
-        case "setup-confirm": settings.setupUnknownConfirmed.toggle()
+        case "setup-later": settings.deferSetup()
         case "setup-all": settings
             .setupItems = v["selected"] as? Bool == true ? Set(["codex", "claude", "agy", "api"]) : []; settings
             .persistSetup()
@@ -799,13 +790,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage": settings.section = 3; bridge.selectPage(2)
         case "start": bridge.startSandbox()
-        case "terminal":
-            bridge.terminalSelected = v["value"] as? Bool ?? true; bridge.selectPage(1)
-        case "edit-login": settings.editLogin(v["id"] as? String ?? "")
-        case "save-login": settings.saveLogin(
-                executable: v["executable"] as? String ?? "",
-                arguments: v["argv"] as? String ?? ""
-            )
+        case "terminal": bridge.selectPage(7)
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
         case "save-api": settings.saveAPI(
                 endpoint: v["endpoint"] as? String ?? "",
@@ -815,18 +800,10 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "select-claude": settings.selectNative(engine: "claude", model: v["model"] as? String ?? "")
         case "select-codex": settings.selectNative(engine: "codex", model: v["model"] as? String ?? "")
         case "agent-refresh": settings.refreshAgents()
-        case "agent-login":
-            if let agent = v["id"] as? String {
-                if !bridge.embeddedTerminalVisible {
-                    bridge.terminalSelected = true; bridge.selectPage(1)
-                }; bridge
-                    .terminal.login(agent)
-            }
         case "save-invocation": settings.saveInvocation(
                 executable: v["executable"] as? String ?? "",
                 arguments: v["argv"] as? String ?? ""
             )
-        case "terminal-shell": bridge.terminal.shell()
         case "terminal-close": bridge.terminal.close()
         case "viewer":
             if let id = v["id"] as? String, ["take", "info", "more", "connect"].contains(id) {

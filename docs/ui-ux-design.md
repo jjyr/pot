@@ -81,13 +81,16 @@ Token 输入按十进制：1K=1,000，1M=1,000,000；保存为整数。取消产
 内嵌 noVNC 使用暖白、精简 Xfce 桌面，与 Pot 的克制风格一致。底部常驻栏直接显示 Browser、Files、Terminal，并提供窗口切换；右键菜单保留相同入口。CJK 字体覆盖中日韩。桌面软件随成品镜像预装，构建与主题入口见 [Sandbox 镜像](sandbox-image.md)。
 
 设置导航为“通用 / 助手 / Agent / Sandbox”。Agent 页面显示各 CLI 安装/官方登录状态、刷新入口及 Pi 可执行文件/argv 编辑；命令保存走 profile revision，不发模型测试。
-Sandbox 的 Desktop / Terminal 共用 GPUI 页头，Terminal 渲染由 bundled xterm WKWebView 承担；关闭终端与切换页签分开。状态未知不画成已登录，未经验收的 CLI 不显示为已支持的 Pot 主 Agent。
+Terminal 和 Sandbox 是左侧两个独立入口。Sandbox 只显示桌面及环境控制；Terminal
+连接同一 Runtime-owned PTY，独立于 noVNC、主 Agent 和首次设置。导航/重连不注入命令；
+关闭终端是独立操作。Agent 设置提供只读安装/认证状态、刷新、普通打开 Terminal 与调用命令编辑，
+没有可点击登录状态、登录命令字段、专用登录 PTY 或认证向导。用户自行在 Terminal 操作原生 CLI。
 
-首次启动显示两页引导：第一步选择工具、准备环境并检测预装结果；第二步嵌入同一 Terminal，
-在已安装的 Codex/Claude 中单选主 Agent，或填写 API 连接。已知未登录和检查失败均不可开始；
-只有不支持官方状态查询的自定义登录流程才允许手动确认“状态未验证”。
-引导进度、工具选择和完成状态按数据目录保存，不保存输入密钥。首次选择不创建原生会话或调用模型。
-Agent 设置的“安装其他 Agent”可重新进入引导。
+首次启动只准备环境与选择工具，然后进入普通助手设置，明确选择主 Agent 或配置 API。
+稍后设置仍可使用 Terminal、Sandbox 与设置；未选择主 profile 不执行聊天/任务。
+已知未登录和检查失败的 CLI 不可选；unknown 不冒充已登录，已验收 CLI 可由用户明确选择。
+刷新不自动选择后端，不发送付费测试或创建原生主会话；首次真实消息才创建会话。
+工具选择和完成状态按数据目录保存，不保存输入密钥。Agent 设置的“安装其他 Agent”复用工具准备。
 
 任务路由设置列出已保存的 profile，可编辑/复制模型配置、选择后台默认、允许 Agent 指定的
 profile 白名单，以及 profile/provider 的后台并发上限。API provider 可配置独立日/周 Token

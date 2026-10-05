@@ -128,6 +128,7 @@ class Mock:
         self.runtime_tools = runtime_tools
         self.summary_calls = 0
         self.requests = []
+        self.fault_status = None
         self.calls = []
         self.errors = []
         self.model_started = asyncio.Event()
@@ -191,6 +192,25 @@ class Mock:
             else:
                 assert path == "/v1/responses", path
                 self.requests.append(body)
+                if self.fault_status is not None:
+                    fault = self.fault_status
+                    response = json.dumps(
+                        {
+                            "error": {
+                                "message": "Fixture authentication expired",
+                                "type": "authentication_error",
+                                "code": "invalid_api_key",
+                            }
+                        }
+                    ).encode()
+                    writer.write(
+                        (
+                            f"HTTP/1.1 {fault} Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {len(response)}\r\nConnection: close\r\n\r\n"
+                        ).encode()
+                        + response
+                    )
+                    await writer.drain()
+                    return
                 if "CANCEL_WAIT" in json.dumps(body["input"]):
                     writer.write(
                         b'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {"type":"response.created","response":{"id":"cancel","status":"in_progress"}}\n\n'

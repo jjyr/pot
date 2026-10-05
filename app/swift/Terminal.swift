@@ -8,14 +8,11 @@ import WebKit
     private let asset: URL
     private var socket: URLSessionWebSocketTask?
     private var sessionID: String?
-    private var shellID: String?
-    private var loginIDs: [String: String] = [:]
     private var bootID = ""
     private var root: URL?
     private var ip = ""
     private var ready = false
     private var connecting = false
-    private var pendingLogin: String?
     private var generation = 0
     private var visible = false
     private var inputQueue = Data()
@@ -40,6 +37,7 @@ import WebKit
         visible = value; self.root = root; self.ip = ip; web.isHidden = !value
         if value {
             connect(); if newlyVisible {
+                web.window?.makeFirstResponder(web)
                 web.evaluateJavaScript("window.potTerminal?.focus()", completionHandler: nil)
             }
         }
@@ -83,7 +81,7 @@ import WebKit
             let (_, _, boot) = try credentials()
             if bootID != boot {
                 generation += 1; socket?
-                    .cancel(with: .goingAway, reason: nil); socket = nil; sessionID = nil; shellID = nil; loginIDs = [:]
+                    .cancel(with: .goingAway, reason: nil); socket = nil; sessionID = nil
                 if !bootID.isEmpty {
                     status("Sandbox 已重启，原终端已结束")
                 }
@@ -94,27 +92,18 @@ import WebKit
         connecting = true
         let current = generation
         Task {
-            defer {
-                connecting = false; if let agent = pendingLogin {
-                    pendingLogin = nil; login(agent)
-                }
-            }
+            defer { connecting = false }
             do {
                 if sessionID == nil {
                     let existing = try await request("api/v1/terminals")
                     guard current == generation else { return }
                     let sessions = existing["sessions"] as? [[String: Any]] ?? []
-                    for session in sessions where session["exit_code"] is NSNull {
-                        if let agent = session["agent"] as? String, let id = session["id"] as? String {
-                            loginIDs[agent] = id
-                        }
-                    }
                     if let shell = sessions
                         .first(where: {
-                            $0["agent"] is NSNull && $0["exit_code"] is NSNull && $0["attached"] as? Bool == false
+                            $0["exit_code"] is NSNull && $0["attached"] as? Bool == false
                         })
                     {
-                        shellID = shell["id"] as? String; sessionID = shellID
+                        sessionID = shell["id"] as? String
                     }
                 }
                 if sessionID == nil {
@@ -164,33 +153,6 @@ import WebKit
                 socket = nil; status("连接已断开，PTY 保留；点击 Terminal 重连")
             }
         }
-    }
-
-    func login(_ agent: String) {
-        guard !connecting else { pendingLogin = agent; return }
-        Task {
-            do {
-                let result = try await request("api/v1/terminals", body: ["cols": cols, "rows": rows, "agent": agent])
-                guard let next = result["id"] as? String else { return }
-                if next ==
-                    sessionID
-                {
-                    web.evaluateJavaScript("window.potTerminal.focus()", completionHandler: nil); return
-                }
-                if !loginIDs.values.contains(sessionID ?? "") {
-                    shellID = sessionID
-                }
-                loginIDs[agent] = next
-                generation += 1; socket?.cancel(with: .goingAway, reason: nil); socket = nil; sessionID = next
-                connect()
-            } catch { status("登录命令无法启动；检查安装及登录命令。") }
-        }
-    }
-
-    func shell() {
-        guard loginIDs.values.contains(sessionID ?? "") else { connect(); return }
-        generation += 1; socket?.cancel(with: .goingAway, reason: nil); socket = nil; sessionID = shellID
-        connect()
     }
 
     func close() {

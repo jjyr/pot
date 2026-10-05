@@ -12,71 +12,39 @@ pub struct CommandSpec {
 pub struct Tool {
     pub id: String,
     pub invocation: CommandSpec,
-    pub login: Option<CommandSpec>,
 }
 fn defaults() -> Vec<Tool> {
-    vec![
-        Tool {
-            id: "pi".into(),
+    ["pi", "codex", "claude", "agy"]
+        .into_iter()
+        .map(|id| Tool {
+            id: id.into(),
             invocation: CommandSpec {
-                executable: "pi".into(),
+                executable: id.into(),
                 argv: vec![],
             },
-            login: None,
-        },
-        Tool {
-            id: "codex".into(),
-            invocation: CommandSpec {
-                executable: "codex".into(),
-                argv: vec![],
-            },
-            login: Some(CommandSpec {
-                executable: "codex".into(),
-                argv: vec!["login".into(), "--device-auth".into()],
-            }),
-        },
-        Tool {
-            id: "claude".into(),
-            invocation: CommandSpec {
-                executable: "claude".into(),
-                argv: vec![],
-            },
-            login: Some(CommandSpec {
-                executable: "claude".into(),
-                argv: vec!["auth".into(), "login".into()],
-            }),
-        },
-        Tool {
-            id: "agy".into(),
-            invocation: CommandSpec {
-                executable: "agy".into(),
-                argv: vec![],
-            },
-            login: Some(CommandSpec {
-                executable: "agy".into(),
-                argv: vec![],
-            }),
-        },
-    ]
+        })
+        .collect()
 }
 pub fn tools(s: &Service) -> Result<Vec<Tool>> {
-    s.inner
-        .lock()
-        .unwrap()
+    let inner = s.inner.lock().unwrap();
+    let mut tools: Vec<Tool> = inner
         .store
         .get("agent.tools.v1")?
         .map(|v| Ok(serde_json::from_str(&v)?))
-        .unwrap_or_else(|| Ok(defaults()))
-}
-fn valid(command: &CommandSpec) -> bool {
-    !command.executable.is_empty()
-        && command.executable.len() <= 4096
-        && !command.executable.contains('\0')
-        && command.argv.len() <= 64
-        && command
-            .argv
+        .unwrap_or_else(|| Ok::<_, anyhow::Error>(defaults()))?;
+    let profiles = agent::profiles(&inner.store)?;
+    for tool in &mut tools {
+        if let Some(profile) = profiles
             .iter()
-            .all(|v| v.len() <= 4096 && !v.contains('\0'))
+            .find(|p| p.id == format!("{}-default", tool.id))
+        {
+            if let Some(launch) = &profile.launch_spec {
+                tool.invocation.executable = launch.executable.clone();
+                tool.invocation.argv = launch.expand(&[])?;
+            }
+        }
+    }
+    Ok(tools)
 }
 pub fn executable(name: &str) -> Option<PathBuf> {
     let check = |p: PathBuf| {
@@ -95,42 +63,6 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     s.authorized(&h)?;
     Ok(Json(json!({"tools":tools(&s).map_err(internal)?})))
 }
-pub async fn save(
-    State(s): State<Service>,
-    h: HeaderMap,
-    Json(tool): Json<Tool>,
-) -> ApiResult<Json<Value>> {
-    s.authorized(&h)?;
-    if !valid(&tool.invocation) || tool.login.as_ref().is_some_and(|c| !valid(c)) {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            "command",
-            "Invalid executable or argument array",
-        ));
-    }
-    // Invocation edits must use Profile revisions; this catalog edits login only.
-    let mut all = tools(&s).map_err(internal)?;
-    let Some(current) = all.iter_mut().find(|t| t.id == tool.id) else {
-        return Err(error(StatusCode::BAD_REQUEST, "agent", "Unknown agent"));
-    };
-    if serde_json::to_value(&current.invocation).unwrap()
-        != serde_json::to_value(&tool.invocation).unwrap()
-    {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            "command",
-            "Edit invocation through the versioned profile API",
-        ));
-    }
-    *current = tool;
-    s.inner
-        .lock()
-        .unwrap()
-        .store
-        .set("agent.tools.v1", &serde_json::to_string(&all).unwrap())
-        .map_err(internal)?;
-    Ok(Json(json!({"tools":all})))
-}
 pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     static PROBE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
@@ -143,11 +75,7 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
     })?;
     let mut results = Vec::new();
     for tool in tools(&s).map_err(internal)? {
-        let name = tool
-            .login
-            .as_ref()
-            .map(|c| c.executable.as_str())
-            .unwrap_or(&tool.invocation.executable);
+        let name = tool.invocation.executable.as_str();
         let present = executable(name).is_some();
         let exists = if name.contains('/') {
             std::path::Path::new(name).exists()
@@ -165,7 +93,11 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
         let mut auth = "unknown";
         let mut check = "unsupported";
         // Only official, documented status commands are queried; wrappers stay unknown.
-        if matches!(tool.id.as_str(), "codex" | "claude") && name == tool.id && present {
+        if matches!(tool.id.as_str(), "codex" | "claude")
+            && name == tool.id
+            && tool.invocation.argv.is_empty()
+            && present
+        {
             match native_status(&tool.id, &s.workspace).await {
                 Ok(Some(true)) => {
                     auth = "authenticated";
@@ -245,17 +177,36 @@ async fn native_status(engine: &str, cwd: &std::path::Path) -> Result<Option<boo
 mod tests {
     use super::*;
     #[test]
+    fn discovery_uses_versioned_invocation_instead_of_old_catalog_command() {
+        let s = crate::tests::service();
+        let mut profile = agent::Profile::legacy(&pi::Config::default());
+        let mut launch = agent::LaunchSpec::default();
+        launch.executable = "/this/wrapper/is/missing".into();
+        launch.argv.insert(
+            0,
+            agent::LaunchArgument::Literal("literal wrapper argument".into()),
+        );
+        profile.launch_spec = Some(launch);
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                "agent.profiles.v1",
+                &serde_json::to_string(&vec![profile]).unwrap(),
+            )
+            .unwrap();
+        let tools = tools(&s).unwrap();
+        assert_eq!(tools[0].invocation.executable, "/this/wrapper/is/missing");
+        assert_eq!(tools[0].invocation.argv, vec!["literal wrapper argument"]);
+        assert!(executable(&tools[0].invocation.executable).is_none());
+    }
+    #[test]
     fn commands_are_argv_and_discovery_does_not_guess_auth() {
         let tools = defaults();
-        assert_eq!(
-            tools[1].login.as_ref().unwrap().argv,
-            vec!["login", "--device-auth"]
-        );
-        assert!(tools[0].login.is_none());
+        assert_eq!(tools[1].invocation.executable, "codex");
+        let old: Tool = serde_json::from_value(json!({"id":"codex","invocation":{"executable":"codex","argv":[]},"login":{"executable":"must-not-run","argv":[]}})).unwrap();
+        assert!(serde_json::to_value(old).unwrap().get("login").is_none());
         assert!(executable("/this/cannot/exist").is_none());
-        assert!(!valid(&CommandSpec {
-            executable: "".into(),
-            argv: vec![]
-        }));
     }
 }

@@ -23,7 +23,6 @@ pub struct Hub {
     sessions: HashMap<String, Arc<Session>>,
 }
 struct Session {
-    login_agent: Option<String>,
     master: Arc<AsyncFd<File>>,
     output: broadcast::Sender<Vec<u8>>,
     history: Mutex<VecDeque<u8>>,
@@ -83,7 +82,7 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     authorize(&s, &h)?;
     let hub = s.terminals.lock().unwrap();
     Ok(Json(
-        json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow(),"agent":p.login_agent,"attached":p.attached.load(Ordering::SeqCst)})).collect::<Vec<_>>()}),
+        json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow(),"attached":p.attached.load(Ordering::SeqCst)})).collect::<Vec<_>>()}),
     ))
 }
 pub async fn create(
@@ -95,30 +94,14 @@ pub async fn create(
     let size = request.size;
     size.validate()
         .map_err(|e| error(StatusCode::BAD_REQUEST, "terminal_size", &e.to_string()))?;
-    let login = if let Some(agent) = &request.agent {
-        let tool = discovery::tools(&s)
-            .map_err(internal)?
-            .into_iter()
-            .find(|t| &t.id == agent)
-            .ok_or_else(|| error(StatusCode::BAD_REQUEST, "agent", "Unknown agent"))?;
-        Some(tool.login.ok_or_else(|| {
-            error(
-                StatusCode::BAD_REQUEST,
-                "login",
-                "This agent uses API settings",
-            )
-        })?)
-    } else {
-        None
-    };
-    let mut hub = s.terminals.lock().unwrap();
-    if let Some(agent) = &request.agent {
-        if let Some((id, _)) = hub.sessions.iter().find(|(_, session)| {
-            session.login_agent.as_ref() == Some(agent) && session.exit.borrow().is_none()
-        }) {
-            return Ok(Json(json!({"id":id,"boot_id":s.boot})));
-        }
+    if request.agent.is_some() {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "terminal_command",
+            "Terminal opens a shell only; commands are entered by the user",
+        ));
     }
+    let mut hub = s.terminals.lock().unwrap();
     if hub.sessions.len() >= MAX_SESSIONS {
         return Err(error(
             StatusCode::CONFLICT,
@@ -126,7 +109,7 @@ pub async fn create(
             "Close an existing terminal first",
         ));
     }
-    let session = spawn(&s.workspace, &size, login.as_ref(), request.agent).map_err(internal)?;
+    let session = spawn(&s.workspace, &size).map_err(internal)?;
     let id = id();
     hub.sessions.insert(id.clone(), session);
     Ok(Json(json!({"id":id,"boot_id":s.boot})))
@@ -253,12 +236,7 @@ pub async fn shutdown(s: &Service) {
         }
     }
 }
-fn spawn(
-    cwd: &std::path::Path,
-    size: &Size,
-    login: Option<&discovery::CommandSpec>,
-    login_agent: Option<String>,
-) -> Result<Arc<Session>> {
+fn spawn(cwd: &std::path::Path, size: &Size) -> Result<Arc<Session>> {
     let (mut master, mut slave) = (-1, -1);
     let mut native = size.native();
     // Both descriptors immediately acquire RAII ownership; no inherited master.
@@ -284,12 +262,8 @@ fn spawn(
             return Err(std::io::Error::last_os_error().into());
         }
     }
-    let mut command = Command::new(login.map(|c| c.executable.as_str()).unwrap_or("/bin/bash"));
-    if let Some(login) = login {
-        command.args(&login.argv);
-    } else {
-        command.args(["--noprofile", "--norc", "-i"]);
-    }
+    let mut command = Command::new("/bin/bash");
+    command.args(["--noprofile", "--norc", "-i"]);
     command
         .env("HISTFILE", "/dev/null")
         .current_dir(cwd)
@@ -311,7 +285,6 @@ fn spawn(
     let (output, _) = broadcast::channel(32);
     let (done, exit) = watch::channel(None);
     let session = Arc::new(Session {
-        login_agent,
         master: Arc::new(AsyncFd::new(master)?),
         output,
         history: Mutex::new(VecDeque::new()),
@@ -426,13 +399,7 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn pty_io_detach_and_explicit_close() {
-        let p = spawn(
-            std::path::Path::new("/tmp"),
-            &Size { cols: 80, rows: 24 },
-            None,
-            None,
-        )
-        .unwrap();
+        let p = spawn(std::path::Path::new("/tmp"), &Size { cols: 80, rows: 24 }).unwrap();
         let mut rx = p.output.subscribe();
         write(
             &p,
@@ -491,59 +458,29 @@ mod lifecycle_tests {
         headers
     }
     #[tokio::test]
-    async fn login_click_is_deduplicated_and_never_injected_into_shell() {
+    async fn login_requests_are_rejected_without_starting_or_injecting_commands() {
         let mut s = crate::tests::service();
         s.workspace = std::env::temp_dir();
-        let tools = vec![discovery::Tool {
-            id: "fixture".into(),
-            invocation: discovery::CommandSpec {
-                executable: "/bin/bash".into(),
-                argv: vec![],
-            },
-            login: Some(discovery::CommandSpec {
-                executable: "/bin/bash".into(),
-                argv: vec!["--noprofile".into(), "--norc".into(), "-i".into()],
-            }),
-        }];
-        s.inner
-            .lock()
-            .unwrap()
-            .store
-            .set("agent.tools.v1", &serde_json::to_string(&tools).unwrap())
-            .unwrap();
-        let create_request = |agent| {
+        let request = |agent| {
             Json(Create {
                 size: Size { cols: 80, rows: 24 },
                 agent,
             })
         };
-        let shell = create(State(s.clone()), auth(&s), create_request(None))
+        let shell = create(State(s.clone()), auth(&s), request(None))
             .await
             .unwrap()
             .0;
-        let first = create(
-            State(s.clone()),
-            auth(&s),
-            create_request(Some("fixture".into())),
-        )
-        .await
-        .unwrap()
-        .0;
-        let second = create(
-            State(s.clone()),
-            auth(&s),
-            create_request(Some("fixture".into())),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert_eq!(first["id"], second["id"]);
-        assert_ne!(first["id"], shell["id"]);
-        assert_eq!(s.terminals.lock().unwrap().sessions.len(), 2);
+        let session = s.terminals.lock().unwrap().sessions[shell["id"].as_str().unwrap()].clone();
+        assert!(
+            create(State(s.clone()), auth(&s), request(Some("codex".into())))
+                .await
+                .is_err()
+        );
+        assert_eq!(s.terminals.lock().unwrap().sessions.len(), 1);
+        // A rejected legacy login request never creates another process or writes PTY input.
         shutdown(&s).await;
-        for session in s.terminals.lock().unwrap().sessions.values() {
-            assert!(session.exit.borrow().is_some());
-        }
+        assert!(session.exit.borrow().is_some());
     }
     #[tokio::test]
     async fn ownership_limits_and_resize_are_checked() {
@@ -594,7 +531,7 @@ mod websocket_tests {
     async fn authenticated_websocket_resize_unicode_and_reconnect() {
         let mut s = crate::tests::service();
         s.workspace = std::env::temp_dir();
-        let session = spawn(&s.workspace, &Size { cols: 80, rows: 24 }, None, None).unwrap();
+        let session = spawn(&s.workspace, &Size { cols: 80, rows: 24 }).unwrap();
         s.terminals
             .lock()
             .unwrap()

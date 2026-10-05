@@ -216,3 +216,83 @@ Codex/Claude 原生契约均通过（各 23 次本地模拟请求，含 wrapper 
 旧 revision 拒绝，模型请求数为 0。新任务路由/额度设置和任务“更换 Agent”界面通过编译；
 实际交互检查遇到 Mac 锁屏，已请求用户解锁，未将其记为 GUI 验收通过。
 之前两页引导 GUI 验证不替代这次新增页面的交互验收。测试 Sandbox 已通过 helper 正常停止。
+
+
+## 2026-10-05 自动触发、认证故障和路由交互补充
+
+Codex/Claude 的 Runtime 契约启用一分钟间隔计划，等待 Runtime 真实时钟触发，
+不调用手动 run 接口；自动执行的原生会话与主聊天、两个 worker、两次手动执行均独立。
+宿主两套真实 CLI 均通过；Codex 的原打包镜像也通过更新后的契约
+（`.local/d1/codex-guest-clock-20261005/data/codex-runtime.json`）。
+
+本地模拟 provider 持续返回 401 后再恢复成功响应，验证：失败消息明确可见、
+引擎回到 ready、用量标为 native_incomplete、binding 保持 active 且 native ID 不变；
+后续轮次恢复原会话，不读取或改动真实账户认证。Codex 宿主与 guest 均通过。
+Claude 原 CLI 发送 api_retry/authentication_failed，原行为会重试数分钟；
+Runtime 现在通过已验证的 SIGINT 生命周期停止，等待终态和进程退出后提示重新登录。
+宿主契约通过认证失败恢复、非重试型 400 故障和诊断过滤；原生续聊、取消、后台进程
+停止、worker 和计划仍通过。测试只有 loopback 请求，没有付费调用。
+
+解锁后的隔离应用交互验证：复制 API profile、选择后台默认、允许 Agent 指定的白名单、
+配置并发 2/provider 并发 4 保存成功；provider 每周 15000 Token/自动恢复保存成功。
+Runtime API 核对持久值且模型请求数为 0。长权限说明被截断的问题已修复并通过编译；
+修复后的布局和任务页迁移交互尚未重新检查，以免中断用户正在使用的 Sandbox 登录终端。
+真实账户登录/调用、完整升级与浅深色矩阵仍未验收，AGY 接入条件仍待解决。
+
+
+## 2026-10-05 独立 Terminal 与真实 Codex 账户验收
+
+按更新后的 #2，Terminal / Sandbox 是两个侧栏按钮。移除专用登录 PTY、登录动作/命令
+配置及 Helper 历史 login RPC；Runtime 拒绝旧 agent 登录终端请求，旧 catalog login
+字段仅在反序列化时忽略，不执行、不返回。官方状态检测保持只读。
+环境/工具准备后进入普通助手设置；无勾选亦可继续，主 Agent 不自动预选。
+
+隔离测试应用 `dev.pot.setup-check` 实测独立导航、只读 Agent 状态、空勾选进入助手设置、
+稍后设置打开 Terminal。全新 `independent-cold-ui-20261005` root 的 profiles/bindings
+均为空，未登录 Codex/Claude 不可选，usage requests 为 0；Terminal 可用。
+忙碌 shell 的 read 等待期间切换 Terminal/Sandbox、触发状态刷新并返回，输入得到
+`POT_BUSY_NAV:KEPT_SHELL_INPUT`，没有命令注入，焦点自动恢复。
+App 新回归禁止 NeedsAuth 时发送主聊/任务 guidance。最终构建后的界面门禁和长说明
+复核遇到 Mac 锁屏，不能将编译/单测记为最终 GUI 验收。
+
+真实账户测试使用用户自行登录的 guest 原版 Codex，模型 `gpt-6-luna`：
+主聊调用 Pot MCP pot_list_tasks 成功；两个并发 worker 使用独立 native threads；
+只读汇总执行并归账；正常重启后官方状态仍 authenticated。
+镜像 `pot.local/sandbox:ff8c27149694187b0495` 下再次重启，epoch 2 和原 native
+thread `01a10962-c6ac-7331-8720-54ca5e80af90` 保持不变，MCP 续聊成功。
+前台 shell sleep 60 执行中取消，确认终态 cancelled、turn 清空、engine ready；
+随后普通轮次在原线程完成，证明容量释放和续聊可用。
+
+真实验收发现 summary 后省略 shell/file feature overrides 无法恢复工具；现每轮显式
+设置，并声明当前普通主轮次权限。宿主/guest 契约均增加 summary 后恢复 shell 的回归。
+真实取消前 shell 未启动的旧失败尝试保留为历史，不计为通过。
+取消轮次不完整用量标 unknown，不记零。此次真实测试累计账本为 9 个轮次记录，
+input 255894、output 1060、cache 210432、unknown 1；并非 0 付费调用声明。
+订阅路线为原生上报事后归账，不能将该记录数等同 HTTP 模型请求数。
+
+证据位于 `setup-ui-check-20261005/workspace/product/issue2-account-{main,workers,resume,cancel,after-cancel}.json`。
+冷配置证据位于 `independent-cold-ui-20261005/workspace/product/issue2-cold-ui.json`。
+仅测试副本切换数据 root；一次 Quit 后 CUA 状态查询自动重启该副本并落到默认目录，
+发现后停止了该副本，未发送模型/聊天动作；之后固定 LSEnvironment 防止再次发生。
+未停止用户日常 Pot，未读取宿主/guest 登录凭据或在线 SQLite。
+
+最终 ff8c guest 的 Codex 契约通过 35 次 loopback 请求；Claude 的 d2bc guest 契约
+通过 32 次 loopback 请求，包含真实时钟计划、401 及时停止/恢复、400 诊断过滤和取消。
+这些离线请求 paid_calls 为 0。Claude 真实账户仍待用户自行登录；AGY Driver 的接入
+许可及技术隔离契约未确认，仍未启用。兼容/不兼容升级、下载故障恢复、完整浅深色
+和权限界面矩阵未全部验收，本次不宣布 #2 可关闭。
+
+
+最终补充：重启后的 snapshot 引擎/模型名称读取持久 binding，不等到首轮再纠正旧启动默认值；
+对应回归通过。工具发现读取版本化默认 profile 的 invocation，缺失 wrapper 不借用系统
+默认 CLI 的安装/认证状态；带 wrapper 参数时保留 unknown，不执行未知状态命令。
+Runtime 84、协议 1、App 11 个测试通过；`mise run check` 及构建通过。
+Pi 的 8 个真实 CLI/mock 契约沿用本轮前已通过的证据，未将其标成重新执行。
+
+
+最终交付包镜像为 `pot.local/sandbox:21841888feb8f142ea98`。
+隔离副本更新后正常重启，首条消息前即显示 `Codex · gpt-6-luna`；
+只读官方检测为 authenticated，epoch/native thread 保持不变，usage 仍为 9 个轮次记录，
+该包核对新增模型调用为 0。Claude 仍为 required，AGY 为 unknown。
+证据为 `setup-ui-check-20261005/workspace/product/issue2-final-package.json`。
+最终包核对没有重跑完整原生/真实模型矩阵；前述 ff8c/d2bc 镜像契约证据保持各自版本范围。
