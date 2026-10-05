@@ -4,7 +4,7 @@ umask 077
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 exec >/data/desktop.log 2>&1
 # Immutable software comes from the bundled OCI image; /data holds user state.
-for name in desktop-config.sh desktop-session.sh pot-wallpaper.svg packages.lock test.html home.html driver.py broker.py index.html close-browser.py open-browser.sh pot-runtime agy; do
+for name in desktop-config.sh desktop-session.sh pot-wallpaper.svg packages.lock test.html home.html driver.py broker.py index.html close-browser.py open-browser.sh pot-server agy; do
   ln -sf "/opt/pot/$name" "/data/$name"
 done
 # Older versions unpacked noVNC into /data; preserve it, but serve image assets.
@@ -22,7 +22,7 @@ python3 -m http.server 8081 --bind 127.0.0.1 --directory /data >/data/logs/page.
 websockify --web=/opt/pot/novnc 127.0.0.1:6080 127.0.0.1:5900 >/data/logs/websockify.log 2>&1 &
 POT_BACKEND=local POT_INTEGRATED_ROOT=/data POT_BROKER_BIND=0.0.0.0 POT_UPSTREAM_WS=http://127.0.0.1:6080/websockify POT_VIEWER_HTML=/data/index.html python3 /data/broker.py >/data/logs/broker.log 2>&1 &
 # Product runtime and engine run as an unprivileged guest user.
-su potdesktop -c 'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"; export npm_config_prefix="$HOME/.npm-global"; exec /data/pot-runtime' >/data/logs/runtime.log 2>&1 &
+su potdesktop -c 'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"; export npm_config_prefix="$HOME/.npm-global"; exec /data/pot-server' >/data/logs/runtime.log 2>&1 &
 runtime_pid=$!
 # Wait for an actual browser process exit before acknowledging clean shutdown.
 shutdown() {

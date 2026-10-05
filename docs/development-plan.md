@@ -63,4 +63,6 @@ Token 用量已补 Agent / 模型归属：新请求与原生轮次记录 agent/p
 
 ## Issue #5：Backend crates / 独立 Server
 
-先更新 [拆分设计](backend-crates.md)，再在独立 branch/worktree 实施。目标是独立 Server、Runtime 库、Core/Storage/Driver/Gateway 边界和构建/契约回归；不混入数据库格式迁移或远程部署功能。验收结果在完成后更新。
+已先提交 [拆分设计](backend-crates.md)，再在独立 branch/worktree 完成 8 个 workspace crates 的实现。Server 独立启动；Runtime 为库；Driver 不持有 Service/数据库；构建、镜像和 mise 入口已更新。数据库格式及原生会话保持兼容，未增加远程部署产品功能。
+
+后端常规回归、App 11 项、真实 Pi + 本地模拟 provider 8 项、Codex 原生 App Server 离线契约、AGY 模拟传输与 Claude 独立 Driver fixture 通过；workspace check、lint 和 Linux ARM64 musl Server 构建通过。独立 Server 已验证认证、持久设置/重启、端口冲突、SSE 关闭和活跃 main/worker 收敛。原版 Claude 的本轮宿主兼容性检查拒绝缺失必需控制的 executable，未算原版通过。未重建 OCI/App bundle，也未做远程部署或真实账户验收。详见 [拆分验证](validation/backend-crates.md)。

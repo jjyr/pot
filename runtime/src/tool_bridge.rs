@@ -4,8 +4,7 @@ use crate::*;
 use axum::response::Response;
 
 pub fn schemas(summary: bool) -> Vec<Value> {
-    let all: Vec<Value> =
-        serde_json::from_str(include_str!("pot-tools.json")).expect("bundled schemas");
+    let all: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).expect("bundled schemas");
     all.into_iter()
         .filter(|tool| {
             !summary

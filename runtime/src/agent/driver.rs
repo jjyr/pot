@@ -1,153 +1,10 @@
-//! Driver boundary: product projection is independent of transport events.
 use super::*;
 use futures::future::BoxFuture;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Success,
-    Failed(String),
-    Cancelled,
-    Unknown,
-}
-#[derive(Clone, Debug)]
-pub enum Update {
-    PolicyDenied,
-    MessageStarted,
-    TextDelta(String),
-    MessageFinished {
-        text: String,
-        outcome: Outcome,
-    },
-    ToolStarted {
-        id: String,
-        name: String,
-        args: Value,
-    },
-    ToolFinished {
-        id: String,
-        name: String,
-        result: Value,
-        failed: bool,
-    },
-    CompactionObserved {
-        recovered: bool,
-    },
-    TurnFinished(Outcome),
-}
-#[derive(Clone, Debug)]
-pub struct DriverEvent {
-    pub epoch: u64,
-    pub turn_id: String,
-    pub seq: u64,
-    pub update: Update,
-}
-pub type Sink<'a> = &'a mut (dyn FnMut(DriverEvent) -> Result<()> + Send);
-
-/// Host and session lifetimes differ: Pi sessions spawn a process per turn;
-/// a future long-lived host can multiplex sessions behind this same boundary.
-pub trait DriverHost: Send + Sync {
-    fn probe(&self, spec: &ResolvedSpec) -> Result<()>;
-    fn session(&self, service: Service, binding: Binding) -> Result<Box<dyn SessionHandle>>;
-}
-pub trait SessionHandle: Send {
-    fn start_turn<'a>(
-        &'a mut self,
-        request: &'a SendMessage,
-        resuming: bool,
-        sink: Sink<'a>,
-    ) -> BoxFuture<'a, Result<()>>;
-}
-
-pub struct PiHost;
-struct PiSession {
-    service: Service,
-    binding: Binding,
-}
-impl DriverHost for PiHost {
-    fn probe(&self, spec: &ResolvedSpec) -> Result<()> {
-        spec.validate()?;
-        anyhow::ensure!(
-            spec.engine == Engine::Pi,
-            "Unsupported engine; needs rebind"
-        );
-        Ok(())
-    }
-    fn session(&self, service: Service, binding: Binding) -> Result<Box<dyn SessionHandle>> {
-        self.probe(&binding.spec)?;
-        anyhow::ensure!(
-            binding.state == BindingState::Active,
-            "Agent binding is broken; needs rebind"
-        );
-        Ok(Box::new(PiSession { service, binding }))
-    }
-}
-impl SessionHandle for PiSession {
-    fn start_turn<'a>(
-        &'a mut self,
-        request: &'a SendMessage,
-        resuming: bool,
-        sink: Sink<'a>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut seq = 0;
-            let epoch = self.binding.epoch;
-            let mut emit = |update| {
-                seq += 1;
-                sink(DriverEvent {
-                    epoch,
-                    turn_id: request.request_id.clone(),
-                    seq,
-                    update,
-                })
-            };
-            let result = pi::execute(&self.service, request, &mut emit, resuming).await;
-            // execute returns only after process disposal. An uncertain shutdown
-            // is an error, never a successful cancellation confirmation.
-            let outcome = match &result {
-                Err(e) => Outcome::Failed(e.to_string()),
-                Ok(()) if cancelled(&self.service) => Outcome::Cancelled,
-                Ok(()) => Outcome::Success,
-            };
-            emit(Update::TurnFinished(outcome))?;
-            result
-        })
-    }
-}
-
-pub struct EventGate {
-    epoch: u64,
-    turn_id: String,
-    seq: u64,
-    terminal: Option<Outcome>,
-}
-impl EventGate {
-    pub fn new(epoch: u64, turn_id: &str) -> Self {
-        Self {
-            epoch,
-            turn_id: turn_id.into(),
-            seq: 0,
-            terminal: None,
-        }
-    }
-    pub fn accept(&mut self, event: &DriverEvent) -> bool {
-        if event.epoch != self.epoch
-            || event.turn_id != self.turn_id
-            || event.seq <= self.seq
-            || self.terminal.is_some()
-        {
-            return false;
-        }
-        self.seq = event.seq;
-        if let Update::TurnFinished(outcome) = &event.update {
-            self.terminal = Some(outcome.clone());
-        }
-        true
-    }
-    pub fn finish(self) -> Outcome {
-        self.terminal.unwrap_or(Outcome::Unknown)
-    }
-}
-
+#[cfg(test)]
+use pot_core::{DriverEvent, Sink};
+pub use pot_core::{DriverHost, EventGate, Outcome, SessionHandle, TurnRequest, Update};
+mod feedback;
+use feedback::{context, prepare_context};
 pub async fn execute(
     s: &Service,
     request: &SendMessage,
@@ -174,10 +31,15 @@ pub async fn execute(
     );
     let epoch = binding.epoch;
     let mut session = match binding.spec.engine {
-        Engine::Pi => PiHost.session(s.clone(), binding)?,
-        Engine::Codex => super::codex::CodexHost.session(s.clone(), binding)?,
-        Engine::Claude => super::claude::ClaudeHost.session(s.clone(), binding)?,
-        Engine::Agy => super::agy::AgyHost.session(s.clone(), binding)?,
+        Engine::Pi => pot_driver::pi::PiHost.session(context(s, request, &binding)?, binding)?,
+        Engine::Codex => pot_driver::codex::CodexHost {
+            hosts: s.codex.clone(),
+        }
+        .session(context(s, request, &binding)?, binding)?,
+        Engine::Claude => {
+            pot_driver::claude::ClaudeHost.session(context(s, request, &binding)?, binding)?
+        }
+        Engine::Agy => pot_driver::agy::AgyHost.session(context(s, request, &binding)?, binding)?,
     };
     run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
         transcript.record(s, update)
@@ -194,12 +56,19 @@ async fn run_session(
 ) -> Result<()> {
     let mut gate = EventGate::new(epoch, &request.request_id);
     let result = session
-        .start_turn(request, resuming, &mut |event| {
-            if gate.accept(&event) {
-                sink(&event.update)?;
-            }
-            Ok(())
-        })
+        .start_turn(
+            &TurnRequest {
+                request_id: request.request_id.clone(),
+                text: request.text.clone(),
+            },
+            resuming,
+            &mut |event| {
+                if gate.accept(&event) {
+                    sink(&event.update)?;
+                }
+                Ok(())
+            },
+        )
         .await;
     result?;
     match gate.finish() {
@@ -221,7 +90,7 @@ mod tests {
     impl SessionHandle for FakeSession {
         fn start_turn<'a>(
             &'a mut self,
-            _: &'a SendMessage,
+            _: &'a TurnRequest,
             _: bool,
             sink: Sink<'a>,
         ) -> BoxFuture<'a, Result<()>> {
@@ -348,7 +217,9 @@ pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRe
     } else if spec.engine == Engine::Claude {
         claude::prepare(spec).await?;
         Ok(None)
+    } else if spec.engine == Engine::Codex {
+        codex::prepare(&prepare_context(s)?, &s.codex, spec).await
     } else {
-        codex::prepare(s, spec).await
+        Ok(None)
     }
 }

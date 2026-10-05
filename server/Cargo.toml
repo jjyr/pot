@@ -1,0 +1,16 @@
+[package]
+name = "pot-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pot-runtime.workspace = true
+pot-protocol.workspace = true
+anyhow = "1"
+serde_json.workspace = true
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }

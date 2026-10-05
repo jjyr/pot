@@ -4,23 +4,30 @@
 
 ```text
 macOS
-  Pot App（GPUI Kit）──── Swift bridge
-     │                   ├─ tray / 窄侧栏 / 原生输入框
-     │                   ├─ 配置与窗口生命周期
-     │                   └─ WKWebView / noVNC + xterm ──────┐
-     ├─ Unix IPC → Swift helper → Containerization │
-     │                            Linux VM         │
-     └─ bearer HTTP / SSE → Rust Runtime           │
-                              ├─ SQLite / 请求账本 │
-                              ├─ Agent binding → 主 Pi 会话         │
-                              ├─ 任务队列 → Pi workers
-                              └─ 定时调度           │
-                                  桌面 / broker ←──┘
++---------------------------------------------+
+| Pot App: GPUI + Swift bridge                 |
+| chat / tasks / settings / tray / WebViews    |
++--------+----------------------+-------------+
+         | Unix IPC             | bearer HTTP/SSE
+         v                      |
+      Helper                    |
+         | Containerization     |
+         v                      v
++---------------------- Linux VM ----------------------+
+| pot-server: HTTP / SSE / MCP / PTY hosting             |
+|      |                                               |
+| pot-runtime: bindings / tasks / schedules / recovery   |
+|      |-- Storage: SQLite + request/usage ledgers       |
+|      |-- Driver: Pi / Codex / Claude / AGY sessions    |
+|      +-- Gateway: provider HTTP + protocol codecs     |
+|                                                      |
+| Desktop / broker <---- App native WebView bridge      |
++------------------------------------------------------+
 ```
 
 ## Backend 拆分设计
 
-Issue [#5](https://github.com/jjyr/pot/issues/5) 在独立 worktree 按 [Backend crate 拆分](backend-crates.md) 调整 Core/Storage/Driver/Gateway/Runtime/Server 边界。Server 独立启动后端；App 通过协议访问，不暴露远程部署产品功能。以下既有运行语义在重构中保持兼容。
+Issue [#5](https://github.com/jjyr/pot/issues/5) 已在独立 worktree 按 [Backend crate 拆分](backend-crates.md) 拆分 Core/Storage/Driver/Gateway/Runtime/Server 边界。Server 独立启动后端；App 通过协议访问，不暴露远程部署产品功能。HTTP 适配参数沿用现有类型；API、存储布局和会话语义保持兼容。
 
 ## 责任与代码入口
 
@@ -29,10 +36,11 @@ Issue [#5](https://github.com/jjyr/pot/issues/5) 在独立 worktree 按 [Backend
 | App | 聊天、任务、计划、设置；缓存与后台同步 | `app/src/main.rs`、`client.rs`、`ui.rs`、`schedules_ui.rs` |
 | 原生桥 | 同一 NSApplication/窗口、输入法、tray、WKWebView、配置写入 | `app/swift/Bridge.swift`、`SettingsPanel.swift` |
 | Helper | 用户进程，管理 VM、资源和正常/异常关闭 | `helper/` |
-| Runtime | 权威任务状态、消息事件、API、用量、恢复 | `runtime/src/main.rs`、`store.rs` |
+| Server | 独立程序、配置、路由、监听与生命周期 | `server/src/main.rs`、`config.rs`、`routes.rs`、`hosting.rs` |
+| Runtime / Storage | 权威任务状态、消息事件、用量、恢复与持久化 | `runtime/src/lib.rs`、`bootstrap.rs`、`storage/src/` |
 | 编排/调度 | 单层委派、队列、完成回流、定时触发 | `tasks.rs`、`orchestration.rs`、`schedules.rs` |
-| Agent / 引擎 | Profile 快照、epoch 绑定与迁移；DriverHost / SessionHandle；Pi RPC、Codex App Server、Claude 原生 CLI 与各自上下文 | `agent/`、`pi.rs` |
-| 网关 / 工具桥 | provider 路由、请求预留、协议 codec；Pi / MCP 共享工具定义和 dispatcher | `gateway.rs`、`pot-tools.json`、`tool_bridge.rs`、`orchestration.rs` |
+| Agent / 引擎 | Profile 快照、epoch 绑定与迁移；DriverHost / SessionHandle；Pi RPC、Codex App Server、Claude 原生 CLI 与各自上下文 | `core/src/`、`driver/src/`、`runtime/src/agent/` |
+| 网关 / 工具桥 | provider 路由、请求预留、协议 codec；Pi / MCP 共享工具定义和 dispatcher | `gateway/src/`、`core/src/pot-tools.json`、`runtime/src/tool_bridge.rs`、`orchestration.rs` |
 | 协议/桌面 | 共享类型；guest 启动、浏览器与输入仲裁 | `protocol/`、`image/` |
 
 GPUI 与 Swift 共用主窗口和事件循环，C ABI 负责桥接。普通页面复用 Kit；原生 NSTextView 负责聊天编辑，WKWebView 分别负责桌面和 bundled xterm 终端。终端通过 Swift URLSessionWebSocketTask 连接 Runtime PTY；bearer 仅保留在原生网络层，网页禁止联网和外部导航。关闭窗口保留后台；Quit 正常关闭 Chromium，再停止 helper/VM。

@@ -1,32 +1,43 @@
 # Backend crate 拆分（Issue #5）
 
-设计确认：2026-10-05。先记录设计，再实现。本次保持产品 API、数据格式、会话与额度语义，只调整模块边界；远程后端属于架构扩展能力，不提供远程连接设置或部署产品功能。
+设计确认：2026-10-05；先提交设计文档，再实施拆分。本次保持产品 API、数据格式、会话与额度语义，只调整模块边界；远程后端属于架构扩展能力，不提供远程连接设置或部署产品功能。
 
 ## 目标结构
 
 ```text
-macOS App                         Independent backend process
-+------------------+             +-----------------------------+
-| pot-app          | -- HTTP/SSE->| pot-server                  |
-| GPUI / Swift     |             | config / listen / routes    |
-| protocol client  |             | shutdown / endpoint publish |
-+--------+---------+             +--------------+--------------+
-         |                                      |
-         v                                      v
-   pot-protocol                            pot-runtime
-                                  application / tasks / schedules
-                                  bindings / recovery / projection
-                                      /        |        \
-                                     v         v         v
-                              pot-storage  pot-driver  pot-gateway
-                              SQLite       native CLI  codecs / HTTP
-                                     \         |         /
-                                      +--------+--------+
-                                               |
-                                               v
-                                            pot-core
-                                   immutable models / contracts
+App / GPUI / Swift ---- HTTP/SSE ----> Server process
+                                         |
+                               config / routes / hosting
+                                         |
+                                         v
+                                      Runtime
+                            tasks / schedules / projection
+                              /          |          \
+                             v           v           v
+                          Storage      Driver      Gateway
+                          SQLite       CLI         HTTP / codecs
+                             \           /
+                              v         v
+                                  Core
+                         models / execution / tool schema
 ```
+
+编译期依赖（省略三方库）：
+
+```text
+pot-app -------> pot-protocol <------- pot-server
+                                           |
+                                           v
+                                       pot-runtime
+                                         |---> pot-protocol
+                                         |---> pot-core
+                                         |---> pot-storage ---> pot-core + pot-protocol
+                                         |---> pot-driver ----> pot-core
+                                         +---> pot-gateway
+```
+
+Gateway 的生产依赖不包含 Storage；codec 与账本联动的测试使用 dev-dependency。
+
 
 Rust workspace 包含 `app`、`protocol`、`core`、`storage`、`driver`、`gateway`、`runtime`、`server`。Helper 继续管理本地 VM，Server 不依赖 App、Swift bridge、Helper 或 GPUI。
 
@@ -47,7 +58,7 @@ Server 可指定 `POT_DATA_DIR`、`POT_WORKSPACE`、`POT_RUNTIME_BIND` 后单独
 
 本地 App 的 Helper/VM 自动启动和发现流程保持兼容。不同机器部署还需要端点发现、TLS、身份配置和产物传输等产品工作，本次不承诺这些功能已交付。桌面 broker 仍为当前合作式仲裁，crate 拆分不产生权限隔离。
 
-Driver 的 ExecutionContext 包含本轮路径、角色、授权端点与窄反馈能力。Runtime 的反馈实现负责验证 native binding 与持久计量；Driver 不接触任务 Hub、配置管理或 Control API 全局 token。取消仍要确认原生执行停止，不能以终态文本代替进程清理。
+Driver 的 ExecutionContext 包含本轮路径、角色、授权端点与窄反馈能力。Runtime 的反馈实现负责验证 native binding 与持久计量；Driver 不接触任务 Hub 或配置管理。lane token 沿用既有权限：主 lane 仍可调用主 Control API，worker token 仍受 API 限制；本次不声称增加 token 或 guest 权限隔离。取消仍要确认原生执行停止，不能以终态文本代替进程清理。
 
 ## 实施与验收
 
@@ -59,3 +70,5 @@ Driver 的 ExecutionContext 包含本轮路径、角色、授权端点与窄反�
 6. 编译后端和 App，运行领域/存储/Driver/Runtime 回归及独立 Server API 启动/重启检查。
 
 数据表结构化、全局持久事件、App SSE 常态同步和 Desktop Controller 独立权限域不属于本次结构重构，继续由后续方案推进。
+
+本次实现与验收结果见 [Backend crates 验证](validation/backend-crates.md)。

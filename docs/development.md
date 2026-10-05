@@ -21,6 +21,19 @@ mise run open
 
 `configure-pi` 仅从宿主 Pi 导入 DeepSeek 凭据到 guest 私有配置，不调用模型，不把密钥打入 App。模型为 `deepseek-v4-flash`；配置入口、默认额度和 K/M token 输入规则见 [UI 规范](ui-ux-design.md#配置额度)。已有配置不会自动覆盖，用量账本不重置。
 
+## 独立 Server（开发入口）
+
+后端可以独立构建和启动，不需要运行 App/Helper。路径属于运行 Server 的机器；使用单独数据目录，不打开正在运行的 App/VM 数据。
+
+```sh
+mise exec -- cargo build --locked -p pot-server
+POT_DATA_DIR=/tmp/pot-server/product POT_WORKSPACE=/tmp/pot-server/workspace POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
+```
+
+`POT_PI_BIN` 可指定 Pi executable。Server 将私有 bearer/boot/port 写入数据目录中的 `runtime.json`；HTTP/SSE/MCP/PTY 仍使用现有 Control API。未配置 Agent 时主聊天拒绝发送，Terminal 可用。关闭时停止后台协调器、会话、PTY、Codex host 和 SSE。
+
+App 继续使用本地 Helper/VM 发现方式，没有远程端点设置。跨机器部署仍需 TLS、身份与产物传输等工作；这里只保留后端独立运行的架构边界。
+
 ## 验证
 
 ```sh
@@ -43,8 +56,8 @@ POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runti
 无凭据集成测试（显式指定安装好的官方 Codex CLI，不调用付费模型）：
 
 ```sh
-mise exec -- cargo build -p pot-runtime
-mise exec -- python scripts/tests/codex-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime --codex /absolute/path/to/codex
+mise exec -- cargo build -p pot-server
+mise exec -- python scripts/tests/codex-runtime.py --runtime .local/poc/cargo-target/debug/pot-server --codex /absolute/path/to/codex
 ```
 
 构建最新镜像后，可在独立无网络 VM 中运行同一契约：
@@ -72,7 +85,12 @@ codesign --force --sign - --entitlements helper/virtualization.entitlements .loc
 |---|---|
 | `app/` | GPUI 界面、Swift 原生桥与配置 |
 | `helper/` | Swift Containerization、VM 生命周期 |
-| `runtime/` | Rust Control API、SQLite、Pi、任务与调度 |
+| `server/` | 独立启动、HTTP/SSE/MCP/PTY 路由、监听与关闭 |
+| `runtime/` | 后端库、产品命令、任务/计划、执行协调与恢复 |
+| `core/` | 不可变 Agent 模型、执行契约、共享工具 schema |
+| `storage/` | SQLite、绑定/用量与文件请求账本、事务 |
+| `driver/` | Pi/Codex/Claude/AGY 原生执行适配 |
+| `gateway/` | provider HTTP transport 与模型协议 codec |
 | `protocol/` | 共享消息与控制类型 |
 | `image/` | guest 桌面、浏览器、broker/viewer 资源 |
 | `scripts/` | 构建、打包、配置导入与图标生成 |
@@ -88,7 +106,7 @@ Pot 只通过官方接口检测 Claude 状态；需要认证的用户自行在�
 无需真实账户的开发验证使用原版 CLI + 本地模拟 Anthropic 服务：
 
 ```sh
-mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime --claude /absolute/path/to/claude
+mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-target/debug/pot-server --claude /absolute/path/to/claude
 .local/d1/helper-build/release/PotImageCheck .local/d1/claude-guest-check .local/d1/resources scripts/tests claude-guest.sh
 ```
 
@@ -112,8 +130,8 @@ AGY 采用原版 CLI 接入，按用户决定开放主聊、后台任务、计�
 用户自行在 Terminal 登录，状态保持 unknown。无需账号的模拟传输回归：
 
 ```sh
-mise exec -- cargo build --locked -p pot-runtime
-mise exec -- python scripts/tests/agy-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime
+mise exec -- cargo build --locked -p pot-server
+mise exec -- python scripts/tests/agy-runtime.py --runtime .local/poc/cargo-target/debug/pot-server
 ```
 
 使用上面的 Helper 签名与全新无网络 guest 目录，验证打包 Runtime 的同一回归，

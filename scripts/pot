@@ -86,7 +86,7 @@ elif cmd == "build":
             "zigbuild",
             "--locked",
             "-p",
-            "pot-runtime",
+            "pot-server",
             "--target",
             "aarch64-unknown-linux-musl",
             "-j",
@@ -130,8 +130,8 @@ elif cmd == "bundle":
         shutil.copy2(src, tmp)
         tmp.replace(dest)
     shutil.copy2(
-        pathlib.Path(env["CARGO_TARGET_DIR"]) / "aarch64-unknown-linux-musl/debug/pot-runtime",
-        RES / "pot-runtime",
+        pathlib.Path(env["CARGO_TARGET_DIR"]) / "aarch64-unknown-linux-musl/debug/pot-server",
+        RES / "pot-server",
     )
     call([REPO / "scripts/build-image"])
     shutil.rmtree(APP / "Contents/Resources/runtime")

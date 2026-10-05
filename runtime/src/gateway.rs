@@ -3,7 +3,6 @@ use crate::*;
 use axum::{body::Body, extract::Path, response::Response};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 pub mod codecs;
 pub mod setup;
@@ -343,30 +342,15 @@ pub async fn forward(
         inner.model_requests += 1;
     }
     s.publish_budget().map_err(internal)?;
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| internal(e.into()))?;
-    let mut upstream = client.post(&provider.endpoint);
-    upstream = match provider.protocol {
-        Protocol::AnthropicMessages => {
-            let mut req = upstream
-                .header("x-api-key", &provider.api_key)
-                .header("anthropic-version", "2023-06-01");
-            if let Some(beta) = h.get("anthropic-beta") {
-                req = req.header("anthropic-beta", beta);
-            }
-            req
-        }
-        Protocol::Gemini => upstream
-            .header("x-goog-api-key", &provider.api_key)
-            .query(&[("alt", "sse")]),
-        _ => upstream.bearer_auth(&provider.api_key),
-    };
-    let response = upstream.json(&body).send().await.map_err(|_| {
+    let response = pot_gateway::forward(
+        &provider.endpoint,
+        &provider.api_key,
+        &provider.protocol,
+        &body,
+        h.get("anthropic-beta"),
+    )
+    .await
+    .map_err(|_| {
         error(
             StatusCode::BAD_GATEWAY,
             "provider_connection",

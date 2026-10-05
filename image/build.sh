@@ -20,7 +20,7 @@ if ! NODE_OPTIONS=--max-old-space-size=512 npm ci --maxsockets=2 --cache /cache/
 fi
 rm -rf /root/.npm /var/cache/apk/*
 chmod -R a+rX /opt/pot /opt/pi
-chmod +x /opt/pot/pot-runtime /opt/pot/agy /opt/pot/open-browser.sh
+chmod +x /opt/pot/pot-server /opt/pot/agy /opt/pot/open-browser.sh
 ln -sf /opt/pi/node_modules/.bin/pi /usr/local/bin/pi
 ln -sf /opt/pi/node_modules/.bin/codex /usr/local/bin/codex
 ln -sf /opt/pi/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude /usr/local/bin/claude

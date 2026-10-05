@@ -1,8 +1,11 @@
-# Product runtime
+# Product runtime library
 
-Rust owns the Control API, SQLite transcript, request ledger and Agent bindings.
-`agent/` owns immutable profile snapshots, epoch migration, driver event filtering
-and product projection; `pi.rs` owns the Pi subprocess transport. Pi (image baseline 0.87.1, not a runtime lock) owns its native JSONL session and built-in read/write/edit/
+`pot-server` independently starts and hosts the Control API; `pot-runtime` is its reusable backend library. App depends only on `pot-protocol`. See [crate architecture](../docs/backend-crates.md) and [standalone development entry](../docs/development.md).
+
+Runtime owns product commands and projection. `pot-storage` owns SQLite, request/usage ledgers and binding persistence; `pot-core` owns immutable models and execution contracts.
+`agent/` owns epoch migration, driver event filtering and product projection;
+`pot-driver` owns Pi/Codex/Claude/AGY subprocess transports through fixed execution
+contexts and scoped feedback, without a Runtime Service or database dependency. Pi (image baseline 0.87.1, not a runtime lock) owns its native JSONL session and built-in read/write/edit/
 bash/grep/find/ls tools. The first MVP uses Pi with DeepSeek Flash; AGY/Codex are
 not required to use it. See [MVP validation](../docs/validation/pi-mvp.md).
 
@@ -77,7 +80,8 @@ from the host; query Runtime HTTP. Inspect SQLite offline only after helper exit
 Pi session files are fsynced before binding and after process disposal.
 
 ```sh
-cargo test --locked -p pot-app -p pot-runtime -p pot-protocol
+mise run test
+mise run test:app
 POT_TEST_PI_BIN="$(command -v pi)" cargo test --locked -p pot-runtime real_pi_tools_resume_cancel_and_budget -- --ignored --nocapture
 ```
 
