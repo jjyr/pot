@@ -290,6 +290,17 @@ async def run(args):
                 "native_ref"
             ]["conversation_id"]
             assert scheduled_ref not in native_ids
+            usage = await api("usage/summary?scope=")
+            assert len(usage["agent_models"]) == 1, usage
+            breakdown = usage["agent_models"][0]
+            assert breakdown["agent"] == "agy" and breakdown["model"] == "agy-mock", breakdown
+            for field in ("input", "output", "cache", "requests", "unknown"):
+                assert breakdown[field] == usage["total"][field], usage
+            main_usage = await api("usage/summary?scope=main")
+            assert all(
+                r["agent"] == "agy" and r["profile_id"] == "agy-test"
+                for r in main_usage["requests"]
+            ), main_usage
             print(
                 json.dumps(
                     {
@@ -306,6 +317,7 @@ async def run(args):
                         "scheduled_worker": True,
                         "independent_native_sessions": True,
                         "pot_tools_not_supplied": True,
+                        "agent_model_usage": True,
                     }
                 )
             )

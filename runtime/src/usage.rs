@@ -93,10 +93,11 @@ fn midnight(tz: Tz, day: chrono::NaiveDate) -> Result<i64> {
     bail!("Date does not exist in timezone")
 }
 impl Ledger {
-    pub fn route(&self, request: &str, provider: &str, epoch: u64, spec_hash: &str) -> Result<()> {
+    pub fn route(&self, request: &str, spec: &agent::ResolvedSpec, epoch: u64) -> Result<()> {
+        let engine = serde_json::to_value(&spec.engine)?;
         self.0.execute(
-            "INSERT INTO request_routes(request_id,provider,epoch,spec_hash) VALUES (?,?,?,?)",
-            params![request, provider, epoch, spec_hash],
+            "INSERT INTO request_routes(request_id,provider,epoch,spec_hash,agent,profile_id) VALUES (?,?,?,?,?,?)",
+            params![request, spec.provider, epoch, spec.spec_hash, engine.as_str().unwrap(), spec.source_profile_id],
         )?;
         Ok(())
     }
@@ -114,6 +115,21 @@ impl Ledger {
         c.execute_batch("CREATE TABLE IF NOT EXISTS wait_routes(scope TEXT PRIMARY KEY,provider TEXT NOT NULL);
         CREATE TRIGGER IF NOT EXISTS clear_wait_route AFTER DELETE ON waits BEGIN DELETE FROM wait_routes WHERE scope=OLD.scope; END;
         CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL);")?;
+        let route_columns = c
+            .prepare("PRAGMA table_info(request_routes)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        // Old requests retain unknown provenance; never infer from the current profile/model.
+        for (column, definition) in [
+            ("agent", "TEXT NOT NULL DEFAULT 'unknown'"),
+            ("profile_id", "TEXT NOT NULL DEFAULT ''"),
+        ] {
+            if !route_columns.iter().any(|name| name == column) {
+                c.execute_batch(&format!(
+                    "ALTER TABLE request_routes ADD COLUMN {column} {definition};"
+                ))?;
+            }
+        }
         c.execute_batch("CREATE TABLE IF NOT EXISTS compactions(id TEXT PRIMARY KEY, scope TEXT NOT NULL, turn_id TEXT NOT NULL, at INTEGER NOT NULL, end_at INTEGER, reason TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'running', tokens_before INTEGER, tokens_after INTEGER, entry_id TEXT);
         CREATE INDEX IF NOT EXISTS compaction_scope ON compactions(scope,at);")?;
         let has_column = c
@@ -137,6 +153,14 @@ impl Ledger {
         Ok(Self(c))
     }
     pub fn import_legacy(&self, scope: &str, store: &Store) -> Result<()> {
+        // Recover old provenance only from validated immutable snapshots for this lane.
+        for binding in agent::bindings(store)? {
+            if binding.pot_owner != scope {
+                continue;
+            }
+            let engine = serde_json::to_value(&binding.spec.engine)?;
+            self.0.execute("UPDATE request_routes SET agent=?,profile_id=? WHERE agent='unknown' AND provider=? AND epoch=? AND spec_hash=? AND request_id IN(SELECT id FROM requests WHERE scope=? AND model=?)",params![engine.as_str().unwrap(),binding.spec.source_profile_id,binding.spec.provider,binding.epoch,binding.spec.spec_hash,scope,binding.spec.model])?;
+        }
         if let Some(raw) = store.get("pi.usage")? {
             let values: Vec<Value> = serde_json::from_str(&raw)?;
             for (i, value) in values.iter().enumerate() {
@@ -421,11 +445,25 @@ impl Ledger {
             bucket["cache"] = json!(sums.cache);
             bucket["unknown"] = json!(sums.unknown);
         }
+        // Global breakdown follows the selected window; conversation breakdown is lifetime.
+        let (group_start, group_end) = if q.scope.is_empty() {
+            (start, end.min(at.saturating_add(1)))
+        } else {
+            (0, i64::MAX)
+        };
+        let mut stmt = self.0.prepare("SELECT COALESCE(t.agent,'unknown'),r.model,COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),SUM(CASE WHEN r.input IS NULL OR r.output IS NULL OR r.state='native_incomplete' THEN 1 ELSE 0 END) FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? GROUP BY COALESCE(t.agent,'unknown'),r.model ORDER BY COALESCE(SUM(r.input),0)+COALESCE(SUM(r.output),0) DESC,1,2 LIMIT 21 OFFSET ?")?;
+        let mut agent_models = stmt.query_map(params![q.scope,q.scope,group_start,group_end,q.offset], |r| Ok(json!({"agent":r.get::<_,String>(0)?,"model":r.get::<_,String>(1)?,"requests":r.get::<_,u64>(2)?,"input":r.get::<_,u64>(3)?,"output":r.get::<_,u64>(4)?,"cache":r.get::<_,u64>(5)?,"unknown":r.get::<_,u64>(6)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let agent_model_next_offset = if agent_models.len() > 20 {
+            agent_models.truncate(20);
+            Some(q.offset + 20)
+        } else {
+            None
+        };
         let mut requests = vec![];
         let mut tools = vec![];
         if !q.scope.is_empty() {
-            let mut stmt=self.0.prepare("SELECT id,turn_id,at,model,input,output,cache,state,compaction_id FROM requests WHERE scope=? ORDER BY at DESC,id DESC LIMIT 20 OFFSET ?")?;
-            for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"turn":r.get::<_,String>(1)?,"at":r.get::<_,i64>(2)?,"label":if r.get::<_,i64>(2)?==0 {"历史 · 时间未知".into()}else{Utc.timestamp_millis_opt(r.get::<_,i64>(2)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string()},"model":r.get::<_,String>(3)?,"input":r.get::<_,Option<u64>>(4)?,"output":r.get::<_,Option<u64>>(5)?,"cache":r.get::<_,u64>(6)?,"state":r.get::<_,String>(7)?,"purpose":if r.get::<_,Option<String>>(8)?.is_some(){"compaction"}else{"conversation"}})))? {requests.push(row?);}
+            let mut stmt=self.0.prepare("SELECT r.id,r.turn_id,r.at,r.model,r.input,r.output,r.cache,r.state,r.compaction_id,COALESCE(t.agent,'unknown'),COALESCE(t.provider,'unknown'),COALESCE(t.profile_id,''),t.epoch FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE r.scope=? ORDER BY r.at DESC,r.id DESC LIMIT 20 OFFSET ?")?;
+            for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"turn":r.get::<_,String>(1)?,"at":r.get::<_,i64>(2)?,"label":if r.get::<_,i64>(2)?==0 {"历史 · 时间未知".into()}else{Utc.timestamp_millis_opt(r.get::<_,i64>(2)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string()},"model":r.get::<_,String>(3)?,"input":r.get::<_,Option<u64>>(4)?,"output":r.get::<_,Option<u64>>(5)?,"cache":r.get::<_,u64>(6)?,"state":r.get::<_,String>(7)?,"agent":r.get::<_,String>(9)?,"provider":r.get::<_,String>(10)?,"profile_id":r.get::<_,String>(11)?,"epoch":r.get::<_,Option<u64>>(12)?,"purpose":if r.get::<_,Option<String>>(8)?.is_some(){"compaction"}else{"conversation"}})))? {requests.push(row?);}
             let mut labels = std::collections::HashMap::new();
             let mut rounds=self.0.prepare("SELECT turn_id,DENSE_RANK() OVER (ORDER BY MIN(at),turn_id) FROM requests WHERE scope=? AND at>0 GROUP BY turn_id")?;
             for row in rounds.query_map([&q.scope], |r| {
@@ -460,7 +498,7 @@ impl Ledger {
             "SELECT EXISTS(SELECT 1 FROM requests WHERE (?='' OR scope=?) AND state LIKE 'native_%')",
             params![q.scope,q.scope], |row| row.get(0))?;
         Ok(
-            json!({"native_turn_usage":native_turn_usage,"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
+            json!({"agent_models":agent_models,"agent_model_next_offset":agent_model_next_offset,"native_turn_usage":native_turn_usage,"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
         )
     }
 }
@@ -746,6 +784,196 @@ mod tests {
         assert_eq!(d["compaction_count"], 0);
     }
 
+    fn attributed_spec(
+        engine: agent::Engine,
+        model: &str,
+        profile_id: &str,
+    ) -> agent::ResolvedSpec {
+        let mut profile = agent::Profile::legacy(&pi::Config {
+            api_key: "unused".into(),
+            model: model.into(),
+            max_tokens: 100,
+            request_limit: 100,
+            max_requests_per_turn: 10,
+            max_parallel_tasks: 2,
+        });
+        profile.id = profile_id.into();
+        profile.auth_ref = match engine {
+            agent::Engine::Pi => "pi.json:api_key",
+            agent::Engine::Codex => "cli:codex",
+            agent::Engine::Claude => "cli:claude",
+            agent::Engine::Agy => "cli:agy",
+        }
+        .into();
+        profile.engine = engine;
+        profile.resolve().unwrap()
+    }
+    #[test]
+    fn agent_model_usage_keeps_snapshot_scope_window_and_unknown_counts() {
+        let l = ledger();
+        let t = at("2026-10-04T01:00:00Z");
+        for (key, engine, scope, model, stamp) in [
+            ("p", agent::Engine::Pi, "main", "shared", t),
+            ("c", agent::Engine::Codex, "main", "shared", t),
+            ("a", agent::Engine::Agy, "task-1", "shared", t),
+            (
+                "older",
+                agent::Engine::Claude,
+                "main",
+                "old-model",
+                t - 10 * 86400000,
+            ),
+        ] {
+            let spec = attributed_spec(engine, model, key);
+            l.reserve(key, scope, "turn", stamp, model, 100, 20)
+                .unwrap();
+            l.route(key, &spec, 2).unwrap();
+            for _ in 0..2 {
+                l.settle(key,&json!({"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":60})).unwrap();
+            }
+        }
+        let pending = attributed_spec(agent::Engine::Codex, "shared", "pending-profile");
+        l.reserve("pending", "main", "other-turn", t, "shared", 100, 20)
+            .unwrap();
+        l.route("pending", &pending, 3).unwrap();
+        l.native_incomplete("c").unwrap();
+        let all = l.summary(&query("", 7), t).unwrap();
+        let groups = all["agent_models"].as_array().unwrap();
+        assert_eq!(groups.len(), 3);
+        let codex = groups.iter().find(|v| v["agent"] == "codex").unwrap();
+        assert_eq!(codex["requests"], 2);
+        assert_eq!(codex["unknown"], 2);
+        assert_eq!(codex["input"], 100);
+        for field in ["input", "output", "cache", "requests", "unknown"] {
+            assert_eq!(
+                groups
+                    .iter()
+                    .map(|v| v[field].as_u64().unwrap())
+                    .sum::<u64>(),
+                all["total"][field].as_u64().unwrap()
+            );
+        }
+        let main = l.summary(&query("main", 7), t).unwrap();
+        assert!(
+            main["agent_models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["agent"] == "claude" && v["model"] == "old-model")
+        );
+        assert!(
+            !main["agent_models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["agent"] == "agy")
+        );
+        let row = main["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == "pending")
+            .unwrap();
+        assert_eq!(row["agent"], "codex");
+        assert_eq!(row["profile_id"], "pending-profile");
+        assert_eq!(row["epoch"], 3);
+        let native = attributed_spec(agent::Engine::Agy, "native-model", "agy-native");
+        l.begin_native("native", "task-native", "turn", &native, 4)
+            .unwrap();
+        assert_eq!(
+            l.summary(&query("task-native", 7), t).unwrap()["requests"][0]["agent"],
+            "agy"
+        );
+    }
+    #[test]
+    fn old_route_upgrade_preserves_usage_and_unknown_agent_after_reopen() {
+        let path = std::env::temp_dir().join(format!("pot-usage-route-{}.sqlite", id()));
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending'); INSERT INTO requests(id,scope,turn_id,at,model,input,output,state) VALUES ('old','main','turn',0,'same-model',10,5,'reported'); CREATE TABLE request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL); INSERT INTO request_routes VALUES ('old','old-provider',2,'old-hash');").unwrap();
+        drop(c);
+        for _ in 0..2 {
+            let l = Ledger::open(&path).unwrap();
+            let data = l.summary(&query("main", 7), now()).unwrap();
+            assert_eq!(data["lifetime"]["input"], 10);
+            assert_eq!(data["agent_models"][0]["agent"], "unknown");
+            assert_eq!(data["requests"][0]["provider"], "old-provider");
+            assert_eq!(data["requests"][0]["profile_id"], "");
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn old_provenance_backfill_requires_the_exact_binding_and_lane() {
+        let l = ledger();
+        let mut store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let spec = attributed_spec(agent::Engine::Codex, "shared", "original-profile");
+        agent::select_initial(
+            &mut store,
+            "main",
+            std::path::Path::new("/unused"),
+            spec.clone(),
+        )
+        .unwrap();
+        for (key, scope, epoch, hash) in [
+            ("match", "main", 1, spec.spec_hash.as_str()),
+            ("wrong-lane", "other", 1, spec.spec_hash.as_str()),
+            ("wrong-epoch", "main", 2, spec.spec_hash.as_str()),
+            ("wrong-hash", "main", 1, "different"),
+        ] {
+            l.reserve(key, scope, "turn", now(), "shared", 1, 1)
+                .unwrap();
+            l.0.execute(
+                "INSERT INTO request_routes(request_id,provider,epoch,spec_hash) VALUES (?,?,?,?)",
+                params![key, spec.provider, epoch, hash],
+            )
+            .unwrap();
+        }
+        l.import_legacy("main", &store).unwrap();
+        l.import_legacy("main", &store).unwrap();
+        let rows = l.summary(&query("main", 7), now()).unwrap();
+        for row in rows["requests"].as_array().unwrap() {
+            assert_eq!(
+                row["agent"],
+                if row["id"] == "match" {
+                    "codex"
+                } else {
+                    "unknown"
+                }
+            );
+            if row["id"] == "match" {
+                assert_eq!(row["profile_id"], "original-profile");
+            }
+        }
+        assert_eq!(
+            l.summary(&query("other", 7), now()).unwrap()["requests"][0]["agent"],
+            "unknown"
+        );
+        assert_eq!(rows["lifetime"]["requests"], 3);
+    }
+
+    #[test]
+    fn agent_model_breakdown_is_paged_without_changing_totals() {
+        let l = ledger();
+        let t = at("2026-10-04T01:00:00Z");
+        for i in 0..21 {
+            let model = format!("model-{i:02}");
+            let spec = attributed_spec(agent::Engine::Pi, &model, "pi-test");
+            l.reserve(&model, "main", "turn", t, &model, 1, 1).unwrap();
+            l.route(&model, &spec, 1).unwrap();
+            l.settle(&model, &json!({"prompt_tokens":1,"completion_tokens":1}))
+                .unwrap();
+        }
+        let mut q = query("", 7);
+        let first = l.summary(&q, t).unwrap();
+        assert_eq!(first["agent_models"].as_array().unwrap().len(), 20);
+        assert_eq!(first["agent_model_next_offset"], 20);
+        q.offset = 20;
+        let last = l.summary(&q, t).unwrap();
+        assert_eq!(last["agent_models"].as_array().unwrap().len(), 1);
+        assert!(last["agent_model_next_offset"].is_null());
+        assert_eq!(first["total"], last["total"]);
+        assert_eq!(last["agent_models"][0]["model"], "model-20");
+    }
+
     #[test]
     fn usage_is_idempotent_scoped_and_excludes_cache_from_total() {
         let l = ledger();
@@ -989,7 +1217,7 @@ impl Ledger {
         );
         let tx = self.0.unchecked_transaction()?;
         self.0.execute("INSERT INTO requests(id,scope,turn_id,at,model,state) VALUES (?,?,?,?,?,'native_pending')", params![id,scope,turn,now(),spec.model])?;
-        self.route(id, &spec.provider, epoch, &spec.spec_hash)?;
+        self.route(id, spec, epoch)?;
         tx.commit()?;
         Ok(())
     }

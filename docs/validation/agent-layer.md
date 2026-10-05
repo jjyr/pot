@@ -396,3 +396,27 @@ fixture 验证 AGY 执行进程没有 Pot MCP 参数或任务 API 环境变量�
 Runtime 88、protocol 1、App 11 项测试和 check/build/bundle 通过。
 真实账户、原版 CLI 后台工具执行与 GUI 交互仍未验收；fake transport 不代替这些验收。
 本记录更新前一节的“后台角色禁用”策略，并保留其历史验收范围。
+
+
+### 2026-10-05 Agent / 模型用量归属与分类
+
+共享 request_routes 增加 agent/profile_id，API 请求预留与 CLI 原生轮次开始时随实际
+binding 的 provider/epoch/spec hash 一起原子记录。统计按 Agent 类型 + 模型组合归属，
+相同模型跨 Agent 不混合，同一组合跨 profile/provider 合并；请求明细保留具体身份。
+主聊、worker、计划和压缩沿用同一账本，不改变缓存计量、额度和历史金额。
+
+旧 schema 可幂等升级；仅在会话/provider/epoch/hash/model 全部匹配已保存、校验通过的
+不可变 binding 时恢复旧 Agent/profile，未匹配的历史显示 unknown。
+总览按所选时间窗口统计，详情按 scope 累计，Agent/模型分类有界分页（每页 20 项）。
+App 提供分类卡和翻页；切换 scope/时间范围/时区重置页码并拒绝过期响应。
+
+Runtime 92、protocol 1、App 11 项测试与 check/build/bundle 通过。
+新增测试覆盖跨 Agent 同模型、时间窗口和任务范围、未知/不完整状态、重复结算、
+旧数据库升级/重开、精确快照回填及错会话/epoch/hash 拒绝、分页总量不变。
+宿主 AGY fake transport 扩展契约通过；同一契约在成品镜像
+`pot.local/sandbox:f3c82a6bfc6d743f28e8` 的无网络 guest 通过，8 秒含 import/unpack：
+主聊/两个 worker/计划/汇总的请求归属为 agy + agy-mock，分类 input/output/cache/
+requests/unknown 与总量一致，请求明细 profile_id 保持 agy-test。
+原版 CLI help/空 HOME 失败退出 smoke 同时通过，model_calls 0。
+证据为 `.local/d1/agent-model-usage-guest-20261005/data/{agy-runtime,agy-cli-smoke}.json`。
+本轮未调用真实模型账户；Mac 锁屏下未进行分类卡/分页的 GUI 交互复核。

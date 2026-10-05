@@ -56,3 +56,7 @@ Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定
 
 验证证据及局限见 [Agent layer 验证](validation/agent-layer.md)。Codex 已完成真实 CLI / guest 离线契约及上述真实账户验收；权限和故障完整矩阵仍有缺口。
 Claude 已完成原生 CLI 集成及离线契约，真实账户测试按用户决定跳过（无账号），不算真实账户通过；AGY 可选择主聊和后台 profile；用户接受原生工具权限并开放任务、计划、提示词约束的汇总，不提供 Pot 编排工具。Terminal 可用不等于通过 Driver 验收。
+
+
+Token 用量已补 Agent / 模型归属：新请求与原生轮次记录 agent/profile/provider/epoch/spec
+快照；总览和会话详情提供组合分类与分页，保留历史未知归属，不重置历史账本或额度。

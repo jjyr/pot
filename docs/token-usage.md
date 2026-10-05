@@ -1,12 +1,12 @@
 # Token 用量与额度
 
-用量页只展示 Pot 内的整体统计和趋势。范围为最近 7 / 30 / 90 天及最近一年（365 天，包含今天）；前三种按日，一年按连续 7 天合并，末组可能不足 7 天。按当前系统 IANA 时区划分日期，今天尚未结束。图表 Hover 展示具体日期范围与输入、输出、缓存命中。
+用量页展示 Pot 内的整体统计、趋势及 Agent / 模型分类。范围为最近 7 / 30 / 90 天及最近一年（365 天，包含今天）；前三种按日，一年按连续 7 天合并，末组可能不足 7 天。按当前系统 IANA 时区划分日期，今天尚未结束。图表 Hover 展示具体日期范围与输入、输出、缓存命中。
 
 每个任务（包括归档任务）和主聊天都有用量入口。详情显示累计用量、模型消耗堆叠条和工具输出排行；追加指导沿用同一任务，底层记录通过轮次 ID 关联。全局用量页不列任务。
 
 ## 计量
 
-Rust Runtime 通过通用模型网关捕获 provider usage。共享 SQLite `product/usage.sqlite` 存储请求 ID、会话/任务、轮次、时间、模型、输入/输出/缓存及预留；工具事件按会话+轮次+调用 ID 去重。各任务共享账本，归档不删除记录。沿用 DELETE journal 和 synchronous=EXTRA，仅 Runtime 访问在线数据库。
+Rust Runtime 通过通用模型网关捕获 provider usage。共享 SQLite `product/usage.sqlite` 存储请求 ID、会话/任务、轮次、时间、模型、输入/输出/缓存及预留；路由快照记录 Agent 类型（Pi / Codex / Claude / AGY）、profile ID、服务商、binding epoch 和 spec hash；工具事件按会话+轮次+调用 ID 去重。各任务共享账本，归档不删除记录。沿用 DELETE journal 和 synchronous=EXTRA，仅 Runtime 访问在线数据库。
 
 - 实际合计 = 输入 + 输出。缓存命中是输入的子集，不再相加。
 - 同一请求多个 usage 帧更新一条记录；缺失用量显示未知，不能按零消耗处理。
@@ -52,7 +52,7 @@ Pi 是执行引擎，模型服务决定计费方式。当前 API 连接默认没
 
 用量查询/策略/恢复接口仅接受主 Runtime token，worker token 无权读全局账本或修改策略；内部压缩事件接口按会话验证权限。
 
-- `GET /api/v1/usage/summary?days=7&timezone=Asia/Shanghai&scope=&offset=0`：空 scope 为全局；`main` 或任务 ID 为会话。任务累计不受 days 限制；任务请求每页 20 条。
+- `GET /api/v1/usage/summary?days=7&timezone=Asia/Shanghai&scope=&offset=0`：空 scope 为全局；`main` 或任务 ID 为会话。任务累计不受 days 限制；请求和 Agent / 模型分类都按 offset 每页 20 条。`agent_models` 为当前页分类，`agent_model_next_offset` 为下一页位置。
 - `POST /api/pi/compactions`：Pi 内部生命周期事件，仅接受当前会话的 token，必须有活动轮次；worker 只能写自己的记录，不能读取全局用量或修改策略。
 - `POST /api/v1/usage/policy`：`{period: none|day|week, limit, timezone, auto_resume}`。
 - `POST /api/v1/usage/resume`：`{scope}`，解除该等待的手动恢复门槛；仍须满足额度。
@@ -64,9 +64,9 @@ Pi 是执行引擎，模型服务决定计费方式。当前 API 连接默认没
 ## Agent 绑定归属
 
 网关仅接受当前 binding 的 provider/model。`request_routes` 通过 request ID 关联
-provider、epoch 和 spec hash；原请求表继续记录实际模型和轮次，旧账本不重置。
+Agent 类型、profile ID、provider、epoch 和 spec hash；原请求表继续记录所执行 binding 的模型和轮次，旧账本不重置。
 OpenAI Chat codec 沿用 DeepSeek 的预留、输出限制和用量结算。迁移后的请求使用
-新快照，旧 epoch 的用量保留。当前用量 UI 仍按模型聚合，尚未新增 provider 分组。
+新快照，旧 epoch 的用量保留。全局用量页及会话详情按 Agent 类型 + 模型组合汇总输入、输出、缓存、记录数和未知用量数；相同模型跨 Agent 使用不会合并，同一 Agent/模型跨 profile 或服务商使用合并显示，具体服务商/profile/epoch 保留在请求明细中。
 
 `unknown` 协议不解析响应 usage、不修改输出 cap，也不假装消耗为零；请求保留
 未知用量及保守预留。其 ResolvedSpec 明确关闭精确请求预算、usage reporting 和
@@ -95,3 +95,18 @@ Gemini codec 读取 usageMetadata，输出包含 candidatesTokenCount + thoughts
 重启后未知请求继续占用预留。暂停恢复同时检查两项策略，且仅对支持检查点的引擎自动继续。
 每个保存的 API 路由有独立不可变身份；更换 endpoint 的新路由需要单独配置额度。
 CLI 订阅路线只统计原生报告用量，不宣称请求前硬限制；服务商限流不等于 Pot 额度耗尽。
+
+
+## Agent / 模型分类
+
+归属在 API 请求预留或 CLI 原生轮次开始时随不可变 binding 快照入账；后来切换 Agent、
+模型、后台默认或修改 profile，不会改写已发生的记录。主聊天、后台任务、计划与压缩
+使用同一共享账本，压缩请求沿用实际执行的 Agent / 模型归属。原生 CLI 汇总保持轮次精度。
+
+全局分类采用页面选定的时间范围和时区，与全局总量一致；会话/任务详情采用该 scope
+累计范围，与累计卡一致。分类每页 20 项，按输入+输出降序，再按 Agent/模型稳定排序。
+翻页不改变总量、趋势或额度；切换 scope、日期范围或时区重置页码，过期查询响应被丢弃。
+分类显示输入、输出、输入中的缓存命中以及不完整记录数，不把未知消耗伪装成零。
+
+旧账本自动增加 agent/profile_id 字段，保留旧 provider/epoch/hash 和全部计量。
+历史记录只在 scope、provider、epoch、spec hash 和模型均匹配已保存的不可变 binding 快照时补回 Agent/profile 归属。无法确认的记录显示“Agent 未知”，不依据当前设置、模型名称或请求 ID 猜测归属。

@@ -123,15 +123,25 @@ impl Shell {
             } else {
                 v.selected.clone()
             };
+            let timezone = self.native["timezone"]
+                .as_str()
+                .unwrap_or("Asia/Shanghai")
+                .to_string();
+            let context = (scope.clone(), self.usage_ui.days, timezone.clone());
+            if self.usage_ui.group_context.as_ref() != Some(&context) {
+                self.usage_ui.group_offset = 0;
+                self.usage_ui.group_context = Some(context);
+            }
             let query = if [0, 3, 4, 5, 6].contains(&page) {
                 Some((
                     scope,
                     self.usage_ui.days,
-                    0,
-                    self.native["timezone"]
-                        .as_str()
-                        .unwrap_or("Asia/Shanghai")
-                        .to_string(),
+                    if [4, 5].contains(&page) {
+                        self.usage_ui.group_offset
+                    } else {
+                        0
+                    },
+                    timezone,
                 ))
             } else {
                 None

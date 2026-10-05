@@ -77,7 +77,7 @@ impl Ledger {
         let result = (|| -> Result<Option<u64>> {
             let value = self.reserve(id, scope, turn, at, &spec.model, input, output)?;
             if value.is_some() {
-                self.route(id, &spec.provider, epoch, &spec.spec_hash)?;
+                self.route(id, spec, epoch)?;
             }
             Ok(value)
         })();
@@ -333,7 +333,7 @@ mod tests {
     fn failed_route_rolls_back_request_and_preserves_prior_wait() {
         let ledger = Ledger::open(std::path::Path::new(":memory:")).unwrap();
         ledger.wait_routed("main", "t", 0, 1, "a").unwrap();
-        ledger.route("duplicate", "a", 1, "hash").unwrap();
+        ledger.route("duplicate", &spec("a"), 1).unwrap();
         assert!(
             ledger
                 .reserve_routed("duplicate", "main", "t", 0, &spec("a"), 1, 1, 1)
