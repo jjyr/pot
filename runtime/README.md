@@ -88,10 +88,10 @@ recovery, request caps and missing-session handling without paid model requests.
 ## Legacy adapters
 
 When `pi.json` is absent, `deepseek.json` selects the old direct Rust smoke adapter;
-otherwise Runtime falls back to AGY CLI. The smoke adapter keeps its separate
+otherwise Runtime requires an explicitly selected Agent profile. The smoke adapter keeps its separate
 `deepseek-attempts` ledger (3 requests, 128 output tokens, restricted write_file).
-Its original ledger is exhausted and must not be reset. AGY's Google login and
-native engine flow remain unaccepted; no AGY or Codex claim is implied by Pi MVP.
+Its original ledger is exhausted and must not be reset. The old AGY direct adapter
+has been removed; AGY now uses the same profile/binding/Driver boundary as Claude.
 
 ## Web access
 
@@ -442,3 +442,34 @@ restoring a compatible command allows an explicit retry in the same native sessi
 Probe output is bounded and a timeout/output failure stops the probe process group.
 Offline original-CLI tests remain separate from real-account acceptance; current
 acceptance scope is recorded in the development plan and validation report.
+
+
+## AGY native sessions (limited integration)
+
+AGY uses the original CLI's `--print --input-format text --output-format stream-json`
+transport, one process per turn. The CLI creates the conversation UUID; Runtime
+persists it only after `init` and supplies `--conversation` for later turns and
+Runtime restarts. Missing/incompatible commands set `needs_rebind` without discarding
+the binding; restoring the command allows retry on the original conversation.
+The driver validates help controls without a model request, bounds NDJSON frames,
+redacts diagnostics, requires an explicit terminal status, and waits for process
+exit before publishing the final response. SIGINT cancellation has a bounded wait;
+on disposal Runtime kills remaining process-group descendants. Native background
+agents that detach from this group are not proven settled by this implementation.
+
+Final per-run usage includes cached input and thinking output. Step/checkpoint
+usage is never added to the final envelope. Missing, malformed, failed-process or
+cancelled usage remains incomplete; no exact request budget or interrupted-turn
+replay is claimed. The original CLI owns its guest HOME, login and conversation
+history. AGY has no verified official read-only auth-status command, so discovery
+keeps authentication `unknown`; Runtime never probes login by calling a model.
+
+Only main chat is enabled. AGY's native permissions/settings remain CLI-owned;
+Pot does not pass blanket approval or overwrite workspace/global CLI configuration.
+AGY lacks Claude's `--strict-mcp-config`/`--setting-sources` controls. Its custom
+agent `tools` and `mcpServers` declarations have not established equivalent global
+configuration isolation. `tool_policy_enforcement`, `mcp_tools`,
+`subagents_disableable` and `native_compaction` capabilities remain false.
+Routing rejects all AGY workers/schedules before dispatch, and the driver refuses
+worker and read-only-summary roles. Selecting AGY in Settings preserves the existing
+worker default. This is not full Issue #2 AGY role acceptance or a licensing claim.

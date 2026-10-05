@@ -104,3 +104,23 @@ guest 检查遵循上面的 Helper 签名及 VM 执行前提。测试使用独�
 使用新的隔离结果目录和上面的 Helper 签名。验证关闭 PTY、Runtime 正常退出及重启；
 包含前台 sleep、独立后台进程组和忽略 HUP/TERM 的后台 shell/孙进程，不调用模型。
 刻意 setsid 脱离终端会话的进程不属于此契约，仍由 VM 生命周期终止。
+
+
+### AGY 驱动回归
+
+AGY 采用原版 CLI 接入，当前只开放主聊/续聊；任务与汇总的严格工具隔离仍未验收。
+用户自行在 Terminal 登录，状态保持 unknown。无需账号的模拟传输回归：
+
+```sh
+mise exec -- cargo build --locked -p pot-runtime
+mise exec -- python scripts/tests/agy-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime
+```
+
+使用上面的 Helper 签名与全新无网络 guest 目录，验证打包 Runtime 的同一回归，
+以及原版 CLI help 和空 HOME的 headless 失败退出：
+
+```sh
+.local/d1/helper-build/release/PotImageCheck .local/d1/agy-guest-check .local/d1/resources scripts/tests agy-guest.sh
+```
+
+模拟传输不能证明原版 CLI 模型/工具行为；原版离线失败 smoke 也不算真实账户或角色隔离通过。

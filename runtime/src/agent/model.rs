@@ -105,7 +105,7 @@ impl Profile {
     }
     pub fn resolve(&self) -> Result<ResolvedSpec> {
         self.validate()?;
-        if matches!(self.engine, Engine::Codex | Engine::Claude) {
+        if matches!(self.engine, Engine::Codex | Engine::Claude | Engine::Agy) {
             return self.resolve_native();
         }
         self.launch_spec.clone().unwrap_or_default().validate()?;
@@ -167,13 +167,24 @@ impl Profile {
     }
     fn resolve_native(&self) -> Result<ResolvedSpec> {
         let claude = self.engine == Engine::Claude;
-        let expected_auth = if claude { "cli:claude" } else { "cli:codex" };
-        let default_launch = if claude {
+        let agy = self.engine == Engine::Agy;
+        let expected_auth = if agy {
+            "cli:agy"
+        } else if claude {
+            "cli:claude"
+        } else {
+            "cli:codex"
+        };
+        let default_launch = if agy {
+            LaunchSpec::agy()
+        } else if claude {
             LaunchSpec::claude()
         } else {
             LaunchSpec::codex()
         };
-        let default_protocol = if claude {
+        let default_protocol = if agy {
+            ProtocolContract::agy()
+        } else if claude {
             ProtocolContract::claude()
         } else {
             ProtocolContract::codex()
@@ -216,11 +227,11 @@ impl Profile {
             gateway_protocol: "native_reported".into(),
             context_window: 0,
             capabilities: Capabilities {
-                native_compaction: true,
+                native_compaction: !agy,
                 usage_reporting: true,
-                tool_policy_enforcement: true,
-                mcp_tools: true,
-                subagents_disableable: true,
+                tool_policy_enforcement: !agy,
+                mcp_tools: !agy,
+                subagents_disableable: !agy,
                 ..Default::default()
             },
             source_profile_id: self.id.clone(),
@@ -297,7 +308,8 @@ impl ResolvedSpec {
                         && protocol.events == "codex_app_server_v2",
                 Engine::Claude =>
                     launch.transport == "claude_json" && protocol.events == "claude_stream_json",
-                _ => false,
+                Engine::Agy =>
+                    launch.transport == "agy_json" && protocol.events == "agy_stream_json",
             },
             "Engine and transport contract mismatch"
         );
@@ -321,6 +333,9 @@ pub enum NativeRef {
     Claude {
         session_id: String,
         started: bool,
+    },
+    Agy {
+        conversation_id: Option<String>,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -374,6 +389,13 @@ impl Default for LaunchSpec {
     }
 }
 impl LaunchSpec {
+    pub fn agy() -> Self {
+        Self {
+            transport: "agy_json".into(),
+            executable: "agy".into(),
+            ..Default::default()
+        }
+    }
     pub fn claude() -> Self {
         Self {
             transport: "claude_json".into(),
@@ -392,7 +414,7 @@ impl LaunchSpec {
         ensure!(
             matches!(
                 self.transport.as_str(),
-                "pi_rpc" | "codex_app_server" | "claude_json"
+                "pi_rpc" | "codex_app_server" | "claude_json" | "agy_json"
             ),
             "Transport has not passed driver acceptance"
         );
@@ -451,6 +473,15 @@ impl LaunchSpec {
             "-v",
         ];
         let native_reserved = [
+            "--conversation",
+            "--project",
+            "--new-project",
+            "--prompt",
+            "--prompt-interactive",
+            "-i",
+            "--print-timeout",
+            "--log-file",
+            "--remote-control",
             "--config",
             "--profile",
             "--enable",
@@ -564,6 +595,12 @@ impl Default for ProtocolContract {
     }
 }
 impl ProtocolContract {
+    pub fn agy() -> Self {
+        Self {
+            events: "agy_stream_json".into(),
+            native_session: "agy_conversation".into(),
+        }
+    }
     pub fn claude() -> Self {
         Self {
             events: "claude_stream_json".into(),
@@ -580,7 +617,8 @@ impl ProtocolContract {
         ensure!(
             (self.events == "pi_rpc_v1" && self.native_session == "pi_jsonl_v3")
                 || (self.events == "codex_app_server_v2" && self.native_session == "codex_thread")
-                || (self.events == "claude_stream_json" && self.native_session == "claude_session"),
+                || (self.events == "claude_stream_json" && self.native_session == "claude_session")
+                || (self.events == "agy_stream_json" && self.native_session == "agy_conversation"),
             "Unsupported protocol/session contract; restore the command or migrate explicitly"
         );
         Ok(())
@@ -601,6 +639,29 @@ mod launch_tests {
         })
         .resolve()
         .unwrap()
+    }
+    #[test]
+    fn agy_native_profile_does_not_claim_unverified_role_capabilities() {
+        let mut profile = Profile::legacy(&crate::pi::Config {
+            api_key: "unused".into(),
+            model: "agy-model".into(),
+            max_tokens: 100,
+            request_limit: 100,
+            max_requests_per_turn: 10,
+            max_parallel_tasks: 2,
+        });
+        profile.engine = Engine::Agy;
+        profile.provider = "google".into();
+        profile.auth_ref = "cli:agy".into();
+        let resolved = profile.resolve().unwrap();
+        resolved.validate().unwrap();
+        assert_eq!(resolved.launch_spec.as_ref().unwrap().transport, "agy_json");
+        assert!(!resolved.capabilities.mcp_tools);
+        assert!(!resolved.capabilities.tool_policy_enforcement);
+        assert!(!resolved.capabilities.subagents_disableable);
+        assert!(!resolved.capabilities.safe_checkpoint_resume);
+        profile.auth_ref = "cli:claude".into();
+        assert!(profile.resolve().is_err());
     }
     #[test]
     fn version_is_diagnostic_and_command_is_identity() {
@@ -628,7 +689,7 @@ mod launch_tests {
     }
     #[test]
     fn native_wrapper_arguments_are_preserved_but_managed_flags_are_rejected() {
-        for mut launch in [LaunchSpec::codex(), LaunchSpec::claude()] {
+        for mut launch in [LaunchSpec::codex(), LaunchSpec::claude(), LaunchSpec::agy()] {
             launch.executable = "/opt/my wrapper".into();
             launch.argv = vec![
                 LaunchArgument::Literal("--wrapper-label".into()),

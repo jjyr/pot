@@ -5,7 +5,7 @@ import Foundation
 @MainActor final class SettingsPanel: NSObject {
     weak var bridge: PotBridge?
     var agentStates: [[String: Any]] = []
-    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = ""
+    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = "", agyModel = ""
     var profile: [String: Any] = [:]
     var savedProfiles: [[String: Any]] = []
     var routingPolicy: [String: Any] = [:]
@@ -122,7 +122,8 @@ import Foundation
          "memory": memoryField, "disk": diskField,
          "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
-         "codex_model": codexModel, "claude_model": claudeModel, "agents": agentStates, "discovering": discovering,
+         "codex_model": codexModel, "claude_model": claudeModel, "agy_model": agyModel, "agents": agentStates,
+         "discovering": discovering,
          "executable": invocationExecutable, "argv": invocationArgs,
          "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
     }
@@ -156,6 +157,9 @@ import Foundation
                     if value["engine"] as? String == "codex" {
                         codexModel = value["model"] as? String ?? ""
                     }
+                    if value["engine"] as? String == "agy" {
+                        agyModel = value["model"] as? String ?? ""
+                    }
                     if value["engine"] as? String == "claude" {
                         claudeModel = value["model"] as? String ?? ""
                     }
@@ -185,8 +189,9 @@ import Foundation
     }
 
     func selectNative(engine: String, model: String) {
-        let name = engine == "claude" ? "Claude" : "Codex"
-        guard setupCanStart(engine) else { result = "当前后端不可用；请查看 Agent 状态或选择其他后端。"; return }
+        let name = engine == "agy" ? "AGY" : (engine == "claude" ? "Claude" : "Codex")
+        guard ["codex", "claude", "agy"].contains(engine),
+              setupCanStart(engine) else { result = "当前后端不可用；请查看 Agent 状态或选择其他后端。"; return }
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let bridge, !model.isEmpty else { result = "请填写 \(name) 模型名称。"; return }
         bridge.terminal.show(
@@ -203,7 +208,9 @@ import Foundation
                 let revision = previous?["revision"] as? Int ?? 0
                 var profile: [String: Any] = [
                     "id": "\(engine)-default", "revision": revision + 1, "name": name,
-                    "engine": engine, "provider": engine == "claude" ? "anthropic" : "openai", "model": model,
+                    "engine": engine,
+                    "provider": engine == "agy" ? "google" : (engine == "claude" ? "anthropic" : "openai"),
+                    "model": model,
                     "auth_ref": "cli:\(engine)",
                     "params": ["max_output_tokens": 8192],
                     "tool_policy": ["worker_orchestration": false, "summary_read_only": true, "unattended": "guest_vm"],
@@ -216,9 +223,11 @@ import Foundation
                 }
                 _ = try await bridge.terminal.request("api/v1/agent", body: [
                     "profile": profile, "expected_revision": revision,
-                    "request_id": UUID().uuidString, "follow_main": true,
+                    "request_id": UUID().uuidString, "follow_main": true, "follow_worker": engine != "agy",
                 ])
-                if engine == "claude" {
+                if engine == "agy" {
+                    agyModel = model
+                } else if engine == "claude" {
                     claudeModel = model
                 } else {
                     codexModel = model
@@ -270,7 +279,8 @@ import Foundation
         updated["revision"] = revision + 1
         updated["launch_spec"] = [
             "transport": profile["engine"] as? String == "codex" ? "codex_app_server" :
-                (profile["engine"] as? String == "claude" ? "claude_json" : "pi_rpc"),
+                (profile["engine"] as? String == "agy" ? "agy_json" :
+                    (profile["engine"] as? String == "claude" ? "claude_json" : "pi_rpc")),
             "executable": executable,
             "argv": args
                 .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],
@@ -285,6 +295,7 @@ import Foundation
                         "expected_revision": revision,
                         "request_id": UUID().uuidString,
                         "follow_main": true,
+                        "follow_worker": updated["engine"] as? String != "agy",
                     ]
                 )
                 result = "命令已保存；在轮次边界迁移，未调用模型。"; refreshAgents()
@@ -513,6 +524,11 @@ import Foundation
 
     func useProfileForOwner() {
         guard let bridge, !routingBusy, !routingProfile.isEmpty else { return }
+        if routingOwner != "main",
+           savedProfiles.first(where: { $0["id"] as? String == routingProfile })?["engine"] as? String == "agy"
+        {
+            result = "AGY 尚未开放后台任务；请选择 Codex 或 Claude。"; return
+        }
         routingBusy = true
         let target = routingProfile
         let owner = routingOwner

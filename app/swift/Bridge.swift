@@ -797,6 +797,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 key: v["key"] as? String ?? "",
                 model: v["model"] as? String ?? ""
             )
+        case "select-agy": settings.selectNative(engine: "agy", model: v["model"] as? String ?? "")
         case "select-claude": settings.selectNative(engine: "claude", model: v["model"] as? String ?? "")
         case "select-codex": settings.selectNative(engine: "codex", model: v["model"] as? String ?? "")
         case "agent-refresh": settings.refreshAgents()

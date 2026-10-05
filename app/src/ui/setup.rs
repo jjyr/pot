@@ -59,7 +59,7 @@ impl Settings {
         for (i, (id, name)) in [
             ("codex", "Codex"),
             ("claude", "Claude"),
-            ("agy", "AGY（仅 Terminal，尚不能作为主 Agent）"),
+            ("agy", "AGY（主聊；后台任务尚未开放）"),
             ("api", "OpenAI 兼容 API / Pi"),
         ]
         .into_iter()

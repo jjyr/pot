@@ -636,6 +636,26 @@ mod tests {
         assert_eq!(summary["lifetime"]["unknown"], 1);
     }
 
+    #[test]
+    fn agy_usage_counts_final_totals_once_and_rejects_inconsistent_counters() {
+        let l = ledger();
+        l.0.execute("INSERT INTO requests(id,scope,turn_id,at,model,state) VALUES ('a','main','turn',0,'mock','native_pending')", []).unwrap();
+        let usage = json!({"input_tokens":10418,"output_tokens":589,"cache_read_tokens":8113,"thinking_tokens":551,"total_tokens":11007});
+        l.settle_agy("a", &usage).unwrap();
+        l.settle_agy("a", &usage).unwrap();
+        assert!(l.settle_agy("missing", &usage).is_err());
+        let mut bad = usage.clone();
+        bad["total_tokens"] = json!(12000);
+        assert!(l.settle_agy("a", &bad).is_err());
+        bad = usage.clone();
+        bad["cache_read_tokens"] = json!(10419);
+        assert!(l.settle_agy("a", &bad).is_err());
+        let summary = l.summary(&query("main", 7), now()).unwrap();
+        assert_eq!(summary["lifetime"]["input"], 10418);
+        assert_eq!(summary["lifetime"]["output"], 589);
+        assert_eq!(summary["lifetime"]["cache"], 8113);
+    }
+
     fn at(s: &str) -> i64 {
         chrono::DateTime::parse_from_rfc3339(s)
             .unwrap()
@@ -996,6 +1016,41 @@ impl Ledger {
             self.0.execute(
                 "UPDATE requests SET state='native_reported' WHERE id=?",
                 [request],
+            )? == 1,
+            "Missing native usage request"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// AGY's final per-run totals include cached input and thinking output.
+    /// Step checkpoints must not be added to these totals.
+    pub fn settle_agy(&self, request: &str, usage: &Value) -> Result<()> {
+        let input = usage["input_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing AGY input usage"))?;
+        let output = usage["output_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing AGY output usage"))?;
+        let cache = usage["cache_read_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing AGY cache usage"))?;
+        let total = usage["total_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing AGY total usage"))?;
+        let thinking = usage["thinking_tokens"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Missing AGY thinking usage"))?;
+        anyhow::ensure!(
+            cache <= input && thinking <= output && input.checked_add(output) == Some(total),
+            "Inconsistent AGY usage"
+        );
+        let tx = self.0.unchecked_transaction()?;
+        self.settle(request, &json!({"prompt_tokens":input,"completion_tokens":output,"prompt_cache_hit_tokens":cache}))?;
+        anyhow::ensure!(
+            self.0.execute(
+                "UPDATE requests SET state='native_reported' WHERE id=?",
+                [request]
             )? == 1,
             "Missing native usage request"
         );

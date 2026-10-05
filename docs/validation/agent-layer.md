@@ -344,3 +344,28 @@ Claude 真实账户跳过不再作为推进阻塞；AGY 接入授权/实际隔�
 原 epoch/native thread 不变，Claude 为 required，测试计划均已暂停，累计仍为 10
 个轮次记录；此包核对新增模型调用 0。证据为
 setup-ui-check-20261005/workspace/product/issue2-claude-package.json。
+
+
+### 2026-10-05 AGY 原版 CLI 驱动（有限主聊接入）
+
+按用户要求采用与 Claude 相同的原版 CLI + AgentDriver 路线，新增 `agy_json` profile、
+CLI 创建的 native conversation binding、`--conversation` 续接、最终用量、SIGINT 取消及
+助手设置入口。移除旧 run_agy 直连路径。保留 CLI 自己的 guest HOME/权限配置，不读取凭据；
+AGY 没有已验证的官方只读 auth status，状态保持 unknown。
+
+宿主和成品镜像 `pot.local/sandbox:fb8d9bcb06dacd38b387` 的模拟传输契约均通过：
+首次原生 ID、续聊、Runtime 重启后同 ID、命令缺失/恢复、错误/无效输出诊断过滤、
+ID 变化拒绝、result 后非法输出不发布成功消息、最终用量只记一次、取消后原会话继续。
+任务路由在启动 CLI 前拒绝 AGY；驱动也拒绝 worker 和只读汇总角色。
+此 fixture 是 fake transport，不是原版 CLI 模型/工具验收。
+
+同一全新无网络 guest 的原版 AGY CLI smoke 通过：帮助参数存在；独立空 HOME、
+默认模型、无 TTY 的 headless 调用失败退出，无凭据读取或远端模型调用。
+证据为 `.local/d1/agy-driver-auth2-guest-20261005/data/{agy-cli-smoke,agy-runtime}.json`；
+检查含 import/unpack 7 秒。Runtime 88、protocol 1、App 11 项测试通过，
+`mise run check`、build、bundle 通过。界面交互未复核（Mac 仍锁屏）。
+
+未验收范围：AGY 真实账户/模型、原版 CLI 工具事件、后台进程完整收敛、厂商适用条款。
+AGY 自定义 agent tools/MCP 配置尚未证明全局配置隔离，且缺少 Claude 的严格 MCP/source
+开关；因此不宣称 task/MCP/subagent 禁用/只读汇总能力，后台角色保持禁用。选择 AGY
+或编辑其调用命令不覆盖已有 worker default。此结果不代表 Issue #2 的 AGY 全部验收完成。

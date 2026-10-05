@@ -159,6 +159,10 @@ pub fn resolve(
     Ok((spec, routing))
 }
 pub fn check_requirements(spec: &ResolvedSpec, requirements: &TaskRequirements) -> Result<()> {
+    anyhow::ensure!(
+        spec.engine != Engine::Agy,
+        "AGY task roles require a verified tool isolation contract; choose Codex or Claude"
+    );
     let c = &spec.capabilities;
     anyhow::ensure!(
         !requirements.tools || c.tool_policy_enforcement,

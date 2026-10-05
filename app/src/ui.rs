@@ -175,7 +175,7 @@ impl Settings {
             "executable",
             "argv",
             "codex_model",
-            "",
+            "agy_model",
             "",
             "claude_model",
             "api_endpoint",
@@ -257,6 +257,10 @@ impl Settings {
                 form = form.child(input(13, "Claude 模型", "填写当前账户可用的模型标识；状态只通过官方查询检测。"))
                     .child(Field::new().label("主 Agent").child(Button::new("select-claude").label("使用 Claude").disabled(!native_available("claude"))
                         .on_click(move |_, _, cx| command(json!({"action":"select-claude","model":fields[13].read(cx).value()})))));
+                let fields = self.fields.clone();
+                form = form.child(input(11, "AGY 模型", "支持原生主聊和续聊；后台任务与只读汇总尚未开放。登录请在 Terminal 处理。"))
+                    .child(Field::new().label("主 Agent").child(Button::new("select-agy").label("使用 AGY").disabled(!native_available("agy"))
+                        .on_click(move |_, _, cx| command(json!({"action":"select-agy","model":fields[11].read(cx).value()})))));
                 form = form.child(label(
                     "模型 API",
                     "Pi 可直接连接模型服务；无需 CLI 登录或付费测试。",
@@ -375,7 +379,7 @@ impl Settings {
                             } else if id == "claude" {
                                 "原生 CLI · 官方登录状态只读检测。"
                             } else {
-                                "CLI 可在终端使用；Pot Driver 尚待验收。"
+                                "原生 CLI 主聊 · 无官方登录查询，状态保持未知；任务隔离待验收。"
                             })
                             .child(div().py_2().child(status)),
                     );

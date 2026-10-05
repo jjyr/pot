@@ -100,7 +100,6 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
         token,
         boot: root.boot.clone(),
         workspace,
-        program: root.program.clone(),
         api_budget: root.api_budget.clone(),
         pi: root.pi.clone(),
         pi_program: root.pi_program.clone(),

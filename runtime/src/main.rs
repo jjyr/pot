@@ -53,7 +53,6 @@ struct Service {
     token: String,
     boot: String,
     workspace: PathBuf,
-    program: String,
     api_budget: Option<deepseek::BudgetSettings>,
     pi: Option<pi::Config>,
     pi_program: String,
@@ -403,81 +402,6 @@ async fn authenticate(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<
         "Use the guest AGY terminal to sign in, then restart the environment",
     ))
 }
-async fn run_agy(s: &Service, req: SendMessage) -> Result<()> {
-    let mut user = s
-        .inner
-        .lock()
-        .unwrap()
-        .store
-        .duplicate(&req.request_id)?
-        .ok_or_else(|| anyhow!("Missing accepted message"))?;
-    let mut assistant = Message {
-        id: id(),
-        conversation_id: req.conversation_id,
-        role: Role::Assistant,
-        text: String::new(),
-        status: MessageStatus::Streaming,
-        created_at_ms: now(),
-        request_id: None,
-    };
-    s.save(assistant.clone())?;
-    let result:Result<()>=async {
-  let session=s.inner.lock().unwrap().store.get("agy.session")?;
-  let mut cmd=Command::new(&s.program);
-  cmd.current_dir(&s.workspace).args(["--print",&req.text,"--output-format","stream-json","--mode","accept-edits","--disable-slash-commands"]);
-  if let Some(session)=session {cmd.args(["--conversation",&session]);}
-  // No blanket tool approval: headless permission failures stay visible.
-  let mut child=cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn()?;
-  let mut stderr=BufReader::new(child.stderr.take().unwrap()).lines();
-  let (auth_tx,mut auth_rx)=mpsc::unbounded_channel();
-  tokio::spawn(async move {
-   let mut auth=false;
-   while let Ok(Some(line))=stderr.next_line().await {
-    if line.contains("Authentication required") {auth=true;let _=auth_tx.send(());}
-    if !auth {eprintln!("agy: {line}");}
-   }
-  });
-  let mut lines=BufReader::new(child.stdout.take().unwrap()).lines();let mut completed=false;
-  loop {
-   let line=tokio::select! {
-    line=lines.next_line()=>match line?{Some(line)=>line,None=>break},
-    Some(())=auth_rx.recv()=>{
-     child.kill().await?;let _=child.wait().await;
-     s.phase(EnginePhase::NeedsAuth,Some("Sign in through the guest AGY terminal, then send a new message".into()));
-     bail!("Guest AGY login required. Use the tray menu to sign in, then retry.");
-    }
-   };
-   let event:Value=serde_json::from_str(&line)?;
-   match event["event"].as_str() {
-    Some("init")=>{if let Some(session)=event["conversation_id"].as_str(){s.inner.lock().unwrap().store.set("agy.session",session)?;}},
-    Some("step_update")=>{
-     let step=&event["step_update"];
-     if step["step_type"]=="agent_response" {if let Some(delta)=step["text_delta"].as_str(){assistant.text.push_str(delta);s.save(assistant.clone())?;}}
-     if step["step_type"]=="tool" && step["state"]=="DONE" {s.save(Message{id:id(),conversation_id:"main".into(),role:Role::Tool,text:json!({"name":step["tool_name"],"detail":step["tool_info"]}).to_string(),status:MessageStatus::Complete,created_at_ms:now(),request_id:None})?;}
-    },
-    Some("result")=>{let r=&event["result"];if let Some(session)=r["conversation_id"].as_str(){s.inner.lock().unwrap().store.set("agy.session",session)?;}if r["status"]!="SUCCESS"{bail!("AGY {}: {}",r["status"],r["error"]);}if let Some(text)=r["response"].as_str(){assistant.text=text.into();}completed=true;},
-    _=>{}
-   }
-  }
-  let status=child.wait().await?;
-  if !status.success() || !completed {bail!("AGY exited without a successful result ({status}); inspect engine log; guest login may be required");}Ok(())
- }.await;
-    match result {
-        Ok(()) => {
-            s.phase(EnginePhase::Ready, None);
-            assistant.status = MessageStatus::Complete;
-            user.status = MessageStatus::Complete;
-        }
-        Err(e) => {
-            assistant.status = MessageStatus::Failed;
-            assistant.text.push_str(&format!("\n{e}"));
-            user.status = MessageStatus::Failed;
-        }
-    }
-    s.save(assistant)?;
-    s.save(user)?;
-    Ok(())
-}
 #[tokio::main]
 async fn main() -> Result<()> {
     let data =
@@ -512,7 +436,6 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-    let program = std::env::var("POT_AGY_BIN").unwrap_or_else(|_| "agy".into());
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
     let s = Service {
@@ -537,7 +460,6 @@ async fn main() -> Result<()> {
         token: id(),
         boot: id(),
         workspace,
-        program,
         api_budget,
         pi: pi_config,
         pi_program: std::env::var("POT_PI_BIN").unwrap_or_else(|_|"pi".into()),
@@ -584,7 +506,7 @@ async fn main() -> Result<()> {
             } else if use_api {
                 deepseek::run(&worker, req, &provider_path).await
             } else {
-                run_agy(&worker, req).await
+                Err(anyhow!("Configure a main Agent before sending messages"))
             };
             if let Err(e) = result {
                 worker.phase(EnginePhase::Failed, Some(e.to_string()));
@@ -727,7 +649,6 @@ mod tests {
             token: "test-token".into(),
             boot: id(),
             workspace: PathBuf::new(),
-            program: String::new(),
             api_budget: None,
             pi: None,
             pi_program: String::new(),

@@ -85,6 +85,10 @@ fn queue(
         epoch,
         native_ref: if spec.engine == Engine::Codex {
             native.ok_or_else(|| anyhow!("Codex candidate must be opened before migration"))?
+        } else if spec.engine == Engine::Agy {
+            NativeRef::Agy {
+                conversation_id: None,
+            }
         } else if spec.engine == Engine::Claude {
             NativeRef::Claude {
                 session_id: id(),

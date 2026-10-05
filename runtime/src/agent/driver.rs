@@ -177,7 +177,7 @@ pub async fn execute(
         Engine::Pi => PiHost.session(s.clone(), binding)?,
         Engine::Codex => super::codex::CodexHost.session(s.clone(), binding)?,
         Engine::Claude => super::claude::ClaudeHost.session(s.clone(), binding)?,
-        _ => bail!("Engine has not passed driver acceptance"),
+        Engine::Agy => super::agy::AgyHost.session(s.clone(), binding)?,
     };
     run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
         transcript.record(s, update)
@@ -342,7 +342,10 @@ pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRe
     if current(&s.inner.lock().unwrap().store)?.is_none() {
         return Ok(None);
     }
-    if spec.engine == Engine::Claude {
+    if spec.engine == Engine::Agy {
+        agy::prepare(spec).await?;
+        Ok(None)
+    } else if spec.engine == Engine::Claude {
         claude::prepare(spec).await?;
         Ok(None)
     } else {
