@@ -208,13 +208,38 @@ pub struct TaskInfo {
     pub updated_at_ms: i64,
     /// Explicit cooperative resource name; empty means a private task directory.
     pub resource: String,
+    #[serde(default)]
+    pub routing: Option<TaskRouting>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskRouting {
+    pub profile: String,
+    pub revision: u64,
+    pub provider: String,
+    pub reason: String,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TaskRequirements {
+    #[serde(default)]
+    pub tools: bool,
+    #[serde(default)]
+    pub desktop: bool,
+    #[serde(default)]
+    pub exact_budget: bool,
+    #[serde(default)]
+    pub live_steering: bool,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CreateTask {
     pub request_id: String,
     pub text: String,
     #[serde(default)]
     pub resource: String,
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub requirements: TaskRequirements,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskInput {
@@ -316,6 +341,10 @@ pub struct ScheduleSpec {
     pub notify: String,
     #[serde(default = "enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub requirements: TaskRequirements,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScheduleInfo {

@@ -123,15 +123,25 @@ impl Shell {
             } else {
                 v.selected.clone()
             };
+            let timezone = self.native["timezone"]
+                .as_str()
+                .unwrap_or("Asia/Shanghai")
+                .to_string();
+            let context = (scope.clone(), self.usage_ui.days, timezone.clone());
+            if self.usage_ui.group_context.as_ref() != Some(&context) {
+                self.usage_ui.group_offset = 0;
+                self.usage_ui.group_context = Some(context);
+            }
             let query = if [0, 3, 4, 5, 6].contains(&page) {
                 Some((
                     scope,
                     self.usage_ui.days,
-                    0,
-                    self.native["timezone"]
-                        .as_str()
-                        .unwrap_or("Asia/Shanghai")
-                        .to_string(),
+                    if [4, 5].contains(&page) {
+                        self.usage_ui.group_offset
+                    } else {
+                        0
+                    },
+                    timezone,
                 ))
             } else {
                 None
@@ -234,6 +244,7 @@ impl Render for Shell {
             }
             Some(2) => return self.settings.render(&self.native["settings"], cx),
             Some(1) => return ui::sandbox(&self.native, cx),
+            Some(7) => return ui::terminal(&self.native, cx),
             _ => {}
         }
         let bg = if dark { 0x191a1d } else { 0xffffff };
@@ -525,6 +536,12 @@ impl Render for Shell {
                                         )
                                     })
                                     .child(usage_ui::entry(&view, cx))
+                                    .when_some(task, |el, task| {
+                                        let owner = task.id.clone();
+                                        let title = task.title.clone();
+                                        el.child(Button::new("task-profile").ghost().small().label("更换 Agent")
+                                            .on_click(move |_,_,_|ui::command(serde_json::json!({"action":"task-profile","owner":owner,"title":title}))))
+                                    })
                                     .when(
                                         task.is_some_and(|t| {
                                             matches!(

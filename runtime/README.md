@@ -1,7 +1,8 @@
 # Product runtime
 
-Rust owns the Control API, SQLite transcript, request ledger and Pi subprocess
-lifecycle. Pi 0.87.1 owns its native JSONL session and built-in read/write/edit/
+Rust owns the Control API, SQLite transcript, request ledger and Agent bindings.
+`agent/` owns immutable profile snapshots, epoch migration, driver event filtering
+and product projection; `pi.rs` owns the Pi subprocess transport. Pi (image baseline 0.87.1, not a runtime lock) owns its native JSONL session and built-in read/write/edit/
 bash/grep/find/ls tools. The first MVP uses Pi with DeepSeek Flash; AGY/Codex are
 not required to use it. See [MVP validation](../docs/validation/pi-mvp.md).
 
@@ -15,7 +16,8 @@ requests. Defaults: `deepseek-v4-flash`, 8192 output tokens/request, 100 request
 The provider still enforces its own output limit. Explicit flags can adjust these;
 re-importing never deletes reservations. Restart the App after changing config.
 
-The Rust gateway has a fixed HTTPS DeepSeek upstream, disables redirects/retries,
+The Rust gateway defaults to HTTPS DeepSeek and supports configured, allow-listed
+provider endpoints. It disables redirects/retries,
 overrides output limits and disables thinking. Each HTTP request, including tool
 continuation or a failed request, consumes an fsynced `pi-attempts/N` reservation
 before networking. It rejects requests without an active turn, cancelled turns,
@@ -23,6 +25,7 @@ oversized request bodies (>16 MiB), and exhausted budgets. Actual provider usage
 separately. Request counts and token usage have different meanings.
 
 Pi gets a local gateway token, not the provider key, in its private models.json.
+`gateway.rs` routes only the active binding’s provider and model.
 The real key is absent from its normal RPC messages, sessions and the App bundle.
 This is not a separate security boundary against guest tools: Pi and Runtime
 currently share the guest user; D4 will isolate Agent/controller access.
@@ -56,7 +59,7 @@ Bearer token comes from mode-0600 `product/runtime.json`:
 - `POST /api/v1/messages`: `{request_id, conversation_id: "main", text}`.
   Retries reuse the ID. Conflicting content and concurrent turns are rejected.
   Exhausted budget returns 429 before messages are inserted.
-- `POST /api/v1/turn/cancel`: `{request_id, user_message_id}`. Pi only; repeat
+- `POST /api/v1/turn/cancel`: `{request_id, user_message_id}`. Pi and Codex; repeat
   cancellation is safe and a stale target is rejected.
 - `GET /api/v1/usage`: durable request counts and saved provider token usage.
 - `POST /api/v1/engine/authenticate`: 501; GUI credential setup belongs to D2.
@@ -85,10 +88,10 @@ recovery, request caps and missing-session handling without paid model requests.
 ## Legacy adapters
 
 When `pi.json` is absent, `deepseek.json` selects the old direct Rust smoke adapter;
-otherwise Runtime falls back to AGY CLI. The smoke adapter keeps its separate
+otherwise Runtime requires an explicitly selected Agent profile. The smoke adapter keeps its separate
 `deepseek-attempts` ledger (3 requests, 128 output tokens, restricted write_file).
-Its original ledger is exhausted and must not be reset. AGY's Google login and
-native engine flow remain unaccepted; no AGY or Codex claim is implied by Pi MVP.
+Its original ledger is exhausted and must not be reset. The old AGY direct adapter
+has been removed; AGY now uses the same profile/binding/Driver boundary as Claude.
 
 ## Web access
 
@@ -174,3 +177,318 @@ The Runtime owns a durable scheduler; each occurrence enters the existing task q
 ## Token accounting and allowance
 
 Request-level usage, task attribution, local calendar quotas and checkpointed Pi continuation are documented in [Token usage](../docs/token-usage.md). The shared `usage.sqlite` is owned exclusively by Runtime; task archive preserves its records. Waiting tasks release their execution slot and remain non-overlapping for scheduled plans. Only an explicitly saved checkpoint may auto-resume after restart.
+
+
+## Agent profiles and epoch migration
+
+`agent.profiles.v1` stores editable revisioned profiles. `agent.bindings.v1` stores
+owner, epoch, immutable resolved spec/hash, native reference and state. The spec
+pins the engine version, provider, model, credential reference, output limit,
+context window, tool policy, gateway protocol and accepted capabilities. Secrets
+are never copied into these records. Each actual turn records its epoch/spec hash,
+provider and model in `agent.turn:<request_id>`.
+
+Legacy `pi.session`, `pi.paused`, Pi config and task stores remain readable and are
+not deleted. Native Pi headers and JSONL records are validated on resume; missing
+or corrupt sessions become broken and never silently start from empty context.
+Existing task snapshots survive config edits and restarts. A missing credential
+route records `agent.needs_rebind`; restoring the route permits retry, or the
+settings migration endpoint can explicitly choose another profile.
+
+Authenticated Runtime endpoints (root token only):
+
+- `GET /api/v1/agent?owner=main`: profiles, the owner's binding history, pending
+  migration and credential-route rebind reason. `owner` may also be a task ID.
+- `POST /api/v1/agent`: `{request_id, expected_revision, profile, follow_main, follow_worker}`.
+  New profiles use revision 1 / expected_revision 0. Updates require exactly the
+  next revision. `follow_main` defaults true; existing tasks remain pinned. This
+  also selects the fallback profile for new workers unless `follow_worker:false`.
+  An explicit routing `worker_profile` remains authoritative. A failed or repeated request does not
+  silently change an existing binding.
+- `POST /api/v1/agent/migrate`: `{request_id, owner, target_profile, reason}`;
+  reason is `settings_changed`, `needs_rebind` or `user_requested`. Same-ID retries
+  return the saved receipt; conflicting content is rejected. Retry a failed
+  migration with a new request ID after fixing its cause.
+
+Profile shape is returned by GET. Pi profiles use engine `pi`, an accepted
+provider/model, an `auth_ref`, `{max_output_tokens, reasoning_effort: null}` params,
+and tool_policy `{worker_orchestration:false, summary_read_only:true,
+unattended:"guest_vm"}`. Only accepted engine routes can be selected. Model names
+are validated by the provider, not guessed by the Runtime.
+
+Assistant API settings still edit pi.json and restart the environment. Agent settings edit Pi launch commands through the versioned API without a model call.
+Its model/output-limit edit is imported into this same migration operation on
+startup. The task-routing settings page edits/copies saved profiles, selects a main profile through
+migration, and configures the worker default, tool-hint whitelist and concurrency caps.
+Library-only saves use `follow_main:false, follow_worker:false`; existing bindings remain fixed.
+The task conversation's Change Agent action targets only that owner through the same migration API.
+Migration previews remain incomplete.
+
+Migration persists requested → handoff_written → new_binding_opened → active.
+Candidate files are fsynced before the final SQLite transaction, which also adds
+the transcript marker. Failure preserves the source binding. Active turns defer
+migration; waiting tasks apply it at the next turn boundary. No interrupted turn
+is automatically replayed. Deterministic handoffs under `.pot/handoff/<owner>/`
+include the original goal, 8 recent messages (32 KiB text bound), older IDs,
+workspace/state references and uncertain-side-effect notes. Configured keys,
+Runtime tokens and sensitive transcript lines are redacted. Transcript material
+is explicitly untrusted data. The next real turn receives the bootstrap pointer.
+Narrative generation and in-place switching are disabled.
+
+## Provider configuration and tool facade
+
+The default `pi.json:api_key` route retains `pi-attempts` and the old internal URL.
+Additional bearer-key providers live in private root `providers.json`:
+
+```json
+[
+  {
+    "id": "example",
+    "endpoint": "https://api.example.com/v1/chat/completions",
+    "allowed_hosts": ["api.example.com"],
+    "api_key": "<private credential>",
+    "protocol": "openai_chat"
+  }
+]
+```
+
+A profile references `provider: "example"`, `auth_ref: "providers.json:example"`.
+Pi receives `/gw/example/v1` as its base URL; callers cannot choose an arbitrary
+upstream path or host. Production custom routes require HTTPS. The OpenAI Chat
+codec clamps output and reads usage without message-format translation. Protocol
+`unknown` passes JSON and response bytes through, reserves a request, leaves usage
+unknown, and disables exact-budget/usage/checkpoint-resume capabilities. It is
+currently useful for opaque OpenAI-shaped streams; it does not make Pi speak an
+arbitrary new protocol. Responses, Anthropic Messages and Gemini codecs clamp their native output-cap fields
+and read native usage; their original wire formats pass through without translation.
+
+`pot-tools.json` is shared by the Pi extension and `POST /api/v1/mcp`. The MCP facade
+implements JSON-RPC initialize/ping/tools/list/tools/call over HTTP (protocol
+2025-03-26). Initialize requires an active lane and returns `Mcp-Session-Id`, bound
+to that lane's current request. Subsequent calls require that header and the lane
+bearer; reuse in another turn fails. Workers cannot orchestrate; summaries expose
+only task list/read. Tool calls use the existing durable dispatcher receipts,
+including conflicting-ID rejection. The Codex driver unsubscribes after resource settlement and resumes at the next turn, forcing MCP initialization with the new turn identity. This passed real CLI tests in an offline ARM64 guest.
+
+DriverHost/SessionHandle implement Pi and native Codex App Server. Codex hosts multiplex independent
+threads, preserve native IDs, record cumulative usage deltas, and wait for turn termination plus
+background-terminal cleanup. A missing native session is marked broken without replacement.
+Settings prepare and persist a native candidate before committing a migration; CLI-owned history
+is initialized with `thread/inject_items`, without a model call. Codex usage is post-hoc, not
+request-level budget enforcement. Each turn explicitly restores shell/file tool feature overrides after
+a read-only summary; native resume otherwise retains the previous disabled values. Snapshot labels
+come from the persisted binding before the first turn after restart. Codex main/MCP, workers,
+restart resume and settled shell cancellation passed native account acceptance; permission UI remains incomplete;
+see the development plan and [Agent validation](../docs/validation/agent-layer.md).
+
+
+## Terminal and explicit CLI discovery
+
+Root bearer only, native bridge only (any browser Origin is rejected):
+
+- `GET /api/v1/terminals`: boot ID and ephemeral session IDs/exit codes.
+- `POST /api/v1/terminals`: `{cols,rows}` opens an interactive shell only.
+  Legacy requests with an agent are rejected; no login command is configured or
+  launched. Navigation reconnects an existing PTY without sending input. Maximum 8 retained sessions.
+- `GET /api/v1/terminals/{id}/socket`: authenticated WebSocket upgrade; one viewer.
+  Binary messages carry raw UTF-8 terminal bytes in either direction; client text
+  messages are resize `{cols,rows}`, server text messages report `{exit_code}`.
+  Frames/messages cap at 16 KiB, dimensions 1–500 columns / 1–300 rows.
+- `POST /api/v1/terminals/{id}/close`: terminate the foreground/session groups and
+  wait for the direct child; remove the PTY. Guest Linux also targets background
+  process groups in the same session. Deliberately daemonized new sessions are
+  not an isolation boundary; stronger process containment remains D4 work.
+
+Disconnect detaches; reconnect replays up to 64 KiB in memory. No terminal output
+is stored in SQLite, disk scrollback or logs; default Shell HISTFILE is disabled.
+Normal Runtime shutdown closes PTYs; VM restart loses them. The native bridge
+uses Authorization headers, never URL credentials or webview JavaScript tokens.
+Bundled xterm 5.5.0 / fit 0.10.0 have adjacent MIT licenses. No remote UI scripts.
+
+- `GET /api/v1/agents/tools`: read-only executable catalog; versioned default-profile
+  invocation overrides historical catalog entries; no login-command field
+  or POST editor. Invocation changes use versioned profiles instead.
+- `POST /api/v1/agents/refresh`: explicit bounded discovery. Codex's official
+  `login status` gets a five-second timeout and bounded, discarded output.
+  Unsupported/custom status interfaces stay unknown. No credential files are
+  opened, no version suite/model test runs, and discovery never changes selection.
+
+Pi launch_spec has `transport: pi_rpc`, an executable, `cwd_policy: workspace`,
+and argv entries `{kind: literal,value: ...}` plus exactly one
+`{kind: runtime_arguments}`. Runtime expands its RPC/session/model/role flags at
+that position; conflicting reserved flags fail validation. Prompts remain RPC
+stdin input. User wrappers are direct exec. `pi` uses the Runtime's configured Pi
+executable default; an explicit wrapper path overrides it. protocol_contract
+requires `events: pi_rpc_v1` and `native_session: pi_jsonl_v3`. No exact CLI version
+check gates turns or saves. Legacy version-bearing checksums are still verified;
+new checksums exclude diagnostic engine_version. Command changes produce a
+profile revision and use the existing turn-boundary migration path.
+
+A fresh Runtime without accepted Pi/API configuration rejects chat with
+`setup_required`; terminal and discovery remain available. Existing API/Pi
+configuration is imported. The complete multi-backend onboarding matrix remains
+listed in the development plan; terminal availability is not Driver acceptance.
+
+## Task profile routing
+
+`POST /api/v1/tasks` accepts optional `profile` (explicit user choice) and
+`requirements: {tools, desktop, exact_budget, live_steering}` (all default false).
+A schedule stores the same optional fields in its spec; each occurrence resolves
+its configured profile at creation. `pot_create_task.profile` is a lower-authority
+hint, restricted to the user's allow-list. Omission uses `agent.default.worker`,
+then legacy `pi-default`. These entry points preserve selection precedence without
+allowing tool input to masquerade as an explicit user selection. Tool-created or
+updated schedule profile references use the same allow-list.
+
+Task metadata includes `routing` with creation-time profile, revision, provider
+and reason (`user_requested`, `schedule`, `tool_hint`, `worker_default`). Existing
+tasks keep their immutable binding across profile edits and restart. A repeated
+create request must match profile, requirements and caller source as well as text.
+Migration accepts reason `routing` and checks the task's requirements again.
+Desktop and live steering requirements are currently rejected; no accepted driver
+advertises these capabilities. Unknown gateway protocols cannot satisfy exact budgets.
+
+`GET/POST /api/v1/agent/routing` reads/saves the root-authorized policy:
+
+```json
+{"revision":0,"worker_profile":null,"allowed_tool_profiles":["pi-default"],"profile_limits":{"pi-default":2},"provider_limits":{"deepseek":3}}
+```
+
+Save with the last observed revision; a successful save increments it. Limits are
+1–1000; omitted entries add no limit beyond global background concurrency. Limits
+count active binding identities across profile revisions; pending task migrations
+are applied before claiming a slot. FIFO applies among eligible tasks, so a capped
+provider does not block another. Cancelling tasks retain capacity until settled;
+unconfirmed engine shutdown holds the lane and all its leases until Runtime restart.
+These limits apply to background workers; the main/summary lane remains separate.
+
+## Claude native sessions
+
+Claude uses the original CLI's stream-json print mode, one process per turn with an
+explicit UUID (`--session-id`, then `--resume`). A fresh UUID is marked unstarted
+until init confirms it; a previously started session that cannot resume becomes
+broken. Settings prepare checks required CLI controls without a model request.
+`--system-prompt-snapshot off` keeps current lane/summary instructions effective
+across resume. Strict MCP configuration carries the lane bearer; an explicit
+built-in tool whitelist excludes native delegation and scheduling. Summary turns
+also exclude shell and mutation tools. Guest VM is the unattended boundary.
+
+Completion waits for process exit and an empty native background-task list after
+the result. Cancellation sends SIGINT and waits; uncertain cleanup blocks further
+execution on that lane. Usage comes from the final cumulative turn report, with
+cache read/create tokens included in input. Missing/failed/cancelled usage remains
+incomplete; request-level budget enforcement and safe checkpoint replay are disabled.
+An observed `system/api_retry` with `error: authentication_failed` uses the same
+SIGINT lifecycle rather than waiting through native authentication retries. After
+a terminal result and resource shutdown, Runtime reports authentication required
+and keeps the native binding for an explicit retry after login. Provider diagnostic
+text is not copied into this error; usage remains incomplete. Synthetic assistant
+API-error events also use a generic failure message instead of the provider diagnostic. Missing terminal or
+unconfirmed shutdown still blocks the lane.
+CLI login is `claude auth login`, and discovery uses official `claude auth status --json`.
+
+## Native provider codecs
+
+`providers.json` supports `openai_chat`, `openai_responses`, `anthropic_messages`,
+`gemini`, and `unknown`. Each entry has id, full HTTPS endpoint, allowed_hosts,
+api_key, and protocol. Gemini's full endpoint may contain `{model}` in
+`/models/{model}:streamGenerateContent`; the expanded model must match the binding.
+Pi uses its corresponding native provider API through `/gw/<provider>/...`.
+The gateway injects Bearer, x-api-key, or x-goog-api-key upstream; SDK local keys
+are accepted only as Runtime lane authentication and are never forwarded upstream.
+Codecs preserve request/response wire formats, clamp their native output field,
+and normalize usage for the shared ledger. Anthropic cache reads/creation count
+inside input; Gemini thought tokens count inside output. Unknown usage retains
+reservations. Newly added formats do not enable automatic checkpoint resume until
+that backend-specific contract has been validated.
+
+`GET /api/v1/providers` returns the active API connection's endpoint/model/protocol
+and has_key, never its key. `POST /api/v1/providers` accepts request_id (UUID),
+expected_revision, endpoint, model, protocol, api_key, and optional max_output_tokens.
+It creates/updates `api-default` and selects it through the existing migration
+transaction. Blank key retains the current key only for the same endpoint.
+Each save uses a new immutable provider ID so existing bindings keep their route;
+the mode-0600 provider file is persisted before selection. A failed selection may
+leave an unused private route, but cannot mutate an existing route. No model test
+is sent. API-only setup works without pi.json; default Pi limits apply and its
+request reservations never use the legacy direct-API smoke ledger.
+
+### Provider allowances
+
+`GET /api/v1/usage/providers` returns known provider routes, current policy/revision,
+usage/reservation totals and enforcement precision. `POST` accepts
+`{provider, revision, policy:{period,limit,timezone,auto_resume}}`; root bearer and
+current revision are required. Only configured gateway routes support hard allowances.
+The gateway atomically reserves tokens and associates the immutable provider route before
+networking. Global and provider allowances both apply; output is capped by the smaller
+available allowance. Unknown requests retain reservations after restart. A paused owner
+resumes only when both policies allow it and the backend supports checkpoint resume.
+Provider service rate limits and native subscription usage are separate from these policies.
+
+Native invocation literals support user wrapper options with direct argv expansion.
+Runtime-owned model, transport, session, MCP, policy and config override flags are rejected,
+including attached short forms. Wrappers are user-trusted executables and must preserve
+the selected protocol; incompatible output fails visibly, without transport fallback.
+Codex extra permission requests are denied by the guest-VM policy and surfaced as a
+credential-free system message; permitted Pot MCP requests still use per-role authorization.
+
+
+Claude capability checks are cached for each launch command and executable metadata
+(device/inode, size, modification/change timestamps). Unchanged commands do not run
+`--help` before every turn. Replacing/reinstalling the executable invalidates the check,
+without changing the binding or imposing an exact version lock. Failed controls or a
+missing executable set an actionable `needs_rebind` reason before model execution;
+restoring a compatible command allows an explicit retry in the same native session.
+Probe output is bounded and a timeout/output failure stops the probe process group.
+Offline original-CLI tests remain separate from real-account acceptance; current
+acceptance scope is recorded in the development plan and validation report.
+
+
+## AGY native sessions
+
+AGY uses the original CLI's `--print --input-format text --output-format stream-json`
+transport, one process per turn. The CLI creates the conversation UUID; Runtime
+persists it only after `init` and supplies `--conversation` for later turns and
+Runtime restarts. Missing/incompatible commands set `needs_rebind` without discarding
+the binding; restoring the command allows retry on the original conversation.
+The driver validates help controls without a model request, bounds NDJSON frames,
+redacts diagnostics, requires an explicit terminal status, and waits for process
+exit before publishing the final response. SIGINT cancellation has a bounded wait;
+on disposal Runtime kills remaining process-group descendants. Native background
+agents that detach from this group are not proven settled by this implementation.
+
+Final per-run usage includes cached input and thinking output. Step/checkpoint
+usage is never added to the final envelope. Missing, malformed, failed-process or
+cancelled usage remains incomplete; no exact request budget or interrupted-turn
+replay is claimed. The original CLI owns its guest HOME, login and conversation
+history. AGY has no verified official read-only auth-status command, so discovery
+keeps authentication `unknown`; Runtime never probes login by calling a model.
+
+Main chat, workers, schedules and result summaries are enabled by the user's
+explicit acceptance of AGY's native tool permissions. Each turn carries current
+role guidance in the input text: workers must not delegate/manage schedules;
+summaries must only summarize supplied results without commands or file edits.
+AGY has no verified system-prompt override, so this is prompt guidance rather than
+an enforced read-only contract. Native conversations and cancellation scopes stay
+independent for workers; summaries resume the main conversation.
+
+Pot supplies no MCP configuration or task/schedule tools to AGY and removes
+inherited `POT_TASK_API`/`POT_TASK_TOKEN` variables from its process. It does not
+provide `pot_create_task` or any other Pot orchestration tool. Users' native CLI
+settings/plugins/MCP and their guest tool permissions remain CLI-owned; Pot does
+not overwrite them or pass blanket approval. Selecting AGY updates the main and
+worker defaults like the other native backends.
+
+`tool_policy_enforcement`, `mcp_tools`, `subagents_disableable` and
+`native_compaction` capabilities remain false. Routing explicitly permits AGY
+with `requirements.tools` under the accepted native-permission policy; exact
+request budgets, live steering and desktop requirements remain unsupported.
+This does not claim original CLI role isolation/account acceptance or vendor licensing.
+
+
+The common Driver interface covers native identity, turn events, usage and cancellation;
+it does not require identical CLI permissions. Codex uses App Server configuration
+and feature overrides; Claude uses stream-json with explicit tools/settings/MCP flags;
+AGY uses its stream-json/conversation interface and per-turn prompt guidance. Drivers
+must declare only capabilities supported by their backend. AGY's accepted native-tool
+routing exception does not enable its strict isolation capability or alter Codex/Claude controls.

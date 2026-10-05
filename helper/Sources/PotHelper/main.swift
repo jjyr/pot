@@ -246,21 +246,6 @@ actor Runtime {
             case "prepare": try await prepare(); value = status()
             case "start": value = start()
             case "status": value = status()
-            case "login":
-                guard let c = container, phase == "running" else { throw NSError(
-                    domain: "pot",
-                    code: 3,
-                    userInfo: [NSLocalizedDescriptionKey: "Environment is not running"]
-                ) }
-                let login = try await c.exec("agy-login-" + UUID().uuidString) { config in
-                    config.arguments = [
-                        "/bin/su",
-                        "potdesktop",
-                        "-c",
-                        "cd /data/workspace && DISPLAY=:99 xterm -fa monospace -fs 14 -title 'AGY login' -e agy",
-                    ]
-                }
-                try await login.start(); value = status()
             case "stop": value = await stop()
             case "shutdown": value = await stop(); Task {
                     try? await Task.sleep(nanoseconds: 200_000_000); unlink(socketPath); exit(0)

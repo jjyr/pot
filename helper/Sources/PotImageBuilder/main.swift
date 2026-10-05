@@ -29,6 +29,8 @@ let vm = try await manager.create(
     networking: true,
     vm: VMResources(cpus: 4, memoryInBytes: 4 * 1024 * 1024 * 1024)
 ) { config in
+    config.cpus = 4
+    config.memoryInBytes = 3 * 1024 * 1024 * 1024
     config.process.arguments = ["/bin/sh", "/build/build.sh"]
     config.mounts.append(.share(source: input.path, destination: "/build"))
     config.mounts.append(.share(source: cache.path, destination: "/cache"))

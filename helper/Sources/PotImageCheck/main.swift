@@ -2,10 +2,12 @@ import Containerization
 import Foundation
 
 let args = CommandLine.arguments
-if args.count != 4 {
-    fatalError("Usage: PotImageCheck ROOT RESOURCES CHECK_SCRIPT")
+if args.count != 4 && args.count != 5 {
+    fatalError("Usage: PotImageCheck ROOT RESOURCES CHECK_DIRECTORY [SCRIPT_NAME]")
 }
 
+let entry = args.count == 5 ? args[4] : "offline-image.sh"
+guard entry == URL(fileURLWithPath: entry).lastPathComponent else { fatalError("Expected a script filename") }
 let started = Date()
 let root = URL(fileURLWithPath: args[1])
 let resources = URL(fileURLWithPath: args[2])
@@ -30,7 +32,7 @@ let vm = try await manager.create(
     networking: false,
     vm: VMResources(cpus: 4, memoryInBytes: 4 * 1024 * 1024 * 1024)
 ) { config in
-    config.process.arguments = ["/bin/sh", "/check/offline-image.sh"]
+    config.process.arguments = ["/bin/sh", "/check/\(entry)"]
     config.mounts.append(.share(source: root.appendingPathComponent("data").path, destination: "/data"))
     config.mounts.append(.share(source: check.path, destination: "/check"))
 }
@@ -40,6 +42,6 @@ do {
     let result = try await vm.wait(); try await vm.stop(); try manager.delete("offline-check")
     guard result.exitCode == 0 else { fatalError("Offline check failed; inspect ROOT/data/check.log") }
     print(
-        "Offline image startup and shutdown passed in \(Int(Date().timeIntervalSince(started))) seconds (including import/unpack)"
+        "Offline guest check \(entry) passed in \(Int(Date().timeIntervalSince(started))) seconds (including import/unpack)"
     )
 } catch { try? await vm.stop(); try? manager.delete("offline-check"); throw error }

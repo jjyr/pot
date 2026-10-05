@@ -45,6 +45,8 @@ pub fn entry(v: &client::View, cx: &mut Context<Shell>) -> Button {
 }
 pub struct UsageUI {
     pub days: u32,
+    pub group_offset: usize,
+    pub group_context: Option<(String, u32, String)>,
     show_all_tools: bool,
     limit: Entity<InputState>,
     period: String,
@@ -61,6 +63,8 @@ impl UsageUI {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         Self {
             days: 7,
+            group_offset: 0,
+            group_context: None,
             show_all_tools: false,
             limit: cx.new(|cx| InputState::new(window, cx).placeholder("例如 2M、500K")),
             period: "none".into(),
@@ -250,7 +254,7 @@ impl UsageUI {
                 )
                 .child(ui::hint(
                     format!(
-                        "输入中缓存命中 {} · {} 次请求{}",
+                        "输入中缓存命中 {} · {} 条用量记录{}",
                         count(n(total, "cache")),
                         n(total, "requests"),
                         if n(total, "unknown") > 0 {
@@ -265,6 +269,96 @@ impl UsageUI {
                     cx,
                 )),
         );
+        let groups = d["agent_models"].as_array().cloned().unwrap_or_default();
+        if !groups.is_empty() || self.group_offset > 0 {
+            let mut card = ui::card(cx).child(div().child("Agent / 模型用量"));
+            for (index, row) in groups.iter().enumerate() {
+                let agent = match row["agent"].as_str().unwrap_or("unknown") {
+                    "pi" => "Pi",
+                    "codex" => "Codex",
+                    "claude" => "Claude",
+                    "agy" => "AGY",
+                    _ => "Agent 未知",
+                };
+                let tooltip = format!(
+                    "{} 条记录 · {} 条用量不完整",
+                    n(row, "requests"),
+                    n(row, "unknown")
+                );
+                card = card.child(
+                    div()
+                        .id(("agent-model-usage", index))
+                        .mt_3()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex()
+                                .gap_3()
+                                .child(div().flex_1().min_w_0().truncate().child(format!(
+                                    "{} · {}",
+                                    agent,
+                                    row["model"].as_str().unwrap_or("模型未知")
+                                )))
+                                .child(div().child(format!("{} tokens", count(tokens(row))))),
+                        )
+                        .child(ui::hint(
+                            format!(
+                                "输入 {} · 输出 {} · 输入中缓存命中 {}{}",
+                                count(n(row, "input")),
+                                count(n(row, "output")),
+                                count(n(row, "cache")),
+                                if n(row, "unknown") > 0 {
+                                    format!(" · {} 条用量不完整", n(row, "unknown"))
+                                } else {
+                                    String::new()
+                                }
+                            ),
+                            cx,
+                        ))
+                        .tooltip(move |window, cx| ui::title_tooltip(tooltip.clone(), window, cx)),
+                );
+            }
+            let next = d["agent_model_next_offset"].as_u64().map(|v| v as usize);
+            if self.group_offset > 0 || next.is_some() {
+                card = card.child(
+                    div()
+                        .mt_3()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("agent-model-prev")
+                                .ghost()
+                                .small()
+                                .label("上一页")
+                                .disabled(self.group_offset == 0)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.usage_ui.group_offset =
+                                        this.usage_ui.group_offset.saturating_sub(20);
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("agent-model-next")
+                                .ghost()
+                                .small()
+                                .label("下一页")
+                                .disabled(next.is_none())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(offset) = next {
+                                        this.usage_ui.group_offset = offset;
+                                        cx.notify();
+                                    }
+                                })),
+                        ),
+                );
+            }
+            scroll = scroll.child(card);
+        }
+        if d["native_turn_usage"] == true {
+            scroll = scroll.child(ui::hint("原生 CLI 用量按轮次记录，包含其报告的原生压缩；不代表模型请求次数或订阅余额。Pot 额度只在新轮次开始前检查，轮次内可能超出。", cx));
+        }
         if detail {
             let compression = &d["compaction_total"];
             let total_tokens = tokens(total);

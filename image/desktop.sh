@@ -22,7 +22,7 @@ python3 -m http.server 8081 --bind 127.0.0.1 --directory /data >/data/logs/page.
 websockify --web=/opt/pot/novnc 127.0.0.1:6080 127.0.0.1:5900 >/data/logs/websockify.log 2>&1 &
 POT_BACKEND=local POT_INTEGRATED_ROOT=/data POT_BROKER_BIND=0.0.0.0 POT_UPSTREAM_WS=http://127.0.0.1:6080/websockify POT_VIEWER_HTML=/data/index.html python3 /data/broker.py >/data/logs/broker.log 2>&1 &
 # Product runtime and engine run as an unprivileged guest user.
-su potdesktop -c 'exec /data/pot-runtime' >/data/logs/runtime.log 2>&1 &
+su potdesktop -c 'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"; export npm_config_prefix="$HOME/.npm-global"; exec /data/pot-runtime' >/data/logs/runtime.log 2>&1 &
 runtime_pid=$!
 # Wait for an actual browser process exit before acknowledging clean shutdown.
 shutdown() {

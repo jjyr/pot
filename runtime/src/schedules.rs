@@ -263,8 +263,8 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
     let mut inserted = None;
     let result = (|| -> ApiResult<Value> {
         if action == "create" {
-            if root.pi.is_none() {
-                return Err(invalid("定时任务需要 Pi"));
+            if !agent::configured(root) {
+                return Err(invalid("定时任务需要主 Agent 配置"));
             }
             if hub
                 .schedules
@@ -279,6 +279,13 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             let spec: ScheduleSpec =
                 serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
             validate(&spec).map_err(invalid)?;
+            agent::routing::resolve(
+                root,
+                spec.profile.as_deref(),
+                agent::routing::Source::Schedule,
+                &spec.requirements,
+            )
+            .map_err(invalid)?;
             let due = if spec.enabled {
                 next(&spec, at).map_err(invalid)?
             } else {
@@ -337,6 +344,13 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                 let spec: ScheduleSpec =
                     serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
                 validate(&spec).map_err(invalid)?;
+                agent::routing::resolve(
+                    root,
+                    spec.profile.as_deref(),
+                    agent::routing::Source::Schedule,
+                    &spec.requirements,
+                )
+                .map_err(invalid)?;
                 let due = if spec.enabled {
                     next(&spec, at).map_err(invalid)?
                 } else {
@@ -424,6 +438,8 @@ fn launch(
             request_id: format!("schedule:{}", id()),
             text: brief,
             resource: String::new(),
+            profile: plan.info.spec.profile.clone(),
+            requirements: plan.info.spec.requirements.clone(),
         },
     )?;
     let plan = hub.schedules.plans.get_mut(sid).unwrap();
@@ -537,7 +553,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
             }
         }
     }
-    if root.pi.is_none()
+    if !agent::configured(root)
         || root.inner.lock().unwrap().engine.phase != EnginePhase::Ready
         || root.budget()?.is_some_and(|b| b.remaining() == 0)
     {

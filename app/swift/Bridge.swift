@@ -128,6 +128,8 @@ var bridge: PotBridge?
     var savedSeen: [String]?
     var tick: Double = 0
     var observations: [NSObjectProtocol] = []
+    let terminal = SandboxTerminal()
+    var guestIP = ""
     var localPhase = "starting"
     var isApplying = false
     var seenKey: String {
@@ -151,6 +153,7 @@ var bridge: PotBridge?
         for (index, symbol, title) in [
             (0, "bubble.left", "聊天"),
             (3, "list.bullet.rectangle", "任务"),
+            (7, "terminal", "Terminal"),
             (1, "desktopcomputer", "Sandbox"),
             (4, "chart.bar.xaxis", "用量"),
             (2, "gearshape", "设置"),
@@ -165,6 +168,7 @@ var bridge: PotBridge?
             button.wantsLayer = true; button.layer?.cornerRadius = 10
             rail.addSubview(button); navigation.append(button)
         }
+        rootView.addSubview(terminal.web)
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
@@ -239,7 +243,7 @@ var bridge: PotBridge?
         localRuntime = LocalRuntime(view: rootView, web: web)
         localRuntime?.onState = { [weak self] state in self?.environmentChanged(state) }
         settings.load()
-        if !settings.hasConfiguration {
+        if !settings.hasConfiguration, !settings.setupCompleted {
             selectPage(2); settings.showAgent(setup: true)
         }
         animation = Timer
@@ -300,11 +304,10 @@ var bridge: PotBridge?
     func layout() {
         let b = rootView.bounds
         rail.frame = NSRect(x: 0, y: 0, width: 56, height: b.height)
-        for button in navigation {
+        for (index, button) in navigation.enumerated() {
             button.frame = NSRect(
                 x: 8,
-                y: button.tag == 2 ? 16 : b
-                    .height - 60 - CGFloat(button.tag == 3 ? 1 : button.tag == 1 ? 2 : button.tag == 4 ? 3 : 0) * 48,
+                y: button.tag == 2 ? 16 : b.height - 60 - CGFloat(index) * 48,
                 width: 40,
                 height: 40
             )
@@ -318,6 +321,7 @@ var bridge: PotBridge?
         if web.frame != desktopArea {
             web.frame = desktopArea
         }
+        terminal.web.frame = desktopArea
         let width = min(760, area.width - 64)
         composer.layoutManager?.ensureLayout(for: composer.textContainer!)
         let used = (composer.layoutManager?.usedRect(for: composer.textContainer!).height ?? 24) +
@@ -387,13 +391,23 @@ var bridge: PotBridge?
     }
 
     func selectPage(_ value: Int) {
-        page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.loaded.isEmpty != false
+        let returningFromTerminal = page == 7 && value != 7
+        page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.loaded
+            .isEmpty != false
+        terminal.show(
+            value == 7 && localPhase == "running",
+            root: localRuntime?.root,
+            ip: guestIP
+        )
         gpuiView.isHidden = false; composerBox.isHidden = value != 0 && value != 3
         if value == 0 {
             host.makeFirstResponder(composer)
         }
         if value == 2 {
             settings.refreshStatus()
+        }
+        if returningFromTerminal {
+            settings.refreshAgents()
         }
         layout()
     }
@@ -489,10 +503,18 @@ var bridge: PotBridge?
 
     func environmentChanged(_ state: [String: Any]) {
         localPhase = state["phase"] as? String ?? "unknown"
+        guestIP = state["ip"] as? String ?? ""
         if page == 1 {
             web.isHidden = localRuntime?.loaded.isEmpty != false
         }
         settings.environment = state; settings.refreshStatus()
+        if page == 7 {
+            terminal.show(localPhase == "running", root: localRuntime?.root, ip: guestIP)
+        }
+        if settings.setup, localPhase == "running" {
+            terminal.show(page == 7 && localPhase == "running", root: localRuntime?.root, ip: guestIP)
+            settings.refreshAgents()
+        }
     }
 
     func webView(_: WKWebView, didFinish _: WKNavigation!) {
@@ -509,7 +531,7 @@ var bridge: PotBridge?
         switch action {
         case "viewer-state": viewer = body; bridgeWake?()
         case "workspace": openWorkspace()
-        case "manage": selectPage(2); settings.section = 2
+        case "manage": selectPage(2); settings.section = 3
         case "stop", "restart":
             guard !isApplying else { return }
             let alert = NSAlert(); alert.messageText = action == "stop" ? "停止 Sandbox？" : "重启 Sandbox？"
@@ -716,7 +738,45 @@ private var bridgeWake: (@convention(c) () -> Void)?
               let action = v["action"] as? String else { return }
         let settings = bridge.settings
         switch action {
-        case "section": settings.section = v["value"] as? Int ?? 0; settings.setup = false; settings.result = ""
+        case "provider-period": settings.providerPeriod = v["period"] as? String ?? "none"
+        case "provider-auto": settings.providerAutoResume.toggle()
+        case "provider-save": settings.saveProviderAllowance(tokens: v["tokens"] as? String ?? "")
+        case "routing-refresh": settings.refreshRouting()
+        case "routing-edit": settings.editRoutingProfile(v["id"] as? String ?? "")
+        case "routing-choice": settings.routingChoice(v["kind"] as? String ?? "", v["id"] as? String ?? "")
+        case "routing-save": settings.saveRouting(
+                profileLimit: v["profile_limit"] as? String ?? "",
+                providerLimit: v["provider_limit"] as? String ?? ""
+            )
+        case "profile-save": settings.saveProfile(
+                name: v["name"] as? String ?? "",
+                model: v["model"] as? String ?? "",
+                copy: v["copy"] as? Bool ?? false
+            )
+        case "profile-main": settings.useProfileForOwner()
+        case "task-profile":
+            settings.routingOwner = v["owner"] as? String ?? "main"
+            settings.routingOwnerName = v["title"] as? String ?? "此任务"
+            settings.setup = false; settings.section = 4; bridge.selectPage(2); settings.refreshRouting()
+        case "setup-stage": settings.setupNavigate(v["value"] as? Int ?? 0)
+        case "setup-later": settings.deferSetup()
+        case "setup-all": settings
+            .setupItems = v["selected"] as? Bool == true ? Set(["codex", "claude", "agy", "api"]) : []; settings
+            .persistSetup()
+        case "setup-item":
+            if let id = v["id"] as? String {
+                if settings.setupItems.contains(id) {
+                    settings.setupItems.remove(id)
+                } else {
+                    settings.setupItems.insert(id)
+                }; settings.persistSetup()
+            }
+        case "section": settings.section = v["value"] as? Int ?? 0; settings.setup = false; settings
+            .result = ""; if settings.section == 2 {
+                settings.refreshAgents()
+            } else if settings.section == 4 {
+                settings.routingOwner = "main"; settings.routingOwnerName = "主会话"; settings.refreshRouting()
+            }
         case "appearance": settings.changeAppearance(v["value"] as? Int ?? 0)
         case "save-agent":
             settings.key = v["key"] as? String ?? ""; settings.limit = v["limit"] as? String ?? ""; settings
@@ -728,8 +788,24 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 .saveSandbox()
         case "workspace": bridge.openWorkspace()
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
-        case "manage": settings.section = 2; bridge.selectPage(2)
+        case "manage": settings.section = 3; bridge.selectPage(2)
         case "start": bridge.startSandbox()
+        case "terminal": bridge.selectPage(7)
+        case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
+        case "save-api": settings.saveAPI(
+                endpoint: v["endpoint"] as? String ?? "",
+                key: v["key"] as? String ?? "",
+                model: v["model"] as? String ?? ""
+            )
+        case "select-agy": settings.selectNative(engine: "agy", model: v["model"] as? String ?? "")
+        case "select-claude": settings.selectNative(engine: "claude", model: v["model"] as? String ?? "")
+        case "select-codex": settings.selectNative(engine: "codex", model: v["model"] as? String ?? "")
+        case "agent-refresh": settings.refreshAgents()
+        case "save-invocation": settings.saveInvocation(
+                executable: v["executable"] as? String ?? "",
+                arguments: v["argv"] as? String ?? ""
+            )
+        case "terminal-close": bridge.terminal.close()
         case "viewer":
             if let id = v["id"] as? String, ["take", "info", "more", "connect"].contains(id) {
                 if id == "more" {

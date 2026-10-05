@@ -1,9 +1,14 @@
+mod agent;
 mod deepseek;
+mod discovery;
+mod gateway;
 mod orchestration;
 mod pi;
 mod schedules;
 mod store;
 mod tasks;
+mod terminal;
+mod tool_bridge;
 mod usage;
 use anyhow::{Result, anyhow, bail};
 use axum::{
@@ -48,7 +53,6 @@ struct Service {
     token: String,
     boot: String,
     workspace: PathBuf,
-    program: String,
     api_budget: Option<deepseek::BudgetSettings>,
     pi: Option<pi::Config>,
     pi_program: String,
@@ -57,6 +61,8 @@ struct Service {
     data: PathBuf,
     cancel_notify: Arc<tokio::sync::Notify>,
     tasks: Arc<Mutex<tasks::Hub>>,
+    terminals: Arc<Mutex<terminal::Hub>>,
+    codex: Arc<agent::codex::Hosts>,
 }
 impl Service {
     fn snapshot(&self) -> Result<Snapshot> {
@@ -65,12 +71,15 @@ impl Service {
     }
     fn snapshot_locked(&self, s: &Inner) -> Result<Snapshot> {
         Ok(Snapshot {
-            budget: self.budget()?,
+            budget: self.budget_for(&s.store)?,
             api_version: API_VERSION,
             boot_id: self.boot.clone(),
             cursor: s.store.cursor()?,
             engine: {
                 let mut engine = s.engine.clone();
+                if let Some(binding) = agent::current(&s.store)? {
+                    engine.engine = format!("{:?} · {}", binding.spec.engine, binding.spec.model);
+                }
                 if s.store.get("pi.paused")?.is_some_and(|v| !v.is_empty()) {
                     engine.detail = Some("等待 Pot 额度恢复".into());
                 }
@@ -82,11 +91,22 @@ impl Service {
         })
     }
     fn budget(&self) -> Result<Option<RequestBudget>> {
+        self.budget_for(&self.inner.lock().unwrap().store)
+    }
+    fn budget_for(&self, store: &Store) -> Result<Option<RequestBudget>> {
+        if let Some(binding) = agent::current(store)? {
+            if binding.spec.engine != agent::Engine::Pi {
+                return Ok(None);
+            }
+            return gateway::pi_budget(self, binding.spec.params.max_output_tokens)?
+                .status()
+                .map(Some);
+        }
         self.api_budget.as_ref().map(|b| b.status()).transpose()
     }
     fn publish_budget(&self) -> Result<()> {
         let _inner = self.inner.lock().unwrap();
-        if let Some(budget) = self.budget()? {
+        if let Some(budget) = self.budget_for(&_inner.store)? {
             let _ = self.events.send(Event {
                 event_id: id(),
                 cursor: None,
@@ -197,6 +217,19 @@ async fn send(
     }
     if inner
         .store
+        .get("agent.setup.pending")
+        .map_err(internal)?
+        .as_deref()
+        == Some("true")
+    {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "setup_required",
+            "请先在助手设置中选择并配置主 Agent；Terminal 仍可使用",
+        ));
+    }
+    if inner
+        .store
         .get("pi.paused")
         .map_err(internal)?
         .is_some_and(|v| !v.is_empty())
@@ -224,7 +257,7 @@ async fn send(
             "Authenticate the guest engine, then restart the environment",
         ));
     }
-    if s.budget()
+    if s.budget_for(&inner.store)
         .map_err(internal)?
         .is_some_and(|b| b.remaining() == 0)
     {
@@ -316,11 +349,11 @@ async fn cancel(
     Json(req): Json<CancelTurn>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    if s.pi.is_none() {
+    if !agent::configured(&s) {
         return Err(error(
             StatusCode::NOT_IMPLEMENTED,
             "cancel_unavailable",
-            "Cancellation requires Pi",
+            "Cancellation requires an Agent binding",
         ));
     }
     let mut inner = s.inner.lock().unwrap();
@@ -347,7 +380,7 @@ async fn cancel(
 async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     let inner = s.inner.lock().unwrap();
-    let budget = s.budget().map_err(internal)?;
+    let budget = s.budget_for(&inner.store).map_err(internal)?;
     let usage = inner
         .store
         .get(if s.pi.is_some() {
@@ -368,81 +401,6 @@ async fn authenticate(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<
         "interactive_login_required",
         "Use the guest AGY terminal to sign in, then restart the environment",
     ))
-}
-async fn run_agy(s: &Service, req: SendMessage) -> Result<()> {
-    let mut user = s
-        .inner
-        .lock()
-        .unwrap()
-        .store
-        .duplicate(&req.request_id)?
-        .ok_or_else(|| anyhow!("Missing accepted message"))?;
-    let mut assistant = Message {
-        id: id(),
-        conversation_id: req.conversation_id,
-        role: Role::Assistant,
-        text: String::new(),
-        status: MessageStatus::Streaming,
-        created_at_ms: now(),
-        request_id: None,
-    };
-    s.save(assistant.clone())?;
-    let result:Result<()>=async {
-  let session=s.inner.lock().unwrap().store.get("agy.session")?;
-  let mut cmd=Command::new(&s.program);
-  cmd.current_dir(&s.workspace).args(["--print",&req.text,"--output-format","stream-json","--mode","accept-edits","--disable-slash-commands"]);
-  if let Some(session)=session {cmd.args(["--conversation",&session]);}
-  // No blanket tool approval: headless permission failures stay visible.
-  let mut child=cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn()?;
-  let mut stderr=BufReader::new(child.stderr.take().unwrap()).lines();
-  let (auth_tx,mut auth_rx)=mpsc::unbounded_channel();
-  tokio::spawn(async move {
-   let mut auth=false;
-   while let Ok(Some(line))=stderr.next_line().await {
-    if line.contains("Authentication required") {auth=true;let _=auth_tx.send(());}
-    if !auth {eprintln!("agy: {line}");}
-   }
-  });
-  let mut lines=BufReader::new(child.stdout.take().unwrap()).lines();let mut completed=false;
-  loop {
-   let line=tokio::select! {
-    line=lines.next_line()=>match line?{Some(line)=>line,None=>break},
-    Some(())=auth_rx.recv()=>{
-     child.kill().await?;let _=child.wait().await;
-     s.phase(EnginePhase::NeedsAuth,Some("Sign in through the guest AGY terminal, then send a new message".into()));
-     bail!("Guest AGY login required. Use the tray menu to sign in, then retry.");
-    }
-   };
-   let event:Value=serde_json::from_str(&line)?;
-   match event["event"].as_str() {
-    Some("init")=>{if let Some(session)=event["conversation_id"].as_str(){s.inner.lock().unwrap().store.set("agy.session",session)?;}},
-    Some("step_update")=>{
-     let step=&event["step_update"];
-     if step["step_type"]=="agent_response" {if let Some(delta)=step["text_delta"].as_str(){assistant.text.push_str(delta);s.save(assistant.clone())?;}}
-     if step["step_type"]=="tool" && step["state"]=="DONE" {s.save(Message{id:id(),conversation_id:"main".into(),role:Role::Tool,text:json!({"name":step["tool_name"],"detail":step["tool_info"]}).to_string(),status:MessageStatus::Complete,created_at_ms:now(),request_id:None})?;}
-    },
-    Some("result")=>{let r=&event["result"];if let Some(session)=r["conversation_id"].as_str(){s.inner.lock().unwrap().store.set("agy.session",session)?;}if r["status"]!="SUCCESS"{bail!("AGY {}: {}",r["status"],r["error"]);}if let Some(text)=r["response"].as_str(){assistant.text=text.into();}completed=true;},
-    _=>{}
-   }
-  }
-  let status=child.wait().await?;
-  if !status.success() || !completed {bail!("AGY exited without a successful result ({status}); inspect engine log; guest login may be required");}Ok(())
- }.await;
-    match result {
-        Ok(()) => {
-            s.phase(EnginePhase::Ready, None);
-            assistant.status = MessageStatus::Complete;
-            user.status = MessageStatus::Complete;
-        }
-        Err(e) => {
-            assistant.status = MessageStatus::Failed;
-            assistant.text.push_str(&format!("\n{e}"));
-            user.status = MessageStatus::Failed;
-        }
-    }
-    s.save(assistant)?;
-    s.save(user)?;
-    Ok(())
 }
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -478,7 +436,6 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-    let program = std::env::var("POT_AGY_BIN").unwrap_or_else(|_| "agy".into());
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
     let s = Service {
@@ -492,7 +449,7 @@ async fn main() -> Result<()> {
                 detail: Some(
                     if use_pi {"Pi tools and native session"} else if use_api {"API smoke test: at most 3 requests, 128 output tokens each"} else {"Sign in through the guest AGY terminal; if already signed in, send a message to verify access"}.into(),
                 ),
-                version: if use_pi {Some("0.87.1".into())} else if use_api {None} else {Some("1.2.16".into())},
+                version: None,
                 auth_methods: vec![],
             },
             turn: None,
@@ -503,7 +460,6 @@ async fn main() -> Result<()> {
         token: id(),
         boot: id(),
         workspace,
-        program,
         api_budget,
         pi: pi_config,
         pi_program: std::env::var("POT_PI_BIN").unwrap_or_else(|_|"pi".into()),
@@ -512,7 +468,23 @@ async fn main() -> Result<()> {
         data,
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
+            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
+            codex: Arc::new(agent::codex::Hosts::default()),
     };
+    let configured = agent::configured(&s) || use_api;
+    s.inner.lock().unwrap().store.set(
+        "agent.setup.pending",
+        if configured { "false" } else { "true" },
+    )?;
+    if configured {
+        s.phase(EnginePhase::Ready, None);
+    }
+    if !configured {
+        s.phase(
+            EnginePhase::NeedsAuth,
+            Some("请先配置主 Agent；Sandbox Terminal 可独立使用".into()),
+        );
+    }
     s.usage
         .lock()
         .unwrap()
@@ -520,18 +492,21 @@ async fn main() -> Result<()> {
     if usage::paused(&s)?.is_none() {
         s.usage.lock().unwrap().clear_wait("main")?;
     }
+    agent::initialize(&s)?;
+    agent::migration::sync_legacy_settings(&s).await?;
     let worker = s.clone();
     tokio::spawn(async move {
         while let Some(mut req) = rx.recv().await {
-            if use_pi && usage::paused(&worker).ok().flatten().is_none() {
+            let use_agent = agent::configured(&worker);
+            if use_agent && usage::paused(&worker).ok().flatten().is_none() {
                 req.text.push_str(&tasks::context(&worker));
             }
-            let result = if use_pi {
-                pi::run(&worker, req).await
+            let result = if use_agent {
+                agent::run(&worker, req).await
             } else if use_api {
                 deepseek::run(&worker, req, &provider_path).await
             } else {
-                run_agy(&worker, req).await
+                Err(anyhow!("Configure a main Agent before sending messages"))
             };
             if let Err(e) = result {
                 worker.phase(EnginePhase::Failed, Some(e.to_string()));
@@ -543,12 +518,30 @@ async fn main() -> Result<()> {
         }
     });
     let router = Router::new()
+        .route("/api/v1/agents/tools", get(discovery::list))
+        .route("/api/v1/agents/refresh", post(discovery::refresh))
+        .route(
+            "/api/v1/terminals",
+            get(terminal::list).post(terminal::create),
+        )
+        .route("/api/v1/terminals/{id}/socket", get(terminal::connect))
+        .route("/api/v1/terminals/{id}/close", post(terminal::close))
+        .route(
+            "/api/v1/providers",
+            get(gateway::setup::get).post(gateway::setup::save),
+        )
         .route(
             "/api/pi/v1/chat/completions",
             post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
         )
+        .route(
+            "/gw/{provider}/{*path}",
+            post(gateway::routed_protocol)
+                .layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
+        )
         .route("/api/pi/compactions", post(pi::compaction_event))
         .route("/api/v1/orchestration", post(orchestration::invoke))
+        .route("/api/v1/mcp", post(tool_bridge::mcp))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/query", get(tasks::query))
         .route(
@@ -558,10 +551,23 @@ async fn main() -> Result<()> {
         .route("/api/v1/tasks/{id}", get(tasks::snapshot))
         .route("/api/v1/tasks/{id}/messages", post(tasks::input))
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))
+        .route(
+            "/api/v1/agent",
+            get(agent::inspect).post(agent::migration::settings),
+        )
+        .route("/api/v1/agent/migrate", post(agent::migration::migrate))
+        .route(
+            "/api/v1/agent/routing",
+            get(agent::routing::inspect).post(agent::routing::configure),
+        )
         .route(PATH_SNAPSHOT, get(snapshot))
         .route("/api/v1/usage", get(usage))
         .route("/api/v1/usage/summary", get(usage::summary))
         .route("/api/v1/usage/policy", post(usage::policy))
+        .route(
+            "/api/v1/usage/providers",
+            get(usage::providers::inspect).post(usage::providers::configure),
+        )
         .route("/api/v1/usage/resume", post(usage::resume))
         .route("/api/v1/usage/cancel", post(usage::cancel_wait))
         .route(PATH_EVENTS, get(events_handler))
@@ -595,8 +601,13 @@ async fn main() -> Result<()> {
     tasks::start(s.clone());
     eprintln!("pot runtime listening on {}", listener.local_addr()?);
     axum::serve(listener, router)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+        .with_graceful_shutdown(async move {
+            let mut term =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("signal handler");
+            tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+            terminal::shutdown(&s).await;
+            s.codex.shutdown().await;
         })
         .await?;
     Ok(())
@@ -638,7 +649,6 @@ mod tests {
             token: "test-token".into(),
             boot: id(),
             workspace: PathBuf::new(),
-            program: String::new(),
             api_budget: None,
             pi: None,
             pi_program: String::new(),
@@ -647,7 +657,30 @@ mod tests {
             data: PathBuf::new(),
             cancel_notify: Arc::new(tokio::sync::Notify::new()),
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
+            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
+            codex: Arc::new(agent::codex::Hosts::default()),
         }
+    }
+    #[test]
+    fn snapshot_reports_persisted_binding_before_first_turn() {
+        let s = service();
+        agent::initialize_store(
+            &mut s.inner.lock().unwrap().store,
+            "main",
+            std::path::Path::new("/tmp"),
+            &pi::Config {
+                model: "deepseek-v4-flash".into(),
+                ..pi::Config::default()
+            },
+        )
+        .unwrap();
+        let binding = agent::current(&s.inner.lock().unwrap().store)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            s.snapshot().unwrap().engine.engine,
+            format!("{:?} · {}", binding.spec.engine, binding.spec.model)
+        );
     }
     #[tokio::test]
     async fn request_retry_is_idempotent_and_conflicting_reuse_is_rejected() {

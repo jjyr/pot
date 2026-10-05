@@ -41,10 +41,7 @@ pub(super) async fn invoke(
             .ok_or_else(|| error(StatusCode::CONFLICT, "no_request", "Main request missing"))?
     };
     if request.starts_with(RESULT_PREFIX)
-        && !matches!(
-            call.name.as_str(),
-            "pot_list_tasks" | "pot_get_task" | "pot_list_schedules" | "pot_get_schedule"
-        )
+        && !matches!(call.name.as_str(), "pot_list_tasks" | "pot_get_task")
     {
         return Err(error(
             StatusCode::FORBIDDEN,
@@ -116,17 +113,34 @@ pub(super) async fn invoke(
         "pot_manage_schedule" => {
             let mut args = call.args.clone();
             args["request_id"] = json!(request_id);
+            if matches!(args["action"].as_str(), Some("create" | "update")) {
+                agent::routing::allow_hint(&s, args["spec"]["profile"].as_str())
+                    .map_err(|e| error(StatusCode::BAD_REQUEST, "profile_hint", &e.to_string()))?;
+            }
             Ok(schedules::apply(&s, args, now())?)
         }
         "pot_create_task" => serde_json::to_value(
-            tasks::create(
-                State(s),
+            tasks::create_from(
+                s,
                 h,
-                Json(CreateTask {
+                CreateTask {
                     request_id,
                     text: field(&call.args, "text")?,
                     resource: call.args["resource"].as_str().unwrap_or("").into(),
-                }),
+                    profile: serde_json::from_value(call.args["profile"].clone()).map_err(|e| {
+                        error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string())
+                    })?,
+                    requirements: serde_json::from_value(
+                        call.args
+                            .get("requirements")
+                            .cloned()
+                            .unwrap_or_else(|| json!({})),
+                    )
+                    .map_err(|e| {
+                        error(StatusCode::BAD_REQUEST, "task_requirements", &e.to_string())
+                    })?,
+                },
+                agent::routing::Source::Tool,
             )
             .await?
             .0,
@@ -196,13 +210,14 @@ pub(super) fn deliver(s: &Service) -> Result<()> {
     if usage::paused(s)?.is_some() {
         return Ok(());
     }
-    if s.pi.is_none() || s.commands.is_closed() {
+    if !agent::configured(s) || s.commands.is_closed() {
         return Ok(());
     }
     let mut inner = s.inner.lock().unwrap();
     if inner.turn.is_some()
         || inner.engine.phase != EnginePhase::Ready
-        || s.budget()?.is_some_and(|b| b.remaining() == 0)
+        || s.budget_for(&inner.store)?
+            .is_some_and(|b| b.remaining() == 0)
     {
         return Ok(());
     }

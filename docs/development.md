@@ -9,7 +9,7 @@ mise trust
 mise install
 mise run setup        # Rust 组件、Linux target、本仓库 hk hooks、环境检查
 mise run prepare
-mise exec -- scripts/configure-pi
+mise exec -- scripts/configure-pi # 可选：仅 Pi + DeepSeek 路线
 mise run build
 mise run bundle
 mise run open
@@ -32,6 +32,29 @@ POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runti
 ```
 
 最后一条使用宿主已安装的 Pi 和本地模拟模型，无付费调用。真实 App/VM/模型验证记录见 [文档索引](README.md)，旧 POC fixture 不代表当前产品验收。
+
+### Codex 验证
+
+用户需要登录时，自行在独立 Terminal 运行官方 CLI 登录命令（Codex 支持
+`codex login --device-auth`）；Pot 仅在设置 → Agent 检测状态。
+在设置 → 助手填写账户可用的模型名称并明确选择 Codex。
+登录态只由 guest CLI 管理，保存在持久 engine-home。
+
+无凭据集成测试（显式指定安装好的官方 Codex CLI，不调用付费模型）：
+
+```sh
+mise exec -- cargo build -p pot-runtime
+mise exec -- python scripts/tests/codex-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime --codex /absolute/path/to/codex
+```
+
+构建最新镜像后，可在独立无网络 VM 中运行同一契约：
+
+```sh
+codesign --force --sign - --entitlements helper/virtualization.entitlements .local/d1/helper-build/release/PotImageCheck
+.local/d1/helper-build/release/PotImageCheck .local/d1/codex-guest-check .local/d1/resources scripts/tests codex-guest.sh
+```
+
+每次冷验证使用新的结果目录。该测试验证真实 CLI 与本地模拟模型的行为，不代替真实登录和模型验收。
 
 ### Git hooks
 
@@ -57,3 +80,47 @@ POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runti
 `poc/` 已移除，实验代码和证据可从 Git 历史查阅。`.local/poc/` 只是沿用的本机构建/下载缓存路径，不依赖旧实验源码。
 
 机器连接与部署记录统一在 `~/Workspace/Machines`；不要提交凭据、用户会话或构建产物。在线检查走 Runtime API，不从宿主打开运行中 guest 的 SQLite。
+
+### Claude 离线契约
+
+Pot 只通过官方接口检测 Claude 状态；需要认证的用户自行在普通 Terminal 处理。
+在助手设置填写模型并明确选择 Claude。当前项目验收按用户决定跳过 Claude 真实账户测试（无账号）。
+无需真实账户的开发验证使用原版 CLI + 本地模拟 Anthropic 服务：
+
+```sh
+mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime --claude /absolute/path/to/claude
+.local/d1/helper-build/release/PotImageCheck .local/d1/claude-guest-check .local/d1/resources scripts/tests claude-guest.sh
+```
+
+guest 检查遵循上面的 Helper 签名及 VM 执行前提。测试使用独立临时 HOME，不复用宿主凭据。
+
+
+### Terminal 进程清理（Linux guest）
+
+```sh
+.local/d1/helper-build/release/PotImageCheck .local/d1/terminal-guest-check .local/d1/resources scripts/tests terminal-guest.sh
+```
+
+使用新的隔离结果目录和上面的 Helper 签名。验证关闭 PTY、Runtime 正常退出及重启；
+包含前台 sleep、独立后台进程组和忽略 HUP/TERM 的后台 shell/孙进程，不调用模型。
+刻意 setsid 脱离终端会话的进程不属于此契约，仍由 VM 生命周期终止。
+
+
+### AGY 驱动回归
+
+AGY 采用原版 CLI 接入，按用户决定开放主聊、后台任务、计划和汇总；不提供 Pot 编排工具，角色依靠提示词约束。
+用户自行在 Terminal 登录，状态保持 unknown。无需账号的模拟传输回归：
+
+```sh
+mise exec -- cargo build --locked -p pot-runtime
+mise exec -- python scripts/tests/agy-runtime.py --runtime .local/poc/cargo-target/debug/pot-runtime
+```
+
+使用上面的 Helper 签名与全新无网络 guest 目录，验证打包 Runtime 的同一回归，
+以及原版 CLI help 和空 HOME的 headless 失败退出：
+
+```sh
+.local/d1/helper-build/release/PotImageCheck .local/d1/agy-guest-check .local/d1/resources scripts/tests agy-guest.sh
+```
+
+模拟传输不能证明原版 CLI 模型/工具行为；原版离线失败 smoke 也不算真实账户或角色隔离通过。

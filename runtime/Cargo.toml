@@ -9,7 +9,7 @@ pot-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow = "1"
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
@@ -21,3 +21,8 @@ libc = "0.2"
 
 chrono = "0.4"
 chrono-tz = "0.10"
+
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"
