@@ -7,6 +7,7 @@
 | 启动、构建、测试 | [开发指南](development.md) |
 | 了解已做什么、还缺什么 | [开发计划](development-plan.md) |
 | 理解组件、数据流和任务编排 | [架构](architecture.md) |
+| 理解后端 crate 与独立 Server 边界 | [Backend crate 拆分](backend-crates.md) |
 | 修改 API、Pi、任务状态或恢复 | [Runtime 契约](../runtime/README.md) |
 | 构建 Sandbox 镜像、桌面主题或 CJK 字体 | [Sandbox 镜像](sandbox-image.md) |
 | 修改聊天、任务、设置或 Sandbox UI | [UI 规范](ui-ux-design.md) |

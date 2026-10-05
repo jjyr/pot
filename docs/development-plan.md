@@ -60,3 +60,7 @@ Claude 已完成原生 CLI 集成及离线契约，真实账户测试按用户�
 
 Token 用量已补 Agent / 模型归属：新请求与原生轮次记录 agent/profile/provider/epoch/spec
 快照；总览和会话详情提供组合分类与分页，保留历史未知归属，不重置历史账本或额度。
+
+## Issue #5：Backend crates / 独立 Server
+
+先更新 [拆分设计](backend-crates.md)，再在独立 branch/worktree 实施。目标是独立 Server、Runtime 库、Core/Storage/Driver/Gateway 边界和构建/契约回归；不混入数据库格式迁移或远程部署功能。验收结果在完成后更新。

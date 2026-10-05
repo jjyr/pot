@@ -1,6 +1,6 @@
 # 当前架构
 
-更新：2026-10-04。本文描述已实现结构；未来产品约束见 [产品设计](product-design.md)。
+更新：2026-10-05。本文描述已实现结构；未来产品约束见 [产品设计](product-design.md)。
 
 ```text
 macOS
@@ -17,6 +17,10 @@ macOS
                               └─ 定时调度           │
                                   桌面 / broker ←──┘
 ```
+
+## Backend 拆分设计
+
+Issue [#5](https://github.com/jjyr/pot/issues/5) 在独立 worktree 按 [Backend crate 拆分](backend-crates.md) 调整 Core/Storage/Driver/Gateway/Runtime/Server 边界。Server 独立启动后端；App 通过协议访问，不暴露远程部署产品功能。以下既有运行语义在重构中保持兼容。
 
 ## 责任与代码入口
 
