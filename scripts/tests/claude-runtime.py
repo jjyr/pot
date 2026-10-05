@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import sqlite3
 import sys
 import tempfile
@@ -275,12 +276,20 @@ async def run(args):
 
         try:
             wrapper = root / "fixture-wrapper"
-            wrapper.write_text(
-                "#!/bin/sh\n"
-                '[ "$1" = "--wrapper-label" ] && [ "$2" = "a b" ] || exit 91\n'
-                "shift 2\n"
-                'exec claude "$@"\n'
-            )
+            probes = root / "help-probes"
+
+            def install_wrapper(version, compatible=True):
+                help_action = "" if compatible else "echo incompatible-controls; exit 0;"
+                wrapper.write_text(
+                    f"#!/bin/sh\n# fixture binary revision {version}\n"
+                    '[ "$1" = "--wrapper-label" ] && [ "$2" = "a b" ] || exit 91\n'
+                    "shift 2\n"
+                    f'if [ "$1" = "--help" ]; then printf x >> {shlex.quote(str(probes))}; {help_action} fi\n'
+                    'exec claude "$@"\n'
+                )
+                wrapper.chmod(0o700)
+
+            install_wrapper("one")
             wrapper.chmod(0o700)
             profile = {
                 "id": "claude-test",
@@ -311,6 +320,7 @@ async def run(args):
             await turn("first")
             before = (await api("agent"))["bindings"][0]["native_ref"]
             await turn("second")
+            assert probes.read_text() == "x", "Unchanged command probed before every turn"
             await stop()
             endpoint = await start()
             await turn("restart")
@@ -321,6 +331,35 @@ async def run(args):
                     "SELECT input,output,state FROM requests WHERE scope='main'"
                 ).fetchall()
                 assert rows == [(40, 10, "native_reported")] * 3, rows
+            assert probes.read_text() == "xx", "Restart should validate controls once"
+            # Compatible executable replacement preserves the immutable binding and native session.
+            install_wrapper("two")
+            await turn("compatible-upgrade")
+            assert probes.read_text() == "xxx"
+            assert (await api("agent"))["bindings"][0]["native_ref"] == before
+            # Incompatible controls and missing commands cannot reach the provider or replace history.
+            install_wrapper("three-incompatible", compatible=False)
+            count_before = len(requests)
+            await turn("incompatible-upgrade", expected="failed")
+            assert len(requests) == count_before
+            incompatible = await api("agent")
+            assert "required structured transport controls" in incompatible["needs_rebind"]
+            assert incompatible["bindings"][0]["native_ref"] == before
+            assert probes.read_text() == "xxxx"
+            install_wrapper("four-restored")
+            await turn("compatible-restore")
+            assert (await api("agent"))["needs_rebind"] is None
+            assert (await api("agent"))["bindings"][0]["native_ref"] == before
+            assert probes.read_text() == "xxxxx"
+            wrapper.unlink()
+            count_before = len(requests)
+            await turn("missing-command", expected="failed")
+            assert len(requests) == count_before
+            assert "missing or not executable" in (await api("agent"))["needs_rebind"]
+            install_wrapper("five-reinstalled")
+            await turn("command-reinstalled")
+            assert (await api("agent"))["bindings"][0]["native_ref"] == before
+            assert probes.read_text() == "xxxxxx"
             # A provider authentication failure must retain the original native session.
             fault_status = 401
             failure_started = asyncio.get_running_loop().time()
@@ -523,6 +562,10 @@ async def run(args):
                         "independent_schedule_runs": True,
                         "native_clock_trigger": True,
                         "authentication_failure_recovery": True,
+                        "capability_probe_cached": True,
+                        "compatible_upgrade_native_preserved": True,
+                        "incompatible_upgrade_no_model_call": True,
+                        "command_restore_native_preserved": True,
                         "provider_diagnostic_redacted": True,
                         "summary_checks": summary_checks,
                         "background_stopped": True,

@@ -296,3 +296,51 @@ Pi 的 8 个真实 CLI/mock 契约沿用本轮前已通过的证据，未将其�
 该包核对新增模型调用为 0。Claude 仍为 required，AGY 为 unknown。
 证据为 `setup-ui-check-20261005/workspace/product/issue2-final-package.json`。
 最终包核对没有重跑完整原生/真实模型矩阵；前述 ff8c/d2bc 镜像契约证据保持各自版本范围。
+
+
+## 2026-10-05 Claude 真实账户跳过、兼容性与 Terminal 清理
+
+用户明确决定无 Claude 账号，先集成并跳过真实账户测试。ClaudeDriver、助手设置、
+官方只读状态查询及 guest 原版 CLI 保留；不等待登录、不把离线 mock 结果写成真实
+账户通过，也不自动选择未登录的 Claude。
+
+Claude 成功的 capability probe 按 launch 配置和 executable metadata 缓存。
+未变化命令不再每轮运行 --help；文件替换/重装后重新检查，缓存有界，检查输出和时间
+有界，失败停止 probe 进程组。缺失或不兼容命令在模型请求前设置可操作的 needs_rebind
+原因；原绑定和 native session 保留，恢复兼容命令后显式 retry 仍使用原 native ID。
+
+宿主原版 2.1.289 CLI + loopback Anthropic 服务的扩展契约通过 36 次本地请求，
+paid_calls 0：两轮不重复 probe、Runtime 重启检查一次、wrapper 文件替换模拟兼容升级、
+缺失控制参数和缺失程序不调用模型、恢复后原 session 续聊；原有 401/400 处理、
+独立 worker/计划、真实时钟、只读汇总、取消及后台资源收敛均通过。
+命令替换模拟升级不等同于对所有厂商版本升级都兼容的承诺。
+
+新增 terminal-runtime.py 在无网络 Linux guest 实测：shell 的前台 sleep、独立后台
+进程组、忽略 HUP/TERM 的后台 shell 及其 sleep 孙进程，在关闭 PTY和 Runtime 正常
+终止后均不再运行；重启 boot ID 改变、PTY 列表为空、用量请求数 0。
+证据位于 terminal-tree-guest-20261005/data/terminal-runtime.json。
+本检查不包括刻意 setsid 脱离终端 session 的守护进程，该范围仍由 VM/D4 处理。
+
+补做已授权的真实 Codex 时钟验收：在既有隔离账户 root 上创建一分钟间隔计划，
+只等待 Runtime 时钟，不调用手动 run。自动 run 完成并写入结构化报告，native thread
+独立于主线程及先前两个 worker，主 epoch 2/native ID 保持不变；随后立即暂停计划。
+该 run 的原生上报 input 44197、output 169、cache 28160、unknown 0；累计账本
+为 10 个轮次记录、input 300091、output 1229、cache 238592、unknown 1。
+这是真实服务调用，不能写成 paid_calls 0。证据为
+setup-ui-check-20261005/workspace/product/issue2-account-clock.json（218418 镜像）。
+
+Mac 仍锁屏，最终发送禁用态、长说明和任务迁移的 GUI 复核继续保持未测。
+Claude 真实账户跳过不再作为推进阻塞；AGY 接入授权/实际隔离契约仍未确认。
+
+
+最终镜像 `pot.local/sandbox:5240639ea6342c173067` 的 Claude guest 扩展契约通过
+36 次 loopback 请求（77 秒含 import/unpack），paid_calls 0、account_acceptance false。
+证据为 claude-upgrade-guest-20261005/data/claude-runtime.json；同镜像 Terminal
+进程清理契约通过（7 秒含 import/unpack）。Runtime 84、protocol 1 测试通过，
+`mise run check`、构建和打包通过。本轮未改 App，也未重复原有 11 个 App 测试。
+
+
+隔离测试副本更新为 524063 镜像后正常重启。只读确认 Codex 仍 authenticated、
+原 epoch/native thread 不变，Claude 为 required，测试计划均已暂停，累计仍为 10
+个轮次记录；此包核对新增模型调用 0。证据为
+setup-ui-check-20261005/workspace/product/issue2-claude-package.json。

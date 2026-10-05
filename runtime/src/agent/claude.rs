@@ -1,27 +1,83 @@
 //! Original Claude CLI structured transport. Each turn owns its process.
 use super::*;
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::MetadataExt;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
-/// Probe the configured executable without opening a model session.
+#[derive(PartialEq, Eq)]
+struct ExecutableStamp(PathBuf, u64, u64, u64, i64, i64, i64, i64);
+fn executable_stamp(name: &str) -> Result<ExecutableStamp> {
+    let path = discovery::executable(name)
+        .ok_or_else(|| anyhow!("Claude executable is missing or not executable: {name}"))?;
+    let m = std::fs::metadata(&path)?;
+    Ok(ExecutableStamp(
+        path,
+        m.dev(),
+        m.ino(),
+        m.len(),
+        m.mtime(),
+        m.mtime_nsec(),
+        m.ctime(),
+        m.ctime_nsec(),
+    ))
+}
+
+/// Cache successful capability checks until the configured executable changes.
+/// This checks controls, not accounts or an exact CLI version, and never calls a model.
 pub async fn prepare(spec: &ResolvedSpec) -> Result<()> {
     let launch = spec
         .launch_spec
         .as_ref()
         .ok_or_else(|| anyhow!("Missing Claude launch spec"))?;
-    let output = tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::process::Command::new(&launch.executable)
-            .args(launch.expand(&["--help".into()])?)
-            .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await??;
-    let help = String::from_utf8_lossy(&output.stdout);
+    static CHECKS: OnceLock<tokio::sync::Mutex<HashMap<String, ExecutableStamp>>> = OnceLock::new();
+    let key = serde_json::to_string(launch)?;
+    let stamp = executable_stamp(&launch.executable)?;
+    let mut checks = CHECKS.get_or_init(Default::default).lock().await;
+    if checks.get(&key) == Some(&stamp) {
+        return Ok(());
+    }
+    let mut child = tokio::process::Command::new(&stamp.0)
+        .args(launch.expand(&["--help".into()])?)
+        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .kill_on_drop(true)
+        .spawn()?;
+    let pid = child.id().unwrap() as i32;
+    let mut stdout = child.stdout.take().unwrap().take(65537);
+    let mut stderr = child.stderr.take().unwrap().take(65537);
+    let output = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut out = vec![];
+        let mut err = vec![];
+        tokio::try_join!(stdout.read_to_end(&mut out), stderr.read_to_end(&mut err))?;
+        anyhow::ensure!(
+            out.len() <= 65536 && err.len() <= 65536,
+            "Claude capability output exceeds limit"
+        );
+        Ok::<_, anyhow::Error>((child.wait().await?, out))
+    })
+    .await;
+    // Also settle wrapper children on timeout or bounded-output failure.
+    let output = match output {
+        Ok(Ok(output)) => output,
+        failure => {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+            let _ = child.wait().await;
+            return match failure {
+                Ok(Err(e)) => Err(e),
+                _ => Err(anyhow!("Claude capability check timed out")),
+            };
+        }
+    };
+    let help = String::from_utf8_lossy(&output.1);
     anyhow::ensure!(
-        output.status.success()
+        output.0.success()
             && [
                 "--system-prompt-snapshot",
                 "--strict-mcp-config",
@@ -34,6 +90,14 @@ pub async fn prepare(spec: &ResolvedSpec) -> Result<()> {
             .all(|flag| help.contains(flag)),
         "Claude CLI lacks the required structured transport controls; update it in Sandbox Terminal"
     );
+    anyhow::ensure!(
+        stamp == executable_stamp(&launch.executable)?,
+        "Claude executable changed during capability check; retry"
+    );
+    if checks.len() >= 64 {
+        checks.clear();
+    }
+    checks.insert(key, stamp);
     Ok(())
 }
 
@@ -106,7 +170,10 @@ async fn execute(
         return Ok(Outcome::Cancelled);
     }
     let spec = &binding.spec;
-    prepare(spec).await?;
+    if let Err(error) = prepare(spec).await {
+        s.inner.lock().unwrap().store.set("agent.needs_rebind", &format!("Claude command unavailable or incompatible: {error}; restore/edit the command and retry, or explicitly migrate"))?;
+        return Err(error);
+    }
     let NativeRef::Claude {
         session_id,
         started,

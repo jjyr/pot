@@ -83,7 +83,8 @@ codesign --force --sign - --entitlements helper/virtualization.entitlements .loc
 
 ### Claude 离线契约
 
-Sandbox Terminal 使用 `claude auth login` 完成官方登录；在 Agent 设置填写模型并选择 Claude。
+Pot 只通过官方接口检测 Claude 状态；需要认证的用户自行在普通 Terminal 处理。
+在助手设置填写模型并明确选择 Claude。当前项目验收按用户决定跳过 Claude 真实账户测试（无账号）。
 无需真实账户的开发验证使用原版 CLI + 本地模拟 Anthropic 服务：
 
 ```sh
@@ -92,3 +93,14 @@ mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-t
 ```
 
 guest 检查遵循上面的 Helper 签名及 VM 执行前提。测试使用独立临时 HOME，不复用宿主凭据。
+
+
+### Terminal 进程清理（Linux guest）
+
+```sh
+.local/d1/helper-build/release/PotImageCheck .local/d1/terminal-guest-check .local/d1/resources scripts/tests terminal-guest.sh
+```
+
+使用新的隔离结果目录和上面的 Helper 签名。验证关闭 PTY、Runtime 正常退出及重启；
+包含前台 sleep、独立后台进程组和忽略 HUP/TERM 的后台 shell/孙进程，不调用模型。
+刻意 setsid 脱离终端会话的进程不属于此契约，仍由 VM 生命周期终止。

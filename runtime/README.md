@@ -259,7 +259,8 @@ codec clamps output and reads usage without message-format translation. Protocol
 `unknown` passes JSON and response bytes through, reserves a request, leaves usage
 unknown, and disables exact-budget/usage/checkpoint-resume capabilities. It is
 currently useful for opaque OpenAI-shaped streams; it does not make Pi speak an
-arbitrary new protocol. Responses, Messages and Gemini codecs are not present.
+arbitrary new protocol. Responses, Anthropic Messages and Gemini codecs clamp their native output-cap fields
+and read native usage; their original wire formats pass through without translation.
 
 `pot-tools.json` is shared by the Pi extension and `POST /api/v1/mcp`. The MCP facade
 implements JSON-RPC initialize/ping/tools/list/tools/call over HTTP (protocol
@@ -430,3 +431,14 @@ including attached short forms. Wrappers are user-trusted executables and must p
 the selected protocol; incompatible output fails visibly, without transport fallback.
 Codex extra permission requests are denied by the guest-VM policy and surfaced as a
 credential-free system message; permitted Pot MCP requests still use per-role authorization.
+
+
+Claude capability checks are cached for each launch command and executable metadata
+(device/inode, size, modification/change timestamps). Unchanged commands do not run
+`--help` before every turn. Replacing/reinstalling the executable invalidates the check,
+without changing the binding or imposing an exact version lock. Failed controls or a
+missing executable set an actionable `needs_rebind` reason before model execution;
+restoring a compatible command allows an explicit retry in the same native session.
+Probe output is bounded and a timeout/output failure stops the probe process group.
+Offline original-CLI tests remain separate from real-account acceptance; current
+acceptance scope is recorded in the development plan and validation report.

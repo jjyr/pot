@@ -25,7 +25,7 @@ D1–D6 保留为范围编号，后续能力已提前实现，不要求重新顺
 | D3 报告场景 S1 | 任务执行与自动编排已有 | 两份附件→追加部署成本→报告/来源→重启追问的完整验收；结构化产物、明确偏好 |
 | D4 网页接管 S2 | 桌面查看与合作式接管已有 | 浏览器 Agent 工具、桌面资源排队、独立 controller 权限域、真实 Pi shell/CDP/X11 绕过负测 |
 | D5 持久计划 S3 | 调度及本地模拟端到端已实现 | 真实来源变化与证据、实际 sleep/wake 错过触发和重复唤醒完整场景验收 |
-| D6 多引擎与发行 | 未完成 | 原生 Codex App Server 的真实主聊/MCP、并发 worker、重启续聊和取消已验收；ClaudeDriver 已完成原生 CLI 离线契约；AgyDriver 与真实账户矩阵待验收；记忆更正/遗忘、服务授权与 review、升级恢复、签名公证与冷安装 |
+| D6 多引擎与发行 | 未完成 | 原生 Codex App Server 的真实主聊/MCP、并发 worker、重启续聊和取消已验收；ClaudeDriver 已完成原生 CLI 离线契约；Claude 真实账户按用户决定跳过；AgyDriver 与其他真实账户矩阵待验收；记忆更正/遗忘、服务授权与 review、升级恢复、签名公证与冷安装 |
 
 完整 S1–S3 通过标准见 [产品设计](product-design.md#产品验收场景)。当前无 Developer ID，发行签名公证暂缓，只阻塞发行；开发包保留必要的 ad hoc 签名。
 
@@ -48,11 +48,11 @@ Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定
 | 4 工具桥 | 共享 schema/dispatcher，Pi 薄适配器，带 lane/turn 身份的 HTTP MCP facade | 权限 UI；其他引擎 MCP 验收 |
 | 5 迁移 | 事务化 handoff、新 epoch、重启恢复、API 设置及既有 pi.json 设置触发、任务默认固定 | profile 管理/worker 默认 UI 已补；任务页“更换 Agent”已接入同一迁移 API，路由配置复制、后台默认、白名单、并发和 provider 额度已交互验证；任务迁移交互待补；原地切换与可选 narrative 未开启 |
 | 6 Codex 主聊天 | 宿主原生 App Server + 本地模拟模型通过并发、MCP 身份隔离、续聊、HTTP 取消和累计用量验证；ACP 额外标题调用及轮次用量缺口已复现，选择原生传输 | 已接入主聊天/独立 worker、设置入口与镜像；guest 本地模拟模型契约通过。真实 Codex 登录、主聊/MCP、重启原线程续聊、前台 shell 取消及取消后续聊已通过；权限 UI 和完整故障矩阵待补 |
-| 7 Codex workers/计划 | 独立 native threads、多 worker 与只读汇总、原生累计差额计量；Pi 前置门槛移除 | 手动执行及 Runtime 真实时钟触发已验证独立线程；真实账户的两个并发 worker 和只读汇总通过，计划真实账户验收待补 |
+| 7 Codex workers/计划 | 独立 native threads、多 worker 与只读汇总、原生累计差额计量；Pi 前置门槛移除 | 手动执行及 Runtime 真实时钟触发已验证独立线程；真实账户的两个并发 worker、只读汇总及 Runtime 时钟自动触发通过，定时 run 的 native thread 独立 |
 | 8 任务路由 | API 显式选择、计划 profile、用户白名单内的 tool hint、worker 默认；创建时能力校验；固定快照及选择原因；全局/profile/provider 并发限制 | 任务路由设置 UI 已实现；Codex 接入后的跨引擎真实验收 |
-| 9 Terminal / 发现 / 命令 | Runtime PTY + 原生 bearer WebSocket 桥 + bundled xterm；Terminal/Sandbox 独立侧栏入口；显式官方只读状态查询；调用命令 revision、返回页面防抖刷新、App 重连找回 PTY；取消登录命令与专用登录终端；取消版本锁 | 独立 Terminal/Sandbox、忙碌 shell 切页保留输入、guest Codex 登录及重启持久性已实测；完整进程树停止负测待补 |
-| 10 Claude / AGY | Claude 原生 CLI Driver、独立会话/worker/计划、只读汇总、取消清理、用量和设置入口；官方登录状态查询；原版集成条款已核实 | Claude 打包 guest 离线契约通过；认证失败及时停止/恢复及诊断过滤已补宿主契约；仍需真实账户与升级故障矩阵；AGY Driver 及其官方条款/契约验收 |
+| 9 Terminal / 发现 / 命令 | Runtime PTY + 原生 bearer WebSocket 桥 + bundled xterm；Terminal/Sandbox 独立侧栏入口；显式官方只读状态查询；调用命令 revision、返回页面防抖刷新、App 重连找回 PTY；取消登录命令与专用登录终端；取消版本锁 | 独立 Terminal/Sandbox、忙碌 shell 切页保留输入、guest Codex 登录及重启持久性已实测；Linux guest 的前台/独立后台组/忽略 HUP/TERM 的 shell 与孙进程在 close/Runtime 退出后停止，重启无 PTY；脱离 session 的守护进程仍属 D4 |
+| 10 Claude / AGY | Claude 原生 CLI Driver、独立会话/worker/计划、只读汇总、取消清理、用量和设置入口；官方登录状态查询；原版集成条款已核实 | Claude 打包 guest 离线契约通过；认证失败及时停止/恢复及诊断过滤已补宿主契约；真实账户按用户决定跳过，不再等待 Claude 登录；兼容性检查缓存与命令替换/不兼容/缺失/恢复已通过宿主离线契约，524063 guest 的命令替换/不兼容/缺失/恢复扩展契约已通过；其他厂商版本矩阵仍需独立验收；AGY Driver 及其官方条款/契约验收 |
 | 11 引导 / 设置 | 通用/助手/Agent/Sandbox 导航；配置前可打开 Terminal；未配置时拒绝主聊天；初始 API 保存取消额外确认 | 按更新后的 #2 改为环境/工具准备后进入普通助手设置，取消强制登录页和自动预选；独立导航、只读状态、空选择及冷配置无请求已交互验收；最终发送禁用态回归通过但界面复核遇到锁屏；冷安装/部分缺失修复、浅深色完整矩阵待验收 |
 
-验证证据及局限见 [Agent layer 验证](validation/agent-layer.md)。Codex 已完成真实 CLI / guest 离线契约及上述真实账户验收；计划、权限和故障完整矩阵仍有缺口。
-Claude 已提供显式 profile 设置入口；AGY 暂不启用 profile。Terminal 可用不等于通过 Driver 验收。
+验证证据及局限见 [Agent layer 验证](validation/agent-layer.md)。Codex 已完成真实 CLI / guest 离线契约及上述真实账户验收；权限和故障完整矩阵仍有缺口。
+Claude 已完成原生 CLI 集成及离线契约，真实账户测试按用户决定跳过（无账号），不算真实账户通过；AGY 暂不启用 profile。Terminal 可用不等于通过 Driver 验收。
