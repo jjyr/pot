@@ -258,7 +258,7 @@ impl Settings {
                     .child(Field::new().label("主 Agent").child(Button::new("select-claude").label("使用 Claude").disabled(!native_available("claude"))
                         .on_click(move |_, _, cx| command(json!({"action":"select-claude","model":fields[13].read(cx).value()})))));
                 let fields = self.fields.clone();
-                form = form.child(input(11, "AGY 模型", "支持原生主聊和续聊；后台任务与只读汇总尚未开放。登录请在 Terminal 处理。"))
+                form = form.child(input(11, "AGY 模型", "支持主聊、后台任务和汇总；工具权限由原版 CLI 管理，不提供 Pot 任务工具。登录请在 Terminal 处理。"))
                     .child(Field::new().label("主 Agent").child(Button::new("select-agy").label("使用 AGY").disabled(!native_available("agy"))
                         .on_click(move |_, _, cx| command(json!({"action":"select-agy","model":fields[11].read(cx).value()})))));
                 form = form.child(label(
@@ -379,7 +379,7 @@ impl Settings {
                             } else if id == "claude" {
                                 "原生 CLI · 官方登录状态只读检测。"
                             } else {
-                                "原生 CLI 主聊 · 无官方登录查询，状态保持未知；任务隔离待验收。"
+                                "原生 CLI · 状态未知；角色由提示词约束，不提供 Pot 任务工具。"
                             })
                             .child(div().py_2().child(status)),
                     );

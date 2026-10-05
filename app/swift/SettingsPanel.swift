@@ -223,7 +223,7 @@ import Foundation
                 }
                 _ = try await bridge.terminal.request("api/v1/agent", body: [
                     "profile": profile, "expected_revision": revision,
-                    "request_id": UUID().uuidString, "follow_main": true, "follow_worker": engine != "agy",
+                    "request_id": UUID().uuidString, "follow_main": true, "follow_worker": true,
                 ])
                 if engine == "agy" {
                     agyModel = model
@@ -295,7 +295,7 @@ import Foundation
                         "expected_revision": revision,
                         "request_id": UUID().uuidString,
                         "follow_main": true,
-                        "follow_worker": updated["engine"] as? String != "agy",
+                        "follow_worker": true,
                     ]
                 )
                 result = "命令已保存；在轮次边界迁移，未调用模型。"; refreshAgents()
@@ -524,11 +524,6 @@ import Foundation
 
     func useProfileForOwner() {
         guard let bridge, !routingBusy, !routingProfile.isEmpty else { return }
-        if routingOwner != "main",
-           savedProfiles.first(where: { $0["id"] as? String == routingProfile })?["engine"] as? String == "agy"
-        {
-            result = "AGY 尚未开放后台任务；请选择 Codex 或 Claude。"; return
-        }
         routingBusy = true
         let target = routingProfile
         let owner = routingOwner

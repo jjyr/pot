@@ -660,6 +660,30 @@ mod launch_tests {
         assert!(!resolved.capabilities.tool_policy_enforcement);
         assert!(!resolved.capabilities.subagents_disableable);
         assert!(!resolved.capabilities.safe_checkpoint_resume);
+        crate::agent::routing::check_requirements(
+            &resolved,
+            &crate::TaskRequirements {
+                tools: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for requirement in [
+            crate::TaskRequirements {
+                exact_budget: true,
+                ..Default::default()
+            },
+            crate::TaskRequirements {
+                desktop: true,
+                ..Default::default()
+            },
+            crate::TaskRequirements {
+                live_steering: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(crate::agent::routing::check_requirements(&resolved, &requirement).is_err());
+        }
         profile.auth_ref = "cli:claude".into();
         assert!(profile.resolve().is_err());
     }

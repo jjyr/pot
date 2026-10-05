@@ -369,3 +369,30 @@ ID 变化拒绝、result 后非法输出不发布成功消息、最终用量只�
 AGY 自定义 agent tools/MCP 配置尚未证明全局配置隔离，且缺少 Claude 的严格 MCP/source
 开关；因此不宣称 task/MCP/subagent 禁用/只读汇总能力，后台角色保持禁用。选择 AGY
 或编辑其调用命令不覆盖已有 worker default。此结果不代表 Issue #2 的 AGY 全部验收完成。
+
+
+### 2026-10-05 AGY 角色按原生 CLI 能力开放
+
+用户明确接受 AGY 原生工具权限与角色隔离差异，不再把严格工具隔离作为启用前提。
+解除后台任务、计划和汇总禁用；角色指导随每轮 stdin 输入发送，汇总不宣称强制只读。
+Pot 不向 AGY 配置 MCP 或提供任务/计划编排工具，执行进程还移除继承的
+POT_TASK_API/POT_TASK_TOKEN。用户原版 CLI 配置继续由 CLI 管理。
+选择 AGY 和修改调用命令采用与其他 native profile 相同的 main/worker 默认设置；
+已有任务保持各自绑定，允许用户显式迁移到 AGY。
+
+继续使用不同 Driver 适配不同 CLI 形态：Codex App Server 的配置/feature controls、
+Claude stream-json 的 tools/settings/MCP flags、AGY stream-json/conversation 和每轮角色
+提示词。共同接口仅统一会话、事件、用量与取消，不强行统一权限能力。
+AGY 的严格工具隔离、MCP 与原生 subagent 禁用能力仍为 false；路由仅按用户接受的
+策略允许 tools 要求，不放开 exact_budget、live_steering 或 desktop。对应能力测试通过。
+
+宿主及成品镜像 `pot.local/sandbox:20ba6069212d23d28f93` 的 fake transport 回归通过：
+两个并发 worker 独立 native ID、主 native ID 保持、任务完成后主聊汇总完成、手动触发
+计划的独立 worker 完成并写入报告，以及已有续聊/重启/命令恢复/取消/用量/诊断过滤。
+fixture 验证 AGY 执行进程没有 Pot MCP 参数或任务 API 环境变量。
+同一无网络 guest 的原版 CLI help/空 HOME headless 失败退出 smoke 通过；
+总计 8 秒含 import/unpack，model_calls 0。
+证据为 `.local/d1/agy-roles-guest-20261005/data/{agy-runtime,agy-cli-smoke}.json`。
+Runtime 88、protocol 1、App 11 项测试和 check/build/bundle 通过。
+真实账户、原版 CLI 后台工具执行与 GUI 交互仍未验收；fake transport 不代替这些验收。
+本记录更新前一节的“后台角色禁用”策略，并保留其历史验收范围。

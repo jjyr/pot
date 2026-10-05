@@ -444,7 +444,7 @@ Offline original-CLI tests remain separate from real-account acceptance; current
 acceptance scope is recorded in the development plan and validation report.
 
 
-## AGY native sessions (limited integration)
+## AGY native sessions
 
 AGY uses the original CLI's `--print --input-format text --output-format stream-json`
 transport, one process per turn. The CLI creates the conversation UUID; Runtime
@@ -464,12 +464,31 @@ replay is claimed. The original CLI owns its guest HOME, login and conversation
 history. AGY has no verified official read-only auth-status command, so discovery
 keeps authentication `unknown`; Runtime never probes login by calling a model.
 
-Only main chat is enabled. AGY's native permissions/settings remain CLI-owned;
-Pot does not pass blanket approval or overwrite workspace/global CLI configuration.
-AGY lacks Claude's `--strict-mcp-config`/`--setting-sources` controls. Its custom
-agent `tools` and `mcpServers` declarations have not established equivalent global
-configuration isolation. `tool_policy_enforcement`, `mcp_tools`,
-`subagents_disableable` and `native_compaction` capabilities remain false.
-Routing rejects all AGY workers/schedules before dispatch, and the driver refuses
-worker and read-only-summary roles. Selecting AGY in Settings preserves the existing
-worker default. This is not full Issue #2 AGY role acceptance or a licensing claim.
+Main chat, workers, schedules and result summaries are enabled by the user's
+explicit acceptance of AGY's native tool permissions. Each turn carries current
+role guidance in the input text: workers must not delegate/manage schedules;
+summaries must only summarize supplied results without commands or file edits.
+AGY has no verified system-prompt override, so this is prompt guidance rather than
+an enforced read-only contract. Native conversations and cancellation scopes stay
+independent for workers; summaries resume the main conversation.
+
+Pot supplies no MCP configuration or task/schedule tools to AGY and removes
+inherited `POT_TASK_API`/`POT_TASK_TOKEN` variables from its process. It does not
+provide `pot_create_task` or any other Pot orchestration tool. Users' native CLI
+settings/plugins/MCP and their guest tool permissions remain CLI-owned; Pot does
+not overwrite them or pass blanket approval. Selecting AGY updates the main and
+worker defaults like the other native backends.
+
+`tool_policy_enforcement`, `mcp_tools`, `subagents_disableable` and
+`native_compaction` capabilities remain false. Routing explicitly permits AGY
+with `requirements.tools` under the accepted native-permission policy; exact
+request budgets, live steering and desktop requirements remain unsupported.
+This does not claim original CLI role isolation/account acceptance or vendor licensing.
+
+
+The common Driver interface covers native identity, turn events, usage and cancellation;
+it does not require identical CLI permissions. Codex uses App Server configuration
+and feature overrides; Claude uses stream-json with explicit tools/settings/MCP flags;
+AGY uses its stream-json/conversation interface and per-turn prompt guidance. Drivers
+must declare only capabilities supported by their backend. AGY's accepted native-tool
+routing exception does not enable its strict isolation capability or alter Codex/Claude controls.

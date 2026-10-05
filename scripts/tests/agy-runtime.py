@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-import urllib.error
 import urllib.request
 
 FIXTURE = r"""
@@ -21,6 +20,10 @@ if args == ['--help']:
 text=sys.stdin.read()
 assert args[args.index('--model')+1] == 'agy-mock'
 assert '--dangerously-skip-permissions' not in args
+assert '--mcp-config' not in args
+assert 'POT_TASK_API' not in os.environ and 'POT_TASK_TOKEN' not in os.environ
+role='summary' if text.startswith('This is a Pot result summary.') else 'worker' if text.startswith('This is a Pot background task.') else 'main'
+with Path(os.environ['AGY_ROLES']).open('a') as f: f.write(json.dumps({'role':role,'prompt':text})+'\n')
 record=Path(os.environ['AGY_CALLS'])
 with record.open('a') as f: f.write(json.dumps(args)+'\n')
 conversation=args[args.index('--conversation')+1] if '--conversation' in args else str(uuid.uuid4())
@@ -29,6 +32,8 @@ if 'ERROR' in text:
     emit({'event':'result','result':{'status':'ERROR','error':'SECRET_DIAGNOSTIC','response':'SECRET_DIAGNOSTIC'}})
     sys.exit(1)
 if 'MISMATCH' in text: conversation=str(uuid.uuid4())
+if role == 'worker' and '.pot-schedule-result.json' in text:
+    Path('.pot-schedule-result.json').write_text(json.dumps({'summary':'AGY fixture observation','fingerprint':'stable-fixture','evidence':['fixture://source'],'artifacts':[]}))
 emit({'event':'init','conversation_id':conversation,'init':{'tools':[]}})
 if 'CANCEL_WAIT' in text:
     Path(os.environ['AGY_PID']).write_text(str(os.getpid()))
@@ -53,6 +58,7 @@ async def run(args):
         fixture.chmod(0o700)
         calls = root / "calls"
         pidfile = root / "pid"
+        roles = root / "roles"
         env = {
             "PATH": os.environ["PATH"],
             "HOME": temp,
@@ -61,6 +67,9 @@ async def run(args):
             "POT_RUNTIME_BIND": "127.0.0.1:0",
             "AGY_CALLS": str(calls),
             "AGY_PID": str(pidfile),
+            "AGY_ROLES": str(roles),
+            "POT_TASK_API": "must-not-reach-cli",
+            "POT_TASK_TOKEN": "must-not-reach-cli",
         }
 
         async def start():
@@ -146,7 +155,7 @@ async def run(args):
                     "profile": profile,
                     "expected_revision": 0,
                     "request_id": "setup",
-                    "follow_worker": False,
+                    "follow_worker": True,
                 },
             )
             await turn("first")
@@ -204,24 +213,83 @@ async def run(args):
             invocations = [json.loads(line) for line in calls.read_text().splitlines()]
             assert "--conversation" not in invocations[0]
             assert all("--conversation" in v for v in invocations[1:])
-            # All AGY task roles are rejected before any CLI process is started.
-            try:
-                await api(
-                    "tasks",
-                    {
-                        "request_id": "deny-tools",
-                        "title": "deny-tools",
-                        "text": "test",
-                        "resource": "",
+            workers = await asyncio.gather(
+                *[
+                    api(
+                        "tasks",
+                        {
+                            "request_id": f"worker-{i}",
+                            "text": f"worker {i}",
+                            "resource": "",
+                            "requirements": {"tools": True},
+                        },
+                    )
+                    for i in range(2)
+                ]
+            )
+            for _ in range(400):
+                page = await api("tasks/query?scope=all&limit=50")
+                assert not any(t["phase"] == "failed" for t in page["items"]), page
+                role_records = [json.loads(v) for v in roles.read_text().splitlines()]
+                if (
+                    len(page["items"]) == 2
+                    and all(t["phase"] == "complete" for t in page["items"])
+                    and any(v["role"] == "summary" for v in role_records)
+                    and (await api("snapshot"))["turn"] is None
+                ):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Workers or summary did not complete")
+            native_ids = [before["native_ref"]["conversation_id"]]
+            for worker in workers:
+                ref = (await api("agent?owner=" + worker["id"]))["bindings"][0]["native_ref"]
+                native_ids.append(ref["conversation_id"])
+            assert len(set(native_ids)) == 3, native_ids
+            assert (await api("agent"))["bindings"][0]["native_ref"] == before["native_ref"]
+            assert all(
+                "Pot task and schedule tools are not provided" in v["prompt"]
+                for v in role_records
+                if v["role"] == "main"
+            )
+            assert all(
+                "do not delegate work" in v["prompt"] for v in role_records if v["role"] == "worker"
+            )
+            assert all(
+                "do not run commands" in v["prompt"] for v in role_records if v["role"] == "summary"
+            )
+            plan = await api(
+                "schedules",
+                {
+                    "request_id": "agy-plan",
+                    "action": "create",
+                    "spec": {
+                        "title": "AGY fixture schedule",
+                        "goal": "Scheduled worker test",
+                        "kind": "interval",
+                        "every_minutes": 1,
+                        "enabled": False,
                         "profile": "agy-test",
                         "requirements": {"tools": True},
                     },
-                )
-            except urllib.error.HTTPError as error:
-                assert error.code == 400, error
-                assert "AGY task roles" in error.read().decode()
+                },
+            )
+            fired = await api(
+                "schedules", {"request_id": "agy-fire", "action": "run", "schedule_id": plan["id"]}
+            )
+            for _ in range(400):
+                page = await api("tasks/query?scope=all&limit=50")
+                scheduled = next(t for t in page["items"] if t["id"] == fired["task_id"])
+                assert scheduled["phase"] != "failed", scheduled
+                if scheduled["phase"] == "complete":
+                    break
+                await asyncio.sleep(0.05)
             else:
-                raise AssertionError("AGY admitted unverified tool policy")
+                raise AssertionError("Scheduled worker did not complete")
+            scheduled_ref = (await api("agent?owner=" + fired["task_id"]))["bindings"][0][
+                "native_ref"
+            ]["conversation_id"]
+            assert scheduled_ref not in native_ids
             print(
                 json.dumps(
                     {
@@ -234,7 +302,10 @@ async def run(args):
                         "command_recovery": True,
                         "redaction": True,
                         "usage_final_only": True,
-                        "tool_tasks_rejected": True,
+                        "workers_and_summary": True,
+                        "scheduled_worker": True,
+                        "independent_native_sessions": True,
+                        "pot_tools_not_supplied": True,
                     }
                 )
             )

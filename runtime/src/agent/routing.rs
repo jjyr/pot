@@ -159,13 +159,11 @@ pub fn resolve(
     Ok((spec, routing))
 }
 pub fn check_requirements(spec: &ResolvedSpec, requirements: &TaskRequirements) -> Result<()> {
-    anyhow::ensure!(
-        spec.engine != Engine::Agy,
-        "AGY task roles require a verified tool isolation contract; choose Codex or Claude"
-    );
+    // User accepts AGY native tool permissions and prompt-only role guidance.
+    // Keep capability declarations false: this exception is not enforcement.
     let c = &spec.capabilities;
     anyhow::ensure!(
-        !requirements.tools || c.tool_policy_enforcement,
+        !requirements.tools || c.tool_policy_enforcement || spec.engine == Engine::Agy,
         "Profile cannot enforce task tool policy"
     );
     // Desktop isolation has not passed D4 acceptance. Shell access is not a declaration of that capability.

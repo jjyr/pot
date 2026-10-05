@@ -51,8 +51,8 @@ Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定
 | 7 Codex workers/计划 | 独立 native threads、多 worker 与只读汇总、原生累计差额计量；Pi 前置门槛移除 | 手动执行及 Runtime 真实时钟触发已验证独立线程；真实账户的两个并发 worker、只读汇总及 Runtime 时钟自动触发通过，定时 run 的 native thread 独立 |
 | 8 任务路由 | API 显式选择、计划 profile、用户白名单内的 tool hint、worker 默认；创建时能力校验；固定快照及选择原因；全局/profile/provider 并发限制 | 任务路由设置 UI 已实现；Codex 接入后的跨引擎真实验收 |
 | 9 Terminal / 发现 / 命令 | Runtime PTY + 原生 bearer WebSocket 桥 + bundled xterm；Terminal/Sandbox 独立侧栏入口；显式官方只读状态查询；调用命令 revision、返回页面防抖刷新、App 重连找回 PTY；取消登录命令与专用登录终端；取消版本锁 | 独立 Terminal/Sandbox、忙碌 shell 切页保留输入、guest Codex 登录及重启持久性已实测；Linux guest 的前台/独立后台组/忽略 HUP/TERM 的 shell 与孙进程在 close/Runtime 退出后停止，重启无 PTY；脱离 session 的守护进程仍属 D4 |
-| 10 Claude / AGY | Claude 原生 CLI Driver、独立会话/worker/计划、只读汇总、取消清理、用量和设置入口；官方登录状态查询；原版集成条款已核实 | Claude 打包 guest 离线契约通过；认证失败及时停止/恢复及诊断过滤已补宿主契约；真实账户按用户决定跳过，不再等待 Claude 登录；兼容性检查缓存与命令替换/不兼容/缺失/恢复已通过宿主离线契约，524063 guest 的命令替换/不兼容/缺失/恢复扩展契约已通过；其他厂商版本矩阵仍需独立验收；AGY 原生主聊 Driver/设置入口已接入；任务、MCP、只读汇总隔离及真实账户验收未完成，厂商适用条款未确认 |
+| 10 Claude / AGY | Claude 原生 CLI Driver、独立会话/worker/计划、只读汇总、取消清理、用量和设置入口；官方登录状态查询；原版集成条款已核实 | Claude 打包 guest 离线契约通过；认证失败及时停止/恢复及诊断过滤已补宿主契约；真实账户按用户决定跳过，不再等待 Claude 登录；兼容性检查缓存与命令替换/不兼容/缺失/恢复已通过宿主离线契约，524063 guest 的命令替换/不兼容/缺失/恢复扩展契约已通过；其他厂商版本矩阵仍需独立验收；AGY 原生 Driver/设置入口已接入，按用户决定开放后台任务、计划和汇总，不提供 Pot 编排工具；原版 CLI 工具隔离及真实账户验收未完成，厂商适用条款未确认 |
 | 11 引导 / 设置 | 通用/助手/Agent/Sandbox 导航；配置前可打开 Terminal；未配置时拒绝主聊天；初始 API 保存取消额外确认 | 按更新后的 #2 改为环境/工具准备后进入普通助手设置，取消强制登录页和自动预选；独立导航、只读状态、空选择及冷配置无请求已交互验收；最终发送禁用态回归通过但界面复核遇到锁屏；冷安装/部分缺失修复、浅深色完整矩阵待验收 |
 
 验证证据及局限见 [Agent layer 验证](validation/agent-layer.md)。Codex 已完成真实 CLI / guest 离线契约及上述真实账户验收；权限和故障完整矩阵仍有缺口。
-Claude 已完成原生 CLI 集成及离线契约，真实账户测试按用户决定跳过（无账号），不算真实账户通过；AGY 可明确选择主聊 profile；后台角色因缺少已验证的配置/工具隔离保持禁用。Terminal 可用不等于通过 Driver 验收。
+Claude 已完成原生 CLI 集成及离线契约，真实账户测试按用户决定跳过（无账号），不算真实账户通过；AGY 可选择主聊和后台 profile；用户接受原生工具权限并开放任务、计划、提示词约束的汇总，不提供 Pot 编排工具。Terminal 可用不等于通过 Driver 验收。
