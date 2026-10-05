@@ -43,11 +43,17 @@ import Foundation
         section = 1; profile = selected; connectionKind = selected["engine"] as? String ?? ""
         connectionName = selected["name"] as? String ?? ""
         connectionModel = selected["model"] as? String ?? ""
-        secretRevision += 1; aiScreen = "manage"; checkMessage = ""; modelOptions = []
+        secretRevision += 1; aiScreen = "manage"; checkMessage = ""; result = ""; modelOptions = []
         let connection = connections.first { $0["profile_id"] as? String == id }
         apiEndpoint = connection?["endpoint"] as? String ?? ""
         apiProtocol = connection?["protocol"] as? String ?? "openai_chat"
         hasAPIKey = connection?["has_key"] as? Bool ?? false
+        if connectionKind == "pi" {
+            let host = URLComponents(string: apiEndpoint)?.host ?? ""
+            connectionKind = host == "api.anthropic.com" && apiProtocol == "anthropic_messages" ? "anthropic" :
+                host == "generativelanguage.googleapis.com" && apiProtocol == "gemini" ? "gemini" :
+                host == "api.openai.com" ? "openai" : "custom"
+        }
         let launch = selected["launch_spec"] as? [String: Any] ?? [:]
         invocationExecutable = launch["executable"] as? String ?? connectionKind
         let literals = (launch["argv"] as? [[String: Any]] ?? [])
@@ -62,10 +68,17 @@ import Foundation
     func newConnection(_ kind: String) {
         guard !aiBusy else { return }
         secretRevision += 1; profile = [:]; connectionKind = kind; aiScreen = "manage"
-        checkMessage = ""; modelOptions = []; hasAPIKey = false
+        checkMessage = ""; result = ""; modelOptions = []; hasAPIKey = false
         switch kind {
         case "codex", "claude", "agy":
             connectionName = kind == "agy" ? "AGY" : kind.capitalized; apiEndpoint = ""
+        case "anthropic":
+            connectionName = "Claude"; apiEndpoint = "https://api.anthropic.com/v1/messages"; apiProtocol = "anthropic_messages"
+        case "gemini":
+            connectionName = "Gemini"; apiEndpoint =
+                "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent"; apiProtocol = "gemini"
+        case "custom":
+            connectionName = "自定义 API"; apiEndpoint = ""; apiProtocol = "openai_chat"
         default:
             connectionName = "OpenAI API"; apiEndpoint = "https://api.openai.com/v1"; apiProtocol = "openai_chat"
         }
@@ -168,7 +181,7 @@ import Foundation
                 try await reloadAI()
                 aiScreen = "main"; secretRevision += 1
                 if returnToChat, activeSpec.isEmpty {
-                    draftProfile = target; draftModel = model; draftRevision += 1
+                    draftProfile = target; draftModel = model; draftRevision += 1; aiScreen = "main-edit"
                 }
                 if routingOwner != "main" {
                     routingProfile = target; editRoutingProfile(target); section = 4
@@ -191,7 +204,7 @@ import Foundation
         if activeSpec["source_profile_id"] as? String == draftProfile, activeSpec["model"] as? String == model,
            activeSpec["source_profile_revision"] as? Int == selected["revision"] as? Int
         {
-            result = "当前配置已生效。"; if returnToChat {
+            result = "当前配置已生效。"; aiScreen = "main"; if returnToChat {
                 finishSetup(); returnToChat = false
             }; return
         }
@@ -225,7 +238,7 @@ import Foundation
                 else {
                     result = "切换尚未生效，请刷新状态后重试。"; return
                 }
-                draftModel = model; revision += 1; result = "聊天配置已生效。已有后台任务保持原配置。"
+                draftModel = model; aiScreen = "main"; revision += 1; result = "主 Agent 已生效。已有后台任务保持原配置。"
                 if returnToChat {
                     finishSetup(); returnToChat = false
                 }

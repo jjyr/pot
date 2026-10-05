@@ -59,3 +59,19 @@ Native revalidation of Main Agent wording, compact integrated rows, direct CLI c
 - Reopening confirmed the `/v1` base URL expanded to `/v1/chat/completions`; saved credentials were absent from the visible field. Existing custom full endpoint paths remain preserved.
 - Advanced interface choices were Chat Completions and Responses.
 - Build, bundle, formatting/compilation checks, and all 11 App tests passed. This refinement does not establish real-provider acceptance; no additional dark-theme or keyboard-only matrix was performed.
+
+## Brand grid and shared panel — 2026-10-06
+
+Replaced the integration chooser with a compact three-column icon/name grid, centered over the AI Configuration page. Codex, Claude, Gemini, OpenAI API, Custom API and AGY lead into the same panel shell. Main Agent is now a compact summary; Change opens its Agent/model form. The focused Chinese screenshot report is `/Users/jjy/Workspace/pot/.local/validation/ai-configuration-20261006/index.html`. Earlier reports remain historical evidence.
+
+Native observations in the same independent fixture root:
+
+- Grid choices lead directly to the matching configuration; Codex shows the Terminal login guide.
+- New Claude connections offer account-login/API-key modes; the API mode hides the official endpoint/protocol. Existing connections keep their saved integration type.
+- Gemini displays key/model only; custom API displays its address. Advanced contains name, endpoint and Chat Completions/Responses/Messages/Gemini formats.
+- Gemini's missing-key check produced an inline error and retained the model draft. Saving with a fake key added a Gemini profile with its native endpoint/protocol; the UI fixture remained the active main Agent. No real provider check/inference was performed. The restored list displayed Gemini's brand mark after restart.
+- Main Change opens the explicit Agent/model confirmation panel; saving the already-active selection closes it without changing the binding.
+- Escape from an API form input closes the panel. Full keyboard focus trapping, all window sizes and dark-theme matrix are not established by this pass.
+- Build/bundle, static checks and 11 App regression tests passed. Backend wire formats were not changed; real Gemini/Claude/OpenAI account/model acceptance remains outstanding.
+
+Brand SVGs are embedded from Simple Icons v14.0.0 (CC0); no external logo downloads happen at runtime. Codex uses the OpenAI mark, while AGY/Custom API use generic terminal/network icons.

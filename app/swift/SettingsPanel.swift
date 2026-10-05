@@ -117,7 +117,8 @@ import Foundation
          "ai_screen": aiScreen, "secret_revision": secretRevision, "draft_revision": draftRevision,
          "draft_profile": draftProfile,
          "draft_model": draftModel,
-         "connection_kind": connectionKind, "connection_name": connectionName, "connection_model": connectionModel,
+         "connection_profile_id": profile["id"] as? String ?? "", "connection_kind": connectionKind,
+         "connection_name": connectionName, "connection_model": connectionModel,
          "return_to_chat": returnToChat, "ai_busy": aiBusy, "active_spec": activeSpec,
          "active_name": savedProfiles
              .first { $0["id"] as? String == activeSpec["source_profile_id"] as? String }?["name"] as? String ??

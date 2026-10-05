@@ -176,6 +176,10 @@ impl Settings {
         let secret_revision = state["secret_revision"].as_i64();
         let clear_secrets = self.secret_revision != secret_revision;
         self.secret_revision = secret_revision;
+        if clear_secrets {
+            self.api_advanced = false;
+            self.commands_open = false;
+        }
         let reset_model = self.draft_revision != state["draft_revision"].as_i64();
         self.draft_revision = state["draft_revision"].as_i64();
         for (i, key) in [
@@ -217,6 +221,16 @@ impl Settings {
                 self.synced_values[i] = value.clone();
                 self.fields[i].update(cx, |field, cx| field.set_value(value, window, cx));
             }
+        }
+        if clear_secrets && state["ai_screen"] == "manage" {
+            let native = matches!(
+                state["connection_kind"].as_str(),
+                Some("codex" | "claude" | "agy")
+            );
+            self.fields[if native { 16 } else { 15 }]
+                .read(cx)
+                .focus_handle(cx)
+                .focus(window, cx);
         }
     }
     pub fn render(&self, state: &Value, cx: &mut Context<Shell>) -> Div {
