@@ -1,144 +1,144 @@
-# 开发指南
+# Development guide
 
-## 开发与运行
+## Development and running
 
-需要 Apple Silicon、macOS 26+、Xcode/Swift 6.2+ 和 [mise](https://mise.jdx.dev/)。Rust、Python、Zig、cargo-zigbuild 与检查工具的版本由 `mise.toml` 固定；Swift 使用当前选中的 Xcode。
+Requires Apple Silicon, macOS 26+, Xcode/Swift 6.2+, and [mise](https://mise.jdx.dev/). `mise.toml` pins Rust, Python, Zig, cargo-zigbuild, and check tools; Swift uses the selected Xcode.
 
 ```sh
 mise trust
 mise install
-mise run setup        # Rust 组件、Linux target、本仓库 hk hooks、环境检查
+mise run setup        # Rust components, Linux target, repository hk hooks, environment checks
 mise run prepare
-mise exec -- scripts/configure-pi # 可选：仅 Pi + DeepSeek 路线
+mise exec -- scripts/configure-pi # Optional: Pi + DeepSeek only
 mise run build
 mise run bundle
 mise run open
 ```
 
-`bundle` 会在独立 VM 内预装依赖并生成完整 Sandbox OCI 镜像；只有构建阶段需要下载软件，App 启动直接加载镜像。镜像缓存、桌面字体与大小对比见 [Sandbox 镜像](sandbox-image.md)。
+`bundle` preinstalls dependencies in a separate VM and builds the complete Sandbox OCI image. Software downloads happen only during build; App loads the image directly at startup. See [Sandbox image](sandbox-image.md) for caches, fonts, and sizes.
 
-开发包为 `.local/d1/Pot.app`。`scripts/pot open` 使用 `.local/d1/local-runtime`（可用 `POT_LOCAL_ROOT` 覆盖）；直接双击默认使用 `~/Library/Application Support/pot`，两者数据不同。
+The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
-`configure-pi` 仅从宿主 Pi 导入 DeepSeek 凭据到 guest 私有配置，不调用模型，不把密钥打入 App。模型为 `deepseek-v4-flash`；配置入口、默认额度和 K/M token 输入规则见 [UI 规范](ui-ux-design.md#配置额度)。已有配置不会自动覆盖，用量账本不重置。
+`configure-pi` imports host Pi DeepSeek credentials into private guest configuration without model calls or embedding keys in App. The model is `deepseek-v4-flash`; see [UI specification](ui-ux-design.md#allowance-configuration) for configuration, default allowances, and K/M token input rules. Existing configuration is not overwritten automatically; the usage ledger is not reset.
 
-## 独立 Server（开发入口）
+## Standalone Server (development entry point)
 
-后端可以独立构建和启动，不需要运行 App/Helper。路径属于运行 Server 的机器；使用单独数据目录，不打开正在运行的 App/VM 数据。
+Build and start the backend without App/Helper. Paths belong to the Server machine. Use a separate data directory rather than opening active App/VM data.
 
 ```sh
 mise exec -- cargo build --locked -p pot-server
 POT_DATA_DIR=/tmp/pot-server/product POT_WORKSPACE=/tmp/pot-server/workspace POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-`POT_PI_BIN` 可指定 Pi executable。Server 将私有 bearer/boot/port 写入数据目录中的 `runtime.json`；HTTP/SSE/MCP/PTY 仍使用现有 Control API。未配置 Agent 时主聊天拒绝发送，Terminal 可用。关闭时停止后台协调器、会话、PTY、Codex host 和 SSE。
+`POT_PI_BIN` selects the Pi executable. Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat rejects sends while Terminal remains available. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
 
-App 继续使用本地 Helper/VM 发现方式，没有远程端点设置。跨机器部署仍需 TLS、身份与产物传输等工作；这里只保留后端独立运行的架构边界。
+App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
 
-## 验证
+## Validation
 
 ```sh
-mise run fmt           # 显式修复格式
-mise run check         # 格式、脚本、Rust workspace 和 Swift Helper 编译
-mise run test          # Runtime / protocol，无真实模型调用
+mise run fmt           # Explicit formatting fixes
+mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
+mise run test          # Backend / protocol, no real model calls
 mise run test:app
 POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runtime real_pi -- --ignored
 ```
 
-最后一条使用宿主已安装的 Pi 和本地模拟模型，无付费调用。真实 App/VM/模型验证记录见 [文档索引](README.md)，旧 POC fixture 不代表当前产品验收。
+The final command uses host-installed Pi and a local mock model without paid calls. See the [Documentation index](README.md) for real App/VM/model results; old POC fixtures do not establish current product acceptance.
 
-### Codex 验证
+### Codex validation
 
-用户需要登录时，自行在独立 Terminal 运行官方 CLI 登录命令（Codex 支持
-`codex login --device-auth`）；Pot 仅在设置 → Agent 检测状态。
-在设置 → 助手填写账户可用的模型名称并明确选择 Codex。
-登录态只由 guest CLI 管理，保存在持久 engine-home。
+Users needing authentication run the official CLI login command in the independent Terminal (Codex supports
+`codex login --device-auth`); Pot only checks status in Settings -> Agent.
+Enter an account-supported model in Settings -> Assistant and explicitly select Codex.
+Only the guest CLI manages login state, stored in persistent engine-home.
 
-无凭据集成测试（显式指定安装好的官方 Codex CLI，不调用付费模型）：
+Credential-free integration test (explicitly select an installed official Codex CLI; no paid model calls):
 
 ```sh
 mise exec -- cargo build -p pot-server
 mise exec -- python scripts/tests/codex-runtime.py --runtime .local/poc/cargo-target/debug/pot-server --codex /absolute/path/to/codex
 ```
 
-构建最新镜像后，可在独立无网络 VM 中运行同一契约：
+After building the latest image, run the same contract in an isolated VM without networking:
 
 ```sh
 codesign --force --sign - --entitlements helper/virtualization.entitlements .local/d1/helper-build/release/PotImageCheck
 .local/d1/helper-build/release/PotImageCheck .local/d1/codex-guest-check .local/d1/resources scripts/tests codex-guest.sh
 ```
 
-每次冷验证使用新的结果目录。该测试验证真实 CLI 与本地模拟模型的行为，不代替真实登录和模型验收。
+Use a new result directory for each cold validation. This tests real CLI behavior against a local mock model, not real login/model acceptance.
 
 ### Git hooks
 
-`mise run setup` 安装本仓库的 hk pre-commit / pre-push，不修改全局 hooks。每个新 clone 都需要运行一次。Git 调用 hook 时通过 mise 加载工具，无需先激活 shell（mise 本身需在 PATH）。
+`mise run setup` installs repository-local hk pre-commit/pre-push hooks without changing global hooks. Run it once per clone. Git hooks load tools through mise without shell activation; mise itself must be on PATH.
 
-- pre-commit：按改动文件检查格式和脚本；Rust 格式检查覆盖 workspace，规则或检查入口变更触发全量轻量检查。检查 staged diff 的空白错误。
-- pre-push：相关 Rust/Swift 改动触发 `check:rust` 和核心测试；Helper 改动另触发 `check:swift`。
-- hooks 只检查、不自动修复或暂存，源码检查读取当前工作树。部分暂存时，应保证提交内容也已格式化。镜像构建、VM 和付费模型测试不进入 hooks。新机器的编译检查可能耗时，后续复用缓存。
+- pre-commit: checks formatting/scripts for changed files; Rust formatting covers the workspace, and rule/check-entry changes trigger all lightweight checks. Also checks staged whitespace.
+- pre-push: relevant Rust/Swift changes trigger `check:rust` and core tests; Helper changes additionally trigger `check:swift`.
+- Hooks only check; they neither fix nor stage. Source checks read the working tree, so partially staged content must also be formatted. Image/VM/paid model tests are excluded. A new machine may compile slowly; later runs reuse caches.
 
-手动验证入口：`mise exec -- hk run pre-commit --all`。完整本地检查用 `mise run check`；需要修复时执行 `mise run fmt`。基础规则集中在 `ruff.toml`、`.swiftformat` 和 `scripts/dev-check`，hook 只负责筛选和调用。
+Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.
 
-## 代码入口
+## Code entry points
 
-| 目录 | 职责 |
+| Directory | Responsibility |
 |---|---|
-| `app/` | GPUI 界面、Swift 原生桥与配置 |
-| `helper/` | Swift Containerization、VM 生命周期 |
-| `server/` | 独立启动、HTTP/SSE/MCP/PTY 路由、监听与关闭 |
-| `runtime/` | 后端库、产品命令、任务/计划、执行协调与恢复 |
-| `core/` | 不可变 Agent 模型、执行契约、共享工具 schema |
-| `storage/` | SQLite、绑定/用量与文件请求账本、事务 |
-| `driver/` | Pi/Codex/Claude/AGY 原生执行适配 |
-| `gateway/` | provider HTTP transport 与模型协议 codec |
-| `protocol/` | 共享消息与控制类型 |
-| `image/` | guest 桌面、浏览器、broker/viewer 资源 |
-| `scripts/` | 构建、打包、配置导入与图标生成 |
+| `app/` | GPUI UI, Swift native bridge, configuration |
+| `helper/` | Swift Containerization, VM lifecycle |
+| `server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
+| `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
+| `core/` | Immutable Agent models, execution contracts, shared tool schema |
+| `storage/` | SQLite, binding/usage/file-request ledgers, transactions |
+| `driver/` | Native Pi/Codex/Claude/AGY execution adapters |
+| `gateway/` | Provider HTTP transport and model protocol codecs |
+| `protocol/` | Shared message and control types |
+| `image/` | Guest desktop, browser, broker/viewer resources |
+| `scripts/` | Build, bundle, configuration import, icon generation |
 
-`poc/` 已移除，实验代码和证据可从 Git 历史查阅。`.local/poc/` 只是沿用的本机构建/下载缓存路径，不依赖旧实验源码。
+`poc/` is removed; experiment code/evidence remain in Git history. `.local/poc/` is a retained local build/download cache path without dependencies on old experiment sources.
 
-机器连接与部署记录统一在 `~/Workspace/Machines`；不要提交凭据、用户会话或构建产物。在线检查走 Runtime API，不从宿主打开运行中 guest 的 SQLite。
+Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not commit credentials, user sessions, or build artifacts. Inspect live state through Runtime APIs, not host access to active guest SQLite.
 
-### Claude 离线契约
+### Claude offline contract
 
-Pot 只通过官方接口检测 Claude 状态；需要认证的用户自行在普通 Terminal 处理。
-在助手设置填写模型并明确选择 Claude。当前项目验收按用户决定跳过 Claude 真实账户测试（无账号）。
-无需真实账户的开发验证使用原版 CLI + 本地模拟 Anthropic 服务：
+Pot checks Claude status only through official interfaces; users authenticate in the normal Terminal themselves.
+Enter a model in Assistant settings and explicitly select Claude. Real Claude account testing is skipped by user decision (no account).
+Account-free development validation uses the original CLI and a local mock Anthropic service:
 
 ```sh
 mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-target/debug/pot-server --claude /absolute/path/to/claude
 .local/d1/helper-build/release/PotImageCheck .local/d1/claude-guest-check .local/d1/resources scripts/tests claude-guest.sh
 ```
 
-guest 检查遵循上面的 Helper 签名及 VM 执行前提。测试使用独立临时 HOME，不复用宿主凭据。
+Guest checks require the Helper signing/VM prerequisites above. Tests use an isolated temporary HOME without host credentials.
 
 
-### Terminal 进程清理（Linux guest）
+### Terminal process cleanup (Linux guest)
 
 ```sh
 .local/d1/helper-build/release/PotImageCheck .local/d1/terminal-guest-check .local/d1/resources scripts/tests terminal-guest.sh
 ```
 
-使用新的隔离结果目录和上面的 Helper 签名。验证关闭 PTY、Runtime 正常退出及重启；
-包含前台 sleep、独立后台进程组和忽略 HUP/TERM 的后台 shell/孙进程，不调用模型。
-刻意 setsid 脱离终端会话的进程不属于此契约，仍由 VM 生命周期终止。
+Use a new isolated result directory and the Helper signing above. Validate PTY close, normal Runtime exit, and restart;
+cover foreground sleep, separate background process groups, and HUP/TERM-resistant background shells/grandchildren without model calls.
+Processes deliberately detached with setsid are outside this contract and remain subject to VM lifecycle termination.
 
 
-### AGY 驱动回归
+### AGY Driver regression
 
-AGY 采用原版 CLI 接入，按用户决定开放主聊、后台任务、计划和汇总；不提供 Pot 编排工具，角色依靠提示词约束。
-用户自行在 Terminal 登录，状态保持 unknown。无需账号的模拟传输回归：
+AGY integrates the original CLI. Main chat, background tasks, schedules, and summaries are enabled by user decision, without Pot orchestration tools; roles are constrained by prompts.
+Users log in through Terminal; status remains unknown. Account-free mock transport regression:
 
 ```sh
 mise exec -- cargo build --locked -p pot-server
 mise exec -- python scripts/tests/agy-runtime.py --runtime .local/poc/cargo-target/debug/pot-server
 ```
 
-使用上面的 Helper 签名与全新无网络 guest 目录，验证打包 Runtime 的同一回归，
-以及原版 CLI help 和空 HOME的 headless 失败退出：
+Use the Helper signing above and a fresh offline guest directory to validate the same regression in the packaged Runtime,
+and original CLI help/headless failure with an empty HOME:
 
 ```sh
 .local/d1/helper-build/release/PotImageCheck .local/d1/agy-guest-check .local/d1/resources scripts/tests agy-guest.sh
 ```
 
-模拟传输不能证明原版 CLI 模型/工具行为；原版离线失败 smoke 也不算真实账户或角色隔离通过。
+Mock transport does not prove original CLI model/tool behavior; an original offline failure smoke test does not establish real account or role isolation acceptance.

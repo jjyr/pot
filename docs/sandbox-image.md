@@ -1,50 +1,50 @@
-# Sandbox 镜像
+# Sandbox image
 
-Sandbox 从 App 内置的 Linux ARM64 OCI 成品镜像启动。桌面、字体、Chromium、noVNC、Pi、Codex、AGY 和 Pot Runtime 都在构建时装入；启动不执行 `apk add` / `npm ci`，不拉取 Alpine 基础镜像。内核与 vminit 也随 App 提供。
+Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Pi, Codex, AGY, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
 
-## 构建与启动
+## Build and startup
 
-运行入口见[开发指南](development.md)。`scripts/pot bundle` 调用 `scripts/build-image`：
+See [Development guide](development.md) for entry points. `scripts/pot bundle` invokes `scripts/build-image`:
 
-1. 在独立构建 VM 中，以锁定的 Alpine digest 为基础，按 `image/packages.lock` 安装系统包，按 npm lock 安装 Pi 和官方 Codex CLI（含平台原生二进制）。
-2. 写入 `/opt/pot` 和 `/opt/pi`，导出 rootfs 并生成 OCI 镜像及 `sandbox-image.json`。
-3. 将镜像、vminit 和内核打入 App。构建输入 hash 用作本地镜像版本；相同输入复用缓存，APK/npm 下载另有缓存。
-4. Helper 首次导入本地镜像，创建 VM 并运行 `/opt/pot/desktop.sh`。首次导入/解包仍有成本，但不依赖软件源或 npm 在线可用。
+1. In a separate build VM, use the pinned Alpine digest, install system packages from `image/packages.lock`, and Pi/official Codex CLI (including native platform binaries) from npm locks.
+2. Write `/opt/pot` and `/opt/pi`, export rootfs, and generate the OCI image plus `sandbox-image.json`.
+3. Bundle image/vminit/kernel in App. A build-input hash identifies the local image; identical inputs reuse caches, with separate APK/npm download caches.
+4. Helper imports the local image initially, creates the VM, and runs `/opt/pot/desktop.sh`. Initial import/unpack has a cost but does not depend on online package/npm sources.
 
-构建需要网络和 Apple Virtualization 权限；镜像启动无需网络，模型调用和网页访问另需联网。构建 VM 不挂载用户 workspace 或凭据。用户配置、聊天数据库、浏览器 profile、工作文件单独挂在 `/data`，升级镜像不打包或清空这些数据。运行中临时安装到 rootfs 的软件不会进入下次新建的 VM，长期依赖应写入镜像。
+Build requires networking and Apple Virtualization permissions; image startup is offline, while models/web browsing need networking. The build VM mounts no user workspace/credentials. User configuration, chat databases, browser profiles, and files mount separately at `/data`; image upgrades neither bundle nor clear them. Software temporarily installed in rootfs does not persist into a newly created VM; permanent dependencies belong in the image.
 
-产物在 `.local/d1/resources/`，缓存和构建证据在 `.local/d1/image-build/`，不提交 Git。镜像更新后需重新打包并重启 App。
+Artifacts live in `.local/d1/resources/`; caches/build evidence in `.local/d1/image-build/`, outside Git. Rebundle and restart App after an image update.
 
-## 桌面与字体
+## Desktop and fonts
 
-使用精简 Xfce：`xfwm4`、`xfsettingsd`、`xfdesktop`、Thunar、Xfce Terminal 与底部常驻面板；无登录管理器、屏保或合成器。暖白 Pot 背景，adw-gtk3 控件，Adwaita 图标，底部直接提供 Browser / Files / Terminal 启动按钮、窗口切换和时钟，右键菜单也保留相同应用入口。在 Pot 中先点击「接管」再操作桌面。主题默认值按版本迁移，不在每次启动覆盖用户字体和应用偏好。
+Minimal Xfce uses `xfwm4`, `xfsettingsd`, `xfdesktop`, Thunar, Xfce Terminal, and a persistent bottom panel without login manager/screensaver/compositor. Warm-white Pot background, adw-gtk3 widgets, Adwaita icons; direct Browser/Files/Terminal launchers, window switching, and clock on the bottom panel, with the same apps in the context menu. Click Take over in Pot before interacting. Theme defaults migrate by version rather than overwriting user fonts/preferences at every startup.
 
-UTF-8 locale 配合 Noto Sans、Noto CJK 的 SC/TC/JP/KR 字形与 emoji fallback，覆盖简体中文、繁体中文、日文和韩文。字体显示支持不等于输入法支持；尚未预装 CJK IME，也不承诺覆盖所有 Unicode 字符。
+UTF-8 locale with Noto Sans, SC/TC/JP/KR Noto CJK glyphs, and emoji fallback covers simplified/traditional Chinese, Japanese, and Korean. Font rendering is not input-method support; CJK IMEs are not preinstalled and complete Unicode coverage is not promised.
 
-## 大小对比（2026-10-04，ARM64，初版无面板）
+## Size comparison (2026-10-04, ARM64, initial version without panel)
 
-| 口径 | 原 Fluxbox | 新 Xfce | 增量 |
+| Metric | Old Fluxbox | New Xfce | Increase |
 |---|---:|---:|---:|
-| APK 包归档合计 | 415.60 MiB | 435.70 MiB | 20.10 MiB |
-| APK 安装体积合计 | 1,018.06 MiB | 1,068.08 MiB | 50.02 MiB |
-| 系统包数量 | 314 | 350 | 36 |
+| APK archive total | 415.60 MiB | 435.70 MiB | 20.10 MiB |
+| APK installed total | 1, 018.06 MiB | 1, 068.08 MiB | 50.02 MiB |
+| System package count | 314 | 350 | 36 |
 
-旧锁文件与新镜像 `/lib/apk/db/installed` 元数据对比；两者都包含 CJK，不重复计算。归档合计不同于整个 OCI 压缩率。
+Compare the old lockfile with new image `/lib/apk/db/installed` metadata; both include CJK, counted once. Archive totals do not represent whole OCI compression.
 
-新成品镜像压缩层 **656,413,994 bytes（626.00 MiB）**，rootfs tar **1,758,677,504 bytes（1.64 GiB）**。旧方案仅下载约 3.93 MiB 的 Alpine 基础层，再安装整个环境，不能将这个基础层大小当作旧桌面总大小。此处尚无同内容的旧成品 OCI 镜像对照。
+New completed image compressed layer: **656, 413, 994 bytes (626.00 MiB)**; rootfs tar: **1, 758, 677, 504 bytes (1.64 GiB)**. The old approach downloaded only a roughly 3.93 MiB Alpine base before installing the entire environment; base size is not total desktop size. No equivalent-content old completed OCI comparison exists here.
 
-## 无网络验收
+## Offline acceptance
 
 ```sh
 codesign --force --sign - --entitlements helper/virtualization.entitlements .local/d1/helper-build/release/PotImageCheck
 .local/d1/helper-build/release/PotImageCheck .local/d1/offline-image-check .local/d1/resources scripts/tests
 ```
 
-`PotImageCheck` 在全新镜像仓库与数据目录导入本地镜像，用 `networking: false` 启动 VM。检查 broker、Chromium CDP、Runtime、Pi 版本、桌面进程、四种语言的示例字形和浏览器正常退出；结果位于验证目录 `data/offline-result.json`，不调用模型。重跑时使用新的验证目录，确保验证冷启动。
+`PotImageCheck` imports the local image into a fresh image store/data directory and starts a VM with `networking: false`. It checks broker, Chromium CDP, Runtime, Pi version, desktop processes, four-language sample glyphs, and normal browser exit. Results are in validation `data/offline-result.json`; no model calls. Use a fresh validation directory for each cold run.
 
-后续可用性修正：增加底部常驻启动栏和窗口列表，新增 4 个锁定系统包。当前镜像 `pot.local/sandbox:b637617123a0ce749783` 的压缩层为 657,315,671 bytes（626.87 MiB）。上表保留初版无面板的验收口径。
+Later usability fix: persistent bottom launcher/window list adds 4 pinned packages. Current image `pot.local/sandbox:b637617123a0ce749783` has a 657, 315, 671-byte compressed layer (626.87 MiB). The table retains the initial no-panel acceptance scope.
 
-Claude Code 镜像基线为官方 `@anthropic-ai/claude-code-linux-arm64-musl` 2.1.289 原版二进制。
-安装禁用 npm 生命周期脚本，`claude` 直接链接到平台包的二进制；不链接包内其他平台的占位文件。
-该版本是构建基线而非 Runtime 锁；升级须满足 required flags / 生命周期能力契约。
-登录与执行共用 guest 持久 HOME，安装和启动不导入宿主 Claude 凭据。
+Claude Code image baseline is the original official `@anthropic-ai/claude-code-linux-arm64-musl` 2.1.289 binary.
+Installation disables npm lifecycle scripts; `claude` links directly to the platform binary, not placeholders for other platforms.
+This version is a build baseline, not a Runtime lock; upgrades must satisfy required flags/lifecycle contracts.
+Login/execution share persistent guest HOME; installation/startup imports no host Claude credentials.

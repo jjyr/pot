@@ -1,71 +1,71 @@
-# 多任务实现与验收
+# Multitask implementation and acceptance
 
-> 后续变更：手动新建入口已移除，任务和计划由主 Agent 创建；定时计划已实现，见 [计划契约](../scheduled-tasks.md)。下文验收过程、额度及“待开发”均保留当时状态。
+> Later changes: manual creation removed; main Agent creates tasks/schedules. Scheduling implemented, [contract](../scheduled-tasks.md). Below preserves historical acceptance/allowances/pending work.
 
-日期：2026-10-04。独立后台任务、可配置并发、追加指导、取消、持久恢复及主 Agent 自动路由已实现并验证。支持单层委派；依赖 DAG、递归委派和强制桌面资源隔离尚未实现。
+Date: 2026-10-04. Independent tasks/configurable concurrency/guidance/cancel/recovery/automatic routing implemented and validated. Single-level delegation; no DAG/recursive delegation/strong desktop resource isolation.
 
-## 使用方式
+## Usage
 
-1. 直接在主聊天提出研究或执行目标，由主 Agent 决定委派与任务复用（当前已移除手动新建入口）。
-2. 任务拥有独立对话、Pi session 和工作目录；默认最多五个后台任务并行，可在设置调整；更多任务排队。主聊天拥有独立执行槽。
-3. 执行中可以在对应任务输入指导。提交后显示「已接收」，Pi 开始消费该轮输入后显示「已应用」。本轮工具循环不会被插入新指导；指导按顺序在下一轮消费。
-4. 任务顶部「停止」或 Cmd+. 取消当前任务并清除其待处理指导，不取消其他任务。
-5. 每轮结果回报到主聊天，主 Agent 空闲时自动汇总；点击「查看任务」进入对应对话。回报使用稳定消息 ID，参与现有未读规则。
-6. 重启时，未开始的持久排队工作可以继续；正在执行的工作标记「已中断」，不会自动重放。显式追加指导后恢复；此前未消费的指导仍按原顺序在前，若不再需要，可先停止清空待处理指导。
+1. Main chat research/execution, Agent chooses delegation/reuse; manual creation now removed.
+2. Separate conversation/Pi session/directory, default5 backgrounds configurable, excess queued; main separate slot.
+3. Guidance shows Received then Applied when Pi consumes next turn, never inserted into current tool loop; ordered.
+4. Stop/Cmd+. cancels target/its pending guidance, not others.
+5. Results report main/idle summary, View task links; stable IDs share unread rules.
+6. Restart resumes unstarted durable queue, active Interrupted without replay. Explicit guidance resumes after older unconsumed guidance; Stop clears obsolete queue.
 
-草稿在应用运行期间按会话保留；不承诺 Quit 后恢复未发送草稿。
+Drafts persist per conversation during App run, not guaranteed after Quit.
 
-## 实际实现
+## Implementation
 
 ```text
 Pot App
-  主聊天 / 任务列表 / 独立任务对话
+  Main chat / task list / independent task conversations
                 |
        Rust Control API
                 |
       +---------+----------------------+
       |                                |
-  主会话执行槽                  持久任务目录与队列
-      |                         单任务独占 + FIFO
-  Pi main session --任务工具-->   默认五项并行
+  Main execution slot          Persistent task directory / queue
+      |                         Per-task exclusive + FIFO
+  Pi main session --tools-->     Default five parallel
       |                          /           \
       |                    Task A worker  Task B worker
       |                    Pi session A   Pi session B
       |                    workspace/A    workspace/B
-      +---- 持久完成通知/汇总 <----+-----------+
+      +---- Persistent completion / summary <----+------+
 ```
 
-- 主 SQLite 的 `tasks.v1` 元数据保存任务、队列、活动轮次、请求收据和持久序号。毫秒时间相同的输入仍按接收顺序调度。
-- 各任务目录保存独立 transcript SQLite 和 `pi-session.jsonl`。产品 API 返回真实任务 conversation ID；复用的 Pi 单会话 adapter 内部仍使用 `main`，该名称局限于自己的数据库。
-- 调度前先持久登记 active；进程未确认开始时崩溃也按中断处理，不冒险重放。
-- 完成回报与任务目录状态在主 SQLite 的同一事务提交，避免完成状态与回报之间的崩溃窗口。
-- API 请求收据支持重试去重，同编号不同内容返回 conflict；每个任务的取消通知与模型请求计数独立。
-- 所有任务共用既有全局模型请求 ledger，每轮沿用 Agent 设置中的请求与输出上限；并发不能绕过总额度。
-- 每个 Pi 拥有单独 gateway token，gateway 只将请求送入对应任务的预算和取消域。worker token 不能调用产品任务管理 API。
-- 主助手的下一次输入可获得最近 8 个任务的有界状态/结果摘要；不会合并所有 worker transcript，也不额外调用模型生成进度摘要。
-- App 每 500ms 获取任务目录、主聊天和当前任务快照，切换时丢弃过时响应；Runtime 原有 SSE 仍保留。后续大量任务时可扩展为任务事件订阅。
+- Main SQLite `tasks.v1` stores tasks/queue/active turns/receipts/durable sequence; same-millisecond inputs ordered by receipt.
+- Task transcript SQLite/`pi-session.jsonl`; API real conversation ID, reused internal adapter `main` scoped to own DB.
+- Persist active before dispatch; crash before confirmed process start still interrupted, no risky replay.
+- Completion/report and directory state commit together in main SQLite.
+- Retry receipts dedupe, same-ID changed content conflict; per-task cancel/count isolation.
+- Shared global request ledger, per-turn Agent caps; concurrency cannot bypass total.
+- Separate Pi gateway tokens route budgets/cancellation; workers cannot manage tasks.
+- Next main input gets bounded latest8 status/results, not all transcripts or paid progress summaries.
+- App500ms task/main/selected snapshots rejects stale; SSE retained, future event subscription scale.
 
-## 免费自动化验证
+## Free automated validation
 
-当前普通 Rust 测试 **35 项通过**：App 9、protocol 1、Runtime 25。另运行 **3 项真实 Pi + 本地模拟模型**集成测试通过；本地模拟模型不使用 DeepSeek key。
+**35** regular(App9/protocol1/Runtime25) plus**3 real Pi/local mock** pass without DeepSeek key.
 
-新增或扩展覆盖：
+Added/expanded coverage:
 
-| 场景 | 验证 |
+| Scenario | Validation |
 |---|---|
-| 双任务及并发额度 | 两个独立 worker 同时占槽，第三项等待；槽释放后按 FIFO 开始 |
-| 主聊天响应 | 后台两个槽占用时，主聊天仍接受并启动自己的 turn |
-| 同任务串行 | A 活动期间追加指导不会再创建一个同时执行的 A |
-| 指导持久化 | 入队后已落库；后续轮次按序消费；确认回执不替换当前活动轮次 |
-| 去重与冲突 | 创建、指导重复请求不重复执行；同 ID 不同文本拒绝 |
-| 取消隔离 | 取消 A 不影响 B；A 待处理指导取消，不自动重启 |
-| 资源协调 | API 显式标记 `resource: shared` 的任务互斥；独立任务仍可执行 |
-| 重启 | 已排队内容保留；active 变中断；已开始的外部操作不自动重放 |
-| 完成事件 | 同一轮稳定回报 ID；重复 finish 不产生第二条回报 |
-| 鉴权 | 任务 A 的 worker token 不能读取 B 或调用任务管理 API |
-| 真实 Pi 双进程 | 模拟模型通过 semaphore 同时阻塞两条请求，证明实际进程重叠，而非依赖 sleep 猜时序 |
-| 工具与上下文 | 两个 Pi 各自在独立目录写文件；请求上下文不串；A 后续指导沿用原生 session |
-| 真实 Pi 取消 | 原有真实 shell 子进程取消、后续恢复及预算测试重新通过 |
+| Two tasks/concurrency | Two occupy, third queues, FIFO refill |
+| Main response | Main starts despite two busy background slots |
+| Serial task | Guidance while A active cannot start overlapping A |
+| Durable guidance | Persisted queue/ordered consume/receipt preserves active turn |
+| Dedupe/conflict | Create/guide retries once, changed text rejected |
+| Cancel isolation | A cancel leaves B, clears A guidance/no restart |
+| Resources | Explicit `resource: shared` exclusive, independent runnable |
+| Restart | Queued retained/active interrupted/no side-effect replay |
+| Completion | Stable report ID, repeated finish no duplicate |
+| Auth | A worker cannot read B/manage tasks |
+| Real Pi processes | Semaphore blocks two requests simultaneously, proves overlap without sleep guessing |
+| Tools/context | Separate files/requests; A guidance native resume |
+| Real cancellation | Shell children/post-cancel/budget regression passes |
 
 ```sh
 CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-app -p pot-runtime -p pot-protocol
@@ -75,80 +75,80 @@ scripts/pot bundle
 scripts/pot open
 ```
 
-日志：忽略目录 `.local/d1/multitask-tests.log`、`multitask-pi-tests.log`、`multitask-build.log`、`multitask-bundle.log`。
+Ignored logs `.local/d1/multitask-tests.log`, `multitask-pi-tests.log`, `multitask-build.log`, `multitask-bundle.log`.
 
-## 真实 UI 与模型验收
+## Real UI / model acceptance
 
-- 从原生任务入口输入并发送 A：执行 `sleep 8; printf ALPHA > result.txt`，随后回复「A完成」。
-- A 的工具仍在执行时，经产品 API 创建 B 并向 A 追加指导。B 独立回复「B完成」，此时界面仍显示 A 执行中、待处理指导 1 条。
-- A 完成初始轮次后，在原会话消费指导并回复「成本已补充」。实际文件内容为 `ALPHA`。
-- 任务列表、独立对话、中文粘贴、主聊天三条回报、回报跳转、按会话保留草稿及未读状态实际操作通过。
-- Quit 后正常重开：两项任务仍为 complete，A 的指导和工具记录均保留，ledger 仍为 10/100；没有自动新增模型请求。
-- 修复验收中暴露的原生 Edit 菜单验证与 GPUI platform mutex 冲突：原生菜单不再自动走 GPUI validation，编辑动作明确指向原生 composer。
-- 本轮真实 DeepSeek **4 次请求，70 输出 token**；Pi 记录非缓存输入 3767、缓存读取 4864，总输入 8631。全局 ledger **6 → 10 / 100**，未重置。
+- Native A `sleep 8; printf ALPHA > result.txt`, then completion reply.
+- While A tool runs, API B and A guidance; B completes, A still active/pending1.
+- A finishes then consumes guidance in same session, deployment-cost acknowledgment; file `ALPHA`.
+- Task list/separate chat/Chinese paste/three main reports/links/drafts/unread pass.
+- Quit/reopen both complete, A guidance/tools retained, ledger10/100, no auto requests.
+- Fix native Edit validation/GPUI mutex conflict; native menu routes composer without automatic GPUI validation.
+- **4 DeepSeek requests, 70 output**; noncached3767/cache4864/input8631, ledger**6->10/100**, no reset.
 
-## 边界
+## Boundaries
 
-- 已加入主 Agent 自动委派与任务复用工具，见下方自动路由验证；路由质量由模型判断和系统提示共同决定。
-- `shared` 是任务调度器的显式协作锁，独立任务使用各自工作目录。它没有接入桌面 broker，也无法阻止任意 bash 绕过文件或桌面访问；不宣称已完成共享桌面或跨任务安全隔离。
-- 独立目录减少正常工作冲突，不是权限边界；主聊天、任务仍在同一 Sandbox 用户域。
-- 失败/中断后不自动重试外部副作用，不承诺 exactly-once 外部操作。自动任务依赖图、优先级编辑、长期记忆仍待后续开发；定时计划已在后续实现。
-- 后台任务目前只支持 Pi；未加入其他 engine 或跨引擎 session 迁移。
+- Main automatic delegate/reuse below; model/system prompt determine routing quality.
+- `shared` cooperative scheduler lock, not desktop broker/security; bash bypass files/desktop possible.
+- Separate directories reduce conflicts, not permissions; same Sandbox user.
+- No automatic external retries/exactly-once, DAG/priorities/memory future; schedules later implemented.
+- Then Pi-only backgrounds, no other drivers/cross-driver sessions.
 
-## 2026-10-04：可配置并发数
+## 2026-10-04: Configurable concurrency
 
-设置 → Agent 新增“同时处理的任务数”，默认 5，范围 1–1000，保存至 pi.json 的 max_parallel_tasks。老配置缺字段时自动使用 5。Runtime 调度读取配置，任务页动态显示配置值；主聊天保留独立槽位，共享资源仍串行。应用配置沿用运行中任务检查与重启流程。
+Agent concurrent tasks default5/range1-1000, pi.json max_parallel_tasks, old missing defaults5. Runtime/UI read it, main separate/shared serial; save uses active-task check/restart.
 
-新增无模型测试覆盖并发 1/5/8：只能领取指定数量，第一个任务完成后按 FIFO 补入等待任务，不超额。配置测试验证缺字段默认 5；原并发 2 场景作为显式测试配置保留。全部 28 项测试通过、2 项外部 Pi 测试默认忽略。App/Runtime/helper 已构建打包重开，实机 AX 确认新字段显示 5。没有新增模型请求。
+No-model1/5/8 slot/FIFO tests, missing defaults5, explicit2 retained; 28 pass/2 external ignored. App/Runtime/Helper bundle/reopen AX5; no models.
 
-## 2026-10-04：自动任务路由
+## 2026-10-04: Automatic routing
 
-主 Pi 会话显式加载 Pot 内置扩展，提供 create/list/get/guide/cancel 五个任务工具。
-研究、实时资料检索、报告与多步执行默认委派；简单问答直接回复。Worker 不加载扩展，
-独立上下文只接收任务说明。追加指导在当前轮结束后执行，不冒充实时打断。
+Main Pi explicitly loads built-in create/list/get/guide/cancel extension.
+Research/current retrieval/reports/multistep delegate; simple chat direct. Workers no extension,
+only task context; guidance next turn, not realtime interrupt.
 
-新增确定性测试覆盖：
+Deterministic coverage:
 
-- 无活跃主轮拒绝工具调用；重复调用返回同一任务，参数冲突拒绝；跨轮相同工具 ID 不冲突。
-- Worker token 拒绝递归委派；指导去重；取消生效；汇总轮拒绝修改任务。
-- 乱序完成合并通知，主聊天忙时延迟；未领取通知重启后送达；已领取但中断的汇总不自动重放。
-- 首次升级不重汇总历史；额度耗尽时保留通知；失败原因进入汇总输入。
+- No active main rejects tools; dedupe/conflicts/cross-turn same IDs.
+- Worker recursive delegation rejected, guidance dedupe/cancel, summary cannot mutate.
+- Out-of-order reports coalesce/delay if main busy; unclaimed survive restart, interrupted claimed summary no replay.
+- Upgrade no historical resummary, exhausted allowance preserves notifications, failures enter summary.
 
-`real_pi_automatic_routing_and_completion` 使用真实 Pi 与本地模拟模型：问候不创建任务，
-随后主 Agent 工具创建两个任务；Worker 各自真实写 result.txt，再回到原主 session 汇总。
-断言 Worker 没有编排工具，汇总轮只有两个只读工具，结果关联正确且重复 dispatch 不再次唤醒。
-共 8 个本地模型请求，零 API 费用。模拟模型验证协议与执行链路，不作为真实模型路由质量证据。
+`real_pi_automatic_routing_and_completion`: real Pi/mock greeting creates none,
+then two tasks, independent real result.txt, original main summary.
+Workers lack orchestration, summary only two read-only tools, correct links/no repeated wake.
+8 mock requests, 0 API cost; protocol/execution, not real routing quality.
 
-通知领取与 System 消息原子提交，已领取汇总不做自动重试；崩溃可能留下失败的汇总轮，
-原始任务报告仍保留。共享 VM 用户域、无依赖 DAG、无递归委派等边界不变。
+Notification claim/System message atomic, no claimed-summary retry; crash may fail summary,
+original reports remain; same VM user/no DAG/no recursive delegation unchanged.
 
-实际验收：31 项常规测试、3 项真实 Pi + 本地模型集成测试通过。App/Runtime/helper
-构建打包并重开。在实际 Linux VM 使用 DeepSeek 发出“查询网页标题并保存文件”的自然语言
-请求（未明确要求创建后台任务）；主 Agent 调用了 pot_create_task，Worker 实际 curl 抓取、
-write 写入并校验文件，最终主 Agent 自动汇总。新增 1 个任务，状态 complete，文件包含
-`title: Example Domain` 和来源 URL。共消耗 7 次真实模型请求，未修改用户额度配置或重置 ledger。
-UI 实际显示任务回报、查看任务入口和主会话汇总。验收后根据观察将任务 brief 改为优先用户语言、
-默认相对产物路径；汇总 System 状态在完成/失败时更新，不永久显示“正在整理”。
+31 regular/3 real Pi mock pass. App/Runtime/Helper
+bundle/reopen. Real guest DeepSeek natural web-title/file
+request without explicit delegation -> pot_create_task, curl,
+write/verify, auto summary. One complete task/file
+`title: Example Domain`/source; 7 real requests, no config/reset.
+UI report/link/summary. Then task brief prefers user language,
+relative artifacts; summary System state updates complete/fail instead of permanent busy.
 
-最终 Runtime 再次构建打包后 Quit/重开：engine=ready，验收任务仍为 complete，
-主会话空闲；请求 ledger 保持 27（本轮前 20），未重复汇总或产生额外模型调用。
+Final rebuild/Quit/reopen ready/task complete,
+main idle/ledger27(previous20), no duplicate summary/calls.
 
 
-## 2026-10-04：任务状态与分页
+## 2026-10-04: Task states / pagination
 
-完成/取消自动进入归档视图，失败/中断进入需处理；实际 phase 原样保留，追加指导重新排队。
-Agent 默认 list 活跃任务，每页 10 条、最多 50；支持 scope/phase/q/offset。主上下文仅注入
-全局数量与最多 8 项活跃/需处理元数据，不再读入历史任务正文。已存在于 Pi session 的聊天
-历史仍会保留，本次没有实现压缩或遗忘。
+Complete/cancel archive, failed/interrupted needs attention; phase retained, guidance requeues.
+Agent defaults active, 10/page/max50, scope/phase/q/offset. Main only
+counts/max8 active-attention metadata, no old body. Existing Pi
+history retained, no compaction/forgetting then.
 
-新增验证覆盖六种状态分组、精确 phase 优先、中文/大小写标题与 ID 检索、页间无重复、
-相同时间稳定排序、页码收缩、非法 limit、当前页之外的已选任务、归档重开与持久恢复。
-1000 个已归档任务的默认查询返回零项目、count=1000；归档页只返回 20 项；新增上下文
-小于 600 字符且不含历史标题。客户端验证过期搜索响应不能覆盖新查询/当前对话，运行
-任务计数不受当前分页影响。35 项常规测试及 3 项真实 Pi+本地模型集成通过，未调用收费模型。
+Tests six states/exact-phase priority/CJK-case-ID search/no overlap,
+stable equal-time sort/page shrink/invalid limits/off-page selection/archive-resume.
+1000 archives default0/count1000, archive page20/context
+under600 chars/no old titles. Stale search cannot overwrite query/chat; running
+counts independent.35 regular/3 real Pi mock pass, 0 paid.
 
-任务 UI 使用 Kit Input/Button/ListItem：进行中/需处理/已归档三个分组、实时搜索、固定分页栏，
-每页 20 项，按最近变更排序。结果列表滚动，筛选和分页固定。归档任务详情保留具体状态。
+Kit Input/Button/ListItem/Ongoing-Attention-Archived/search/fixed pages,
+20/latest-change; list scroll/filter-page fixed, archive actual state.
 
-实机重开后旧 4 项完成任务均进入归档，中文搜索匹配 2 项、无匹配返回 0；归档详情保留
-已完成状态与原会话。HTTP limit=2 返回 next_offset=2。请求 ledger 保持 27，未新增模型调用。
+Reopen old4 archived, Chinese search2/unmatched0, archived
+completed/history preserved; HTTP limit2, next_offset2, ledger27, 0 models.

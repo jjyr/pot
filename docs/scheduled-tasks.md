@@ -1,50 +1,50 @@
-# 定时计划
+# Scheduled tasks
 
-定时计划是持久定义，每次触发创建独立后台任务和 Pi 会话。Rust Runtime 决定触发、去重、并发和通知；主 Agent 通过工具管理计划，不需要常驻模型或执行 sleep/cron。
+Schedules are persistent definitions; each trigger creates an independent background task/Pi session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
 
 ```
-聊天 / 任务 → 定时计划
-             │ 创建、编辑、暂停、立即运行、删除
+Chat / tasks -> schedules
+             | Create, edit, pause, run now, delete
              ▼
-Runtime 调度器 → SQLite tasks.v2（计划 + 触发记录 + 任务队列）
-             │ 到期，事务内创建一次执行
+Runtime scheduler -> SQLite tasks.v2 (schedules + triggers + task queue)
+             | Due: create one run transactionally
              ▼
-共享任务队列（默认并发 5）→ 独立 Pi / 工作目录
+Shared task queue (default concurrency 5) -> independent Pi / working directory
              │ .pot-schedule-result.json
              ▼
-校验结果 → 比较 fingerprint → 保存历史
-             └ 有变化 / 失败 → 主聊天汇总
+Validate result -> compare fingerprint -> save history
+             + Change / failure -> main chat summary
 ```
 
-## 使用
+## Usage
 
-在主聊天描述目标、时间、时区与频率，由主 Agent 创建计划。「任务 → 定时计划」只查看和管理已有计划，不提供手动新建入口。主 Agent 可使用 `pot_list_schedules`、`pot_get_schedule`、`pot_manage_schedule`。列表默认只返回摘要，详情和执行历史按需读取。
+Describe goal, time, time zone, and frequency in main chat; main Agent creates the schedule. Tasks -> Schedules only views/manages existing definitions without manual creation. Tools: `pot_list_schedules`, `pot_get_schedule`, `pot_manage_schedule`. Lists return summaries; details/history are loaded on demand.
 
-- 一次：当地日期时间 `YYYY-MM-DD HH:MM`。
-- 间隔：正整数分钟，从创建或恢复时起计算。
-- 每天：当地时间 `HH:MM`。
-- 每周：当地时间加星期，1 为周一，7 为周日。
-- 时区：IANA 名称，默认 `Asia/Shanghai`；保存的时区不随机器旅行而改变。
-- 通知：默认有变化或失败时通知；可选每次通知、仅失败。首次成功观察视为变化。
-- 错过触发：默认合并补跑一次；选择跳过时，迟到至少 60 秒的触发只记历史。
+- Once: local date/time `YYYY-MM-DD HH:MM`.
+- Interval: positive integer minutes, measured from creation/resume.
+- Daily: local time `HH:MM`.
+- Weekly: local time and weekday, 1 = Monday, 7 = Sunday.
+- Time zone: IANA name, default `Asia/Shanghai`; saved zones do not change when the machine travels.
+- Notifications: changes/failures by default; optionally every run or failures only. First successful observation counts as changed.
+- Missed triggers: coalesce into one catch-up by default; with skip, triggers at least 60 seconds late only enter history.
 
-暂停和删除仅停止未来触发，当前排队/执行任务继续；取消当前执行在任务页面操作。暂停计划也可立即运行。前次仍在排队或执行时跳过本次，避免积压。删除保留历史，API 默认隐藏已删除定义。
+Pause/delete stops future triggers; queued/running tasks continue and can be cancelled on the task page. Paused schedules can run now. Skip a trigger while its previous run is queued/running to prevent backlog. Delete preserves history; APIs hide deleted definitions by default.
 
-隐藏窗口继续运行；Quit、睡眠、关机期间不会执行。恢复后按补跑策略处理，不唤醒 Mac。中断的模型执行不自动重放。模型未就绪或预算耗尽时暂缓调度。
+Hiding the window keeps execution running; Quit/sleep/shutdown stops it. Resume applies catch-up policy without waking the Mac. Interrupted model execution is not replayed automatically. Scheduling waits while the model is unready or budget exhausted.
 
-夏令时：重复小时选较早时刻且只触发一次；不存在的日/周时间跳过当天；不存在的一次性时间拒绝保存。
+DST: choose the earlier occurrence of repeated hours and trigger once; skip nonexistent daily/weekly times for that day; reject nonexistent one-off times on save.
 
-## 结果与存储
+## Results and storage
 
-Worker 写入 `.pot-schedule-result.json`：`summary`、稳定 `fingerprint`、非空 `evidence` 数组，以及可选 `artifacts` 相对路径数组。缺失或无效结果记失败，不能当作“无变化”。目标编辑后重置比较基线，旧执行不会覆盖新目标的基线。无变化且静默的执行不唤醒主 Agent，但保留任务和计划历史；每次检查本身仍可能产生模型费用。
+Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, nonempty `evidence` array, optional relative-path `artifacts` array. Missing/invalid results fail rather than count as unchanged. Editing a goal resets the comparison baseline; old runs cannot overwrite the new baseline. Silent unchanged runs do not wake main Agent but retain task/schedule history; each check may still incur model costs.
 
-计划最多 100 个未删除定义，每个保留最近 100 条已结束/跳过记录；未结束执行保留。任务沿用现有总量限制。调度队列与计划一起保存到 `tasks.v2`，自动读取旧 `tasks.v1`；旧版本程序不识别新元数据，不应直接降级。
+At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.v2`, reading old `tasks.v1` automatically. Older programs cannot understand new metadata; do not downgrade directly.
 
-接口：`GET /api/v1/schedules` 分页查询，`POST /api/v1/schedules` 接受 `request_id`、`action`、`schedule_id`、`spec`。写入请求重复使用相同 ID 防止重复创建；相同 ID 不同内容拒绝。运行记录链接到任务详情，沿用任务状态及归档方式。
+API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID to prevent duplicate creation; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
 
-## 验证
+## Validation
 
-调度测试使用显式时钟，覆盖时区/DST、错过触发、重叠、暂停、幂等、重启恢复、持久化失败回滚、基线更新和旧数据迁移。真实 Pi 对本地模拟模型验证创建计划、两次独立执行、结构化结果、有变化汇总和无变化静默，不调用付费服务。
+Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates, and old-data migration. Real Pi with a local mock model validates creation, two independent runs, structured results, change summaries, and unchanged silence without paid services.
 
 ```sh
 CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-app -p pot-runtime -p pot-protocol

@@ -1,37 +1,37 @@
-# UI / UX 改版验证
+# UI / UX redesign validation
 
-> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+> Historical record: versions, allowances, UI reflect section dates. Current scope/contracts: [Development plan](../development-plan.md), [Documentation index](../README.md).
 
-日期：2026-10-03  
-设计依据：[UI / UX 设计](../ui-ux-design.md)。状态：当前 Pi MVP 界面切面通过下列验证；不代表后续多引擎、完整冷安装 Setup 或网页隔离已交付。
+Date: 2026-10-03
+Basis: [UI design](../ui-ux-design.md). Current Pi MVP slice passes below, not multiple drivers/full cold Setup/web isolation.
 
-## 已实现
+## Implemented
 
-- 原生 56px 图标导航：聊天、Sandbox、设置；hover 名称；聊天中央不放头像。
-- GPUI 蓝灰气泡、深浅色、基础 CommonMark 正文、复制、工具折叠、成功 write/edit 的工作文件入口。产物仅在工作目录内解析，Finder 显示文件，不执行生成文件。
-- 原生 NSTextView 多行输入与中文粘贴、Enter 发送、Shift+Enter 换行、停止。页面切换保留草稿；上翻历史时保留位置，提供回到最新消息入口。
-- Sandbox 全页 noVNC，精简工具栏、接管/交回、重连、剪贴板、重开浏览器、打开工作目录、管理/停止/重启环境。移除 viewer 调试表单，浏览器使用 Pot 欢迎页。
-- 环境信息：真实 OCI 镜像引用和压缩层大小、运行时长、CPU 平均使用率、内存、系统盘使用与容量、工作文件逻辑占用。工作文件统计每 30 秒更新。
-- 设置：系统/浅色/深色；Pi + DeepSeek 密钥与额度；Sandbox CPU/内存/系统盘。配置验证后原子保存、正常重启；任务执行或 Runtime 状态未知时不应用配置。密钥留空保留，文件模式 0600。
-- 首次无 Pi 配置时使用同一 Agent 表单进入 Setup。当前唯一可选执行引擎为已验证的 Pi，模型固定 DeepSeek Flash。
-- 原创 U 形锅身与悬浮锅盖，App/Dock/侧栏/tray 使用同一造型。工作时锅盖轻微起伏，减少动态效果时静态抬盖；需要认证时倾盖。tray 默认无文字，有未读显示数字，菜单仅 Open / Hide。
-- 未读计数独立于任务状态，按完成的助手消息 ID 去重并持久记录已读；停留在 Sandbox 或历史区不会清除，查看聊天底部后清除。
+- Native56px icon navigation chat/Sandbox/settings, tooltips, no central avatar.
+- GPUI blue-gray bubbles/light-dark/basic CommonMark/copy/collapsed tools/successful write-edit file entries. Resolve artifacts only in workspace, show Finder without execution.
+- NSTextView multiline/Chinese paste/Enter-send/Shift-Enter/stop; navigation preserves drafts/history position/latest entry.
+- Full-page noVNC/minimal toolbar/takeover-handback/reconnect/clipboard/browser/workspace/environment stop-restart. Remove debug forms, Pot browser welcome.
+- Real OCI reference/compressed size/uptime/average CPU/memory/system disk/work logical sizes; files refresh30s.
+- System/light/dark, Pi-DeepSeek key/allowances, CPU-memory-disk. Validate/atomic save/normal restart; no apply during execution/unknown Runtime. Blank key retains, mode0600.
+- Missing Pi config reuses Agent Setup form; only validated Pi selectable, fixed DeepSeek Flash.
+- Original U-shaped pot/floating lid shared App-Dock-sidebar-tray. Working lid movement/static raised with reduced motion, tilted auth state. Tray no text, unread number, Open/Hide menu only.
+- Unread deduplicates completed assistant IDs/persists read state; Sandbox/history viewing preserves, bottom chat clears.
 
-## 验证
+## Validation
 
-| 项目 | 结果 |
+| Item | Result |
 |---|---|
-| 构建 | macOS App、Swift helper、ARM64 Runtime 构建通过；bundle ad hoc deep/strict 签名通过 |
-| Rust 自动化 | App 6 + protocol 1 + Runtime 8 项通过；收费模型无关的原有 Pi 集成测试本轮未重复运行 |
-| Swift 未读状态 | 首次历史基线、重复消息、隐藏/历史视图、读取、重开恢复通过 |
-| 原生 UI | 窄侧栏导航、设置深浅色、聊天气泡、中文粘贴、Shift+Enter、多行草稿切页保留实际操作通过 |
-| Agent 设置 | 非法 token 值被拒绝；恢复原值后经确认保存、正常重启并恢复连接；历史与用量保留，密钥仍为 0600 |
-| Sandbox | noVNC 实际连接；信息面板展示真实指标；浏览器关闭后仍连接，空桌面交还控制成功；工具栏重新打开浏览器成功 |
-| 真实发送 | 原生输入框发送短测试消息，Pi 返回“已收到”；无工具调用 |
+| Build | macOS App/Swift Helper/ARM64 Runtime pass; ad hoc deep-strict bundle |
+| Rust automation | App6/protocol1/Runtime8 pass; prior no-paid Pi integration not rerun |
+| Swift unread | Historical baseline/duplicates/hidden-history/read/reopen pass |
+| Native UI | Sidebar/settings themes/bubbles/Chinese paste/Shift-Enter/multiline draft navigation pass |
+| Agent settings | Invalid tokens rejected; restored config confirmed/saved/restarted/reconnected, history/usage retained, key0600 |
+| Sandbox | Actual noVNC/real metrics; browser close retains connection, empty desktop handback/browser reopen pass |
+| Real send | Native short test, Pi acknowledgment, no tools |
 
-本轮真实发送仅新增 **1 次 DeepSeek 请求**：2350 输入 token（2176 缓存命中）、2 输出 token。Pi ledger 从 5 增至 6，没有重置额度。
+One additional **DeepSeek request**: 2350 input (2176 cached), 2 output; ledger5->6, no reset.
 
-测试入口：
+Test entry points:
 
 ```sh
 CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-app -p pot-runtime -p pot-protocol
@@ -43,121 +43,121 @@ scripts/pot bundle
 scripts/pot open
 ```
 
-构建与测试日志在忽略目录 `.local/d1/ui-*.log`。机器当前部署与资源观测记录在 `~/Workspace/Machines`。
+Ignored `.local/d1/ui-*.log`; Machines holds deployment/resources.
 
-## 修复与边界
+## Fixes and boundaries
 
-- 发现旧 helper 只设置容器 cgroup 限额，VM 使用框架默认 1 GiB / 4 vCPU。现在同时传入 `VMResources`，为 guest 内核预留框架建议的 128 MiB。实测配置 3 GiB 后，VM 可用内存约 2.98 GiB；CPU 配置 2。
-- 修复原生透明设置页与 Metal 视图叠加导致的黑背景，并对原生 layer 明确处理深色背景。
-- 浏览器已关闭时交回桌面仍执行 RFB release/fence，不再要求不存在的 CDP 页面响应。
-- 当前配置检查验证格式与范围；不会为了验证 API key 自动消耗模型请求。不能凭“配置已保存”推断任意新 key 可用。
-- 其他执行引擎接入、跨引擎上下文迁移、任务列表、附件、完整产物预览仍属于后续产品能力；未添加假入口。基本 Markdown 不包含完整表格排版或内联图片预览。
-- 当前协议尚无通用 action-review 等待事件，倾盖等待状态接到 NeedsAuth；后续新增等待事件时需继续接入。控制权 UI 不替代 D4 的独立 Agent/controller 隔离。
-- 完整冷安装下载向导、下载续传、发行签名仍未交付；本次复用的是 Agent 配置表单与应用流程。
+- Old Helper set only cgroups while VM defaulted1GiB/4vCPU. Pass VMResources plus recommended128MiB kernel reserve. Config3GiB yields ~2.98GiB usable, CPU2.
+- Fix black background from transparent native settings/Metal, explicit native dark layers.
+- Browser-closed handback still RFB release/Fence without nonexistent CDP page.
+- Config checks format/ranges, no automatic paid key probe; Saved is not key validation.
+- Other drivers/migration/task lists/attachments/full artifact previews future; no fake entries. Basic Markdown lacks full tables/inline images.
+- No generic review-wait event; tilted lid uses NeedsAuth, extend for future waits. UI not D4 isolation.
+- Cold downloads/resume/distribution undelivered; reused configuration flow only.
 
-## 2026-10-04 细节打磨
+## 2026-10-04 refinement
 
-App 编译和 bundle deep/strict 签名通过。实际检查侧栏合并、选中颜色、通用/Agent 设置对齐、用量限制折叠/展开、聊天复制 hover 显隐与复制后粘贴内容；测试草稿已清除。没有保存或更换凭据，没有发送模型请求。设置仍使用原生控件，消息复制使用 gpui-kit Clipboard。任务页改为居中限宽卡片和标题行新任务按钮。
+App/bundle signature pass. Real sidebar/selection/General-Agent alignment/limit expand/copy hover/paste checked; drafts cleared, no key save/change/models. Native settings then, Kit Clipboard. Task centered cards/header New task.
 
-### 灰色消息复制按钮对比度
+### Gray message copy contrast
 
-助手消息的 hover 复制按钮增加独立底色、对比边框和轻阴影；浅色为白底灰边，深色为较亮灰底和浅边；按钮 hover 进一步强调底色。蓝色用户消息保持原样。编译及 bundle 签名通过。
+Assistant hover-copy gets background/border/shadow: white-gray light, brighter gray/light border dark; hover stronger. Blue user unchanged. Build/signature pass.
 
-### Sandbox 连接指示
+### Sandbox connection indicator
 
-标题保留 Sandbox，连接状态改为圆点：已连接绿色、连接中琥珀色、断开/错误红色。状态文字改为 title 悬停提示，保留键盘焦点及 aria-label。RFB connect/disconnect 立即刷新指示，状态 API 失败显示错误色。JavaScript 语法检查与 bundle 签名通过。
+Sandbox title retained; green connected/amber connecting/red disconnect-error dot. Status in hover title, keyboard/aria retained; RFB/API refresh/errors. JS/signature pass.
 
-发现 WKWebView 可能复用旧版本 viewer 页面；LocalRuntime 的就绪探测和页面请求改为 reloadIgnoringLocalCacheData，确保升级后加载当前 Sandbox UI。Swift/Rust 构建通过。
+WKWebView cached old viewer; LocalRuntime readiness/page requests use reloadIgnoringLocalCacheData for upgrades. Swift/Rust pass.
 
-### 聊天切页去除重复载入
+### Avoid repeated conversation loading
 
-Client::select 原先每次点击都清空 snapshot 并等待 500ms 轮询；现在同会话选择不改变状态，主会话使用持续更新的 main_snapshot，已读任务会话使用最多 16 条内存快照缓存。首次读取仍加载，不将其他会话内容当作目标内容。切页唤醒刷新线程，结果立即唤醒 GPUI；缓存不持久化到磁盘，Runtime boot_id 改变时清除任务缓存。
+Client:: select cleared snapshots/waited500ms every click; same-session now unchanged, live main_snapshot/up to16 task memory snapshots. First access loads correct target. Selection wakes refresh/GPUI; no disk cache, boot_id clears tasks.
 
-App 8 项测试通过（新增重复打开保留消息/错误、主任务切换缓存隔离两项）。App 构建与 bundle 签名通过；没有新增模型请求。冷启动 VM 等待、首次任务读取以及外层长历史虚拟化不在本次优化范围内。
+App8 tests including reopen messages-errors/cache isolation pass; build/signature, no models. Cold VM/first task/long history virtualization outside.
 
-## 2026-10-04：任务 / 设置 / Sandbox 统一
+## 2026-10-04: Unified tasks / settings / Sandbox
 
-- 新增 `app/src/ui.rs`：共享页面、标题、说明、卡片与 Kit 设置表单。任务列表使用同一布局和主题边框。
-- 设置从 AppKit 自绘页面迁至 Kit Form / Field / Input / Button；Swift 保留配置校验、原子保存与重启服务。Setup 复用表单。
-- Sandbox 标题、连接状态、接管和图标操作迁至 Kit；WKWebView 仅占标题下方。环境信息与更多菜单仍是网页，应用内隐藏网页标题，统一控件圆角并同步主题。
-- `cargo build --locked -p pot-app`、`cargo test --locked -p pot-app` 通过（8 tests）。使用现有本地 target 目录，bundle 已重新签名，应用已重开。
-- 实机确认：三页切换、任务卡片显示、通用/Agent/Sandbox 表单、用量展开、⌘A 和粘贴、vCPU=0 的范围错误提示；恢复输入草稿，未保存配置。
-- 实机确认：Sandbox 绿色连接点、环境信息包含镜像/CPU/内存/磁盘、更多菜单保留重连/浏览器/剪贴板/管理等项；深色主题同步到 viewer，最后恢复跟随系统。
-- 本轮没有模型请求，没有修改认证、资源配置或任务数据。没有重新执行配置保存重启、接管桌面、最小窗口尺寸的完整回归。
-- 简明规范已重写至 `docs/ui-ux-design.md`；新增普通 UI 优先复用 Kit 与 `ui.rs`，不再新增独立 AppKit 设置页面。
+- `app/src/ui.rs` shared page/title/hint/cards/Kit forms; same task borders.
+- AppKit settings -> Kit Form/Field/Input/Button; Swift validates/atomic save/restarts; Setup reuses.
+- Sandbox title/status/actions -> Kit; WebView below, web environment/More retained, hidden web header/shared radii/themes.
+- `cargo build --locked -p pot-app`, `cargo test --locked -p pot-app` pass8; existing target, resigned/reopened.
+- Real three-page navigation/cards/forms/limits/Cmd-A/paste/vCPU0 error; restored draft, no save.
+- Real green dot/image-CPU-memory-disk/More reconnect-browser-clipboard-management; dark viewer sync, restored system theme.
+- No models/auth/resources/task changes; no full save-restart/takeover/minimum-size regression.
+- Rewrote concise `docs/ui-ux-design.md`; reuse Kit/ui.rs, no separate standard AppKit settings.
 
-## 2026-10-04：放宽日常配置
+## 2026-10-04: Everyday configuration ranges
 
-通用设置移除窗口/后台和未读说明。默认模型额度改为 10000 累计请求、8192 输出 tokens、100 请求/轮；Sandbox 默认 4 vCPU、8 GiB、32 GiB。可设置范围见 UI 规范，UI/Swift/Runtime/helper/导入脚本同步调整。已有配置不会被加载逻辑重置；本机开发配置已在正常退出后显式更新，账本保留 11 次。
+Remove General background/unread text. Defaults10000 lifetime/8192 output/100 per turn, Sandbox4vCPU/8GiB/32GiB. UI/Swift/Runtime/Helper/import ranges aligned; old explicit values preserved. Local dev config explicitly updated after clean exit, ledger11.
 
-App、Linux Runtime、helper 构建通过；测试 26 项通过、2 项外部 Pi 测试按默认忽略。重开后只读 API 确认 Pi ready、新预算与 4/8/32 资源生效；实机确认通用项删除及三个额度字段显示。未调用模型。
+App/Linux Runtime/Helper pass; 26 tests, 2 external Pi ignored. Reopened API Ready/new budget/4-8-32, UI fields confirmed, no models.
 
-## 2026-10-04：Sandbox 菜单定位
+## 2026-10-04: Sandbox menu positioning
 
-复现右上角更多按钮与网页菜单之间存在标题区偏移。应用内改用原生 NSMenu，在窗口坐标中按工具栏右侧定位，跨越 GPUI/WKWebView 边界；独立 viewer 不变。实机确认菜单靠近按钮、右边缘对齐，禁用项与分隔线正常，管理环境跳转到 Sandbox 设置。底部显示比例菜单已检查可正常展开。App 构建通过，无模型调用。
+Web menu offset by title. App NSMenu anchored toolbar-right in window coordinates across GPUI/WebView; standalone unchanged. Real alignment/disabled/separators/management-to-settings/scaling menu pass; App build, no models.
 
-## 2026-10-04：聊天光标闪烁
+## 2026-10-04: Chat caret blinking
 
-后台 200 ms 状态同步反复给 NSTextView 设置 textColor 与 frame，干扰插入点闪烁。改为仅在主题变化时更新文字/光标颜色，仅在实际尺寸变化时更新输入框几何。App 构建、打包、重开通过；实机对同一输入内容观察到光标亮/灭两阶段，粘贴、全选、删除正常。验证草稿已清除，无消息发送或模型调用。
+200ms sync resetting textColor/frame disrupted caret. Update colors on theme change/geometry only actual resize. Build/bundle/reopen; bright/dark caret/paste-select-delete observed, draft cleared, no send.
 
-## 2026-10-04：原生输入键盘路由与联网能力
+## 2026-10-04: Native keyboard routing and networking
 
-聊天输入是 NSTextView，不是 Kit Input。GPUI 宿主窗口与原生编辑器的按键路由冲突曾使左右键变成控制字符。现在 firstResponder 为 composer 时，local key monitor 将事件直接交给原生编辑器；未组合输入时，方向键、Home/End 显式映射 AppKit 编辑命令，包含 Shift 选择、Option 词移动和 Command 行首尾/文档首尾。输入法 marked text 仍走原生处理。
+Composer is NSTextView, not Kit. GPUI conflict inserted control characters. firstResponder composer routes through local key monitor; unmarked arrows/Home-End map AppKit editing with Shift/Option/Command; marked IME native.
 
-实机验收：abcd 左移两次插 X 得 abXcd；右移和 Shift+Right 替换得 abXcY；Command+Left 插 Z 得 ZabXcY；多行上下移动在正确行插入。测试草稿已清空，未发送。App/Runtime 共 25 项测试通过，2 项外部 Pi 测试忽略；已构建打包重开。
+Real abcd/Left2/X -> abXcd, Right/Shift-Right replacement -> abXcY, Command-Left/Z -> ZabXcY, multiline movement correct. Draft cleared, 25 tests/2 ignored, built/bundled/reopened.
 
-Pi 已启用 bash，镜像包含 curl，VM 有出站网络；此前“无法联网”回复没有工具调用。新增 append-system-prompt 要求实时问题先尝试权威来源，区分网站拒绝与网络不可用，不虚构搜索/浏览器工具。一次真实诊断任务调用 bash/curl 访问 https://abc.xyz/investor/，返回 HTTP/2 403、cf-mitigated: challenge；模型准确报告 Cloudflare 拦截。该轮使用 2 次模型请求，未重试。当前尚无专用搜索与浏览器工具。
+Pi bash/curl/outbound network available; earlier no-network reply used no tools. Append prompt tries authoritative current sources, distinguishes site denial/network, invents no tools. Real curl https://abc.xyz/investor/ returns HTTP/2 403/cf-mitigated challenge, accurately reported.2 requests/no retries; no dedicated search/browser tools.
 
-## 2026-10-04：自定义输出 token 与 K/M
+## 2026-10-04: Custom output tokens / K-M
 
-取消 32768 输出上限；设置和导入脚本支持十进制 K/M（大小写、空白、小数），保存为整数。Runtime 与预算协议扩至 u64，保留 JavaScript 精确 JSON 整数边界 2^53−1。当前输出配置保持 8192，没有为验证改成大额度。模型服务仍自行校验实际支持的输出上限，上下文容量不等同输出容量。
+Remove32768 cap; UI/import decimal case-insensitive K-M/whitespace/fractions -> integer. Runtime/protocol u64 retains JS exact2^53-1. Output stays8192; server validates, context/output differ.
 
-Swift 解析测试通过：128K、1M、1.5M、超过 u32 的值、非整数/负值/溢出拒绝；CLI 同等解析测试通过。Rust 新增配置/协议回归通过（1M、2^32、2^53−1 可往返，0/越界拒绝）；已有 26 项回归通过、2 项默认忽略。App、Linux Runtime、helper 构建与打包通过，已重开。无模型调用。UI 最终交互验收因用户同时操作窗口未继续；解析和配置链路由上述测试覆盖。
+Swift/CLI128K/1M/1.5M/>u32 and fractional-negative-overflow rejection pass. Rust1M/2^32/2^53-1 roundtrip/zero-overflow rejection; 26 regressions/2 ignored. App/Linux/Helper bundle/reopen, no models. Final UI interrupted by simultaneous user window operation; parsing/config tested.
 
-## 2026-10-04：最新消息按钮
+## 2026-10-04: Latest-message button
 
-scroll_to_bottom 在后续布局才应用，旧 render 使用点击前的滚动位置，且 Runtime 状态不变时没有再次通知。新增跳转中状态让点击当帧隐藏按钮，并单独观察滚动是否到达底部以触发重绘。按钮在输入区上方水平居中。构建打包重开通过；实机确认上滚出现、点击后鼠标不移开即从 AX 移除、再次上滚重新出现并可再次跳到底部。无消息发送/模型调用。
+Deferred scroll_to_bottom left old render/no unchanged-state notification. Jump state hides same frame; separately observe bottom for redraw. Center above input. Build/reopen; scroll-up appears/click removes AX without mouse move/repeat works; no models.
 
-## 2026-10-04：任务状态、归档与分页
+## 2026-10-04: Task states / archive / pagination
 
-任务页改用 Kit 分组按钮、Input 搜索和固定分页栏；进行中/需处理/已归档各自显示全局数量，
-每页 20 项，详情独立读取选中任务元数据。实际重开验证：4 条旧完成任务自动归入已归档，
-进行中为空；中文搜索“多任务验收”返回 2 项，无匹配搜索显示明确提示；打开归档任务后标题
-显示“已归档 · 已完成”，原对话与追加指导入口保留，返回时保留筛选。测试搜索已清除。
-API 实测 limit=2 时返回 2/4 项和 next_offset=2。千条数据的分页由自动测试验证，未向用户
-数据批量灌入测试任务。模型请求账本保持 27，本轮零收费调用。
+Kit groups/search/fixed pagination; Ongoing/Needs attention/Archived global counts,
+20/page, independent selected metadata. Reopen: 4 old completed archived,
+ongoing empty; Chinese multitask search2, unmatched explicit; archived detail
+Archived/Completed, history/guidance retained, back preserves filters, search cleared.
+API limit2 returns2/4, next_offset2. Thousand-task automated pagination without
+bulk user data injection; ledger27, 0 paid calls.
 
-## 2026-10-04 定时计划
+## 2026-10-04 schedules
 
-- 构建并重新打开 `.local/d1/Pot.app`，VM 使用新版 Runtime。
-- CUA 验证「任务 → 定时计划」入口、表单布局、暂停状态创建、编辑字段回填、修改为远期一次性计划、恢复后显示正确时区时间、再次暂停。
-- 本次测试计划已通过 Runtime API 移除；没有剩余启用计划或活动任务。实际模型请求账本维持 27，新增付费请求 0。
-- App 9、Protocol 1、Runtime 31 项常规测试通过；4 项真实 Pi + 本地模拟模型集成测试通过，包含创建计划、独立执行与无变化静默。调度语义见 [定时计划](../scheduled-tasks.md)。
-- 本轮实机检查使用当前浅色窗口；未额外验收最小窗口和深色主题。
+- Built/reopened `.local/d1/Pot.app`, updated guest Runtime.
+- CUA Tasks/Schedules/form/paused creation/edit refill/future one-off/resume-zone/pause checked.
+- Test schedule removed via API, no enabled schedules/active tasks; ledger27, 0 new paid.
+- App9/Protocol1/Runtime31 and4 real Pi mock tests pass, including creation/independent runs/unchanged silence. [Contract](../scheduled-tasks.md).
+- Light UI only; no extra minimum-size/dark acceptance.
 
-### 2026-10-04：Token 用量与 Pot 额度
+### 2026-10-04: Token usage / Pot allowance
 
-- 用量页只显示整体统计，范围为 7 / 30 / 90 / 365 天；一年 53 个桶。主聊天及归档任务内可查累计、模型请求、工具、Skills 和压缩状态。默认 API 配置不显示周期额度卡。
-- SQLite 验证覆盖请求去重、任务归属、缓存不重复累加、历史幂等导入、日期边界、分页、DST/周一重置、共享预留、手动恢复、未知用量与等待持久化。任务等待测试覆盖释放槽位、重启、排队指导与取消。
-- App 10、Protocol 1、Runtime 39 项常规测试通过；5 项安装版 Pi + 本地模拟服务集成测试全部通过。新增用例先真实执行追加文件工具，再耗尽本地额度、重开存储、沿用会话恢复，文件只追加一次、两次模型请求共 30 tokens。
-- App/guest Runtime 构建、lint 和 diff 检查通过。实机核对侧栏入口、四个时间范围、设置表单、归档任务累计及分页；原有 27 次历史请求保留，用量限制默认不限，付费请求账本仍为 27。本轮新增付费调用 0。
-- 旧用量缺少时间，不补造时间图表。Skills/自动 compact 尚未启用，订阅服务额度尚未接入；未额外验收深色与最小窗口。本轮 UI 使用现有历史数据，正值时间桶和去重由本地模拟服务/聚合测试覆盖。
+- Global7/30/90/365, 53 year buckets; session/archived totals/requests/tools/Skills/compaction then. Default no periodic card.
+- SQLite dedupe/attribution/cache/import/date/page/DST-Monday/reserve/manual resume/unknown/wait persistence; task slots/restart/guidance/cancel.
+- App10/Protocol1/Runtime39 plus5 real Pi mock pass. Real append tool then local allowance exhaustion/storage reopen/same-session resume, one file append, 2 requests30tokens.
+- Build/lint/diff; real sidebar/ranges/forms/archive/page; historical27 retained/unlimited, 0 paid.
+- Missing old times not invented. Skills/automatic compact then off, subscriptions absent; no dark/minimum-size. Existing UI data, positive buckets/dedupe mock-tested.
 
-## 2026-10-04：任务对话页头
+## 2026-10-04: Task conversation header
 
-- 标题独立单行，按实际字体测量宽度并以 `…` 省略；完整标题通过 Kit Tooltip 展示。列表与对话页共用测量逻辑，保留 Unicode 字素边界。
-- 阶段、归档、累计 token 合并为浅灰小图标信息行；页头与消息列对齐。旧版 48 字标题从原始任务首行恢复，不调用模型。
-- 51 项普通测试通过（App 10、Protocol 1、Runtime 40），包括标题创建、持久化恢复与旧前缀修复；5 项 Pi 集成测试本次未重跑。lint、App/Runtime 构建、镜像及应用打包通过。
-- 实机确认中英文长标题末尾省略号、旧标题恢复、图标信息行与全文提示触发。提示框随后改为固定内容宽度自动换行；最后构建成功，但 Mac 锁屏，最终换行效果及最小窗口/深色未目视复核。本次没有模型请求。
+- Font-measured single-line `...`, Kit full tooltip/list-chat shared grapheme-aware logic.
+- Stage/archive/tokens one gray icon row aligned; old48-character titles restored from initial task, no models.
+- 51 tests(App10/Protocol1/Runtime40) title creation/persistence/repair; 5 Pi not rerun. lint/build/image/bundle pass.
+- Real long CJK-English ellipsis/restored titles/icons/tooltips; then fixed-width wrapping built, Mac locked before final visual/minimum-dark check. No models.
 
-## 2026-10-04：启用自动压缩，移除 Skills 统计
+## 2026-10-04: Enable compaction, remove Skills stats
 
-- 54 项普通测试与 6 项真实 Pi + 本地模拟 provider 集成测试通过。新增覆盖自动阈值压缩、输出上限触发压缩重试、压缩额度不足后持久化恢复、压缩中取消、跨会话权限、旧表迁移、多个摘要请求聚合及去重。取消且无 usage 的请求仍标记用量未知。
-- lint、workspace check、App 构建、Linux Runtime 交叉编译、Sandbox 镜像构建和应用打包验证通过。重开后的 Runtime summary 返回 compaction=true；Skills capability 与 UI 入口已移除。
-- 实机确认会话用量只保留模型请求、工具、上下文压缩三个页签，以及自动压缩已启用/暂无记录提示。生产会话未人为触发付费压缩；非空压缩记录由真实 Pi 的本地模拟服务测试验证，未对其卡片另做实机截图。无付费模型请求。
+-54 regular/6 real Pi mock pass: threshold/output-trigger retry/budget recovery/cancel/permissions/migration/multiple-summary aggregation-dedupe; cancelled no-usage unknown.
+- lint/workspace/App/Linux/image/bundle pass; reopened summary compaction=true, Skills capability/UI removed.
+- Real then-three tabs/model-tools-compaction/Enabled-empty. No forced paid compaction; nonempty mock-tested, no extra real card screenshot, 0 paid.
 
-## 2026-10-04：用量详情简化
+## 2026-10-04: Simplified usage details
 
-- 去掉模型请求 / 工具 / 压缩页签及明细分页，改为累计统计、对话 / 压缩真实用量堆叠条和工具输出排行。工具按输出量降序，默认前 5 项、支持展开全部；估算不计入真实模型合计。
-- 验证：workspace 编译、lint、54 项普通测试通过（6 项 Pi 集成测试本次未重跑）；App / Linux Runtime 构建及打包成功。无付费模型调用。
-- 实际 App 检查主聊天历史累计、单段模型条、空工具区隐藏、页签及分页移除。当前真实数据无新工具输出与压缩记录，因此未实测非空排行、展开和双段图；深色 / 最小窗口本次未复验。
+- Remove tabs/detail pagination; totals/conversation-compaction actual stacks/tool rankings, descending/top5-expand, estimates excluded from totals.
+- Workspace/lint/54 regular pass, 6 Pi not rerun; App/Linux/bundle, 0 paid.
+- Real main lifetime/single stack/empty-tools hidden/no tabs-page. No fresh tools/compaction so nonempty ranks/expand/two stacks untested; no dark/minimum-size rerun.

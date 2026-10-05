@@ -1,65 +1,65 @@
-# Pot 产品目标
+# Pot product goals
 
-更新：2026-10-04。本文维护长期产品约束；已交付范围见 [开发计划](development-plan.md)，具体界面见 [UI 规范](ui-ux-design.md)。未完成的目标不能作为现有能力向用户承诺。
+Updated: 2026-10-04. This page maintains long-term product constraints. See the [Development plan](development-plan.md) for delivered scope and [UI specification](ui-ux-design.md) for interfaces. Unfinished goals must not be promised as existing capabilities.
 
-## 定位与边界
+## Positioning and boundaries
 
-Pot 是从 Mac 菜单栏进入的个人助手，在持久 Linux Sandbox 中执行工作、协调后台任务并保存结果。用户通过主聊天交办与追问，可查看独立任务和同一个工作桌面。
+Pot is a personal assistant accessed from the Mac menu bar. It works in a persistent Linux Sandbox, coordinates background tasks, and saves results. Users delegate/follow up through main chat and can inspect separate tasks and the shared desktop.
 
-- 一个长期主助手，默认名 Pot；任务 worker 没有独立人格。任务和定时计划只通过主 Agent 创建，界面负责查看、指导和管理。
-- 交互参考 ChatGPT Dot；Agent Setup 与 Sandbox 配置按本地产品需要设计，不推断或复制闭源内部实现。
-- 本地运行 GUI、Runtime 与工具，模型可能使用云服务；不承诺默认离线或数据永不离机。
-- 当前先用 Pi + DeepSeek。后续引擎目标为 Codex ACP、Claude、OpenCode、AGY CLI；每个引擎分别验收，不把握手或宿主登录等同可用。
-- 本地产品自带 Containerization，不要求 Docker Desktop；远程 Docker/Node Manager、多节点为后续方向，不自动迁移任务或身份。
-- 不引入持久项目助手、跨助手通信、环境迁移或完整插件生态作为当前 MVP 前置条件。
+- One long-lived main assistant, named Pot by default; task workers have no separate personas. Tasks/schedules are created only through the main Agent; UI handles viewing, guidance, and management.
+- Interaction references ChatGPT Dot. Agent Setup/Sandbox configuration follow local product needs without inferring or copying closed-source internals.
+- GUI, Runtime, and tools run locally; models may use cloud services. Default offline operation or data never leaving the machine is not promised.
+- Start with Pi + DeepSeek. Future driver targets include Codex ACP, Claude, OpenCode, and AGY CLI; validate each separately rather than treating a handshake/host login as readiness.
+- Local product bundles Containerization without requiring Docker Desktop. Remote Docker/Node Manager and multiple nodes are future directions without automatic task/identity migration.
+- Persistent project assistants, inter-assistant communication, environment migration, and a complete plugin ecosystem are not current MVP prerequisites.
 
-## 用户旅程
+## User journey
 
-目标流程：安装 → 环境/引擎 Setup 与认证 → 主聊天命名和偏好引导 → 交办 → 后台执行 → 查看产物或接管桌面 → 结果回报 → 重开续接。
+Target flow: install -> environment/driver Setup and auth -> main chat naming/preferences -> delegation -> background execution -> artifacts or desktop takeover -> results -> reopen and continue.
 
-聊天内引导可跳过，完成进度和明确偏好需持久化。Setup 失败应指出具体步骤并保留有效配置/已下载资源；未验证的引擎不展示为可用。
+Chat onboarding is skippable; completion progress and explicit preferences persist. Setup failure identifies the specific step while retaining valid configuration/downloads. Unvalidated drivers must not appear ready.
 
-主助手处理短问答，并将研究、报告、多步执行委派到有明确目标的任务。后台执行时主聊天保持可用；追加指导先显示“已接收”，实际消费后显示“已应用”，不支持实时 steering 时明确排入下一轮。
+The main assistant answers short questions and delegates research, reports, and multistep execution to tasks with explicit goals. Main chat stays available during background work. Guidance first shows Received, then Applied after consumption; without real-time steering, explicitly queue it for the next turn.
 
-完成任务进入归档视图；失败/中断需要用户处理；归档不删除记录或原生 session，追加指导可继续同一任务。主助手按需搜索状态与结果，不把所有历史任务塞进每轮上下文。
+Completed tasks enter archive; failed/interrupted tasks need attention. Archiving preserves records/native sessions; further guidance can continue the same task. The main assistant searches status/results on demand rather than loading all history every turn.
 
-## 控制与授权
+## Control and authorization
 
-| 操作 | 语义 |
+| Action | Semantics |
 |---|---|
-| 停止指定任务 | 只取消目标执行，等待执行端收敛；不影响其他任务，不回滚既有副作用 |
-| 暂停/移除计划 | 阻止未来触发，不取消已排队或运行的一次执行 |
-| 查看桌面 | 只看，不发送人工输入，不等于接管 |
-| 接管桌面 | 目标是暂停 Agent 输入与新观察、排空在途输入；断线不自动抢回，交回后重新观察 |
-| 隐藏窗口 | 保持后台运行；tray 点击重开 |
-| Quit / 紧急停止环境 | 停止自有 VM；重启不将中断工作当作成功 |
+| Stop a task | Cancel only the target and wait for execution cleanup; other tasks and existing side effects remain unaffected |
+| Pause/remove a schedule | Prevent future triggers without cancelling an already queued/running execution |
+| View desktop | Observe without human input; viewing is not takeover |
+| Take over desktop | Aim to pause Agent input/new observations and drain in-flight input; disconnect does not reclaim control automatically; observe again after handback |
+| Hide window | Keep background work running; tray click reopens |
+| Quit / emergency environment stop | Stop the owned VM; restart does not treat interrupted work as success |
 
-桌面接管最终必须由独立 controller 权限域落实，不能仅依赖模型或合作式 flag。当前实现差距见开发计划。
+Desktop takeover ultimately needs a separate controller permission domain, not just model cooperation or flags. See the development plan for current gaps.
 
-普通沙箱工具不逐条弹审批；外部账号、分享、发送等操作按用户授权、规则与平台约束处理。review 展示目标账号和具体内容，批准绑定该次动作；“写草稿”不等于“发送”。服务授权独立于模型登录，撤销、停止任务、删除数据是不同操作。
+Ordinary Sandbox tools do not prompt for approval individually. External accounts, sharing, and sending follow user authorization, rules, and platform constraints. Review displays the destination account and concrete content; approval binds to that action. Drafting does not authorize sending. Service authorization is separate from model login; revocation, task cancellation, and data deletion are different operations.
 
-秘密不进入聊天、日志或普通记忆；宿主共享目录与读写范围需明确，不默认共享整个 home。只读共享仍允许读取，不等于防外传。账户状态以实际服务为准，摘要和记忆不增加权限。
+Secrets do not enter chat, logs, or ordinary memory. Host shared directories/read-write scope must be explicit; the whole home is not shared by default. Read-only sharing permits reading and does not prevent exfiltration. Actual services define account state; summaries/memory grant no permissions.
 
-## 执行上下文与恢复
+## Execution context and recovery
 
-Runtime 管理产品消息、任务、计划和 binding；引擎管理自己的原生 session、上下文与压缩。一个主引擎即可承担主助手，不需要额外模型逐句转发。
+Runtime owns product messages, tasks, schedules, and bindings; drivers own native sessions, context, and compaction. One main driver can serve the assistant without another model forwarding each sentence.
 
-adapter 需显式声明认证、工具、指导、停止、恢复和压缩能力。原生 session 恢复失败不能静默创建新会话并声称续接；切换引擎不冒充原生上下文迁移，活跃执行保留原 binding。
+Adapters explicitly declare auth, tools, guidance, stop, resume, and compaction capabilities. Failed native resume must not silently create a new session and claim continuation. Driver switching must not impersonate native context migration; active execution retains its binding.
 
-产品命令幂等、事件可恢复；文件和任务状态跨重启保留。已开始但结果不明的外部操作先核实，不能盲目重放。保存了输入不等于执行成功；恢复摘要必须指向可核实的产物和证据。
+Product commands are idempotent and events recoverable; files/task state survive restart. Verify external actions with uncertain results before replaying. Saved input does not imply execution success; recovery summaries point to verifiable artifacts/evidence.
 
-长期记忆后续先保存显式偏好、事实及来源，提供更正/遗忘；不把任务流水账、秘密或推断人格混入核心记忆。遗忘须说明产品存储与引擎既有上下文的实际范围，不承诺删除无法控制的副本。
+Future long-term memory initially stores explicit preferences, facts, and sources with correction/forgetting. Do not mix task logs, secrets, or inferred personas into core memory. Forgetting explains the actual scope of product storage and existing native context without promising deletion of uncontrolled copies.
 
-计划由 Runtime 触发，每次运行使用独立任务；默认禁止重叠，错过可合并补跑或跳过。通知条件与执行频率分开。当前首次成功观察视为变化，后续按稳定 fingerprint 比较；具体规则以 [定时计划](scheduled-tasks.md)为准。本地环境离线期间不执行，不承诺唤醒关机电脑。
+Runtime triggers schedules; each run uses an independent task. No overlap by default; missed triggers can coalesce into one catch-up or skip. Notification conditions are separate from frequency. The first successful observation currently counts as changed; later observations compare stable fingerprints. See [Scheduled tasks](scheduled-tasks.md). Offline local environments do not execute, and waking a powered-off computer is not promised.
 
-## 产品验收场景
+## Product acceptance scenarios
 
-三个场景须在正式界面、真实模型与持久环境中端到端通过；模拟模型只证明协议和执行链路。
+All three scenarios must pass end-to-end in the real UI with real models and persistent environments; mock models prove only protocol/execution paths.
 
-| 场景 | 流程与通过条件 |
+| Scenario | Flow and pass criteria |
 |---|---|
-| S1 报告与指导 | 上传两份资料→要求对比报告→执行中追加部署成本→打开产物→重启追问。指导状态真实，报告包含新增要求和来源，任务/会话/文件保持关联，回报不重复；同时验证停止与中断后恢复 |
-| S2 登录与接管 | 网页任务遇到登录→查看并接管→人工登录→交回继续。接管确认后无残留 Agent 输入/新观察，真实 shell/CDP/X11 无法绕过；断线不抢回，过期控制请求拒绝，独立任务不误停，秘密不进入聊天或日志 |
-| S3 计划与休眠 | 主聊天创建每周一北京时间九点检查来源的计划→睡眠错过→恢复→关闭计划。界面显示规则、时区、下次时间、错过策略和历史；无重叠、重复唤醒不重复创建/通知；变化附证据，无变化按策略静默；关闭不误停当次运行 |
+| S1 Reports and guidance | Upload two sources -> request comparison -> add deployment costs during execution -> open artifact -> restart/follow up. Guidance states are truthful; report includes the addition/sources; task/session/files stay linked; reports do not duplicate. Also validate stop/interruption recovery |
+| S2 Login and takeover | Web task encounters login -> view/take over -> log in manually -> hand back/continue. After takeover acknowledgment, no residual Agent input/new observations; real shell/CDP/X11 cannot bypass control. Disconnect does not reclaim control; stale control requests rejected; unrelated tasks unaffected; secrets absent from chat/logs |
+| S3 Schedules and sleep | Main chat creates a Monday 09: 00 Beijing source-check schedule -> sleep misses trigger -> resume -> disable. UI shows rule/time zone/next run/missed policy/history. No overlap or duplicate creation/notification after repeated wakes; changes include evidence, unchanged runs follow silence policy; disabling does not stop the current run |
 
-公开交付还需冷安装/Setup 故障恢复、服务授权撤销和 review、记忆更正遗忘、升级保留数据、签名公证。串账号、重复外部副作用、接管失效均阻断对应能力发布。
+Public delivery also requires cold install/Setup failure recovery, service authorization revocation/review, memory correction/forgetting, upgrades preserving data, and signing/notarization. Cross-account access, duplicate external effects, or failed takeover block the corresponding feature release.

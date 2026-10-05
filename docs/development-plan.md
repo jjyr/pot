@@ -1,68 +1,68 @@
-# 开发计划与当前范围
+# Development plan and current scope
 
-更新：2026-10-05。按“纵向骨架优先”推进；已交付能力与完整场景验收分开记录，不再维护逐轮开发流水账。
+Updated: 2026-10-05. Prioritize the vertical skeleton. Track delivered capabilities separately from full scenario acceptance rather than keeping a turn-by-turn development log.
 
-## 当前能力
+## Current capabilities
 
-| 能力 | 状态与证据 |
+| Capability | Status and evidence |
 |---|---|
-| Pi + DeepSeek 主聊天 | 已实现真实流式回复、工具、取消、Quit 重开续聊；[Pi MVP](validation/pi-mvp.md) |
-| GPUI / Sandbox / 设置 | Kit 统一界面、原生输入、noVNC 桌面、资源配置、tray；[UI 规范](ui-ux-design.md)、[验收](validation/ui-ux.md) |
-| 多任务与主 Agent 路由 | 独立 session、并发、持久指导、取消、结果汇总、按状态搜索/归档；[多任务验收](validation/multitask.md) |
-| Token 用量与本地额度 | 整体趋势、任务累计与工具统计；自动压缩及实际用量；日/周额度、等待及检查点续跑；[契约](token-usage.md)、[验收](validation/ui-ux.md) |
-| 定时计划 | 主 Agent 创建；日历/间隔、时区、去重、补跑/跳过、独立执行和变化通知；[契约与验证](scheduled-tasks.md) |
+| Pi + DeepSeek main chat | Real streaming replies, tools, cancellation, and continuation after Quit/reopen implemented; [Pi MVP](validation/pi-mvp.md) |
+| GPUI / Sandbox / settings | Unified Kit UI, native input, noVNC desktop, resource configuration, tray; [UI specification](ui-ux-design.md), [acceptance](validation/ui-ux.md) |
+| Multitask and main Agent routing | Independent sessions, concurrency, persistent guidance, cancellation, summaries, status search/archive; [multitask acceptance](validation/multitask.md) |
+| Token usage and local allowances | Overall trends, task totals, tool statistics; automatic compaction and actual usage; daily/weekly allowances, waiting, checkpoint resume; [contract](token-usage.md), [acceptance](validation/ui-ux.md) |
+| Scheduled tasks | Main Agent creation; calendar/interval rules, time zones, deduplication, catch-up/skip, independent execution, change notifications; [contract and validation](scheduled-tasks.md) |
 
-最新界面只通过主 Agent 创建任务和计划；任务页面用于查看与管理。当前没有完整产品或公开发行验收结论。
+The current UI creates tasks and schedules only through the main Agent; task pages are for viewing and management. Full product/public release acceptance has not been established.
 
-## 剩余工作
+## Remaining work
 
-D1–D6 保留为范围编号，后续能力已提前实现，不要求重新顺序开发。
+D1-D6 remain scope identifiers. Later capabilities have already been implemented where useful; development need not repeat the sequence.
 
-| 阶段 | 现状 | 仍需交付或验证 |
+| Phase | Current state | Still to deliver or validate |
 |---|---|---|
-| D1 纵向骨架 | 已完成 Pi MVP | 仅按新问题维护；AGY/Codex 不阻塞当前使用 |
-| D2 Setup / 引导 | 环境/工具准备、普通助手选择、API-only、完成状态持久化已实现 | 冷安装、下载续传/故障恢复、认证校验、聊天内命名与进度持久化 |
-| D3 报告场景 S1 | 任务执行与自动编排已有 | 两份附件→追加部署成本→报告/来源→重启追问的完整验收；结构化产物、明确偏好 |
-| D4 网页接管 S2 | 桌面查看与合作式接管已有 | 浏览器 Agent 工具、桌面资源排队、独立 controller 权限域、真实 Pi shell/CDP/X11 绕过负测 |
-| D5 持久计划 S3 | 调度及本地模拟端到端已实现 | 真实来源变化与证据、实际 sleep/wake 错过触发和重复唤醒完整场景验收 |
-| D6 多引擎与发行 | 未完成 | 原生 Codex App Server 的真实主聊/MCP、并发 worker、重启续聊和取消已验收；ClaudeDriver 已完成原生 CLI 离线契约；Claude 真实账户按用户决定跳过；AgyDriver 与其他真实账户矩阵待验收；记忆更正/遗忘、服务授权与 review、升级恢复、签名公证与冷安装 |
+| D1 Vertical skeleton | Pi MVP complete | Maintain for new issues only; AGY/Codex do not block current use |
+| D2 Setup / onboarding | Environment/tool preparation, normal assistant selection, API-only mode, and persistent completion implemented | Cold install, download resume/failure recovery, auth validation, chat naming, onboarding progress persistence |
+| D3 Report scenario S1 | Task execution and automatic orchestration available | Full two-attachment -> deployment-cost guidance -> report/sources -> restart follow-up acceptance; structured artifacts, explicit preferences |
+| D4 Web takeover S2 | Desktop viewing and cooperative takeover available | Browser Agent tools, desktop resource queues, separate controller permission domain, real Pi shell/CDP/X11 bypass negative tests |
+| D5 Persistent schedule S3 | Scheduling and local mock end-to-end implemented | Real source changes/evidence and full sleep/wake missed-trigger/repeated-wake acceptance |
+| D6 Multiple drivers and release | Incomplete | Native Codex App Server real main chat/MCP, concurrent workers, restart continuation, and cancellation accepted; ClaudeDriver native CLI offline contract complete; real Claude account testing skipped by user decision; AgyDriver/other real account matrices pending; memory correction/forgetting, service authorization/review, upgrade recovery, signing/notarization, cold install |
 
-完整 S1–S3 通过标准见 [产品设计](product-design.md#产品验收场景)。当前无 Developer ID，发行签名公证暂缓，只阻塞发行；开发包保留必要的 ad hoc 签名。
+See [Product design](product-design.md#product-acceptance-scenarios) for full S1-S3 criteria. No Developer ID is available; release signing/notarization is deferred and blocks only distribution. Development bundles retain necessary ad hoc signing.
 
-## 实施约束
+## Implementation constraints
 
-Rust Runtime + SQLite、共享 `protocol` crate、GPUI/Swift/helper 路线固定；旧 `poc/` 已移除，历史实验从 Git 查阅。先用 Pi 推进真实产品切面，不重写引擎已有工具循环，不另开记忆算法 POC。远程多节点不纳入当前 MVP。
+Rust Runtime + SQLite, shared `protocol` crate, and GPUI/Swift/Helper are fixed. The old `poc/` directory is removed; historical experiments remain in Git. Use Pi to advance real product slices without rewriting existing driver tool loops or starting another memory-algorithm POC. Remote multiple nodes are outside the current MVP.
 
-优先确定性测试与真实 Pi + 本地模拟 provider，必要时做节省用量的真实模型验收。历史 tray/多屏/完整 IME 矩阵不重新作为开工门槛；新问题做针对性回归。签名、远端 IME/弱网等只在对应产品承诺前验收。
+Prefer deterministic tests and real Pi with local mock providers, using economical real model acceptance when needed. Historical tray/multiscreen/full IME matrices are not renewed prerequisites; regress new issues specifically. Validate signing, remote IME, and weak networks before making the corresponding product promises.
 
 
-## Issue #2：Agent layer（2026-10-04）
+## Issue #2: Agent layer(2026-10-04)
 
-此分支是基础增量，**尚不能关闭 #2**。
+This branch is a foundational increment and **cannot close #2 yet**.
 
-| 阶段 | 当前结果 | 仍需完成 |
+| Phase | Current result | Remaining work |
 | --- | --- | --- |
-| 1 数据模型 | Profile/ResolvedSpec/Binding、epoch 1 导入、不可变快照和损坏检测 | 配置编辑/复制、主会话选择已提供；删除和完整任务 rebind UI 待完善 |
-| 2 Pi 驱动 | 主聊天/worker 走 DriverHost/SessionHandle，事件隔离与产品投影抽离，原真实 Pi 测试通过 | 可注入 fake session 并发、取消/缺失终态测试已补；额外权限拒绝在会话显示；真实账户认证/限流及故障 UI 待验收 |
-| 3 网关 | 通用请求核心、Chat/Responses/Messages/Gemini/unknown codec、provider 路由和用量归属；三个新增格式真实 Pi + 本地模拟服务通过 | provider 预算策略与 UI 已补，离线预留/恢复测试通过；真实服务商/额度恢复矩阵待验收 |
-| 4 工具桥 | 共享 schema/dispatcher，Pi 薄适配器，带 lane/turn 身份的 HTTP MCP facade | 权限 UI；其他引擎 MCP 验收 |
-| 5 迁移 | 事务化 handoff、新 epoch、重启恢复、API 设置及既有 pi.json 设置触发、任务默认固定 | profile 管理/worker 默认 UI 已补；任务页“更换 Agent”已接入同一迁移 API，路由配置复制、后台默认、白名单、并发和 provider 额度已交互验证；任务迁移交互待补；原地切换与可选 narrative 未开启 |
-| 6 Codex 主聊天 | 宿主原生 App Server + 本地模拟模型通过并发、MCP 身份隔离、续聊、HTTP 取消和累计用量验证；ACP 额外标题调用及轮次用量缺口已复现，选择原生传输 | 已接入主聊天/独立 worker、设置入口与镜像；guest 本地模拟模型契约通过。真实 Codex 登录、主聊/MCP、重启原线程续聊、前台 shell 取消及取消后续聊已通过；权限 UI 和完整故障矩阵待补 |
-| 7 Codex workers/计划 | 独立 native threads、多 worker 与只读汇总、原生累计差额计量；Pi 前置门槛移除 | 手动执行及 Runtime 真实时钟触发已验证独立线程；真实账户的两个并发 worker、只读汇总及 Runtime 时钟自动触发通过，定时 run 的 native thread 独立 |
-| 8 任务路由 | API 显式选择、计划 profile、用户白名单内的 tool hint、worker 默认；创建时能力校验；固定快照及选择原因；全局/profile/provider 并发限制 | 任务路由设置 UI 已实现；Codex 接入后的跨引擎真实验收 |
-| 9 Terminal / 发现 / 命令 | Runtime PTY + 原生 bearer WebSocket 桥 + bundled xterm；Terminal/Sandbox 独立侧栏入口；显式官方只读状态查询；调用命令 revision、返回页面防抖刷新、App 重连找回 PTY；取消登录命令与专用登录终端；取消版本锁 | 独立 Terminal/Sandbox、忙碌 shell 切页保留输入、guest Codex 登录及重启持久性已实测；Linux guest 的前台/独立后台组/忽略 HUP/TERM 的 shell 与孙进程在 close/Runtime 退出后停止，重启无 PTY；脱离 session 的守护进程仍属 D4 |
-| 10 Claude / AGY | Claude 原生 CLI Driver、独立会话/worker/计划、只读汇总、取消清理、用量和设置入口；官方登录状态查询；原版集成条款已核实 | Claude 打包 guest 离线契约通过；认证失败及时停止/恢复及诊断过滤已补宿主契约；真实账户按用户决定跳过，不再等待 Claude 登录；兼容性检查缓存与命令替换/不兼容/缺失/恢复已通过宿主离线契约，524063 guest 的命令替换/不兼容/缺失/恢复扩展契约已通过；其他厂商版本矩阵仍需独立验收；AGY 原生 Driver/设置入口已接入，按用户决定开放后台任务、计划和汇总，不提供 Pot 编排工具；原版 CLI 工具隔离及真实账户验收未完成，厂商适用条款未确认 |
-| 11 引导 / 设置 | 通用/助手/Agent/Sandbox 导航；配置前可打开 Terminal；未配置时拒绝主聊天；初始 API 保存取消额外确认 | 按更新后的 #2 改为环境/工具准备后进入普通助手设置，取消强制登录页和自动预选；独立导航、只读状态、空选择及冷配置无请求已交互验收；最终发送禁用态回归通过但界面复核遇到锁屏；冷安装/部分缺失修复、浅深色完整矩阵待验收 |
+| 1 Data model | Profile/ResolvedSpec/Binding, epoch 1 import, immutable snapshots, corruption detection | Configuration edit/copy and main-session selection available; deletion and full task rebind UI pending |
+| 2 Pi Driver | Main chat/workers use DriverHost/SessionHandle; event isolation and product projection extracted; original real Pi tests pass | Injectable fake session concurrency, cancellation/missing-terminal tests added; extra permission denials shown in session; real account auth/rate limits and failure UI pending |
+| 3 Gateway | Shared request core, Chat/Responses/Messages/Gemini/unknown codecs, provider routing/usage attribution; three new formats pass real Pi + local mock service | Provider budget policy/UI added; offline reservation/recovery tests pass; real provider/budget recovery matrix pending |
+| 4 Tool bridge | Shared schema/dispatcher, thin Pi adapter, HTTP MCP facade with lane/turn identity | Permission UI; other drivers' MCP acceptance |
+| 5 Migration | Transactional handoff, new epoch, restart recovery, API settings and existing pi.json settings triggers; tasks pinned by default | Profile management/worker default UI added; task Change Agent uses the same migration API; route copy, background defaults, allowlists, concurrency, provider allowances tested interactively; task migration interaction pending; in-place switching/optional narrative disabled |
+| 6 Codex main chat | Host native App Server + local mock model passes concurrency, MCP identity isolation, continuation, HTTP cancellation, cumulative usage; ACP extra title calls and turn usage gaps reproduced, so native transport chosen | Main chat/independent workers, settings, and image integrated; guest mock model contract passes. Real Codex login, main chat/MCP, original thread continuation after restart, foreground shell cancellation and subsequent continuation pass; permission UI/full failure matrix pending |
+| 7 Codex workers/schedules | Independent native threads, multiple workers, read-only summary, native cumulative delta metering; Pi prerequisite removed | Independent threads validated for manual runs and real Runtime clock triggers; real account two concurrent workers, read-only summary, automatic clock trigger pass; scheduled run has an independent native thread |
+| 8 Task routing | Explicit API selection, schedule profile, allowlisted tool hints, worker default; creation-time capability checks, fixed snapshots/reasons; global/profile/provider concurrency limits | Routing settings UI implemented; real cross-driver acceptance after Codex integration pending |
+| 9 Terminal / discovery / commands | Runtime PTY + native bearer WebSocket bridge + bundled xterm; independent Terminal/Sandbox sidebar entries; explicit official read-only status queries; command revisions, debounced page-return refresh, PTY recovery after App reconnect; login commands/dedicated login terminals/version locks removed | Independent Terminal/Sandbox, preserved busy-shell input across navigation, guest Codex login and restart persistence tested; Linux guest foreground/separate background groups/HUP-TERM-resistant shells and grandchildren stop on close/Runtime exit; no PTY after restart; detached daemons remain D4 scope |
+| 10 Claude / AGY | Native Claude CLI Driver, independent sessions/workers/schedules, read-only summary, cancellation cleanup, usage/settings; official login query; original integration terms verified | Claude bundled guest offline contract passes; prompt auth failure stop/recovery and diagnostic filtering added to host contract; real account testing skipped by user decision without waiting for Claude login; cached compatibility/command replacement/incompatible/missing/recovery host contracts pass, as does expanded 524063 guest contract; other vendor versions need separate acceptance; native AGY Driver/settings integrated; background tasks/schedules/summary enabled by user decision without Pot orchestration tools; original CLI tool isolation/real account acceptance incomplete, applicable vendor terms unconfirmed |
+| 11 Onboarding / settings | General/Assistant/Agent/Sandbox navigation; Terminal before configuration; main chat rejected without setup; extra confirmation removed for initial API save | Updated #2 uses environment/tool preparation followed by normal assistant settings; forced login/automatic selection removed; independent navigation, read-only state, empty selection, no-request cold setup tested interactively; final send-disabled regression passes but UI review encountered a locked screen; cold install/partial repair/full light-dark matrix pending |
 
-验证证据及局限见 [Agent layer 验证](validation/agent-layer.md)。Codex 已完成真实 CLI / guest 离线契约及上述真实账户验收；权限和故障完整矩阵仍有缺口。
-Claude 已完成原生 CLI 集成及离线契约，真实账户测试按用户决定跳过（无账号），不算真实账户通过；AGY 可选择主聊和后台 profile；用户接受原生工具权限并开放任务、计划、提示词约束的汇总，不提供 Pot 编排工具。Terminal 可用不等于通过 Driver 验收。
+See [Agent layer validation](validation/agent-layer.md) for evidence and limitations. Codex has passed real CLI/guest offline contracts and the account scenarios above; full permission/failure matrices remain incomplete.
+Claude native CLI integration/offline contract is complete; real account tests were skipped by user decision (no account), not passed. AGY can be selected for main/background profiles; the user accepted native tool permissions and enabled tasks/schedules/prompt-constrained summaries without Pot orchestration tools. Terminal availability does not establish Driver acceptance.
 
 
-Token 用量已补 Agent / 模型归属：新请求与原生轮次记录 agent/profile/provider/epoch/spec
-快照；总览和会话详情提供组合分类与分页，保留历史未知归属，不重置历史账本或额度。
+Token usage now includes Agent/model attribution: new requests and native turns record agent/profile/provider/epoch/spec
+snapshots. Overview/session details provide combined categories and pagination, retaining historical unknown attribution without resetting ledgers or allowances.
 
-## Issue #5：Backend crates / 独立 Server
+## Issue #5: Backend crates / standalone Server
 
-已先提交 [拆分设计](backend-crates.md)，再在独立 branch/worktree 完成 8 个 workspace crates 的实现。Server 独立启动；Runtime 为库；Driver 不持有 Service/数据库；构建、镜像和 mise 入口已更新。数据库格式及原生会话保持兼容，未增加远程部署产品功能。
+The [split design](backend-crates.md) was committed first, followed by an eight-crate implementation in an independent branch/worktree. Server starts independently; Runtime is a library; Driver holds no Service/database. Build, image, and mise entry points are updated. Database formats/native sessions remain compatible; no remote deployment product feature was added.
 
-后端常规回归、App 11 项、真实 Pi + 本地模拟 provider 8 项、Codex 原生 App Server 离线契约、AGY 模拟传输与 Claude 独立 Driver fixture 通过；workspace check、lint 和 Linux ARM64 musl Server 构建通过。独立 Server 已验证认证、持久设置/重启、端口冲突、SSE 关闭和活跃 main/worker 收敛。原版 Claude 的本轮宿主兼容性检查拒绝缺失必需控制的 executable，未算原版通过。未重建 OCI/App bundle，也未做远程部署或真实账户验收。详见 [拆分验证](validation/backend-crates.md)。
+Regular backend regressions, 11 App tests, 8 real Pi + local mock provider tests, native Codex App Server offline contract, AGY mock transport, and independent Claude Driver fixture pass, along with workspace checks, lint, and Linux ARM64 musl Server build. Standalone Server validates auth, persistent settings/restart, port conflict, SSE closure, and active main/worker cleanup. This round's host compatibility check rejected the original Claude executable for missing required controls; it was not counted as an original CLI pass. No OCI/App bundle rebuild, remote deployment, or real account acceptance was performed. See [split validation](validation/backend-crates.md).

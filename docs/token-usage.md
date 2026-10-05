@@ -1,112 +1,112 @@
-# Token 用量与额度
+# Token usage and allowances
 
-用量页展示 Pot 内的整体统计、趋势及 Agent / 模型分类。范围为最近 7 / 30 / 90 天及最近一年（365 天，包含今天）；前三种按日，一年按连续 7 天合并，末组可能不足 7 天。按当前系统 IANA 时区划分日期，今天尚未结束。图表 Hover 展示具体日期范围与输入、输出、缓存命中。
+Usage shows overall Pot statistics, trends, and Agent/model categories over the last 7/30/90 days or year (365 days including today). The first three use daily buckets; year uses consecutive 7-day groups, possibly a partial final group. Dates follow the current system IANA zone; today is incomplete. Hover shows date ranges, input/output/cache hits.
 
-每个任务（包括归档任务）和主聊天都有用量入口。详情显示累计用量、模型消耗堆叠条和工具输出排行；追加指导沿用同一任务，底层记录通过轮次 ID 关联。全局用量页不列任务。
+Each task (including archived tasks) and main chat has a usage entry. Details show cumulative usage, stacked model consumption, and tool output rankings. Guidance continues the same task; turn IDs link records. Global usage does not list tasks.
 
-## 计量
+## Metering
 
-Rust Runtime 通过通用模型网关捕获 provider usage。共享 SQLite `product/usage.sqlite` 存储请求 ID、会话/任务、轮次、时间、模型、输入/输出/缓存及预留；路由快照记录 Agent 类型（Pi / Codex / Claude / AGY）、profile ID、服务商、binding epoch 和 spec hash；工具事件按会话+轮次+调用 ID 去重。各任务共享账本，归档不删除记录。沿用 DELETE journal 和 synchronous=EXTRA，仅 Runtime 访问在线数据库。
+Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent type (Pi/Codex/Claude/AGY), profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
 
-- 实际合计 = 输入 + 输出。缓存命中是输入的子集，不再相加。
-- 同一请求多个 usage 帧更新一条记录；缺失用量显示未知，不能按零消耗处理。
-- 工具显示次数、失败数、耗时和输出估算（序列化返回内容的 UTF-8 字节数 / 4）。估算不等于服务商计费，不与实际合计相加。
-- Pi 自动压缩默认开启，使用同一模型和网关。当前声明上下文 32,768 tokens，保留最近约 8,192 tokens、预留 8,192 tokens；接近上限或溢出恢复由 Pi 触发。压缩请求尊重 Pi 请求上限与用户输出上限中较小者。
-- 压缩生命周期由每个会话显式加载的 `pot-usage.mjs` 记录；开始事件先落盘，再通过请求头关联压缩 ID。SQLite 按该 ID 聚合一个或多个摘要请求的实际用量。Pi 自带汇总 usage 不再次入账；失败/取消请求已返回的用量仍保留，未返回完整用量保持未知。
-- 会话用量详情不使用页签或逐次请求列表。横向堆叠条展示任务对话与上下文压缩的已记录真实 token 和比例，hover 查看输入、输出、缓存；零消耗压缩段隐藏。无已确认用量时显示空态。工具按输出字节数降序排列，横条共用最大值尺度，显示估算 token 和调用次数，默认前 5 项，可展开全部；无工具时隐藏。工具输出不参与模型消耗比例或合计。
-- 底层仍保留模型请求和压缩生命周期记录，归档保留；API 仍支持明细分页。压缩前后上下文大小是估算，不是计费量。
-- Skills 无独立可靠计量边界，因此不提供 Skills 统计页签或估算分摊。Skills 加载功能仍未接入，本次不改变它。
-- 旧 `pi.usage` 按所属会话幂等导入。旧数据无时间/轮次，保留在累计用量，不放入时间图表，界面不显示缺少时间的说明。升级前工具事件没有可靠完整输出，因此不回填估算。
+- Actual total = input + output. Cache hits are a subset of input, not added again.
+- Multiple usage frames update one request record. Missing usage is unknown, not zero.
+- Tools show calls, failures, duration, and output estimates (serialized UTF-8 bytes / 4). Estimates are not provider billing and are not added to actual totals.
+- Pi automatic compaction defaults on, using the same model/gateway. Declared context is 32, 768 tokens, retaining about 8, 192 recent tokens and reserving 8, 192. Pi triggers compaction near the limit or on overflow recovery. Compaction respects the smaller of Pi request cap and user output cap.
+- Each session explicitly loads `pot-usage.mjs` for compaction lifecycle. Start persists before the compaction ID is sent in request headers. SQLite aggregates one/multiple summary requests by ID. Pi's own aggregate usage is not counted again. Known usage from failed/cancelled requests remains; incomplete usage stays unknown.
+- Session details have no tabs/per-request list. Horizontal stacks show recorded conversation/compaction tokens and proportions, with input/output/cache hover. Hide zero compaction; show empty state without confirmed usage. Rank tools by output bytes using a shared maximum bar scale, with estimated tokens/calls, top 5 by default and expandable. Hide empty tools; tool output contributes neither to model proportions nor totals.
+- Underlying request/compaction lifecycle records and archived records remain; API detail pagination remains supported. Context sizes before/after compaction are estimates, not billing.
+- Skills lack a reliable independent metering boundary, so no Skills statistics tab or estimated allocation. Skills loading remains unintegrated and unchanged here.
+- Legacy `pi.usage` imports idempotently by session. Without time/turn data, it contributes to lifetime totals, not time charts, without a missing-time notice. Historical tool events lack reliable complete output, so estimates are not backfilled.
 
-查询在 Runtime 内使用 SQL 聚合和索引，返回有界时间桶及每页 20 条请求。App 每 3 秒按需刷新，切换查询拒绝旧响应；断开时不把旧数据当作新结果。图表复用 gpui-kit `BarChart` 的 hover、tooltip、刻度与主题；额度复用 `Progress`，页面沿用共享卡片和 Kit 表单。
+Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages. App refreshes on demand every 3 seconds, rejects stale query responses, and does not present old disconnected data as new. Charts reuse gpui-kit `BarChart` hover/tooltips/ticks/themes; allowances use `Progress`, shared cards, and Kit forms.
 
-## Codex 原生计量
+## Native Codex metering
 
-Codex 不经过模型网关，以原生线程累计用量的差额记录每个 Pot 轮次。记录包含该轮原生压缩，
-无法拆分为每次模型请求或单独压缩消耗；用量页明确标注这一精度。重复通知不会重复计量。
-缺失历史基线、计数器回退或缺少必要字段会保留未知状态，不把历史消费归到当前轮次。
-Pot 额度只在新轮次开始前检查，不能在 CLI 内每次请求前预留，因此一轮内可能超过额度；
-不声明逐请求硬预算、自动检查点续跑或服务商订阅余额。
+Codex bypasses the model gateway and records per-Pot-turn deltas of native thread cumulative usage. This includes native compaction within the turn,
+without individual request/compaction breakdown; the UI states this precision. Duplicate notifications do not double-count.
+Missing historical baselines, counter rollback, or missing required fields remain unknown rather than attributing historical consumption to the current turn.
+Pot checks allowance only before new turns, with no per-request CLI reservation, so a turn may exceed the allowance;
+no per-request hard budget, automatic checkpoint resume, or provider subscription balance is claimed.
 
-## 显示与限制
+## Display and limits
 
-Pi 是执行引擎，模型服务决定计费方式。当前 API 连接默认没有周期限制，所以不显示额度卡或重置时间。用户可从设置 → Agent 或用量页配置 **Pot 用量限制**：不限 / 每天 / 每周、支持 K/M 的正整数 tokens、额度恢复后自动继续（默认开启）。保存立即生效，不重启 VM。
+Pi is the execution driver; the model service determines billing. API connections default to no periodic limit, hiding allowance cards/reset times. Settings -> Agent or Usage configures **Pot usage limits**: unlimited/daily/weekly, positive integer tokens with K/M, and automatic continuation after recovery (on by default). Saving applies immediately without VM restart.
 
-每日在配置时区 00:00、每周在周一 00:00 重置；时区明确保存在策略中，夏令时按日历计算。统计图范围不影响额度窗口。周期切换不删除历史。
+Daily reset is 00: 00 in the configured zone, weekly Monday 00: 00. The policy explicitly stores its zone and uses calendar DST rules. Chart ranges do not affect allowance windows; changing periods preserves history.
 
-未来订阅额度须由引擎适配器报告窗口、剩余比例、重置时间和采集时间，单独展示为“服务商额度”。当前未接 Codex 订阅额度，不展示或推算任何服务商余额；Pot tokens 也不能代表其他客户端的订阅消耗。
+Future subscription allowance adapters must report window, remaining fraction, reset time, and collection time, shown separately as Provider allowance. Codex subscription allowances are not integrated; no provider balance is shown/inferred, and Pot tokens do not represent other clients' subscription consumption.
 
-普通对话和压缩模型请求都在联网前先在共享账本预留：输入使用请求 UTF-8 字节数 + 1024 的保守估算，输出以配置上限与剩余额度的较小值为限。收到实际 usage 后结算，未知/中断请求保留保守预留至该窗口结束。不同模型分词及服务商隐藏开销可能偏离估算，不能承诺通用计费硬上限。若整个周期额度都小于当前上下文预留，界面提示提高额度。
+Conversation/compaction requests reserve in the shared ledger before networking: conservative input estimate = request UTF-8 bytes + 1024; output cap = smaller of configured cap and remaining allowance. Settle actual usage when received; unknown/interrupted requests keep conservative reservations until the window ends. Tokenizers/hidden overhead can differ, so no universal billing hard cap is promised. If the whole allowance is smaller than current context reservation, suggest raising it.
 
-累计请求上限、每轮请求上限、每次输出上限仍是独立限制，不会因 token 周期重置而清零。
+Lifetime request, per-turn request, and per-request output caps remain independent and do not reset with periodic token windows.
 
-## 等待与恢复
+## Waiting and recovery
 
-额度不足时网关拒绝当前尚未发出的模型请求，不消耗请求次数。Pi 停止并 fsync 原生 session 后，Runtime 才保存 `pi.paused` 检查点。任务进入 `waiting`（仍属进行中），释放执行槽位；主聊天保留待完成轮次。追加任务指导排在该轮次之后。相同定时计划仍按非重叠规则处理，不因等待而创建重复执行。
+When allowance is insufficient, gateway rejects the unsent request without consuming a request count. Runtime saves `pi.paused` only after Pi stops and fsyncs its native session. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
 
-额度足够且自动继续开启时调度器恢复；关闭时需要在会话用量详情点击“继续”。“取消等待”丢弃该轮待执行工作。重开 App/VM 后只有明确持久检查点允许恢复，未知执行状态仍为 interrupted。
+When allowance is sufficient and automatic continuation enabled, the scheduler resumes. Otherwise click Continue in session usage. Cancel waiting discards pending work for that turn. After App/VM restart, only explicit persistent checkpoints can resume; unknown execution remains interrupted.
 
-恢复复用 Pi 原生 session，并追加明确的继续指令，不重放原始 prompt 或旧工具调用。模型仍自主选择后续工具；这不是所有外部操作的 exactly-once 保证。旧会话缺失、Pi 未确认退出、崩溃中未知副作用均不能自动重试。
+Resume reuses native Pi session with an explicit continuation instruction, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed Pi exit, or unknown crash side effects cannot retry automatically.
 
 ## API
 
-用量查询/策略/恢复接口仅接受主 Runtime token，worker token 无权读全局账本或修改策略；内部压缩事件接口按会话验证权限。
+Usage query/policy/recovery APIs require the main Runtime token; workers cannot read the global ledger or change policies. Internal compaction endpoints validate session authority.
 
-- `GET /api/v1/usage/summary?days=7&timezone=Asia/Shanghai&scope=&offset=0`：空 scope 为全局；`main` 或任务 ID 为会话。任务累计不受 days 限制；请求和 Agent / 模型分类都按 offset 每页 20 条。`agent_models` 为当前页分类，`agent_model_next_offset` 为下一页位置。
-- `POST /api/pi/compactions`：Pi 内部生命周期事件，仅接受当前会话的 token，必须有活动轮次；worker 只能写自己的记录，不能读取全局用量或修改策略。
-- `POST /api/v1/usage/policy`：`{period: none|day|week, limit, timezone, auto_resume}`。
-- `POST /api/v1/usage/resume`：`{scope}`，解除该等待的手动恢复门槛；仍须满足额度。
-- `POST /api/v1/usage/cancel`：取消主聊天等待；任务取消沿用任务取消接口。
+- `GET /api/v1/usage/summary?days=7&timezone=Asia/Shanghai&scope=&offset=0`: empty scope = global; `main` or task ID = session. Task totals ignore days; requests and Agent/model categories paginate in 20-item offset pages. `agent_models` contains the current category page; `agent_model_next_offset` is the next offset.
+- `POST /api/pi/compactions`: internal Pi lifecycle events require the current session token and active turn. Workers write only their own records and cannot read global usage/change policies.
+- `POST /api/v1/usage/policy`: `{period: none|day|week, limit, timezone, auto_resume}`.
+- `POST /api/v1/usage/resume`: `{scope}` clears the manual-resume gate, still requiring allowance.
+- `POST /api/v1/usage/cancel`: cancels main chat waiting; tasks use the task cancellation API.
 
-旧 `/api/v1/usage` 保留用于旧请求次数诊断，新界面使用 summary。
-
-
-## Agent 绑定归属
-
-网关仅接受当前 binding 的 provider/model。`request_routes` 通过 request ID 关联
-Agent 类型、profile ID、provider、epoch 和 spec hash；原请求表继续记录所执行 binding 的模型和轮次，旧账本不重置。
-OpenAI Chat codec 沿用 DeepSeek 的预留、输出限制和用量结算。迁移后的请求使用
-新快照，旧 epoch 的用量保留。全局用量页及会话详情按 Agent 类型 + 模型组合汇总输入、输出、缓存、记录数和未知用量数；相同模型跨 Agent 使用不会合并，同一 Agent/模型跨 profile 或服务商使用合并显示，具体服务商/profile/epoch 保留在请求明细中。
-
-`unknown` 协议不解析响应 usage、不修改输出 cap，也不假装消耗为零；请求保留
-未知用量及保守预留。其 ResolvedSpec 明确关闭精确请求预算、usage reporting 和
-safe checkpoint resume。订阅配额仍未接入，不能由 API 请求账本推算。
-
-终端、官方登录状态查询、命令保存不触发模型调用，不创建用量记录；终端文本不进入用量或产品日志。CLI 发现显示“已登录”仅代表官方状态结果，不表示真实请求、模型预算或角色能力已验收。
-
-## Claude 原生计量
-
-Claude 使用最终 result 的轮次累计 usage。输入 = input_tokens + cache_read_input_tokens +
-cache_creation_input_tokens；缓存命中为 cache_read_input_tokens，是输入的子集。
-重复结果覆盖同一轮次，不重复相加；失败/取消保留已知用量并标记 incomplete。
-与 Codex 一样只在新轮次前检查 Pot 额度，不提供 CLI 内逐请求硬预算或自动检查点恢复。
-
-Responses codec 读取 response.completed/incomplete/failed 内的 usage；Messages codec
-合并 message_start 输入与 message_delta 输出，不在初始 output=0 时提前释放预留；
-Gemini codec 读取 usageMetadata，输出包含 candidatesTokenCount + thoughtsTokenCount。
-各格式均保留缓存命中为输入子集；缺字段保留未知值。新增格式尚不开启自动检查点恢复。
-
-## 服务商额度
-
-任务路由设置可为已配置的 API provider 设置日/周 Token 额度、时区和自动继续策略。
-界面沿用已有策略时区（新策略默认 Asia/Shanghai）；API 支持配置其他合法时区。
-全局额度与服务商额度同时生效，所有主会话/worker 请求共享同一账本。
-预留与 provider 归属在同一事务提交，输出上限取两个额度可用量的较小值；
-重启后未知请求继续占用预留。暂停恢复同时检查两项策略，且仅对支持检查点的引擎自动继续。
-每个保存的 API 路由有独立不可变身份；更换 endpoint 的新路由需要单独配置额度。
-CLI 订阅路线只统计原生报告用量，不宣称请求前硬限制；服务商限流不等于 Pot 额度耗尽。
+Legacy `/api/v1/usage` remains for request-count diagnostics; new UI uses summary.
 
 
-## Agent / 模型分类
+## Agent binding attribution
 
-归属在 API 请求预留或 CLI 原生轮次开始时随不可变 binding 快照入账；后来切换 Agent、
-模型、后台默认或修改 profile，不会改写已发生的记录。主聊天、后台任务、计划与压缩
-使用同一共享账本，压缩请求沿用实际执行的 Agent / 模型归属。原生 CLI 汇总保持轮次精度。
+Gateway accepts only the current binding's provider/model. `request_routes` links request IDs to
+Agent type, profile ID, provider, epoch, and spec hash. Existing request tables retain executed binding models/turns; old ledgers are not reset.
+OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Post-migration requests use
+new snapshots; old epoch usage remains. Global/session summaries group input/output/cache/records/unknown usage by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/epoch in request details.
 
-全局分类采用页面选定的时间范围和时区，与全局总量一致；会话/任务详情采用该 scope
-累计范围，与累计卡一致。分类每页 20 项，按输入+输出降序，再按 Agent/模型稳定排序。
-翻页不改变总量、趋势或额度；切换 scope、日期范围或时区重置页码，过期查询响应被丢弃。
-分类显示输入、输出、输入中的缓存命中以及不完整记录数，不把未知消耗伪装成零。
+`unknown` protocol neither parses response usage nor changes output caps or pretends usage is zero. Requests retain
+unknown usage and conservative reservations. Its ResolvedSpec disables exact request budgets, usage reporting, and
+safe checkpoint resume. Subscription quotas remain unintegrated and cannot be inferred from the API ledger.
 
-旧账本自动增加 agent/profile_id 字段，保留旧 provider/epoch/hash 和全部计量。
-历史记录只在 scope、provider、epoch、spec hash 和模型均匹配已保存的不可变 binding 快照时补回 Agent/profile 归属。无法确认的记录显示“Agent 未知”，不依据当前设置、模型名称或请求 ID 猜测归属。
+Terminal, official login queries, and command saves trigger no model calls/usage records. Terminal text enters neither usage nor product logs. CLI discovery Logged in means only official status, not validated real requests, model budgets, or role capabilities.
+
+## Native Claude metering
+
+Claude uses final-result cumulative turn usage. Input = input_tokens + cache_read_input_tokens +
+cache_creation_input_tokens; cache hits = cache_read_input_tokens, a subset of input.
+Repeated results overwrite the same turn rather than add again. Failure/cancellation retains known usage marked incomplete.
+Like Codex, checks occur before new turns without per-request CLI hard budgets or automatic checkpoint recovery.
+
+Responses codec reads usage from response.completed/incomplete/failed; Messages codec
+combines message_start input with message_delta output without releasing reservations at initial output=0;
+Gemini codec reads usageMetadata, with output = candidatesTokenCount + thoughtsTokenCount.
+All formats retain cache hits as input subsets and missing fields as unknown. New formats do not yet enable automatic checkpoint recovery.
+
+## Provider allowances
+
+Task routing settings configure daily/weekly token allowances, zones, and automatic continuation for configured API providers.
+UI retains policy zones (new policies default to Asia/Shanghai); API accepts other valid zones.
+Global/provider allowances apply together; all main/worker requests share one ledger.
+Reservation/provider attribution commit in one transaction; output cap is the smaller available allowance;
+unknown requests remain reserved after restart. Resume checks both policies and automatically continues only checkpoint-capable drivers.
+Each saved API route has an independent immutable identity; a new endpoint route needs its own allowance.
+CLI subscriptions report native post-execution usage without pre-request hard limits; provider rate limits are not Pot allowance exhaustion.
+
+
+## Agent / model categories
+
+Attribution persists with the immutable binding at API reservation or native CLI turn start. Later Agent,
+model, background-default, or profile changes do not rewrite past records. Main chat, background tasks, schedules, and compaction
+share one ledger; compaction retains its actual Agent/model attribution. Native CLI summaries retain turn precision.
+
+Global categories use the page's selected range/zone, matching global totals; session/task details use their scope's
+lifetime range, matching the total card. Pages hold 20 categories, sorted by input+output descending, then stable Agent/model order.
+Pagination does not change totals/trends/allowances; scope/range/zone changes reset pages and stale responses are discarded.
+Categories show input/output/input-cache hits/incomplete records without presenting unknown consumption as zero.
+
+Old ledgers gain agent/profile_id fields while preserving provider/epoch/hash and all metering.
+Backfill historical Agent/profile only when scope, provider, epoch, spec hash, and model all match saved immutable bindings. Unconfirmed records show Unknown Agent without guesses from current settings, model names, or request IDs.
