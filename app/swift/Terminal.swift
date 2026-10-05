@@ -6,6 +6,7 @@ import WebKit
 @MainActor final class SandboxTerminal: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     let web: WKWebView
     private let asset: URL
+    private let purpose: String
     private var socket: URLSessionWebSocketTask?
     private var sessionID: String?
     private var bootID = ""
@@ -20,7 +21,8 @@ import WebKit
     private var cols = 80
     private var rows = 24
 
-    override init() {
+    init(purpose: String = "shell") {
+        self.purpose = purpose
         asset = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/terminal/index.html")
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -55,8 +57,13 @@ import WebKit
 
     func request(_ path: String, body: [String: Any]? = nil) async throws -> [String: Any] {
         let (base, token, _) = try credentials()
-        var request = URLRequest(url: base.appendingPathComponent(path))
-        request.httpMethod = body == nil ? "GET" : "POST"; request.timeoutInterval = 10
+        let pieces = path.split(separator: "?", maxSplits: 1)
+        var parts = URLComponents(url: base.appendingPathComponent(String(pieces[0])), resolvingAgainstBaseURL: false)!
+        if pieces.count > 1 {
+            parts.percentEncodedQuery = String(pieces[1])
+        }
+        var request = URLRequest(url: parts.url!)
+        request.httpMethod = body == nil ? "GET" : "POST"; request.timeoutInterval = 20
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let body {
@@ -100,14 +107,18 @@ import WebKit
                     let sessions = existing["sessions"] as? [[String: Any]] ?? []
                     if let shell = sessions
                         .first(where: {
-                            $0["exit_code"] is NSNull && $0["attached"] as? Bool == false
+                            ($0["purpose"] as? String ?? "shell") == purpose && $0["exit_code"] is NSNull &&
+                                $0["attached"] as? Bool == false
                         })
                     {
                         sessionID = shell["id"] as? String
                     }
                 }
                 if sessionID == nil {
-                    let result = try await request("api/v1/terminals", body: ["cols": cols, "rows": rows])
+                    let result = try await request(
+                        "api/v1/terminals",
+                        body: ["cols": cols, "rows": rows, "purpose": purpose]
+                    )
                     guard current == generation else { return }
                     sessionID = result["id"] as? String
                 }
@@ -193,10 +204,11 @@ import WebKit
     }
 
     private func sendSize() {
-        guard let data = try? JSONSerialization.data(withJSONObject: ["cols": cols, "rows": rows]), let text = String(
-            data: data,
-            encoding: .utf8
-        ) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["cols": cols, "rows": rows, "purpose": purpose]),
+              let text = String(
+                  data: data,
+                  encoding: .utf8
+              ) else { return }
         socket?.send(.string(text)) { _ in }
     }
 

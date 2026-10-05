@@ -24,6 +24,7 @@ pub struct Hub {
     sessions: HashMap<String, Arc<Session>>,
 }
 struct Session {
+    purpose: Mutex<String>,
     master: Arc<AsyncFd<File>>,
     output: broadcast::Sender<Vec<u8>>,
     history: Mutex<VecDeque<u8>>,
@@ -43,6 +44,8 @@ pub struct Create {
     #[serde(flatten)]
     size: Size,
     agent: Option<String>,
+    #[serde(default)]
+    purpose: Option<String>,
 }
 #[derive(Deserialize)]
 pub struct Size {
@@ -83,7 +86,7 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     authorize(&s, &h)?;
     let hub = s.terminals.lock().unwrap();
     Ok(Json(
-        json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow(),"attached":p.attached.load(Ordering::SeqCst)})).collect::<Vec<_>>()}),
+        json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow(),"attached":p.attached.load(Ordering::SeqCst),"purpose":*p.purpose.lock().unwrap()})).collect::<Vec<_>>()}),
     ))
 }
 pub async fn create(
@@ -102,6 +105,14 @@ pub async fn create(
             "Terminal opens a shell only; commands are entered by the user",
         ));
     }
+    let purpose = request.purpose.unwrap_or_else(|| "shell".into());
+    if !["shell", "login"].contains(&purpose.as_str()) {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "terminal_purpose",
+            "Invalid terminal purpose",
+        ));
+    }
     let mut hub = s.terminals.lock().unwrap();
     if hub.sessions.len() >= MAX_SESSIONS {
         return Err(error(
@@ -111,6 +122,7 @@ pub async fn create(
         ));
     }
     let session = spawn(&s.workspace, &size).map_err(internal)?;
+    *session.purpose.lock().unwrap() = purpose;
     let id = id();
     hub.sessions.insert(id.clone(), session);
     Ok(Json(json!({"id":id,"boot_id":s.boot})))
@@ -286,6 +298,7 @@ fn spawn(cwd: &std::path::Path, size: &Size) -> Result<Arc<Session>> {
     let (output, _) = broadcast::channel(32);
     let (done, exit) = watch::channel(None);
     let session = Arc::new(Session {
+        purpose: Mutex::new("shell".into()),
         master: Arc::new(AsyncFd::new(master)?),
         output,
         history: Mutex::new(VecDeque::new()),
@@ -459,6 +472,56 @@ mod lifecycle_tests {
         headers
     }
     #[tokio::test]
+    async fn login_and_shell_sessions_are_distinct_without_command_injection() {
+        let mut s = crate::tests::service();
+        s.workspace = std::env::temp_dir();
+        let make = |purpose| {
+            Json(Create {
+                size: Size { cols: 80, rows: 24 },
+                agent: None,
+                purpose: Some(purpose),
+            })
+        };
+        let shell = create(State(s.clone()), auth(&s), make("shell".into()))
+            .await
+            .unwrap()
+            .0;
+        let login = create(State(s.clone()), auth(&s), make("login".into()))
+            .await
+            .unwrap()
+            .0;
+        assert_ne!(shell["id"], login["id"]);
+        let public = list(State(s.clone()), auth(&s)).await.unwrap().0;
+        assert!(
+            public["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["id"] == login["id"] && p["purpose"] == "login")
+        );
+        let _ = close(
+            State(s.clone()),
+            auth(&s),
+            Path(login["id"].as_str().unwrap().into()),
+        )
+        .await
+        .unwrap();
+        assert!(
+            s.terminals
+                .lock()
+                .unwrap()
+                .sessions
+                .contains_key(shell["id"].as_str().unwrap())
+        );
+        let _ = close(
+            State(s.clone()),
+            auth(&s),
+            Path(shell["id"].as_str().unwrap().into()),
+        )
+        .await
+        .unwrap();
+    }
+    #[tokio::test]
     async fn login_requests_are_rejected_without_starting_or_injecting_commands() {
         let mut s = crate::tests::service();
         s.workspace = std::env::temp_dir();
@@ -466,6 +529,7 @@ mod lifecycle_tests {
             Json(Create {
                 size: Size { cols: 80, rows: 24 },
                 agent,
+                purpose: None,
             })
         };
         let shell = create(State(s.clone()), auth(&s), request(None))
@@ -491,6 +555,7 @@ mod lifecycle_tests {
             Json(Create {
                 size: Size { cols: 80, rows: 24 },
                 agent: None,
+                purpose: None,
             })
         };
         assert!(

@@ -47,6 +47,33 @@ impl Config {
         Ok(c)
     }
 }
+/// Product execution limits do not imply a legacy DeepSeek connection.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionLimits {
+    request_limit: u64,
+    max_tokens: u64,
+    max_requests_per_turn: u64,
+    max_parallel_tasks: usize,
+}
+pub fn execution_config(mut base: Config, data: &std::path::Path) -> Result<Config> {
+    let path = data.join("execution-limits.json");
+    if path.exists() {
+        let limits: ExecutionLimits = serde_json::from_slice(&std::fs::read(path)?)?;
+        anyhow::ensure!(
+            limits.request_limit <= 1_000_000
+                && (1..=9_007_199_254_740_991).contains(&limits.max_tokens)
+                && (1..=1000).contains(&limits.max_requests_per_turn)
+                && (1..=1000).contains(&limits.max_parallel_tasks),
+            "Invalid execution limits"
+        );
+        base.request_limit = limits.request_limit;
+        base.max_tokens = limits.max_tokens;
+        base.max_requests_per_turn = limits.max_requests_per_turn;
+        base.max_parallel_tasks = limits.max_parallel_tasks;
+    }
+    Ok(base)
+}
 pub use pot_driver::private_json;
 pub const MAX_MODEL_BODY: usize = 16 * 1024 * 1024;
 
@@ -104,6 +131,28 @@ mod tests {
     use super::*;
     use axum::response::sse::Event as WireEvent;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn execution_limits_do_not_create_provider_credentials() {
+        let mut s = crate::tests::service();
+        s.data = std::env::temp_dir().join(format!("pot-execution-limits-{}", id()));
+        std::fs::create_dir_all(&s.data).unwrap();
+        private_json(
+            &s.data.join("execution-limits.json"),
+            &json!({
+                "request_limit": 20, "max_tokens": 1000,
+                "max_requests_per_turn": 3, "max_parallel_tasks": 2
+            }),
+        )
+        .unwrap();
+        let config = execution_config(Config::default(), &s.data).unwrap();
+        assert!(config.api_key.is_empty());
+        assert!(config.model.is_empty());
+        assert_eq!(config.request_limit, 20);
+        assert_eq!(config.max_parallel_tasks, 2);
+        assert!(!s.data.join("pi.json").exists());
+        std::fs::remove_dir_all(&s.data).unwrap();
+    }
 
     #[test]
     fn custom_token_limits_survive_configuration_and_protocol() {

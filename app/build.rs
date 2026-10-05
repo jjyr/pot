@@ -15,6 +15,7 @@ fn main() {
         .arg("swift/Terminal.swift")
         .arg("swift/LocalRuntime.swift")
         .arg("swift/SettingsPanel.swift")
+        .arg("swift/AIConfiguration.swift")
         .arg("swift/UnreadTracker.swift")
         .arg("swift/TokenCount.swift")
         .arg("-o")
@@ -33,6 +34,7 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/Terminal.swift");
     println!("cargo:rerun-if-changed=swift/LocalRuntime.swift");
     println!("cargo:rerun-if-changed=swift/SettingsPanel.swift");
+    println!("cargo:rerun-if-changed=swift/AIConfiguration.swift");
     println!("cargo:rerun-if-changed=swift/UnreadTracker.swift");
     println!("cargo:rerun-if-changed=swift/TokenCount.swift");
 }

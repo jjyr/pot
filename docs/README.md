@@ -14,7 +14,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Change token accounting, periodic allowances, or budget recovery | [Token usage](token-usage.md) |
 | Change scheduled triggers, time zones, or notifications | [Scheduled tasks](scheduled-tasks.md) |
 | Review long-term product boundaries and acceptance goals | [Product design](product-design.md) |
-| Review completed tests and limitations | [Agent layer](validation/agent-layer.md), [Pi MVP](validation/pi-mvp.md), [Multitask](validation/multitask.md), [UI](validation/ui-ux.md), [Sandbox image](validation/sandbox-image.md), [Backend crates](validation/backend-crates.md) |
+| Review completed tests and limitations | [Agent layer](validation/agent-layer.md), [Pi MVP](validation/pi-mvp.md), [Multitask](validation/multitask.md), [UI](validation/ui-ux.md), [Sandbox image](validation/sandbox-image.md), [Backend crates](validation/backend-crates.md), [AI configuration](validation/ai-configuration.md) |
 | Investigate old integrations or technical decisions | [Historical POC index](poc-plan.md) |
 
 ## Research on demand

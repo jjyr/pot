@@ -129,6 +129,7 @@ var bridge: PotBridge?
     var tick: Double = 0
     var observations: [NSObjectProtocol] = []
     let terminal = SandboxTerminal()
+    let loginTerminal = SandboxTerminal(purpose: "login")
     var guestIP = ""
     var localPhase = "starting"
     var isApplying = false
@@ -169,6 +170,7 @@ var bridge: PotBridge?
             rail.addSubview(button); navigation.append(button)
         }
         rootView.addSubview(terminal.web)
+        rootView.addSubview(loginTerminal.web)
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
@@ -246,6 +248,17 @@ var bridge: PotBridge?
         if !settings.hasConfiguration, !settings.setupCompleted {
             selectPage(2); settings.showAgent(setup: true)
         }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                if self?.settings.loginVisible == true {
+                    self?.settings.refreshAgents()
+                }
+            }
+        }
         animation = Timer
             .scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateIcon() }
@@ -322,6 +335,7 @@ var bridge: PotBridge?
             web.frame = desktopArea
         }
         terminal.web.frame = desktopArea
+        loginTerminal.web.frame = NSRect(x: 56, y: 0, width: area.width, height: max(0, area.height - 208))
         let width = min(760, area.width - 64)
         composer.layoutManager?.ensureLayout(for: composer.textContainer!)
         let used = (composer.layoutManager?.usedRect(for: composer.textContainer!).height ?? 24) +
@@ -395,7 +409,12 @@ var bridge: PotBridge?
         page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.loaded
             .isEmpty != false
         terminal.show(
-            value == 7 && localPhase == "running",
+            value == 7 && !settings.loginVisible && localPhase == "running",
+            root: localRuntime?.root,
+            ip: guestIP
+        )
+        loginTerminal.show(
+            value == 7 && settings.loginVisible && localPhase == "running",
             root: localRuntime?.root,
             ip: guestIP
         )
@@ -508,8 +527,19 @@ var bridge: PotBridge?
             web.isHidden = localRuntime?.loaded.isEmpty != false
         }
         settings.environment = state; settings.refreshStatus()
+        terminal.show(
+            page == 7 && !settings.loginVisible && localPhase == "running",
+            root: localRuntime?.root,
+            ip: guestIP
+        )
+        loginTerminal.show(
+            page == 7 && settings.loginVisible && localPhase == "running",
+            root: localRuntime?.root,
+            ip: guestIP
+        )
         if page == 7 {
-            terminal.show(localPhase == "running", root: localRuntime?.root, ip: guestIP)
+            terminal.show(localPhase == "running" && !settings.loginVisible, root: localRuntime?.root, ip: guestIP)
+            loginTerminal.show(localPhase == "running" && settings.loginVisible, root: localRuntime?.root, ip: guestIP)
         }
         if settings.setup, localPhase == "running" {
             terminal.show(page == 7 && localPhase == "running", root: localRuntime?.root, ip: guestIP)
@@ -584,6 +614,9 @@ var bridge: PotBridge?
         }
         composerBox.isHidden = (page != 0 && page != 3) || value["task_list"] as? Bool == true
         placeholder.stringValue = next == "new" ? "描述新任务的目标…" : next.isEmpty ? "给 Pot 发消息…" : "追加指导；中断任务将在下一轮继续…"
+        if page == 0 && value["needs_auth"] as? Bool == true {
+            composerBox.isHidden = true
+        }
         ready = (value["can_send"] as? Bool ?? false) && !isApplying
         failed = (value["error"] as? Bool ?? false) || localPhase == "failed"
         sendButton.image = NSImage(
@@ -605,6 +638,11 @@ var bridge: PotBridge?
                 "cancelled",
             ].contains($0["status"] as? String ?? "") }.compactMap { $0["id"] as? String })
             let previous = unreadTracker.seen
+            let failedIDs = Set(messages.filter { $0["status"] as? String == "failed" }
+                .compactMap { $0["id"] as? String })
+            if !failedIDs.subtracting(previous).isEmpty {
+                settings.refreshAgents()
+            }
             if !unreadTracker.initialized {
                 savedSeen = UserDefaults.standard.stringArray(forKey: seenKey)
             }
@@ -623,7 +661,13 @@ var bridge: PotBridge?
                 )
             }
         }
-        settings.refreshStatus(); layout()
+        settings.refreshStatus()
+        if snapshot["connected"] as? Bool == true, settings.agentStates.isEmpty,
+           !settings.discovering
+        {
+            settings.refreshAgents()
+        }
+        layout()
     }
 
     func updateIcon() {
@@ -772,7 +816,8 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 }; settings.persistSetup()
             }
         case "section": settings.section = v["value"] as? Int ?? 0; settings.setup = false; settings
-            .result = ""; if settings.section == 2 {
+            .result = ""; settings.returnToChat = false; if settings.section == 1 {
+                settings.routingOwner = "main"; settings.aiScreen = "main"
                 settings.refreshAgents()
             } else if settings.section == 4 {
                 settings.routingOwner = "main"; settings.routingOwnerName = "主会话"; settings.refreshRouting()
@@ -790,22 +835,47 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage": settings.section = 3; bridge.selectPage(2)
         case "start": bridge.startSandbox()
-        case "terminal": bridge.selectPage(7)
+        case "terminal": settings.loginVisible = false; bridge.selectPage(7)
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
-        case "save-api": settings.saveAPI(
+        case "ai-open": settings.routingOwner = "main"; settings.openAI(fromChat: true)
+        case "ai-back":
+            settings.aiScreen = "main"
+            if settings.routingOwner != "main" {
+                settings.section = 4
+            }
+        case "ai-screen": if !settings.aiBusy {
+                settings.aiScreen = v["screen"] as? String ?? "main"
+            }
+        case "ai-new": settings.newConnection(v["kind"] as? String ?? "custom")
+        case "ai-manage": settings.editConnection(v["id"] as? String ?? "")
+        case "ai-choose": settings.chooseAI(v["id"] as? String ?? "")
+        case "ai-api-check": settings.checkAPI(endpoint: v["endpoint"] as? String ?? "", key: v["key"] as? String ?? "")
+        case "ai-save-connection": settings.saveConnection(
+                name: v["name"] as? String ?? "",
+                model: v["model"] as? String ?? "",
                 endpoint: v["endpoint"] as? String ?? "",
-                key: v["key"] as? String ?? "",
-                model: v["model"] as? String ?? ""
+                key: v["key"] as? String ?? ""
             )
-        case "select-agy": settings.selectNative(engine: "agy", model: v["model"] as? String ?? "")
-        case "select-claude": settings.selectNative(engine: "claude", model: v["model"] as? String ?? "")
-        case "select-codex": settings.selectNative(engine: "codex", model: v["model"] as? String ?? "")
+        case "ai-save-main": settings.saveMain(model: v["model"] as? String ?? "")
+        case "login-open": settings.openLogin(v["engine"] as? String ?? "")
+        case "login-copy": NSPasteboard.general.clearContents(); NSPasteboard.general.setString(
+                settings.loginCommand,
+                forType: .string
+            )
+        case "login-continue": settings.continueLogin()
+        case "login-back": settings.loginVisible = false; bridge.selectPage(2); settings.section = 1; settings
+            .refreshAgents()
         case "agent-refresh": settings.refreshAgents()
         case "save-invocation": settings.saveInvocation(
                 executable: v["executable"] as? String ?? "",
                 arguments: v["argv"] as? String ?? ""
             )
-        case "terminal-close": bridge.terminal.close()
+        case "terminal-close": if settings.loginVisible {
+                bridge.loginTerminal.close()
+            } else {
+                bridge.terminal.close()
+            }
+        case "terminal-reconnect": bridge.selectPage(7)
         case "viewer":
             if let id = v["id"] as? String, ["take", "info", "more", "connect"].contains(id) {
                 if id == "more" {

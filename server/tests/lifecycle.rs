@@ -3,12 +3,14 @@ use pot_runtime::RuntimeConfig;
 use pot_server::{Server, ServerConfig};
 use serde_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
+static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
         Self(std::env::temp_dir().join(format!(
-                "pot-server-{}-{}",
+                "pot-server-{}-{}-{}",
                 std::process::id(),
+                NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()

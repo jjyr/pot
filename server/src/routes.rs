@@ -19,6 +19,7 @@ pub fn router(s: Service) -> Router {
             "/api/v1/providers",
             get(gateway::setup::get).post(gateway::setup::save),
         )
+        .route("/api/v1/providers/check", post(gateway::setup::check))
         .route(
             "/api/pi/v1/chat/completions",
             post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),

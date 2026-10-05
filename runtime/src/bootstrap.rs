@@ -63,14 +63,15 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
     } else {
         None
     };
+    let execution_config = pi::execution_config(pi_config.clone().unwrap_or_default(), &data)?;
     let use_pi = pi_config.is_some();
     let use_api = !use_pi && provider_path.exists();
-    let api_budget = if let Some(c) = &pi_config {
+    let api_budget = if pi_config.is_some() || data.join("execution-limits.json").exists() {
         Some(deepseek::BudgetSettings {
             namespace: "pi-attempts",
             data: data.clone(),
-            limit: c.request_limit,
-            max_output_tokens: c.max_tokens,
+            limit: execution_config.request_limit,
+            max_output_tokens: execution_config.max_tokens,
         })
     } else if use_api {
         let config = deepseek::Config::load(&provider_path)?;

@@ -16,7 +16,7 @@ struct Provider {
     api_key: String,
     protocol: Protocol,
 }
-fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
+fn stored_provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
     if spec.auth_ref == "pi.json:api_key" && spec.provider == "deepseek" {
         return Ok(Provider {
             id: "deepseek".into(),
@@ -47,10 +47,17 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
     };
     let providers: Vec<Provider> =
         serde_json::from_slice(&std::fs::read(root.join("providers.json"))?)?;
-    let mut p = providers
+    let p = providers
         .into_iter()
         .find(|p| p.id == spec.provider)
         .ok_or_else(|| anyhow!("Provider unavailable; needs rebind"))?;
+    Ok(p)
+}
+fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
+    let mut p = stored_provider(s, spec)?;
+    if spec.auth_ref == "pi.json:api_key" {
+        return Ok(p);
+    }
     if p.protocol == Protocol::Gemini {
         anyhow::ensure!(
             spec.model

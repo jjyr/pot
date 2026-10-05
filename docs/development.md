@@ -48,9 +48,9 @@ The final command uses host-installed Pi and a local mock model without paid cal
 
 ### Codex validation
 
-Users needing authentication run the official CLI login command in the independent Terminal (Codex supports
-`codex login --device-auth`); Pot only checks status in Settings -> Agent.
-Enter an account-supported model in Settings -> Assistant and explicitly select Codex.
+Users needing authentication run the official CLI login command in the dedicated login Terminal (Codex supports
+`codex login --device-auth`); Pot provides a guided login terminal and read-only checks in Settings -> AI Configuration.
+Return to the shared AI Configuration page, confirm an account-supported model, and explicitly save the Chat selection.
 Only the guest CLI manages login state, stored in persistent engine-home.
 
 Credential-free integration test (explicitly select an installed official Codex CLI; no paid model calls):
@@ -102,7 +102,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 ### Claude offline contract
 
 Pot checks Claude status only through official interfaces; users authenticate in the normal Terminal themselves.
-Enter a model in Assistant settings and explicitly select Claude. Real Claude account testing is skipped by user decision (no account).
+Confirm the model in AI Configuration and explicitly save the Chat selection. Real Claude account testing is skipped by user decision (no account).
 Account-free development validation uses the original CLI and a local mock Anthropic service:
 
 ```sh

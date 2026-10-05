@@ -220,7 +220,7 @@ and tool_policy `{worker_orchestration:false, summary_read_only:true,
 unattended:"guest_vm"}`. Only accepted engine routes can be selected. Model names
 are validated by the provider, not guessed by the Runtime.
 
-Assistant API settings still edit pi.json and restart the environment. Agent settings edit Pi launch commands through the versioned API without a model call.
+AI Configuration saves API connections and CLI launch commands through the versioned Agent/provider APIs without a model call. Chat selection is a separate explicit save; product execution limits use execution-limits.json and restart the environment independently of credentials. Legacy pi.json remains supported.
 Its model/output-limit edit is imported into this same migration operation on
 startup. The task-routing settings page edits/copies saved profiles, selects a main profile through
 migration, and configures the worker default, tool-hint whitelist and concurrency caps.
@@ -496,3 +496,12 @@ and feature overrides; Claude uses stream-json with explicit tools/settings/MCP 
 AGY uses its stream-json/conversation interface and per-turn prompt guidance. Drivers
 must declare only capabilities supported by their backend. AGY's accepted native-tool
 routing exception does not enable its strict isolation capability or alter Codex/Claude controls.
+
+## AI connection management (#7)
+
+- `GET /api/v1/providers`: selected connection plus all saved API connection metadata (`connections`, keyed by `profile_id`), never secrets; Gemini endpoint templates remain templates.
+- `POST /api/v1/providers`: accepts optional `profile_id`, `name`, and `follow_main`. `follow_main: false` adds/updates a connection without selecting it; omitted fields preserve the legacy request contract. Never updates the worker default. Empty keys retain only the same profile's same-endpoint credential, even when another Agent is active.
+- `POST /api/v1/providers/check`: endpoint/protocol/key or same-profile retained key; bounded supported model-list GET only, 12-second timeout, no redirects or inference. Returns models and safe status, never upstream response bodies or secrets. Custom unsupported paths permit manual configuration.
+- `POST /api/v1/terminals`: optional purpose `shell` (default) or `login`, returned by list; both open a shell only, never execute authentication commands. `agent` command injection remains rejected.
+- Routing supports `follow_chat: true`, which pins new tasks to the active main binding snapshot rather than an unapplied profile revision. Existing explicit defaults remain effective until changed.
+- `execution-limits.json` contains request_limit, max_tokens, max_requests_per_turn and max_parallel_tasks; no credentials or model selection. Bounds match existing settings. Limits do not create an implicit legacy Pi binding.

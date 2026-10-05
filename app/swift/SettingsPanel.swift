@@ -4,6 +4,12 @@ import Foundation
 /// Configuration service only. GPUI Kit owns the settings interface.
 @MainActor final class SettingsPanel: NSObject {
     weak var bridge: PotBridge?
+    var aiScreen = "main", draftProfile = "", draftModel = "", connectionKind = "", connectionName = "",
+        connectionModel = ""
+    var secretRevision = 0, draftRevision = 0
+    var returnToChat = false, aiBusy = false, draftInitialized = false
+    var activeSpec: [String: Any] = [:], connections: [[String: Any]] = [], modelOptions: [String] = []
+    var loginEngine = "", loginVisible = false, loginMessage = "", checkMessage = ""
     var agentStates: [[String: Any]] = []
     var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = "", agyModel = ""
     var profile: [String: Any] = [:]
@@ -51,7 +57,7 @@ import Foundation
 
     func setupNavigate(_ stage: Int) {
         if stage == 1 {
-            setup = false; section = 1
+            setup = false; section = 1; returnToChat = true
         } else {
             setup = true; setupStage = 0; section = 2
         }
@@ -108,6 +114,19 @@ import Foundation
 
     var publicState: [String: Any] {
         ["revision": revision, "section": section, "setup": setup,
+         "ai_screen": aiScreen, "secret_revision": secretRevision, "draft_revision": draftRevision,
+         "draft_profile": draftProfile,
+         "draft_model": draftModel,
+         "connection_kind": connectionKind, "connection_name": connectionName, "connection_model": connectionModel,
+         "return_to_chat": returnToChat, "ai_busy": aiBusy, "active_spec": activeSpec,
+         "active_name": savedProfiles
+             .first { $0["id"] as? String == activeSpec["source_profile_id"] as? String }?["name"] as? String ??
+             (activeSpec["engine"] as? String ?? "Agent"),
+         "connections": connections, "model_options": modelOptions,
+         "login_command": loginCommand, "login_can_continue": setupCanStart(loginEngine), "login_engine": loginEngine,
+         "login_visible": loginVisible,
+         "login_message": loginMessage,
+         "check_message": checkMessage,
          "profiles": savedProfiles, "routing": routingPolicy, "routing_profile": routingProfile,
          "routing_name": routingName, "routing_model": routingModel,
          "routing_profile_limit": routingProfileLimit, "routing_provider_limit": routingProviderLimit,
@@ -129,152 +148,39 @@ import Foundation
     }
 
     func refreshAgents() {
-        guard let bridge, !discovering, Date().timeIntervalSince(lastDiscovery) > 1 else { return }
-        lastDiscovery = Date()
-        bridge.terminal.show(
-            bridge.page == 7 && bridge.localPhase == "running",
-            root: root,
-            ip: bridge.guestIP
-        )
-        discovering = true
+        guard let bridge, !discovering, bridge.snapshot["connected"] as? Bool == true,
+              Date().timeIntervalSince(lastDiscovery) > 1 else { return }
+        lastDiscovery = Date(); discovering = true
         Task {
             defer { discovering = false }
             do {
                 let facts = try await bridge.terminal.request("api/v1/agents/refresh", body: [:])
                 agentStates = facts["agents"] as? [[String: Any]] ?? []
-                let agent = try await bridge.terminal.request("api/v1/agent")
-                savedProfiles = agent["profiles"] as? [[String: Any]] ?? []
-                let bindings = agent["bindings"] as? [[String: Any]] ?? []
-                let active = bindings.first { $0["state"] as? String == "active" }
-                if active != nil, setup, setupAutoPending {
+                try await reloadAI()
+                if setup, setupAutoPending, !activeSpec.isEmpty {
                     finishSetup()
                 }
-                let selectedID = (active?["spec"] as? [String: Any])?["source_profile_id"] as? String
-                if let profiles = agent["profiles"] as? [[String: Any]],
-                   let value = profiles.first(where: { $0["id"] as? String == selectedID }) ?? profiles.first
-                {
-                    profile = value
-                    if value["engine"] as? String == "codex" {
-                        codexModel = value["model"] as? String ?? ""
+                if !loginEngine.isEmpty {
+                    let status = agentStates.first { $0["id"] as? String == loginEngine }
+                    if status?["authentication"] as? String == "authenticated" {
+                        loginMessage = "已登录。点击继续选择模型，返回 AI 配置。"
+                    } else if status?["status_check"] as? String == "failed" {
+                        loginMessage = "暂时无法检测登录状态，请重试；这不表示你尚未登录。"
+                    } else if status?["authentication"] as? String == "required" {
+                        loginMessage = "尚未登录。请在终端完成授权后重新检查。"
+                    } else {
+                        loginMessage = "无法确认登录状态。请核对终端结果；继续不代表已经登录。"
                     }
-                    if value["engine"] as? String == "agy" {
-                        agyModel = value["model"] as? String ?? ""
-                    }
-                    if value["engine"] as? String == "claude" {
-                        claudeModel = value["model"] as? String ?? ""
-                    }
-                    let launch = value["launch_spec"] as? [String: Any] ?? [:]
-                    invocationExecutable = launch["executable"] as? String ?? value["engine"] as? String ?? "pi"
-                    let argv = launch["argv"] as? [[String: Any]] ?? []
-                    let literals = argv.compactMap { $0["kind"] as? String == "literal" ? $0["value"] as? String : nil }
-                    if let data = try? JSONSerialization.data(withJSONObject: literals), let text = String(
-                        data: data,
-                        encoding: .utf8
-                    ) {
-                        invocationArgs = text
-                    }
-                    revision += 1
                 }
-                if let connection = try await bridge.terminal
-                    .request("api/v1/providers")["connection"] as? [String: Any]
-                {
-                    apiEndpoint = connection["endpoint"] as? String ?? ""
-                    apiModel = connection["model"] as? String ?? ""
-                    apiProtocol = connection["protocol"] as? String ?? "openai_chat"
-                    hasAPIKey = connection["has_key"] as? Bool ?? false
-                }
-                result = "状态已刷新。已登录不代表模型调用已验证。"
-            } catch { result = "状态检查失败；可在 Sandbox Terminal 中手动使用 CLI。" }
-        }
-    }
-
-    func selectNative(engine: String, model: String) {
-        let name = engine == "agy" ? "AGY" : (engine == "claude" ? "Claude" : "Codex")
-        guard ["codex", "claude", "agy"].contains(engine),
-              setupCanStart(engine) else { result = "当前后端不可用；请查看 Agent 状态或选择其他后端。"; return }
-        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let bridge, !model.isEmpty else { result = "请填写 \(name) 模型名称。"; return }
-        bridge.terminal.show(
-            bridge.page == 7 && bridge.localPhase == "running",
-            root: root,
-            ip: bridge.guestIP
-        )
-        Task {
-            do {
-                let state = try await bridge.terminal.request("api/v1/agent")
-                let firstSelection = (state["bindings"] as? [[String: Any]] ?? []).isEmpty
-                let profiles = state["profiles"] as? [[String: Any]] ?? []
-                let previous = profiles.first { $0["id"] as? String == "\(engine)-default" }
-                let revision = previous?["revision"] as? Int ?? 0
-                var profile: [String: Any] = [
-                    "id": "\(engine)-default", "revision": revision + 1, "name": name,
-                    "engine": engine,
-                    "provider": engine == "agy" ? "google" : (engine == "claude" ? "anthropic" : "openai"),
-                    "model": model,
-                    "auth_ref": "cli:\(engine)",
-                    "params": ["max_output_tokens": 8192],
-                    "tool_policy": ["worker_orchestration": false, "summary_read_only": true, "unattended": "guest_vm"],
-                ]
-                if let launch = previous?["launch_spec"] {
-                    profile["launch_spec"] = launch
-                }
-                if let contract = previous?["protocol_contract"] {
-                    profile["protocol_contract"] = contract
-                }
-                _ = try await bridge.terminal.request("api/v1/agent", body: [
-                    "profile": profile, "expected_revision": revision,
-                    "request_id": UUID().uuidString, "follow_main": true, "follow_worker": true,
-                ])
-                if engine == "agy" {
-                    agyModel = model
-                } else if engine == "claude" {
-                    claudeModel = model
-                } else {
-                    codexModel = model
-                }; if setup || firstSelection {
-                    finishSetup()
-                }
-                result = "已选择 \(name)；现有轮次结束后生效。"
-                refreshAgents()
-            } catch { result = "\(name) 配置未保存：\(error.localizedDescription)" }
-        }
-    }
-
-    func saveAPI(endpoint: String, key: String, model: String) {
-        guard let bridge else { return }
-        bridge.terminal.show(
-            bridge.page == 7 && bridge.localPhase == "running",
-            root: root,
-            ip: bridge.guestIP
-        )
-        let endpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !endpoint.isEmpty, !model.isEmpty else { result = "请填写 API endpoint 和模型名称。"; return }
-        let protocolName = apiProtocol
-        Task {
-            do {
-                let state = try await bridge.terminal.request("api/v1/agent")
-                let firstSelection = (state["bindings"] as? [[String: Any]] ?? []).isEmpty
-                let profiles = state["profiles"] as? [[String: Any]] ?? []
-                let expected = profiles.first { $0["id"] as? String == "api-default" }?["revision"] as? Int ?? 0
-                _ = try await bridge.terminal.request("api/v1/providers", body: [
-                    "request_id": UUID().uuidString, "expected_revision": expected,
-                    "endpoint": endpoint, "api_key": key, "model": model, "protocol": protocolName,
-                ])
-                apiEndpoint = endpoint; apiModel = model; hasAPIKey = true; if setup || firstSelection {
-                    finishSetup()
-                }
-                revision += 1
-                result = "API 已保存；新配置在当前轮次结束后生效。"
-                refreshAgents()
-            } catch { result = "API 未保存：\(error.localizedDescription)" }
+                result = "状态已刷新；未发送模型请求。"
+            } catch { result = "暂时无法检测状态，请检查环境并重试。"; loginMessage = result }
         }
     }
 
     func saveInvocation(executable: String, arguments: String) {
         guard let bridge, let data = arguments.data(using: .utf8),
               let args = try? JSONSerialization.jsonObject(with: data) as? [String],
-              let revision = profile["revision"] as? Int else { result = "参数必须是 JSON 字符串数组，且需先配置 API profile。"; return }
+              let revision = profile["revision"] as? Int else { result = "参数必须是 JSON 字符串数组，且需先保存连接。"; return }
         var updated = profile
         updated["revision"] = revision + 1
         updated["launch_spec"] = [
@@ -294,11 +200,11 @@ import Foundation
                         "profile": updated,
                         "expected_revision": revision,
                         "request_id": UUID().uuidString,
-                        "follow_main": true,
-                        "follow_worker": true,
+                        "follow_main": false,
+                        "follow_worker": false,
                     ]
                 )
-                result = "命令已保存；在轮次边界迁移，未调用模型。"; refreshAgents()
+                result = "命令已保存；在 AI 配置中保存聊天选择后生效。"; refreshAgents()
             } catch { result = "命令未保存：\(error.localizedDescription)" }
         }
     }
@@ -312,6 +218,13 @@ import Foundation
         tokens = String(config["max_tokens"] as? Int ?? 8192)
         perTurn = String(config["max_requests_per_turn"] as? Int ?? 100)
         parallel = String(config["max_parallel_tasks"] as? Int ?? 5)
+        if let data = try? Data(contentsOf: root.appendingPathComponent("workspace/product/execution-limits.json")),
+           let limits = try? JSONSerialization.jsonObject(with: data) as? [String: Int]
+        {
+            limit = String(limits["request_limit"] ?? 10000); tokens = String(limits["max_tokens"] ?? 8192)
+            perTurn = String(limits["max_requests_per_turn"] ?? 100); parallel =
+                String(limits["max_parallel_tasks"] ?? 5)
+        }
         if let data = try? Data(contentsOf: root.appendingPathComponent("sandbox.json")),
            let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Int]
         {
@@ -332,19 +245,10 @@ import Foundation
             perTurn,
             1 ... 1000
         ), let n = parsed(parallel, 1 ... 1000) else { result = "请检查请求上限；输出 token 可填正整数或 K/M，例如 128K、1M、1.5M。"; return }
-        let credential = key.isEmpty ? config["api_key"] as? String ?? "" : key
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !credential.isEmpty,
-              !credential.contains("\n") else { result = "需要有效的 DeepSeek API key；密钥不会显示或写入日志。"; return }
-        let value: [String: Any] = [
-            "api_key": credential,
-            "model": "deepseek-v4-flash",
-            "request_limit": l,
-            "max_tokens": t,
-            "max_requests_per_turn": p,
-            "max_parallel_tasks": n,
-        ]
-        apply(value, to: root.appendingPathComponent("workspace/product/pi.json"))
+        apply(
+            ["request_limit": l, "max_tokens": t, "max_requests_per_turn": p, "max_parallel_tasks": n],
+            to: root.appendingPathComponent("workspace/product/execution-limits.json")
+        )
     }
 
     @objc func saveSandbox() {
@@ -453,6 +357,7 @@ import Foundation
     func routingChoice(_ kind: String, _ id: String) {
         if kind == "worker" {
             routingPolicy["worker_profile"] = id.isEmpty ? NSNull() : id as Any
+            routingPolicy["follow_chat"] = id.isEmpty
         } else {
             var allowed = Set(routingPolicy["allowed_tool_profiles"] as? [String] ?? [])
             if allowed.contains(id) {
@@ -534,9 +439,17 @@ import Foundation
                     "request_id": UUID().uuidString, "target_profile": target,
                     "owner": owner, "reason": "settings_changed",
                 ])
-                result = "已请求此会话迁移；当前轮次结束或下次恢复时生效，其他任务保持固定。"
-                refreshAgents()
-            } catch { result = "会话未切换：\(error.localizedDescription)" }
+                while true {
+                    let response = try await bridge.terminal.request("api/v1/agent?owner=" + owner)
+                    if response["pending_migration"] is NSNull || response["pending_migration"] == nil {
+                        break
+                    }
+                    result = "任务正在等待交接，请在任务中结束当前轮次后继续；请勿重复提交。"
+                    try await Task.sleep(nanoseconds: 750_000_000)
+                }
+                result = "此任务的 Agent 已切换；其他任务保持固定。"
+                bridge.selectPage(3)
+            } catch { result = "任务未切换；请检查连接、结束已有交接并刷新后重试。" }
         }
     }
 }
