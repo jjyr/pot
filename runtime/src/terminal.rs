@@ -11,6 +11,7 @@ use std::{
     os::fd::{AsRawFd, FromRawFd},
     sync::atomic::{AtomicBool, Ordering},
 };
+use tokio::process::Command;
 use tokio::{
     io::unix::AsyncFd,
     sync::{Notify, watch},

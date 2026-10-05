@@ -148,7 +148,7 @@ fn info(plan: &Plan, summary: bool) -> ScheduleInfo {
     i
 }
 #[derive(Default, Deserialize)]
-pub(super) struct QueryPage {
+pub struct QueryPage {
     #[serde(default)]
     pub offset: usize,
     #[serde(default)]
@@ -226,7 +226,7 @@ pub(super) fn page(root: &Service, q: QueryPage) -> ApiResult<SchedulePage> {
         runs_next_offset: next_run,
     })
 }
-pub(super) async fn list(
+pub async fn list(
     State(root): State<Service>,
     h: HeaderMap,
     Query(q): Query<QueryPage>,
@@ -234,7 +234,7 @@ pub(super) async fn list(
     root.authorized(&h)?;
     Ok(Json(page(&root, q)?))
 }
-pub(super) async fn command(
+pub async fn command(
     State(root): State<Service>,
     h: HeaderMap,
     Json(req): Json<Value>,

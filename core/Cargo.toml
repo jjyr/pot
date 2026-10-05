@@ -1,0 +1,12 @@
+[package]
+name = "pot-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow = "1"
+sha2 = "0.10"
+futures = "0.3"

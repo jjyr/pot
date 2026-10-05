@@ -1,97 +1,97 @@
 ---
 { tags: [ Architecture ] }
 ---
-# Apple container：最新能力、架构与使用调研
+# Apple container: capabilities, architecture, and usage research
 
-> 历史研究：版本与“当前”均指原文核对日期。实施现状见 [开发计划](../development-plan.md)，不是本报告中的建议或旧状态。
+> Historical research: versions and “current” refer to the original review date. See the [development plan](../development-plan.md) for implementation status; this report contains recommendations and historical observations.
 
-整理日期：2026-10-02  
-版本基线：`apple/container 1.5.0`；对应底层依赖 `apple/containerization 0.47.0`。  
-研究范围：官方发布记录、固定 tag 文档与关键源码；未安装软件、未运行容器、未执行性能基准。
+Research date: 2026-10-02  
+Version baseline: `apple/container 1.5.0`, with `apple/containerization 0.47.0`.  
+Scope: official releases, documentation at fixed tags, and key source files. No software installation, container execution, or performance benchmarks were performed.
 
-相关笔记：[Docker容器GUI与可嵌入运行时调研](docker-gui.md)。
+Related notes: [Docker GUI and embeddable runtime research](docker-gui.md).
 
-## 0. 核心结论
+## 0. Key findings
 
-1. **Apple container 是 Apple 开源的 Linux 容器工具，不是运行 macOS 应用的容器。** 面向 Apple silicon Mac，官方支持平台为 macOS 26。
-2. **它不是“没有 VM 的 Docker”。** 普通 `container run` 的核心模型是每个容器拥有一个独立轻量 Linux VM，而不是让所有容器共用一台大型 Linux VM。
-3. **镜像生态兼容，控制面不等价。** 可以使用 OCI 镜像、Registry 和 Dockerfile，但不能因此认为兼容 Docker Engine API、Docker socket、Compose 或所有 Docker CLI 参数。
-4. **最新稳定版为 1.5.0，发布于 2026-09-29。** 已具备构建、镜像分发、自定义网络、端口转发、卷、资源统计、持久 Linux machine 和实验性本地 Kubernetes 能力，不应继续用 2025 年初版功能表评价它。
-5. **底层 Containerization 是可嵌入的 Swift 库。** 如果目标是把 Linux 沙箱能力集成进 Mac 应用，应该重点研究该库，而不只是把 `container` CLI 当成可嵌入运行时。
-6. **GUI/Chromium 可以作为 Linux 工作负载实现，但不是内置桌面功能。** 仍需 Linux 图形栈、显示传输和浏览器沙箱；GPU 直通及原生 macOS 窗口不能假定开箱即用。
-7. **独立 VM 增加内核隔离边界，但宿主管理面仍是攻击面。** 镜像解包、Registry 认证、文件共享、SSH agent 和 kubeconfig 管理都需要安全审计；近期版本有多项相关修复。
-
----
-
-## 1. 最新版本与项目状态
-
-### 1.1 截至研究日期的版本快照
-
-| 项目 | 核实结果 | 含义 |
-|---|---|---|
-| 最新稳定 CLI | `1.5.0` | GitHub releases/latest 返回的非预发布版本 |
-| 发布时间 | `2026-09-29T02:33:21Z`，北京时间 09-29 10:33 | 与本笔记的 2026-10-02 查询日期区分 |
-| CLI 内嵌 Containerization 版本 | `0.47.0` | 来自 `1.5.0/Package.swift` 的 `scVersion`；不是声称底层库的独立最新 release |
-| builder shim 版本 | `0.13.1` | 构建工具链的另一项依赖 |
-| 签名安装包 | `container-1.5.0-installer-signed.pkg` | 推荐使用官方签名包 |
-| 签名安装包大小 | `118,045,087 bytes`，约 `112.6 MiB` | 只是安装包下载量，不包含工作负载镜像、首次内核准备和运行数据 |
-| 官方支持运行平台 | Apple silicon + macOS 26 | 不支持 Intel Mac 作为标准运行平台 |
-| 从源码构建底层库 | Apple silicon、macOS 26、Xcode 26 | 下载签名 CLI 不等于必须安装完整 Xcode |
-
-来源：[1.5.0 release](https://github.com/apple/container/releases/tag/1.5.0)、[固定版本 Package.swift](https://github.com/apple/container/blob/1.5.0/Package.swift)、[固定版本 README](https://github.com/apple/container/blob/1.5.0/README.md)。
-
-### 1.2 最近几个版本的重要变化
-
-| 版本 | 发布日期（UTC） | 与选型相关的变化 |
-|---|---|---|
-| `1.2.0 / 1.2.1` | 2026-07-29 / 08-07 | 本地 `k8s` 插件、运行中容器 export、构建 SSH forwarding、masked/read-only paths；1.2.0 有多项安全修复 |
-| `1.2.2` | 2026-08-08 | 修复 release 安装包中 Kubernetes 插件无法工作的情况 |
-| `1.3.0` | 2026-08-24 | 默认 Kata kernel 更新为 `3.32.0-debug`；Registry scheme 默认 HTTPS，移除 `auto` |
-| `1.3.1` | 2026-08-29 | 修复 ID、digest、镜像加载/解包、Registry 认证等路径上的安全问题 |
-| `1.4.1` | 2026-09-09 | 增加 `container clean`、增强 system status；修复 OCI layout 符号链接及 Unix socket buffer 相关问题。官方说明未发布 1.4.0 |
-| `1.5.0` | 2026-09-29 | 修复空 entrypoint、localhost DNS 变更后出口网络中断；K8s 增加自定义 CNI，移除 `k8s start`，修复 guest kubeconfig 合并安全问题 |
-
-**最新版本不能只理解为“命令更多了”。** 对任意镜像或不可信程序的执行产品，近期宿主侧解析和解包修复意味着不能长期停留在旧版本。
-
-### 1.3 稳定性承诺
-
-固定版本 README 的项目状态说明：
-
-- `container` release 是产品版本，不是严格 semantic versioning。
-- 同一大版本内 CLI 一般维持兼容，但并非绝对保证。
-- 标为 experimental 的功能，例如 `k8s`，不保证兼容性。
-- `container-apiserver` XPC API 在同一大版本内承诺前后兼容。
-- 非公开 XPC helpers 不承诺跨版本兼容。
-- 应用数据只保证同一大版本内向前兼容；不能因为能升级就认为能无风险降级。
-- Containerization 库的源码稳定性承诺更窄：只在同一 minor 内保证，应锁定依赖并评估每次升级。
-
-**工程建议：CLI、库、guest init、内核、builder 和工作负载镜像分别记录版本，不能仅固定一个 `container --version`。**
+1. **Apple container is Apple's open-source Linux container tool, not a container for macOS applications.** It targets Apple silicon Macs; the officially supported platform is macOS 26.
+2. **It is not “Docker without VMs.”** Ordinary `container run` gives each container a separate lightweight Linux VM, rather than sharing one large Linux VM.
+3. **Image compatibility does not imply control-plane compatibility.** OCI images, registries, and Dockerfiles are supported; Docker Engine APIs, sockets, Compose, and all Docker CLI flags are not implied.
+4. **The latest stable release at review time was 1.5.0, released 2026-09-29.** It includes builds, image distribution, custom networks, forwarding, volumes, statistics, persistent Linux machines, and experimental local Kubernetes. The initial 2025 feature list is outdated.
+5. **Containerization is an embeddable Swift library.** Integrating Linux sandboxes into a Mac app calls for evaluating this library, beyond treating the `container` CLI as an embedded runtime.
+6. **GUI/Chromium can run as Linux workloads, but there is no built-in desktop.** Linux graphics, display transport, and browser sandboxing are still required; GPU passthrough and native macOS windows cannot be assumed.
+7. **Separate VMs add kernel isolation, while the host management plane remains an attack surface.** Image extraction, registry authentication, file sharing, SSH agents, and kubeconfig handling require review; recent releases include relevant fixes.
 
 ---
 
-## 2. 需要区分的四层
+## 1. Versions and project status
 
-| 名称 | 定位 | 对开发者的意义 |
+### 1.1 Version snapshot at the research date
+
+| Item | Verified result | Meaning |
 |---|---|---|
-| `apple/container` | 用户工具、CLI、API server、镜像/网络/运行时 helpers | 日常开发和产品控制面参考实现 |
-| `apple/containerization` | Swift 容器、镜像、文件系统与 VM 管理库 | 真正需要“嵌入应用/bin”时的主要对象 |
-| `Virtualization.framework` | macOS VM 与虚拟设备框架 | 负责 Linux VM 的执行与设备模型，不是 Docker 引擎 |
-| `vminitd` / `vmexec` | Linux guest 内的 init、管理和执行机制 | 接收宿主请求并管理 Linux 进程 |
+| Latest stable CLI | `1.5.0` | Non-prerelease returned by GitHub releases/latest |
+| Release timestamp | `2026-09-29T02:33:21Z`, 09-29 10: 33 Beijing time | Distinct from the 2026-10-02 query date |
+| Bundled Containerization version | `0.47.0` | `scVersion` in `1.5.0/Package.swift`; not a claim about the library's latest independent release |
+| Builder shim | `0.13.1` | Separate build-toolchain dependency |
+| Signed installer | `container-1.5.0-installer-signed.pkg` | Official signed package recommended |
+| Signed installer size | `118,045,087 bytes`, approximately `112.6 MiB` | Download size only; excludes workload images, initial kernel preparation, and runtime data |
+| Supported runtime platform | Apple silicon + macOS 26 | Intel Macs are not a standard supported platform |
+| Building the library from source | Apple silicon, macOS 26, Xcode 26 | Installing the signed CLI does not necessarily require full Xcode |
 
-OCI 镜像定义应用用户空间；Linux kernel 和 guest init 由运行时额外提供。拉一个 Ubuntu 镜像不是再下载完整 Ubuntu VM，也不意味着使用镜像发行版自己的内核。
+Sources: [1.5.0 release](https://github.com/apple/container/releases/tag/1.5.0), [pinned Package.swift](https://github.com/apple/container/blob/1.5.0/Package.swift), [pinned README](https://github.com/apple/container/blob/1.5.0/README.md).
 
-### 2.1 相比 Docker Desktop 的典型模型
+### 1.2 Recent changes relevant to selection
+
+| Version | Release date (UTC) | Relevant changes |
+|---|---|---|
+| `1.2.0 / 1.2.1` | 2026-07-29 / 08-07 | Local `k8s` plugin, running-container export, build SSH forwarding, masked/read-only paths; multiple security fixes in 1.2.0 |
+| `1.2.2` | 2026-08-08 | Fixed Kubernetes plugin failure in release installers |
+| `1.3.0` | 2026-08-24 | Default Kata kernel updated to `3.32.0-debug`; registry scheme defaults to HTTPS, with `auto` removed |
+| `1.3.1` | 2026-08-29 | Security fixes in IDs, digests, image loading/extraction, and registry authentication |
+| `1.4.1` | 2026-09-09 | Added `container clean` and improved system status; fixed OCI-layout symlinks and Unix-socket buffers. Official notes state 1.4.0 was not released |
+| `1.5.0` | 2026-09-29 | Fixed empty entrypoints and egress failures after localhost DNS changes; custom Kubernetes CNI, removal of `k8s start`, and guest kubeconfig merge security fixes |
+
+**New releases matter beyond additional commands.** Products executing arbitrary images or untrusted programs should not remain on versions preceding host parsing and extraction fixes.
+
+### 1.3 Stability commitments
+
+The pinned README states:
+
+- `container` releases use product versioning, not strict semantic versioning.
+- CLI compatibility generally holds within a major version, without an absolute guarantee.
+- Experimental features such as `k8s` have no compatibility guarantee.
+- The `container-apiserver` XPC API promises forward/backward compatibility within a major version.
+- Private XPC helpers have no cross-version compatibility guarantee.
+- Application data only promises forward compatibility within a major version; upgrades do not imply safe downgrades.
+- Containerization source compatibility is narrower: guaranteed only within a minor version. Pin dependencies and evaluate each upgrade.
+
+**Record separate versions for the CLI, library, guest init, kernel, builder, and workload images; pinning `container --version` alone is insufficient.**
+
+---
+
+## 2. Four distinct layers
+
+| Name | Role | Developer relevance |
+|---|---|---|
+| `apple/container` | User tools, CLI, API server, image/network/runtime helpers | Reference implementation for daily usage and product control planes |
+| `apple/containerization` | Swift container, image, filesystem, and VM management library | Main integration target for embedding in an app or binary |
+| `Virtualization.framework` | macOS VM and virtual-device framework | Executes Linux VMs and supplies devices; not a Docker engine |
+| `vminitd` / `vmexec` | Linux guest init, management, and execution | Receives host requests and manages Linux processes |
+
+OCI images define application user space; the runtime separately supplies the Linux kernel and guest init. An Ubuntu image is not a complete Ubuntu VM download and does not imply use of that distribution's kernel.
+
+### 2.1 Typical comparison with Docker Desktop
 
 ```text
-Docker Desktop 常见模型
+Typical Docker Desktop model
 macOS
   └── Linux VM
         └── Docker Engine / container runtime
               ├── container A ─┐
-              ├── container B  ├── 共用这个 VM 的 Linux kernel
+              ├── container B  ├── shared Linux kernel in this VM
               └── container C ─┘
 
-Apple container 普通运行模型
+Ordinary Apple container model
 macOS
   ├── container control plane
   ├── lightweight VM A → kernel A + init + workload A
@@ -99,159 +99,159 @@ macOS
   └── lightweight VM C → kernel C + init + workload C
 ```
 
-这里是普通应用容器的对比。后文的 `container machine`、Kubernetes 节点是另一类工作负载：节点 VM 内部可能管理多个进程/Pod，不能机械推导“每个 Pod 都是单独的 Apple VM”。
+This comparison concerns ordinary application containers. `container machine` and Kubernetes nodes are different workloads: a node VM may manage multiple processes/Pods, so one Apple VM per Pod cannot be inferred.
 
-### 2.2 直接影响
+### 2.2 Direct implications
 
-- **隔离**：其他普通容器不与当前容器共享一个 guest kernel。
-- **资源**：每实例都增加 guest kernel/init 等开销；高密度并发需测量，不能只计算应用内存。
-- **网络**：每容器有独立 IP，宿主可以直接访问；端口映射是方便访问的一种方式，而不是唯一方式。
-- **文件共享**：可只给当前 VM 共享它需要的目录。
-- **内核配置**：可按容器指定 kernel，适合内核特性或版本测试。
-- **启动**：官方库设计说明宣称亚秒级启动，指优化环境下的启动设计目标/表现，不包含下载镜像、冷文件系统准备和应用首屏；本次没有复测。
+- **Isolation: ** other ordinary containers do not share the current container's guest kernel.
+- **Resources: ** each instance adds guest kernel/init overhead. Measure dense concurrency rather than counting application memory alone.
+- **Networking: ** each container has its own IP, directly accessible from the host. Port mapping is one access method.
+- **File sharing: ** expose only the directories needed by each VM.
+- **Kernel configuration: ** kernels can be selected per container for feature/version testing.
+- **Startup: ** official library design notes claim subsecond startup in optimized environments. This excludes image downloads, cold filesystem preparation, and application first paint; it was not measured here.
 
 ---
 
-## 3. 架构详解
+## 3. Architecture
 
-### 3.1 宿主控制面
+### 3.1 Host control plane
 
 ```text
-container CLI / 客户端
+container CLI / client
          │ XPC
          ▼
-container-apiserver（launchd 用户 LaunchAgent）
+container-apiserver (launchd user LaunchAgent)
          ├── container-core-images
-         │      └── Registry client + 本地 image/content store
+         │      └── Registry client + local image/content store
          ├── container-network-vmnet
-         │      └── vmnet 网络、IP 分配与网络管理
-         └── container-runtime-linux（每容器一个 runtime helper）
+         │      └── vmnet networking, IP allocation, and network management
+         └── container-runtime-linux (one runtime helper per container)
                 └── Containerization
                       └── Virtualization.framework
-                            └── 该容器的 Linux VM
+                            └── Linux VM for this container
 ```
 
-`container system start` 启动 API server 和相关后台服务，`container system stop` 停止服务并从 launchd 注销。
+`container system start` starts the API server and associated services; `container system stop` stops them and unregisters them from launchd.
 
-**它没有要求 Docker daemon，但并不是没有后台服务。** `container-apiserver`、helpers 和 VM 都是产品运行的一部分。
+**No Docker daemon is required, but background services exist.** The API server, helpers, and VMs are all runtime components.
 
-关键 macOS 集成：
+Key macOS integrations:
 
-| 技术 | 作用 |
+| Technology | Role |
 |---|---|
-| Virtualization.framework | VM、CPU/内存与虚拟设备 |
-| vmnet | 虚拟网络 |
-| XPC | CLI/API server/helper 间通信 |
-| launchd | 服务生命周期 |
-| Keychain | Registry 登录凭据 |
-| Unified Logging | 系统日志 |
+| Virtualization.framework | VM, CPU/memory, and virtual devices |
+| vmnet | Virtual networking |
+| XPC | CLI/API server/helper communication |
+| launchd | Service lifecycle |
+| Keychain | Registry credentials |
+| Unified Logging | System logs |
 
-来源：[technical overview](https://github.com/apple/container/blob/1.5.0/docs/technical-overview.md)。
+Source: [technical overview](https://github.com/apple/container/blob/1.5.0/docs/technical-overview.md).
 
-### 3.2 guest 内部：vminitd 与工作负载不是同一个 PID 1
+### 3.2 Guest internals: vminitd and workload PID 1 differ
 
 ```text
-宿主 runtime helper
+Host runtime helper
        │ gRPC over vsock
        ▼
 guest kernel
-       └── vminitd（VM 的初始进程）
-              ├── 挂载/网络/运行环境管理
-              ├── 创建与启动 containerized process
-              └── I/O、signal、exit event 管理
-                    └── 应用容器进程
+       └── vminitd (initial VM process)
+              ├── Mount, network, and environment management
+              ├── Create and start containerized processes
+              └── I/O, signals, and exit events
+                    └── Application container process
 ```
 
-vsock 是宿主与 guest 的管理通道，不需要把 guest 管理服务暴露成普通公网 TCP 端口。
+vsock provides host/guest management transport without exposing guest management as a public TCP service.
 
-要区分：
+Distinguish:
 
-- VM 初始进程是 `vminitd`。
-- 应用容器自己的进程空间中，应用可能是 PID 1。
-- CLI 的 `--init` 用于应用层信号转发和孤儿进程回收，不等于“没有 --init 就没有 VM init”。
+- `vminitd` is the VM's initial process.
+- Within the application's process namespace, the application may be PID 1.
+- CLI `--init` handles application signal forwarding and orphan reaping. Omitting it does not remove VM init.
 
-来源：[Containerization 0.47.0 README](https://github.com/apple/containerization/blob/0.47.0/README.md)、[runtime configuration](https://github.com/apple/container/blob/1.5.0/docs/runtime-configuration.md)。
+Sources: [Containerization 0.47.0 README](https://github.com/apple/containerization/blob/0.47.0/README.md), [runtime configuration](https://github.com/apple/container/blob/1.5.0/docs/runtime-configuration.md).
 
-### 3.3 镜像与 rootfs 路径
+### 3.3 Image and rootfs path
 
 ```text
 OCI Registry
-    → 选择 linux/arm64 或 linux/amd64 manifest
-    → 下载 config 与 layers、存入内容存储
-    → 构造 Linux ext4 rootfs
-    → 准备 guest kernel + init filesystem
-    → 挂载块设备、virtiofs、网络设备
-    → 启动 VM → vminitd → 应用进程
+    → Select linux/arm64 or linux/amd64 manifest
+    → Download config/layers into content storage
+    → Construct Linux ext4 rootfs
+    → Prepare guest kernel + init filesystem
+    → Attach block devices, virtiofs, and networking
+    → Start VM → vminitd → application process
 ```
 
-Containerization 提供 OCI 管理、Registry、归档/解包、ext4 构建、Linux process 和 VM API。它不只是 Virtualization.framework 的薄包装。
+Containerization supplies OCI, registry, archive/extraction, ext4, Linux process, and VM APIs. It is more than a thin Virtualization.framework wrapper.
 
-镜像层下载可使用内容缓存，但**不能直接套用 Docker OverlayFS 的“所有运行容器共享相同 lowerdir”来估算 Apple 的实际磁盘占用**。CLI 每个容器可写文件系统使用 macOS sparse disk image；命名卷也有自己的 sparse image，实际共享/复制效果应结合磁盘统计测试。
+Layer downloads can use content caching, but **Docker OverlayFS assumptions about shared lowerdirs do not establish Apple's disk usage**. CLI writable filesystems and named volumes use macOS sparse disk images; measure actual sharing/copying and allocation.
 
-### 3.4 构建架构
+### 3.4 Build architecture
 
-`container build` 使用独立 builder 工作负载，基于 BuildKit，经 builder shim 管理：
+`container build` uses a separate BuildKit-based builder workload, managed by a builder shim:
 
 ```text
 Dockerfile / Containerfile + build context
          → container build
          → BuildKit builder VM
-         → OCI image → 本地存储 / Registry
+         → OCI image → local storage / registry
 ```
 
-支持多阶段构建、build args、target、secret、SSH agent forwarding、多架构与 OCI/tar/local 输出。builder 是另一台要计入 CPU、内存和缓存的 VM。
+Multi-stage builds, arguments, targets, secrets, SSH forwarding, multiple architectures, and OCI/tar/local outputs are supported. Include the builder VM's CPU, memory, and cache in resource budgets.
 
-### 3.5 底层库的 Linux backend：新能力但不是 CLI 平台承诺
+### 3.5 Library Linux backend versus CLI platform support
 
-Containerization `0.47.0` 文档列出两类 VM backend：
+Containerization `0.47.0` documents two VM backends:
 
-- macOS：`VZVirtualMachineManager`，使用 Virtualization.framework。
-- Linux：`CHVirtualMachineManager`，使用 Cloud Hypervisor + KVM；需要 `cloud-hypervisor`、按需 `virtiofsd`、`/dev/kvm` 权限和网络准备。
+- macOS: `VZVirtualMachineManager` uses Virtualization.framework.
+- Linux: `CHVirtualMachineManager` uses Cloud Hypervisor + KVM, requiring `cloud-hypervisor`, optional `virtiofsd`, `/dev/kvm` access, and network preparation.
 
-Linux backend 使用 TAP/bridge/NAT 时，调用方负责相应宿主网络配置；集成测试目前只覆盖跨平台子集。
+Callers configure host networking for TAP/bridge/NAT. Integration tests currently cover only a cross-platform subset.
 
-**结论：底层库已有 Linux 路线，不等于 `container 1.5.0` CLI 已变成与 macOS 一样受支持的跨平台 Docker 替代品。** 产品若要跨平台，需单独评估 API、依赖分发、网络和 Linux 测试覆盖。
+**The library's Linux backend does not make the `container 1.5.0` CLI an equally supported cross-platform Docker replacement.** Evaluate APIs, dependency distribution, networking, and Linux test coverage separately.
 
 ---
 
-## 4. 当前能力边界
+## 4. Capability boundaries
 
-| 能力 | 1.5.0 状态 / 注意事项 |
+| Capability | 1.5.0 status / caveats |
 |---|---|
-| OCI pull/push/tag/list/inspect | 已支持，默认 Registry 为 docker.io |
-| Dockerfile / Containerfile build | 已支持，BuildKit 路线 |
-| ARM64 Linux 工作负载 | 标准优先路径 |
-| AMD64 用户空间 | Rosetta 支持，需验证目标应用兼容性 |
-| create/run/start/stop/exec/logs/cp/export | 已支持；命令参数以固定 tag 文档为准 |
-| 多容器并行 | 已支持，每普通容器独立 VM |
-| CPU、内存、ulimit、shm | 已支持 |
-| bind mounts / named volumes / tmpfs | 已支持，数据与生命周期规则不同于 Docker 的部分默认行为 |
-| 自定义网络、IPv4/IPv6、端口转发 | 已支持，官方平台基线为 macOS 26 |
-| 宿主与容器 DNS 集成 | 已支持，需要两侧配置；自定义网络裸 hostname 发现仍有缺口 |
-| SSH agent / Unix socket 集成 | 已支持相关参数，但显式共享扩大授权面 |
-| 只读 rootfs、cap-add/drop | 已支持 |
-| masked/read-only paths | 已有，标为 experimental |
-| 自定义 kernel/init filesystem | 已支持 |
-| 嵌套虚拟化 | 有条件支持，M3+ 和支持 KVM 的 guest kernel |
-| Linux machine | 已支持，面向持久开发环境 |
-| 本地 Kubernetes | 实验性插件，1.5.0 已支持自定义 CNI |
-| 原生 macOS GUI、macOS container | 不是目标能力 |
-| Linux GUI 远程显示 | 可搭建工作负载，非内置桌面特性 |
-| Linux guest 自动获得 Metal/GPU | 本次未发现标准 CLI 提供可直接依赖的 GPU 直通流程，不应假定支持 |
-| Docker Engine REST API / Docker socket | 不是其公开控制模型，不应按兼容端点使用 |
-| 内置 Docker Compose | 固定版本命令参考中无该能力；第三方适配应单独验证 |
+| OCI pull/push/tag/list/inspect | Supported; default registry is docker.io |
+| Dockerfile / Containerfile build | Supported through BuildKit |
+| ARM64 Linux workloads | Standard preferred path |
+| AMD64 user space | Rosetta support; validate target applications |
+| create/run/start/stop/exec/logs/cp/export | Supported; consult pinned command documentation |
+| Concurrent containers | Supported; each ordinary container has a separate VM |
+| CPU, memory, ulimit, shm | Supported |
+| bind mounts / named volumes / tmpfs | Supported; some data/lifecycle defaults differ from Docker |
+| Custom networks, IPv4/IPv6, forwarding | Supported; official baseline is macOS 26 |
+| Host/container DNS integration | Supported with configuration on both sides; bare-hostname discovery on custom networks has gaps |
+| SSH agent / Unix sockets | Relevant options supported; explicit sharing expands authorization |
+| Read-only rootfs, cap-add/drop | Supported |
+| masked/read-only paths | Available, experimental |
+| Custom kernel/init filesystem | Supported |
+| Nested virtualization | Conditional: M3+ and a KVM-enabled guest kernel |
+| Linux machine | Supported for persistent development environments |
+| Local Kubernetes | Experimental plugin; custom CNI supported in 1.5.0 |
+| Native macOS GUI/macOS containers | Outside scope |
+| Linux GUI remote display | Can be assembled as a workload; no built-in desktop |
+| Automatic Metal/GPU in Linux guests | No dependable standard CLI passthrough procedure was found in this review |
+| Docker Engine REST API / socket | Not the public control model; do not treat it as a compatible endpoint |
+| Built-in Docker Compose | Absent from pinned command reference; verify third-party adapters separately |
 
-“OCI 兼容”主要指镜像与分发生态，不代表每个依赖特定内核、设备、权限和 Docker 管理 API 的镜像都无需修改即可运行。
+OCI compatibility concerns images and distribution. It does not guarantee unchanged execution of images depending on specific kernels, devices, permissions, or Docker APIs.
 
 ---
 
-## 5. 安装、升级和第一批命令
+## 5. Installation, upgrades, and first commands
 
-### 5.1 官方安装路径
+### 5.1 Official installation
 
-1. 在 [1.5.0 release](https://github.com/apple/container/releases/tag/1.5.0) 下载签名 `.pkg`。
-2. 双击安装；安装器向 `/usr/local` 放置文件时需要管理员授权。
-3. 启动系统服务，按提示准备默认 Linux kernel。
+1. Download the signed `.pkg` from [1.5.0 release](https://github.com/apple/container/releases/tag/1.5.0).
+2. Open the installer; writing to `/usr/local` requires administrator authorization.
+3. Start system services and prepare the default Linux kernel when prompted.
 
 ```bash
 container --version
@@ -261,11 +261,11 @@ container system status
 container run --rm alpine:3.22 echo hello
 ```
 
-日常操作的控制服务是用户 LaunchAgent，不代表每次 run 都要 sudo；但安装、某些 DNS/网络集成、受保护文件访问和自定义打包仍有权限要求。
+The daily control service is a user LaunchAgent, so each run does not require sudo. Installation, some DNS/network integration, protected-file access, and custom packaging still have permission requirements.
 
-离线或受限网络环境要提前准备内核、vminit、builder 镜像和工作负载镜像，不能只复制 CLI binary。
+Offline/restricted environments must prepare the kernel, vminit, builder images, and workload images; copying the CLI binary alone is insufficient.
 
-### 5.2 基本生命周期
+### 5.2 Basic lifecycle
 
 ```bash
 container run -it --rm alpine:3.22 sh
@@ -284,18 +284,18 @@ container stop research-web
 container start research-web
 ```
 
-`http://127.0.0.1:8080` 为宿主访问入口。示例镜像 tag 为教学用途，产品部署应选择验证过的架构和 digest。
+`http://127.0.0.1:8080` is the host entry point. Example tags are educational; use validated architectures and digests for deployment.
 
-删除会话及其可写层属于数据破坏操作，确认不再需要后才执行：
+Deleting a session and its writable layer destroys data; run only after confirming they are no longer needed:
 
 ```bash
 container stop research-web
 container rm research-web
 ```
 
-### 5.3 升级和降级
+### 5.3 Upgrades and downgrades
 
-官方升级流程：
+Official upgrade procedure:
 
 ```bash
 container system stop
@@ -304,20 +304,20 @@ container system start
 container system version
 ```
 
-也可以手动安装指定版本的签名包。降级时先备份，不能把保留用户数据理解为旧版本一定能读取新版本数据。
+A specific signed version can also be installed manually. Back up before downgrading; retaining data does not guarantee older versions can read newer data.
 
-官方 uninstall 脚本：
+Official uninstall script:
 
-- `uninstall-container.sh -k`：卸载工具、保留用户数据。
-- `uninstall-container.sh -d`：连同用户数据删除；具有破坏性，不应作为普通排障第一步。
+- `uninstall-container.sh -k`: removes tools and retains user data.
+- `uninstall-container.sh -d`: also deletes user data; destructive and unsuitable as the first troubleshooting step.
 
-本次研究未执行安装、升级或卸载。
+No installation, upgrade, or uninstall was performed in this research.
 
 ---
 
-## 6. 构建、镜像发布与迁移
+## 6. Builds, image publishing, and migration
 
-### 6.1 最小 Dockerfile 示例
+### 6.1 Minimal Dockerfile
 
 ```dockerfile
 FROM python:3.13-alpine
@@ -327,7 +327,7 @@ EXPOSE 8000
 CMD ["python3", "-m", "http.server", "8000", "--bind", "0.0.0.0"]
 ```
 
-在独立测试目录放置该 Dockerfile 与测试文件，再运行：
+Place this Dockerfile and test files in a separate test directory, then run:
 
 ```bash
 container build -t local/research-web:demo .
@@ -335,11 +335,11 @@ container run -d --name research-built-web \
   -p 127.0.0.1:8081:8000 local/research-web:demo
 ```
 
-构建上下文不要直接指向整个家目录；使用 `.dockerignore` 控制敏感数据和无关文件。
+Do not use the entire home directory as build context; control sensitive and irrelevant files with `.dockerignore`.
 
-### 6.2 builder 资源
+### 6.2 Builder resources
 
-默认 builder 为 2 CPUs / 2 GiB RAM，普通容器为 4 vCPUs / 1 GiB RAM。
+The builder defaults to 2 CPUs / 2 GiB RAM; ordinary containers default to 4 vCPUs / 1 GiB RAM.
 
 ```bash
 container builder start --cpus 4 --memory 8g
@@ -347,9 +347,9 @@ container builder status
 container build -t local/research-web:demo .
 ```
 
-如果 builder 已启动，修改资源需按官方文档 stop/delete/start；删除 builder 会清理其状态/缓存，应评估代价。
+For an existing builder, resource changes require the documented stop/delete/start procedure. Deletion clears state/cache; evaluate that cost.
 
-### 6.3 多架构
+### 6.3 Multiple architectures
 
 ```bash
 container build --arch arm64 --arch amd64 \
@@ -359,9 +359,9 @@ container run --arch arm64 --rm alpine:3.22 uname -m
 container run --arch amd64 --rm alpine:3.22 uname -m
 ```
 
-amd64 用户空间经 Rosetta 翻译，**不是启动一台真正 x86 guest kernel 的 VM**。`uname` 输出 x86_64 不能单独证明底层内核架构或所有 x86 系统行为都完全等价。
+Rosetta translates amd64 user space; **it does not launch a VM with a native x86 guest kernel**. `uname` reporting x86_64 alone does not prove kernel architecture or complete x86 behavior equivalence.
 
-浏览器沙箱、JIT、特定 CPU 指令、低层调试、内核模块及性能测试都应单独验证；优先 ARM64 原生镜像。
+Validate browser sandboxing, JIT, CPU instructions, low-level debugging, kernel modules, and performance separately; prefer native ARM64 images.
 
 ### 6.4 Registry
 
@@ -372,39 +372,39 @@ container image pull registry.example.com/team/research-web:demo
 container image inspect registry.example.com/team/research-web:demo
 ```
 
-避免把密码写进命令行或镜像构建参数；登录凭据通过宿主 Keychain 集成。默认 HTTPS，不能继续依赖旧文档的 `--scheme auto`。
+Avoid passwords in command lines or build arguments. Credentials integrate with host Keychain. HTTPS is the default; older `--scheme auto` examples no longer apply.
 
-### 6.5 从 Docker 迁移时检查什么
+### 6.5 Docker migration checklist
 
-- 从同一 Registry 拉取 OCI 镜像通常最直接；镜像 tag、CPU 架构、guest kernel 与应用依赖需匹配。
-- 重新创建容器配置、网络和持久卷；不要认为两个引擎共用本地镜像缓存或数据目录。
-- 把 Dockerfile 迁移和 Compose 编排迁移分开评估。
-- 宿主 Docker socket、`--privileged`、`--device`、`--security-opt`、host IPC/network 等 Docker 参数不能机械替换为 `container`。
-- image save/load 与容器文件系统 export 是不同用途；export 不等同于含完整 OCI config/history 的镜像迁移，更不应当作所有外部卷的备份。
+- Pulling OCI images from the same registry is usually simplest; match tags, architecture, guest kernel, and application dependencies.
+- Recreate container configuration, networks, and persistent volumes; engines do not necessarily share local caches or data directories.
+- Evaluate Dockerfile and Compose migration separately.
+- Docker sockets, `--privileged`, `--device`, `--security-opt`, and host IPC/network flags cannot be mechanically substituted with `container` options.
+- Image save/load and filesystem export serve different purposes. Export is not full OCI config/history migration or a backup of all external volumes.
 
 ---
 
-## 7. 网络、DNS 与宿主互通
+## 7. Networking, DNS, and host access
 
-### 7.1 基本网络模型
+### 7.1 Basic network model
 
-- `system start` 创建 `default` vmnet 网络。
-- 每个容器有自己的 IP，宿主和同网络容器可以访问它。
-- 通过 `container inspect` 查看 IP；IP 可能变化，脚本不应硬编码示例地址。
-- 如果容器连接多个网络，已发布端口转发至第一个网络接口的 IP。
+- `system start` creates the `default` vmnet network.
+- Each container has its own IP accessible to the host and containers on that network.
+- Obtain IPs through `container inspect`; addresses may change, so scripts should not hardcode examples.
+- For containers on multiple networks, published ports forward to the first interface's IP.
 
-**重要：loopback publish 只约束该端口转发监听地址，不是整个网络的访问控制。** 同网络容器仍可能直连目标 VM IP。桌面/浏览器服务本身要认证，不能只靠 `-p 127.0.0.1:...` 当跨租户安全边界。
+**Loopback publishing constrains the forwarding listener, not access to the entire network.** Peers may directly reach VM IPs. Authenticate desktop/browser services; `-p 127.0.0.1:...` alone is not a tenant boundary.
 
-### 7.2 宿主通过名字访问容器：需要两步
+### 7.2 Host name resolution requires two steps
 
-在 `~/.config/container/config.toml` 的现有配置中合并：
+Merge into the existing `~/.config/container/config.toml`:
 
 ```toml
 [dns]
 domain = "test"
 ```
 
-然后：
+Then:
 
 ```bash
 container system stop
@@ -412,11 +412,11 @@ container system start
 sudo container system dns create test
 ```
 
-两步分别设置容器系统 DNS domain、为 macOS 写入 `/etc/resolver/` 规则。只做其中一步不等于宿主和容器都能正常解析。
+These steps set the container DNS domain and write macOS `/etc/resolver/` rules. Completing only one does not configure resolution on both sides.
 
-例如容器 `research-web` 可通过 `research-web.test` 访问。官方文档指出，自定义网络上仅使用裸 hostname 的 Compose 式自动发现尚有缺口，必要时使用 inspect 获取 IP；不要笼统宣称服务发现已完全等价 Docker。
+For example, `research-web` becomes accessible as `research-web.test`. Official notes identify gaps in Compose-style bare-hostname discovery on custom networks; obtain IPs through inspect when needed. Do not claim complete Docker-equivalent discovery.
 
-### 7.3 自定义网络
+### 7.3 Custom networks
 
 ```bash
 container network create research-net
@@ -426,39 +426,39 @@ container run -d --name research-net-web --network research-net \
 container inspect research-net-web
 ```
 
-网络之间隔离；同一个网络内部不是每容器独立隔离。默认网络与自定义网络的出口、宿主访问和路由关系仍需按安全目标验证。
+Networks are isolated from each other; containers within a network are not individually isolated. Validate egress, host access, and routing against security goals.
 
-### 7.4 容器访问宿主 loopback 服务
+### 7.4 Container access to host loopback services
 
-官方支持创建专门域名：
+An explicit domain can be created:
 
 ```bash
 sudo container system dns create host.container.internal \
   --localhost 203.0.113.113
 ```
 
-之后可在容器内访问 `http://host.container.internal:<port>`。地址应避免与环境中的网络冲突。
+Containers can then access `http://host.container.internal:<port>`. Choose an address without network conflicts.
 
-官方明确列出的副作用：
+Documented side effects:
 
-- 创建 localhost domain 会禁用 Private Relay。
-- 相关 packet filter 规则在系统重启后会被移除，需要重新验证配置。
+- Creating a localhost domain disables Private Relay.
+- Related packet-filter rules are removed on reboot; revalidate configuration.
 
-这不是无需配置就存在的 Docker `host.docker.internal`。1.5.0 修复了 localhost DNS 变更后的出口网络问题，但没有因此取消这些已记录的限制。
+Unlike Docker's `host.docker.internal`, this requires configuration. The 1.5.0 localhost DNS egress fix does not remove these documented limitations.
 
 ---
 
-## 8. 存储、持久化与磁盘回收
+## 8. Storage, persistence, and disk reclamation
 
-### 8.1 三种存储
+### 8.1 Three storage modes
 
-| 模式 | 使用场景 | 特性 |
+| Mode | Use case | Characteristics |
 |---|---|---|
-| 宿主 bind mount / virtiofs | Mac 编辑、Linux 编译；文件交互 | 直接暴露授权目录；大量小文件 I/O 要测试 |
-| named volume | 数据库、浏览器 profile、不需要宿主直接读写的数据 | guest ext4 块文件系统，官方推荐作为改善 I/O 的选择 |
-| tmpfs | 临时文件、shm、无需持久化的高速数据 | 消耗 guest 内存，停止后数据消失 |
+| Host bind mount / virtiofs | Mac editing, Linux builds, file exchange | Exposes authorized directories; test small-file I/O |
+| Named volume | Databases, browser profiles, guest-only data | Guest ext4 block filesystem; officially recommended for improved I/O |
+| tmpfs | Temporary files, shm, fast nonpersistent data | Uses guest memory; data disappears on stop |
 
-### 8.2 挂载示例
+### 8.2 Mount examples
 
 ```bash
 container run --rm \
@@ -475,27 +475,27 @@ container run --rm \
   alpine:3.22 cat /data/example.txt
 ```
 
-共享目录尽量只读；只读挂载不会阻止程序读取并外传目录中的敏感数据。
+Prefer read-only sharing. Read-only mounts still allow sensitive data to be read and exfiltrated.
 
-### 8.3 两个容易误解的地方
+### 8.3 Common misconceptions
 
-1. named volume 默认虚拟容量为 **512 GiB**，采用 sparse image；不代表创建时占用 512 GiB 物理磁盘。
-2. 匿名 volume **不会因为 `--rm` 自动删除**，与 Docker 的部分行为不同；会话程序需记录并回收它们。
+1. Named volumes default to **512 GiB** virtual capacity using sparse images, not 512 GiB of immediate physical allocation.
+2. Anonymous volumes **are not automatically removed by `--rm`**, unlike some Docker behavior. Session managers must track and reclaim them.
 
-不要把 sparse image 的逻辑容量、文件逻辑长度和真实分配磁盘量混为一谈。
+Distinguish sparse logical capacity, file logical length, and allocated disk space.
 
-### 8.4 回收
+### 8.4 Reclamation
 
 ```bash
 container system df
 container clean research-net-web
 ```
 
-`container clean` 是 1.4.1 加入的功能，面向运行中容器的 rootfs 和 named volume 中未使用空间。guest 内删除文件后，宿主 sparse image 空间并不自动相应缩小；不能只看 Linux `df`。
+Added in 1.4.1, `container clean` reclaims unused space in running-container rootfs and named volumes. Guest file deletion does not automatically shrink host sparse allocation; Linux `df` alone is insufficient.
 
-注意：[resource-usage 文档](https://github.com/apple/container/blob/1.5.0/docs/resource-usage.md) 的回收段落未完整展示新 clean 功能，需结合 release 和 command reference 阅读。
+The reclamation section in [resource usage](https://github.com/apple/container/blob/1.5.0/docs/resource-usage.md) does not fully describe the new clean feature; consult releases and command reference too.
 
-以下命令会删除资源；只在确认停止容器/未引用卷的数据不再需要后执行：
+These commands delete resources; run only after confirming stopped-container/unreferenced-volume data is no longer needed:
 
 ```bash
 container prune
@@ -503,13 +503,13 @@ container image prune
 container volume prune
 ```
 
-数据库和 profile 应做应用一致性备份。不要把停止/删除运行环境当成已备份持久卷。
+Use application-consistent backups for databases and profiles. Stopping/deleting an environment is not a volume backup.
 
 ---
 
-## 9. CPU、内存、运行开销与观测
+## 9. CPU, memory, runtime overhead, and observation
 
-### 9.1 资源配置
+### 9.1 Resource configuration
 
 ```bash
 container run --rm --cpus 2 --memory 2g \
@@ -518,54 +518,54 @@ container stats --no-stream
 container stats --no-stream --format json
 ```
 
-`--cpus` 表示配置的虚拟 CPU 数，不应直接等同 Docker cgroup 的 CPU quota 语义。macOS 最终调度这些 VM 和宿主程序。
+`--cpus` configures virtual CPUs and is not directly equivalent to Docker cgroup quotas. macOS schedules the VMs and host processes.
 
-可 overcommit：系统不因单个/总请求超过物理资源而拒绝创建，但 CPU 竞争会降低吞吐，实际 RAM 需求超过物理内存后会产生 swap 和延迟。
+Overcommit is allowed: requests exceeding physical resources do not prevent creation. CPU contention reduces throughput; RAM demand above physical memory causes swap and latency.
 
-### 9.2 内存回收限制
+### 9.2 Memory reclamation limits
 
-官方技术概述说明：Virtualization.framework 对 ballooning 的支持有限。guest 进程释放到 Linux 的内存页目前不能保证归还给 macOS，因此长期会话或内存密集负载可能需要重启来降低宿主使用量。
+The official overview describes limited ballooning support in Virtualization.framework. Pages released by guest processes to Linux are not guaranteed to return to macOS; long or memory-intensive sessions may require restarts to reduce host usage.
 
-`--memory 16g` 并不代表 VM 启动时立即触碰全部 16 GiB；但“guest 已释放内存”也不代表宿主 RSS 会立即下降。应同时观察：
+`--memory 16g` does not mean immediately touching all 16 GiB at startup, but guest memory release does not imply an immediate host RSS reduction. Observe:
 
-- `container stats` 的容器指标。
-- macOS Activity Monitor/宿主整体内存压力。
-- runtime helper/VM 进程的内存。
-- swap、长会话峰值及重启前后变化。
+- Container metrics from `container stats`.
+- Activity Monitor and overall macOS memory pressure.
+- Runtime helper/VM process memory.
+- Swap, long-session peaks, and changes across restarts.
 
-### 9.3 总预算
+### 9.3 Total budget
 
 ```text
-磁盘 = 安装资源 + kernel/init/builder + 本地镜像存储
-     + 各会话 rootfs/可写 image + volumes + build cache + logs
+Disk = installation resources + kernel/init/builder + local image store
+     + session rootfs/writable images + volumes + build cache + logs
 
-内存 = 宿主控制面 + builder（若运行）
-     + Σ(各 guest kernel/init + 工作负载 + 实际shm/文件缓存)
-     + macOS 与其他应用余量
+Memory = host control plane + builder (when running)
+       + Σ(guest kernel/init + workload + actual shm/file cache)
+       + headroom for macOS and other applications
 ```
 
-安装包 112.6 MiB 不能用来回答“每个浏览器会话有多大”。浏览器镜像下载量、rootfs、profile 和实际 RAM 必须分别测量。
+The 112.6 MiB installer does not establish browser-session size. Measure image downloads, rootfs, profiles, and actual RAM separately.
 
-### 9.4 调试分层
+### 9.4 Layered debugging
 
-| 现象 | 先看什么 |
+| Symptom | First checks |
 |---|---|
-| CLI 连不上服务 | `container system status`、`container system version` |
-| VM 无法启动 | `container logs --boot <name>` |
-| 应用退出 | `container logs <name>`、entrypoint、工作目录、架构 |
-| 网络/DNS 异常 | inspect networks、system DNS 配置、出口和 localhost 规则 |
-| 工作负载慢 | stats、宿主内存压力、Rosetta、磁盘挂载方式 |
-| 系统控制面问题 | `container system logs` |
+| CLI cannot connect | `container system status`, `container system version` |
+| VM cannot start | `container logs --boot <name>` |
+| Application exits | `container logs <name>`, entrypoint, working directory, architecture |
+| Network/DNS failure | Network inspection, system DNS, egress, and localhost rules |
+| Slow workload | Stats, host memory pressure, Rosetta, disk mount mode |
+| Control-plane failure | `container system logs` |
 
-不要先用卸载并清空数据掩盖故障；先记录版本、日志和可复现工作负载。
+Record versions, logs, and a reproducible workload before uninstalling or clearing data.
 
 ---
 
-## 10. machine、Kubernetes 与嵌套虚拟化
+## 10. Machines, Kubernetes, and nested virtualization
 
-### 10.1 Container machine：持久 Linux 开发环境
+### 10.1 Container machine: persistent Linux development
 
-普通容器围绕应用进程；machine 围绕 Linux 环境，会运行镜像的 init system，适合长期服务、systemd 和发行版开发环境。
+Ordinary containers center on an application process; machines center on a Linux environment and run the image's init system, supporting long-lived services, systemd, and distribution development.
 
 ```bash
 container machine create alpine:3.22 --name research-dev \
@@ -577,13 +577,13 @@ container machine inspect research-dev
 container machine stop research-dev
 ```
 
-machine run 在 machine 停止时会先启动它。镜像应具备 `/sbin/init`，不代表任意 minimal 应用镜像都适合。
+Machine run starts a stopped machine first. Images should provide `/sbin/init`; arbitrary minimal application images may be unsuitable.
 
-**安全关键点：machine 默认映射宿主用户与家目录，`--home-mount` 默认 `rw`；默认内存为宿主内存的一半。** 这是开发便利设计，不适合作为不可信程序的默认沙箱。上例显式关闭 home mount 并限制资源。
+**Machines map the host user and home directory by default, with `--home-mount rw`; default memory is half of host RAM.** These development conveniences are unsuitable defaults for untrusted code. The example disables home mounting and limits resources.
 
-需要共享源代码时，应评估 `ro` 或只共享专门目录的普通容器方案，避免整个 home 暴露 SSH key、云凭据、浏览器配置等。
+For source sharing, consider `ro` or an ordinary container sharing a dedicated directory, rather than exposing home-directory SSH keys, cloud credentials, and browser settings.
 
-### 10.2 本地 Kubernetes：已有，但实验性
+### 10.2 Local Kubernetes: available but experimental
 
 ```bash
 container k8s create --name research-k8s --cpus 4 --memory 8g
@@ -592,20 +592,20 @@ kubectl --context research-k8s get nodes
 container k8s load-image --name research-k8s local/research-web:demo
 ```
 
-它会准备 node image、运行 kubeadm、安装 CNI，并合并 `~/.kube/config`。默认 node image 在 1.5.0 文档中为 `kindest/node:v1.35.5`；允许指定其他版本与自定义 CNI manifest。
+The plugin prepares node images, runs kubeadm, installs CNI, and merges `~/.kube/config`. The documented default in 1.5.0 is `kindest/node:v1.35.5`; alternative versions and custom CNI manifests are supported.
 
-用途是本地开发与测试，不是声明 Mac 已成为通用生产 Kubernetes 平台。底层普通应用容器的每容器 VM 模型，也不意味着节点内部每个 Pod 都有一个独立 Apple VM。
+This targets local development/testing, not a general production Kubernetes platform on Macs. The VM-per-ordinary-container model does not imply a separate Apple VM for every Pod within a node.
 
-**1.5.0 重要限制：`container k8s start` 已移除。** 控制平面停止后，官方恢复建议是删除并重新创建集群，这会影响数据和状态，不能把它当成无损 restart。
+**In 1.5.0, `container k8s start` was removed.** After stopping the control plane, official recovery guidance is to delete and recreate the cluster. This affects state/data and is not a lossless restart.
 
-1.5.0 也修复了把 guest kubeconfig 值合并到宿主 kubeconfig 时的安全问题；实验性并不意味着可以省略更新。
+1.5.0 also fixed security issues when merging guest kubeconfig values into the host. Experimental status does not justify skipping updates.
 
-### 10.3 嵌套虚拟化
+### 10.3 Nested virtualization
 
-- 需要 M3 或更新的 Apple silicon。
-- 需要 guest kernel 启用相应 KVM 特性；默认 kernel 不能想当然满足要求。
-- CLI 使用 `--virtualization` 和自定义 `--kernel`。
-- 文档对 framework 能力列出的 macOS 15 下限，不等于项目官方回退支持 macOS 15；本笔记选型基线仍为 macOS 26。
+- Requires M3 or newer Apple silicon.
+- Requires a guest kernel with relevant KVM support; do not assume the default kernel qualifies.
+- CLI uses `--virtualization` and a custom `--kernel`.
+- Framework documentation mentioning macOS 15 does not establish official project support on macOS 15. This selection baseline remains macOS 26.
 
 ```bash
 container run --rm --virtualization \
@@ -613,92 +613,92 @@ container run --rm --virtualization \
   ubuntu:24.04 sh -c 'ls -l /dev/kvm'
 ```
 
-这是给需要 KVM 的工作负载增加嵌套能力，不是 GUI、普通浏览器或 Kubernetes 的通用前提。
+This supplies nested execution for KVM-dependent workloads, rather than a general prerequisite for GUI, browsers, or Kubernetes.
 
 ---
 
-## 11. GUI、Chrome 与多会话 UI：结合前一篇调研
+## 11. GUI, Chrome, and multiple sessions
 
-### 11.1 能做什么
+### 11.1 Available building blocks
 
-Linux VM 用户空间中可配置：
+Linux VM user space can contain:
 
 ```text
-Mac 原生应用 / 宿主浏览器 / WebView
-          │ HTTPS + 会话认证 + 输入事件
+Native Mac app / host browser / WebView
+          │ HTTPS + session authentication + input events
           ▼
-该会话 VM 的 noVNC 或其他远程显示服务
+Session VM's noVNC or other remote display service
           ▼
-Linux X11/Wayland 显示环境
+Linux X11/Wayland display environment
           ▼
-Chromium / Chrome / 其他 Linux GUI 程序
+Chromium / Chrome / other Linux GUI applications
 ```
 
-有 display server 不等于有远程 UI。Xvfb 只提供虚拟屏幕，仍需 VNC/WebSocket、显示串流或截图接口。
+A display server is not a remote UI. Xvfb supplies a virtual screen; VNC/WebSocket, streaming, or screenshot interfaces are still needed.
 
-### 11.2 多实例
+### 11.2 Multiple instances
 
-普通每实例独立 VM 能提供单独的 kernel、IP、显示、profile 和资源配置。绑定宿主不同 loopback 端口可区分入口，但每会话 profile/volume、认证和网络授权仍需独立。
+Separate VMs provide separate kernels, IPs, displays, profiles, and resource configuration. Distinct host loopback ports identify entry points; profiles/volumes, authentication, and network permissions must still be isolated per session.
 
-以下是**工作负载模板，不是已经验证成功的 Apple container Webtop 部署**；需先选择具有 linux/arm64 variant、经验证的 GUI 镜像：
+This is a **workload template, not a verified Apple container Webtop deployment**. First select a validated GUI image with a linux/arm64 variant:
 
 ```bash
-export GUI_IMAGE='<已验证的linux/arm64 GUI镜像及固定tag或digest>'
+export GUI_IMAGE='<validated-linux/arm64-GUI-image-with-pinned-tag-or-digest>'
 container run -d --name research-gui-1 \
   --cpus 2 --memory 2g --shm-size 512M \
   -p 127.0.0.1:5801:5800 "$GUI_IMAGE"
 ```
 
-镜像内部端口 5800 只是 noVNC 类镜像的示例。Selkies/Webtop 常用 HTTPS 3001，必须按目标镜像调整，并配置认证。两个方案对 WebView、编码、音频、GPU 的要求不一样。
+Port 5800 is an example for noVNC-style images. Selkies/Webtop commonly use HTTPS 3001; adjust for the image and configure authentication. WebView, encoding, audio, and GPU requirements differ.
 
-### 11.3 浏览器兼容与 sandbox
+### 11.3 Browser compatibility and sandboxing
 
-- 优先 ARM64 Chromium；不要默认 Linux ARM64 有等同 amd64 的 Google Chrome 官方包。
-- 如果必须使用 amd64 Chrome，Rosetta、browser sandbox、JIT、WebGL 与 headed 模式应作为联合兼容性测试，而不是只验证 `uname`。
-- 浏览器建议普通用户运行，并验证其实际 sandbox；VM 边界不是关闭 browser sandbox 的理由。
-- shm 可通过 CLI `--shm-size` 配置。
-- `1.5.0` command reference 未提供 Docker 风格 `--security-opt seccomp=...`；不能原样套用 Playwright 的 Docker 安全参数。
-- Containerization `0.47.0` 的 `cctl` 源码特别指出：seccomp 需 OCI runtime 路径配合，默认 vmexec 路径忽略 OCI seccomp。**库支持某种配置结构不代表当前选中的执行路径会实施过滤。**
+- Prefer ARM64 Chromium; do not assume official Linux ARM64 Google Chrome packages match amd64 availability.
+- If amd64 Chrome is required, test Rosetta, sandboxing, JIT, WebGL, and headed mode together, beyond checking `uname`.
+- Run browsers as ordinary users and verify actual sandboxing. VM isolation does not justify disabling the browser sandbox.
+- Configure shm with CLI `--shm-size`.
+- The `1.5.0` command reference lacks Docker-style `--security-opt seccomp=...`; Playwright Docker security flags cannot be copied unchanged.
+- Containerization `0.47.0` `cctl` source states that seccomp requires the OCI runtime path; the default vmexec path ignores OCI seccomp. **A supported configuration structure does not prove enforcement by the selected execution path.**
 
-### 11.4 暂不能承诺的能力
+### 11.4 Capabilities not yet established
 
-- 没有从标准 CLI 文档确认可供 Linux Chrome 直接使用的 Metal/GPU passthrough 方案。
-- Linux UI 不会自动变成 AppKit 原生窗口。
-- 摄像头、麦克风、剪贴板、文件传输、DRM 视频、WebGL 等需要显示协议和宿主 UI 配合。
-- Swift 库没有替你生成 noVNC 前端、管理人工接管、实现多租户访问控制。
+- Standard CLI documentation did not confirm Metal/GPU passthrough usable directly by Linux Chrome.
+- Linux UIs do not automatically become native AppKit windows.
+- Cameras, microphones, clipboard, file transfer, DRM video, and WebGL require display-protocol and host-UI integration.
+- The Swift library does not generate noVNC frontends, manage human takeover, or implement tenant access control.
 
-**适合的原型路径：先 software rendering + headed Chromium + noVNC，再测试输入、中文字体、下载和 1/5/10 个会话；不要首阶段同时引入 Rosetta、GPU 和库嵌入。**
+**Prototype software rendering + headed Chromium + noVNC first; then test input, CJK fonts, downloads, and 1/5/10 sessions. Avoid introducing Rosetta, GPU, and library embedding simultaneously in the first stage.**
 
 ---
 
-## 12. 如何嵌入自己的 bin / Mac 应用
+## 12. Embedding in a binary or Mac application
 
-### 12.1 三种集成方式
+### 12.1 Three integration options
 
-| 路线 | 工作量 | 适合阶段 |
+| Approach | Effort | Suitable stage |
 |---|---|---|
-| 启动 CLI subprocess，读取 JSON 输出 | 最小，但依赖已安装 CLI/服务 | 快速 PoC、可接受外部安装的产品 |
-| 通过公开客户端/XPC 控制已安装系统 | 更多 API/打包耦合，仍依赖服务 | 需要高效服务管理且接受系统部署 |
-| 直接使用 Containerization Swift package | 最大，需要自行管理资源与生命周期 | 不希望依赖外部 container 工具、需要定制隔离的 Mac 产品 |
+| CLI subprocess with JSON output | Lowest; installed CLI/services required | Quick PoC or products accepting external installation |
+| Public client/XPC controlling installed services | More API/packaging coupling; services still required | Efficient service management with accepted system deployment |
+| Direct Containerization Swift package | Highest; manage resources and lifecycle yourself | Mac products requiring customized isolation without external container tools |
 
-Go/Rust/C++ 产品可先采用 Swift sidecar + 自己定义的本地 IPC；如果用 FFI，需自行设计桥接、并发、异步回调和错误处理。Swift 库不意味着已经提供稳定 C ABI。
+Go/Rust/C++ products can begin with a Swift sidecar and local IPC. FFI requires bridging, concurrency, asynchronous callbacks, and error handling; a Swift library does not imply a stable C ABI.
 
-### 12.2 库能力与调用顺序
+### 12.2 APIs and lifecycle
 
-可研究的 API：`ContainerManager`、`LinuxContainer`、`LinuxProcess`、`Kernel`、`VZVirtualMachineManager` 及 OCI/ext4 相关模块。
+Relevant APIs include `ContainerManager`, `LinuxContainer`, `LinuxProcess`, `Kernel`, `VZVirtualMachineManager`, and OCI/ext4 modules.
 
 ```text
-准备 kernel / initfs / 存储目录
-       → 获取并校验 OCI image
-       → 选择平台并准备 ext4 rootfs
-       → 创建 VM manager / 网络
-       → 创建 LinuxContainer，指定进程与资源
+Prepare kernel / initfs / storage directories
+       → Fetch and verify OCI image
+       → Select platform and prepare ext4 rootfs
+       → Create VM manager / networking
+       → Create LinuxContainer with process and resource configuration
        → create → start
-       → 连接 I/O、发送 signal、等待退出
-       → stop / 删除临时资源 / 保留需要的 volume
+       → Connect I/O, send signals, wait for exit
+       → Stop / delete temporary resources / retain required volumes
 ```
 
-固定依赖的 Swift Package 声明可以采用：
+A pinned Swift Package dependency can use:
 
 ```swift
 .package(
@@ -707,179 +707,179 @@ Go/Rust/C++ 产品可先采用 Swift sidecar + 自己定义的本地 IPC；如�
 )
 ```
 
-这只是依赖片段，不是完整可编译项目。完整实例应以固定 tag 的 [cctl/RunCommand.swift](https://github.com/apple/containerization/blob/0.47.0/Sources/cctl/RunCommand.swift) 为准，避免复制旧版本示例后假定 API 不变。
+This is a dependency fragment, not a complete compilable project. Consult the pinned [cctl/RunCommand.swift](https://github.com/apple/containerization/blob/0.47.0/Sources/cctl/RunCommand.swift) for a full example; do not assume old API examples remain valid.
 
-### 12.3 签名、权限与分发
+### 12.3 Signing, permissions, and distribution
 
-官方 Virtualization entitlement 文件包含：
+The official Virtualization entitlement file contains:
 
 ```xml
 <key>com.apple.security.virtualization</key>
 <true/>
 ```
 
-该 entitlement 只是 VM 执行的相关要求，不是完整产品权限方案。还需评估代码签名、公证、App Sandbox、文件选择授权、vmnet 使用、网络 helper 部署和目标分发渠道。
+This entitlement concerns VM execution, not a complete product permission model. Assess signing, notarization, App Sandbox, file-selection authorization, vmnet, network-helper deployment, and distribution channels.
 
-不能由此推导“任何 unsigned bin 都能无权限运行”或“已经满足 Mac App Store 审核”。如果需要网络虚拟化和 GUI，必须在真实签名应用中验证。
+It does not establish unrestricted unsigned execution or Mac App Store acceptance. Validate networking and GUI in a real signed application.
 
-### 12.4 单文件幻想与真实交付物
+### 12.4 Real deliverables beyond one binary
 
-“嵌入库”不代表所有东西只占一个 binary：
+Embedding the library does not reduce everything to one binary:
 
-- Swift 主程序及可能的辅助执行文件。
-- Linux kernel。
-- vminit/init filesystem。
-- 工作负载 OCI 镜像/rootfs。
-- 浏览器、字体、动态库与显示协议服务。
-- profile/volume、日志、镜像缓存和更新数据。
+- Swift application and any helper executables.
+- Linux kernel.
+- vminit/init filesystem.
+- Workload OCI images/rootfs.
+- Browser, fonts, dynamic libraries, and display services.
+- Profiles/volumes, logs, image caches, and update data.
 
-可以打成 App bundle 或首次下载资源，但仍需要版本锁定、校验、许可合规、缓存目录和更新机制。安装包约 112.6 MiB 不是整个浏览器产品的分发体积。
+An App bundle or first-run downloads can package these, but version pinning, verification, licenses, cache paths, and updates remain necessary. The approximately 112.6 MiB installer is not a browser product's total distribution size.
 
-### 12.5 官方示例也有版本滞后
+### 12.5 Official examples can lag versions
 
-`0.47.0` 中 `examples/ctr-example/Package.swift` 仍锁定 `0.33.4`；CLI runtime 文档自定义 init 示例使用 `0.34.0`，而实际 CLI 1.5.0 依赖为 `0.47.0`。
+In `0.47.0`, `examples/ctr-example/Package.swift` still pins `0.33.4`. CLI runtime documentation uses `0.34.0` in a custom-init example, while CLI 1.5.0 depends on `0.47.0`.
 
-因此，官方示例适合理解结构，但不能不加核对就混用：
+Official examples explain structure, but check compatibility before combining them:
 
-- 以当前项目 Package.swift/Package.resolved 确认版本。
-- kernel/initfs 与实际库/CLI 配对。
-- 先跑匹配版本测试，再集成 GUI。
-- 不直接调用无兼容保证的私有 helper。
+- Confirm versions in the project's Package.swift/Package.resolved.
+- Match kernel/initfs to the actual library/CLI.
+- Run matching-version tests before GUI integration.
+- Avoid private helpers without compatibility guarantees.
 
 ---
 
-## 13. 安全模型：VM 边界之外还需要什么
+## 13. Security beyond VM boundaries
 
-### 13.1 相比普通共享内核容器的收益
+### 13.1 Benefits over shared-kernel containers
 
-每个普通容器自己的 guest kernel 降低了同一 Linux kernel 作为跨会话共享攻击面的范围；只共享必要目录也能缩小数据暴露。
+Separate guest kernels reduce the Linux kernel's role as a cross-session attack surface; sharing only required directories reduces data exposure.
 
-但“VM 级隔离”不等于没有逃逸、宿主解析漏洞或跨会话数据泄露。安全边界至少分成：
+VM isolation does not eliminate escapes, host parsing vulnerabilities, or cross-session leaks. Boundaries include:
 
 ```text
-镜像与Registry输入
-   → 宿主解析/解包/内容存储
-   → 宿主控制面及虚拟设备
-   → VM边界
-   → guest容器进程权限
-   → 浏览器自己的sandbox
-   → UI/自动化/网络访问授权
+Image and registry input
+   → Host parsing/extraction/content storage
+   → Host control plane and virtual devices
+   → VM boundary
+   → Guest process permissions
+   → Browser sandbox
+   → UI/automation/network authorization
 ```
 
-### 13.2 不可信工作负载检查表
+### 13.2 Untrusted workload checklist
 
-- 用已包含安全修复的版本；跟踪 container 与 Containerization 两个仓库的 security advisories。
-- 默认不用 machine 的整个 home rw mount 执行不可信任务。
-- 不透传 SSH agent、不共享 Keychain/凭据文件、不挂载不必要的宿主 Unix socket。
-- 仅共享明确授权的目录；只读不代表防止读取和外传。
-- UI、CDP 与管理 API 分别鉴权；同网络直连也要考虑。
-- 使用普通用户、cap-drop、只读 rootfs/路径等防御，验证实际生效。
-- 不把未实施的 seccomp 配置当安全保证。
-- 控制出口访问，防止访问局域网、宿主服务、云 metadata 等。
-- 限制 CPU、内存、文件描述符、进程数量、会话时长和可增长数据。
-- 记录/回收 rootfs、volume、网络、端口和临时数据，避免匿名卷残留。
-- Kubernetes 插件会写宿主 kubeconfig；不可信集群环境需审计授权和状态合并。
+- Use versions containing security fixes; track advisories in both repositories.
+- Avoid machines with whole-home rw mounts for untrusted tasks.
+- Do not forward SSH agents, share Keychain/credential files, or mount unnecessary host Unix sockets.
+- Share only explicitly authorized directories; read-only access still permits reading and exfiltration.
+- Authenticate UI, CDP, and management APIs separately, including direct network access.
+- Use ordinary users, cap-drop, read-only rootfs/paths, and verify enforcement.
+- Do not treat unenforced seccomp configuration as a guarantee.
+- Control egress to LAN, host services, cloud metadata, and other sensitive destinations.
+- Limit CPU, memory, file descriptors, process counts, session duration, and growing data.
+- Track/reclaim rootfs, volumes, networks, ports, and temporary data, including anonymous volumes.
+- Kubernetes modifies host kubeconfig; audit authorization and state merging for untrusted clusters.
 
-近期安全修复集中出现于宿主侧镜像、路径、Registry 和配置处理，说明 VM 隔离只是整体安全的一部分。这里不对“已达到恶意多租户生产隔离标准”作未经测试的承诺。
+Recent host-side image, path, registry, and configuration fixes show VM isolation is only part of security. No untested claim of production isolation for malicious tenants is made here.
 
 ---
 
-## 14. 与其他方案的选择
+## 14. Choosing between options
 
-| 场景 | Apple container 的适配度 | 主要考虑 |
+| Scenario | Apple container suitability | Main considerations |
 |---|---|---|
-| Apple silicon 上运行单个 Linux 服务 | 较高 | 安装路径清晰、OCI 镜像可复用 |
-| 少量独立沙箱/agent 执行环境 | 值得重点验证 | 每会话独立 kernel、Swift 集成；宿主管理面与资源回收仍需审计 |
-| 重度 Docker Compose/现有 Docker API 产品 | 迁移成本较高 | 引擎与编排控制模型不兼容，不能只换命令名 |
-| 本地 Kubernetes 试验 | 可用但需接受实验性 | cluster 生命周期、数据和版本变化风险 |
-| 持久 Linux 开发 machine | 较高 | 默认 home 共享是便利也有风险 |
-| 大规模浏览器会话 | 需要基准再判断 | 每 VM 内存、memory reclaim、图形传输和密度 |
-| 原生 macOS GUI 应用隔离 | 不适合当直接答案 | 运行的是 Linux 工作负载，不是 AppKit 容器 |
-| Linux 生产服务器通用容器引擎 | 不能按 CLI 已等价支持来选 | 底层 Linux backend 与用户工具支持需分别评估 |
-| Rust/Go 跨平台单 bin | 集成复杂 | Swift/FFI/sidecar、kernel/rootfs、签名和双平台网络 |
+| Single Linux service on Apple silicon | High | Clear installation, reusable OCI images |
+| A few isolated sandboxes/agent environments | Worth validating | Separate kernels, Swift integration; audit host control plane and cleanup |
+| Heavy Compose/existing Docker API products | Higher migration cost | Different engine/orchestration control model; renaming commands is insufficient |
+| Local Kubernetes experiments | Usable with experimental constraints | Cluster lifecycle, data, and version risks |
+| Persistent Linux development machines | High | Convenient default home sharing also carries risks |
+| Many browser sessions | Benchmark first | Per-VM memory, reclamation, display transport, density |
+| Native macOS GUI isolation | Not a direct solution | Linux workloads rather than AppKit containers |
+| General Linux production container engine | CLI equivalence not established | Evaluate library backend and user-tool support separately |
+| Cross-platform single Rust/Go binary | Complex | Swift/FFI/sidecar, kernel/rootfs, signing, platform networking |
 
-Docker Desktop/Podman 等通常更适合复用成熟 Docker 工作流；Apple Containerization 更值得用于明确限定的 Mac 原生隔离产品。没有基准时不能宣称 Apple container 在所有场景都更快、更小或更安全。
-
----
-
-## 15. 建议的验证顺序
-
-### 阶段 A：基础模型验证
-
-1. 确认目标 Mac 为 Apple silicon/macOS 26，安装固定签名版本。
-2. 记录 CLI/server/library/kernel/initfs/builder 版本。
-3. 验证 ARM64 hello、网络服务、stop/start、logs、stats。
-4. 分别验证宿主端口转发、直连 IP、DNS 和自定义网络。
-5. 测试 bind/volume、删除 guest 文件后的 `clean`、匿名 volume 回收。
-
-### 阶段 B：目标浏览器工作负载
-
-1. ARM64 Chromium，先 headless，后 headed + software rendering + noVNC。
-2. 确认 browser sandbox 与普通用户运行。
-3. 验证中文输入、字体、剪贴板、下载/上传、人工接管。
-4. 1/5/10 会话固定相同分辨率、页面、标签数，记录启动、内存、CPU、带宽和输入延迟。
-5. 长时间运行并制造内存峰值，测 guest 释放后宿主内存、重启与 clean 效果。
-6. 只有确实需要 Google Chrome amd64 时，再测试 Rosetta 组合。
-
-### 阶段 C：产品嵌入
-
-1. 先通过 CLI subprocess 实现会话生命周期，控制面不要与 Docker/Apple 特定参数耦合。
-2. 用固定版本 Containerization 做最小独立 Swift 原型。
-3. 补齐签名、公证、网络授权、用户目录授权、资源分发与更新。
-4. 再引入 WebView、会话鉴权、自动化接口和并发资源池。
-5. 执行异常退出、宿主重启、网络切换、版本升级和数据备份恢复测试。
-
-### 目前仍没有实测答案的问题
-
-- 目标 Chromium 镜像在该版本下的 headed/sandbox 兼容性。
-- 具体 Mac 上每会话实际 RAM、长会话回收和最大可承受并发。
-- 目标 WebView/noVNC/Selkies 的音频、视频、编码与输入能力。
-- GPU 所需的准确设备通路与可用程度。
-- 目标 App Sandbox/分发渠道允许的网络和虚拟化部署方式。
-
-这些项目应作为 PoC 验收条件，而不是在文档中预先写成“已支持”。
+Docker Desktop/Podman generally fit mature Docker workflows better. Apple Containerization merits evaluation for specifically scoped native Mac isolation products. Without benchmarks, do not claim universally better speed, size, or security.
 
 ---
 
-## 16. 官方来源与阅读路线
+## 15. Suggested validation sequence
 
-阅读顺序建议：README → Technical overview → Networking/Volumes/Resources → Command reference → Containerization API 与 cctl 源码 → Release/Security。
+### Stage A: basic model
 
-| 来源 | 用途 |
+1. Confirm Apple silicon/macOS 26 and install a pinned signed version.
+2. Record CLI/server/library/kernel/initfs/builder versions.
+3. Validate ARM64 hello, network services, stop/start, logs, and stats.
+4. Test host forwarding, direct IP access, DNS, and custom networks separately.
+5. Test binds/volumes, `clean` after guest deletion, and anonymous-volume cleanup.
+
+### Stage B: target browser workload
+
+1. ARM64 Chromium: headless first, then headed + software rendering + noVNC.
+2. Verify browser sandbox and ordinary-user execution.
+3. Test Chinese input, fonts, clipboard, downloads/uploads, and human takeover.
+4. Measure startup, memory, CPU, bandwidth, and input latency at 1/5/10 sessions using identical resolution, pages, and tab counts.
+5. Run long sessions and induce memory peaks; measure host usage after guest release, restarts, and clean.
+6. Test Rosetta combinations only if Google Chrome amd64 is required.
+
+### Stage C: product integration
+
+1. Implement lifecycle through CLI subprocesses first, keeping the control plane independent of Docker/Apple-specific flags.
+2. Build a minimal standalone Swift prototype with pinned Containerization.
+3. Complete signing, notarization, networking/directory authorization, resource distribution, and updates.
+4. Add WebView, session authentication, automation APIs, and concurrent resource pools.
+5. Test crashes, host reboots, network changes, upgrades, and backup/restore.
+
+### Questions still lacking measurements
+
+- Headed/sandbox compatibility of the target Chromium image on this version.
+- Per-session RAM, long-session reclamation, and maximum practical concurrency on the target Mac.
+- Audio, video, encoding, and input capabilities of the chosen WebView/noVNC/Selkies stack.
+- Exact GPU device path and availability.
+- Networking/virtualization deployment allowed by the target App Sandbox/distribution channel.
+
+Treat these as PoC acceptance criteria rather than documenting them as already supported.
+
+---
+
+## 16. Official sources and reading order
+
+Suggested order: README → Technical overview → Networking/Volumes/Resources → Command reference → Containerization API and cctl source → Releases/Security.
+
+| Source | Purpose |
 |---|---|
-| [container 1.5.0 release](https://github.com/apple/container/releases/tag/1.5.0) | 最新 release、breaking changes、安装包与安全修复 |
-| [GitHub latest release API](https://api.github.com/repos/apple/container/releases/latest) | 本次 latest 版本快照；该 URL 会随以后发布改变 |
-| [固定版本 README](https://github.com/apple/container/blob/1.5.0/README.md) | 平台、安装、升级、兼容承诺 |
-| [Technical overview](https://github.com/apple/container/blob/1.5.0/docs/technical-overview.md) | 控制面、每容器 VM、内存限制；部分历史段落有滞后 |
-| [Command reference](https://github.com/apple/container/blob/1.5.0/docs/command-reference.md) | run/build/machine/k8s/clean 的实际参数 |
-| [Networking](https://github.com/apple/container/blob/1.5.0/docs/networking.md) | IP、DNS 两步配置、自定义网络、服务发现缺口 |
-| [Host integration](https://github.com/apple/container/blob/1.5.0/docs/host-integration.md) | SSH agent、宿主 loopback、Private Relay/重启限制 |
-| [Volumes](https://github.com/apple/container/blob/1.5.0/docs/volumes.md) | sparse ext4、默认容量、匿名卷生命周期 |
-| [Resource usage](https://github.com/apple/container/blob/1.5.0/docs/resource-usage.md) | 默认 CPU/RAM、overcommit、stats 和磁盘 |
-| [Runtime configuration](https://github.com/apple/container/blob/1.5.0/docs/runtime-configuration.md) | capabilities、init、路径保护和 nested virtualization |
-| [Multiplatform images](https://github.com/apple/container/blob/1.5.0/docs/multiplatform-images.md) | ARM64/AMD64 构建及 Rosetta |
-| [Container machine](https://github.com/apple/container/blob/1.5.0/docs/container-machine.md) | persistent Linux 环境、home mount、资源默认 |
-| [Kubernetes](https://github.com/apple/container/blob/1.5.0/docs/kubernetes.md) | 本地 cluster、load-image、CNI 和恢复限制 |
-| [Config reference](https://github.com/apple/container/blob/1.5.0/docs/container-system-config.md) | config.toml 与 kernel 配置 |
-| [Config 源码](https://github.com/apple/container/blob/1.5.0/Sources/ContainerPersistence/ContainerSystemConfig.swift) | 核对文档默认 kernel 等具体值 |
-| [container Package.swift](https://github.com/apple/container/blob/1.5.0/Package.swift) | Containerization 0.47.0 与 builder shim 0.13.1 |
-| [Containerization 0.47.0 README](https://github.com/apple/containerization/blob/0.47.0/README.md) | 低层库、VM backend、vsock、构建要求 |
-| [Containerization API docs](https://apple.github.io/containerization/documentation/) | API 阅读；在线文档可能随新版本改变 |
-| [cctl RunCommand](https://github.com/apple/containerization/blob/0.47.0/Sources/cctl/RunCommand.swift) | API 生命周期、guest overhead、seccomp 执行路径 |
-| [Virtualization entitlement](https://github.com/apple/containerization/blob/0.47.0/signing/vz.entitlements) | VM 签名 entitlement 示例 |
-| [container releases](https://github.com/apple/container/releases) | 1.2–1.5 变化与安全修复历史 |
-| [container security advisories](https://github.com/apple/container/security/advisories) | 宿主控制面安全更新 |
-| [Containerization security advisories](https://github.com/apple/containerization/security/advisories) | 解包、Registry、内容存储等库级安全更新 |
+| [container 1.5.0 release](https://github.com/apple/container/releases/tag/1.5.0) | Release, breaking changes, installer, security fixes |
+| [GitHub latest release API](https://api.github.com/repos/apple/container/releases/latest) | Review-time version snapshot; URL changes with future releases |
+| [Pinned README](https://github.com/apple/container/blob/1.5.0/README.md) | Platform, installation, upgrades, compatibility |
+| [Technical overview](https://github.com/apple/container/blob/1.5.0/docs/technical-overview.md) | Control plane, per-container VMs, memory limits; some historical sections lag |
+| [Command reference](https://github.com/apple/container/blob/1.5.0/docs/command-reference.md) | Actual run/build/machine/k8s/clean flags |
+| [Networking](https://github.com/apple/container/blob/1.5.0/docs/networking.md) | IPs, two-step DNS, custom networks, discovery gaps |
+| [Host integration](https://github.com/apple/container/blob/1.5.0/docs/host-integration.md) | SSH agents, host loopback, Private Relay/reboot limitations |
+| [Volumes](https://github.com/apple/container/blob/1.5.0/docs/volumes.md) | Sparse ext4, default capacity, anonymous-volume lifecycle |
+| [Resource usage](https://github.com/apple/container/blob/1.5.0/docs/resource-usage.md) | CPU/RAM defaults, overcommit, stats, disk usage |
+| [Runtime configuration](https://github.com/apple/container/blob/1.5.0/docs/runtime-configuration.md) | Capabilities, init, path protection, nested virtualization |
+| [Multiplatform images](https://github.com/apple/container/blob/1.5.0/docs/multiplatform-images.md) | ARM64/AMD64 builds and Rosetta |
+| [Container machine](https://github.com/apple/container/blob/1.5.0/docs/container-machine.md) | Persistent Linux, home mounts, resource defaults |
+| [Kubernetes](https://github.com/apple/container/blob/1.5.0/docs/kubernetes.md) | Local clusters, load-image, CNI, recovery limits |
+| [Config reference](https://github.com/apple/container/blob/1.5.0/docs/container-system-config.md) | config.toml and kernel configuration |
+| [Config source](https://github.com/apple/container/blob/1.5.0/Sources/ContainerPersistence/ContainerSystemConfig.swift) | Verify concrete values such as the default kernel |
+| [container Package.swift](https://github.com/apple/container/blob/1.5.0/Package.swift) | Containerization 0.47.0 and builder shim 0.13.1 |
+| [Containerization 0.47.0 README](https://github.com/apple/containerization/blob/0.47.0/README.md) | Library, VM backends, vsock, build requirements |
+| [Containerization API docs](https://apple.github.io/containerization/documentation/) | API reference; online docs may change with versions |
+| [cctl RunCommand](https://github.com/apple/containerization/blob/0.47.0/Sources/cctl/RunCommand.swift) | Lifecycle, guest overhead, seccomp execution paths |
+| [Virtualization entitlement](https://github.com/apple/containerization/blob/0.47.0/signing/vz.entitlements) | VM signing entitlement example |
+| [container releases](https://github.com/apple/container/releases) | Changes/security fixes across 1.2–1.5 |
+| [container security advisories](https://github.com/apple/container/security/advisories) | Host control-plane updates |
+| [Containerization security advisories](https://github.com/apple/containerization/security/advisories) | Library extraction, registry, and content-store updates |
 
-### 资料冲突的处理原则
+### Resolving conflicting sources
 
-- 固定版本 README/源码和 release 优先于历史概述文字。
-- technical overview 仍包含早期 macOS 15 与 initial release 描述；不据此覆盖 1.5.0 README 的 macOS 26 官方支持承诺。
-- 文档里的 kernel/程序输出可能只是历史示例，不作为当前实际 kernel 版本。
-- 当前源码默认 Kata archive 为 3.32.0，kernel binary path 为 `vmlinux-6.18.35-197-debug`；用户可自定义，实际运行值还需检查本机配置。
-- 不把库新增能力自动等同于 CLI 已暴露、默认实施或完整受支持的能力。
+- Prefer pinned README/source and release notes over historical overview prose.
+- The overview still includes early macOS 15/initial-release descriptions; these do not override the 1.5.0 README's macOS 26 support baseline.
+- Kernel/program output in documentation may be historical examples, not the current kernel version.
+- Current source defaults to Kata archive 3.32.0 and kernel binary `vmlinux-6.18.35-197-debug`. Customization is allowed; inspect local configuration for actual values.
+- New library features do not automatically imply CLI exposure, default enforcement, or full support.
 
-## 分类与标签
+## Categories and tags
 
-- 分类：技术 / 容器与沙箱
-- 标签：#AppleContainer #Containerization #macOS #AppleSilicon #Swift #虚拟化 #OCI #沙箱 #Chromium
+- Category: Technology / Containers and sandboxes
+- Tags: #AppleContainer #Containerization #macOS #AppleSilicon #Swift #Virtualization #OCI #Sandbox #Chromium

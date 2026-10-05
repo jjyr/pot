@@ -1,66 +1,66 @@
-# Pi + DeepSeek MVP 验证
+# Pi + DeepSeek MVP validation
 
-> 历史验收记录：版本、额度与界面均以各节日期为准。当前能力见 [开发计划](../development-plan.md)，操作规范见 [文档索引](../README.md)。
+> Historical acceptance record: versions, allowances, and UI reflect each section's date. See [Development plan](../development-plan.md) for current capabilities and [Documentation index](../README.md) for operating contracts.
 
-日期：2026-10-03。状态：**单会话 MVP 已完成，未提交**。按用户最新决定，Pi + DeepSeek 作为首个切面，AGY/Codex 后移。本报告覆盖 D1，不代表 D2–D6 或公开发行完成。
+Date: 2026-10-03. Status: **single-session MVP complete, uncommitted**. User chose Pi + DeepSeek as the first slice, deferring AGY/Codex. This covers D1, not D2-D6 or public release completion.
 
-## 可操作流程
+## Operational flow
 
-1. `scripts/pot prepare` 准备固定资源；`scripts/configure-pi` 从本机 Pi 定向导入 DeepSeek 凭据，不发送请求。
-2. `scripts/pot build && scripts/pot bundle && scripts/pot open` 构建并打开开发包。
-3. 在原生聊天输入任务，Enter 发送。Pi 可使用 read/write/edit/bash/grep/find/ls，工具在 Linux VM 内以普通用户运行。
-4. 查看流式回复和工具开始/完成状态；通过按钮或原生菜单「打开工作目录」访问生成文件。
-5. 「停止任务」或 Cmd+. 取消当前任务。Runtime 等待 Pi 的 abort 确认和进程退出；停止未确认时要求重开环境，不继续接收任务。
-6. 关闭窗口保持运行；Quit 停止 VM。重开保留产品历史、工作文件和同一个 Pi 原生会话。
+1. `scripts/pot prepare` prepares pinned resources; `scripts/configure-pi` imports only local DeepSeek credentials without requests.
+2. `scripts/pot build && scripts/pot bundle && scripts/pot open` builds/opens development App.
+3. Enter a task in native chat; Enter sends. Pi read/write/edit/bash/grep/find/ls run as a normal Linux VM user.
+4. View streaming/tool start-completion; Open workspace button/native menu opens artifacts.
+5. Stop task or Cmd+. cancels. Runtime waits for Pi abort acknowledgment/process exit; unconfirmed stop requires environment reopen and blocks more tasks.
+6. Window close retains execution; Quit stops VM. Reopen preserves product history/files/the same native Pi session.
 
-Pi 0.87.1、Node 22.23.2、guest APK 与 npm integrity lock 固定；首次启动联网安装，之后复用缓存。Runtime 仍为 Rust + SQLite，Pi 通过 JSONL RPC 接入。Pi 原生会话与历史 smoke adapter 的模型上下文分开，旧界面记录不会上传给 Pi 模型。
+Pi 0.87.1, Node 22.23.2, guest APK/npm integrity locks pinned; first startup installs online, later uses caches. Runtime remains Rust + SQLite with JSONL RPC Pi. Native Pi context is separate from historical smoke adapter context; old UI records are not uploaded to Pi models.
 
-## 实测结果
+## Observed results
 
-| 检查 | 结果 |
+| Check | Result |
 |---|---|
-| 原生聊天 → VM → Pi → DeepSeek | 通过，模型真实返回，使用 SSE 更新 UI |
-| 真实工具 | Pi 调用 bash 创建 `mvp-check.md`，读取输出后回复 `DONE`；文件可通过 Finder 访问 |
-| Quit / 重开 | helper 正常停止，Chromium profile `Normal`；重开后历史、文件、额度保留 |
-| 原生会话与语义续聊 | 重开前后 Pi session ID 相同；询问上一轮 codeword，正确回复 `apricot`，未在新提示中透露答案 |
-| 真实取消 | Pi 执行 `sleep 30` 后写文件的命令，Cmd+. 后返回 `Command aborted`，用户消息为 Cancelled，超过 30 秒后目标文件不存在，模型请求数没有继续增长 |
-| 取消状态显示 | 实测暴露 Pi 把底层 abort 包装为错误；已按当前取消状态映射为 Cancelled，本地真实 Pi 集成测试确认取消轮不再产生 Failed 状态 |
-| 工作文件入口 | 原生菜单打开 Finder，生成文件可见 |
-| 普通自动化测试 | App 4 + protocol 1 + Runtime 8 = 13 项通过 |
-| 真实 Pi / 模拟模型 | 另 1 项通过：write/bash、重启 Pi 续接、取消后 bash 子进程退出、取消后再发、请求 cap、会话文件缺失时拒绝静默重建 |
-| 构建 | macOS App、ARM64 musl Runtime、Swift helper 构建；App ad hoc deep/strict 校验通过 |
+| Native chat -> VM -> Pi -> DeepSeek | Pass, real model response, SSE UI updates |
+| Real tools | Pi bash creates `mvp-check.md`, reads output, replies `DONE`; Finder can access file |
+| Quit / reopen | Helper stops normally, Chromium profile `Normal`; history/files/allowances retained |
+| Native session / semantic continuation | Same Pi session ID; recalls previous codeword `apricot` without revealing it in new prompt |
+| Real cancellation | Pi runs `sleep 30` then file write; Cmd+. yields `Command aborted`, user message Cancelled, no target file after 30 seconds or growing model request count |
+| Cancellation display | Pi wrapped abort as error; mapped to Cancelled using current state; real Pi local integration confirms no Failed on cancelled turns |
+| Workspace entry | Native menu opens Finder with artifact visible |
+| Regular automation | App 4 + protocol 1 + Runtime 8 = 13 pass |
+| Real Pi / mock model | 1 additional pass: write/bash, restart continuation, bash child exit on cancel, subsequent send, request cap, refusal to silently rebuild missing sessions |
+| Build | macOS App, ARM64 musl Runtime, Swift Helper; App ad hoc deep/strict validation passes |
 
-真实验证额外消耗 **4 次** DeepSeek 请求，8719 输入 token，其中 6016 缓存命中；122 输出 token。工具任务 2 次、重开续聊 1 次、取消验证 1 次。没有自动重试。没有估算货币费用。此前 smoke adapter 的 3 次请求记录保留，未重置。
+Real validation adds **4** DeepSeek requests, 8719 input tokens including 6016 cache hits, 122 output. Tool task 2, reopen continuation 1, cancellation 1. No automatic retries or monetary estimate. Prior smoke adapter's 3 requests retained without reset.
 
-忽略目录中的本轮证据：`.local/d1/pi-mvp-verification.json`、`pi-tests.log`、`pi-integration.log`、`pi-build.log`。机器部署与当前运行状态在 Machines 中维护。
+Ignored evidence: `.local/d1/pi-mvp-verification.json`, `pi-tests.log`, `pi-integration.log`, `pi-build.log`. Machines maintains deployment/current running state.
 
-## 自动化入口
+## Automation entry points
 
 ```sh
 cargo test --locked -p pot-app -p pot-runtime -p pot-protocol
 POT_TEST_PI_BIN="$(command -v pi)" cargo test --locked -p pot-runtime real_pi_tools_resume_cancel_and_budget -- --ignored --nocapture
 ```
 
-第二项需要本机安装 Pi 0.87.1。它使用独立临时目录、虚拟凭据和本地模拟 provider，不读取本机 Pi 认证，也不调用真实模型。正常测试默认跳过该项，避免要求所有开发机都安装 Pi。
+Second test requires local Pi 0.87.1, isolated temporary directories/fake credentials/local mock provider, without reading local Pi auth or real model calls. Normal tests skip it so not all development machines need Pi.
 
-## 当前边界
+## Current boundaries
 
-- 一个持久会话；多会话、任务卡、附件、结构化产物预览仍在后续阶段。
-- 为节省用量，当前配置每次最多 512 输出 token、每轮 6 次模型请求、累计 100 次；上下文请求体上限 96 KB，关闭自动重试和自动压缩。到达上限显式失败，不静默丢历史。参数可通过 `configure-pi` 调整后重开，历史 ledger 不清零。
-- Pi 原生工具可操作 guest 内普通用户可访问的文件及网络。尚未实现 D4 的独立 Agent/controller UID 与 CDP/X11 隔离，不能宣称可承载不可信网页接管。
-- Setup 向导、下载续传、跨机器冷安装和发行签名未交付。开发包仍用 ad hoc 签名。
-- 故障恢复保留产品部分输出，并把中断消息标为失败；不自动重放用户提示。不支持通过本 MVP UI 修复损坏/缺失的 Pi session 文件。
+- One persistent session; multiple sessions/task cards/attachments/structured previews remain later work.
+- Economical configuration: 512 output tokens/request, 6 requests/turn, 100 lifetime; context body 96 KB, auto retry/compaction disabled. Limits fail explicitly without silent history loss. Adjust via `configure-pi` and reopen without ledger reset.
+- Pi tools can access normal guest user files/network. Separate D4 Agent/controller UID and CDP/X11 isolation unimplemented; not suitable for claimed untrusted-web takeover.
+- Setup wizard/download resume/cross-machine cold install/release signing undelivered; development uses ad hoc signing.
+- Recovery preserves partial product output and marks interrupted messages failed without prompt replay. MVP UI cannot repair corrupt/missing Pi session files.
 
 
-## Sandbox 浏览器生命周期回归（2026-10-03）
+## Sandbox browser lifecycle regression (2026-10-03)
 
-修复 `desktop.sh` 以 Chromium 退出作为 VM 退出条件的问题：浏览器关闭后继续等待 Runtime，保留桌面和 noVNC。统一 `open-browser.sh` 启动入口记录浏览器 PID；Fluxbox 桌面右键菜单提供 Chromium / Terminal。退出 Pot 时仍通过 CDP 正常关闭当前浏览器，浏览器已经关闭时直接确认停止。
+Fix `desktop.sh` using Chromium exit as VM exit condition: browser close waits for Runtime, retaining desktop/noVNC. Shared `open-browser.sh` records browser PID; Fluxbox context menu offers Chromium/Terminal. Quit still closes current browser through CDP; already-closed browsers confirm stop directly.
 
-真实 VM 手工回归（不调用模型）：
+Real VM manual regression (no model calls):
 
-1. Take over 后点击 Chromium 关闭按钮：保留空桌面，Pi Ready；helper 为 running，Runtime snapshot HTTP 200。
-2. 桌面空白处右键 → Chromium：浏览器重新打开，原 profile/session 保留。
-3. 重开浏览器后退出 Pot：收到 browser-stopped，profile.exit_type 为 Normal。
-4. 浏览器已关闭时退出 Pot：同样收到停止确认，profile 为 Normal；再次启动连接正常。
+1. Take over and close Chromium: empty desktop/Pi Ready remain; Helper running, Runtime snapshot HTTP 200.
+2. Desktop context menu -> Chromium reopens with original profile/session.
+3. Quit after reopen: browser-stopped received, profile.exit_type Normal.
+4. Quit with browser closed: same stop confirmation/Normal profile; next startup connects normally.
 
-`sh -n`、产品构建和 bundle 完成。本轮模型请求为 0。
+`sh -n`, product build, bundle complete; 0 model requests this round.

@@ -1,422 +1,422 @@
-# Agent layer 验证
+# Agent layer validation
 
-日期：2026-10-04。范围：#2 的 Pi/Runtime 基础增量；不是多引擎完整验收。
+Date: 2026-10-04. Pi/Runtime foundational increment for #2, not complete multi-driver acceptance.
 
-## 已验证
+## Validated
 
-- Runtime 56 个非忽略测试、protocol 1 个测试通过。
-- 原有 6 个 `real_pi` 测试保持通过；新增第 7 个真实 Pi 测试，通过两个本地模拟
-  provider 验证迁移、模型选择、handoff bootstrap、旧 native session 保留和 provider 归属。
-- Runtime/protocol `cargo check --locked`、Rust 格式和 `git diff --check` 通过。
-- 没有付费模型调用；没有读取宿主 Codex 登录态或复用宿主会话。
+-56 nonignored Runtime/1 protocol pass.
+- Original6 real_pi pass; seventh real Pi with two local mock
+  providers validates migration/model/handoff/old native retention/provider attribution.
+- Runtime/protocol locked check/Rust formatting/diff pass.
+- No paid models/host Codex auth/session reuse.
 
-覆盖旧元数据保留、重启后的固定快照、损坏原生会话、重复/迟到/终止后事件过滤、
-迁移每个持久阶段重启、候选会话失败、设置等待运行轮次、新任务继承/旧任务固定、
-既有设置导入幂等性、未知协议透明转发与非零占位语义、MCP 汇总权限和重复调用冲突。
+Covers old metadata/pinned restart snapshots/corrupt native sessions/duplicate-late-post-terminal filtering,
+every durable migration-stage restart/candidate failures/settings wait/new inheritance-old pinning,
+legacy import idempotency/transparent unknown protocol/nonzero unknown usage/MCP summary/conflicts.
 
-复现使用开发指南中的 `mise run test` 和真实 Pi 命令；真实 Pi 测试只连接测试启动的
-本地模拟模型。生产额外 provider 仍强制 allow-listed HTTPS，不允许测试的 loopback HTTP。
+Reproduce via development mise test/real Pi commands; real Pi only connects to test-launched
+local mocks. Production additional providers require allowlisted HTTPS, not test loopback HTTP.
 
-## Codex 探测（未验收）
+## Codex probe (not accepted)
 
-候选：`@agentclientprotocol/codex-acp` 2.1.1、`@openai/codex` 0.159.1，安装到临时目录。
-单独创建空 Codex 配置目录，剔除 API-key 环境变量，仅发送 ACP `initialize` 和
-`session/new`；未发送 prompt、未登录、未访问用户历史。
+Temporary candidates `@agentclientprotocol/codex-acp`2.1.1 / `@openai/codex`0.159.1.
+Empty isolated Codex config/no API-key env, ACP initialize/
+session-new only, no prompt/login/history.
 
-- initialize 成功，报告 HTTP MCP、load/resume 等能力。
-- session/new 返回 `-32000 Authentication required`。
-- 不把能力声明视为取消、后台资源收敛、线程隔离或安全恢复验收。
-- 探测后停止整个进程组。候选依赖未加入 Sandbox 镜像。
+- initialize advertises HTTP MCP/load-resume.
+- session/new `-32000 Authentication required`.
+- Claims do not establish cancel/cleanup/thread isolation/safe recovery.
+- Whole group stopped, candidates not in image.
 
-源码参考固定到 [ca1d9717](https://github.com/agentclientprotocol/codex-acp/tree/ca1d97173ad37b471d5a4e5847725a4657d34e29)：
-`CodexAcpClient.createSessionConfig` 将 MCP servers 传入线程配置；`cancel` 请求
-turn interruption 并等待 Codex turn/completed。前者尚无跨 lane 的负向实测，后者
-不能单凭源码证明所有后台终端与子资源已停止。因此未实现/启用 CodexDriver。
+Pinned source [ca1d9717](https://github.com/agentclientprotocol/codex-acp/tree/ca1d97173ad37b471d5a4e5847725a4657d34e29):
+createSessionConfig passes MCP into threads; cancel requests
+interrupt/waits turn-completed. No cross-lane negative test or source-only
+proof of background cleanup, so CodexDriver then disabled/unimplemented.
 
-## 未测范围
+## Untested scope
 
-未构建或启动新 Sandbox 镜像，未跑真实 Codex 模型、登录刷新、musl ARM64、MCP
-多 lane 隔离、native subagent 禁用、Codex 后台命令停止及恢复。未验证完整 profile
-设置 GUI；当前通用 profile 操作使用 Runtime API，原设置表单保留。driver fake
-覆盖目前是事件 gate，不替代完整 fake backend 的生命周期/取消测试。尚无按 provider
-预算和按 profile/provider 并发限制。详细进度仅在开发计划维护。
+No new image/real Codex models/auth refresh/musl/MCP
+lane isolation/subagent-disable/background cleanup-resume/full profile
+GUI. Profiles via API, old form retained; fake coverage
+then event gate only, not full lifecycle/cancel. No provider
+budgets/profile-provider concurrency then; development plan owns progress.
 
-## 2026-10-05 更新要求增量
+## 2026-10-05 updated requirements
 
-- Runtime 65 个离线测试、protocol 1 个测试通过；7 个真实 Pi + 本地模拟 provider 测试通过，无付费调用。
-- 新测试覆盖版本诊断不改变新 hash、旧 checksum 防篡改、命令参数冲突、PTY Unicode 输入输出、专用登录去重、会话数量限制与显式关闭。
-- 真实 loopback WebSocket 测试覆盖 bearer 缺失、非原生 Origin、重复连接拒绝、resize、断开保留和缓冲回放；未使用用户凭据。
-- `cargo check --locked -p pot-app`（含 Swift bridge）、Runtime ARM64 Linux/musl zigbuild、格式/lint 通过。
-- 独立 WKWebView smoke 加载 bundled HTML/CSP/xterm，收到 ready，并确认 88×31 字符区和 renderer 创建成功、Unicode 写入无 JS 异常。
-- 终端 UI 尚未做真实 VM/截图验收；未实际登录 Codex/Claude/AGY，没有 guest localhost callback 可达性或登录持久性结论。没有声称完整进程树隔离或新 Driver 验收。
-- 本次未跑完整两页安装/引导矩阵。其余缺口以开发计划为准。
+-65 Runtime/1 protocol/7 real Pi mocks pass, 0 paid.
+- Tests version-neutral new hashes/old checksum tamper/argv conflicts/PTY Unicode/dedicated login dedupe/session caps/close.
+- Real loopback WebSocket missing bearer/non-native Origin/duplicate/resize/detach-replay, no user credentials.
+- App locked check including Swift/Linux ARM64-musl zigbuild/lint pass.
+- Isolated WKWebView bundled HTML/CSP/xterm ready, 88x31/renderer/Unicode no JS error.
+- No real VM terminal UI/screenshots/login/callback/persistence/full tree isolation/new Driver claim.
+- No full two-page Setup matrix; remaining work in plan.
 
-## 2026-10-05 任务路由增量
+## 2026-10-05 routing increment
 
-- Runtime 69 个离线测试、protocol 1 个测试通过；7 个真实 Pi + 本地模拟 provider 测试通过，无付费调用。
-- 新增覆盖提示白名单及策略写入鉴权/revision 冲突、固定快照与重启、能力不匹配拒绝、重复创建冲突、计划逐次解析、profile/provider/global 上限和跨 provider 排队。
-- 取消请求保留槽位；未确认停止的引擎保留全部并发租约直到 Runtime 重启，有确定性回归测试。
-- `mise run check` 的格式/脚本、Rust workspace 和 Swift Helper 编译通过。尚无路由设置 GUI 或 Codex 跨引擎验收。
+-69 Runtime/1 protocol/7 Pi mocks pass, 0 paid.
+- Allowlist/policy auth-revision/pinning-restart/capability mismatch/dedupe/schedule resolution/global-profile-provider concurrency/cross-provider queues.
+- Cancellation retains slot; unconfirmed stop retains leases until restart, deterministic regression.
+- mise check formatting/scripts/workspace/Swift passes; no routing GUI/real cross-driver Codex then.
 
-## 2026-10-05 Codex 传输对照（宿主，无凭据/付费调用）
+## 2026-10-05 Codex transport comparison (host, no credentials/paid calls)
 
-`scripts/tests/codex-contract.py` 使用独立临时 HOME/CODEX_HOME、显式最小环境和
-仅 loopback 的 Responses/MCP 模拟服务器。没有加载用户 CLI 配置、登录态或历史。
-探测结束关闭整个进程组；版本只是结果中的诊断，不作为运行时门禁。
+`scripts/tests/codex-contract.py` isolated HOME/CODEX_HOME/minimal env/
+loopback Responses-MCP only, no user config/auth/history.
+Whole group stopped; version diagnostic, not gate.
 
-对照 Codex 0.159.1、codex-acp 2.1.1：
+Codex0.159.1 vs codex-acp2.1.1:
 
-- 两个并发会话各自配置同名 `pot` MCP server，但使用不同 HTTP 身份。两次工具调用和
-  输出均进入正确 lane；官方 MCP approval 往返只允许测试生成的无副作用身份探针。
-- 原生 App Server：两轮各两次模型请求、一次 resume 后续轮次、一次被取消请求；
-  共 6 次，未出现其他模型。累计用量 50→75，最后一次请求 25；Pot 应按累计差值计量，
-  不能把每次累计值相加。
-- ACP：除上述调用外还创建临时线程，使用固定 `gpt-5.6-luna` 生成两个标题；这不服从
-  所选主模型。轮次 `usage` 为最后一次请求的 25，而这一轮实际模拟请求合计 50。
-  因此当前候选不能直接满足模型固定和完整计量要求，后续 CodexDriver 选择原生
-  App Server（#2 已允许此备用路线）。没有在会话中静默切换传输。
-- 续聊保持 thread/session ID。取消测试同时等到终止事件与模拟模型 HTTP 连接断开；
-  **不等于 shell 子进程/后台终端全部停止**，尚需专门 guest 负测。
-- 模型可见工具中没有 native spawn/send/wait agent 工具。此结论仅覆盖探测调用。
-- `mise run test:app` 的 10 个测试通过。
+- Two parallel sessions same MCP name pot/different HTTP identities. Both calls/
+ outputs correct lane; official approval allows only generated side-effect-free identity probes.
+- Native App Server: two turns/two requests each, resumed turn, cancelled request;
+6 total/no other model. Cumulative50->75, last25; meter deltas,
+not summed cumulative.
+- ACP additionally temp threads/fixed gpt-5.6-luna for two titles, ignoring
+selected main model. Turn usage25 vs actual50.
+Cannot satisfy model pinning/full metering, so choose native
+App Server (#2 permitted fallback), no silent transport switch.
+- Continuation same IDs; cancellation waits terminal/HTTP disconnect,
+**not proof all shell/background resources stop**, dedicated guest negatives needed.
+- No native spawn/send/wait Agent tools in this probe schema only.
+- App10 pass.
 
-复现（传入已安装的可执行文件；脚本不会安装/升级）：
+Reproduce with installed executables, no installs/upgrades:
 
 ```sh
 mise exec -- python scripts/tests/codex-contract.py --codex /path/to/codex
 mise exec -- python scripts/tests/codex-contract.py --codex /path/to/codex --acp /path/to/codex-acp
 ```
 
-这是传输选择证据，**不是已交付 CodexDriver 或真实登录/guest 验收**。
-
-
-## 2026-10-05 原生 Codex Runtime 与 ARM64 guest
-
-已接入原生 App Server 长驻 host，按 launch spec 共享进程、按 lane 绑定独立 thread。
-主聊天、worker、自动汇总与取消走统一 Driver 事件。设置可在无 pi.json 时选择 Codex；
-先打开原生候选并通过官方 `thread/inject_items` 写入初始化记录，再提交新绑定。
-空线程不持久化的行为已在真实 CLI 中复现，因此不能仅保存 thread/start 返回的 ID。
-
-`scripts/tests/codex-runtime.py` 使用真实 Runtime + Codex 0.159.1 + 本地 Responses mock，
-隔离 HOME/CODEX_HOME，无宿主凭据、无付费调用。已通过：
-
-- 无 Pi 首次配置、首次发消息前重启、连续轮次及 Runtime 重启后的原生续聊。
-- 设置迁移、新 epoch、重复提交不调用模型、迁移后重启及缺失原生文件拒绝静默新建。
-- 三次主轮次各有独立 MCP 回执；两 worker、同一计划两次手动触发及主会话的 thread ID 互不相同。
-- 用量按原生累计值差额记账，原子更新基线；缺少基线、计数器回退及不完整数据不伪造零用量。
-- 模型流取消等待终态；实际启动 `sleep 60` 后，轮次收尾终止原生后台终端，并检查进程消失。
-- native subagent 工具不出现在模型 schema；汇总轮次明确携带 Runtime 的角色指令且不暴露 shell / apply_patch；继承的无关 MCP server 被管理会话禁用。
-
-发现并修复了跨轮 MCP 连接复用：仅 thread/resume 会保留前一轮的 MCP 身份。
-现在在资源收尾后 thread/unsubscribe，再在下一轮恢复，确保重新初始化 turn 身份。
-
-以上测试在无网络 Linux ARM64/musl VM 中也通过，使用镜像内官方 Codex CLI 与交叉编译 Runtime。
-证据输出保留 `guest_acceptance:false`：表示**尚未验证真实账户认证、模型服务或订阅额度**，
-并非没有在 guest 执行。隔离 VM 不含用户登录态。
-
-回归：70 个 Runtime 测试、1 个 protocol 测试、10 个 App 测试及 7 个真实 Pi/mock 集成测试通过；
-`mise run check` 通过。Codex CLI 已由 npm lock 固定为构建基线并装入镜像，运行时不锁版本。
-当前仍不能关闭 Issue #2：Claude/AGY Driver、其他网关 codec、完整设置/引导和真实账户矩阵未完成。
-
-## 2026-10-05 Claude 原生 CLI 契约
-
-原版 Claude Code 2.1.289，临时 HOME/CLAUDE_CONFIG_DIR 与本地 Anthropic SSE 模拟服务；
-不读取宿主真实凭据，不调用付费模型。`scripts/tests/claude-runtime.py` 验证：
-
-- 无 Pi 配置时选择 Claude；连续对话和 Runtime 重启沿用同一原生 UUID。
-- 配置迁移不调用模型，重复请求幂等；新 epoch 创建独立 UUID；原生 JSONL 丢失时 binding 变为 broken。
-- 两个 worker 和两次计划执行使用独立原生会话；只读汇总不能使用 Bash/Write/Edit。
-- 显式 built-in 白名单排除原生 Agent/Task/SendMessage/Cron；Pot MCP 正常调用。
-- 原生后台 `sleep 60` 在轮次完成前退出；取消等待模型请求后确认进程退出。
-- 23 次本地模拟模型请求；无额外模型。结果 usage 为轮次累计量；缓存读写归入输入，缓存命中不重复累加。
-
-旧宿主 Claude 构建在探针中出现辅助模型调用、结果只含最后请求用量及后台进程存活，
-因此没有作为可用基线。Runtime 通过 help 控制项和 init 生命周期能力进行兼容性校验，
-不锁死版本；用户升级仍须满足契约。取消/异常不能确认资源清理时保留“stop unconfirmed”。
-Codex 原生契约回归通过（23 次本地模拟请求）。真实 Claude 账户、认证过期、服务商限流和升级矩阵仍未验收。
-
-### 官方集成条款核实
-
-2026-10-05 阅读 [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)。
-当前页面明确说明产品可预装/运行原版 CLI，但要求适用 Commercial Terms、不得修改二进制或限制其认证方式、
-用户自行认证并由服务商直接计费，不得代付/转售/中介用量。页面另明确区分原版 CLI 内用户自行登录订阅
-与第三方应用收集/中介 Claude.ai 凭据。Pot 使用原版二进制及官方登录，未抽取 token；
-这不是 Anthropic 对 Pot 的授权或背书，也不替代发行主体接受适用条款。
-
-Linux ARM64/musl guest 补充：原版 2.1.289 + 最新交叉编译 Runtime 在非 root 用户下通过同一
-完整契约（`.local/d1/claude-guest-20261005/data/claude-runtime.json`；23 次本地请求）。
-TCP reset 与正常 EOF 均作为取消连接已关闭；summary 以工具白名单和 Runtime MCP 权限控制，
-避免 CLI plan 模式连只读 MCP 也拒绝。测试要求每个模拟工具结果成功，不能用最终文字掩盖工具拒绝。
-此轮 guest 使用检查目录挂载最新 Runtime，最终 bundled Runtime 仍需单独验证。
-
-## 2026-10-05 原生 API codec
-
-新增 Responses、Anthropic Messages、Gemini 的输出上限及 usage 观察器；Pi 直接使用相应
-原生 API，不进行消息格式翻译。真实已安装 Pi 对三个本地模拟服务通过完整一轮请求，验证
-路径/模型约束、真实 key 注入、输出 cap、缓存命中及 Gemini 思考 token 归账。
-Anthropic message_start 不提前释放输出预留；message_delta 累计值覆盖，不重复相加。
-8 个 `real_pi` 测试全部通过（含原 DeepSeek、第二 provider 迁移、取消、额度恢复、压缩、worker/计划）。
-新增格式尚未验证真实服务商、压缩/额度检查点矩阵，因此其 safe_checkpoint_resume 保持关闭。
-
-Claude 最终镜像 `pot.local/sandbox:cd5858f99ca0649d32c6` 已通过打包二进制 guest 验证：
-`.local/d1/claude-guest-bundled-20261005/data/claude-runtime.json`（23 次本地请求）。
-构建中的 npm 终止经内核日志确认为构建容器默认 1 GiB memory cgroup 限额；
-将构建容器显式设为 3 GiB（VM 仍为 4 GiB）后安装与打包通过。这不改变用户 Sandbox 资源设置。
-
-## 2026-10-05 API-only 设置
-
-新增共享 API 设置表单及私有 provider 保存接口。离线测试覆盖无 pi.json 的初始配置、
-未授权拒绝、UUID 幂等、冲突/旧 revision 拒绝、同 endpoint 空 key 保留、0600 权限、
-公开响应/profile 不含 key，以及旧 binding 的 endpoint 引用不被新配置替换。
-三个新增 codec 的真实 Pi 测试已改为完全无旧 Pi 配置/请求预算的环境，仍通过。
-76 个 Runtime 测试、1 个协议测试及 8 个真实 Pi 离线契约通过；GUI 编译通过，尚未做交互截图验收。
-
-## 2026-10-05 两页引导与 API-only GUI
-
-独立 `dev.pot.setup-check` 应用和 `setup-ui-check-20261005` 数据目录，未改动用户运行中的 Pot。
-实际界面检查通过：取消全选时不能继续；全选后进入第二页，同一 Runtime PTY 正常嵌入；
-未登录的 Codex 不可开始；API-only 使用 `example.invalid` 和虚构密钥保存后进入空聊天。
-通过 Runtime API 确认消息数和请求数都是 0；正常退出重启后保留完成状态和模型选择，仍为 0 请求。
-
-首次主 Agent 选择只保存元数据，原生会话延迟至第一条真实消息创建；已有会话迁移保留预检。
-Codex/Claude 宿主离线契约均回归通过（各 23 次本地模拟请求）。
-工具准备使用镜像预装并检测复用；缺失工具可进入 Terminal 修复或取消勾选后稍后处理。
-此证据不包括真实登录、下载中断恢复及完整浅/深色布局矩阵。
-
-## 2026-10-05 设置、路由及生命周期补充
-
-- Profile 编辑/复制不改变主绑定及 worker fallback；显式 worker profile 不随后续连接设置覆盖。
-  新增授权、未知 profile、revision 冲突及显式用户选择优先的回归测试。
-- 可注入 fake session 验证并发事件隔离、重复/迟到过滤、取消后清理失败和缺失终止事件。
-  缺失终态标为 stop unconfirmed，不释放并发容量。
-- Provider 额度验证跨 scope 共享、provider 隔离、全局/局部共同约束、手动恢复、重启预留保留、
-  事务回滚及 wait route 清理；真实 Pi 的 8 个本地模拟 provider 测试通过。
-- Codex/Claude 宿主契约加入自定义 wrapper 参数验证，各 23 个本地请求全部通过。
-  Runtime 管理参数冲突拒绝；wrapper 字符串不经 shell 展开。
-
-### AGY 尚未解决的接入条件
-
-阅读官方 [CLI headless](https://antigravity.google/docs/cli/headless/)、
-[CLI reference](https://antigravity.google/docs/cli/reference/)、
-[subagents](https://antigravity.google/docs/subagents/)、[MCP](https://antigravity.google/docs/mcp/)
-和 [Additional Terms](https://antigravity.google/terms)（2026-10-05）。
-官方 headless 文档有结构化事件和用量，subagent 配置支持 tools；CLI help 本身未提供
-已验收的每 lane 禁用原生委派、独立 MCP 与取消收敛组合。尚未据此启用 Driver。
-条款明确包含使用第三方产品接入服务的限制；企业路径适用不同协议。
-这些资料不足以确认 Pot 的原版 CLI 托管调用符合适用授权，需发行主体或服务商确认。
-仅保留现有 Terminal 可用状态，不把它当作技术/条款验收通过。
-
-最终增量验证：82 个 Runtime 测试、1 个协议测试、10 个 App 测试及 8 个真实 Pi/mock 测试通过。
-`mise run check` 和构建打包通过；镜像 `pot.local/sandbox:4247db1d941e1045cb89` 内的
-Codex/Claude 原生契约均通过（各 23 次本地模拟请求，含 wrapper 参数）。
-证据目录为 `.local/d1/codex-guest-final-20261005/data` 与
-`.local/d1/claude-guest-final-20261005/data`。
-
-隔离测试应用的最终 Sandbox API 验证 profile 复制幂等、原绑定不变、路由/provider 额度保存、
-旧 revision 拒绝，模型请求数为 0。新任务路由/额度设置和任务“更换 Agent”界面通过编译；
-实际交互检查遇到 Mac 锁屏，已请求用户解锁，未将其记为 GUI 验收通过。
-之前两页引导 GUI 验证不替代这次新增页面的交互验收。测试 Sandbox 已通过 helper 正常停止。
-
-
-## 2026-10-05 自动触发、认证故障和路由交互补充
-
-Codex/Claude 的 Runtime 契约启用一分钟间隔计划，等待 Runtime 真实时钟触发，
-不调用手动 run 接口；自动执行的原生会话与主聊天、两个 worker、两次手动执行均独立。
-宿主两套真实 CLI 均通过；Codex 的原打包镜像也通过更新后的契约
-（`.local/d1/codex-guest-clock-20261005/data/codex-runtime.json`）。
-
-本地模拟 provider 持续返回 401 后再恢复成功响应，验证：失败消息明确可见、
-引擎回到 ready、用量标为 native_incomplete、binding 保持 active 且 native ID 不变；
-后续轮次恢复原会话，不读取或改动真实账户认证。Codex 宿主与 guest 均通过。
-Claude 原 CLI 发送 api_retry/authentication_failed，原行为会重试数分钟；
-Runtime 现在通过已验证的 SIGINT 生命周期停止，等待终态和进程退出后提示重新登录。
-宿主契约通过认证失败恢复、非重试型 400 故障和诊断过滤；原生续聊、取消、后台进程
-停止、worker 和计划仍通过。测试只有 loopback 请求，没有付费调用。
-
-解锁后的隔离应用交互验证：复制 API profile、选择后台默认、允许 Agent 指定的白名单、
-配置并发 2/provider 并发 4 保存成功；provider 每周 15000 Token/自动恢复保存成功。
-Runtime API 核对持久值且模型请求数为 0。长权限说明被截断的问题已修复并通过编译；
-修复后的布局和任务页迁移交互尚未重新检查，以免中断用户正在使用的 Sandbox 登录终端。
-真实账户登录/调用、完整升级与浅深色矩阵仍未验收，AGY 接入条件仍待解决。
-
-
-## 2026-10-05 独立 Terminal 与真实 Codex 账户验收
-
-按更新后的 #2，Terminal / Sandbox 是两个侧栏按钮。移除专用登录 PTY、登录动作/命令
-配置及 Helper 历史 login RPC；Runtime 拒绝旧 agent 登录终端请求，旧 catalog login
-字段仅在反序列化时忽略，不执行、不返回。官方状态检测保持只读。
-环境/工具准备后进入普通助手设置；无勾选亦可继续，主 Agent 不自动预选。
-
-隔离测试应用 `dev.pot.setup-check` 实测独立导航、只读 Agent 状态、空勾选进入助手设置、
-稍后设置打开 Terminal。全新 `independent-cold-ui-20261005` root 的 profiles/bindings
-均为空，未登录 Codex/Claude 不可选，usage requests 为 0；Terminal 可用。
-忙碌 shell 的 read 等待期间切换 Terminal/Sandbox、触发状态刷新并返回，输入得到
-`POT_BUSY_NAV:KEPT_SHELL_INPUT`，没有命令注入，焦点自动恢复。
-App 新回归禁止 NeedsAuth 时发送主聊/任务 guidance。最终构建后的界面门禁和长说明
-复核遇到 Mac 锁屏，不能将编译/单测记为最终 GUI 验收。
-
-真实账户测试使用用户自行登录的 guest 原版 Codex，模型 `gpt-6-luna`：
-主聊调用 Pot MCP pot_list_tasks 成功；两个并发 worker 使用独立 native threads；
-只读汇总执行并归账；正常重启后官方状态仍 authenticated。
-镜像 `pot.local/sandbox:ff8c27149694187b0495` 下再次重启，epoch 2 和原 native
-thread `01a10962-c6ac-7331-8720-54ca5e80af90` 保持不变，MCP 续聊成功。
-前台 shell sleep 60 执行中取消，确认终态 cancelled、turn 清空、engine ready；
-随后普通轮次在原线程完成，证明容量释放和续聊可用。
-
-真实验收发现 summary 后省略 shell/file feature overrides 无法恢复工具；现每轮显式
-设置，并声明当前普通主轮次权限。宿主/guest 契约均增加 summary 后恢复 shell 的回归。
-真实取消前 shell 未启动的旧失败尝试保留为历史，不计为通过。
-取消轮次不完整用量标 unknown，不记零。此次真实测试累计账本为 9 个轮次记录，
-input 255894、output 1060、cache 210432、unknown 1；并非 0 付费调用声明。
-订阅路线为原生上报事后归账，不能将该记录数等同 HTTP 模型请求数。
-
-证据位于 `setup-ui-check-20261005/workspace/product/issue2-account-{main,workers,resume,cancel,after-cancel}.json`。
-冷配置证据位于 `independent-cold-ui-20261005/workspace/product/issue2-cold-ui.json`。
-仅测试副本切换数据 root；一次 Quit 后 CUA 状态查询自动重启该副本并落到默认目录，
-发现后停止了该副本，未发送模型/聊天动作；之后固定 LSEnvironment 防止再次发生。
-未停止用户日常 Pot，未读取宿主/guest 登录凭据或在线 SQLite。
-
-最终 ff8c guest 的 Codex 契约通过 35 次 loopback 请求；Claude 的 d2bc guest 契约
-通过 32 次 loopback 请求，包含真实时钟计划、401 及时停止/恢复、400 诊断过滤和取消。
-这些离线请求 paid_calls 为 0。Claude 真实账户仍待用户自行登录；AGY Driver 的接入
-许可及技术隔离契约未确认，仍未启用。兼容/不兼容升级、下载故障恢复、完整浅深色
-和权限界面矩阵未全部验收，本次不宣布 #2 可关闭。
-
-
-最终补充：重启后的 snapshot 引擎/模型名称读取持久 binding，不等到首轮再纠正旧启动默认值；
-对应回归通过。工具发现读取版本化默认 profile 的 invocation，缺失 wrapper 不借用系统
-默认 CLI 的安装/认证状态；带 wrapper 参数时保留 unknown，不执行未知状态命令。
-Runtime 84、协议 1、App 11 个测试通过；`mise run check` 及构建通过。
-Pi 的 8 个真实 CLI/mock 契约沿用本轮前已通过的证据，未将其标成重新执行。
-
-
-最终交付包镜像为 `pot.local/sandbox:21841888feb8f142ea98`。
-隔离副本更新后正常重启，首条消息前即显示 `Codex · gpt-6-luna`；
-只读官方检测为 authenticated，epoch/native thread 保持不变，usage 仍为 9 个轮次记录，
-该包核对新增模型调用为 0。Claude 仍为 required，AGY 为 unknown。
-证据为 `setup-ui-check-20261005/workspace/product/issue2-final-package.json`。
-最终包核对没有重跑完整原生/真实模型矩阵；前述 ff8c/d2bc 镜像契约证据保持各自版本范围。
-
-
-## 2026-10-05 Claude 真实账户跳过、兼容性与 Terminal 清理
-
-用户明确决定无 Claude 账号，先集成并跳过真实账户测试。ClaudeDriver、助手设置、
-官方只读状态查询及 guest 原版 CLI 保留；不等待登录、不把离线 mock 结果写成真实
-账户通过，也不自动选择未登录的 Claude。
-
-Claude 成功的 capability probe 按 launch 配置和 executable metadata 缓存。
-未变化命令不再每轮运行 --help；文件替换/重装后重新检查，缓存有界，检查输出和时间
-有界，失败停止 probe 进程组。缺失或不兼容命令在模型请求前设置可操作的 needs_rebind
-原因；原绑定和 native session 保留，恢复兼容命令后显式 retry 仍使用原 native ID。
-
-宿主原版 2.1.289 CLI + loopback Anthropic 服务的扩展契约通过 36 次本地请求，
-paid_calls 0：两轮不重复 probe、Runtime 重启检查一次、wrapper 文件替换模拟兼容升级、
-缺失控制参数和缺失程序不调用模型、恢复后原 session 续聊；原有 401/400 处理、
-独立 worker/计划、真实时钟、只读汇总、取消及后台资源收敛均通过。
-命令替换模拟升级不等同于对所有厂商版本升级都兼容的承诺。
-
-新增 terminal-runtime.py 在无网络 Linux guest 实测：shell 的前台 sleep、独立后台
-进程组、忽略 HUP/TERM 的后台 shell 及其 sleep 孙进程，在关闭 PTY和 Runtime 正常
-终止后均不再运行；重启 boot ID 改变、PTY 列表为空、用量请求数 0。
-证据位于 terminal-tree-guest-20261005/data/terminal-runtime.json。
-本检查不包括刻意 setsid 脱离终端 session 的守护进程，该范围仍由 VM/D4 处理。
-
-补做已授权的真实 Codex 时钟验收：在既有隔离账户 root 上创建一分钟间隔计划，
-只等待 Runtime 时钟，不调用手动 run。自动 run 完成并写入结构化报告，native thread
-独立于主线程及先前两个 worker，主 epoch 2/native ID 保持不变；随后立即暂停计划。
-该 run 的原生上报 input 44197、output 169、cache 28160、unknown 0；累计账本
-为 10 个轮次记录、input 300091、output 1229、cache 238592、unknown 1。
-这是真实服务调用，不能写成 paid_calls 0。证据为
-setup-ui-check-20261005/workspace/product/issue2-account-clock.json（218418 镜像）。
-
-Mac 仍锁屏，最终发送禁用态、长说明和任务迁移的 GUI 复核继续保持未测。
-Claude 真实账户跳过不再作为推进阻塞；AGY 接入授权/实际隔离契约仍未确认。
-
-
-最终镜像 `pot.local/sandbox:5240639ea6342c173067` 的 Claude guest 扩展契约通过
-36 次 loopback 请求（77 秒含 import/unpack），paid_calls 0、account_acceptance false。
-证据为 claude-upgrade-guest-20261005/data/claude-runtime.json；同镜像 Terminal
-进程清理契约通过（7 秒含 import/unpack）。Runtime 84、protocol 1 测试通过，
-`mise run check`、构建和打包通过。本轮未改 App，也未重复原有 11 个 App 测试。
-
-
-隔离测试副本更新为 524063 镜像后正常重启。只读确认 Codex 仍 authenticated、
-原 epoch/native thread 不变，Claude 为 required，测试计划均已暂停，累计仍为 10
-个轮次记录；此包核对新增模型调用 0。证据为
-setup-ui-check-20261005/workspace/product/issue2-claude-package.json。
-
-
-### 2026-10-05 AGY 原版 CLI 驱动（有限主聊接入）
-
-按用户要求采用与 Claude 相同的原版 CLI + AgentDriver 路线，新增 `agy_json` profile、
-CLI 创建的 native conversation binding、`--conversation` 续接、最终用量、SIGINT 取消及
-助手设置入口。移除旧 run_agy 直连路径。保留 CLI 自己的 guest HOME/权限配置，不读取凭据；
-AGY 没有已验证的官方只读 auth status，状态保持 unknown。
-
-宿主和成品镜像 `pot.local/sandbox:fb8d9bcb06dacd38b387` 的模拟传输契约均通过：
-首次原生 ID、续聊、Runtime 重启后同 ID、命令缺失/恢复、错误/无效输出诊断过滤、
-ID 变化拒绝、result 后非法输出不发布成功消息、最终用量只记一次、取消后原会话继续。
-任务路由在启动 CLI 前拒绝 AGY；驱动也拒绝 worker 和只读汇总角色。
-此 fixture 是 fake transport，不是原版 CLI 模型/工具验收。
-
-同一全新无网络 guest 的原版 AGY CLI smoke 通过：帮助参数存在；独立空 HOME、
-默认模型、无 TTY 的 headless 调用失败退出，无凭据读取或远端模型调用。
-证据为 `.local/d1/agy-driver-auth2-guest-20261005/data/{agy-cli-smoke,agy-runtime}.json`；
-检查含 import/unpack 7 秒。Runtime 88、protocol 1、App 11 项测试通过，
-`mise run check`、build、bundle 通过。界面交互未复核（Mac 仍锁屏）。
-
-未验收范围：AGY 真实账户/模型、原版 CLI 工具事件、后台进程完整收敛、厂商适用条款。
-AGY 自定义 agent tools/MCP 配置尚未证明全局配置隔离，且缺少 Claude 的严格 MCP/source
-开关；因此不宣称 task/MCP/subagent 禁用/只读汇总能力，后台角色保持禁用。选择 AGY
-或编辑其调用命令不覆盖已有 worker default。此结果不代表 Issue #2 的 AGY 全部验收完成。
-
-
-### 2026-10-05 AGY 角色按原生 CLI 能力开放
-
-用户明确接受 AGY 原生工具权限与角色隔离差异，不再把严格工具隔离作为启用前提。
-解除后台任务、计划和汇总禁用；角色指导随每轮 stdin 输入发送，汇总不宣称强制只读。
-Pot 不向 AGY 配置 MCP 或提供任务/计划编排工具，执行进程还移除继承的
-POT_TASK_API/POT_TASK_TOKEN。用户原版 CLI 配置继续由 CLI 管理。
-选择 AGY 和修改调用命令采用与其他 native profile 相同的 main/worker 默认设置；
-已有任务保持各自绑定，允许用户显式迁移到 AGY。
-
-继续使用不同 Driver 适配不同 CLI 形态：Codex App Server 的配置/feature controls、
-Claude stream-json 的 tools/settings/MCP flags、AGY stream-json/conversation 和每轮角色
-提示词。共同接口仅统一会话、事件、用量与取消，不强行统一权限能力。
-AGY 的严格工具隔离、MCP 与原生 subagent 禁用能力仍为 false；路由仅按用户接受的
-策略允许 tools 要求，不放开 exact_budget、live_steering 或 desktop。对应能力测试通过。
-
-宿主及成品镜像 `pot.local/sandbox:20ba6069212d23d28f93` 的 fake transport 回归通过：
-两个并发 worker 独立 native ID、主 native ID 保持、任务完成后主聊汇总完成、手动触发
-计划的独立 worker 完成并写入报告，以及已有续聊/重启/命令恢复/取消/用量/诊断过滤。
-fixture 验证 AGY 执行进程没有 Pot MCP 参数或任务 API 环境变量。
-同一无网络 guest 的原版 CLI help/空 HOME headless 失败退出 smoke 通过；
-总计 8 秒含 import/unpack，model_calls 0。
-证据为 `.local/d1/agy-roles-guest-20261005/data/{agy-runtime,agy-cli-smoke}.json`。
-Runtime 88、protocol 1、App 11 项测试和 check/build/bundle 通过。
-真实账户、原版 CLI 后台工具执行与 GUI 交互仍未验收；fake transport 不代替这些验收。
-本记录更新前一节的“后台角色禁用”策略，并保留其历史验收范围。
-
-
-### 2026-10-05 Agent / 模型用量归属与分类
-
-共享 request_routes 增加 agent/profile_id，API 请求预留与 CLI 原生轮次开始时随实际
-binding 的 provider/epoch/spec hash 一起原子记录。统计按 Agent 类型 + 模型组合归属，
-相同模型跨 Agent 不混合，同一组合跨 profile/provider 合并；请求明细保留具体身份。
-主聊、worker、计划和压缩沿用同一账本，不改变缓存计量、额度和历史金额。
-
-旧 schema 可幂等升级；仅在会话/provider/epoch/hash/model 全部匹配已保存、校验通过的
-不可变 binding 时恢复旧 Agent/profile，未匹配的历史显示 unknown。
-总览按所选时间窗口统计，详情按 scope 累计，Agent/模型分类有界分页（每页 20 项）。
-App 提供分类卡和翻页；切换 scope/时间范围/时区重置页码并拒绝过期响应。
-
-Runtime 92、protocol 1、App 11 项测试与 check/build/bundle 通过。
-新增测试覆盖跨 Agent 同模型、时间窗口和任务范围、未知/不完整状态、重复结算、
-旧数据库升级/重开、精确快照回填及错会话/epoch/hash 拒绝、分页总量不变。
-宿主 AGY fake transport 扩展契约通过；同一契约在成品镜像
-`pot.local/sandbox:f3c82a6bfc6d743f28e8` 的无网络 guest 通过，8 秒含 import/unpack：
-主聊/两个 worker/计划/汇总的请求归属为 agy + agy-mock，分类 input/output/cache/
-requests/unknown 与总量一致，请求明细 profile_id 保持 agy-test。
-原版 CLI help/空 HOME 失败退出 smoke 同时通过，model_calls 0。
-证据为 `.local/d1/agent-model-usage-guest-20261005/data/{agy-runtime,agy-cli-smoke}.json`。
-本轮未调用真实模型账户；Mac 锁屏下未进行分类卡/分页的 GUI 交互复核。
+Transport decision evidence, **not delivered CodexDriver/real login/guest acceptance**.
+
+
+## 2026-10-05 native Codex Runtime / ARM64 guest
+
+Persistent App Server host shared by launch spec, independent threads by lane.
+Main/workers/summaries/cancel use Driver events; settings select without pi.json.
+Open native candidate/inject_items initialization before binding commit.
+Actual CLI empty threads not persisted, so thread/start ID alone insufficient.
+
+`scripts/tests/codex-runtime.py` real Runtime/Codex0.159.1/local Responses,
+isolated HOME/CODEX_HOME, 0 host credentials/paid calls. Pass:
+
+- No-Pi config/restart before first message/turns/native restart continuation.
+- Migration/new epoch/dedupe no model/restart/missing files reject silent replacement.
+- Three main MCP turn identities; two workers/two manual schedule runs/main distinct thread IDs.
+- Cumulative delta/atomic baseline, missing baseline/rollback/incomplete remain unknown.
+- Stream cancel waits terminal; real sleep60 background stops before finish, process checked gone.
+- No subagents in schema; summary role prompt/no shell-apply_patch; unrelated inherited MCP disabled.
+
+Found MCP reuse: thread/resume retained previous-turn identity.
+After cleanup unsubscribe before next resume to reinitialize turn identity.
+
+Same tests pass offline ARM64-musl VM with image official CLI/cross Runtime.
+Evidence guest_acceptance: false means **real account/model/subscription unvalidated**,
+not absence of guest execution; VM has no user login.
+
+70 Runtime/1 protocol/10 App/7 Pi mocks pass;
+mise check pass. npm-lock build baseline in image, no runtime version lock.
+Issue#2 remains: Claude/AGY/codecs/full settings-onboarding/account matrix incomplete then.
+
+## 2026-10-05 native Claude CLI contract
+
+Original Claude2.1.289/temp HOME-CLAUDE_CONFIG_DIR/local Anthropic SSE;
+no host credentials/paid models. claude-runtime.py:
+
+- No-Pi select/turns/restart same UUID.
+- No-model idempotent migration/new epoch UUID/missing JSONL broken.
+- Two workers/two schedules independent; read-only summary no Bash-Write-Edit.
+- Explicit built-ins exclude Agent/Task/SendMessage/Cron; Pot MCP works.
+- Native background sleep60 stops before finish; cancelled model/process exit confirmed.
+-23 mock requests/no other models; turn cumulative usage/cache input/no double count.
+
+Old host build had auxiliary model/last-only usage/live background,
+not accepted. Help/init lifecycle compatibility,
+no fixed version; upgrades meet contract. Unconfirmed cancel/error keeps stop unconfirmed.
+Codex contract regression23 mocks passes; Claude real auth/expiry/rate limit/upgrades pending.
+
+### Official integration terms
+
+Read [Claude legal/compliance](https://code.claude.com/docs/en/legal-and-compliance)2026-10-05.
+Page permits original CLI preload/run under Commercial Terms, no binary modification/auth restriction;
+users authenticate/provider bills directly, no resale/subsidy/usage mediation. Distinguishes original subscription
+login from third-party credential collection. Pot original binary/official login/no token extraction;
+not Anthropic authorization/endorsement or substitute for distributor accepting terms.
+
+Linux ARM64-musl original2.1.289/latest Runtime nonroot same
+contract `.local/d1/claude-guest-20261005/data/claude-runtime.json`, 23 mocks.
+TCP reset/EOF both confirm cancel disconnect; summary allowlist/MCP authority,
+not plan mode which rejected read-only MCP. Every mock tool must succeed, final prose cannot mask rejection.
+Guest mounted latest Runtime; final bundled Runtime needs separate check.
+
+## 2026-10-05 native API codecs
+
+Responses/Messages/Gemini output caps/usage observers; Pi uses
+native APIs without translation. Installed Pi three mocks full turns validate
+paths/models/real-key injection/caps/cache/Gemini thinking accounting.
+message_start retains output reserve; message_delta cumulative replaces.
+All8 real_pi pass: DeepSeek/migration/cancel/budget/compact/workers-schedules.
+Real providers/compaction-checkpoint matrices pending; safe_checkpoint_resume false for new formats.
+
+Final Claude image `pot.local/sandbox:cd5858f99ca0649d32c6` bundled guest passes:
+`.local/d1/claude-guest-bundled-20261005/data/claude-runtime.json`, 23 mocks.
+Kernel logs identify npm termination as build container1GiB cgroup;
+explicit3GiB within4GiB VM fixes install/bundle, no user resource change.
+
+## 2026-10-05 API-only settings
+
+Shared API form/private save. Offline no-pi initial setup/
+auth/UUID dedupe/conflict-stale revision/blank same-endpoint key retention/mode0600/
+no public key/old binding endpoint stable.
+Three new codecs pass cold no-Pi/no-budget configuration.
+76 Runtime/1 protocol/8 real Pi offline pass; GUI compiles, interaction pending.
+
+## 2026-10-05 two-page onboarding / API-only GUI
+
+Isolated dev.pot.setup-check/setup-ui-check-20261005, running user Pot untouched.
+UI none-selected cannot continue/all-selected second page/same PTY;
+logged-out Codex blocked/API-only example.invalid/fake key saves to empty chat.
+API messages/requests0; Quit/restart completion/model persisted, still0.
+
+Initial main selection metadata only, session first real message; existing migration preflight retained.
+Codex/Claude host regressions23 mocks each pass.
+Preparation detects/reuses image tools; missing repair in Terminal or deselect/later.
+No real login/download-interruption/full themes.
+
+## 2026-10-05 settings/routing/lifecycle addendum
+
+- Profile edit/copy preserves main/worker fallback, explicit worker choice not overwritten.
+ Auth/unknown/revision/user-choice precedence regressions.
+- Fake session concurrency/filter/cancel cleanup failure/missing terminal.
+ Missing terminal stop unconfirmed, capacity retained.
+- Provider shared scope/isolation/global-local limits/manual resume/restart reservations/
+ rollback/wait-route cleanup; 8 real Pi mocks pass.
+- Codex/Claude wrapper argv23 mocks each pass,
+ managed conflicts rejected, no shell expansion.
+
+### AGY unresolved requirements
+
+Read official [headless](https://antigravity.google/docs/cli/headless/),
+[CLI reference](https://antigravity.google/docs/cli/reference/), 
+[subagents](https://antigravity.google/docs/subagents/), [MCP](https://antigravity.google/docs/mcp/)
+[Additional Terms](https://antigravity.google/terms), 2026-10-05.
+Structured events/usage/subagent tools documented, but help lacks
+accepted per-lane delegation disable/MCP/cancel cleanup combination; then disabled.
+Terms restrict third-party products; enterprise differs.
+Insufficient to establish permitted hosted original CLI use; distributor/provider confirmation needed.
+Terminal availability only, not technical/terms acceptance.
+
+82 Runtime/1 protocol/10 App/8 Pi mocks pass.
+mise check/build/bundle; image `pot.local/sandbox:4247db1d941e1045cb89`
+Codex/Claude23 mocks each including wrappers pass.
+Evidence `.local/d1/codex-guest-final-20261005/data` and
+`.local/d1/claude-guest-final-20261005/data`.
+
+Isolated final API profile-copy dedupe/binding stable/routing-provider saves/
+stale revisions rejected, 0 models. New routing/budget/task Change Agent compiles;
+Mac locked during interaction, unlock requested, not GUI accepted.
+Old onboarding evidence not new-page acceptance. Test Sandbox stopped normally via Helper.
+
+
+## 2026-10-05 clock triggers, auth failures, routing interaction
+
+Codex/Claude one-minute schedules wait for actual Runtime clock,
+no manual run; native session independent of main/two workers/two manual runs.
+Both host CLIs pass; original Codex bundled image passes updated contract
+(`.local/d1/codex-guest-clock-20261005/data/codex-runtime.json`).
+
+Mock401 then success validates visible failure,
+ready/native_incomplete/active unchanged native ID;
+next turn resumes without real auth access/change. Codex host/guest pass.
+Claude api_retry/authentication_failed previously retried minutes;
+Runtime verified SIGINT/waits terminal-exit before reauthentication message.
+Host auth recovery/nonretry400/redaction and continuation/cancel/background
+cleanup/workers/schedules pass, loopback only/0 paid.
+
+Unlocked isolated UI profile copy/background default/allowlist,
+concurrency2/provider4 saved; weekly15000/auto-resume saved.
+API persisted values/0 models. Truncated long permission explanation fixed/compiled;
+layout/task migration not retested to avoid interrupting user's login Terminal.
+Real auth/calls/full upgrades/themes pending, AGY unresolved then.
+
+
+## 2026-10-05 separate Terminal / real Codex account
+
+Updated#2 two sidebar buttons. Remove auth PTYs/login actions-commands/
+old Helper login RPC; reject old terminal request, legacy catalog login
+ignored on deserialize, never executed/returned. Official checks read-only.
+Preparation -> normal Assistant settings; empty tool selection allowed/no auto main.
+
+Isolated dev.pot.setup-check navigation/read-only Agent/empty selection/
+Set up later Terminal. Fresh independent-cold-ui-20261005 profiles/bindings
+empty, logged-out CLIs unselectable, usage0, Terminal available.
+Busy shell read survives Terminal-Sandbox navigation/status refresh,
+`POT_BUSY_NAV:KEPT_SHELL_INPUT`, no injected commands, focus restored.
+App NeedsAuth blocks main/guidance. Final UI/long explanation
+Mac locked, compilation/tests not GUI acceptance.
+
+Real user-authenticated guest Codex, gpt-6-luna:
+main pot_list_tasks MCP succeeds, two independent concurrent threads;
+read-only summary/metering, normal restart authenticated.
+Image `pot.local/sandbox:ff8c27149694187b0495` restart preserves epoch2/native
+`01a10962-c6ac-7331-8720-54ca5e80af90`, MCP continuation.
+Cancel active foreground sleep60 -> cancelled/turn cleared/ready;
+next same-thread turn succeeds, slot released.
+
+Summary omitted feature overrides failed to restore shell/files; explicitly
+set each turn/declare main permissions; host-guest regressions added.
+Earlier attempt before shell started retained as failure, not pass.
+Cancel incomplete unknown, not0; 9 native turn records,
+input255894/output1060/cache210432/unknown1, not zero-paid claim.
+Subscription native post-execution records not HTTP request counts.
+
+`setup-ui-check-20261005/workspace/product/issue2-account-{main,workers,resume,cancel,after-cancel}.json`.
+`independent-cold-ui-20261005/workspace/product/issue2-cold-ui.json`.
+Only test copy root switched; after Quit CUA auto-reopened default root,
+stopped without model/chat, then fixed LSEnvironment.
+Daily Pot untouched, no auth credentials/live SQLite reads.
+
+Final ff8c Codex35 loopback; d2bc Claude
+32 including clock/401-stop-resume/400-redaction/cancel.
+0 paid offline. Claude real login awaited then; AGY
+terms/isolation unconfirmed/disabled. Upgrade compatibility/download/theme/
+permission matrices incomplete, #2 not closable.
+
+
+Final snapshots read persisted driver/model before first turn, not old defaults;
+regression passes. Discovery reads versioned invocation, missing wrapper cannot borrow
+system CLI status; wrapper args unknown without arbitrary status execution.
+84 Runtime/1 protocol/11 App/mise check/build pass.
+8 Pi mocks retain earlier evidence, not claimed rerun.
+
+
+Final package `pot.local/sandbox:21841888feb8f142ea98`.
+Isolated copy restart displays Codex/gpt-6-luna before message;
+authenticated/same epoch-thread/usage9,
+0 new package-check models; Claude required/AGY unknown.
+`setup-ui-check-20261005/workspace/product/issue2-final-package.json`.
+No full final native/account rerun; ff8c/d2bc evidence scoped to those versions.
+
+
+## 2026-10-05 skip Claude account / compatibility / Terminal cleanup
+
+User has no Claude account; integrate/skip real testing. Driver/settings/
+read-only official status/guest original CLI retained, no login waiting/mock-as-real
+claim or auto-select logged-out Claude.
+
+Cache successful probes by launch config/executable metadata.
+Unchanged avoids per-turn help; replacement/reinstall rechecks, bounded cache/output/time,
+failed group stops. Missing/incompatible sets actionable needs_rebind before models;
+binding/session preserved, compatible restore/explicit retry same native ID.
+
+Host original2.1.289/mock extended36 requests,
+0 paid: two turns no repeat probe/restart once/wrapper replacement compatible-upgrade,
+missing flag/program no calls/restore same session; 401-400/
+workers/schedules/clock/read-only/cancel/cleanup pass.
+Simulated replacement is not all-vendor-version guarantee.
+
+terminal-runtime.py offline guest real foreground sleep/separate background
+groups/HUP-TERM-resistant shells/grandchildren stop after PTY close/normal
+Runtime exit; new boot/empty PTYs/usage0.
+terminal-tree-guest-20261005/data/terminal-runtime.json.
+Deliberate setsid daemon detachment outside, VM/D4 scope.
+
+Authorized real Codex one-minute schedule in existing isolated account root,
+actual clock only. Complete structured report/independent native thread,
+main epoch2/ID stable; immediately paused.
+Run input44197/output169/cache28160/unknown0; total
+10 turns/input300091/output1229/cache238592/unknown1.
+Real service, not0 paid; evidence
+setup-ui-check-20261005/workspace/product/issue2-account-clock.json, image218418.
+
+Mac locked, final send gate/long text/task migration UI untested.
+Skipped Claude account no longer blocker; AGY permission/isolation unresolved then.
+
+
+Final `pot.local/sandbox:5240639ea6342c173067` Claude guest
+36 loopback/77seconds import-unpack, paid0/account_acceptance false.
+claude-upgrade-guest-20261005/data/claude-runtime.json; same Terminal
+cleanup7seconds import-unpack.84 Runtime/1 protocol/
+mise check/build/bundle pass; App unchanged/11 not rerun.
+
+
+Isolated copy524063 restart read-only authenticated Codex/
+same epoch-thread/Claude required/paused schedules/10
+turns, no new models. Evidence
+setup-ui-check-20261005/workspace/product/issue2-claude-package.json.
+
+
+### 2026-10-05 AGY original CLI Driver (limited main chat)
+
+User requested original CLI/AgentDriver like Claude: agy_json profile,
+CLI-created binding/--conversation/final usage/SIGINT/
+Assistant settings; old run_agy removed. CLI own HOME/permissions, no credential reads;
+no validated official auth status, unknown.
+
+Host/image `pot.local/sandbox:fb8d9bcb06dacd38b387` fake contract pass:
+initial ID/continuation/restart/command missing-restore/error-invalid redaction/
+ID mismatch/post-result invalid output prevents success/usage once/cancel-resume.
+Then routing rejects AGY before launch; Driver rejects worker/read-only summary.
+Fake transport, not original model/tool acceptance.
+
+Fresh offline guest original smoke help controls/empty HOME/
+default model/no-TTY headless failure, 0 credentials/models.
+`.local/d1/agy-driver-auth2-guest-20261005/data/{agy-cli-smoke,agy-runtime}.json`;
+7seconds import-unpack; 88 Runtime/1 protocol/11 App,
+check/build/bundle pass; UI locked/untested.
+
+Unaccepted: real AGY account/model/original tool events/full cleanup/vendor terms.
+Custom agents/MCP not proven global-config isolated, missing strict Claude MCP/source
+flags; no task-MCP/subagent-disable/read-only claims, background disabled then. Selection
+or commands preserve worker default. Not full #2 AGY acceptance.
+
+
+### 2026-10-05 AGY roles under native CLI capabilities
+
+User accepted native tools/role-isolation differences, strict controls not prerequisite.
+Enable backgrounds/schedules/summaries with per-turn stdin roles, no enforced read-only claim.
+No Pot MCP/task-schedule tools; remove inherited
+POT_TASK_API/POT_TASK_TOKEN; CLI manages native config.
+Select/edit same native main-worker defaults;
+existing tasks stay bound, explicit AGY migration allowed.
+
+Different Drivers adapt Codex config/features,
+Claude tools-settings-MCP flags, AGY JSON/conversation/per-turn
+roles; shared session/event/usage/cancel, not uniform permissions.
+Strict isolation/MCP/native subagent disable false; routing only accepts tools under
+user policy, not exact_budget/live_steering/desktop; tests pass.
+
+Host/image `pot.local/sandbox:20ba6069212d23d28f93` fake regression:
+two workers distinct IDs/main stable/completion-summary/manual
+schedule independent worker/report plus continuation/restart/recovery/cancel/usage/redaction.
+Fixture verifies no Pot MCP argv/task API env.
+Same guest original help/empty-HOME failure smoke,
+8seconds import-unpack, model_calls0.
+`.local/d1/agy-roles-guest-20261005/data/{agy-runtime,agy-cli-smoke}.json`.
+88 Runtime/1 protocol/11 App/check-build-bundle pass.
+Real account/original background tools/UI unaccepted; fake not substitute.
+Updates prior disabled policy while retaining historical scope.
+
+
+### 2026-10-05 Agent/model attribution/categories
+
+request_routes agent/profile_id atomically with actual
+binding provider/epoch/hash at reservation/native turn. Group Agent+model,
+same model across Agents separate/same pair profiles-providers combined, detailed identity retained.
+Main/workers/schedules/compaction same ledger, cache/allowances/history unchanged.
+
+Idempotent schema upgrade; backfill only session/provider/epoch/hash/model match
+validated immutable bindings, otherwise unknown.
+Overview window/session lifetime, bounded20-item categories.
+App cards/pages, scope-range-zone reset/stale response rejection.
+
+92 Runtime/1 protocol/11 App/check-build-bundle pass.
+Cross-Agent same-model/window-scope/unknown-incomplete/dedupe/
+old upgrade-reopen/exact backfill/wrong session-epoch-hash/page totals tested.
+Host AGY extended fake passes, same
+`pot.local/sandbox:f3c82a6bfc6d743f28e8` offline guest8seconds import-unpack:
+main/two workers/schedule/summary agy+agy-mock, input-output-cache/
+requests-unknown match totals, profile_id agy-test.
+Original help/empty-HOME failure smoke, model_calls0.
+`.local/d1/agent-model-usage-guest-20261005/data/{agy-runtime,agy-cli-smoke}.json`.
+No real accounts; locked Mac prevented categories/pagination UI review.

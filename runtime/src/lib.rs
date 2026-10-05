@@ -1,41 +1,50 @@
-mod agent;
+//! Reusable backend application services. The executable and route assembly live in pot-server.
+pub mod agent;
 mod deepseek;
-mod discovery;
-mod gateway;
-mod orchestration;
-mod pi;
-mod schedules;
+pub mod discovery;
+pub mod gateway;
+pub mod orchestration;
+pub mod pi;
+pub mod schedules;
 mod store;
-mod tasks;
-mod terminal;
-mod tool_bridge;
-mod usage;
+pub mod tasks;
+pub mod terminal;
+pub mod tool_bridge;
+pub mod usage;
 use anyhow::{Result, anyhow, bail};
 use axum::{
-    Json, Router,
+    Json,
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::{
         IntoResponse,
         sse::{Event as SseEvent, KeepAlive, Sse},
     },
-    routing::{get, post},
 };
 use pot_protocol::*;
+mod bootstrap;
+pub use bootstrap::{Backend, RuntimeConfig, initialize};
+pub mod api {
+    pub use crate::usage as accounting;
+    pub use crate::{Service, authenticate, cancel, events_handler, send, snapshot, usage};
+    pub use crate::{
+        agent, discovery, gateway, orchestration, pi, schedules, tasks, terminal, tool_bridge,
+    };
+}
+#[cfg(test)]
+use axum::{
+    Router,
+    routing::{get, post},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     convert::Infallible,
     path::PathBuf,
-    process::Stdio,
     sync::{Arc, Mutex},
 };
 use store::{Store, id, now};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    process::Command,
-    sync::{broadcast, mpsc},
-};
+use tokio::sync::{broadcast, mpsc};
 
 struct Inner {
     store: Store,
@@ -44,7 +53,7 @@ struct Inner {
     model_requests: u64,
 }
 #[derive(Clone)]
-struct Service {
+pub struct Service {
     usage: Arc<Mutex<usage::Ledger>>,
     usage_scope: String,
     inner: Arc<Mutex<Inner>>,
@@ -60,11 +69,20 @@ struct Service {
     is_worker: bool,
     data: PathBuf,
     cancel_notify: Arc<tokio::sync::Notify>,
+    stop: tokio::sync::watch::Sender<bool>,
     tasks: Arc<Mutex<tasks::Hub>>,
     terminals: Arc<Mutex<terminal::Hub>>,
     codex: Arc<agent::codex::Hosts>,
 }
 impl Service {
+    fn stopping(&self) -> bool {
+        *self.stop.borrow()
+    }
+    async fn stop_requested(&self) {
+        let mut stop = self.stop.subscribe();
+        let _ = stop.wait_for(|stopping| *stopping).await;
+    }
+
     fn snapshot(&self) -> Result<Snapshot> {
         let s = self.inner.lock().unwrap();
         self.snapshot_locked(&s)
@@ -173,11 +191,11 @@ fn internal(e: anyhow::Error) -> (StatusCode, Json<ApiError>) {
         &e.to_string(),
     )
 }
-async fn snapshot(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Snapshot>> {
+pub async fn snapshot(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Snapshot>> {
     s.authorized(&h)?;
     Ok(Json(s.snapshot().map_err(internal)?))
 }
-async fn send(
+pub async fn send(
     State(s): State<Service>,
     h: HeaderMap,
     Json(req): Json<SendMessage>,
@@ -194,7 +212,7 @@ async fn send(
             "Invalid conversation, request ID or message",
         ));
     }
-    if s.commands.is_closed() {
+    if s.stopping() || s.commands.is_closed() {
         return Err(error(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_exited",
@@ -304,11 +322,11 @@ async fn send(
     }))
 }
 #[derive(Deserialize)]
-struct Cursor {
+pub struct Cursor {
     #[serde(default)]
     after: i64,
 }
-async fn events(
+pub async fn events(
     State(s): State<Service>,
     h: HeaderMap,
     Query(q): Query<Cursor>,
@@ -334,16 +352,16 @@ async fn events(
      let mut cursor=q.after;
      for event in history {cursor=event.cursor.unwrap_or(cursor);yield Ok::<_,Infallible>(SseEvent::default().id(cursor.to_string()).json_data(&event).unwrap());}
      yield Ok(SseEvent::default().event("snapshot").json_data(&initial).unwrap());
-     loop {match rx.recv().await {
+     loop {tokio::select! { event = rx.recv() => match event {
       Ok(event)=>{if event.cursor.is_some_and(|c|c<=cursor){continue;}let mut out=SseEvent::default().json_data(&event).unwrap();if let Some(c)=event.cursor{cursor=c;out=out.id(c.to_string());}yield Ok(out);},
       // Reconnect from a snapshot after lag; never silently lose durable messages.
       Err(_)=>break,
-     }}
+     }, _ = s.stop_requested() => break }}
     };
     Ok(Sse::new(stream)
         .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(5))))
 }
-async fn cancel(
+pub async fn cancel(
     State(s): State<Service>,
     h: HeaderMap,
     Json(req): Json<CancelTurn>,
@@ -377,7 +395,7 @@ async fn cancel(
     s.cancel_notify.notify_one();
     Ok(Json(json!({"stopping":inner.turn.is_some()})))
 }
-async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
+pub async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     let inner = s.inner.lock().unwrap();
     let budget = s.budget_for(&inner.store).map_err(internal)?;
@@ -394,7 +412,7 @@ async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>>
         json!({"requests":budget.as_ref().map(|b|b.used),"request_limit":budget.as_ref().map(|b|b.limit),"usage":serde_json::from_str::<Value>(&usage).unwrap_or(json!([]))}),
     ))
 }
-async fn authenticate(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
+pub async fn authenticate(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     Err(error(
         StatusCode::NOT_IMPLEMENTED,
@@ -402,218 +420,8 @@ async fn authenticate(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<
         "Use the guest AGY terminal to sign in, then restart the environment",
     ))
 }
-#[tokio::main]
-async fn main() -> Result<()> {
-    let data =
-        PathBuf::from(std::env::var("POT_DATA_DIR").unwrap_or_else(|_| "/data/product".into()));
-    std::fs::create_dir_all(&data)?;
-    let workspace =
-        PathBuf::from(std::env::var("POT_WORKSPACE").unwrap_or_else(|_| "/data/workspace".into()));
-    std::fs::create_dir_all(&workspace)?;
-    let provider_path = data.join("deepseek.json");
-    let pi_config = if data.join("pi.json").exists() {
-        Some(pi::Config::load(&data.join("pi.json"))?)
-    } else {
-        None
-    };
-    let use_pi = pi_config.is_some();
-    let use_api = !use_pi && provider_path.exists();
-    let api_budget = if let Some(c) = &pi_config {
-        Some(deepseek::BudgetSettings {
-            namespace: "pi-attempts",
-            data: data.clone(),
-            limit: c.request_limit,
-            max_output_tokens: c.max_tokens,
-        })
-    } else if use_api {
-        let config = deepseek::Config::load(&provider_path)?;
-        Some(deepseek::BudgetSettings {
-            namespace: "deepseek-attempts",
-            data: data.clone(),
-            limit: config.request_limit,
-            max_output_tokens: config.max_tokens,
-        })
-    } else {
-        None
-    };
-    let (events, _) = broadcast::channel(256);
-    let (commands, mut rx) = mpsc::unbounded_channel();
-    let s = Service {
-        usage: Arc::new(Mutex::new(usage::Ledger::open(&data.join("usage.sqlite"))?)),
-        usage_scope: "main".into(),
-        inner: Arc::new(Mutex::new(Inner {
-            store: Store::open(&data.join("pot.sqlite"))?,
-            engine: EngineStatus {
-                engine: if use_pi {"Pi · DeepSeek Flash"} else if use_api {"deepseek-v4-flash"} else {"agy-cli"}.into(),
-                phase: if use_pi || use_api {EnginePhase::Ready} else {EnginePhase::NeedsAuth},
-                detail: Some(
-                    if use_pi {"Pi tools and native session"} else if use_api {"API smoke test: at most 3 requests, 128 output tokens each"} else {"Sign in through the guest AGY terminal; if already signed in, send a message to verify access"}.into(),
-                ),
-                version: None,
-                auth_methods: vec![],
-            },
-            turn: None,
-            model_requests: 0,
-        })),
-        events,
-        commands,
-        token: id(),
-        boot: id(),
-        workspace,
-        api_budget,
-        pi: pi_config,
-        pi_program: std::env::var("POT_PI_BIN").unwrap_or_else(|_|"pi".into()),
-        pi_upstream: "https://api.deepseek.com/chat/completions".into(),
-        is_worker: false,
-        data,
-        cancel_notify: Arc::new(tokio::sync::Notify::new()),
-            tasks: Arc::new(Mutex::new(tasks::Hub::default())),
-            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-            codex: Arc::new(agent::codex::Hosts::default()),
-    };
-    let configured = agent::configured(&s) || use_api;
-    s.inner.lock().unwrap().store.set(
-        "agent.setup.pending",
-        if configured { "false" } else { "true" },
-    )?;
-    if configured {
-        s.phase(EnginePhase::Ready, None);
-    }
-    if !configured {
-        s.phase(
-            EnginePhase::NeedsAuth,
-            Some("请先配置主 Agent；Sandbox Terminal 可独立使用".into()),
-        );
-    }
-    s.usage
-        .lock()
-        .unwrap()
-        .import_legacy("main", &s.inner.lock().unwrap().store)?;
-    if usage::paused(&s)?.is_none() {
-        s.usage.lock().unwrap().clear_wait("main")?;
-    }
-    agent::initialize(&s)?;
-    agent::migration::sync_legacy_settings(&s).await?;
-    let worker = s.clone();
-    tokio::spawn(async move {
-        while let Some(mut req) = rx.recv().await {
-            let use_agent = agent::configured(&worker);
-            if use_agent && usage::paused(&worker).ok().flatten().is_none() {
-                req.text.push_str(&tasks::context(&worker));
-            }
-            let result = if use_agent {
-                agent::run(&worker, req).await
-            } else if use_api {
-                deepseek::run(&worker, req, &provider_path).await
-            } else {
-                Err(anyhow!("Configure a main Agent before sending messages"))
-            };
-            if let Err(e) = result {
-                worker.phase(EnginePhase::Failed, Some(e.to_string()));
-            }
-            if let Err(e) = usage::settle_cancelled_pause(&worker) {
-                worker.phase(EnginePhase::Failed, Some(e.to_string()));
-            }
-            worker.turn(None);
-        }
-    });
-    let router = Router::new()
-        .route("/api/v1/agents/tools", get(discovery::list))
-        .route("/api/v1/agents/refresh", post(discovery::refresh))
-        .route(
-            "/api/v1/terminals",
-            get(terminal::list).post(terminal::create),
-        )
-        .route("/api/v1/terminals/{id}/socket", get(terminal::connect))
-        .route("/api/v1/terminals/{id}/close", post(terminal::close))
-        .route(
-            "/api/v1/providers",
-            get(gateway::setup::get).post(gateway::setup::save),
-        )
-        .route(
-            "/api/pi/v1/chat/completions",
-            post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
-        )
-        .route(
-            "/gw/{provider}/{*path}",
-            post(gateway::routed_protocol)
-                .layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
-        )
-        .route("/api/pi/compactions", post(pi::compaction_event))
-        .route("/api/v1/orchestration", post(orchestration::invoke))
-        .route("/api/v1/mcp", post(tool_bridge::mcp))
-        .route(PATH_TASKS, get(tasks::list).post(tasks::create))
-        .route("/api/v1/tasks/query", get(tasks::query))
-        .route(
-            "/api/v1/schedules",
-            get(schedules::list).post(schedules::command),
-        )
-        .route("/api/v1/tasks/{id}", get(tasks::snapshot))
-        .route("/api/v1/tasks/{id}/messages", post(tasks::input))
-        .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))
-        .route(
-            "/api/v1/agent",
-            get(agent::inspect).post(agent::migration::settings),
-        )
-        .route("/api/v1/agent/migrate", post(agent::migration::migrate))
-        .route(
-            "/api/v1/agent/routing",
-            get(agent::routing::inspect).post(agent::routing::configure),
-        )
-        .route(PATH_SNAPSHOT, get(snapshot))
-        .route("/api/v1/usage", get(usage))
-        .route("/api/v1/usage/summary", get(usage::summary))
-        .route("/api/v1/usage/policy", post(usage::policy))
-        .route(
-            "/api/v1/usage/providers",
-            get(usage::providers::inspect).post(usage::providers::configure),
-        )
-        .route("/api/v1/usage/resume", post(usage::resume))
-        .route("/api/v1/usage/cancel", post(usage::cancel_wait))
-        .route(PATH_EVENTS, get(events_handler))
-        .route(PATH_MESSAGES, post(send))
-        .route(PATH_CANCEL, post(cancel))
-        .route(PATH_AUTHENTICATE, post(authenticate))
-        .with_state(s.clone());
-    let address =
-        std::env::var("POT_RUNTIME_BIND").unwrap_or_else(|_| format!("0.0.0.0:{RUNTIME_PORT}"));
-    let listener = tokio::net::TcpListener::bind(address).await?;
-    let endpoint = RuntimeEndpoint {
-        api_version: API_VERSION,
-        port: listener.local_addr()?.port(),
-        token: s.token.clone(),
-        boot_id: s.boot.clone(),
-    };
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let path = s.data.join(RUNTIME_ENDPOINT_FILE);
-    let temp = path.with_extension("tmp");
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&temp)?;
-    f.write_all(&serde_json::to_vec(&endpoint)?)?;
-    std::fs::rename(temp, &path)?;
-    orchestration::initialize(&s)?;
-    tasks::restore(&s)?;
-    tasks::start(s.clone());
-    eprintln!("pot runtime listening on {}", listener.local_addr()?);
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            let mut term =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("signal handler");
-            tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
-            terminal::shutdown(&s).await;
-            s.codex.shutdown().await;
-        })
-        .await?;
-    Ok(())
-}
 // Keep the endpoint name distinct from the broadcast sender in main.
-async fn events_handler(
+pub async fn events_handler(
     s: State<Service>,
     h: HeaderMap,
     q: Query<Cursor>,
@@ -656,6 +464,7 @@ mod tests {
             is_worker: false,
             data: PathBuf::new(),
             cancel_notify: Arc::new(tokio::sync::Notify::new()),
+            stop: tokio::sync::watch::channel(false).0,
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
             codex: Arc::new(agent::codex::Hosts::default()),

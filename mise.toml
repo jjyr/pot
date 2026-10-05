@@ -37,8 +37,8 @@ description = "Run formatting, script and Rust compilation checks"
 depends = ["lint", "check:rust", "check:swift"]
 
 [tasks.test]
-description = "Run core Runtime and protocol tests without model calls"
-run = "cargo test --locked -p pot-runtime -p pot-protocol -j 4"
+description = "Run backend crate tests without model calls"
+run = "cargo test --locked -p pot-core -p pot-storage -p pot-driver -p pot-gateway -p pot-runtime -p pot-server -p pot-protocol -j 4"
 
 [tasks."test:app"]
 run = "cargo test --locked -p pot-app -j 4"
@@ -56,3 +56,7 @@ run = "scripts/pot open"
 description = "Compile Helper executables without starting a VM"
 run = "swift build -c release --package-path helper --disable-sandbox --scratch-path .local/d1/helper-build --force-resolved-versions -j 4"
 env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/d1/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/d1/clang-modules" }
+
+[tasks.server]
+description = "Run the standalone backend without App or Helper"
+run = "cargo run --locked -p pot-server"

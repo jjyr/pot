@@ -1,14 +1,14 @@
-# Sandbox 成品镜像验收
+# Completed Sandbox image acceptance
 
-日期：2026-10-04，Apple Silicon 本地 VM。实现与体积口径见 [Sandbox 镜像](../sandbox-image.md)。本次未调用真实模型，已有请求账本保持 27。
+Date: 2026-10-04, local Apple Silicon VM. See [Sandbox image](../sandbox-image.md) for implementation/size metrics. No real models called; existing request ledger stays 27.
 
-- Swift Helper / ImageBuilder / ImageCheck 优化构建通过；Python AST、shell 语法和 `git diff --check` 通过。
-- 在独立镜像仓库和全新 `/data` 中导入 App 随附镜像；VM 设置 `networking: false`。桌面、broker、Chromium CDP、Runtime 与 Pi 0.87.1 启动成功，不运行 apk/npm 安装；SIGTERM 后确认 Chromium 退出标记。
-- 中日韩字体检查覆盖简体、繁体、日文假名/汉字、韩文 Hangul/Hanja 示例。已有 UI 验证确认这些字符及 emoji 在终端可见；不代表全 Unicode 覆盖或 IME 输入法验收。
-- 原 Fluxbox 与 Xfce 的 APK 元数据比较：归档增加 21,073,898 bytes，安装增加 52,451,059 bytes；不把基础 Alpine 层和完整桌面镜像直接比较。
+- Optimized Swift Helper/ImageBuilder/ImageCheck builds pass; Python AST, shell syntax, `git diff --check` pass.
+- Import App image into separate store/fresh `/data`; VM `networking: false`. Desktop/broker/Chromium CDP/Runtime/Pi 0.87.1 start without apk/npm installation; Chromium exit marker confirmed after SIGTERM.
+- CJK font checks cover simplified/traditional Chinese, Japanese kana/kanji, Korean Hangul/Hanja. UI evidence confirms characters/emoji in terminal, not full Unicode/IME acceptance.
+- Fluxbox/Xfce APK metadata: archives increase 21, 073, 898 bytes, installed size 52, 451, 059 bytes; do not compare base Alpine layer directly with full desktop image.
 
-本地证据在 `.local/d1/xfce-check/` 与 `.local/d1/offline-image-check*/data/`；不提交用户数据、日志中的 token 或构建产物。
+Local evidence: `.local/d1/xfce-check/`, `.local/d1/offline-image-check*/data/`; do not commit user data/log tokens/build artifacts.
 
-最终镜像 `pot.local/sandbox:989970b5d23191baf89f`：无网络完整检查（含导入/解包、服务检查、正常退出）冷启动 10 秒，复用数据再启动 8 秒。修复了旧数据目录残留 socket 引起的递归 chown 失败。最终 App 内确认暖白 Pot 背景、三项右键菜单、Thunar 和终端可用，简繁中文、日文、韩文与 emoji 显示正常；既有任务与配置可继续读取。
+Final image `pot.local/sandbox:989970b5d23191baf89f`: offline full check (import/unpack/services/normal exit) cold 10 seconds, reused-data startup 8 seconds. Fixed recursive chown failure from stale sockets. Final App confirms warm-white background/three context-menu apps/Thunar/terminal, CJK/emoji rendering; existing tasks/configuration readable.
 
-启动栏修正：无网络检查新增 `xfce4-panel` 进程断言。实际 App 已验证 Browser 关闭后重开、Files 打开工作目录、Terminal 启动及浏览器最小化后的窗口恢复。旧用户目录通过独立 panel 版本标记迁移，不重置原主题配置。
+Launcher fix: offline check asserts `xfce4-panel`. Actual App validates Browser close/reopen, Files workspace, Terminal, minimized browser restoration. Independent panel-version marker migrates old user directories without resetting themes.

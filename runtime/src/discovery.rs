@@ -1,8 +1,9 @@
 //! Explicit, bounded official status discovery. Never reads native auth files.
 use crate::*;
 use serde::{Deserialize, Serialize};
-use std::{os::unix::fs::PermissionsExt, time::Duration};
+use std::{process::Stdio, time::Duration};
 use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CommandSpec {
     pub executable: String,
@@ -46,19 +47,7 @@ pub fn tools(s: &Service) -> Result<Vec<Tool>> {
     }
     Ok(tools)
 }
-pub fn executable(name: &str) -> Option<PathBuf> {
-    let check = |p: PathBuf| {
-        p.metadata()
-            .ok()
-            .filter(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            .map(|_| p)
-    };
-    if name.contains('/') {
-        return check(PathBuf::from(name));
-    }
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .find_map(|p| check(p.join(name)))
-}
+pub use pot_driver::executable;
 pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     Ok(Json(json!({"tools":tools(&s).map_err(internal)?})))

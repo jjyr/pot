@@ -5185,6 +5185,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "pot-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "pot-driver"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "libc",
+ "pot-core",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "pot-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pot-storage",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pot-protocol"
 version = "0.1.0"
 dependencies = [
@@ -5203,7 +5238,11 @@ dependencies = [
  "chrono-tz",
  "futures",
  "libc",
+ "pot-core",
+ "pot-driver",
+ "pot-gateway",
  "pot-protocol",
+ "pot-storage",
  "reqwest",
  "rusqlite",
  "serde",
@@ -5211,6 +5250,34 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
+name = "pot-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "pot-protocol",
+ "pot-runtime",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "pot-storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "chrono-tz",
+ "pot-core",
+ "pot-protocol",
+ "rusqlite",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 

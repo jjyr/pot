@@ -2,8 +2,8 @@ pub(super) mod agy;
 pub(super) mod claude;
 pub(super) mod codex;
 pub(super) mod driver;
-pub(super) mod migration;
-pub(super) mod routing;
+pub mod migration;
+pub mod routing;
 pub(super) mod transcript;
 // Runtime owns profile snapshots and bindings; engines own native context.
 mod model;

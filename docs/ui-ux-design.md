@@ -1,110 +1,110 @@
-# Pot UI 规范
+# Pot UI specification
 
-更新：2026-10-04。本文是当前 MVP 的界面规范；历史验收见 [UI 验证](validation/ui-ux.md)，能力范围见 [开发计划](development-plan.md)。
+Updated: 2026-10-04. Current MVP UI specification; see [UI validation](validation/ui-ux.md) for historical acceptance and [Development plan](development-plan.md) for scope.
 
-## 统一布局
+## Shared layout
 
-任务、设置、Sandbox 使用 **gpui-kit 0.7.0**（gpui-pre 0.3.7）。共享布局定义在 `app/src/ui.rs`，新页面直接复用，避免分别维护颜色和尺寸。
+Tasks, settings, and Sandbox use **gpui-kit 0.7.0** (gpui-pre 0.3.7). Shared layout lives in `app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
 
-| 元素 | 规范 |
+| Element | Specification |
 | --- | --- |
-| 侧栏 | 56 px，仅图标；hover 提示名称，选中/hover 有背景 |
-| 页面 | `ui::page(cx)`：预留侧栏，使用 Kit 主题背景与文字色 |
-| 普通内容 | `ui::content()`：居中，最大宽 820 px，内边距 32 px，区块间距 20 px |
-| 标题 / 说明 | `ui::title()`：24 px 半粗；`ui::hint()`：13 px 次要文字 |
-| 卡片 | `ui::card(cx)`：20 px 内边距、8 px 圆角、1 px 主题边框 |
-| 表单 | Kit `Form::horizontal().label_width(px(160.))` + `Field` + `Input` |
-| 操作 | Kit `Button`：主要操作用 `primary()`，次要操作用 `ghost()` |
-| 图标操作 | Kit `IconName`，同时提供 tooltip 和 accessibility label |
-| 列表 | Kit `ListItem`，使用同样的卡片边框、圆角、20 px 内边距 |
+| Sidebar | 56 px, icons only; name tooltips, selected/hover backgrounds |
+| Page | `ui::page(cx)`: reserves sidebar, uses Kit theme background/text |
+| Standard content | `ui::content()`: centered, max 820 px, 32 px padding, 20 px section spacing |
+| Title / hint | `ui::title()`: 24 px semibold; `ui::hint()`: 13 px secondary text |
+| Card | `ui::card(cx)`: 20 px padding, 8 px radius, 1 px themed border |
+| Form | Kit `Form::horizontal().label_width(px(160.))` + `Field` + `Input` |
+| Actions | Kit `Button`: `primary()` for primary, `ghost()` for secondary |
+| Icon actions | Kit `IconName` with tooltip and accessibility label |
+| List | Kit `ListItem` with shared card border/radius/20 px padding |
 
-颜色优先取 `cx.theme()` 的 background、foreground、muted_foreground、border、secondary；状态色才使用绿色、琥珀色、红色。选中背景不能只靠 hover。浅色、深色、跟随系统在通用设置中切换。
+Prefer `cx.theme()` background, foreground, muted_foreground, border, secondary; reserve green/amber/red for status. Selection backgrounds must not depend solely on hover. General settings switch light/dark/system appearance.
 
-内容区域滚动，标题和主要导航保留。最小窗口 800 × 700；表单较长时必须能滚动到操作按钮。
+Content scrolls while titles/main navigation remain. Minimum window 800 x 700; long forms must scroll to action buttons.
 
-## 页面与交互
+## Pages and interactions
 
-- **聊天**：Pot 图标就是聊天入口，无中央头像。用户蓝色气泡、助手中性气泡；消息下方统一放置小图标操作栏：复制在左，关联任务的「查看任务」在右，均有 tooltip。最新一条助手回复在空闲时显示操作栏，历史消息与用户消息仅 hover 显示；预留栏高，避免 hover 引发消息位移。「最新消息」使用与原生输入框相同的宽度与居中规则，贴合输入框上沿，整条可点击；点击立即隐藏。保留原生输入法与编辑快捷键。切换已打开的对话先显示缓存，再后台刷新。
-- **任务**：标题、三个状态分组及搜索固定在上方；不提供手动新建入口，任务由主 Agent 创建；中部仅任务列表滚动，底部分页固定。默认“进行中”（排队/执行中）；“需处理”（失败/中断）；“已归档”（完成/取消）。分组显示全局数量，搜索在当前分组内按标题/编号匹配，每页 20 项，按最近状态变更排序。卡片保留具体阶段与待处理指导数；归档任务进入独立对话后追加指导会重新排队。切换分组/搜索回到第一页，查询失败、无匹配和加载中分别显示明确文案。使用 Kit Input、Button、ListItem；运行任务检查使用全局计数，不依赖当前页是否显示它。并发数从 Agent 设置读取，默认 5。
-- **任务对话页头**：返回入口独立一行；标题单行显示，超出宽度以 `…` 省略，hover 使用 Kit Tooltip 展示可换行的完整标题（最大宽 480 px）。底层保留完整标题，旧版 48 字截断标题从原始任务首行恢复。下方同一行展示阶段、归档和累计 token，统一小图标与次要文字色；token 可点击查看明细。页头不随对话滚动，内容最大宽 760 px，与消息对齐。任务列表标题采用相同省略与全文提示。
-- **定时计划**：复用任务页的「任务 / 定时计划」导航、Kit Button、Form、Field、Input 和共享卡片。列表底部分页固定，与任务页一致：左侧显示总数和页码，右侧显示上一页/下一页。详情显示下次执行、状态和分页历史；历史可打开独立任务。计划只通过主 Agent 创建，页面不提供新建入口；已有计划的编辑表单可滚动，保存/取消固定；包含时区、频率、通知、错过策略。暂停/删除不取消当前执行，删除二次点击确认。规则见 [定时计划](scheduled-tasks.md)。
-- **用量**：只展示整体统计和图表，范围为最近 7 / 30 / 90 天、最近一年。无粒度选择器，年视图自动按 7 天聚合。任务和主聊天用量位于各自会话内，归档保留。详情采用单页：累计统计、模型消耗横向堆叠条（对话 / 压缩，真实 token 与比例，hover 明细）、工具输出排行（估算 token、调用次数，共用横条尺度，默认前 5 项，可展开全部）。隐藏零消耗压缩段与空工具区，不提供页签、逐次请求列表或 Skills 统计。工具输出不得与模型消耗相加。未配置 Pot 周期限额时隐藏额度卡。实际计量、估算与恢复规则见 [Token 用量](token-usage.md)。
-- **设置**：通用 / 助手 / Agent / Sandbox 四个分组，复用同一表单结构。助手设置明确选择 Codex、Claude、AGY 或 Pi/API；Agent 设置只读检测状态和编辑调用命令。API key 属于模型服务；只展示真实支持的选项。用量限制按需展开。环境/工具准备后复用普通助手设置。通用设置只保留外观与快捷键，不显示“窗口与后台”“未读消息”说明。
-- **Sandbox**：Kit 标题和工具栏高 112 px，桌面占满余下空间；不限制为 820 px，优先留出操作空间。连接圆点绿色，文字在 hover 提示。接管是主要操作，环境信息、重连、设置、更多使用图标。环境信息显示镜像、状态、CPU、内存、系统盘和工作文件大小。
-- **Tray**：一个 Pot 锅形状态图标，点击直接打开窗口；没有菜单。未读数显示在图标旁。关闭窗口继续后台运行，Quit 正常停止环境。
+- **Chat**: Pot icon opens chat; no central avatar. Blue user/neutral assistant bubbles. Small action bar below messages: Copy left, linked View task right, both with tooltips. Latest assistant actions show when idle; historical/user actions show on hover. Reserve height to avoid movement. Latest messages shares native input width/centering, sits above it, is fully clickable, and hides immediately on click. Preserve native IME/edit shortcuts. Opened conversations show cache before background refresh.
+- **Tasks**: fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running), Needs attention (failed/interrupted), Archived (completed/cancelled). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Cards retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Agent settings concurrency defaults to 5.
+- **Task conversation header**: separate back row; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore old 48-character truncation from original task first lines. One row below shows stage/archive/cumulative tokens using small icons/secondary text; tokens open details. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
+- **Schedules**: reuse Tasks / Schedules navigation, Kit Button/Form/Field/Input/cards. Fixed bottom pagination matches tasks: total/page left, previous/next right. Details show next run/state/paginated history linking to tasks. Main Agent creates schedules; no manual creation. Existing edit forms scroll with fixed save/cancel and include zone/frequency/notification/missed policy. Pause/delete preserves current runs; second click confirms deletion. See [Scheduled tasks](scheduled-tasks.md).
+- **Usage**: overall statistics/charts only, last 7/30/90 days/year. No granularity selector; year automatically aggregates 7-day groups. Task/main usage belongs in each conversation and survives archive. Single-page details: totals, horizontal model stacks (conversation/compaction, real tokens/proportions/hover), tool rankings (estimated tokens/calls, shared scale, top 5 expandable). Hide zero compaction/empty tools; no tabs/per-request lists/Skills stats. Never add tool output to model consumption. Hide allowance cards without periodic limits. See [Token usage](token-usage.md).
+- **Settings**: General / Assistant / Agent / Sandbox share forms. Assistant explicitly selects Codex/Claude/AGY/Pi-API; Agent checks read-only status/edits launch commands. API keys belong to model services; show supported options only. Expand limits on demand. Reuse normal Assistant settings after environment/tool preparation. General contains appearance/shortcuts without Window and background/Unread messages explanations.
+- **Sandbox**: Kit title/toolbar 112 px; desktop fills remaining space without the 820 px cap. Green connection dot with hover text. Take over is primary; environment/reconnect/settings/more are icons. Environment displays image/state/CPU/memory/system disk/work-file sizes.
+- **Tray**: one pot-shaped status icon; click opens window, no menu. Unread count beside icon. Window close keeps background work; Quit stops the environment normally.
 
-## 实现边界
+## Implementation boundaries
 
-- Rust / Kit：聊天、任务、设置、Sandbox 标题/工具栏及未就绪状态。
-- Swift：窗口、侧栏、tray、原生聊天输入框、配置读写与环境生命周期；`SettingsPanel.swift` 仅作为配置服务，不再绘制设置页面。重启确认继续使用原生 sheet；Sandbox“更多”使用 NSMenu，按窗口坐标锚定工具栏右边缘，避免网页弹层受 WebView 顶部边界限制。
-- WKWebView / noVNC：桌面画布、环境信息、剪贴板和显示比例；独立 viewer 保留网页更多菜单。这些保留网页实现以复用独立 viewer；使用中性配色、8 px 控件圆角、13–14 px 正文，与应用主题同步。应用内隐藏网页标题栏，避免重复工具栏。
+- Rust / Kit: chat, tasks, settings, Sandbox title/toolbar, unready states.
+- Swift: window/sidebar/tray/native chat input/configuration/lifecycle. `SettingsPanel.swift` is configuration service only, not settings rendering. Restart confirmation uses native sheets; Sandbox More uses NSMenu anchored to toolbar right in window coordinates, avoiding WebView popup clipping.
+- WKWebView / noVNC: desktop canvas/environment/clipboard/scaling. Standalone viewer retains its web More menu; shared web implementations use neutral colors, 8 px radii, 13-14 px text, synchronized themes. Hide web title bar in App to avoid duplicate toolbars.
 
-Rust 通过 `pot_bridge_ui` 读取非敏感状态，通过 `pot_bridge_command` 发送白名单操作。保存的密钥不回传界面；用户输入用 masked Input，留空保留原值。表单仅在配置 revision 变化时同步，后台刷新不能覆盖未保存输入。保存前校验范围、运行中任务和连接状态，确认后正常停机、原子写入并重启。
+Rust reads nonsensitive state through `pot_bridge_ui` and sends allowlisted operations via `pot_bridge_command`. Saved keys never return to UI; masked Input accepts new keys, blank preserves existing. Sync forms only on configuration revision changes; background refresh must preserve unsaved input. Validate ranges/active tasks/connection before save; after confirmation, stop normally, write atomically, restart.
 
-## 新增界面的方法
+## Adding UI
 
-1. 从 `ui::page(cx).child(ui::content()…)` 开始，复用 title、hint、card。
-2. 优先找 Kit 的 Button、Form、Field、Input、ListItem；不要新写一套 AppKit/HTML 普通设置控件。
-3. 将输入状态保存在 Entity 中；渲染只读取状态，后台任务通过更新通知重绘。
-4. 图标按钮提供名称、tooltip、禁用态；耗时操作显示进度，失败给出可恢复提示。
-5. 验收浅/深色、最小窗口、滚动、键盘输入/粘贴、切页后的草稿和错误状态；纯 UI 变更无需调用模型。
+1. Start with `ui::page(cx).child(ui::content()...)` and reuse title/hint/card.
+2. Prefer Kit Button/Form/Field/Input/ListItem over new AppKit/HTML standard settings widgets.
+3. Store input state in Entity; render reads state, background updates notify redraw.
+4. Icon buttons have names/tooltips/disabled states; slow actions show progress and recoverable failures.
+5. Validate light/dark/minimum window/scroll/keyboard/paste/drafts after navigation/errors; UI-only changes need no model calls.
 
 ```rust
 ui::page(cx).child(
     ui::content()
-        .child(ui::title("页面名称"))
-        .child(ui::hint("一句话说明", cx))
+        .child(ui::title("Page name"))
+        .child(ui::hint("One-sentence description", cx))
         .child(ui::card(cx).child(form))
 )
 ```
 
-## 配置额度
+## Allowance configuration
 
-默认值面向日常任务，旧配置保留显式值；可在设置中调整并重启生效。
+Defaults suit everyday tasks; preserve explicit old values. Settings changes apply after restart.
 
-| 设置 | 默认 | 可设置范围 |
+| Setting | Default | Range |
 | --- | --- | --- |
-| 同时处理的后台任务 | 5 | 1–1,000；超出排队，主聊天独立 |
-| 累计模型请求 | 10,000 | 0–1,000,000；0 禁止请求，账本不重置 |
-| 每次输出 tokens | 8,192 | 自定义正整数，支持 K/M（含小数，如 1.5M） |
-| 每轮模型请求 | 100 | 1–1,000 |
+| Concurrent background tasks | 5 | 1-1, 000; excess queues, main chat separate |
+| Lifetime model requests | 10, 000 | 0-1, 000, 000; 0 disables requests, ledger retained |
+| Output tokens per request | 8, 192 | Positive integer, K/M supported including decimals such as 1.5M |
+| Model requests per turn | 100 | 1-1, 000 |
 | Sandbox vCPU | 4 | 1–32 |
-| Sandbox 内存 | 8 GiB | 1–128 GiB |
-| Sandbox 系统盘 | 32 GiB | 4–512 GiB |
+| Sandbox memory | 8 GiB | 1-128 GiB |
+| Sandbox system disk | 32 GiB | 4-512 GiB |
 
-资源上限仍受本机硬件与虚拟化平台约束；界面、Swift 配置服务、helper、Runtime、导入脚本的范围需同时更新。
+Resource maxima remain constrained by hardware/virtualization. Update UI, Swift configuration, Helper, Runtime, and import-script ranges together.
 
-Token 输入按十进制：1K=1,000，1M=1,000,000；保存为整数。取消产品层面的 32K 上限，只保留跨 Pi/JSON 的精确整数边界（2^53−1），拒绝零、负值、非整数结果和溢出。模型的上下文容量与单次输出上限是不同参数，服务端可能拒绝超出其支持范围的请求。
+Token input is decimal: 1K=1, 000, 1M=1, 000, 000, stored as integers. Remove the product 32K cap; retain exact Pi/JSON integer bound (2^53-1), rejecting zero/negative/fractional results/overflow. Model context and output limits differ; servers may reject unsupported ranges.
 
-## Sandbox 桌面
+## Sandbox desktop
 
-内嵌 noVNC 使用暖白、精简 Xfce 桌面，与 Pot 的克制风格一致。底部常驻栏直接显示 Browser、Files、Terminal，并提供窗口切换；右键菜单保留相同入口。CJK 字体覆盖中日韩。桌面软件随成品镜像预装，构建与主题入口见 [Sandbox 镜像](sandbox-image.md)。
+Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent bottom Browser/Files/Terminal launchers/window switching and matching context menu. CJK fonts cover Chinese/Japanese/Korean. Software is preinstalled; see [Sandbox image](sandbox-image.md) for build/theme entries.
 
-设置导航为“通用 / 助手 / Agent / Sandbox”。Agent 页面显示各 CLI 安装/官方登录状态、刷新入口及当前 profile 的可执行文件/argv 编辑；命令保存走 profile revision，不发模型测试。
-Terminal 和 Sandbox 是左侧两个独立入口。Sandbox 只显示桌面及环境控制；Terminal
-连接同一 Runtime-owned PTY，独立于 noVNC、主 Agent 和首次设置。导航/重连不注入命令；
-关闭终端是独立操作。Agent 设置提供只读安装/认证状态、刷新、普通打开 Terminal 与调用命令编辑，
-没有可点击登录状态、登录命令字段、专用登录 PTY 或认证向导。用户自行在 Terminal 操作原生 CLI。
+Settings navigation: General / Assistant / Agent / Sandbox. Agent shows CLI installation/official login status, refresh, current profile executable/argv editing. Command saves use profile revisions without model tests.
+Terminal and Sandbox are independent sidebar entries. Sandbox contains desktop/environment controls; Terminal
+connects to the same Runtime-owned PTY independently of noVNC/main Agent/first setup. Navigation/reconnect injects no commands;
+terminal close is separate. Agent settings offers read-only installation/auth, refresh, ordinary Open Terminal, and launch command editing,
+without clickable login status/login-command fields/dedicated auth PTYs/wizards. Users operate native CLIs in Terminal themselves.
 
-首次启动只准备环境与选择工具，然后进入普通助手设置，明确选择主 Agent 或配置 API。
-稍后设置仍可使用 Terminal、Sandbox 与设置；未选择主 profile 不执行聊天/任务。
-已知未登录和检查失败的 CLI 不可选；unknown 不冒充已登录，已验收 CLI 可由用户明确选择。
-刷新不自动选择后端，不发送付费测试或创建原生主会话；首次真实消息才创建会话。
-工具选择和完成状态按数据目录保存，不保存输入密钥。Agent 设置的“安装其他 Agent”复用工具准备。
+First launch prepares environment/tools, then normal Assistant settings explicitly choose a main Agent or configure API.
+Set up later still permits Terminal/Sandbox/settings; without a main profile no chat/tasks execute.
+Known logged-out/check-failed CLIs are unavailable; unknown does not mean logged in, and accepted CLIs require explicit selection.
+Refresh neither selects backends automatically nor sends paid tests/creates native main sessions; the first real message creates one.
+Tool selection/completion persist per data directory, not entered keys. Install other Agents reuses preparation.
 
-任务路由设置列出已保存的 profile，可编辑/复制模型配置、选择后台默认、允许 Agent 指定的
-profile 白名单，以及 profile/provider 的后台并发上限。API provider 可配置独立日/周 Token
-额度，与全局额度同时生效；CLI 订阅只显示事后用量能力。任务会话中的“更换 Agent”打开
-同一设置页并显示迁移对象，提交只迁移该任务；普通设置入口作用于主会话。
-
-
-AGY 助手入口支持主聊、后台任务、计划和结果汇总，模型名称由用户填写。用户接受原版
-CLI 工具权限，角色由每轮提示词约束，汇总不宣称强制只读。Pot 不向 AGY 提供任务创建、
-计划管理或其他编排工具；选择 AGY 会同步设置主聊和后台默认 profile。
-AGY 无已验证的官方只读登录查询，状态显示“未知”，不发送模型探测请求。
+Routing settings list saved profiles for model edit/copy, background defaults, Agent-selectable
+profile allowlists, and profile/provider background concurrency limits. API providers configure daily/weekly token
+allowances alongside global limits; CLI subscriptions show post-execution metering only. Change Agent in task chat opens
+the same settings with migration target; save migrates only that task, while normal settings target main chat.
 
 
-用量总览和会话用量详情都显示“Agent / 模型用量”：按 Pi、Codex、Claude、AGY 与模型
-组合展示输入、输出、输入中的缓存命中及不完整记录数；旧归属缺失显示“Agent 未知”。
-总览分类随选定时间范围变化，详情为当前会话累计；每页 20 项，提供上一页/下一页。
-分类翻页不改变总量、趋势及额度，切换范围/会话/时区重置页码。
+AGY supports main/background/schedules/summaries with user-entered models. Users accept original
+CLI permissions; per-turn prompts constrain roles, with no enforced read-only summary claim. Pot gives AGY no task creation,
+schedule management, or other orchestration tools. Selecting AGY sets main/background default profiles together.
+AGY has no validated official read-only login query; show Unknown without model probes.
+
+
+Global/session usage both show Agent / model usage grouped by Pi/Codex/Claude/AGY and model,
+including input/output/input-cache/incomplete records; missing legacy attribution shows Unknown Agent.
+Global categories follow selected ranges; details use session totals, 20/page with previous/next.
+Category pages do not change totals/trends/allowances; range/session/zone changes reset pages.
