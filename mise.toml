@@ -19,7 +19,7 @@ run = "python scripts/dev-check doctor"
 
 [tasks.setup]
 description = "Prepare Rust components and install repository-local Git hooks"
-run = ["rustup component add rustfmt", "rustup target add aarch64-unknown-linux-musl", "hk install --mise", "mise run doctor"]
+run = ["rustup component add rustfmt clippy", "rustup target add aarch64-unknown-linux-musl", "hk install --mise", "mise run doctor"]
 
 [tasks.fmt]
 description = "Format Rust, Swift, Python and Shell sources"
@@ -32,16 +32,39 @@ run = "python scripts/dev-check lint"
 [tasks."check:rust"]
 run = "cargo check --workspace --locked -j 4"
 
+[tasks.clippy]
+description = "Lint every Rust workspace target, treating warnings as errors"
+run = "cargo clippy --workspace --all-targets --locked -j 4 -- -D warnings"
+
+[tasks."clippy:backend"]
+description = "Lint portable backend targets without the macOS App"
+run = "cargo clippy --workspace --exclude pot-app --all-targets --locked -j 4 -- -D warnings"
+
 [tasks.check]
 description = "Run formatting, script and Rust compilation checks"
 depends = ["lint", "check:rust", "check:swift"]
 
 [tasks.test]
 description = "Run backend crate tests without model calls"
-run = "cargo test --locked -p pot-core -p pot-storage -p pot-driver -p pot-gateway -p pot-runtime -p pot-server -p pot-protocol -j 4"
+run = "cargo test --locked -p pot-core -p pot-storage -p pot-driver -p pot-agent -p pot-gateway -p pot-runtime -p pot-server -p pot-protocol -p pot-eval -j 4"
 
 [tasks."test:app"]
 run = "cargo test --locked -p pot-app -j 4"
+
+[tasks."test:eval"]
+description = "Run deterministic CLI contracts without credentials or model calls"
+run = """
+set -eu
+eval_root=$(mktemp -d "${TMPDIR:-/tmp}/pot-eval-ci.XXXXXX")
+trap 'rm -rf "$eval_root"' EXIT
+cargo run --locked -p pot-eval -- suite deterministic "$eval_root/suite"
+for scenario in short-chat tool-round compaction; do
+  cargo run --locked -p pot-eval -- run "eval/scenarios/$scenario.json" "$eval_root/$scenario"
+  cargo run --locked -p pot-eval -- validate "$eval_root/$scenario"
+done
+cargo run --locked -p pot-eval -- run eval/scenarios/compaction.json "$eval_root/compaction-repeat"
+cargo run --locked -p pot-eval -- compare "$eval_root/compaction" "$eval_root/compaction-repeat"
+"""
 
 [tasks.prepare]
 run = "scripts/pot prepare"

@@ -7,29 +7,28 @@ mkdir -p /cache/apk /cache/npm
 # shellcheck disable=SC2046
 apk --cache-dir /cache/apk add $(cat /build/assets/packages.lock)
 adduser -D -H -h /data/engine-home potdesktop
-mkdir -p /opt/pot /opt/pi /opt/pot/novnc /data
+mkdir -p /opt/pot /opt/agents /opt/pot/novnc /data
 cp /build/assets/* /opt/pot/
 tar xzf /opt/pot/novnc.tar.gz -C /opt/pot/novnc --strip-components=1
 rm /opt/pot/novnc.tar.gz
-cp /opt/pot/pi-package.json /opt/pi/package.json
-cp /opt/pot/pi-package-lock.json /opt/pi/package-lock.json
-if ! NODE_OPTIONS=--max-old-space-size=512 npm ci --maxsockets=2 --cache /cache/npm --prefix /opt/pi --ignore-scripts --omit=dev --no-audit --no-fund; then
+cp /opt/pot/agents-package.json /opt/agents/package.json
+cp /opt/pot/agents-package-lock.json /opt/agents/package-lock.json
+if ! NODE_OPTIONS=--max-old-space-size=512 npm ci --maxsockets=2 --cache /cache/npm --prefix /opt/agents --ignore-scripts --omit=dev --no-audit --no-fund; then
   free -m
   dmesg | tail -40
   exit 1
 fi
 rm -rf /root/.npm /var/cache/apk/*
-chmod -R a+rX /opt/pot /opt/pi
+chmod -R a+rX /opt/pot /opt/agents
 chmod +x /opt/pot/pot-server /opt/pot/open-browser.sh
-ln -sf /opt/pi/node_modules/.bin/pi /usr/local/bin/pi
-ln -sf /opt/pi/node_modules/.bin/codex /usr/local/bin/codex
+ln -sf /opt/agents/node_modules/.bin/codex /usr/local/bin/codex
 node - <<'JS'
 const fs = require('node:fs');
 const zlib = require('node:zlib');
-const binary = '/opt/pi/node_modules/@xai-official/grok-linux-arm64/bin/grok';
+const binary = '/opt/agents/node_modules/@xai-official/grok-linux-arm64/bin/grok';
 fs.writeFileSync(binary, zlib.brotliDecompressSync(fs.readFileSync(binary + '.br')), { mode: 0o755 });
 JS
-ln -sf /opt/pi/node_modules/@xai-official/grok-linux-arm64/bin/grok /usr/local/bin/grok
+ln -sf /opt/agents/node_modules/@xai-official/grok-linux-arm64/bin/grok /usr/local/bin/grok
 ln -sf /opt/pot/open-browser.sh /usr/local/bin/pot-browser
 fc-cache -f
 apk info -v | sort >/build/installed-packages.txt

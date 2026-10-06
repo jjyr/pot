@@ -8,18 +8,22 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
 | Understand backend crate and standalone Server boundaries | [Backend crate split](backend-crates.md) |
-| Change APIs, Pi, task state, or recovery | [Runtime contract](../runtime/README.md) |
+| Change APIs, Agent execution, task state, or recovery | [Runtime contract](../runtime/README.md) |
+| Discuss controller/task execution isolation | [Proposed isolation boundaries](agent-isolation.md) |
 | Build the Sandbox image, desktop theme, or CJK fonts | [Sandbox image](sandbox-image.md) |
 | Change chat, tasks, settings, or Sandbox UI | [UI specification](ui-ux-design.md) |
 | Apply the approved visual, component, motion, and navigation direction | [Design language](design-language.md) (shared shell, page layouts, Chat and Pot icons implemented; acceptance limits documented) |
 | Change persistent execution preferences or preference-guided task routing | [Execution preferences](execution-preferences.md) |
 | Change token accounting, periodic allowances, or budget recovery | [Token usage](token-usage.md) |
+| Design long-term cross-runtime token evaluation | [Token evaluation framework](token-evaluation.md), [Small-budget suite](token-evaluation-next-suite.md), [CLI usage](../eval/README.md), [validation](validation/token-evaluation.md), [Small-budget results](validation/small-budget-evaluation.md), [Pi CLI comparison](validation/pi-token-comparison.md) |
 | Change scheduled triggers, time zones, or notifications | [Scheduled tasks](scheduled-tasks.md) |
 | Review long-term product boundaries and acceptance goals | [Product design](product-design.md) |
 | Review completed tests and limitations | [Agent layer](validation/agent-layer.md), [Pi MVP](validation/pi-mvp.md), [Multitask](validation/multitask.md), [UI](validation/ui-ux.md), [Sandbox image](validation/sandbox-image.md), [Backend crates](validation/backend-crates.md), [AI configuration](validation/ai-configuration.md) |
 | Investigate old integrations or technical decisions | [Historical POC index](poc-plan.md) |
 
 ## Research on demand
+
+Current execution contract: [Pot Agent and native drivers](../runtime/README.md); [native Agent acceptance](validation/native-agent.md). Pi validation pages below are historical.
 
 Latest AI integration acceptance: [Simplified AI integration, 2026-10-06](validation/ai-integration-20261006.md). Earlier Terminal-based screenshots are historical.
 

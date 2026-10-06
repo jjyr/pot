@@ -1,0 +1,39 @@
+{
+  "id": "deepseek-tool-round-v1",
+  "profile": {
+    "id": "eval",
+    "revision": 1,
+    "name": "Evaluation fixture",
+    "engine": "pot",
+    "provider": "mock",
+    "model": "fixture",
+    "auth_ref": "providers.json:mock",
+    "params": {
+      "max_output_tokens": 768,
+      "reasoning_effort": null,
+      "agent": {
+        "system_prompt": "Complete the task.",
+        "builtin_tools": [
+          "apply_patch",
+          "exec_command"
+        ]
+      }
+    },
+    "tool_policy": {
+      "worker_orchestration": false,
+      "summary_read_only": true,
+      "unattended": "guest_vm"
+    }
+  },
+  "protocol": "openai_chat",
+  "turns": [
+    "Use apply_patch to create result.txt with exactly APRICOT followed by a newline. Then use exec_command to run cat result.txt and verify its content. Finally reply with exactly done."
+  ],
+  "responses": [],
+  "fixtures": {},
+  "expected_files": {
+    "result.txt": "APRICOT\n"
+  },
+  "expected_final_text": "done",
+  "deadline_ms": 180000
+}

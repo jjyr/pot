@@ -1,13 +1,13 @@
 # Sandbox image
 
-Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Pi, Codex, Grok, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
+Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Codex, Grok, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
 
 ## Build and startup
 
 See [Development guide](development.md) for entry points. `scripts/pot bundle` invokes `scripts/build-image`:
 
-1. In a separate build VM, use the pinned Alpine digest, install system packages from `image/packages.lock`, and Pi/official Codex CLI (including native platform binaries) from npm locks.
-2. Write `/opt/pot` and `/opt/pi`, export rootfs, and generate the OCI image plus `sandbox-image.json`.
+1. In a separate build VM, use the pinned Alpine digest, install system packages from `image/packages.lock`, and official Codex/Grok CLI (including native platform binaries) from npm locks.
+2. Write `/opt/pot` and `/opt/agents`, export rootfs, and generate the OCI image plus `sandbox-image.json`.
 3. Bundle image/vminit/kernel in App. A build-input hash identifies the local image; identical inputs reuse caches, with separate APK/npm download caches.
 4. Helper imports the local image initially, creates the VM, and runs `/opt/pot/desktop.sh`. Initial import/unpack has a cost but does not depend on online package/npm sources.
 
@@ -40,10 +40,12 @@ codesign --force --sign - --entitlements helper/virtualization.entitlements .loc
 .local/d1/helper-build/release/PotImageCheck .local/d1/offline-image-check .local/d1/resources scripts/tests
 ```
 
-`PotImageCheck` imports the local image into a fresh image store/data directory and starts a VM with `networking: false`. It checks broker, Chromium CDP, Runtime, Pi version, desktop processes, four-language sample glyphs, and normal browser exit. Results are in validation `data/offline-result.json`; no model calls. Use a fresh validation directory for each cold run.
+`PotImageCheck` imports the local image into a fresh image store/data directory and starts a VM with `networking: false`. It checks broker, Chromium CDP, Runtime, native CLI versions, desktop processes, four-language sample glyphs, and normal browser exit. Results are in validation `data/offline-result.json`; no model calls. Use a fresh validation directory for each cold run.
 
 Later usability fix: persistent bottom launcher/window list adds 4 pinned packages. Current image `pot.local/sandbox:b637617123a0ce749783` has a 657, 315, 671-byte compressed layer (626.87 MiB). The table retains the initial no-panel acceptance scope.
 
 Antigravity and Claude CLI are no longer downloaded or installed in newly built images. Claude API remains available through the generic provider gateway. Older running VMs need the rebuilt image to remove previously bundled binaries; persistent user files are preserved.
 
 Grok uses the official `@xai-official/grok` 1.0.46 distribution and its pinned Linux ARM64 platform package. Build-time Node Brotli decompression writes the static native binary, then `grok` links directly to it. npm lifecycle scripts and the vendor launcher/updater are not run. Native authorization and session files stay in the persistent guest HOME; no host credentials are imported.
+
+2026-10-06 source update: `image/agents` pins only Codex/Grok and required dependencies; Pi and its extensions are removed. Pot Agent is linked into pot-server. Previously recorded image sizes/VM acceptance are historical; rebuilding and fresh offline VM acceptance for this revision remain separate checks.

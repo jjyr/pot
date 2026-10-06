@@ -179,7 +179,7 @@ mod tests {
             replace(&s, "save", "different", 0).unwrap_err().0,
             StatusCode::CONFLICT
         );
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot.sqlite")).unwrap();
+        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         assert_eq!(read(&s).unwrap(), edited);
         assert_eq!(replace(&s, "save", text, 0).unwrap(), first);
         assert_eq!(read(&s).unwrap(), edited);
@@ -260,13 +260,14 @@ mod tests {
     }
     #[tokio::test]
     async fn delegation_requires_fresh_preferences_and_pins_original_decision() {
-        let s = tasks::tests::fixture();
+        let mut s = tasks::tests::fixture();
+        s.agent_upstream = "https://api.deepseek.com/chat/completions".into();
         initialize(&s).unwrap();
         let _ = routing::configure(
             State(s.clone()),
             tasks::tests::headers(),
             Json(routing::Policy {
-                allowed_tool_profiles: ["pi-default".into()].into(),
+                allowed_tool_profiles: ["pot-default".into()].into(),
                 ..Default::default()
             }),
         )
@@ -274,7 +275,7 @@ mod tests {
         .unwrap();
         replace(&s, "save", "Use DeepSeek for coding.", 0).unwrap();
         turn(&s, "delegate");
-        let args = json!({"text":"Implement a parser", "profile":"pi-default","preference_revision":1,"selection_reason":"Your coding preference"});
+        let args = json!({"text":"Implement a parser", "profile":"pot-default","preference_revision":1,"selection_reason":"Your coding preference"});
         let task = invoke(&s, "create", "pot_create_task", args.clone())
             .await
             .unwrap();
@@ -376,7 +377,7 @@ mod tests {
             State(s.clone()),
             tasks::tests::headers(),
             Json(routing::Policy {
-                allowed_tool_profiles: ["pi-default".into(), "grok".into()].into(),
+                allowed_tool_profiles: ["pot-default".into(), "grok".into()].into(),
                 ..Default::default()
             }),
         )
@@ -406,17 +407,15 @@ mod integration_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "Installed Pi with loopback mock model, no paid calls; set POT_TEST_PI_BIN"]
-    async fn real_pi_execution_preferences_tools_and_routing_usage() {
+    async fn native_agent_execution_preferences_tools_and_routing_usage() {
         use axum::response::sse::Event as WireEvent;
         let mut s = tasks::tests::fixture();
-        s.pi_program = std::env::var("POT_TEST_PI_BIN").expect("POT_TEST_PI_BIN");
-        s.pi.as_mut().unwrap().max_requests_per_turn = 8;
+        s.execution.as_mut().unwrap().max_requests_per_turn = 8;
         let _ = routing::configure(
             State(s.clone()),
             tasks::tests::headers(),
             Json(routing::Policy {
-                allowed_tool_profiles: ["pi-default".into()].into(),
+                allowed_tool_profiles: ["pot-default".into()].into(),
                 ..Default::default()
             }),
         )
@@ -424,8 +423,8 @@ mod integration_tests {
         .unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        s.pi_upstream = format!("http://127.0.0.1:{port}/mock");
-        pi::private_json(
+        s.agent_upstream = format!("http://127.0.0.1:{port}/mock");
+        execution::private_json(
             &s.data.join(RUNTIME_ENDPOINT_FILE),
             &json!(RuntimeEndpoint {
                 api_version: API_VERSION,
@@ -440,8 +439,10 @@ mod integration_tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let count = counter.clone();
         let router=Router::new()
-            .route("/api/pi/v1/chat/completions",post(tasks::gateway))
+            .route("/gw/{provider}/{*path}",post(gateway::routed_protocol))
             .route("/api/v1/orchestration",post(orchestration::invoke))
+            .route("/api/v1/mcp",post(tool_bridge::mcp))
+            .route("/api/agent/compactions",post(execution::compaction_event))
             .with_state(s.clone())
             .route("/mock",post(move |Json(body):Json<Value>| {
                 let captures=captured.clone(); let counter=count.clone();
@@ -455,7 +456,7 @@ mod integration_tests {
                         0 => ("pot_get_execution_preferences",json!({})),
                         1 => ("pot_update_execution_preferences",json!({"text":"Use DeepSeek for coding.","expected_revision":0})),
                         2 => ("pot_get_execution_preferences",json!({})),
-                        3 => ("pot_create_task",json!({"text":"Build parser","profile":"pi-default","preference_revision":1,"selection_reason":"Your coding preference"})),
+                        3 => ("pot_create_task",json!({"text":"Build parser","profile":"pot-default","preference_revision":1,"selection_reason":"Your coding preference"})),
                         _ => ("",json!({})),
                     };
                     let delta=if name.is_empty() {json!({"role":"assistant","content":"Preference saved and task accepted."})} else {
@@ -485,10 +486,13 @@ mod integration_tests {
         .unwrap();
         let mut request = rx.recv().await.unwrap();
         request.text.push_str(&context(&s).unwrap());
-        tokio::time::timeout(std::time::Duration::from_secs(45), pi::run(&s, request))
-            .await
-            .unwrap()
-            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(45),
+            execution::run(&s, request),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(counter.load(Ordering::SeqCst), 5);
         assert_eq!(read(&s).unwrap().text, "Use DeepSeek for coding.");
         let task = tasks::page(&s, &TaskQuery::default())
@@ -496,7 +500,7 @@ mod integration_tests {
             .items
             .remove(0);
         assert_eq!(task.routing.unwrap().preference_revision, Some(1));
-        assert_eq!(task.executor_icon, "deepseek");
+        assert_eq!(task.executor_icon, "custom");
         assert!(
             !s.snapshot()
                 .unwrap()

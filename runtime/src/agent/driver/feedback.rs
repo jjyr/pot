@@ -30,6 +30,32 @@ impl Feedback {
     }
 }
 impl ExecutionFeedback for Feedback {
+    fn ready(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async {
+            self.check()?;
+            crate::control::ready(&self.service).await
+        })
+    }
+    fn steering(&self, finalizing: bool) -> Result<Vec<(String, String)>> {
+        self.check()?;
+        crate::control::pending(&self.service, self.epoch, finalizing)
+    }
+    fn acknowledge_steering(&self, ids: &[String]) -> Result<()> {
+        self.check()?;
+        crate::control::acknowledge(&self.service, self.epoch, ids)
+    }
+    fn diagnostic(&self, metadata: &Value) -> Result<()> {
+        self.check()?;
+        crate::control::record(&self.service, self.epoch, metadata)
+    }
+    fn load_context(&self) -> Result<Option<Value>> {
+        self.check()?;
+        pot_storage::bindings::load_context(&self.service.inner.lock().unwrap().store)
+    }
+    fn save_context(&self, value: &Value) -> Result<()> {
+        self.check()?;
+        pot_storage::bindings::save_context(&self.service.inner.lock().unwrap().store, value)
+    }
     fn cancelled(&self) -> bool {
         self.service.stopping() || self.check().is_err() || cancelled(&self.service)
     }
@@ -44,7 +70,7 @@ impl ExecutionFeedback for Feedback {
             .spec
             .engine
         {
-            Engine::Pi => save_pi_session(&mut inner.store, identity),
+            Engine::Pot => save_agent_session(&mut inner.store, identity),
             Engine::Codex => save_codex_thread(&mut inner.store, identity),
             Engine::Grok => save_grok_session(&mut inner.store, identity),
         }
@@ -154,15 +180,7 @@ fn make_context(
         role,
         backend_url: format!("http://127.0.0.1:{}", endpoint.port),
         lane_token: s.token.clone(),
-        pi_program: s.pi_program.clone(),
         main_prompt: orchestration::MAIN_PROMPT.into(),
-        model_api: if binding.spec.engine == Engine::Pi {
-            crate::gateway::codecs::Protocol::from_name(&binding.spec.gateway_protocol)?
-                .pi_api()
-                .into()
-        } else {
-            String::new()
-        },
         feedback: Arc::new(Feedback {
             service: s.clone(),
             epoch: binding.epoch,
@@ -175,7 +193,7 @@ pub(super) fn context(
     request: &SendMessage,
     binding: &Binding,
 ) -> Result<ExecutionContext> {
-    if binding.spec.engine == Engine::Pi {
+    if binding.spec.engine == Engine::Pot {
         native_session(s)?;
     }
     make_context(s, binding, Some(request))

@@ -31,7 +31,9 @@ pub async fn execute(
     );
     let epoch = binding.epoch;
     let mut session = match binding.spec.engine {
-        Engine::Pi => pot_driver::pi::PiHost.session(context(s, request, &binding)?, binding)?,
+        Engine::Pot => s
+            .agent_host
+            .session(context(s, request, &binding)?, binding)?,
         Engine::Codex => pot_driver::codex::CodexHost {
             hosts: s.codex.clone(),
         }
@@ -76,6 +78,19 @@ async fn run_session(
         Outcome::Unknown => {
             bail!("Agent event stream ended without a terminal event; stop unconfirmed")
         }
+    }
+}
+
+/// Validate a candidate before settings commit; preparation never calls a model.
+pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRef>> {
+    // Initial selection is metadata-only; open the native session on the first real turn.
+    if current(&s.inner.lock().unwrap().store)?.is_none() {
+        return Ok(None);
+    }
+    if spec.engine == Engine::Codex {
+        codex::prepare(&prepare_context(s)?, &s.codex, spec).await
+    } else {
+        Ok(None)
     }
 }
 
@@ -201,18 +216,5 @@ mod tests {
         assert!(!gate.accept(&event));
         assert_eq!(gate.finish(), Outcome::Cancelled);
         assert_eq!(EventGate::new(1, "missing").finish(), Outcome::Unknown);
-    }
-}
-
-/// Validate a candidate before settings commit; preparation never calls a model.
-pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRef>> {
-    // Initial selection is metadata-only; open the native session on the first real turn.
-    if current(&s.inner.lock().unwrap().store)?.is_none() {
-        return Ok(None);
-    }
-    if spec.engine == Engine::Codex {
-        codex::prepare(&prepare_context(s)?, &s.codex, spec).await
-    } else {
-        Ok(None)
     }
 }

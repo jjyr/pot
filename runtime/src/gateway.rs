@@ -1,4 +1,4 @@
-//! Protocol-independent reservation and transport; no format translation.
+//! Scoped reservations and forwarding for Pot Agent model adapters.
 use crate::*;
 use axum::{body::Body, extract::Path, response::Response};
 use futures::StreamExt;
@@ -17,15 +17,19 @@ struct Provider {
     protocol: Protocol,
 }
 fn stored_provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
-    if spec.auth_ref == "pi.json:api_key" && spec.provider == "deepseek" {
+    #[cfg(test)]
+    if spec.auth_ref == "providers.json:deepseek"
+        && spec.provider == "deepseek"
+        && s.execution.is_some()
+    {
         return Ok(Provider {
             id: "deepseek".into(),
-            endpoint: s.pi_upstream.clone(),
+            endpoint: s.agent_upstream.clone(),
             allowed_hosts: vec!["api.deepseek.com".into()],
             api_key: s
-                .pi
+                .execution
                 .as_ref()
-                .ok_or_else(|| anyhow!("Pi credential missing"))?
+                .ok_or_else(|| anyhow!("Pot credential missing"))?
                 .api_key
                 .clone(),
             protocol: Protocol::OpenaiChat,
@@ -55,7 +59,8 @@ fn stored_provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> 
 }
 fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
     let mut p = stored_provider(s, spec)?;
-    if spec.auth_ref == "pi.json:api_key" {
+    #[cfg(test)]
+    if spec.auth_ref == "providers.json:deepseek" && s.execution.is_some() {
         return Ok(p);
     }
     if p.protocol == Protocol::Gemini {
@@ -75,8 +80,8 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
         );
     }
     let url = reqwest::Url::parse(&p.endpoint)?;
-    let secure = url.scheme() == "https"
-        || (cfg!(test) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1"));
+    let secure =
+        url.scheme() == "https" || (url.scheme() == "http" && url.host_str() == Some("127.0.0.1"));
     anyhow::ensure!(
         secure
             && url
@@ -91,13 +96,13 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
     Ok(p)
 }
 /// API profiles keep their own request ledger even when the legacy smoke route exists.
-pub fn pi_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::BudgetSettings> {
-    if let Some(budget) = &s.api_budget {
-        if budget.namespace != "deepseek-attempts" {
-            let mut budget = budget.clone();
-            budget.max_output_tokens = max_output_tokens;
-            return Ok(budget);
-        }
+pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::BudgetSettings> {
+    if let Some(budget) = &s.api_budget
+        && budget.namespace != "deepseek-attempts"
+    {
+        let mut budget = budget.clone();
+        budget.max_output_tokens = max_output_tokens;
+        return Ok(budget);
     }
     let data = if s.is_worker {
         s.data
@@ -109,9 +114,9 @@ pub fn pi_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::Budget
         s.data.clone()
     };
     Ok(deepseek::BudgetSettings {
-        namespace: "pi-attempts",
+        namespace: "agent-attempts",
         data,
-        limit: s.pi.as_ref().map_or(10000, |c| c.request_limit),
+        limit: s.execution.as_ref().map_or(10000, |c| c.request_limit),
         max_output_tokens,
     })
 }
@@ -130,10 +135,7 @@ pub fn executor_icon(s: &Service, spec: &agent::ResolvedSpec) -> String {
     match spec.engine {
         agent::Engine::Codex => "codex".into(),
         agent::Engine::Grok => "grok".into(),
-        agent::Engine::Pi => {
-            if spec.provider == "deepseek" && spec.auth_ref == "pi.json:api_key" {
-                return "deepseek".into();
-            }
+        agent::Engine::Pot => {
             let endpoint = stored_provider(s, spec)
                 .ok()
                 .map(|p| p.endpoint)
@@ -181,7 +183,7 @@ pub async fn routed(
     h: HeaderMap,
     body: Json<Value>,
 ) -> ApiResult<Response> {
-    let s = tasks::pi_service(&root, &h)?;
+    let s = tasks::execution_service(&root, &h)?;
     let binding = agent::binding(&s).map_err(internal)?;
     if binding.spec.provider != provider_id {
         return Err(error(
@@ -192,7 +194,7 @@ pub async fn routed(
     }
     forward(State(s), h, body).await
 }
-/// Pi speaks each provider's native protocol; authenticate its local SDK key only.
+/// Pot speaks each provider's native protocol; authenticate its local SDK key only.
 pub async fn routed_protocol(
     State(root): State<Service>,
     Path((provider_id, path)): Path<(String, String)>,
@@ -216,7 +218,7 @@ pub async fn routed_protocol(
             .map_err(|_| error(StatusCode::UNAUTHORIZED, "unauthorized", "Invalid token"))?;
         h.insert("authorization", bearer);
     }
-    let s = tasks::pi_service(&root, &h)?;
+    let s = tasks::execution_service(&root, &h)?;
     let binding = agent::binding(&s).map_err(internal)?;
     let protocol = Protocol::from_name(&binding.spec.gateway_protocol).map_err(internal)?;
     if binding.spec.provider != provider_id || !protocol.path_matches(&path, &binding.spec.model) {
@@ -230,20 +232,20 @@ pub async fn routed_protocol(
 }
 
 // The gateway has a fixed upstream and never follows redirects. The real API
-// key is not passed to Pi or included in its session files.
+// key is not passed to Pot or included in its session files.
 pub async fn forward(
     State(s): State<Service>,
     h: HeaderMap,
     Json(mut body): Json<Value>,
 ) -> ApiResult<Response> {
     s.authorized(&h)?;
-    let c = agent::pi_config(&s).map_err(internal)?;
+    let c = agent::execution_config_for(&s).map_err(internal)?;
     let binding = agent::binding(&s).map_err(internal)?;
     validate_spec(&s, &binding.spec).map_err(internal)?;
     let provider = provider(&s, &binding.spec).map_err(internal)?;
     if (provider.protocol != Protocol::Gemini
         && (body["model"] != c.model || body["stream"] != true))
-        || body.to_string().len() > pi::MAX_MODEL_BODY
+        || body.to_string().len() > execution::MAX_MODEL_BODY
     {
         return Err(error(
             StatusCode::BAD_REQUEST,
@@ -314,12 +316,12 @@ pub async fn forward(
                 max_output,
             )
             .map_err(internal)?;
-        if output.is_some() {
-            if let Some(operation) = operation {
-                ledger
-                    .tag_compaction(&request_id, operation)
-                    .map_err(internal)?;
-            }
+        if output.is_some()
+            && let Some(operation) = operation
+        {
+            ledger
+                .tag_compaction(&request_id, operation)
+                .map_err(internal)?;
         }
         output
     };
@@ -364,7 +366,7 @@ pub async fn forward(
                 "Turn changed before request claim",
             ));
         }
-        let budget = pi_budget(&s, c.max_tokens).map_err(internal)?;
+        let budget = agent_budget(&s, c.max_tokens).map_err(internal)?;
         if deepseek::reserve_in(&budget.data.join(budget.namespace), budget.limit).is_err() {
             s.usage
                 .lock()
@@ -428,8 +430,8 @@ pub async fn forward(
                     pending.push_str(&String::from_utf8_lossy(&bytes));
                     while let Some(end) = pending.find('\n') {
                         let line = pending[..end].trim().to_owned(); pending.drain(..=end);
-                        if let Some(data) = line.strip_prefix("data:") {
-                            if let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
+                        if let Some(data) = line.strip_prefix("data:")
+                            && let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
                                 let result = observer.observe(&provider.protocol,&value).and_then(|usage| {
                                     if let Some(usage) = usage { service.usage.lock().unwrap().settle(&request_id,&usage)?; }
                                     Ok(())
@@ -439,7 +441,6 @@ pub async fn forward(
                                     return;
                                 }
                             }
-                        }
                     }
                     if pending.len()>1024*1024 { pending.clear(); }
                     yield Ok::<_,std::io::Error>(bytes);
@@ -486,158 +487,7 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use axum::response::sse::Event as WireEvent;
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "Runs installed Pi against two local mock providers; set POT_TEST_PI_BIN"]
-    async fn real_pi_migrates_to_second_provider_without_losing_old_session() {
-        let dir = std::env::temp_dir().join(format!("pot-providers-{}", id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut s = crate::tests::service();
-        s.data = dir.clone();
-        s.workspace = dir.clone();
-        s.pi_program = std::env::var("POT_TEST_PI_BIN").unwrap();
-        s.pi = Some(pi::Config {
-            api_key: "first-secret".into(),
-            model: "deepseek-v4-flash".into(),
-            request_limit: 10,
-            max_tokens: 128,
-            max_requests_per_turn: 2,
-            max_parallel_tasks: 5,
-        });
-        s.api_budget = Some(deepseek::BudgetSettings {
-            namespace: "pi-attempts",
-            data: dir.clone(),
-            limit: 10,
-            max_output_tokens: 128,
-        });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        s.pi_upstream = format!("http://127.0.0.1:{port}/first");
-        pi::private_json(
-            &dir.join(RUNTIME_ENDPOINT_FILE),
-            &json!({"api_version":API_VERSION,"port":port,"token":s.token,"boot_id":s.boot}),
-        )
-        .unwrap();
-        pi::private_json(&dir.join("providers.json"),&json!([{"id":"mock","endpoint":format!("http://127.0.0.1:{port}/second"),"allowed_hosts":["127.0.0.1"],"api_key":"second-secret","protocol":"openai_chat"}])).unwrap();
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let capture = seen.clone();
-        let mock = move |h: HeaderMap, Json(body): Json<Value>| {
-            let capture = capture.clone();
-            async move {
-                capture.lock().unwrap().push((
-                    h["authorization"].to_str().unwrap().to_string(),
-                    body.clone(),
-                ));
-                let events = vec![
-                    json!({"id":"test","choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":null}]}),
-                    json!({"id":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":2}}),
-                ];
-                Sse::new(futures::stream::iter(events.into_iter().map(|value| {
-                    Ok::<_, Infallible>(WireEvent::default().data(value.to_string()))
-                })))
-            }
-        };
-        let router = Router::new()
-            .route("/api/pi/v1/chat/completions", post(tasks::gateway))
-            .route("/gw/{provider}/v1/chat/completions", post(routed))
-            .with_state(s.clone())
-            .route("/first", post(mock.clone()))
-            .route("/second", post(mock));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-        for turn in ["first", "second"] {
-            if turn == "second" {
-                let mut profile = agent::Profile::legacy(s.pi.as_ref().unwrap());
-                profile.id = "second-profile".into();
-                profile.provider = "mock".into();
-                profile.auth_ref = "providers.json:mock".into();
-                profile.model = "mock-model".into();
-                let settings = serde_json::from_value(
-                    json!({"profile":profile,"expected_revision":0,"request_id":"switch"}),
-                )
-                .unwrap();
-                let mut h = HeaderMap::new();
-                h.insert("authorization", "Bearer test-token".parse().unwrap());
-                let _ = agent::migration::settings(State(s.clone()), h, Json(settings))
-                    .await
-                    .unwrap();
-            }
-            s.save(Message {
-                id: turn.into(),
-                conversation_id: "main".into(),
-                role: Role::User,
-                text: format!("real {turn} request"),
-                status: MessageStatus::Accepted,
-                created_at_ms: now(),
-                request_id: Some(turn.into()),
-            })
-            .unwrap();
-            s.turn(Some(TurnState {
-                user_message_id: turn.into(),
-                cancelling: false,
-            }));
-            s.inner.lock().unwrap().model_requests = 0;
-            agent::run(
-                &s,
-                SendMessage {
-                    request_id: turn.into(),
-                    conversation_id: "main".into(),
-                    text: format!("real {turn} request"),
-                },
-            )
-            .await
-            .unwrap();
-            assert_eq!(
-                s.inner
-                    .lock()
-                    .unwrap()
-                    .store
-                    .message(turn)
-                    .unwrap()
-                    .unwrap()
-                    .status,
-                MessageStatus::Complete
-            );
-            s.turn(None);
-        }
-        let captures = seen.lock().unwrap();
-        assert_eq!(captures.len(), 2);
-        assert_eq!(captures[0].0, "Bearer first-secret");
-        assert_eq!(captures[1].0, "Bearer second-secret");
-        assert_eq!(captures[1].1["model"], "mock-model");
-        assert!(captures[1].1.to_string().contains("lossy handoff"));
-        drop(captures);
-        let all = agent::bindings(&s.inner.lock().unwrap().store).unwrap();
-        assert_eq!(all.len(), 2);
-        assert_eq!(all[0].state, agent::BindingState::Archived);
-        assert_eq!(all[1].epoch, 2);
-        let agent::NativeRef::Pi {
-            file,
-            session_id: Some(native),
-        } = &all[0].native_ref
-        else {
-            panic!()
-        };
-        agent::validate_pi_session(file, native).unwrap();
-        let providers: Vec<String> = s
-            .usage
-            .lock()
-            .unwrap()
-            .0
-            .prepare("SELECT provider FROM request_routes ORDER BY rowid")
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(providers, vec!["deepseek", "mock"]);
-        server.abort();
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-}
 
-#[cfg(test)]
-mod opaque_tests {
-    use super::*;
     #[tokio::test]
     async fn unknown_protocol_forwards_without_translation_and_never_reports_zero() {
         let dir = std::env::temp_dir().join(format!("pot-opaque-{}", id()));
@@ -645,7 +495,7 @@ mod opaque_tests {
         let mut s = crate::tests::service();
         s.data = dir.clone();
         s.workspace = dir.clone();
-        s.pi = Some(pi::Config {
+        s.execution = Some(execution::Config {
             api_key: "legacy".into(),
             model: "deepseek-v4-flash".into(),
             request_limit: 10,
@@ -654,20 +504,20 @@ mod opaque_tests {
             max_parallel_tasks: 5,
         });
         s.api_budget = Some(deepseek::BudgetSettings {
-            namespace: "pi-attempts",
+            namespace: "agent-attempts",
             data: dir.clone(),
             limit: 10,
             max_output_tokens: 20,
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        pi::private_json(&dir.join("providers.json"),&json!([{"id":"opaque","endpoint":format!("http://127.0.0.1:{port}/model"),"allowed_hosts":["127.0.0.1"],"api_key":"upstream-secret","protocol":"unknown"}])).unwrap();
+        execution::private_json(&dir.join("providers.json"),&json!([{"id":"opaque","endpoint":format!("http://127.0.0.1:{port}/model"),"allowed_hosts":["127.0.0.1"],"api_key":"upstream-secret","protocol":"unknown"}])).unwrap();
         let original = json!({"model":"opaque-model","stream":true,"max_tokens":99,"messages":[{"role":"user","content":"hello"}]});
         let expected = original.clone();
         let server = tokio::spawn(async move {
             axum::serve(listener,Router::new().route("/model",post(move |h:HeaderMap,Json(body):Json<Value>|{let expected=expected.clone();async move{assert_eq!(body,expected);assert_eq!(h["authorization"],"Bearer upstream-secret");([("content-type","text/event-stream")],"data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n")}}))).await.unwrap()
         });
-        let mut profile = agent::Profile::legacy(s.pi.as_ref().unwrap());
+        let mut profile = agent::Profile::api(s.execution.as_ref().unwrap());
         profile.id = "opaque".into();
         profile.provider = "opaque".into();
         profile.auth_ref = "providers.json:opaque".into();
@@ -718,6 +568,3 @@ mod opaque_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
-
-#[cfg(test)]
-mod native_tests;

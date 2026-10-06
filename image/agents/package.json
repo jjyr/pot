@@ -1,0 +1,9 @@
+{
+  "name": "pot-native-agents",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@openai/codex": "0.159.1",
+    "@xai-official/grok": "1.0.46"
+  }
+}

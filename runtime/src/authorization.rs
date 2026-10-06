@@ -283,20 +283,20 @@ async fn begin(
                 Ok(v) if !v["account"].is_null() => {}
                 _ => final_phase = "failed",
             }
-            if final_phase == "authenticated" {
-                if let Ok(v) = host.request("model/list", json!({})).await {
-                    models = v["data"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|m| {
-                            m["model"]
-                                .as_str()
-                                .or_else(|| m["id"].as_str())
-                                .map(str::to_owned)
-                        })
-                        .collect();
-                }
+            if final_phase == "authenticated"
+                && let Ok(v) = host.request("model/list", json!({})).await
+            {
+                models = v["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|m| {
+                        m["model"]
+                            .as_str()
+                            .or_else(|| m["id"].as_str())
+                            .map(str::to_owned)
+                    })
+                    .collect();
             }
         } else {
             let _ = host
@@ -348,7 +348,7 @@ async fn start_grok(
                 let _=host.request("_x.ai/auth/cancel",json!({"request_seq":1})).await;authenticate.abort();return Err(unavailable());
             },
             reply=host.request("_x.ai/auth/get_url",json!({}))=>{
-                if let Ok(reply)=reply {if let Some(raw)=reply["auth_url"].as_str() {break raw.to_owned();}}
+                if let Ok(reply)=reply&& let Some(raw)=reply["auth_url"].as_str() {break raw.to_owned();}
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }

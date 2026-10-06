@@ -2,9 +2,9 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "Paid main-model evaluation; set POT_TEST_REAL_PI_CONFIG and POT_TEST_PI_BIN explicitly"]
+#[ignore = "Paid main-model evaluation; set POT_TEST_REAL_MODEL_CONFIG explicitly"]
 async fn real_model_execution_preferences_quality() {
-    let path = std::env::var("POT_TEST_REAL_PI_CONFIG").expect("POT_TEST_REAL_PI_CONFIG");
+    let path = std::env::var("POT_TEST_REAL_MODEL_CONFIG").expect("POT_TEST_REAL_MODEL_CONFIG");
     let config: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let provider = &config["providers"]["deepseek"];
     assert_eq!(
@@ -105,13 +105,12 @@ async fn real_model_execution_preferences_quality() {
         }
         evaluated += 1;
         let mut s = tasks::tests::fixture();
-        s.pi_program = std::env::var("POT_TEST_PI_BIN").expect("POT_TEST_PI_BIN");
-        let main = s.pi.as_mut().unwrap();
+        let main = s.execution.as_mut().unwrap();
         main.api_key = key.clone();
         main.max_tokens = 2048;
         main.request_limit = 20;
         main.max_requests_per_turn = 8;
-        s.pi_upstream = "https://api.deepseek.com/chat/completions".into();
+        s.agent_upstream = "https://api.deepseek.com/chat/completions".into();
         initialize(&s).unwrap();
         let base = profiles(&s.inner.lock().unwrap().store).unwrap().remove(0);
         let mut claude = base.clone();
@@ -135,7 +134,7 @@ async fn real_model_execution_preferences_quality() {
                 &serde_json::to_string(&vec![base, claude, gemini]).unwrap(),
             )
             .unwrap();
-        pi::private_json(&s.data.join("providers.json"),&json!([
+        execution::private_json(&s.data.join("providers.json"),&json!([
             {"id":"eval-claude","endpoint":"https://api.anthropic.com/v1/messages","allowed_hosts":["api.anthropic.com"],"api_key":"synthetic-never-called","protocol":"anthropic_messages"},
             {"id":"eval-gemini","endpoint":"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent","allowed_hosts":["generativelanguage.googleapis.com"],"api_key":"synthetic-never-called","protocol":"gemini"}
         ])).unwrap();
@@ -144,7 +143,7 @@ async fn real_model_execution_preferences_quality() {
             tasks::tests::headers(),
             Json(routing::Policy {
                 allowed_tool_profiles: [
-                    "pi-default".into(),
+                    "pot-default".into(),
                     "claude-coding".into(),
                     "gemini-design".into(),
                 ]
@@ -159,7 +158,7 @@ async fn real_model_execution_preferences_quality() {
         }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        pi::private_json(
+        execution::private_json(
             &s.data.join(RUNTIME_ENDPOINT_FILE),
             &json!(RuntimeEndpoint {
                 api_version: API_VERSION,
@@ -170,8 +169,10 @@ async fn real_model_execution_preferences_quality() {
         )
         .unwrap();
         let router = Router::new()
-            .route("/api/pi/v1/chat/completions", post(tasks::gateway))
+            .route("/gw/{provider}/{*path}", post(gateway::routed_protocol))
             .route("/api/v1/orchestration", post(orchestration::invoke))
+            .route("/api/v1/mcp", post(tool_bridge::mcp))
+            .route("/api/agent/compactions", post(execution::compaction_event))
             .with_state(s.clone());
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -189,8 +190,11 @@ async fn real_model_execution_preferences_quality() {
         .unwrap();
         let mut request = rx.recv().await.unwrap();
         request.text.push_str(&context(&s).unwrap());
-        let result =
-            tokio::time::timeout(std::time::Duration::from_secs(90), pi::run(&s, request)).await;
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(90),
+            execution::run(&s, request),
+        )
+        .await;
         if !matches!(result, Ok(Ok(()))) {
             failures.push(format!("{label}: turn did not complete"));
         }

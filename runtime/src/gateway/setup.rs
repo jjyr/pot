@@ -20,7 +20,7 @@ pub struct Setup {
     max_output_tokens: u64,
 }
 fn default_profile() -> String {
-    "api-default".into()
+    "apot-default".into()
 }
 fn default_name() -> String {
     "API".into()
@@ -38,11 +38,11 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
     let mut connections = Vec::new();
     for profile in profiles {
         let spec = profile.resolve().map_err(internal)?;
-        if spec.auth_ref.starts_with("providers.json:") {
-            if let Ok(p) = stored_provider(&s, &spec) {
-                connections.push(json!({"profile_id": profile.id, "endpoint":p.endpoint,
+        if spec.auth_ref.starts_with("providers.json:")
+            && let Ok(p) = stored_provider(&s, &spec)
+        {
+            connections.push(json!({"profile_id": profile.id, "endpoint":p.endpoint,
                     "model":spec.model,"protocol":p.protocol,"has_key":!p.api_key.is_empty()}));
-            }
         }
     }
     let binding = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?;
@@ -63,6 +63,13 @@ pub async fn save(
     Json(input): Json<Setup>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
+    if input.protocol == Protocol::Unknown {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "protocol",
+            "Select Chat Completions, Responses, Anthropic Messages or Gemini",
+        ));
+    }
     static SAVE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = SAVE.lock().await;
     let request = uuid::Uuid::parse_str(&input.request_id).map_err(|_| {
@@ -79,8 +86,7 @@ pub async fn save(
             "Enter a full HTTPS model endpoint",
         )
     })?;
-    if !(url.scheme() == "https"
-        || (cfg!(test) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1")))
+    if !(url.scheme() == "https" || (url.scheme() == "http" && url.host_str() == Some("127.0.0.1")))
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -102,12 +108,11 @@ pub async fn save(
     let mut key = input.api_key;
     if key.is_empty() {
         let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
-        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id) {
-            if let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?) {
-                if previous.endpoint == input.endpoint {
-                    key = previous.api_key;
-                }
-            }
+        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
+            && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
+            && previous.endpoint == input.endpoint
+        {
+            key = previous.api_key;
         }
     }
     if key.is_empty() {
@@ -125,12 +130,12 @@ pub async fn save(
         api_key: key,
         protocol: input.protocol,
     };
-    let config = pi::Config {
+    let config = execution::Config {
         model: input.model.clone(),
         max_tokens: input.max_output_tokens,
         ..Default::default()
     };
-    let mut profile = agent::Profile::legacy(&config);
+    let mut profile = agent::Profile::api(&config);
     profile.id = input.profile_id;
     profile.name = input.name;
     profile.revision = input
@@ -161,7 +166,7 @@ pub async fn save(
         all.push(next);
         // Persist the immutable credential route first. A failed profile save can
         // leave an unused route, but cannot change any existing binding's endpoint.
-        pi::private_json(
+        execution::private_json(
             &path,
             &serde_json::to_value(&all).map_err(|e| internal(e.into()))?,
         )
@@ -208,7 +213,7 @@ mod tests {
         let mut s = crate::tests::service();
         s.data = dir.clone();
         s.workspace = dir.clone();
-        s.pi = None;
+        s.execution = None;
         s.api_budget = None;
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
@@ -300,7 +305,7 @@ mod tests {
         let mut s = crate::tests::service();
         s.data = dir.clone();
         s.workspace = dir.clone();
-        s.pi = None;
+        s.execution = None;
         s.api_budget = None;
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
@@ -336,7 +341,12 @@ mod tests {
         );
         let current = agent::binding(&s).unwrap();
         assert_eq!(current.spec.model, "custom-model");
-        assert_eq!(agent::pi_config(&s).unwrap().max_requests_per_turn, 100);
+        assert_eq!(
+            agent::execution_config_for(&s)
+                .unwrap()
+                .max_requests_per_turn,
+            100
+        );
         assert!(
             !serde_json::to_string(&current)
                 .unwrap()
@@ -414,8 +424,7 @@ pub async fn check(
     s.authorized(&h)?;
     let mut url = reqwest::Url::parse(&input.endpoint)
         .map_err(|_| error(StatusCode::BAD_REQUEST, "endpoint", "请输入完整 HTTPS 地址"))?;
-    if !(url.scheme() == "https"
-        || (cfg!(test) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1")))
+    if !(url.scheme() == "https" || (url.scheme() == "http" && url.host_str() == Some("127.0.0.1")))
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -432,12 +441,11 @@ pub async fn check(
     let mut key = input.api_key;
     if key.is_empty() {
         let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
-        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id) {
-            if let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?) {
-                if previous.endpoint == input.endpoint {
-                    key = previous.api_key;
-                }
-            }
+        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
+            && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
+            && previous.endpoint == input.endpoint
+        {
+            key = previous.api_key;
         }
     }
     if key.trim().is_empty() || key.contains(['\n', '\r']) {

@@ -8,6 +8,7 @@ for cli in agy antigravity claude; do
   fi
 done
 test ! -e /opt/pot/agy
-test ! -e /opt/pi/node_modules/@anthropic-ai/claude-code-linux-arm64-musl
-su potdesktop -c 'pi --version && codex --version && grok --version'
+test ! -e /opt/agents/node_modules/@anthropic-ai/claude-code-linux-arm64-musl
+test ! -e /usr/local/bin/pi
+su potdesktop -c 'codex --version && grok --version'
 echo "Supported engines present; removed CLI binaries absent."

@@ -48,13 +48,13 @@ pub async fn resume(
     Ok(Json(json!({"resumed":true})))
 }
 
-/// Only an explicitly checkpointed, fully stopped Pi turn can resume automatically.
+/// Only an explicitly checkpointed, fully stopped Pot turn can resume automatically.
 pub fn paused(s: &Service) -> Result<Option<SendMessage>> {
     Ok(s.inner
         .lock()
         .unwrap()
         .store
-        .get("pi.paused")?
+        .get("execution.paused")?
         .filter(|v| !v.is_empty())
         .map(|v| serde_json::from_str(&v))
         .transpose()?)
@@ -68,7 +68,12 @@ pub fn resume_main(s: &Service) -> Result<()> {
         return Ok(());
     }
     let mut inner = s.inner.lock().unwrap();
-    if inner.turn.is_some() || inner.store.get("pi.paused")?.is_none_or(|v| v.is_empty()) {
+    if inner.turn.is_some()
+        || inner
+            .store
+            .get("execution.paused")?
+            .is_none_or(|v| v.is_empty())
+    {
         return Ok(());
     }
     let message = inner
@@ -96,7 +101,7 @@ pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Js
     }
     if let Some(raw) = inner
         .store
-        .get("pi.paused")
+        .get("execution.paused")
         .map_err(internal)?
         .filter(|v| !v.is_empty())
     {
@@ -105,7 +110,7 @@ pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Js
             user.status = MessageStatus::Cancelled;
             inner.store.save(user).map_err(internal)?;
         }
-        inner.store.set("pi.paused", "").map_err(internal)?;
+        inner.store.set("execution.paused", "").map_err(internal)?;
         inner.engine.detail = None;
         s.usage
             .lock()
@@ -114,6 +119,28 @@ pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Js
             .map_err(internal)?;
     }
     Ok(Json(json!({"cancelled":true})))
+}
+
+pub fn settle_cancelled_pause(s: &Service) -> Result<()> {
+    let mut inner = s.inner.lock().unwrap();
+    if !inner.turn.as_ref().is_some_and(|t| t.cancelling) {
+        return Ok(());
+    }
+    if let Some(raw) = inner
+        .store
+        .get("execution.paused")?
+        .filter(|s| !s.is_empty())
+    {
+        let req: SendMessage = serde_json::from_str(&raw)?;
+        if let Some(mut m) = inner.store.duplicate(&req.request_id)? {
+            m.status = MessageStatus::Cancelled;
+            inner.store.save(m)?;
+        }
+        inner.store.set("execution.paused", "")?;
+        inner.engine.detail = None;
+        s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -175,7 +202,7 @@ mod tests {
     fn compaction_usage_is_a_subset_and_lifecycle_is_scoped_and_durable() {
         let dir = std::env::temp_dir().join(format!("pot-compaction-{}", id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("usage.sqlite");
+        let path = dir.join("usage-v2.sqlite");
         let l = Ledger::open(&path).unwrap();
         let at = now();
         let op = id();
@@ -237,7 +264,7 @@ mod tests {
     fn old_usage_schema_migrates_without_losing_requests() {
         let dir = std::env::temp_dir().join(format!("pot-usage-migrate-{}", id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("usage.sqlite");
+        let path = dir.join("usage-v2.sqlite");
         let c = Connection::open(&path).unwrap();
         c.execute_batch("CREATE TABLE requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending'); INSERT INTO requests(id,scope,turn_id,at,model,input,output,state) VALUES ('old','main','turn',0,'mock',10,5,'reported');").unwrap();
         drop(c);
@@ -253,7 +280,7 @@ mod tests {
         model: &str,
         profile_id: &str,
     ) -> agent::ResolvedSpec {
-        let mut profile = agent::Profile::legacy(&pi::Config {
+        let mut profile = agent::Profile::api(&execution::Config {
             api_key: "unused".into(),
             model: model.into(),
             max_tokens: 100,
@@ -263,7 +290,7 @@ mod tests {
         });
         profile.id = profile_id.into();
         profile.auth_ref = match engine {
-            agent::Engine::Pi => "pi.json:api_key",
+            agent::Engine::Pot => "providers.json:deepseek",
             agent::Engine::Codex => "cli:codex",
             agent::Engine::Grok => "cli:grok",
         }
@@ -276,7 +303,7 @@ mod tests {
         let l = ledger();
         let t = at("2026-10-04T01:00:00Z");
         for (key, engine, scope, model, stamp) in [
-            ("p", agent::Engine::Pi, "main", "shared", t),
+            ("p", agent::Engine::Pot, "main", "shared", t),
             ("c", agent::Engine::Codex, "main", "shared", t),
             ("a", agent::Engine::Grok, "task-1", "shared", t),
             (
@@ -419,7 +446,7 @@ mod tests {
         let t = at("2026-10-04T01:00:00Z");
         for i in 0..21 {
             let model = format!("model-{i:02}");
-            let spec = attributed_spec(agent::Engine::Pi, &model, "pi-test");
+            let spec = attributed_spec(agent::Engine::Pot, &model, "execution-test");
             l.reserve(&model, "main", "turn", t, &model, 1, 1).unwrap();
             l.route(&model, &spec, 1).unwrap();
             l.settle(&model, &json!({"prompt_tokens":1,"completion_tokens":1}))
@@ -493,7 +520,7 @@ mod tests {
     #[test]
     fn routing_native_turn_metering_retains_incomplete_usage_without_double_counting() {
         let l = ledger();
-        let profile = agent::Profile::legacy(&pi::Config {
+        let profile = agent::Profile::api(&execution::Config {
             model: "fixture-model".into(),
             max_tokens: 128,
             ..Default::default()
@@ -548,7 +575,7 @@ mod tests {
         let l = ledger();
         let s = Store::open(std::path::Path::new(":memory:")).unwrap();
         s.set(
-            "pi.usage",
+            "execution.usage",
             &json!([{"prompt_tokens":3,"completion_tokens":2}]).to_string(),
         )
         .unwrap();
@@ -720,22 +747,4 @@ mod tests {
         );
         assert!(summary(State(s), h, Query(query("", 7))).await.is_ok());
     }
-}
-
-pub fn settle_cancelled_pause(s: &Service) -> Result<()> {
-    let mut inner = s.inner.lock().unwrap();
-    if !inner.turn.as_ref().is_some_and(|t| t.cancelling) {
-        return Ok(());
-    }
-    if let Some(raw) = inner.store.get("pi.paused")?.filter(|s| !s.is_empty()) {
-        let req: SendMessage = serde_json::from_str(&raw)?;
-        if let Some(mut m) = inner.store.duplicate(&req.request_id)? {
-            m.status = MessageStatus::Cancelled;
-            inner.store.save(m)?;
-        }
-        inner.store.set("pi.paused", "")?;
-        inner.engine.detail = None;
-        s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
-    }
-    Ok(())
 }

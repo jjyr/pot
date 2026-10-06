@@ -1,6 +1,6 @@
 # Scheduled tasks
 
-Schedules are persistent definitions; each trigger creates an independent background task/Pi session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
+Schedules are persistent definitions; each trigger creates an independent background task/Agent context. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
 
 ```
 Chat / tasks -> schedules
@@ -48,5 +48,5 @@ Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempoten
 
 ```sh
 CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-app -p pot-runtime -p pot-protocol
-POT_TEST_PI_BIN="$(command -v pi)" CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-runtime real_pi -- --ignored
+mise exec -- cargo test --locked -p pot-runtime native_agent
 ```

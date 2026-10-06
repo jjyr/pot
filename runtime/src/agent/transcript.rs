@@ -8,6 +8,7 @@ use std::collections::HashMap;
 pub struct Transcript {
     pub assistant: Option<Message>,
     pub tools: HashMap<String, Message>,
+    tool_labels: HashMap<String, String>,
     pub failure: Option<String>,
 }
 fn limited(text: String) -> String {
@@ -93,6 +94,7 @@ impl Transcript {
                     request_id: None,
                 };
                 s.save(message.clone())?;
+                self.tool_labels.insert(call_id.clone(), message.text.clone());
                 self.tools.insert(call_id.clone(), message);
             }
             Update::ToolFinished {
@@ -105,7 +107,7 @@ impl Transcript {
                 if let Some(message) = self.tools.get_mut(call_id) {
                     message.text = limited(format!(
                         "{}\n{}",
-                        message.text,
+                        self.tool_labels.get(call_id).unwrap_or(&message.text),
                         result["content"]
                             .as_array()
                             .map(|blocks| blocks
@@ -122,6 +124,12 @@ impl Transcript {
                     } else {
                         MessageStatus::Complete
                     };
+                    s.save(message.clone())?;
+                }
+            }
+            Update::ToolOutput { id: call_id, stream, text } => {
+                if let Some(message) = self.tools.get_mut(call_id) {
+                    message.text = limited(format!("{}\n[{stream}] {text}", message.text));
                     s.save(message.clone())?;
                 }
             }

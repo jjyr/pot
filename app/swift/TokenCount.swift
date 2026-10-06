@@ -2,7 +2,7 @@ import Foundation
 
 /// Decimal SI suffixes, matching model token-count notation (1K = 1000).
 enum TokenCount {
-    static let maximum = 9_007_199_254_740_991 // Exact JSON integer in Pi/JavaScript.
+    static let maximum = 9_007_199_254_740_991 // Exact JSON integer in JSON.
     static func parse(_ input: String) -> Int? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard text.range(of: "^[0-9]+(?:\\.[0-9]+)?[KM]?$", options: .regularExpression) != nil else { return nil }

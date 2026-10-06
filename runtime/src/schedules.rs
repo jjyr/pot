@@ -107,10 +107,10 @@ fn next(spec: &ScheduleSpec, after: i64) -> Result<Option<i64>> {
                 {
                     continue;
                 }
-                if let Some(t) = tz.from_local_datetime(&date.and_time(time)).earliest() {
-                    if t.timestamp_millis() > after {
-                        return Ok(Some(t.timestamp_millis()));
-                    }
+                if let Some(t) = tz.from_local_datetime(&date.and_time(time)).earliest()
+                    && t.timestamp_millis() > after
+                {
+                    return Ok(Some(t.timestamp_millis()));
                 }
             }
             bail!("无法计算下次运行")
@@ -201,12 +201,11 @@ pub(super) fn page(root: &Service, q: QueryPage) -> ApiResult<SchedulePage> {
                             })
                         })
                         .unwrap_or_default();
-                    if let Some(t) = &r.task_id {
-                        if r.finished_at_ms.is_none() {
-                            if let Some(p) = tasks::task_phase(&hub, t) {
-                                r.state = serde_json::to_value(p).unwrap().as_str().unwrap().into();
-                            }
-                        }
+                    if let Some(t) = &r.task_id
+                        && r.finished_at_ms.is_none()
+                        && let Some(p) = tasks::task_phase(&hub, t)
+                    {
+                        r.state = serde_json::to_value(p).unwrap().as_str().unwrap().into();
                     }
                     r
                 })
@@ -501,15 +500,14 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
             .enumerate()
             .filter(|(_, r)| r.finished_at_ms.is_none())
         {
-            if let Some(task) = &r.task_id {
-                if let Some(phase) = tasks::task_phase(&hub, task) {
-                    if !matches!(
-                        phase,
-                        TaskPhase::Running | TaskPhase::Queued | TaskPhase::Waiting
-                    ) {
-                        recovered.push((sid.clone(), index, phase));
-                    }
-                }
+            if let Some(task) = &r.task_id
+                && let Some(phase) = tasks::task_phase(&hub, task)
+                && !matches!(
+                    phase,
+                    TaskPhase::Running | TaskPhase::Queued | TaskPhase::Waiting
+                )
+            {
+                recovered.push((sid.clone(), index, phase));
             }
         }
     }
@@ -528,11 +526,9 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
         }
         changed = true;
     }
-    if changed {
-        if let Err(error) = tasks::persist(root, &hub) {
-            hub.schedules = recovery_before;
-            return Err(error);
-        }
+    if changed && let Err(error) = tasks::persist(root, &hub) {
+        hub.schedules = recovery_before;
+        return Err(error);
     }
     // Flush durable notifications with their removal in the same transaction.
     if let Some(message) = hub.schedules.outbox.first().cloned() {
@@ -759,7 +755,7 @@ mod tests {
         .unwrap()
     }
     fn result(worker: &Service, fingerprint: &str) {
-        pi::private_json(&worker.workspace.join(".pot-schedule-result.json"),&json!({"summary":"Verified fixture observation","fingerprint":fingerprint,"evidence":["fixture://source"],"artifacts":[]})).unwrap();
+        execution::private_json(&worker.workspace.join(".pot-schedule-result.json"),&json!({"summary":"Verified fixture observation","fingerprint":fingerprint,"evidence":["fixture://source"],"artifacts":[]})).unwrap();
     }
     #[test]
     fn timezone_weekday_dst_and_interval_are_deterministic() {
@@ -988,147 +984,5 @@ mod tests {
         next.tasks = Arc::new(Mutex::new(tasks::Hub::default()));
         tasks::restore(&next).unwrap();
         assert_eq!(page(&next, QueryPage::default()).unwrap().total, 1);
-    }
-}
-
-#[cfg(test)]
-mod integration_tests {
-    use super::*;
-    use axum::response::sse::Event as WireEvent;
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "Runs installed Pi against a local mock provider; set POT_TEST_PI_BIN"]
-    async fn real_pi_schedule_creation_execution_and_quiet_repeat() {
-        let mut s = tasks::tests::fixture();
-        s.pi_program = std::env::var("POT_TEST_PI_BIN").expect("POT_TEST_PI_BIN");
-        s.api_budget = Some(deepseek::BudgetSettings {
-            namespace: "pi-attempts",
-            data: s.data.clone(),
-            limit: 12,
-            max_output_tokens: 512,
-        });
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        s.pi_upstream = format!("http://127.0.0.1:{port}/mock");
-        pi::private_json(
-            &s.data.join(RUNTIME_ENDPOINT_FILE),
-            &json!(RuntimeEndpoint {
-                api_version: API_VERSION,
-                port,
-                token: s.token.clone(),
-                boot_id: s.boot.clone()
-            }),
-        )
-        .unwrap();
-        orchestration::initialize(&s).unwrap();
-        let captured = Arc::new(Mutex::new(Vec::<Value>::new()));
-        let requests = captured.clone();
-        let router=Router::new().route("/api/pi/v1/chat/completions",post(tasks::gateway)).route("/api/v1/orchestration",post(orchestration::invoke)).with_state(s.clone())
-            .route("/mock",post(move|Json(body):Json<Value>|{
-                let requests=requests.clone();async move {
-                    let names:Vec<_>=body["tools"].as_array().unwrap().iter().filter_map(|t|t["function"]["name"].as_str()).collect();
-                    let main=names.contains(&"pot_manage_schedule");let summary=!main && names.contains(&"pot_get_task");
-                    let tool_result=body["messages"].as_array().unwrap().iter().any(|m|m["role"]=="tool");
-                    let tool=|name:&str,args:Value|json!({"role":"assistant","tool_calls":[{"index":0,"id":"scheduled-tool","type":"function","function":{"name":name,"arguments":args.to_string()}}]});
-                    let (delta,reason)=if summary {(json!({"role":"assistant","content":"SCHEDULE_SUMMARY: fixture changed."}),"stop")}
-                    else if main && !tool_result {(tool("pot_manage_schedule",json!({"action":"create","spec":{"title":"Fixture monitor","goal":"Observe the fixture and report a stable result","timezone":"Asia/Shanghai","kind":"interval","every_minutes":1,"notify":"changes"}})),"tool_calls")}
-                    else if main {(json!({"role":"assistant","content":"The plan is scheduled."}),"stop")}
-                    else if !tool_result {(tool("write",json!({"path":".pot-schedule-result.json","content":json!({"summary":"Fixture observation","fingerprint":"stable-fixture","evidence":["fixture://source"],"artifacts":[]}).to_string()})),"tool_calls")}
-                    else {(json!({"role":"assistant","content":"Observation saved."}),"stop")};
-                    requests.lock().unwrap().push(body);
-                    let chunk=|d:Value,f:Value|json!({"id":"schedule-fixture","object":"chat.completion.chunk","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"delta":d,"finish_reason":f}]}).to_string();
-                    let frames=vec![WireEvent::default().data(chunk(delta,Value::Null)),WireEvent::default().data(chunk(json!({}),json!(reason))),WireEvent::default().data("[DONE]")];
-                    Sse::new(futures::stream::iter(frames.into_iter().map(Ok::<_,Infallible>)))
-                }
-            }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-        let mut h = HeaderMap::new();
-        h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let _ = send(
-            State(s.clone()),
-            h,
-            Json(SendMessage {
-                request_id: "create-plan".into(),
-                conversation_id: "main".into(),
-                text: "Create a fixture monitor every minute, notify changes only.".into(),
-            }),
-        )
-        .await
-        .unwrap();
-        tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            pi::run(&s, rx.recv().await.unwrap()),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        s.turn(None);
-        let sid = {
-            let hub = s.tasks.lock().unwrap();
-            assert_eq!(hub.schedules.plans.len(), 1);
-            hub.schedules.plans.keys().next().unwrap().clone()
-        };
-        let mut session_ids = Vec::new();
-        for iteration in 0..2 {
-            let due = s.tasks.lock().unwrap().schedules.plans[&sid]
-                .info
-                .next_at_ms
-                .unwrap();
-            tick(&s, due).unwrap();
-            let (tid, worker, req) = tasks::claim(&s).unwrap().unwrap();
-            let result =
-                tokio::time::timeout(std::time::Duration::from_secs(30), pi::run(&worker, req))
-                    .await
-                    .unwrap()
-                    .unwrap();
-            tasks::finish(&s, &tid, Ok(result)).unwrap();
-            session_ids.push(
-                worker
-                    .inner
-                    .lock()
-                    .unwrap()
-                    .store
-                    .get("pi.session")
-                    .unwrap()
-                    .unwrap(),
-            );
-            assert_eq!(
-                read_result(&worker.workspace).unwrap().fingerprint,
-                "stable-fixture"
-            );
-            orchestration::deliver(&s).unwrap();
-            if iteration == 0 {
-                let notification = rx.try_recv().unwrap();
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
-                    pi::run(&s, notification),
-                )
-                .await
-                .unwrap()
-                .unwrap();
-                s.turn(None);
-            } else {
-                assert!(rx.try_recv().is_err());
-            }
-        }
-        assert_ne!(session_ids[0], session_ids[1]);
-        let hub = s.tasks.lock().unwrap();
-        let p = &hub.schedules.plans[&sid];
-        assert_eq!(p.runs[0].changed, Some(true));
-        assert_eq!(p.runs[1].changed, Some(false));
-        assert!(p.runs.iter().all(|r| r.state == "complete"));
-        drop(hub);
-        assert_eq!(captured.lock().unwrap().len(), 7);
-        assert_eq!(
-            s.snapshot()
-                .unwrap()
-                .messages
-                .iter()
-                .filter(|m| m.text == "SCHEDULE_SUMMARY: fixture changed.")
-                .count(),
-            1
-        );
-        server.abort();
     }
 }

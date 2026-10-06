@@ -15,7 +15,7 @@ pub struct Tool {
     pub invocation: CommandSpec,
 }
 fn defaults() -> Vec<Tool> {
-    ["pi", "codex", "grok"]
+    ["codex", "grok"]
         .into_iter()
         .map(|id| Tool {
             id: id.into(),
@@ -33,7 +33,7 @@ pub fn tools(s: &Service) -> Result<Vec<Tool>> {
         .get("agent.tools.v1")?
         .map(|v| Ok(serde_json::from_str(&v)?))
         .unwrap_or_else(|| Ok::<_, anyhow::Error>(defaults()))?;
-    tools.retain(|t| matches!(t.id.as_str(), "pi" | "codex" | "grok"));
+    tools.retain(|t| matches!(t.id.as_str(), "codex" | "grok"));
     let profiles = agent::profiles(&inner.store)?;
     if !tools.iter().any(|t| t.id == "grok") {
         tools.push(Tool {
@@ -48,11 +48,10 @@ pub fn tools(s: &Service) -> Result<Vec<Tool>> {
         if let Some(profile) = profiles
             .iter()
             .find(|p| p.id == format!("{}-default", tool.id))
+            && let Some(launch) = &profile.launch_spec
         {
-            if let Some(launch) = &profile.launch_spec {
-                tool.invocation.executable = launch.executable.clone();
-                tool.invocation.argv = launch.expand(&[])?;
-            }
+            tool.invocation.executable = launch.executable.clone();
+            tool.invocation.argv = launch.expand(&[])?;
         }
     }
     Ok(tools)
@@ -113,38 +112,38 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
         }
         if auth == "authenticated" {
             if tool.id == "codex" {
-                if let Ok(host) = s.codex.connect(&agent::LaunchSpec::codex()).await {
-                    if let Ok(reply) = host.request("model/list", json!({})).await {
-                        models = reply["data"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|m| {
-                                m["model"]
-                                    .as_str()
-                                    .or_else(|| m["id"].as_str())
-                                    .map(str::to_owned)
-                            })
-                            .collect();
-                    }
+                if let Ok(host) = s.codex.connect(&agent::LaunchSpec::codex()).await
+                    && let Ok(reply) = host.request("model/list", json!({})).await
+                {
+                    models = reply["data"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|m| {
+                            m["model"]
+                                .as_str()
+                                .or_else(|| m["id"].as_str())
+                                .map(str::to_owned)
+                        })
+                        .collect();
                 }
-            } else if tool.id == "grok" {
-                if let Ok(host) = pot_driver::grok::connect().await {
-                    if let Ok(session) = host
-                        .request("session/new", json!({"cwd":s.workspace,"mcpServers":[]}))
-                        .await
-                    {
-                        models = pot_driver::grok::models(&session);
-                    }
-                    host.shutdown().await;
+            } else if tool.id == "grok"
+                && let Ok(host) = pot_driver::grok::connect().await
+            {
+                if let Ok(session) = host
+                    .request("session/new", json!({"cwd":s.workspace,"mcpServers":[]}))
+                    .await
+                {
+                    models = pot_driver::grok::models(&session);
                 }
+                host.shutdown().await;
             }
         }
         results.push(json!({"id":tool.id,"installation":installation,
             "models":models,
             "authentication":auth,"auth_type":"unknown","status_check":check,
-            "compatibility":if tool.id == "pi" {"compatible"} else {"unchecked"},
-            "readiness":"unchecked","accepted_roles":if tool.id == "pi" {vec!["main","worker","summary"]} else {vec![]}}));
+            "compatibility":"unchecked",
+            "readiness":"unchecked","accepted_roles":Vec::<String>::new()}));
     }
     Ok(Json(json!({"agents":results})))
 }
@@ -207,8 +206,11 @@ mod tests {
     #[test]
     fn discovery_uses_versioned_invocation_instead_of_old_catalog_command() {
         let s = crate::tests::service();
-        let mut profile = agent::Profile::legacy(&pi::Config::default());
-        let mut launch = agent::LaunchSpec::default();
+        let mut profile = agent::Profile::api(&execution::Config::default());
+        profile.id = "codex-default".into();
+        profile.engine = agent::Engine::Codex;
+        profile.auth_ref = "cli:codex".into();
+        let mut launch = agent::LaunchSpec::codex();
         launch.executable = "/this/wrapper/is/missing".into();
         launch.argv.insert(
             0,
@@ -232,7 +234,7 @@ mod tests {
     #[test]
     fn commands_are_argv_and_discovery_does_not_guess_auth() {
         let tools = defaults();
-        assert_eq!(tools[1].invocation.executable, "codex");
+        assert_eq!(tools[0].invocation.executable, "codex");
         let old: Tool = serde_json::from_value(json!({"id":"codex","invocation":{"executable":"codex","argv":[]},"login":{"executable":"must-not-run","argv":[]}})).unwrap();
         assert!(serde_json::to_value(old).unwrap().get("login").is_none());
         assert!(executable("/this/cannot/exist").is_none());

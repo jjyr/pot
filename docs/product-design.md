@@ -9,7 +9,7 @@ Pot is a personal assistant accessed from the Mac menu bar. It works in a persis
 - One long-lived main assistant, named Pot by default; task workers have no separate personas. Tasks/schedules are created only through the main Agent; UI handles viewing, guidance, and management.
 - Interaction references ChatGPT Dot. Agent Setup/Sandbox configuration follow local product needs without inferring or copying closed-source internals.
 - GUI, Runtime, and tools run locally; models may use cloud services. Default offline operation or data never leaving the machine is not promised.
-- Start with Pi + DeepSeek. Future driver targets include Codex ACP, Claude, OpenCode, and AGY CLI; validate each separately rather than treating a handshake/host login as readiness.
+- Direct APIs use Pot Agent (Chat Completions, Responses, Anthropic and Gemini). Codex App Server and Grok ACP are native drivers; validate each independently.
 - Local product bundles Containerization without requiring Docker Desktop. Remote Docker/Node Manager and multiple nodes are future directions without automatic task/identity migration.
 - Persistent project assistants, inter-assistant communication, environment migration, and a complete plugin ecosystem are not current MVP prerequisites.
 

@@ -35,7 +35,7 @@ impl BudgetSettings {
 // before networking, fsync, never remove a reservation, and never auto-retry.
 pub fn reserve_in(dir: &std::path::Path, limit: u64) -> Result<u64> {
     use std::io::Write;
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(dir)?;
     for n in 1..=limit {
         match std::fs::OpenOptions::new()
             .write(true)

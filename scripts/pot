@@ -66,7 +66,7 @@ if cmd == "prepare":
     ]:
         shutil.copy2(REPO / "image" / name, RES / name)
     for name in ["package.json", "package-lock.json"]:
-        shutil.copy2(REPO / "image/pi" / name, RES / ("pi-" + name))
+        shutil.copy2(REPO / "image/agents" / name, RES / ("agents-" + name))
 elif cmd == "build":
     call(["cargo", "build", "--locked", "-p", "pot-app", "-j", "4"], cwd=REPO, env=env)
     call(

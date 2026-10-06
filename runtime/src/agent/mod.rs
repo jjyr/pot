@@ -11,16 +11,18 @@ use crate::*;
 pub use model::*;
 pub use storage::*;
 
-/// Import once. Existing snapshots always win over a changed pi.json.
+/// Initialize an explicitly supplied API profile; persisted snapshots stay immutable.
 pub fn initialize(s: &Service) -> Result<()> {
-    let Some(config) = &s.pi else { return Ok(()) };
+    let Some(config) = &s.execution else {
+        return Ok(());
+    };
     let mut inner = s.inner.lock().unwrap();
     initialize_store(&mut inner.store, &s.usage_scope, &s.data, config)?;
     Ok(())
 }
 
 pub fn configured(s: &Service) -> bool {
-    s.pi.is_some()
+    s.execution.is_some()
         || current(&s.inner.lock().unwrap().store)
             .ok()
             .flatten()
@@ -32,7 +34,7 @@ pub fn binding(s: &Service) -> Result<Binding> {
     current(&s.inner.lock().unwrap().store)?.ok_or_else(|| anyhow!("Agent binding missing"))
 }
 
-pub fn pi_config(s: &Service) -> Result<pi::Config> {
+pub fn execution_config_for(s: &Service) -> Result<execution::Config> {
     let binding = binding(s)?;
     anyhow::ensure!(
         binding.state == BindingState::Active,
@@ -40,7 +42,7 @@ pub fn pi_config(s: &Service) -> Result<pi::Config> {
         binding.failure.as_deref().unwrap_or("needs rebind")
     );
     anyhow::ensure!(
-        binding.spec.engine == Engine::Pi,
+        binding.spec.engine == Engine::Pot,
         "Agent engine needs rebind"
     );
     let data = if s.is_worker {
@@ -51,7 +53,7 @@ pub fn pi_config(s: &Service) -> Result<pi::Config> {
     } else {
         &s.data
     };
-    let mut config = pi::execution_config(s.pi.clone().unwrap_or_default(), data)?;
+    let mut config = execution::execution_config(s.execution.clone().unwrap_or_default(), data)?;
     config.model = binding.spec.model;
     config.max_tokens = binding.spec.params.max_output_tokens;
     Ok(config)
@@ -65,21 +67,21 @@ pub fn native_session(s: &Service) -> Result<(PathBuf, Option<String>)> {
         binding.failure.as_deref().unwrap_or("needs rebind")
     );
     match binding.native_ref {
-        NativeRef::Pi { file, session_id } => {
-            if let Some(expected) = &session_id {
-                if let Err(e) = validate_pi_session(&file, expected) {
-                    mark_broken(&mut s.inner.lock().unwrap().store, &e.to_string())?;
-                    return Err(e);
-                }
+        NativeRef::Pot { file, session_id } => {
+            if let Some(expected) = &session_id
+                && let Err(e) = validate_agent_session(&file, expected)
+            {
+                mark_broken(&mut s.inner.lock().unwrap().store, &e.to_string())?;
+                return Err(e);
             }
             Ok((file, session_id))
         }
-        _ => bail!("Expected a Pi native session"),
+        _ => bail!("Expected a Pot native session"),
     }
 }
 
-pub fn bind_pi_session(s: &Service, session_id: &str) -> Result<()> {
-    save_pi_session(&mut s.inner.lock().unwrap().store, session_id)
+pub fn bind_agent_session(s: &Service, session_id: &str) -> Result<()> {
+    save_agent_session(&mut s.inner.lock().unwrap().store, session_id)
 }
 
 pub fn record_turn(s: &Service, turn: &str) -> Result<()> {
@@ -155,7 +157,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
         req.text = "Pot allowance is available again. Continue the unfinished user request from the saved session. Preserve completed tool results; do not repeat completed external actions.".into();
     }
     req.text = migration::bootstrap(s, &req)?;
-    s.inner.lock().unwrap().store.set("pi.paused", "")?;
+    s.inner.lock().unwrap().store.set("execution.paused", "")?;
     s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
     s.usage
         .lock()
@@ -188,7 +190,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
             .lock()
             .unwrap()
             .store
-            .set("pi.paused", &serde_json::to_string(&req)?)?;
+            .set("execution.paused", &serde_json::to_string(&req)?)?;
         s.phase(EnginePhase::Ready, Some("等待 Pot 额度恢复".into()));
         return Ok(());
     }
@@ -245,3 +247,6 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod integration_tests;

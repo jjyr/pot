@@ -214,15 +214,14 @@ fn kill_groups(pid: i32, fd: i32) {
                 continue;
             };
             let fields: Vec<_> = fields.split_whitespace().collect();
-            if fields.get(3).and_then(|v| v.parse::<i32>().ok()) == Some(pid) {
-                if let Some(group) = fields
+            if fields.get(3).and_then(|v| v.parse::<i32>().ok()) == Some(pid)
+                && let Some(group) = fields
                     .get(2)
                     .and_then(|v| v.parse::<i32>().ok())
                     .filter(|v| *v > 0)
-                {
-                    unsafe {
-                        libc::kill(-group, libc::SIGKILL);
-                    }
+            {
+                unsafe {
+                    libc::kill(-group, libc::SIGKILL);
                 }
             }
         }
@@ -259,7 +258,8 @@ fn spawn(cwd: &std::path::Path, size: &Size) -> Result<Arc<Session>> {
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &mut native,
+            // libc uses a const winsize pointer on Linux and a mutable one on macOS.
+            &raw mut native,
         )
     } != 0
     {
@@ -328,7 +328,7 @@ fn spawn(cwd: &std::path::Path, size: &Size) -> Result<Arc<Session>> {
         loop {
             let ready = reader.master.readable().await;
             let Ok(mut ready) = ready else { break };
-            match ready.try_io(|fd| (&*fd.get_ref()).read(&mut buffer)) {
+            match ready.try_io(|fd| fd.get_ref().read(&mut buffer)) {
                 Ok(Ok(0)) | Ok(Err(_)) => break,
                 Ok(Ok(n)) => {
                     let mut history = reader.history.lock().unwrap();
@@ -348,7 +348,7 @@ fn spawn(cwd: &std::path::Path, size: &Size) -> Result<Arc<Session>> {
 async fn write(session: &Session, mut bytes: &[u8]) -> Result<()> {
     while !bytes.is_empty() {
         let mut ready = session.master.writable().await?;
-        match ready.try_io(|fd| (&*fd.get_ref()).write(bytes)) {
+        match ready.try_io(|fd| fd.get_ref().write(bytes)) {
             Ok(Ok(0)) => bail!("Terminal closed"),
             Ok(Ok(n)) => bytes = &bytes[n..],
             Ok(Err(e)) => return Err(e.into()),

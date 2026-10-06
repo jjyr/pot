@@ -153,11 +153,7 @@ impl UsageUI {
                 .items_center()
                 .justify_between()
                 .child(ui::section(if detail {
-                    if v.selected.is_empty() {
-                        "累计用量"
-                    } else {
-                        "累计用量"
-                    }
+                    "累计用量"
                 } else {
                     "整体统计"
                 }))
@@ -286,7 +282,7 @@ impl UsageUI {
             let mut card = ui::card(cx).child(ui::section("Agent / 模型用量"));
             for (index, row) in groups.iter().enumerate() {
                 let agent = match row["agent"].as_str().unwrap_or("unknown") {
-                    "pi" => "Pi",
+                    "pot" => "Pot",
                     "codex" => "Codex",
                     "claude" => "Claude",
                     _ => "Agent 未知",

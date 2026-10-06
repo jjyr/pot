@@ -60,7 +60,7 @@ impl ExecutionFeedback for Feedback {
     }
 }
 struct Config;
-impl LegacyProfileConfig for Config {
+impl ProfileConfig for Config {
     fn model(&self) -> &str {
         "grok-fixture"
     }
@@ -105,7 +105,7 @@ for line in sys.stdin:
  else:raise Exception('Unexpected RPC')
 "#).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let mut profile = Profile::legacy(&Config);
+    let mut profile = Profile::api(&Config);
     profile.engine = Engine::Grok;
     profile.provider = "xai".into();
     profile.auth_ref = "cli:grok".into();
@@ -136,9 +136,7 @@ for line in sys.stdin:
         role: ExecutionRole::Main,
         backend_url: "unused".into(),
         lane_token: "not-exposed".into(),
-        pi_program: "unused".into(),
         main_prompt: String::new(),
-        model_api: String::new(),
         feedback: feedback.clone(),
     };
     let mut session = GrokHost.session(context.clone(), binding.clone()).unwrap();

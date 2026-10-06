@@ -24,8 +24,6 @@ for lang,text in {'zh-cn':'简体中文','zh-tw':'繁體中文','ja':'日本語�
  fonts[lang]=subprocess.check_output(['fc-match','-f','%{family}',pattern],text=True,env=font_env)
  expected={'zh-cn':'SC','zh-tw':'TC','ja':'JP','ko':'KR'}[lang]
  assert 'CJK '+expected in fonts[lang],(lang,fonts[lang])
-pi=subprocess.check_output(['pi','--version'],text=True).strip()
-assert pi=='0.87.1',pi
 codex=subprocess.check_output(['codex','--version'],text=True).strip()
 assert codex.startswith('codex-cli '),codex
 cmds=[]
@@ -34,8 +32,8 @@ for p in pathlib.Path('/proc').glob('[0-9]*/cmdline'):
  except FileNotFoundError:pass
 for program in ['xfwm4','xfdesktop','xfsettingsd','xfce4-panel']:assert any(program in c for c in cmds),program
 assert not any('apk add' in c or 'npm ci' in c for c in cmds)
-pathlib.Path('/data/offline-result.json').write_text(json.dumps({'networking':False,'ready_seconds':round(time.monotonic()-start,2),'pi':pi,'codex':codex,'fonts':fonts},indent=2))
-print('Desktop + Runtime + Pi + CJK ready without a network interface')
+pathlib.Path('/data/offline-result.json').write_text(json.dumps({'networking':False,'ready_seconds':round(time.monotonic()-start,2),'codex':codex,'fonts':fonts},indent=2))
+print('Desktop + Runtime + Pot Agent + CJK ready without a network interface')
 PY
 kill -TERM "$desktop"
 wait "$desktop"

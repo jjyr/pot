@@ -16,7 +16,6 @@ impl ServerConfig {
                 workspace: PathBuf::from(
                     std::env::var("POT_WORKSPACE").unwrap_or_else(|_| "/data/workspace".into()),
                 ),
-                pi_program: std::env::var("POT_PI_BIN").unwrap_or_else(|_| "pi".into()),
             },
             bind: std::env::var("POT_RUNTIME_BIND")
                 .unwrap_or_else(|_| format!("0.0.0.0:{RUNTIME_PORT}")),

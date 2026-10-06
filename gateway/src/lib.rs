@@ -42,3 +42,5 @@ pub async fn forward(
         .await
         .map_err(|_| anyhow!("Model provider connection failed"))
 }
+
+pub mod model;

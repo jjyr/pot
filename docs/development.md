@@ -9,7 +9,6 @@ mise trust
 mise install
 mise run setup        # Rust components, Linux target, repository hk hooks, environment checks
 mise run prepare
-mise exec -- scripts/configure-pi # Optional: Pi + DeepSeek only
 mise run build
 mise run bundle
 mise run open
@@ -19,7 +18,7 @@ mise run open
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
-`configure-pi` imports host Pi DeepSeek credentials into private guest configuration without model calls or embedding keys in App. The model is `deepseek-v4-flash`; see [UI specification](ui-ux-design.md#allowance-configuration) for configuration, default allowances, and K/M token input rules. Existing configuration is not overwritten automatically; the usage ledger is not reset.
+Configure model API connections in AI Configuration. Direct APIs use the Rust Pot Agent; Codex App Server and Grok retain native drivers. Old Pi development sessions/configurations are not imported.
 
 ## Standalone Server (development entry point)
 
@@ -30,7 +29,7 @@ mise exec -- cargo build --locked -p pot-server
 POT_DATA_DIR=/tmp/pot-server/product POT_WORKSPACE=/tmp/pot-server/workspace POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-`POT_PI_BIN` selects the Pi executable. Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
 
 App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
 
@@ -41,10 +40,18 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
-POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runtime real_pi -- --ignored
+mise run clippy         # All Rust targets; warnings fail the check
+mise run test:eval      # Deterministic CLI suite, compaction, validation and comparison
+mise exec -- cargo test --locked -p pot-runtime native_agent
 ```
 
-The final command uses host-installed Pi and a local mock model without paid calls. See the [Documentation index](README.md) for real App/VM/model results; old POC fixtures do not establish current product acceptance.
+The final command runs the Rust Agent against local HTTP model fixtures with real file/shell tools, without paid calls. See the [Documentation index](README.md) for real App/VM/model results; old POC fixtures do not establish current product acceptance.
+
+### GitHub CI
+
+[CI](../.github/workflows/ci.yml) runs on pull requests, pushes to `main`, and manual dispatch. Linux runs backend Clippy, all backend tests and `test:eval`; Apple Silicon macOS 26 runs source formatting/script checks, workspace compilation, workspace Clippy, the Swift Helper build, backend tests and App unit tests. Clippy includes all targets (including tests) and treats warnings as errors. Linux excludes the macOS-only App; the macOS job covers it. Tool versions come from `mise.toml`, with Actions pinned to commit hashes. Dependency/build caches are separated by OS and architecture; evaluation records, credentials and VM images are not cached.
+
+The deterministic evaluation checks five-turn retention, cache request identity, injected failures/recovery, child-task delegation, tool execution and compaction. It also reconstructs records and compares repeated compaction runs. These are contract checks, not measurements of real provider efficiency. CI requires no model credentials and does not run live evaluations, account authorization, GUI acceptance, image builds or VM boot tests. Local development still covers those acceptance steps separately.
 
 ### Codex validation
 
@@ -71,7 +78,7 @@ Use a new result directory for each cold validation. This tests real CLI behavio
 `mise run setup` installs repository-local hk pre-commit/pre-push hooks without changing global hooks. Run it once per clone. Git hooks load tools through mise without shell activation; mise itself must be on PATH.
 
 - pre-commit: checks formatting/scripts for changed files; Rust formatting covers the workspace, and rule/check-entry changes trigger all lightweight checks. Also checks staged whitespace.
-- pre-push: relevant Rust/Swift changes trigger `check:rust` and core tests; Helper changes additionally trigger `check:swift`.
+- pre-push: relevant Rust/Swift changes trigger `check:rust`, workspace Clippy (all targets, warnings as errors), and backend tests; Helper changes additionally trigger `check:swift`. Clippy does not run in pre-commit.
 - Hooks only check; they neither fix nor stage. Source checks read the working tree, so partially staged content must also be formatted. Image/VM/paid model tests are excluded. A new machine may compile slowly; later runs reuse caches.
 
 Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.
@@ -86,7 +93,9 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
 | `core/` | Immutable Agent models, execution contracts, shared tool schema |
 | `storage/` | SQLite, binding/usage/file-request ledgers, transactions |
-| `driver/` | Pi RPC, Codex App Server and Grok ACP execution adapters |
+| `agent/` | Pot model/tool loop, context management, apply_patch and exec_command |
+| `eval/` | Standalone deterministic evaluation CLI, usage validation and run comparison |
+| `driver/` | Codex App Server and Grok ACP execution adapters |
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
 | `image/` | Guest desktop, browser, broker/viewer resources |
@@ -98,7 +107,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Only Codex and Grok use native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Antigravity and Claude CLI adapters, binaries, discovery and tests have been removed. Removed CLI configurations are unsupported; no compatibility migration, conversion or archive is provided. Account files, messages, tasks and historical usage are not deleted.
+Only Codex and Grok use native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pot Agent. Antigravity and Claude CLI adapters, binaries, discovery and tests have been removed. Removed CLI configurations are unsupported; no compatibility migration, conversion or archive is provided. Account files, messages, tasks and historical usage are not deleted.
 
 ### Terminal process cleanup (Linux guest)
 

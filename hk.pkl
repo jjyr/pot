@@ -22,7 +22,7 @@ hooks {
       }
       ["rust"] {
         glob = List("**/*.rs", "**/*.swift", "**/Cargo.toml", "Cargo.toml", "Cargo.lock", "mise.toml", "hk.pkl")
-        check = "mise run check:rust && mise run test"
+        check = "mise run check:rust && mise run clippy && mise run test"
       }
     }
   }
