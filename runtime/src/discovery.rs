@@ -15,7 +15,7 @@ pub struct Tool {
     pub invocation: CommandSpec,
 }
 fn defaults() -> Vec<Tool> {
-    ["pi", "codex", "grok", "claude", "agy"]
+    ["pi", "codex", "grok"]
         .into_iter()
         .map(|id| Tool {
             id: id.into(),
@@ -33,6 +33,7 @@ pub fn tools(s: &Service) -> Result<Vec<Tool>> {
         .get("agent.tools.v1")?
         .map(|v| Ok(serde_json::from_str(&v)?))
         .unwrap_or_else(|| Ok::<_, anyhow::Error>(defaults()))?;
+    tools.retain(|t| matches!(t.id.as_str(), "pi" | "codex" | "grok"));
     let profiles = agent::profiles(&inner.store)?;
     if !tools.iter().any(|t| t.id == "grok") {
         tools.push(Tool {
@@ -92,7 +93,7 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
         let mut check = "unsupported";
         let mut models = Vec::<String>::new();
         // Only official, documented status commands are queried; wrappers stay unknown.
-        if matches!(tool.id.as_str(), "codex" | "claude" | "grok")
+        if matches!(tool.id.as_str(), "codex" | "grok")
             && name == tool.id
             && tool.invocation.argv.is_empty()
             && present
@@ -158,11 +159,7 @@ async fn native_status(engine: &str, cwd: &std::path::Path) -> Result<Option<boo
         .await
         .map_err(|_| anyhow!("Grok account check timed out"))?;
     }
-    let args: &[&str] = if engine == "claude" {
-        &["auth", "status", "--json"]
-    } else {
-        &["login", "status"]
-    };
+    let args: &[&str] = &["login", "status"];
     let mut child = Command::new(engine)
         .args(args)
         .current_dir(cwd)
@@ -189,14 +186,6 @@ async fn native_status(engine: &str, cwd: &std::path::Path) -> Result<Option<boo
             String::from_utf8_lossy(&out),
             String::from_utf8_lossy(&err)
         );
-        if engine == "claude" {
-            let value: Value = serde_json::from_slice(&out)?;
-            return Ok::<_, anyhow::Error>(match value["loggedIn"].as_bool() {
-                Some(true) if status.success() => Some(true),
-                Some(false) if status.code() == Some(1) => Some(false),
-                _ => None,
-            });
-        }
         Ok::<_, anyhow::Error>(if status.success() && text.contains("Logged in") {
             Some(true)
         } else if !status.success() && text.trim() == "Not logged in" {
@@ -247,5 +236,29 @@ mod tests {
         let old: Tool = serde_json::from_value(json!({"id":"codex","invocation":{"executable":"codex","argv":[]},"login":{"executable":"must-not-run","argv":[]}})).unwrap();
         assert!(serde_json::to_value(old).unwrap().get("login").is_none());
         assert!(executable("/this/cannot/exist").is_none());
+    }
+
+    #[test]
+    fn cached_removed_tools_are_never_discovered() {
+        let s = crate::tests::service();
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                "agent.tools.v1",
+                &json!([
+                    {"id":"claude","invocation":{"executable":"must-not-run","argv":[]}},
+                    {"id":"agy","invocation":{"executable":"must-not-run","argv":[]}},
+                    {"id":"codex","invocation":{"executable":"codex","argv":[]}}
+                ])
+                .to_string(),
+            )
+            .unwrap();
+        let catalog = tools(&s).unwrap();
+        assert_eq!(
+            catalog.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["codex", "grok"]
+        );
     }
 }

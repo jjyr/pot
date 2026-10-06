@@ -18,7 +18,7 @@ macOS
 |      |                                               |
 | pot-runtime: bindings / tasks / schedules / recovery   |
 |      |-- Storage: SQLite + request/usage ledgers       |
-|      |-- Driver: Pi / Codex / Claude / AGY sessions    |
+|      |-- Driver: Pi / Codex / Grok sessions            |
 |      +-- Gateway: provider HTTP + protocol codecs     |
 |                                                      |
 | Desktop / broker <---- App native WebView bridge      |
@@ -39,7 +39,7 @@ Issue [#5](https://github.com/jjyr/pot/issues/5) separates Core/Storage/Driver/G
 | Server | Standalone program, configuration, routes, listener, and lifecycle | `server/src/main.rs`, `config.rs`, `routes.rs`, `hosting.rs` |
 | Runtime / Storage | Authoritative task state, message events, usage, recovery, and persistence | `runtime/src/lib.rs`, `bootstrap.rs`, `storage/src/` |
 | Orchestration / scheduling | Single-level delegation, queues, completion delivery, scheduled triggers | `tasks.rs`, `orchestration.rs`, `schedules.rs` |
-| Agent / Driver | Profile snapshots, epoch bindings and migration; DriverHost / SessionHandle; Pi RPC, Codex App Server, native Claude CLI and their contexts | `core/src/`, `driver/src/`, `runtime/src/agent/` |
+| Agent / Driver | Profile snapshots, epoch bindings and migration; DriverHost / SessionHandle; Pi RPC, Codex App Server, Grok ACP and their contexts | `core/src/`, `driver/src/`, `runtime/src/agent/` |
 | Gateway / tool bridge | Provider routing, request reservations, protocol codecs; shared Pi / MCP tool definitions and dispatcher | `gateway/src/`, `core/src/pot-tools.json`, `runtime/src/tool_bridge.rs`, `orchestration.rs` |
 | Protocol / desktop | Shared types; guest startup, browser, and input arbitration | `protocol/`, `image/` |
 

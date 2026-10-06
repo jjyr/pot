@@ -92,10 +92,28 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
         inner: Arc::new(Mutex::new(Inner {
             store: Store::open(&data.join("pot.sqlite"))?,
             engine: EngineStatus {
-                engine: if use_pi {"Pi · DeepSeek Flash"} else if use_api {"deepseek-v4-flash"} else {"agy-cli"}.into(),
-                phase: if use_pi || use_api {EnginePhase::Ready} else {EnginePhase::NeedsAuth},
+                engine: if use_pi {
+                    "Pi · DeepSeek Flash"
+                } else if use_api {
+                    "deepseek-v4-flash"
+                } else {
+                    "unconfigured"
+                }
+                .into(),
+                phase: if use_pi || use_api {
+                    EnginePhase::Ready
+                } else {
+                    EnginePhase::NeedsAuth
+                },
                 detail: Some(
-                    if use_pi {"Pi tools and native session"} else if use_api {"API smoke test: at most 3 requests, 128 output tokens each"} else {"Sign in through the guest AGY terminal; if already signed in, send a message to verify access"}.into(),
+                    if use_pi {
+                        "Pi tools and native session"
+                    } else if use_api {
+                        "API smoke test: at most 3 requests, 128 output tokens each"
+                    } else {
+                        "Open AI Configuration to integrate an Agent and select a model"
+                    }
+                    .into(),
                 ),
                 version: None,
                 auth_methods: vec![],
@@ -116,10 +134,10 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
         data,
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
         stop: tokio::sync::watch::channel(false).0,
-            tasks: Arc::new(Mutex::new(tasks::Hub::default())),
-            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-            codex: Arc::new(agent::codex::Hosts::default()),
-            authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
+        tasks: Arc::new(Mutex::new(tasks::Hub::default())),
+        terminals: Arc::new(Mutex::new(terminal::Hub::default())),
+        codex: Arc::new(agent::codex::Hosts::default()),
+        authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
     };
     let configured = agent::configured(&s) || use_api;
     s.inner.lock().unwrap().store.set(

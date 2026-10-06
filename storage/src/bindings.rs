@@ -7,6 +7,73 @@ use std::path::Path;
 pub const PROFILES: &str = "agent.profiles.v1";
 pub const BINDINGS: &str = "agent.bindings.v1";
 
+/// Preserve removed integrations as raw history before typed deserialization.
+/// This also runs for each worker database; no removed executable is invoked.
+pub fn retire_removed_cli(store: &mut Store) -> Result<()> {
+    fn retired(v: &serde_json::Value) -> bool {
+        match v {
+            serde_json::Value::Object(o) => {
+                matches!(
+                    o.get("engine").and_then(|v| v.as_str()),
+                    Some("claude" | "agy")
+                ) || o.values().any(retired)
+            }
+            serde_json::Value::Array(a) => a.iter().any(retired),
+            _ => false,
+        }
+    }
+    let rows: Vec<(String, String)> = {
+        let mut stmt = store
+            .0
+            .prepare("SELECT key,value FROM metadata WHERE key LIKE 'agent.%'")?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let tx = store.0.transaction()?;
+    for (key, raw) in rows {
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if !retired(&value) {
+            continue;
+        }
+        tx.execute(
+            "INSERT OR IGNORE INTO metadata(key,value) VALUES (?,?)",
+            params![format!("retired-cli.v1/{key}"), raw],
+        )?;
+        if key == PROFILES || key == BINDINGS {
+            let entries = value
+                .as_array_mut()
+                .ok_or_else(|| anyhow!("Invalid Agent metadata"))?;
+            let active_removed = key == BINDINGS
+                && entries
+                    .iter()
+                    .any(|v| retired(v) && v["state"] != "archived");
+            entries.retain(|v| !retired(v));
+            if key == BINDINGS && !entries.iter().any(|v| v["state"] != "archived") {
+                entries.clear();
+            }
+            set(&tx, &key, &serde_json::to_string(&value)?)?;
+            if active_removed {
+                set(&tx, "agent.retired.active", "true")?;
+                set(&tx, "agent.setup.pending", "true")?;
+                set(
+                    &tx,
+                    "agent.needs_rebind",
+                    "This CLI integration was removed. Choose an Agent in AI Configuration.",
+                )?;
+                tx.execute("INSERT OR IGNORE INTO metadata(key,value) SELECT 'retired-cli.v1/pi.paused',value FROM metadata WHERE key='pi.paused'", [])?;
+                set(&tx, "pi.paused", "")?;
+            }
+        } else {
+            // Pending migration and old receipts must not reactivate a retired spec.
+            tx.execute("DELETE FROM metadata WHERE key=?", [key])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn profiles(store: &Store) -> Result<Vec<Profile>> {
     store
         .get(PROFILES)?
@@ -41,8 +108,6 @@ pub fn bindings(store: &Store) -> Result<Vec<Binding>> {
                 (&b.spec.engine, &b.native_ref),
                 (Engine::Pi, NativeRef::Pi { .. })
                     | (Engine::Codex, NativeRef::Codex { .. })
-                    | (Engine::Claude, NativeRef::Claude { .. })
-                    | (Engine::Agy, NativeRef::Agy { .. })
                     | (Engine::Grok, NativeRef::Grok { .. })
             ),
             "Engine and native session identity mismatch"
@@ -80,6 +145,9 @@ pub fn initialize_store(
     data: &Path,
     config: &impl LegacyProfileConfig,
 ) -> Result<()> {
+    if store.get("agent.retired.active")?.as_deref() == Some("true") {
+        return Ok(());
+    }
     if let Some(binding) = current(store)? {
         ensure!(binding.pot_owner == owner, "Binding owner mismatch");
         return Ok(());
@@ -196,14 +264,7 @@ pub fn select_initial(
     spec.validate()?;
     let native_ref = match spec.engine {
         Engine::Codex => NativeRef::Codex { thread_id: None },
-        Engine::Claude => NativeRef::Claude {
-            session_id: crate::id(),
-            started: false,
-        },
         Engine::Grok => NativeRef::Grok { session_id: None },
-        Engine::Agy => NativeRef::Agy {
-            conversation_id: None,
-        },
         Engine::Pi => NativeRef::Pi {
             file: data.join("pi-session.jsonl"),
             session_id: None,
@@ -222,6 +283,7 @@ pub fn select_initial(
     };
     store.set(BINDINGS, &serde_json::to_string(&vec![binding])?)?;
     store.set("agent.setup.pending", "false")?;
+    store.set("agent.retired.active", "false")?;
     Ok(())
 }
 
@@ -241,16 +303,6 @@ pub fn assign_new(store: &mut Store, spec: ResolvedSpec) -> Result<()> {
     );
     if spec.engine == Engine::Codex {
         all[0].native_ref = NativeRef::Codex { thread_id: None };
-    } else if spec.engine == Engine::Claude {
-        all[0].native_ref = NativeRef::Claude {
-            session_id: crate::id(),
-            started: false,
-        };
-    }
-    if spec.engine == Engine::Agy {
-        all[0].native_ref = NativeRef::Agy {
-            conversation_id: None,
-        };
     }
     all[0].spec = spec;
     store.set(BINDINGS, &serde_json::to_string(&all)?)
@@ -276,52 +328,6 @@ pub fn save_codex_thread(store: &mut Store, thread: &str) -> Result<()> {
         }
         _ => anyhow::bail!("Expected a Codex binding"),
     }
-    store.set(BINDINGS, &serde_json::to_string(&all)?)
-}
-
-pub fn save_claude_session(store: &mut Store, session: &str) -> Result<()> {
-    ensure!(
-        uuid::Uuid::parse_str(session).is_ok(),
-        "Invalid Claude session identity"
-    );
-    let mut all = bindings(store)?;
-    let binding = all
-        .iter_mut()
-        .find(|b| b.state == BindingState::Active)
-        .ok_or_else(|| anyhow!("No active binding"))?;
-    match &mut binding.native_ref {
-        NativeRef::Claude {
-            session_id,
-            started,
-        } => {
-            ensure!(session_id == session, "Claude changed native identity");
-            *started = true;
-        }
-        _ => anyhow::bail!("Expected Claude binding"),
-    }
-    store.set(BINDINGS, &serde_json::to_string(&all)?)
-}
-
-pub fn save_agy_conversation(store: &mut Store, conversation: &str) -> Result<()> {
-    ensure!(
-        uuid::Uuid::parse_str(conversation).is_ok(),
-        "Invalid AGY conversation identity"
-    );
-    let mut all = bindings(store)?;
-    let binding = all
-        .iter_mut()
-        .find(|b| b.state == BindingState::Active)
-        .ok_or_else(|| anyhow!("Active binding missing"))?;
-    let NativeRef::Agy { conversation_id } = &mut binding.native_ref else {
-        anyhow::bail!("Expected AGY binding");
-    };
-    ensure!(
-        conversation_id
-            .as_deref()
-            .is_none_or(|old| old == conversation),
-        "AGY changed native identity"
-    );
-    *conversation_id = Some(conversation.into());
     store.set(BINDINGS, &serde_json::to_string(&all)?)
 }
 

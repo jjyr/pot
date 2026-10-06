@@ -1,6 +1,4 @@
 //! Original CLI execution adapters. Runtime access is limited to ExecutionFeedback.
-pub mod agy;
-pub mod claude;
 pub mod codex;
 mod files;
 pub mod grok;
@@ -13,14 +11,9 @@ use pot_core::*;
 pub use pot_core::{DriverHost, SessionHandle};
 use serde_json::{Value, json};
 use std::{
-    path::PathBuf,
     process::Stdio,
     sync::{Arc, Mutex},
 };
 fn cancelled(s: &ExecutionContext) -> bool {
     s.feedback.cancelled()
-}
-#[cfg(test)]
-fn id() -> String {
-    uuid::Uuid::new_v4().to_string()
 }

@@ -1,5 +1,13 @@
 # Simplified AI integration acceptance — 2026-10-06
 
+## Follow-up: retired CLI removal
+
+Antigravity and Claude CLI execution adapters, engine/transport/session types, status probes, native usage parsers, onboarding controls, install/download steps and executable tests are removed. Only Pi, Codex and Grok remain accepted engine values. Claude API and all provider codecs remain available. The former AGY task-tool exception is removed. Grok native specs use their native gateway validation path.
+
+Database-open migration archives removed profiles, binding snapshots, checkpoints and pending migration receipts in raw `retired-cli.v1/*` metadata before typed deserialization. Removed active bindings require explicit AI Configuration; legacy Pi settings cannot silently replace them. Supported active bindings, API profiles, task records, messages, native account/session files and historical usage are preserved. Stale worker selections remain explicit rather than selecting another Agent. New removed-engine requests are rejected.
+
+Formatting/compilation, backend tests, both retirement migration tests, cached-discovery removal regression, all 11 App tests, native/Linux builds and bundle passed. Server shutdown coverage now uses a Pi RPC fixture for active main/worker cancellation. An actual isolated, network-disabled guest check passed in six seconds: removed binaries/packages absent; Pi 0.87.1, Codex 0.159.1 and Grok 1.0.46 executable. Image `pot.local/sandbox:96d9e15cf98a5504c1c2` is 863,486,423 compressed bytes, about 162 MB smaller than the preceding image. The check log is `.local/d1/supported-engines-validation-20261006/data/check.log` in the worktree.
+
 Implementation for [issue #7](https://github.com/jjyr/pot/issues/7), in the separate `codex/ai-configuration` worktree. This supersedes the earlier Terminal-based configuration flow.
 
 ## Delivered behavior

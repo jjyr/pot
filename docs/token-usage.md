@@ -6,7 +6,7 @@ Each task (including archived tasks) and main chat has a usage entry. Details sh
 
 ## Metering
 
-Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent type (Pi/Codex/Claude/AGY), profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
+Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent type (Pi/Codex/Grok; historical CLI labels remain in existing rows), profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
 
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.

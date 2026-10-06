@@ -53,9 +53,7 @@ impl ExecutionFeedback for Feedback {
     fn cumulative_usage(&self, _: &str, _: &str, _: &Value) -> Result<()> {
         anyhow::bail!("No verified Grok native usage")
     }
-    fn final_usage(&self, _: &str, _: Engine, _: &Value) -> Result<()> {
-        anyhow::bail!("No fabricated usage")
-    }
+
     fn incomplete_usage(&self, _: &str) -> Result<()> {
         self.incomplete.store(true, Ordering::SeqCst);
         Ok(())

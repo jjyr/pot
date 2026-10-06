@@ -58,8 +58,7 @@ impl Settings {
         );
         for (i, (id, name)) in [
             ("codex", "Codex"),
-            ("claude", "Claude"),
-            ("agy", "AGY"),
+            ("grok", "Grok"),
             ("api", "OpenAI 兼容 API / Pi"),
         ]
         .into_iter()

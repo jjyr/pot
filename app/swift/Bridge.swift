@@ -775,7 +775,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "setup-stage": settings.setupNavigate(v["value"] as? Int ?? 0)
         case "setup-later": settings.deferSetup()
         case "setup-all": settings
-            .setupItems = v["selected"] as? Bool == true ? Set(["codex", "claude", "agy", "api"]) : []; settings
+            .setupItems = v["selected"] as? Bool == true ? Set(["codex", "grok", "api"]) : []; settings
             .persistSetup()
         case "setup-item":
             if let id = v["id"] as? String {

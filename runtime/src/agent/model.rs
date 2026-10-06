@@ -2,56 +2,10 @@ pub use pot_core::*;
 #[cfg(test)]
 mod launch_tests {
     use super::*;
-    #[test]
-    fn agy_native_profile_does_not_claim_unverified_role_capabilities() {
-        let mut profile = Profile::legacy(&crate::pi::Config {
-            api_key: "unused".into(),
-            model: "agy-model".into(),
-            max_tokens: 100,
-            request_limit: 100,
-            max_requests_per_turn: 10,
-            max_parallel_tasks: 2,
-        });
-        profile.engine = Engine::Agy;
-        profile.provider = "google".into();
-        profile.auth_ref = "cli:agy".into();
-        let resolved = profile.resolve().unwrap();
-        resolved.validate().unwrap();
-        assert_eq!(resolved.launch_spec.as_ref().unwrap().transport, "agy_json");
-        assert!(!resolved.capabilities.mcp_tools);
-        assert!(!resolved.capabilities.tool_policy_enforcement);
-        assert!(!resolved.capabilities.subagents_disableable);
-        assert!(!resolved.capabilities.safe_checkpoint_resume);
-        crate::agent::routing::check_requirements(
-            &resolved,
-            &crate::TaskRequirements {
-                tools: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        for requirement in [
-            crate::TaskRequirements {
-                exact_budget: true,
-                ..Default::default()
-            },
-            crate::TaskRequirements {
-                desktop: true,
-                ..Default::default()
-            },
-            crate::TaskRequirements {
-                live_steering: true,
-                ..Default::default()
-            },
-        ] {
-            assert!(crate::agent::routing::check_requirements(&resolved, &requirement).is_err());
-        }
-        profile.auth_ref = "cli:claude".into();
-        assert!(profile.resolve().is_err());
-    }
+
     #[test]
     fn native_wrapper_arguments_are_preserved_but_managed_flags_are_rejected() {
-        for mut launch in [LaunchSpec::codex(), LaunchSpec::claude(), LaunchSpec::agy()] {
+        for mut launch in [LaunchSpec::codex(), LaunchSpec::grok()] {
             launch.executable = "/opt/my wrapper".into();
             launch.argv = vec![
                 LaunchArgument::Literal("--wrapper-label".into()),

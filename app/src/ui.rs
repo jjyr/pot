@@ -194,9 +194,7 @@ impl Settings {
             "executable",
             "argv",
             "codex_model",
-            "agy_model",
             "",
-            "claude_model",
             "api_endpoint",
             "api_key",
             "api_model",
@@ -223,10 +221,7 @@ impl Settings {
             }
         }
         if clear_secrets && state["ai_screen"] == "manage" {
-            let native = matches!(
-                state["connection_kind"].as_str(),
-                Some("codex" | "claude" | "agy")
-            );
+            let native = matches!(state["connection_kind"].as_str(), Some("codex" | "grok"));
             self.fields[if native { 16 } else { 15 }]
                 .read(cx)
                 .focus_handle(cx)

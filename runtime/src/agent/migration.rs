@@ -87,15 +87,6 @@ fn queue(
             native.ok_or_else(|| anyhow!("Codex candidate must be opened before migration"))?
         } else if spec.engine == Engine::Grok {
             NativeRef::Grok { session_id: None }
-        } else if spec.engine == Engine::Agy {
-            NativeRef::Agy {
-                conversation_id: None,
-            }
-        } else if spec.engine == Engine::Claude {
-            NativeRef::Claude {
-                session_id: id(),
-                started: false,
-            }
         } else {
             NativeRef::Pi {
                 file: data.join(format!("pi-session-{epoch}-{}.jsonl", id())),

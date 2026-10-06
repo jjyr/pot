@@ -86,7 +86,7 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
 | `core/` | Immutable Agent models, execution contracts, shared tool schema |
 | `storage/` | SQLite, binding/usage/file-request ledgers, transactions |
-| `driver/` | Native Pi/Codex/Claude/AGY execution adapters |
+| `driver/` | Pi RPC, Codex App Server and Grok ACP execution adapters |
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
 | `image/` | Guest desktop, browser, broker/viewer resources |
@@ -96,19 +96,9 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 
 Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not commit credentials, user sessions, or build artifacts. Inspect live state through Runtime APIs, not host access to active guest SQLite.
 
-### Claude offline contract
+### Supported integrations
 
-New Claude integrations use API keys. Legacy Claude CLI profiles and official status checks are preserved; new CLI login onboarding has been removed.
-Confirm the model in AI Configuration and explicitly save the Chat selection. Real Claude account testing is skipped by user decision (no account).
-Account-free development validation uses the original CLI and a local mock Anthropic service:
-
-```sh
-mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-target/debug/pot-server --claude /absolute/path/to/claude
-.local/d1/helper-build/release/PotImageCheck .local/d1/claude-guest-check .local/d1/resources scripts/tests claude-guest.sh
-```
-
-Guest checks require the Helper signing/VM prerequisites above. Tests use an isolated temporary HOME without host credentials.
-
+Only Codex and Grok use native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Antigravity and Claude CLI adapters, binaries, discovery and tests have been removed. On database open, removed CLI profiles/bindings and pending migrations are archived as raw `retired-cli.v1/*` metadata; a removed active binding requires explicit AI reconfiguration. Account files, messages, tasks and historical usage are not deleted.
 
 ### Terminal process cleanup (Linux guest)
 
@@ -119,23 +109,3 @@ Guest checks require the Helper signing/VM prerequisites above. Tests use an iso
 Use a new isolated result directory and the Helper signing above. Validate PTY close, normal Runtime exit, and restart;
 cover foreground sleep, separate background process groups, and HUP/TERM-resistant background shells/grandchildren without model calls.
 Processes deliberately detached with setsid are outside this contract and remain subject to VM lifecycle termination.
-
-
-### AGY Driver regression
-
-AGY integrates the original CLI. Main chat, background tasks, schedules, and summaries are enabled by user decision, without Pot orchestration tools; roles are constrained by prompts.
-Existing AGY profiles are preserved but new AGY onboarding is removed; status remains unknown. Account-free mock transport regression:
-
-```sh
-mise exec -- cargo build --locked -p pot-server
-mise exec -- python scripts/tests/agy-runtime.py --runtime .local/poc/cargo-target/debug/pot-server
-```
-
-Use the Helper signing above and a fresh offline guest directory to validate the same regression in the packaged Runtime,
-and original CLI help/headless failure with an empty HOME:
-
-```sh
-.local/d1/helper-build/release/PotImageCheck .local/d1/agy-guest-check .local/d1/resources scripts/tests agy-guest.sh
-```
-
-Mock transport does not prove original CLI model/tool behavior; an original offline failure smoke test does not establish real account or role isolation acceptance.

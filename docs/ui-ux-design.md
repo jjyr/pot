@@ -84,7 +84,7 @@ Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent b
 
 Unconfigured Chat links to AI Configuration; first-time setup and Settings use the same page. The Pot Terminal page, side-rail button, xterm assets and native renderer have been removed. Sandbox remains independently accessible. API setup never requires a Terminal.
 
-AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: Codex, Grok, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing OpenAI/Claude CLI/AGY connections remain editable; removing an item from the add catalog does not delete saved profiles or sessions. Main-Agent changes stay in AI Configuration, not the Chat header.
+AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: Codex, Grok, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing API connections remain editable. Removed native CLI configurations are archived and require explicit reconfiguration; their conversations and account files are retained. Main-Agent changes stay in AI Configuration, not the Chat header.
 
 Preset API forms show only key/model and a Get API Key link. Endpoint/protocol are supplied by Pot. Claude has no account/API mode selector. Custom API shows endpoint and four explicit formats: OpenAI Chat Completions, OpenAI Responses, Claude Messages and Gemini. Model-list results appear in a picker alongside the editable model field.
 
@@ -106,7 +106,7 @@ Task Configuration preserves existing explicit worker defaults/routing and allow
 
 Initial setup opens ordinary AI Configuration directly and can be deferred. Status refresh never selects an Agent or makes paid model probes. Real-account/engine matrices are recorded separately in dated acceptance reports.
 
-Global/session usage both show Agent / model usage grouped by Pi/Codex/Claude/AGY and model,
+Global/session usage both show Agent / model usage grouped by Pi/Codex/Grok and model (historical rows retain their original labels),
 including input/output/input-cache/incomplete records; missing legacy attribution shows Unknown Agent.
 Global categories follow selected ranges; details use session totals, 20/page with previous/next.
 Category pages do not change totals/trends/allowances; range/session/zone changes reset pages.

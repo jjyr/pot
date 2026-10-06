@@ -46,8 +46,6 @@ impl ExecutionFeedback for Feedback {
         {
             Engine::Pi => save_pi_session(&mut inner.store, identity),
             Engine::Codex => save_codex_thread(&mut inner.store, identity),
-            Engine::Claude => save_claude_session(&mut inner.store, identity),
-            Engine::Agy => save_agy_conversation(&mut inner.store, identity),
             Engine::Grok => save_grok_session(&mut inner.store, identity),
         }
     }
@@ -129,15 +127,7 @@ impl ExecutionFeedback for Feedback {
             .unwrap()
             .native_usage(ledger, native, usage)
     }
-    fn final_usage(&self, ledger: &str, engine: Engine, usage: &Value) -> Result<()> {
-        self.check()?;
-        let ledger_store = self.service.usage.lock().unwrap();
-        match engine {
-            Engine::Claude => ledger_store.settle_claude(ledger, usage),
-            Engine::Agy => ledger_store.settle_agy(ledger, usage),
-            _ => bail!("Unsupported final usage format"),
-        }
-    }
+
     fn incomplete_usage(&self, ledger: &str) -> Result<()> {
         self.check()?;
         self.service.usage.lock().unwrap().native_incomplete(ledger)

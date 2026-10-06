@@ -420,7 +420,7 @@ pub async fn authenticate(State(s): State<Service>, h: HeaderMap) -> ApiResult<J
     Err(error(
         StatusCode::NOT_IMPLEMENTED,
         "interactive_login_required",
-        "Use the guest AGY terminal to sign in, then restart the environment",
+        "Use AI Configuration to start official browser authorization",
     ))
 }
 // Keep the endpoint name distinct from the broadcast sender in main.

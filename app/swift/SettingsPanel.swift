@@ -15,7 +15,7 @@ import Foundation
     var authorizationRelay: AuthorizationRelay?
     var loginEngine = "", loginVisible = false, loginMessage = "", checkMessage = ""
     var agentStates: [[String: Any]] = []
-    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = "", agyModel = ""
+    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = ""
     var profile: [String: Any] = [:]
     var savedProfiles: [[String: Any]] = []
     var routingPolicy: [String: Any] = [:]
@@ -38,7 +38,7 @@ import Foundation
     var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "5"
     var cpuField = "4", memoryField = "8", diskField = "32", result = ""
     var setupStage = 0
-    var setupItems = Set(["codex", "claude", "agy", "api"])
+    var setupItems = Set(["codex", "grok", "api"])
     var setupAutoPending = false
     var setupKey: String {
         "onboarding.\(root.path)"
@@ -95,7 +95,7 @@ import Foundation
             setupAutoPending = false
             setupStage = 0
             if let saved = UserDefaults.standard.stringArray(forKey: setupKey + ".items") {
-                setupItems = Set(saved)
+                setupItems = Set(saved).intersection(["codex", "grok", "api"])
             }
         }
     }
@@ -146,7 +146,7 @@ import Foundation
          "memory": memoryField, "disk": diskField,
          "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
-         "codex_model": codexModel, "claude_model": claudeModel, "agy_model": agyModel, "agents": agentStates,
+         "codex_model": codexModel, "agents": agentStates,
          "discovering": discovering,
          "executable": invocationExecutable, "argv": invocationArgs,
          "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
@@ -187,8 +187,7 @@ import Foundation
         updated["launch_spec"] = [
             "transport": profile["engine"] as? String == "grok" ? "grok_acp" : profile["engine"] as? String == "codex" ?
                 "codex_app_server" :
-                (profile["engine"] as? String == "agy" ? "agy_json" :
-                    (profile["engine"] as? String == "claude" ? "claude_json" : "pi_rpc")),
+                "pi_rpc",
             "executable": executable,
             "argv": args
                 .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],

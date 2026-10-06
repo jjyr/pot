@@ -5,7 +5,7 @@ import Foundation
 @MainActor extension SettingsPanel {
     var activeNeedsLogin: Bool {
         let engine = activeSpec["engine"] as? String ?? ""
-        return ["codex", "grok", "claude", "agy"].contains(engine) && agentStates
+        return ["codex", "grok"].contains(engine) && agentStates
             .contains { $0["id"] as? String == engine && $0["authentication"] as? String == "required" }
     }
 
@@ -162,7 +162,7 @@ import Foundation
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { result = "请填写 Agent 名称。"; return }
         guard !model.isEmpty else { result = "请选择或填写模型。"; return }
-        let native = ["codex", "grok", "claude", "agy"].contains(connectionKind)
+        let native = ["codex", "grok"].contains(connectionKind)
         let firstMain = activeSpec.isEmpty && routingOwner == "main"
         if connectionKind.hasPrefix("opencode-"), !selectOpenCodeRoute(model) {
             return
@@ -187,8 +187,7 @@ import Foundation
                     var value = profile
                     value["id"] = target; value["revision"] = expected + 1; value["name"] = name
                     value["engine"] = kind; value["model"] = model
-                    value["provider"] = kind == "grok" ? "xai" : kind == "claude" ? "anthropic" : kind == "agy" ?
-                        "google" : "openai"
+                    value["provider"] = kind == "grok" ? "xai" : "openai"
                     value["auth_ref"] = "cli:" + kind
                     if value["params"] == nil {
                         value["params"] = ["max_output_tokens": 8192]

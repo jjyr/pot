@@ -5,21 +5,18 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 fn brand_icon(kind: &str) -> Icon {
     let icon = match kind {
         "codex" | "openai" => Icon::empty().data(include_bytes!("../../assets/agents/openai.svg")),
-        "claude" | "anthropic" => {
-            Icon::empty().data(include_bytes!("../../assets/agents/claude.svg"))
-        }
+        "anthropic" => Icon::empty().data(include_bytes!("../../assets/agents/claude.svg")),
         "gemini" => Icon::empty().data(include_bytes!("../../assets/agents/gemini.svg")),
         "grok" => Icon::new(IconName::Bot),
         "deepseek" => Icon::empty().data(include_bytes!("../../assets/agents/deepseek.svg")),
         "opencode-go" | "opencode-zen" => {
             Icon::empty().data(include_bytes!("../../assets/agents/opencode.svg"))
         }
-        "agy" => Icon::new(IconName::Globe),
         _ => Icon::new(IconName::Globe),
     };
     icon.text_color(gpui::rgb(match kind {
         "codex" | "openai" => 0x159B7D,
-        "claude" | "anthropic" => 0xD97757,
+        "anthropic" => 0xD97757,
         "gemini" => 0x4285F4,
         "grok" => 0xD79026,
         "deepseek" => 0x4D6BFE,
@@ -32,14 +29,13 @@ fn brand_icon(kind: &str) -> Icon {
 fn brand_name(kind: &str) -> &'static str {
     match kind {
         "codex" => "Codex",
-        "claude" | "anthropic" => "Claude",
+        "anthropic" => "Claude",
         "gemini" => "Gemini",
         "openai" => "OpenAI API",
         "grok" => "Grok",
         "deepseek" => "DeepSeek",
         "opencode-go" => "OpenCode Go",
         "opencode-zen" => "OpenCode Zen",
-        "agy" => "AGY",
         _ => "自定义 API",
     }
 }
@@ -140,10 +136,7 @@ impl Settings {
             }
             body = body.child(choices);
         } else if screen == "manage" {
-            let native = matches!(
-                state["connection_kind"].as_str(),
-                Some("codex" | "grok" | "claude" | "agy")
-            );
+            let native = matches!(state["connection_kind"].as_str(), Some("codex" | "grok"));
             let kind = state["connection_kind"].as_str().unwrap_or("").to_owned();
             let mut form = Form::horizontal().label_width(px(90.));
             if (!native && self.api_advanced) || (native && self.commands_open) {

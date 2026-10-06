@@ -27,6 +27,7 @@ impl Store {
             conn.execute_batch("BEGIN; CREATE TABLE messages(id TEXT PRIMARY KEY, request_id TEXT UNIQUE, body TEXT NOT NULL); CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL); CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL); PRAGMA user_version=1; COMMIT;")?;
         }
         let mut store = Self(conn);
+        crate::bindings::retire_removed_cli(&mut store)?;
         // Interrupted turns are never silently replayed; preserve partial output.
         for mut message in store.messages()? {
             if matches!(

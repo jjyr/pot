@@ -1,6 +1,6 @@
 # Sandbox image
 
-Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Pi, Codex, Grok, Claude, AGY, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
+Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Pi, Codex, Grok, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
 
 ## Build and startup
 
@@ -44,9 +44,6 @@ codesign --force --sign - --entitlements helper/virtualization.entitlements .loc
 
 Later usability fix: persistent bottom launcher/window list adds 4 pinned packages. Current image `pot.local/sandbox:b637617123a0ce749783` has a 657, 315, 671-byte compressed layer (626.87 MiB). The table retains the initial no-panel acceptance scope.
 
-Claude Code image baseline is the original official `@anthropic-ai/claude-code-linux-arm64-musl` 2.1.289 binary.
-Installation disables npm lifecycle scripts; `claude` links directly to the platform binary, not placeholders for other platforms.
-This version is a build baseline, not a Runtime lock; upgrades must satisfy required flags/lifecycle contracts.
-Login/execution share persistent guest HOME; installation/startup imports no host Claude credentials.
+Antigravity and Claude CLI are no longer downloaded or installed in newly built images. Claude API remains available through the generic provider gateway. Older running VMs need the rebuilt image to remove previously bundled binaries; persistent user files are preserved.
 
 Grok uses the official `@xai-official/grok` 1.0.46 distribution and its pinned Linux ARM64 platform package. Build-time Node Brotli decompression writes the static native binary, then `grok` links directly to it. npm lifecycle scripts and the vendor launcher/updater are not run. Native authorization and session files stay in the persistent guest HOME; no host credentials are imported.
