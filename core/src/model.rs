@@ -282,7 +282,10 @@ impl ResolvedSpec {
         value.spec_hash.clear();
         let mut value = serde_json::to_value(value)?;
         value.as_object_mut().unwrap().remove("engine_version");
-        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
+        Ok(Sha256::digest(serde_json::to_vec(&value)?)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect())
     }
     pub fn validate(&self) -> Result<()> {
         self.launch_spec.clone().unwrap_or_default().validate()?;

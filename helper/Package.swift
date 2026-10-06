@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(name: "PotHelper", platforms: [.macOS("26.0")], dependencies: [
     .package(
         url: "https://github.com/apple/containerization.git",
-        revision: "bc994b88df46207fad7775b0eabc51947e315881"
+        revision: "1fca8c55e5eb4c26a0025da68cb8c9f167e6d963"
     ),
 ], targets: [
     .executableTarget(name: "PotHelper", dependencies: [.product(

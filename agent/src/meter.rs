@@ -23,10 +23,12 @@ fn fingerprint(
     tools: &[Value],
 ) -> Result<String> {
     let payload = model::context_payload(protocol, model, system, messages, tools)?;
-    Ok(format!(
-        "{:x}",
+    Ok(
         Sha256::digest(serde_json::to_vec(&(protocol, model, payload))?)
-    ))
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
 }
 impl UsageAnchor {
     pub(crate) fn capture(

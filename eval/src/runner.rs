@@ -85,7 +85,10 @@ pub struct Report {
     pub transport_hash: Option<String>,
 }
 fn hash(value: &impl Serialize) -> Result<String> {
-    Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
+    Ok(Sha256::digest(serde_json::to_vec(value)?)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 fn relative(root: &Path, name: &str) -> Result<std::path::PathBuf> {
     let path = Path::new(name);

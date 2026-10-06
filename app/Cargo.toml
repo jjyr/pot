@@ -5,11 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-gpui-kit = "=0.7.0"
+gpui-kit = "=0.7.1"
 unicode-segmentation = "=1.13.3"
 pot-protocol.workspace = true
 serde_json.workspace = true
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 uuid = { version = "1", features = ["v4"] }
 async-channel = "2"
 smol = "2"
