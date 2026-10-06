@@ -168,7 +168,7 @@ impl Ledger {
             let engine = serde_json::to_value(&binding.spec.engine)?;
             self.0.execute("UPDATE request_routes SET agent=?,profile_id=? WHERE agent='unknown' AND provider=? AND epoch=? AND spec_hash=? AND request_id IN(SELECT id FROM requests WHERE scope=? AND model=?)",params![engine.as_str().unwrap(),binding.spec.source_profile_id,binding.spec.provider,binding.epoch,binding.spec.spec_hash,scope,binding.spec.model])?;
         }
-        if let Some(raw) = store.get("pi.usage")? {
+        if let Some(raw) = store.get("execution.usage")? {
             let values: Vec<Value> = serde_json::from_str(&raw)?;
             for (i, value) in values.iter().enumerate() {
                 let key = format!("legacy:{scope}:{i}");

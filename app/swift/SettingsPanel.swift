@@ -15,7 +15,7 @@ import Foundation
     var authorizationRelay: AuthorizationRelay?
     var loginEngine = "", loginVisible = false, loginMessage = "", checkMessage = ""
     var agentStates: [[String: Any]] = []
-    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = ""
+    var invocationExecutable = "pot", invocationArgs = "[]", codexModel = ""
     var profile: [String: Any] = [:]
     var savedProfiles: [[String: Any]] = []
     var routingPolicy: [String: Any] = [:]
@@ -144,7 +144,7 @@ import Foundation
          "environment_phase": environment["phase"] as? String ?? "等待启动", "has_key": hasConfiguration,
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
-         "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
+         "selected_engine": profile["engine"] as? String ?? "pot", "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
          "codex_model": codexModel, "agents": agentStates,
          "discovering": discovering,
@@ -187,7 +187,7 @@ import Foundation
         updated["launch_spec"] = [
             "transport": profile["engine"] as? String == "grok" ? "grok_acp" : profile["engine"] as? String == "codex" ?
                 "codex_app_server" :
-                "pi_rpc",
+                "pot_agent",
             "executable": executable,
             "argv": args
                 .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],
@@ -211,9 +211,8 @@ import Foundation
     }
 
     func load() {
-        config = ((try? Data(contentsOf: root.appendingPathComponent("workspace/product/pi.json")))
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
-        hasConfiguration = !(config["api_key"] as? String ?? "").isEmpty
+        config = [:]
+        hasConfiguration = false
         key = ""
         limit = String(config["request_limit"] as? Int ?? 10000)
         tokens = String(config["max_tokens"] as? Int ?? 8192)

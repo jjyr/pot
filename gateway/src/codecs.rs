@@ -22,14 +22,6 @@ impl Protocol {
             Self::Unknown => "unknown",
         }
     }
-    pub fn pi_api(&self) -> &'static str {
-        match self {
-            Self::OpenaiResponses => "openai-responses",
-            Self::AnthropicMessages => "anthropic-messages",
-            Self::Gemini => "google-generative-ai",
-            _ => "openai-completions",
-        }
-    }
     pub fn from_name(name: &str) -> Result<Self> {
         Ok(serde_json::from_value(json!(name))?)
     }

@@ -17,7 +17,7 @@ pub async fn inspect(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
         quota["enforcement"] = json!(if profiles
             .iter()
             .filter(|p| p.provider == id)
-            .all(|p| p.engine == agent::Engine::Pi)
+            .all(|p| p.engine == agent::Engine::Pot)
         {
             "pre_request"
         } else {
@@ -36,7 +36,7 @@ pub async fn configure(
     let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
     if !profiles
         .iter()
-        .any(|p| p.provider == r.provider && p.engine == agent::Engine::Pi)
+        .any(|p| p.provider == r.provider && p.engine == agent::Engine::Pot)
     {
         return Err(error(
             StatusCode::BAD_REQUEST,
@@ -72,7 +72,7 @@ pub async fn configure(
 mod tests {
     use super::*;
     fn spec(provider: &str) -> agent::ResolvedSpec {
-        let mut profile = agent::Profile::legacy(&crate::pi::Config::default());
+        let mut profile = agent::Profile::api(&crate::execution::Config::default());
         profile.model = "fixture".into();
         let mut spec = profile.resolve().unwrap();
         spec.provider = provider.into();

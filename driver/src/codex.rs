@@ -274,6 +274,13 @@ struct CodexSession {
     hosts: Arc<Hosts>,
 }
 impl driver::DriverHost for CodexHost {
+    fn describe(&self, spec: &ResolvedSpec) -> Result<driver::DriverDescription> {
+        self.probe(spec)?;
+        Ok(driver::DriverDescription {
+            native_cumulative_usage: true,
+            ..Default::default()
+        })
+    }
     fn probe(&self, spec: &ResolvedSpec) -> Result<()> {
         spec.validate()?;
         anyhow::ensure!(spec.engine == Engine::Codex, "Expected Codex spec");

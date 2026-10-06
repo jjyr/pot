@@ -1,5 +1,5 @@
 //! Stateless HTTP MCP facade. Lane bearer + turn-bound session identity are
-//! checked before the shared dispatcher; MCP IDs reuse Pi receipt semantics.
+//! checked before the shared dispatcher; MCP IDs reuse Pot receipt semantics.
 use crate::*;
 use axum::response::Response;
 
@@ -34,7 +34,7 @@ pub async fn mcp(
     h: HeaderMap,
     Json(call): Json<Value>,
 ) -> ApiResult<Response> {
-    let s = tasks::pi_service(&root, &h)?;
+    let s = tasks::execution_service(&root, &h)?;
     let turn = current_turn(&s)?;
     if call["jsonrpc"] != "2.0" {
         return Err(error(

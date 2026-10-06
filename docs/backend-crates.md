@@ -32,6 +32,7 @@ pot-app -------> pot-protocol <------- pot-server
                                          |---> pot-protocol
                                          |---> pot-core
                                          |---> pot-storage ---> pot-core + pot-protocol
+                                         |---> pot-agent ----> pot-core + pot-gateway
                                          |---> pot-driver ----> pot-core
                                          +---> pot-gateway
 ```
@@ -39,11 +40,12 @@ pot-app -------> pot-protocol <------- pot-server
 Gateway has no production dependency on Storage; codec/ledger integration tests use a dev-dependency.
 
 
-The Rust workspace contains `app`, `protocol`, `core`, `storage`, `driver`, `gateway`, `runtime`, and `server`. Helper continues to manage the local VM. Server does not depend on App, the Swift bridge, Helper, or GPUI.
+The Rust workspace contains `app`, `protocol`, `core`, `storage`, `driver`, `agent`, `gateway`, `runtime`, `server`, and `eval`. Helper continues to manage the local VM. Server does not depend on App, the Swift bridge, Helper, or GPUI.
 
 - `pot-core`: immutable Profile/ResolvedSpec/Binding, execution requests, Driver events, and host/session contracts; no database, HTTP server, or process implementation.
 - `pot-storage`: product SQLite, binding persistence, request/usage ledgers, transactions, and compatibility migrations. Preserve main/task databases, usage.sqlite layouts, and DELETE + synchronous=EXTRA.
-- `pot-driver`: Pi RPC, Codex App Server, Claude/AGY CLI, process cleanup, native session identity validation, and normalized events. Reports native identity/usage through a fixed ExecutionContext and narrow ExecutionFeedback interface; holds no Runtime Service or database connection.
+- `pot-agent`: Rust model/tool loop, complete native assistant replay, compaction and Codex-style file/shell tools; persists context through scoped ExecutionFeedback implemented by Runtime/Storage. Depends on Core and Gateway, without a database dependency.
+- `pot-driver`: Codex App Server and Grok ACP, process cleanup, native session identity validation, and normalized events. Reports native identity/usage through a fixed ExecutionContext and narrow ExecutionFeedback interface; holds no Runtime Service or database connection.
 - `pot-gateway`: model protocol codecs and provider HTTP transport. Runtime persists reservations and validates lane/turn before calling transport; actual usage returns to the persistent ledger. Driver native usage is independent of the gateway.
 - `pot-runtime`: reusable backend library for product commands, tasks/schedules, execution coordination, binding migration, message projection, recovery, and result delivery. HTTP adapters keep existing contracts, while routes and startup move to Server. This change does not rewrite every handler's arguments and error types.
 - `pot-server`: standalone backend binary and service modules for configuration, TCP listening, HTTP/SSE/MCP/PTY routes, endpoint publication, and lifecycle. Composes Runtime's public backend entry points without reading App configuration or depending on frontend startup.
@@ -72,3 +74,7 @@ Driver ExecutionContext contains turn paths, role, authorized endpoints, and nar
 Structured tables, a global persistent event stream, routine App SSE synchronization, and a separate Desktop Controller permission domain are outside this structural refactor and remain future work.
 
 See [Backend crate validation](validation/backend-crates.md) for implementation and acceptance results.
+
+2026-10-06: Pi was replaced by Pot Agent. Development sessions are reset through new database names; Pi compatibility is not provided. See the [runtime contract](../runtime/README.md).
+
+2026-10-06: `pot-eval` is a separate CLI/library crate for deterministic Agent evaluation. It depends on Core and Agent, without Runtime/Storage/App dependencies. Core now exposes Driver capability descriptions, typed execution observations and injectable standalone services. The product Agent retains its default authenticated HTTP services. See the [evaluation CLI](../eval/README.md) for implemented scope and remaining native/live modes.

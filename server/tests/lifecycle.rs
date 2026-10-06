@@ -22,7 +22,6 @@ impl Fixture {
             runtime: RuntimeConfig {
                 data: self.0.join("data"),
                 workspace: self.0.join("workspace"),
-                pi_program: "pi".into(),
             },
             bind: "127.0.0.1:0".into(),
         }
@@ -79,6 +78,28 @@ async fn standalone_server_auth_persistence_sse_and_shutdown_without_app() {
         .json()
         .await
         .unwrap();
+    assert_eq!(
+        client
+            .post(format!("{base}/api/agent/compactions"))
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        401
+    );
+    assert_eq!(
+        client
+            .post(format!("{base}/api/pi/compactions"))
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        404
+    );
     assert!(snapshot.messages.is_empty());
     assert!(snapshot.turn.is_none());
     // Save through the real API; restart must preserve settings and create a new boot/token.
@@ -169,30 +190,23 @@ async fn occupied_listener_does_not_initialize_product_storage() {
 
 #[tokio::test]
 async fn shutdown_settles_active_main_and_worker_processes() {
+    use axum::{
+        Router,
+        response::sse::{Event, Sse},
+        routing::post,
+    };
+    use std::convert::Infallible;
     let fixture = Fixture::new();
-    let cli = fixture.0.join("pi-fixture");
-    std::fs::create_dir_all(fixture.0.join("data")).unwrap();
-    std::fs::write(fixture.0.join("data/pi.json"), r#"{"api_key":"fixture-key","model":"deepseek-v4-flash","request_limit":100,"max_tokens":256,"max_requests_per_turn":10,"max_parallel_tasks":2}"#).unwrap();
-    std::fs::write(&cli, r#"#!/usr/bin/env python3
-import json, sys, uuid
-from pathlib import Path
-session=Path(sys.argv[sys.argv.index('--session')+1])
-identity=str(uuid.uuid4())
-session.write_text(json.dumps({'type':'session','version':3,'id':identity})+'\n')
-for line in sys.stdin:
-    v=json.loads(line)
-    if v['type']=='get_state':
-        print(json.dumps({'id':v['id'],'type':'response','success':True,'data':{'sessionId':identity}}),flush=True)
-    elif v['type']=='prompt':
-        Path('started').write_text('ready')
-    elif v['type']=='abort':
-        Path('stopped').write_text('interrupt acknowledged')
-        print(json.dumps({'id':v['id'],'type':'response','success':True}),flush=True)
-"#).unwrap();
-    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let mut config = fixture.config();
-    config.runtime.pi_program = cli.to_string_lossy().into_owned();
-    let server = Server::bind(config).await.unwrap();
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = upstream.local_addr().unwrap();
+    let model = tokio::spawn(async move {
+        let router=Router::new().route("/model",post(||async {
+            let event=json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"shell","type":"function","function":{"name":"exec_command","arguments":json!({"cmd":"echo $$ > child.pid; sleep 30; echo bad > late","timeout_ms":60000}).to_string()}}]},"finish_reason":"tool_calls"}]}).to_string();
+            Sse::new(futures::stream::iter([Ok::<_,Infallible>(Event::default().data(event))]))
+        }));
+        axum::serve(upstream, router).await.unwrap();
+    });
+    let server = Server::bind(fixture.config()).await.unwrap();
     let endpoint = server.endpoint().unwrap();
     let base = format!("http://{}", server.local_addr().unwrap());
     let (stop, shutdown) = tokio::sync::oneshot::channel();
@@ -200,6 +214,7 @@ for line in sys.stdin:
         let _ = shutdown.await;
     }));
     let client = reqwest::Client::new();
+    client.post(format!("{base}/api/v1/providers")).bearer_auth(&endpoint.token).json(&json!({"request_id":uuid::Uuid::new_v4().to_string(),"expected_revision":0,"endpoint":format!("http://{address}/model"),"model":"fixture","protocol":"openai_chat","api_key":"fixture"})).send().await.unwrap().error_for_status().unwrap();
     client
         .post(format!("{base}/api/v1/messages"))
         .bearer_auth(&endpoint.token)
@@ -225,19 +240,28 @@ for line in sys.stdin:
         .0
         .join("workspace/tasks")
         .join(task["id"].as_str().unwrap());
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !fixture.0.join("workspace/started").exists() || !task_dir.join("started").exists() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
+    let main_dir = fixture.0.join("workspace");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !main_dir.join("child.pid").exists() || !task_dir.join("child.pid").exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
     .unwrap();
     stop.send(()).unwrap();
-    tokio::time::timeout(Duration::from_secs(5), serving)
+    tokio::time::timeout(Duration::from_secs(8), serving)
         .await
         .unwrap()
         .unwrap()
         .unwrap();
-    assert!(fixture.0.join("workspace/stopped").exists());
-    assert!(task_dir.join("stopped").exists());
+    for dir in [main_dir, task_dir] {
+        let pid: i32 = std::fs::read_to_string(dir.join("child.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert!(!dir.join("late").exists());
+    }
+    model.abort();
 }

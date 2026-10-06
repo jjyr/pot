@@ -31,7 +31,9 @@ pub async fn execute(
     );
     let epoch = binding.epoch;
     let mut session = match binding.spec.engine {
-        Engine::Pi => pot_driver::pi::PiHost.session(context(s, request, &binding)?, binding)?,
+        Engine::Pot => s
+            .agent_host
+            .session(context(s, request, &binding)?, binding)?,
         Engine::Codex => pot_driver::codex::CodexHost {
             hosts: s.codex.clone(),
         }

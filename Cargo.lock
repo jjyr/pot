@@ -5171,6 +5171,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pot-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "futures",
+ "libc",
+ "pot-core",
+ "pot-gateway",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "pot-app"
 version = "0.1.0"
 dependencies = [
@@ -5209,6 +5227,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pot-eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "futures",
+ "pot-agent",
+ "pot-core",
+ "pot-gateway",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "pot-gateway"
 version = "0.1.0"
 dependencies = [
@@ -5238,6 +5274,7 @@ dependencies = [
  "chrono-tz",
  "futures",
  "libc",
+ "pot-agent",
  "pot-core",
  "pot-driver",
  "pot-gateway",
@@ -5259,11 +5296,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "futures",
+ "libc",
  "pot-protocol",
  "pot-runtime",
  "reqwest",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

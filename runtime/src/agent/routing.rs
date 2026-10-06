@@ -178,7 +178,7 @@ pub fn resolve(
                             .ok()
                             .flatten()
                             .map(|b| b.spec.source_profile_id)
-                            .unwrap_or_else(|| "pi-default".into())
+                            .unwrap_or_else(|| "pot-default".into())
                     })
                 })
             },

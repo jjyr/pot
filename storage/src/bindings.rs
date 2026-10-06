@@ -39,7 +39,7 @@ pub fn bindings(store: &Store) -> Result<Vec<Binding>> {
         ensure!(
             matches!(
                 (&b.spec.engine, &b.native_ref),
-                (Engine::Pi, NativeRef::Pi { .. })
+                (Engine::Pot, NativeRef::Pot { .. })
                     | (Engine::Codex, NativeRef::Codex { .. })
                     | (Engine::Grok, NativeRef::Grok { .. })
             ),
@@ -76,27 +76,23 @@ pub fn initialize_store(
     store: &mut Store,
     owner: &str,
     data: &Path,
-    config: &impl LegacyProfileConfig,
+    config: &impl ProfileConfig,
 ) -> Result<()> {
     if let Some(binding) = current(store)? {
         ensure!(binding.pot_owner == owner, "Binding owner mismatch");
         return Ok(());
     }
-    let profile = Profile::legacy(config);
+    let profile = Profile::api(config);
     let spec = profile.resolve()?;
-    let legacy = store.get("pi.session")?;
-    let file = data.join("pi-session.jsonl");
-    let failure = legacy
-        .as_ref()
-        .and_then(|id| validate_pi_session(&file, id).err())
-        .map(|e| e.to_string());
+    let file = data.join("agent-context.json");
+    let failure = None;
     let binding = Binding {
         pot_owner: owner.into(),
         epoch: 1,
         spec,
-        native_ref: NativeRef::Pi {
+        native_ref: NativeRef::Pot {
             file,
-            session_id: legacy,
+            session_id: None,
         },
         schema_version: SCHEMA_VERSION,
         state: if failure.is_some() {
@@ -111,65 +107,93 @@ pub fn initialize_store(
     let tx = store.0.transaction()?;
     set(&tx, PROFILES, &serde_json::to_string(&vec![profile])?)?;
     set(&tx, BINDINGS, &serde_json::to_string(&vec![binding])?)?;
-    // Deliberately preserve pi.session, pi.paused, pi.usage and task records.
     tx.commit()?;
     Ok(())
 }
 
-pub fn validate_pi_session(file: &Path, expected: &str) -> Result<()> {
-    use std::io::{BufRead, BufReader};
-    let reader = BufReader::new(
-        std::fs::File::open(file).map_err(|_| anyhow!("Pi 会话文件缺失，拒绝静默新建会话"))?,
-    );
-    let mut lines = reader.lines();
-    let header: serde_json::Value = serde_json::from_str(
-        &lines
-            .next()
-            .transpose()?
-            .ok_or_else(|| anyhow!("Pi session header missing"))?,
-    )?;
+pub fn validate_agent_session(file: &Path, expected: &str) -> Result<()> {
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?)?;
     ensure!(
-        header["type"] == "session" && header["id"].as_str() == Some(expected),
-        "Pi session changed unexpectedly"
+        value["type"] == "session"
+            && value["id"].as_str() == Some(expected)
+            && value["version"] == 1
+            && value["messages"].is_array(),
+        "Invalid Pot execution context"
     );
-    ensure!(
-        header["version"] == 3,
-        "Incompatible Pi native session format; restore a compatible command or migrate explicitly"
-    );
-    for line in lines {
-        let line = line?;
-        if !line.trim().is_empty() {
-            let value: serde_json::Value =
-                serde_json::from_str(&line).map_err(|_| anyhow!("Pi session is corrupted"))?;
-            ensure!(value.is_object(), "Pi session is corrupted");
-        }
-    }
     Ok(())
 }
-pub fn save_pi_session(store: &mut Store, session_id: &str) -> Result<()> {
-    ensure!(!session_id.is_empty(), "Pi session ID missing");
+pub fn load_context(store: &Store) -> Result<Option<serde_json::Value>> {
+    let binding = current(store)?.ok_or_else(|| anyhow!("Binding missing"))?;
+    let NativeRef::Pot { file, session_id } = binding.native_ref else {
+        anyhow::bail!("Expected Pot binding");
+    };
+    if !file.exists() {
+        ensure!(session_id.is_none(), "Execution context missing");
+        return Ok(None);
+    }
+    if let Some(expected) = session_id {
+        validate_agent_session(&file, &expected)?;
+    }
+    Ok(Some(serde_json::from_slice(&std::fs::read(file)?)?))
+}
+pub fn save_context(store: &Store, value: &serde_json::Value) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let binding = current(store)?.ok_or_else(|| anyhow!("Binding missing"))?;
+    let NativeRef::Pot { file, session_id } = binding.native_ref else {
+        anyhow::bail!("Expected Pot binding");
+    };
+    ensure!(
+        value["type"] == "session"
+            && value["version"] == 1
+            && value["messages"].is_array()
+            && value["id"].is_string(),
+        "Invalid context"
+    );
+    ensure!(
+        session_id
+            .as_deref()
+            .is_none_or(|id| value["id"].as_str() == Some(id)),
+        "Context identity changed"
+    );
+    std::fs::create_dir_all(file.parent().unwrap())?;
+    let temp = file.with_extension("tmp");
+    let mut output = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temp)?;
+    output.write_all(&serde_json::to_vec(value)?)?;
+    output.sync_all()?;
+    std::fs::rename(&temp, &file)?;
+    std::fs::File::open(file.parent().unwrap())?.sync_all()?;
+    Ok(())
+}
+pub fn save_agent_session(store: &mut Store, session_id: &str) -> Result<()> {
+    ensure!(!session_id.is_empty(), "Pot session ID missing");
     let mut all = bindings(store)?;
     let binding = all
         .iter_mut()
         .find(|b| b.state == BindingState::Active)
         .ok_or_else(|| anyhow!("No active binding"))?;
     match &mut binding.native_ref {
-        NativeRef::Pi {
+        NativeRef::Pot {
             file,
             session_id: previous,
         } => {
             ensure!(
                 previous.as_deref().is_none_or(|old| old == session_id),
-                "Pi session changed unexpectedly"
+                "Pot session changed unexpectedly"
             );
-            validate_pi_session(file, session_id)?;
+            validate_agent_session(file, session_id)?;
             *previous = Some(session_id.into());
         }
-        _ => anyhow::bail!("Expected Pi binding"),
+        _ => anyhow::bail!("Expected Pot binding"),
     }
     let tx = store.0.transaction()?;
     set(&tx, BINDINGS, &serde_json::to_string(&all)?)?;
-    set(&tx, "pi.session", session_id)?;
+    set(&tx, "execution.session", session_id)?;
     tx.commit()?;
     Ok(())
 }
@@ -183,7 +207,7 @@ pub fn mark_broken(store: &mut Store, reason: &str) -> Result<()> {
 }
 
 /// Only an unstarted lane may inherit the current worker default.
-/// Select an initial immutable binding without requiring a legacy Pi configuration.
+/// Select an initial immutable binding without requiring a initial API configuration.
 pub fn select_initial(
     store: &mut Store,
     owner: &str,
@@ -195,8 +219,8 @@ pub fn select_initial(
     let native_ref = match spec.engine {
         Engine::Codex => NativeRef::Codex { thread_id: None },
         Engine::Grok => NativeRef::Grok { session_id: None },
-        Engine::Pi => NativeRef::Pi {
-            file: data.join("pi-session.jsonl"),
+        Engine::Pot => NativeRef::Pot {
+            file: data.join("agent-context.json"),
             session_id: None,
         },
     };
@@ -223,7 +247,7 @@ pub fn assign_new(store: &mut Store, spec: ResolvedSpec) -> Result<()> {
             && all[0].epoch == 1
             && matches!(
                 all[0].native_ref,
-                NativeRef::Pi {
+                NativeRef::Pot {
                     session_id: None,
                     ..
                 }

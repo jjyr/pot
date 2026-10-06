@@ -28,15 +28,12 @@ pub fn router(s: Service) -> Router {
         )
         .route("/api/v1/providers/check", post(gateway::setup::check))
         .route(
-            "/api/pi/v1/chat/completions",
-            post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
-        )
-        .route(
             "/gw/{provider}/{*path}",
-            post(gateway::routed_protocol)
-                .layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),
+            post(gateway::routed_protocol).layer(axum::extract::DefaultBodyLimit::max(
+                execution::MAX_MODEL_BODY,
+            )),
         )
-        .route("/api/pi/compactions", post(pi::compaction_event))
+        .route("/api/agent/compactions", post(execution::compaction_event))
         .route("/api/v1/orchestration", post(orchestration::invoke))
         .route("/api/v1/mcp", post(tool_bridge::mcp))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
@@ -70,6 +67,11 @@ pub fn router(s: Service) -> Router {
         .route(PATH_EVENTS, get(events_handler))
         .route(PATH_MESSAGES, post(send))
         .route(PATH_CANCEL, post(cancel))
+        .route("/api/v1/turn/steer", post(control::steer))
+        .route("/api/v1/tasks/{id}/steer", post(control::steer_task))
+        .route("/api/v1/turn/control", post(control::control))
+        .route("/api/v1/tasks/{id}/control", post(control::control_task))
+        .route("/api/v1/agent/diagnostics", get(control::diagnostics))
         .route(PATH_AUTHENTICATE, post(authenticate))
         .with_state(s)
 }

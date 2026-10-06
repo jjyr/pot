@@ -11,12 +11,12 @@ Rust Runtime captures provider usage through the generic model gateway. Shared S
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
 - Tools show calls, failures, duration, and output estimates (serialized UTF-8 bytes / 4). Estimates are not provider billing and are not added to actual totals.
-- Pi automatic compaction defaults on, using the same model/gateway. Declared context is 32, 768 tokens, retaining about 8, 192 recent tokens and reserving 8, 192. Pi triggers compaction near the limit or on overflow recovery. Compaction respects the smaller of Pi request cap and user output cap.
-- Each session explicitly loads `pot-usage.mjs` for compaction lifecycle. Start persists before the compaction ID is sent in request headers. SQLite aggregates one/multiple summary requests by ID. Pi's own aggregate usage is not counted again. Known usage from failed/cancelled requests remains; incomplete usage stays unknown.
+- Pot Agent compacts completed older user turns when its context estimate approaches the profile-configured window, reserving room for output. Estimates use the actual provider-native context projection without duplicate display/replay fields. Complete usage calibrates an unchanged request prefix; later input is estimated locally. Cache is included once in input and reasoning once in output. Edits, tool/system/model changes and compaction invalidate old calibration. Missing usage supplies no new calibration; new context is estimated from a valid earlier prefix, or locally when no prefix is valid, and missing billed usage remains unknown. Context estimates and allowance reservations do not contribute to actual token totals. The replacement summary and complete recent turn are persisted through Storage.
+- Agent reports compaction lifecycle directly to Runtime. Start persists before its ID tags the metered gateway request. Summary usage is a subset of request usage, never counted twice. Native Codex compaction remains Codex-owned.
 - Session details have no tabs/per-request list. Horizontal stacks show recorded conversation/compaction tokens and proportions, with input/output/cache hover. Hide zero compaction; show empty state without confirmed usage. Rank tools by output bytes using a shared maximum bar scale, with estimated tokens/calls, top 5 by default and expandable. Hide empty tools; tool output contributes neither to model proportions nor totals.
 - Underlying request/compaction lifecycle records and archived records remain; API detail pagination remains supported. Context sizes before/after compaction are estimates, not billing.
 - Skills lack a reliable independent metering boundary, so no Skills statistics tab or estimated allocation. Skills loading remains unintegrated and unchanged here.
-- Legacy `pi.usage` imports idempotently by session. Without time/turn data, it contributes to lifetime totals, not time charts, without a missing-time notice. Historical tool events lack reliable complete output, so estimates are not backfilled.
+- Pi development sessions and old usage databases are not imported; this revision starts a new usage database.
 
 Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages. App refreshes on demand every 3 seconds, rejects stale query responses, and does not present old disconnected data as new. Charts reuse gpui-kit `BarChart` hover/tooltips/ticks/themes; allowances use `Progress`, shared cards, and Kit forms.
 
@@ -30,7 +30,7 @@ no per-request hard budget, automatic checkpoint resume, or provider subscriptio
 
 ## Display and limits
 
-Pi is the execution driver; the model service determines billing. API connections default to no periodic limit, hiding allowance cards/reset times. Settings -> Agent or Usage configures **Pot usage limits**: unlimited/daily/weekly, positive integer tokens with K/M, and automatic continuation after recovery (on by default). Saving applies immediately without VM restart.
+Pot Agent executes direct API connections; the model service determines billing. API connections default to no periodic limit, hiding allowance cards/reset times. Settings -> Agent or Usage configures **Pot usage limits**: unlimited/daily/weekly, positive integer tokens with K/M, and automatic continuation after recovery (on by default). Saving applies immediately without VM restart.
 
 Daily reset is 00: 00 in the configured zone, weekly Monday 00: 00. The policy explicitly stores its zone and uses calendar DST rules. Chart ranges do not affect allowance windows; changing periods preserves history.
 
@@ -42,18 +42,18 @@ Lifetime request, per-turn request, and per-request output caps remain independe
 
 ## Waiting and recovery
 
-When allowance is insufficient, gateway rejects the unsent request without consuming a request count. Runtime saves `pi.paused` only after Pi stops and fsyncs its native session. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
+When allowance is insufficient, gateway rejects the unsent request without consuming a request count. Runtime saves `execution.paused` only after tools settle and Storage persists the execution context. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
 
 When allowance is sufficient and automatic continuation enabled, the scheduler resumes. Otherwise click Continue in session usage. Cancel waiting discards pending work for that turn. After App/VM restart, only explicit persistent checkpoints can resume; unknown execution remains interrupted.
 
-Resume reuses native Pi session with an explicit continuation instruction, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed Pi exit, or unknown crash side effects cannot retry automatically.
+Resume reuses the saved Agent context, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed tool cleanup, or unknown crash side effects cannot retry automatically.
 
 ## API
 
 Usage query/policy/recovery APIs require the main Runtime token; workers cannot read the global ledger or change policies. Internal compaction endpoints validate session authority.
 
 - `GET /api/v1/usage/summary?days=7&timezone=Asia/Shanghai&scope=&offset=0`: empty scope = global; `main` or task ID = session. Task totals ignore days; requests and Agent/model categories paginate in 20-item offset pages. `agent_models` contains the current category page; `agent_model_next_offset` is the next offset.
-- `POST /api/pi/compactions`: internal Pi lifecycle events require the current session token and active turn. Workers write only their own records and cannot read global usage/change policies.
+- `POST /api/agent/compactions`: internal Agent lifecycle events require the current session token and active turn. Workers write only their own records and cannot read global usage/change policies.
 - `POST /api/v1/usage/policy`: `{period: none|day|week, limit, timezone, auto_resume}`.
 - `POST /api/v1/usage/resume`: `{scope}` clears the manual-resume gate, still requiring allowance.
 - `POST /api/v1/usage/cancel`: cancels main chat waiting; tasks use the task cancellation API.

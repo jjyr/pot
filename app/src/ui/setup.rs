@@ -60,7 +60,7 @@ impl Settings {
         for (i, (id, name)) in [
             ("codex", "Codex"),
             ("grok", "Grok"),
-            ("api", "OpenAI 兼容 API / Pi"),
+            ("api", "OpenAI 兼容 API / Pot"),
         ]
         .into_iter()
         .enumerate()

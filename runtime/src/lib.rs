@@ -1,11 +1,12 @@
 //! Reusable backend application services. The executable and route assembly live in pot-server.
 pub mod agent;
 pub mod authorization;
+pub mod control;
 mod deepseek;
 pub mod discovery;
+pub mod execution;
 pub mod gateway;
 pub mod orchestration;
-pub mod pi;
 pub mod schedules;
 mod store;
 pub mod tasks;
@@ -24,13 +25,13 @@ use axum::{
 };
 use pot_protocol::*;
 mod bootstrap;
-pub use bootstrap::{Backend, RuntimeConfig, initialize};
+pub use bootstrap::{Backend, RuntimeConfig, initialize, initialize_with_agent_host};
 pub mod api {
     pub use crate::usage as accounting;
     pub use crate::{Service, authenticate, cancel, events_handler, send, snapshot, usage};
     pub use crate::{
-        agent, authorization, discovery, gateway, orchestration, pi, schedules, tasks, terminal,
-        tool_bridge,
+        agent, authorization, control, discovery, execution, gateway, orchestration, schedules,
+        tasks, terminal, tool_bridge,
     };
 }
 #[cfg(test)]
@@ -65,9 +66,8 @@ pub struct Service {
     boot: String,
     workspace: PathBuf,
     api_budget: Option<deepseek::BudgetSettings>,
-    pi: Option<pi::Config>,
-    pi_program: String,
-    pi_upstream: String,
+    execution: Option<execution::Config>,
+    agent_upstream: String,
     is_worker: bool,
     data: PathBuf,
     cancel_notify: Arc<tokio::sync::Notify>,
@@ -75,6 +75,7 @@ pub struct Service {
     tasks: Arc<Mutex<tasks::Hub>>,
     terminals: Arc<Mutex<terminal::Hub>>,
     codex: Arc<agent::codex::Hosts>,
+    agent_host: Arc<dyn pot_core::DriverHost>,
     authorization: Arc<tokio::sync::Mutex<authorization::Hub>>,
 }
 impl Service {
@@ -101,7 +102,10 @@ impl Service {
                 if let Some(binding) = agent::current(&s.store)? {
                     engine.engine = format!("{:?} · {}", binding.spec.engine, binding.spec.model);
                 }
-                if s.store.get("pi.paused")?.is_some_and(|v| !v.is_empty()) {
+                if s.store
+                    .get("execution.paused")?
+                    .is_some_and(|v| !v.is_empty())
+                {
                     engine.detail = Some("等待 Pot 额度恢复".into());
                 }
                 engine
@@ -116,10 +120,10 @@ impl Service {
     }
     fn budget_for(&self, store: &Store) -> Result<Option<RequestBudget>> {
         if let Some(binding) = agent::current(store)? {
-            if binding.spec.engine != agent::Engine::Pi {
+            if binding.spec.engine != agent::Engine::Pot {
                 return Ok(None);
             }
-            return gateway::pi_budget(self, binding.spec.params.max_output_tokens)?
+            return gateway::agent_budget(self, binding.spec.params.max_output_tokens)?
                 .status()
                 .map(Some);
         }
@@ -251,7 +255,7 @@ pub async fn send(
     }
     if inner
         .store
-        .get("pi.paused")
+        .get("execution.paused")
         .map_err(internal)?
         .is_some_and(|v| !v.is_empty())
     {
@@ -404,8 +408,8 @@ pub async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Val
     let budget = s.budget_for(&inner.store).map_err(internal)?;
     let usage = inner
         .store
-        .get(if s.pi.is_some() {
-            "pi.usage"
+        .get(if s.execution.is_some() {
+            "execution.usage"
         } else {
             "deepseek.usage"
         })
@@ -461,9 +465,8 @@ mod tests {
             boot: id(),
             workspace: PathBuf::new(),
             api_budget: None,
-            pi: None,
-            pi_program: String::new(),
-            pi_upstream: String::new(),
+            execution: None,
+            agent_upstream: String::new(),
             is_worker: false,
             data: PathBuf::new(),
             cancel_notify: Arc::new(tokio::sync::Notify::new()),
@@ -471,6 +474,7 @@ mod tests {
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
             codex: Arc::new(agent::codex::Hosts::default()),
+            agent_host: Arc::new(pot_agent::AgentHost),
             authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
         }
     }
@@ -481,9 +485,9 @@ mod tests {
             &mut s.inner.lock().unwrap().store,
             "main",
             std::path::Path::new("/tmp"),
-            &pi::Config {
+            &execution::Config {
                 model: "deepseek-v4-flash".into(),
-                ..pi::Config::default()
+                ..execution::Config::default()
             },
         )
         .unwrap();

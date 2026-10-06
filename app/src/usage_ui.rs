@@ -276,7 +276,7 @@ impl UsageUI {
             let mut card = ui::card(cx).child(ui::section("Agent / 模型用量"));
             for (index, row) in groups.iter().enumerate() {
                 let agent = match row["agent"].as_str().unwrap_or("unknown") {
-                    "pi" => "Pi",
+                    "pot" => "Pot",
                     "codex" => "Codex",
                     "claude" => "Claude",
                     _ => "Agent 未知",

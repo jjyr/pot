@@ -38,10 +38,25 @@ depends = ["lint", "check:rust", "check:swift"]
 
 [tasks.test]
 description = "Run backend crate tests without model calls"
-run = "cargo test --locked -p pot-core -p pot-storage -p pot-driver -p pot-gateway -p pot-runtime -p pot-server -p pot-protocol -j 4"
+run = "cargo test --locked -p pot-core -p pot-storage -p pot-driver -p pot-agent -p pot-gateway -p pot-runtime -p pot-server -p pot-protocol -p pot-eval -j 4"
 
 [tasks."test:app"]
 run = "cargo test --locked -p pot-app -j 4"
+
+[tasks."test:eval"]
+description = "Run deterministic CLI contracts without credentials or model calls"
+run = """
+set -eu
+eval_root=$(mktemp -d "${TMPDIR:-/tmp}/pot-eval-ci.XXXXXX")
+trap 'rm -rf "$eval_root"' EXIT
+cargo run --locked -p pot-eval -- suite deterministic "$eval_root/suite"
+for scenario in short-chat tool-round compaction; do
+  cargo run --locked -p pot-eval -- run "eval/scenarios/$scenario.json" "$eval_root/$scenario"
+  cargo run --locked -p pot-eval -- validate "$eval_root/$scenario"
+done
+cargo run --locked -p pot-eval -- run eval/scenarios/compaction.json "$eval_root/compaction-repeat"
+cargo run --locked -p pot-eval -- compare "$eval_root/compaction" "$eval_root/compaction-repeat"
+"""
 
 [tasks.prepare]
 run = "scripts/pot prepare"

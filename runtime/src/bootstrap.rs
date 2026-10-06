@@ -4,7 +4,6 @@ use super::*;
 pub struct RuntimeConfig {
     pub data: PathBuf,
     pub workspace: PathBuf,
-    pub pi_program: String,
 }
 pub struct Backend {
     state: Service,
@@ -53,68 +52,37 @@ impl Backend {
     }
 }
 pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
+    initialize_with_agent_host(config, Arc::new(pot_agent::AgentHost)).await
+}
+/// Embedders can install code-level tools, context transforms and token estimation.
+pub async fn initialize_with_agent_host(
+    config: RuntimeConfig,
+    agent_host: Arc<dyn pot_core::DriverHost>,
+) -> Result<Backend> {
     let data = config.data;
     std::fs::create_dir_all(&data)?;
     let workspace = config.workspace;
     std::fs::create_dir_all(&workspace)?;
-    let provider_path = data.join("deepseek.json");
-    let pi_config = if data.join("pi.json").exists() {
-        Some(pi::Config::load(&data.join("pi.json"))?)
-    } else {
-        None
-    };
-    let execution_config = pi::execution_config(pi_config.clone().unwrap_or_default(), &data)?;
-    let use_pi = pi_config.is_some();
-    let use_api = !use_pi && provider_path.exists();
-    let api_budget = if pi_config.is_some() || data.join("execution-limits.json").exists() {
-        Some(deepseek::BudgetSettings {
-            namespace: "pi-attempts",
-            data: data.clone(),
-            limit: execution_config.request_limit,
-            max_output_tokens: execution_config.max_tokens,
-        })
-    } else if use_api {
-        let config = deepseek::Config::load(&provider_path)?;
-        Some(deepseek::BudgetSettings {
-            namespace: "deepseek-attempts",
-            data: data.clone(),
-            limit: config.request_limit,
-            max_output_tokens: config.max_tokens,
-        })
-    } else {
-        None
-    };
+    let execution_config = execution::execution_config(execution::Config::default(), &data)?;
+    let api_budget = Some(deepseek::BudgetSettings {
+        namespace: "agent-attempts",
+        data: data.clone(),
+        limit: execution_config.request_limit,
+        max_output_tokens: execution_config.max_tokens,
+    });
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
     let s = Service {
-        usage: Arc::new(Mutex::new(usage::Ledger::open(&data.join("usage.sqlite"))?)),
+        usage: Arc::new(Mutex::new(usage::Ledger::open(
+            &data.join("usage-v2.sqlite"),
+        )?)),
         usage_scope: "main".into(),
         inner: Arc::new(Mutex::new(Inner {
-            store: Store::open(&data.join("pot.sqlite"))?,
+            store: Store::open(&data.join("pot-v2.sqlite"))?,
             engine: EngineStatus {
-                engine: if use_pi {
-                    "Pi · DeepSeek Flash"
-                } else if use_api {
-                    "deepseek-v4-flash"
-                } else {
-                    "unconfigured"
-                }
-                .into(),
-                phase: if use_pi || use_api {
-                    EnginePhase::Ready
-                } else {
-                    EnginePhase::NeedsAuth
-                },
-                detail: Some(
-                    if use_pi {
-                        "Pi tools and native session"
-                    } else if use_api {
-                        "API smoke test: at most 3 requests, 128 output tokens each"
-                    } else {
-                        "Open AI Configuration to integrate an Agent and select a model"
-                    }
-                    .into(),
-                ),
+                engine: "unconfigured".into(),
+                phase: EnginePhase::NeedsAuth,
+                detail: Some("Open AI Configuration to select an Agent and model".into()),
                 version: None,
                 auth_methods: vec![],
             },
@@ -127,9 +95,8 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
         boot: id(),
         workspace,
         api_budget,
-        pi: pi_config,
-        pi_program: config.pi_program,
-        pi_upstream: "https://api.deepseek.com/chat/completions".into(),
+        execution: None,
+        agent_upstream: "https://api.deepseek.com/chat/completions".into(),
         is_worker: false,
         data,
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
@@ -137,9 +104,10 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
         tasks: Arc::new(Mutex::new(tasks::Hub::default())),
         terminals: Arc::new(Mutex::new(terminal::Hub::default())),
         codex: Arc::new(agent::codex::Hosts::default()),
+        agent_host,
         authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
     };
-    let configured = agent::configured(&s) || use_api;
+    let configured = agent::configured(&s);
     s.inner.lock().unwrap().store.set(
         "agent.setup.pending",
         if configured { "false" } else { "true" },
@@ -153,15 +121,10 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
             Some("请先配置主 Agent；Sandbox Terminal 可独立使用".into()),
         );
     }
-    s.usage
-        .lock()
-        .unwrap()
-        .import_legacy("main", &s.inner.lock().unwrap().store)?;
     if usage::paused(&s)?.is_none() {
         s.usage.lock().unwrap().clear_wait("main")?;
     }
     agent::initialize(&s)?;
-    agent::migration::sync_legacy_settings(&s).await?;
     let worker = s.clone();
     let main = tokio::spawn(async move {
         while let Some(mut req) =
@@ -173,8 +136,6 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
             }
             let result = if use_agent {
                 agent::run(&worker, req).await
-            } else if use_api {
-                deepseek::run(&worker, req, &provider_path).await
             } else {
                 Err(anyhow!("Configure a main Agent before sending messages"))
             };

@@ -9,7 +9,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
-    Pi,
+    Pot,
     Codex,
     Grok,
 }
@@ -29,6 +29,8 @@ pub struct Capabilities {
 pub struct Parameters {
     pub max_output_tokens: u64,
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub agent: crate::AgentSettings,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolPolicy {
@@ -53,20 +55,21 @@ pub struct Profile {
     pub tool_policy: ToolPolicy,
 }
 impl Profile {
-    pub fn legacy(config: &impl LegacyProfileConfig) -> Self {
+    pub fn api(config: &impl ProfileConfig) -> Self {
         Self {
-            id: "pi-default".into(),
+            id: "pot-default".into(),
             revision: 1,
-            name: "Pi · DeepSeek Flash".into(),
-            engine: Engine::Pi,
+            name: "Pot · DeepSeek Flash".into(),
+            engine: Engine::Pot,
             launch_spec: None,
             protocol_contract: None,
             provider: "deepseek".into(),
             model: config.model().to_owned(),
-            auth_ref: "pi.json:api_key".into(),
+            auth_ref: "providers.json:deepseek".into(),
             params: Parameters {
                 max_output_tokens: config.max_tokens(),
                 reasoning_effort: None,
+                agent: config.agent_settings(),
             },
             tool_policy: ToolPolicy {
                 worker_orchestration: false,
@@ -76,6 +79,9 @@ impl Profile {
         }
     }
     pub fn validate(&self) -> Result<()> {
+        if self.engine == Engine::Pot {
+            self.params.agent.validate()?;
+        }
         ensure!(
             !self.id.is_empty() && self.id.len() <= 128 && self.revision > 0,
             "Invalid profile identity"
@@ -113,21 +119,33 @@ impl Profile {
             .unwrap_or_default()
             .validate()?;
         ensure!(
-            self.params.reasoning_effort.is_none(),
-            "Reasoning configuration is not accepted for this Pi route"
+            self.params
+                .reasoning_effort
+                .as_deref()
+                .is_none_or(|v| matches!(
+                    v,
+                    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+                )),
+            "Invalid reasoning effort"
         );
         ensure!(
-            self.launch_spec.clone().unwrap_or_default().transport == "pi_rpc"
-                && self.protocol_contract.clone().unwrap_or_default().events == "pi_rpc_v1",
-            "Pi requires the Pi RPC contract"
+            self.launch_spec.clone().unwrap_or_default().transport == "pot_agent"
+                && self.protocol_contract.clone().unwrap_or_default().events == "pot_agent_v1",
+            "Pot requires the built-in Agent contract"
         );
-        // Capability declarations must follow accepted transports, never UI guesses.
         ensure!(
-            self.engine == Engine::Pi,
+            self.launch_spec
+                .as_ref()
+                .is_none_or(|v| v == &LaunchSpec::default()),
+            "Pot Agent runs in-process; executable overrides are unsupported"
+        );
+        // Capability declarations follow the implemented execution backend.
+        ensure!(
+            self.engine == Engine::Pot,
             "Backend has not passed guest acceptance"
         );
         ensure!(
-            (self.provider == "deepseek" && self.auth_ref == "pi.json:api_key")
+            (self.provider == "deepseek" && self.auth_ref == "providers.json:deepseek")
                 || (self
                     .provider
                     .bytes()
@@ -147,10 +165,11 @@ impl Profile {
             params: self.params.clone(),
             tool_policy: self.tool_policy.clone(),
             gateway_protocol: "openai_chat".into(),
-            context_window: 32768,
+            context_window: self.params.agent.context_window,
             capabilities: Capabilities {
                 native_compaction: true,
                 safe_checkpoint_resume: true,
+                live_steering: true,
                 usage_reporting: true,
                 request_level_budget_enforcement: true,
                 tool_policy_enforcement: true,
@@ -264,7 +283,7 @@ impl ResolvedSpec {
         self.gateway_protocol = protocol.into();
         self.capabilities.request_level_budget_enforcement = protocol != "unknown";
         self.capabilities.usage_reporting = protocol != "unknown";
-        self.capabilities.safe_checkpoint_resume = protocol == "openai_chat";
+        self.capabilities.safe_checkpoint_resume = protocol != "unknown";
         self.spec_hash = self.hash()?;
         Ok(())
     }
@@ -273,11 +292,6 @@ impl ResolvedSpec {
         value.spec_hash.clear();
         let mut value = serde_json::to_value(value)?;
         value.as_object_mut().unwrap().remove("engine_version");
-        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
-    }
-    fn legacy_hash(&self) -> Result<String> {
-        let mut value = self.clone();
-        value.spec_hash.clear();
         Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
     }
     pub fn validate(&self) -> Result<()> {
@@ -290,7 +304,7 @@ impl ResolvedSpec {
         let protocol = self.protocol_contract.clone().unwrap_or_default();
         ensure!(
             match self.engine {
-                Engine::Pi => launch.transport == "pi_rpc" && protocol.events == "pi_rpc_v1",
+                Engine::Pot => launch.transport == "pot_agent" && protocol.events == "pot_agent_v1",
                 Engine::Codex =>
                     launch.transport == "codex_app_server"
                         && protocol.events == "codex_app_server_v2",
@@ -299,7 +313,7 @@ impl ResolvedSpec {
             "Engine and transport contract mismatch"
         );
         ensure!(
-            self.hash()? == self.spec_hash || self.legacy_hash()? == self.spec_hash,
+            self.hash()? == self.spec_hash,
             "Resolved spec checksum mismatch"
         );
         Ok(())
@@ -308,7 +322,7 @@ impl ResolvedSpec {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "engine", rename_all = "snake_case")]
 pub enum NativeRef {
-    Pi {
+    Pot {
         file: PathBuf,
         session_id: Option<String>,
     },
@@ -362,8 +376,8 @@ pub struct LaunchSpec {
 impl Default for LaunchSpec {
     fn default() -> Self {
         Self {
-            transport: "pi_rpc".into(),
-            executable: "pi".into(),
+            transport: "pot_agent".into(),
+            executable: "pot-agent".into(),
             argv: vec![LaunchArgument::RuntimeArguments],
             cwd_policy: "workspace".into(),
         }
@@ -389,7 +403,7 @@ impl LaunchSpec {
         ensure!(
             matches!(
                 self.transport.as_str(),
-                "pi_rpc" | "codex_app_server" | "grok_acp"
+                "pot_agent" | "codex_app_server" | "grok_acp"
             ),
             "Transport has not passed driver acceptance"
         );
@@ -527,7 +541,7 @@ impl LaunchSpec {
                     "Invalid literal argument"
                 );
                 let flag = value.split('=').next().unwrap_or_default();
-                let native = self.transport != "pi_rpc";
+                let native = self.transport != "pot_agent";
                 ensure!(
                     !reserved
                         .iter()
@@ -564,8 +578,8 @@ pub struct ProtocolContract {
 impl Default for ProtocolContract {
     fn default() -> Self {
         Self {
-            events: "pi_rpc_v1".into(),
-            native_session: "pi_jsonl_v3".into(),
+            events: "pot_agent_v1".into(),
+            native_session: "pot_context_v1".into(),
         }
     }
 }
@@ -585,7 +599,7 @@ impl ProtocolContract {
     }
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            (self.events == "pi_rpc_v1" && self.native_session == "pi_jsonl_v3")
+            (self.events == "pot_agent_v1" && self.native_session == "pot_context_v1")
                 || (self.events == "codex_app_server_v2" && self.native_session == "codex_thread")
                 || (self.events == "grok_acp_v1" && self.native_session == "grok_session"),
             "Unsupported protocol/session contract; restore the command or migrate explicitly"
@@ -594,17 +608,20 @@ impl ProtocolContract {
     }
 }
 
-/// Minimum non-secret settings needed to import a legacy profile.
-pub trait LegacyProfileConfig {
+/// Non-secret settings for constructing an API profile.
+pub trait ProfileConfig {
     fn model(&self) -> &str;
     fn max_tokens(&self) -> u64;
+    fn agent_settings(&self) -> crate::AgentSettings {
+        Default::default()
+    }
 }
 
 #[cfg(test)]
 mod checksum_tests {
     use super::*;
     struct Config;
-    impl LegacyProfileConfig for Config {
+    impl ProfileConfig for Config {
         fn model(&self) -> &str {
             "model"
         }
@@ -613,7 +630,7 @@ mod checksum_tests {
         }
     }
     fn spec() -> ResolvedSpec {
-        Profile::legacy(&Config).resolve().unwrap()
+        Profile::api(&Config).resolve().unwrap()
     }
     #[test]
     fn version_is_diagnostic_and_command_is_identity() {
@@ -629,13 +646,8 @@ mod checksum_tests {
         assert!(spec.validate().is_err());
     }
     #[test]
-    fn legacy_checksum_still_detects_corruption() {
+    fn checksum_detects_context_and_model_changes() {
         let mut spec = spec();
-        spec.launch_spec = None;
-        spec.protocol_contract = None;
-        spec.engine_version = "0.87.1".into();
-        spec.spec_hash = spec.legacy_hash().unwrap();
-        spec.validate().unwrap();
         spec.model = "tampered".into();
         assert!(spec.validate().is_err());
     }

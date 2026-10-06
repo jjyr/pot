@@ -151,12 +151,12 @@ async def run(args):
             await turn("LANE_A restart")
             after = (await api("agent"))["bindings"][0]["native_ref"]
             assert before == after and before["thread_id"], (before, after)
-            with sqlite3.connect(data / "pot.sqlite") as db:
+            with sqlite3.connect(data / "pot-v2.sqlite") as db:
                 receipts = db.execute(
                     "SELECT COUNT(*) FROM metadata WHERE key LIKE 'orchestration.receipt:%'"
                 ).fetchone()[0]
                 assert receipts == 3, receipts
-            with sqlite3.connect(data / "usage.sqlite") as db:
+            with sqlite3.connect(data / "usage-v2.sqlite") as db:
                 rows = db.execute(
                     "SELECT input,output,state FROM requests WHERE scope='main'"
                 ).fetchall()
@@ -170,7 +170,7 @@ async def run(args):
             assert not any(
                 "Fixture authentication expired" in m["text"] for m in failed["messages"]
             ), failed
-            with sqlite3.connect(data / "usage.sqlite") as db:
+            with sqlite3.connect(data / "usage-v2.sqlite") as db:
                 assert (
                     db.execute(
                         "SELECT COUNT(*) FROM requests WHERE scope='main' AND state='native_incomplete'"

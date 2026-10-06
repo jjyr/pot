@@ -1,6 +1,6 @@
 # Current architecture
 
-Updated: 2026-10-05. This page describes the implemented structure; see [Product design](product-design.md) for future product constraints.
+Updated: 2026-10-06. This page describes the implemented structure; see [Product design](product-design.md) for future product constraints.
 
 ```text
 macOS
@@ -18,7 +18,7 @@ macOS
 |      |                                               |
 | pot-runtime: bindings / tasks / schedules / recovery   |
 |      |-- Storage: SQLite + request/usage ledgers       |
-|      |-- Driver: Pi / Codex / Grok sessions            |
+|      |-- Agent / Driver: Pot Agent / Codex / Grok sessions            |
 |      +-- Gateway: provider HTTP + protocol codecs     |
 |                                                      |
 | Desktop / broker <---- App native WebView bridge      |
@@ -39,8 +39,8 @@ Issue [#5](https://github.com/jjyr/pot/issues/5) separates Core/Storage/Driver/G
 | Server | Standalone program, configuration, routes, listener, and lifecycle | `server/src/main.rs`, `config.rs`, `routes.rs`, `hosting.rs` |
 | Runtime / Storage | Authoritative task state, message events, usage, recovery, and persistence | `runtime/src/lib.rs`, `bootstrap.rs`, `storage/src/` |
 | Orchestration / scheduling | Single-level delegation, queues, completion delivery, scheduled triggers | `tasks.rs`, `orchestration.rs`, `schedules.rs` |
-| Agent / Driver | Profile snapshots, epoch bindings and migration; DriverHost / SessionHandle; Pi RPC, Codex App Server, Grok ACP and their contexts | `core/src/`, `driver/src/`, `runtime/src/agent/` |
-| Gateway / tool bridge | Provider routing, request reservations, protocol codecs; shared Pi / MCP tool definitions and dispatcher | `gateway/src/`, `core/src/pot-tools.json`, `runtime/src/tool_bridge.rs`, `orchestration.rs` |
+| Agent / Driver | Profile snapshots, epoch bindings and migration; DriverHost / SessionHandle; Pot Agent, Codex App Server, Grok ACP and their contexts | `core/src/`, `agent/src/`, `driver/src/`, `runtime/src/agent/` |
+| Gateway / tool bridge | Provider routing, request reservations, protocol codecs; shared Agent / MCP tool definitions and dispatcher | `gateway/src/`, `core/src/pot-tools.json`, `runtime/src/tool_bridge.rs`, `orchestration.rs` |
 | Protocol / desktop | Shared types; guest startup, browser, and input arbitration | `protocol/`, `image/` |
 
 GPUI and Swift share the main window and event loop, bridged through a C ABI. Standard pages reuse Kit; native NSTextView handles chat editing, while separate WKWebViews host the desktop and bundled xterm terminal. The terminal connects to Runtime PTY through Swift URLSessionWebSocketTask; bearer credentials stay in the native networking layer, and the web page cannot access the network or navigate externally. Closing the window keeps background work running; Quit closes Chromium normally before stopping Helper/VM.
@@ -49,7 +49,7 @@ The build VM preinstalls Sandbox system dependencies into an OCI image shipped w
 
 ## Main assistant, tasks, and schedules
 
-Main Pi chooses between a direct reply and task tools based on the goal. Runtime enforces concurrency, idempotency, and state transitions; each task has its own directory and Pi session. Workers receive explicit task instructions without copies of the main chat history and cannot recursively delegate through the orchestration API.
+Main Agent chooses between a direct reply and task tools based on the goal. Runtime enforces concurrency, idempotency, and state transitions; each task has its own directory and execution context. Workers receive explicit task instructions without copies of the main chat history and cannot recursively delegate through the orchestration API.
 
 Background concurrency defaults to 5, with additional user-configured profile/provider limits. Runnable tasks queue FIFO; a limited provider does not block others. Main chat has a separate slot. Each task executes serially; follow-up guidance is durably queued and consumed on the next turn. `shared` is an explicit cooperative lock, not permission isolation. Completion reports persist with state; when the main session is idle, up to 8 reports are combined into a summary.
 
@@ -57,23 +57,23 @@ Schedules are persistent definitions; each trigger creates a new task. The sched
 
 ## State and recovery
 
-- Runtime stores product messages/task state; each CLI stores native execution context. `agent.bindings.v1` stores immutable ResolvedSpec, SHA-256, epoch, and native_ref per owner. Legacy Pi metadata imports idempotently into epoch 1 while retaining old fields. Recovery uses only the binding snapshot.
+- Runtime stores product messages/task state; Storage persists Pot context and native CLIs own their execution context. `agent.bindings.v1` stores immutable ResolvedSpec, SHA-256, epoch, and native_ref per owner. Pot Agent stores provider-native execution context through Storage; old Pi development databases are not imported. Recovery uses only the binding snapshot.
 - Profile settings switch main chat through a persistent migration operation, waiting for an active turn to stop. Existing tasks stay pinned by default; new tasks resolve the current worker default. External handoff and the new session are written first, then one SQLite transaction archives the old binding, activates the new one, and inserts a conversation boundary. Deterministic handoff is bounded and redacted; the next real input instructs the model to read it without an extra model call.
-- Pi transport events become Driver events carrying epoch/turn/seq before projection into product records. Cancellation still waits for Pi exit; an owner cannot restart before shutdown is confirmed. Implementing an enum alone does not establish support for other drivers.
+- Agent execution events become Driver events carrying epoch/turn/seq before projection into product records. Cancellation waits for model/tool settlement; an owner cannot restart before shutdown is confirmed. Implementing an enum alone does not establish support for other drivers.
 - API commands carry request IDs; message events have persistent cursors. Runtime provides SSE; App currently uses background snapshot/paginated polling (about 500 ms), rejects stale query results, and shows cached conversations first on navigation.
 - SQLite uses DELETE journal + synchronous=EXTRA to avoid observed WAL loss on the shared filesystem. Inspect live state through Runtime APIs; the host must not open an active guest database.
 - Tasks and schedules persist together as `tasks.v2`, with compatible reads of `tasks.v1`. Restart preserves queued work and marks running tasks interrupted; unknown external side effects are not replayed automatically.
-- Token usage uses a shared SQLite request ledger for time aggregation, task attribution, and Pot periodic allowances. After Pi has confirmed shutdown, tasks without enough allowance save a recovery checkpoint, enter waiting, and release their execution slot. See [Token usage](token-usage.md).
+- Token usage uses a shared SQLite request ledger for time aggregation, task attribution, and Pot periodic allowances. After execution has settled, tasks without enough allowance save a recovery checkpoint, enter waiting, and release their execution slot. See [Token usage](token-usage.md).
 
-Model requests reserve allowance durably before networking. Tool continuations and failed requests also count. Cancellation waits for Pi to settle and cannot undo completed external actions.
+Model requests reserve allowance durably before networking. Tool continuations and failed requests also count. Cancellation waits for execution to settle and cannot undo completed external actions.
 
-The [Runtime README](../runtime/README.md) maintains API, pagination, report delivery, and Pi constraints.
+The [Runtime README](../runtime/README.md) maintains API, pagination, report delivery, and Agent constraints.
 
 ## Current boundaries
 
-Current use is a local VM with Pi + DeepSeek. Remote Docker is a historical POC; Node Manager, multiple nodes, and other drivers are not productized.
+Current use is a local VM with Pot Agent or native Codex/Grok drivers. Remote Docker is a historical POC; Node Manager, multiple nodes, and other drivers are not productized.
 
-The VM isolates the host, but Pi and Runtime still share the guest user domain. Worker tokens restrict APIs, not same-user file access. The desktop broker offers cooperative arbitration without full shell/CDP/X11 isolation. Dedicated browser tools, dependency DAGs, long-term memory, and service authorization remain in the [Development plan](development-plan.md).
+The VM isolates the host, but tools and Runtime still share the guest user domain. Worker tokens restrict APIs, not same-user file access. The desktop broker offers cooperative arbitration without full shell/CDP/X11 isolation. Dedicated browser tools, dependency DAGs, long-term memory, and service authorization remain in the [Development plan](development-plan.md).
 
 ## Terminal and command configuration
 
@@ -94,4 +94,4 @@ Official auth status queries only login state without reading or exporting crede
 
 AI Configuration shares first-time Chat setup and ordinary Settings. Agent selection/model edits remain drafts until explicit save. Connection-only profile/provider writes use `follow_main: false, follow_worker: false`; main selection uses the existing binding/migration mechanism without modifying explicit worker defaults. API metadata and model checks never return keys. Supported model-list checks are bounded GET requests with no redirects or inference calls; unsupported CLI discovery uses manual model identifiers.
 
-Product execution limits live in private `product/execution-limits.json`, separately from legacy `pi.json` credentials. New workers can follow the active main binding snapshot; existing explicit routing/defaults and task bindings remain unchanged.
+Product execution limits live in private `product/execution-limits.json`, separately from provider credentials. New workers can follow the active main binding snapshot; existing explicit routing/defaults and task bindings remain unchanged.

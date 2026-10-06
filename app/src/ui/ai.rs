@@ -42,7 +42,7 @@ fn brand_name(kind: &str) -> &'static str {
 
 fn profile_brand<'a>(state: &'a Value, profile: &'a Value) -> &'a str {
     let engine = profile["engine"].as_str().unwrap_or("");
-    if engine != "pi" {
+    if engine != "pot" {
         return engine;
     }
     let endpoint = state["connections"]
@@ -72,7 +72,7 @@ fn profile_brand<'a>(state: &'a Value, profile: &'a Value) -> &'a str {
 }
 
 pub(super) fn agent_status(state: &Value, engine: &str) -> &'static str {
-    if engine == "pi" {
+    if engine == "pot" {
         return "已配置";
     }
     if state["discovering"] == true {
@@ -427,7 +427,7 @@ impl Settings {
                 let engine = selected["engine"].as_str().unwrap_or("");
                 let status = agent_status(state, engine);
                 form = form.child(field("连接状态").child(status));
-                if engine != "pi" && status != "已登录" {
+                if engine != "pot" && status != "已登录" {
                     let id = selected["id"].as_str().unwrap_or("").to_owned();
                     form = form.child(
                         field("完成连接").child(

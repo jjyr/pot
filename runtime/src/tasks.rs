@@ -1,4 +1,4 @@
-//! Durable background task lanes. Each lane owns a Pi session, transcript and
+//! Durable background task lanes. Each lane owns a Pot session, transcript and
 //! cancellation scope. The main conversation retains its own execution slot.
 use super::*;
 use axum::extract::Path;
@@ -75,7 +75,7 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     let endpoint: RuntimeEndpoint =
         serde_json::from_slice(&std::fs::read(root.data.join(RUNTIME_ENDPOINT_FILE))?)?;
     let token = id();
-    pi::private_json(
+    execution::private_json(
         &data.join(RUNTIME_ENDPOINT_FILE),
         &json!(RuntimeEndpoint {
             token: token.clone(),
@@ -87,11 +87,12 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     let service = Service {
         terminals: root.terminals.clone(),
         codex: root.codex.clone(),
+        agent_host: root.agent_host.clone(),
         authorization: root.authorization.clone(),
         usage: root.usage.clone(),
         usage_scope: task_id.into(),
         inner: Arc::new(Mutex::new(Inner {
-            store: Store::open(&data.join("pot.sqlite"))?,
+            store: Store::open(&data.join("pot-v2.sqlite"))?,
             engine: root.inner.lock().unwrap().engine.clone(),
             turn: None,
             model_requests: 0,
@@ -102,20 +103,14 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
         boot: root.boot.clone(),
         workspace,
         api_budget: root.api_budget.clone(),
-        pi: root.pi.clone(),
-        pi_program: root.pi_program.clone(),
-        pi_upstream: root.pi_upstream.clone(),
+        execution: root.execution.clone(),
+        agent_upstream: root.agent_upstream.clone(),
         is_worker: true,
         data,
         cancel_notify: Arc::new(tokio::sync::Notify::new()),
         stop: root.stop.clone(),
         tasks: Arc::new(Mutex::new(Hub::default())),
     };
-    service
-        .usage
-        .lock()
-        .unwrap()
-        .import_legacy(task_id, &service.inner.lock().unwrap().store)?;
     agent::initialize(&service)?;
     Ok(service)
 }
@@ -462,7 +457,7 @@ pub async fn input(
         return Err(error(
             StatusCode::CONFLICT,
             "engine_uncertain",
-            "Pi 停止状态未确认，请重启 Sandbox 后继续",
+            "Pot 停止状态未确认，请重启 Sandbox 后继续",
         ));
     }
     if lane.record.queue.len() >= 100 {
@@ -515,7 +510,7 @@ pub async fn cancel(
         .lock()
         .unwrap()
         .store
-        .set("pi.paused", "")
+        .set("execution.paused", "")
         .map_err(internal)?;
     lane.service
         .usage
@@ -543,10 +538,19 @@ pub async fn gateway(
     h: HeaderMap,
     body: Json<Value>,
 ) -> ApiResult<axum::response::Response> {
-    crate::gateway::forward(State(pi_service(&root, &h)?), h, body).await
+    crate::gateway::forward(State(execution_service(&root, &h)?), h, body).await
 }
 
-pub(super) fn pi_service(root: &Service, h: &HeaderMap) -> ApiResult<Service> {
+pub(crate) fn control_service(root: &Service, task_id: &str) -> ApiResult<Service> {
+    root.tasks
+        .lock()
+        .unwrap()
+        .lanes
+        .get(task_id)
+        .map(|lane| lane.service.clone())
+        .ok_or_else(missing)
+}
+pub(super) fn execution_service(root: &Service, h: &HeaderMap) -> ApiResult<Service> {
     if root.authorized(h).is_ok() {
         Ok(root.clone())
     } else {
@@ -581,7 +585,8 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         .filter(|l| l.record.active.is_some())
         .collect();
     if active.len()
-        >= pi::execution_config(root.pi.clone().unwrap_or_default(), &root.data)?.max_parallel_tasks
+        >= execution::execution_config(root.execution.clone().unwrap_or_default(), &root.data)?
+            .max_parallel_tasks
     {
         return Ok(None);
     }
@@ -720,7 +725,7 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
             .lock()
             .unwrap()
             .store
-            .set("pi.paused", "")?;
+            .set("execution.paused", "")?;
         lane.service.usage.lock().unwrap().clear_wait(task_id)?;
         for j in lane.record.queue.drain(..) {
             let mut m = user(&j);
@@ -877,14 +882,14 @@ pub(super) mod tests {
         let op = id();
         let event = json!({"id":op,"action":"start","reason":"threshold","tokens_before":28000});
         assert_eq!(
-            pi::compaction_event(State(s.clone()), HeaderMap::new(), Json(event.clone()))
+            execution::compaction_event(State(s.clone()), HeaderMap::new(), Json(event.clone()))
                 .await
                 .unwrap_err()
                 .0,
             StatusCode::UNAUTHORIZED
         );
         assert_eq!(
-            pi::compaction_event(State(s.clone()), headers(), Json(event.clone()))
+            execution::compaction_event(State(s.clone()), headers(), Json(event.clone()))
                 .await
                 .unwrap_err()
                 .0,
@@ -897,17 +902,17 @@ pub(super) mod tests {
             "authorization",
             format!("Bearer {}", worker.token).parse().unwrap(),
         );
-        let _ = pi::compaction_event(State(s.clone()), h.clone(), Json(event.clone()))
+        let _ = execution::compaction_event(State(s.clone()), h.clone(), Json(event.clone()))
             .await
             .unwrap();
         main_turn(&s, "main-compaction");
         assert!(
-            pi::compaction_event(State(s.clone()), headers(), Json(event.clone()))
+            execution::compaction_event(State(s.clone()), headers(), Json(event.clone()))
                 .await
                 .is_err()
         );
         assert!(
-            pi::compaction_event(
+            execution::compaction_event(
                 State(s.clone()),
                 headers(),
                 Json(json!({"id":op,"action":"complete"}))
@@ -924,7 +929,7 @@ pub(super) mod tests {
             .unwrap()
             .cancelling = true;
         assert_eq!(
-            pi::compaction_event(
+            execution::compaction_event(
                 State(s.clone()),
                 h.clone(),
                 Json(json!({"id":id(),"action":"start","reason":"threshold"}))
@@ -934,7 +939,7 @@ pub(super) mod tests {
             .0,
             StatusCode::CONFLICT
         );
-        let _ = pi::compaction_event(
+        let _ = execution::compaction_event(
             State(s.clone()),
             h,
             Json(json!({"id":op,"action":"cancelled"})),
@@ -987,161 +992,6 @@ pub(super) mod tests {
         record.info.title = "用户自定义标题".into();
         restore_title(record);
         assert_eq!(record.info.title, "用户自定义标题");
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "Runs installed Pi against a local mock provider; set POT_TEST_PI_BIN"]
-    async fn real_pi_automatic_routing_and_completion() {
-        use axum::response::sse::Event as WireEvent;
-        let mut s = fixture();
-        s.pi_program = std::env::var("POT_TEST_PI_BIN").expect("POT_TEST_PI_BIN");
-        s.api_budget = Some(deepseek::BudgetSettings {
-            namespace: "pi-attempts",
-            data: s.data.clone(),
-            limit: 12,
-            max_output_tokens: 256,
-        });
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        s.pi_upstream = format!("http://127.0.0.1:{port}/mock");
-        pi::private_json(
-            &s.data.join(RUNTIME_ENDPOINT_FILE),
-            &json!(RuntimeEndpoint {
-                api_version: API_VERSION,
-                port,
-                token: s.token.clone(),
-                boot_id: s.boot.clone()
-            }),
-        )
-        .unwrap();
-        orchestration::initialize(&s).unwrap();
-        let captures = Arc::new(Mutex::new(Vec::<Value>::new()));
-        let counts = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
-        let captured = captures.clone();
-        let router = Router::new()
-            .route("/api/pi/v1/chat/completions",post(gateway))
-            .route("/api/v1/orchestration",post(orchestration::invoke))
-            .with_state(s.clone())
-            .route("/mock",post(move |Json(body):Json<Value>| {
-                let captures=captured.clone();let counts=counts.clone();
-                async move {
-                    let names:Vec<_> = body["tools"].as_array().unwrap().iter().filter_map(|t|t["function"]["name"].as_str()).collect();
-                    let main=names.contains(&"pot_create_task");
-                    let summary=!main && names.contains(&"pot_get_task");
-                    let latest=body["messages"].as_array().unwrap().iter().rev().find(|m|m["role"]=="user").unwrap()["content"].to_string();
-                    let greeting=main && latest.contains("GREETING_ONLY");
-                    let label=if greeting {"greeting"}else if summary {"summary"}else if main {"main"}else if latest.contains("WORKER_ALPHA") {"WORKER_ALPHA"}else{"WORKER_BETA"};
-                    let index={let mut c=counts.lock().unwrap();let n=c.entry(label.into()).or_default();let i=*n;*n+=1;i};
-                    if !main && !summary { assert!(!names.iter().any(|n|n.starts_with("pot_"))); }
-                    if summary {assert_eq!(names.len(),2);}
-                    captures.lock().unwrap().push(body);
-                    let tool=|index,id:&str,name:&str,args:Value|json!({"index":index,"id":id,"type":"function","function":{"name":name,"arguments":args.to_string()}});
-                    let (delta,reason)=if greeting {
-                        (json!({"role":"assistant","content":"Hello."}),"stop")
-                    } else if summary {
-                        (json!({"role":"assistant","content":"Combined verified results: ALPHA and BETA."}),"stop")
-                    } else if main && index==0 {
-                        (json!({"role":"assistant","tool_calls":[tool(0,"delegate-a","pot_create_task",json!({"text":"WORKER_ALPHA: write result.txt with ALPHA"})),tool(1,"delegate-b","pot_create_task",json!({"text":"WORKER_BETA: write result.txt with BETA"}))]}),"tool_calls")
-                    } else if main {
-                        (json!({"role":"assistant","content":"Two background tasks accepted."}),"stop")
-                    } else if index==0 {
-                        (json!({"role":"assistant","tool_calls":[tool(0,"write-result","write",json!({"path":"result.txt","content":label}))]}),"tool_calls")
-                    } else {
-                        (json!({"role":"assistant","content":format!("Verified result {label}")}),"stop")
-                    };
-                    let chunk=|d:Value,f:Value|json!({"id":"routing-fixture","object":"chat.completion.chunk","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"delta":d,"finish_reason":f}]}).to_string();
-                    let frames=vec![WireEvent::default().data(chunk(delta,Value::Null)),WireEvent::default().data(chunk(json!({}),json!(reason))),WireEvent::default().data("[DONE]")];
-                    Sse::new(futures::stream::iter(frames.into_iter().map(Ok::<_,Infallible>)))
-                }
-            }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-        for (request, text) in [
-            ("hello", "GREETING_ONLY"),
-            ("research", "Compare two companies and prepare files"),
-        ] {
-            let _ = send(
-                State(s.clone()),
-                headers(),
-                Json(SendMessage {
-                    request_id: request.into(),
-                    conversation_id: "main".into(),
-                    text: text.into(),
-                }),
-            )
-            .await
-            .unwrap();
-            let req = rx.recv().await.unwrap();
-            tokio::time::timeout(std::time::Duration::from_secs(30), pi::run(&s, req))
-                .await
-                .unwrap()
-                .unwrap();
-            s.turn(None);
-            assert!(
-                !s.snapshot()
-                    .unwrap()
-                    .messages
-                    .iter()
-                    .any(|m| m.status == MessageStatus::Failed),
-                "{:?}",
-                s.snapshot().unwrap().messages
-            );
-            if request == "hello" {
-                assert!(s.tasks.lock().unwrap().lanes.is_empty());
-            }
-        }
-        assert_eq!(s.tasks.lock().unwrap().lanes.len(), 2);
-        let a = claim(&s).unwrap().unwrap();
-        let b = claim(&s).unwrap().unwrap();
-        assert!(claim(&s).unwrap().is_none());
-        let (ar, br) = tokio::join!(pi::run(&a.1, a.2.clone()), pi::run(&b.1, b.2.clone()));
-        finish(&s, &b.0, br).unwrap();
-        finish(&s, &a.0, ar).unwrap();
-        for (_, worker, req) in [&a, &b] {
-            let content = std::fs::read_to_string(worker.workspace.join("result.txt")).unwrap();
-            assert!(req.text.contains(&content));
-            assert_eq!(
-                worker
-                    .inner
-                    .lock()
-                    .unwrap()
-                    .store
-                    .duplicate(&req.request_id)
-                    .unwrap()
-                    .unwrap()
-                    .status,
-                MessageStatus::Complete
-            );
-        }
-        orchestration::deliver(&s).unwrap();
-        let req = rx.try_recv().unwrap();
-        assert!(
-            req.text.contains("Verified result WORKER_ALPHA")
-                && req.text.contains("Verified result WORKER_BETA")
-        );
-        tokio::time::timeout(std::time::Duration::from_secs(30), pi::run(&s, req))
-            .await
-            .unwrap()
-            .unwrap();
-        s.turn(None);
-        orchestration::deliver(&s).unwrap();
-        assert!(rx.try_recv().is_err());
-        assert!(
-            s.snapshot()
-                .unwrap()
-                .messages
-                .iter()
-                .any(|m| m.text == "Combined verified results: ALPHA and BETA.")
-        );
-        let captured = captures.lock().unwrap();
-        assert_eq!(captured.len(), 8);
-        let last = captured.last().unwrap()["messages"].to_string();
-        assert!(
-            last.contains("Two background tasks accepted.")
-                && last.contains("Verified result WORKER_ALPHA")
-        );
-        server.abort();
     }
 
     async fn tool(s: &Service, name: &str, call_id: &str, args: Value) -> ApiResult<Json<Value>> {
@@ -1295,7 +1145,7 @@ pub(super) mod tests {
         orchestration::deliver(&s).unwrap();
         assert!(rx.try_recv().is_err());
         // Reopen the durable state before delivery, as on Runtime restart.
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot.sqlite")).unwrap();
+        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         s.turn(None);
         orchestration::initialize(&s).unwrap();
         orchestration::deliver(&s).unwrap();
@@ -1316,7 +1166,7 @@ pub(super) mod tests {
         orchestration::deliver(&s).unwrap();
         assert!(rx.try_recv().is_err());
         s.turn(None);
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot.sqlite")).unwrap();
+        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         orchestration::deliver(&s).unwrap();
         assert!(rx.try_recv().is_err());
         assert_eq!(
@@ -1651,7 +1501,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn allowance_wait_releases_slot_survives_restore_and_cancels() {
         let mut s = fixture();
-        s.pi.as_mut().unwrap().max_parallel_tasks = 1;
+        s.execution.as_mut().unwrap().max_parallel_tasks = 1;
         let a = add(&s, "waits", "").await;
         let (_, lane, req) = claim(&s).unwrap().unwrap();
         let mid = lane
@@ -1667,7 +1517,7 @@ pub(super) mod tests {
             .lock()
             .unwrap()
             .store
-            .set("pi.paused", &serde_json::to_string(&req).unwrap())
+            .set("execution.paused", &serde_json::to_string(&req).unwrap())
             .unwrap();
         s.usage
             .lock()
@@ -1725,7 +1575,7 @@ pub(super) mod tests {
     }
     fn routing_profiles(s: &Service) {
         agent::initialize(s).unwrap();
-        let base = agent::Profile::legacy(s.pi.as_ref().unwrap());
+        let base = agent::Profile::api(s.execution.as_ref().unwrap());
         let mut alternate = base.clone();
         alternate.id = "alternate".into();
         let mut other = base.clone();
@@ -1741,7 +1591,7 @@ pub(super) mod tests {
                 &serde_json::to_string(&vec![base, alternate, other]).unwrap(),
             )
             .unwrap();
-        pi::private_json(&s.data.join("providers.json"), &json!([{"id":"other","endpoint":"https://example.com/model","allowed_hosts":["example.com"],"api_key":"test-only","protocol":"unknown"}])).unwrap();
+        execution::private_json(&s.data.join("providers.json"), &json!([{"id":"other","endpoint":"https://example.com/model","allowed_hosts":["example.com"],"api_key":"test-only","protocol":"unknown"}])).unwrap();
     }
     #[tokio::test]
     async fn profile_routes_are_pinned_authorized_and_idempotent() {
@@ -1843,16 +1693,10 @@ pub(super) mod tests {
             s.tasks.lock().unwrap().lanes[&task.id].record.info.routing,
             task.routing
         );
-        for requirements in [
-            TaskRequirements {
-                desktop: true,
-                ..Default::default()
-            },
-            TaskRequirements {
-                live_steering: true,
-                ..Default::default()
-            },
-        ] {
+        for requirements in [TaskRequirements {
+            desktop: true,
+            ..Default::default()
+        }] {
             assert!(
                 create(
                     State(s.clone()),
@@ -1888,10 +1732,10 @@ pub(super) mod tests {
     #[tokio::test]
     async fn profile_and_provider_caps_skip_blocked_lanes_and_hold_cancelling_slots() {
         let mut s = fixture();
-        s.pi.as_mut().unwrap().max_parallel_tasks = 3;
+        s.execution.as_mut().unwrap().max_parallel_tasks = 3;
         routing_profiles(&s);
         let policy = agent::routing::Policy {
-            profile_limits: [("pi-default".into(), 1)].into(),
+            profile_limits: [("pot-default".into(), 1)].into(),
             provider_limits: [("deepseek".into(), 2)].into(),
             ..Default::default()
         };
@@ -1900,8 +1744,8 @@ pub(super) mod tests {
             .unwrap();
         let mut tasks = Vec::new();
         for profile in [
-            "pi-default",
-            "pi-default",
+            "pot-default",
+            "pot-default",
             "alternate",
             "alternate",
             "other",
@@ -2007,7 +1851,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unconfirmed_stop_holds_capacity_until_restart() {
         let mut s = fixture();
-        s.pi.as_mut().unwrap().max_parallel_tasks = 1;
+        s.execution.as_mut().unwrap().max_parallel_tasks = 1;
         let first = add(&s, "first", "").await;
         let second = add(&s, "second", "").await;
         let (_, worker, _) = claim(&s).unwrap().unwrap();
@@ -2030,8 +1874,8 @@ pub(super) mod tests {
         s.data = std::env::temp_dir().join(format!("pot-tasks-{}", id()));
         s.workspace = s.data.join("workspace");
         std::fs::create_dir_all(&s.workspace).unwrap();
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot.sqlite")).unwrap();
-        s.pi = Some(pi::Config {
+        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+        s.execution = Some(execution::Config {
             api_key: "fixture".into(),
             model: "deepseek-v4-flash".into(),
             request_limit: 20,
@@ -2039,7 +1883,7 @@ pub(super) mod tests {
             max_requests_per_turn: 3,
             max_parallel_tasks: 2,
         });
-        pi::private_json(
+        execution::private_json(
             &s.data.join(RUNTIME_ENDPOINT_FILE),
             &json!(RuntimeEndpoint {
                 api_version: API_VERSION,
@@ -2108,7 +1952,7 @@ pub(super) mod tests {
     async fn configured_concurrency_limits_and_releases_slots() {
         for limit in [1, 5, 8] {
             let mut s = fixture();
-            s.pi.as_mut().unwrap().max_parallel_tasks = limit;
+            s.execution.as_mut().unwrap().max_parallel_tasks = limit;
             let mut queued = Vec::new();
             for i in 0..limit + 1 {
                 queued.push(add(&s, &format!("task-{i}"), "").await);
@@ -2277,7 +2121,7 @@ pub(super) mod tests {
         let mut next = crate::tests::service();
         next.data = path.clone();
         next.workspace = path.join("workspace");
-        next.inner.lock().unwrap().store = Store::open(&path.join("pot.sqlite")).unwrap();
+        next.inner.lock().unwrap().store = Store::open(&path.join("pot-v2.sqlite")).unwrap();
         restore(&next).unwrap();
         assert_eq!(
             next.tasks.lock().unwrap().lanes[&a.id].record.info.phase,
@@ -2398,144 +2242,14 @@ pub(super) mod tests {
             StatusCode::UNAUTHORIZED
         );
     }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "Runs installed Pi against a local mock provider; set POT_TEST_PI_BIN"]
-    async fn real_pi_parallel_tools_guidance_and_sessions() {
-        use axum::response::sse::Event as WireEvent;
-        let mut s = fixture();
-        s.pi_program = std::env::var("POT_TEST_PI_BIN").expect("POT_TEST_PI_BIN");
-        s.api_budget = Some(deepseek::BudgetSettings {
-            namespace: "pi-attempts",
-            data: s.data.clone(),
-            limit: 8,
-            max_output_tokens: 128,
-        });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        s.pi_upstream = format!("http://127.0.0.1:{port}/mock");
-        pi::private_json(
-            &s.data.join(RUNTIME_ENDPOINT_FILE),
-            &json!(RuntimeEndpoint {
-                api_version: API_VERSION,
-                port,
-                token: s.token.clone(),
-                boot_id: s.boot.clone()
-            }),
-        )
-        .unwrap();
-        let captures = Arc::new(Mutex::new(Vec::<Value>::new()));
-        let counts = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
-        let gate = Arc::new(tokio::sync::Semaphore::new(0));
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let captured = captures.clone();
-        let released = gate.clone();
-        let router=Router::new().route("/api/pi/v1/chat/completions",post(gateway)).with_state(s.clone()).route("/mock",post(move |Json(body):Json<Value>|{
-            let captures=captured.clone();let counts=counts.clone();let gate=released.clone();let tx=tx.clone();
-            async move {
-                let all=body["messages"].to_string();let label=if all.contains("ALPHA_SECRET"){"ALPHA_SECRET"}else{"BETA_SECRET"};
-                assert!(!(all.contains("ALPHA_SECRET") && all.contains("BETA_SECRET")),"worker context crossed lanes");
-                captures.lock().unwrap().push(body);
-                let index={let mut counts=counts.lock().unwrap();let n=counts.entry(label.into()).or_default();let i=*n;*n+=1;i};
-                if index==0 {tx.send(label.to_string()).unwrap();gate.acquire().await.unwrap().forget();}
-                let (delta,reason)=if index==0 {(json!({"role":"assistant","tool_calls":[{"index":0,"id":format!("write-{label}"),"type":"function","function":{"name":"write","arguments":json!({"path":"result.txt","content":label}).to_string()}}]}),"tool_calls")}else{(json!({"role":"assistant","content":format!("Finished {label} round {index}")}),"stop")};
-                let chunk=|d:Value,f:Value|json!({"id":format!("mock-{label}-{index}"),"object":"chat.completion.chunk","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"delta":d,"finish_reason":f}]}).to_string();
-                let frames=vec![WireEvent::default().data(chunk(delta,Value::Null)),WireEvent::default().data(chunk(json!({}),json!(reason))),WireEvent::default().data("[DONE]")];
-                Sse::new(futures::stream::iter(frames.into_iter().map(Ok::<_,Infallible>)))
-            }
-        }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-        let a = add(&s, "ALPHA_SECRET", "").await;
-        let b = add(&s, "BETA_SECRET", "").await;
-        let mut workers = vec![];
-        for _ in 0..2 {
-            let (tid, svc, req) = claim(&s).unwrap().unwrap();
-            let root = s.clone();
-            workers.push(tokio::spawn(async move {
-                let r = pi::run(&svc, req).await;
-                finish(&root, &tid, r).unwrap();
-            }));
-        }
-        for _ in 0..2 {
-            tokio::time::timeout(std::time::Duration::from_secs(20), rx.recv())
-                .await
-                .unwrap()
-                .unwrap();
-        }
-        guide(&s, &a.id, "followup", "include COST_MARKER").await;
-        assert_eq!(s.tasks.lock().unwrap().lanes[&a.id].record.queue.len(), 1);
-        gate.add_permits(2);
-        for worker in workers {
-            tokio::time::timeout(std::time::Duration::from_secs(30), worker)
-                .await
-                .unwrap()
-                .unwrap();
-        }
-        let binding = {
-            let hub = s.tasks.lock().unwrap();
-            let av = &hub.lanes[&a.id].service;
-            let bv = &hub.lanes[&b.id].service;
-            assert_eq!(
-                std::fs::read_to_string(av.workspace.join("result.txt")).unwrap(),
-                "ALPHA_SECRET"
-            );
-            assert_eq!(
-                std::fs::read_to_string(bv.workspace.join("result.txt")).unwrap(),
-                "BETA_SECRET"
-            );
-            let ab = av
-                .inner
-                .lock()
-                .unwrap()
-                .store
-                .get("pi.session")
-                .unwrap()
-                .unwrap();
-            let bb = bv
-                .inner
-                .lock()
-                .unwrap()
-                .store
-                .get("pi.session")
-                .unwrap()
-                .unwrap();
-            assert_ne!(ab, bb);
-            ab
-        };
-        let (tid, svc, req) = claim(&s).unwrap().unwrap();
-        assert_eq!(tid, a.id);
-        assert_eq!(req.text, "include COST_MARKER");
-        let result = pi::run(&svc, req).await;
-        finish(&s, &tid, result).unwrap();
-        assert_eq!(
-            svc.inner
-                .lock()
-                .unwrap()
-                .store
-                .get("pi.session")
-                .unwrap()
-                .unwrap(),
-            binding
-        );
-        assert_eq!(
-            s.tasks.lock().unwrap().lanes[&a.id].record.info.phase,
-            TaskPhase::Complete
-        );
-        assert_eq!(s.snapshot().unwrap().messages.len(), 3);
-        assert_eq!(s.budget().unwrap().unwrap().used, 5);
-        assert!(
-            captures.lock().unwrap().last().unwrap()["messages"]
-                .to_string()
-                .contains("COST_MARKER")
-        );
-        server.abort();
-    }
+
     #[tokio::test]
     async fn new_tasks_inherit_profile_changes_but_existing_and_restored_tasks_stay_pinned() {
         let s = fixture();
         agent::initialize(&s).unwrap();
         let old = add(&s, "old snapshot", "").await;
         let before = agent::binding(&owner(&s, &old.id).unwrap()).unwrap().spec;
-        let mut profile = agent::Profile::legacy(s.pi.as_ref().unwrap());
+        let mut profile = agent::Profile::api(s.execution.as_ref().unwrap());
         profile.revision = 2;
         profile.params.max_output_tokens = 77;
         let settings=serde_json::from_value(json!({"profile":profile,"expected_revision":1,"request_id":"edit","follow_main":false})).unwrap();
