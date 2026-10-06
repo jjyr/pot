@@ -296,7 +296,7 @@ impl Settings {
         }
         let reset_model = self.draft_revision != state["draft_revision"].as_i64();
         self.draft_revision = state["draft_revision"].as_i64();
-        for (i, key) in [
+        let field_keys: [&str; 24] = [
             "key",
             "limit",
             "tokens",
@@ -309,6 +309,8 @@ impl Settings {
             "argv",
             "codex_model",
             "",
+            "",
+            "",
             "api_endpoint",
             "api_key",
             "api_model",
@@ -319,10 +321,8 @@ impl Settings {
             "provider_tokens",
             "draft_model",
             "connection_name",
-        ]
-        .iter()
-        .enumerate()
-        {
+        ];
+        for (i, key) in field_keys.iter().enumerate() {
             let key = if i == 16 { "connection_model" } else { *key };
             let value = state[key].as_str().unwrap_or("").to_owned();
             if first

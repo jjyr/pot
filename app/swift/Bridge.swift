@@ -224,6 +224,14 @@ var bridge: PotBridge?
             MainActor.assumeIsolated {
                 guard let self else { return event }
                 if event.modifierFlags.contains(.command) {
+                    if ["[", "]"].contains(event.charactersIgnoringModifiers ?? ""),
+                       event.window === self.host,
+                       (self.host.firstResponder as? NSTextInputClient)?.hasMarkedText() != true,
+                       (self.host.firstResponder as? NSView)?.isDescendant(of: self.web) != true,
+                       NSApp.mainMenu?.performKeyEquivalent(with: event) == true
+                    {
+                        return nil
+                    }
                     if let text = self.host.firstResponder as? NSTextView {
                         switch event.charactersIgnoringModifiers {
                         case "a": text.selectAll(nil); return nil
