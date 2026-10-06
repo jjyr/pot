@@ -12,6 +12,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Build the Sandbox image, desktop theme, or CJK fonts | [Sandbox image](sandbox-image.md) |
 | Change chat, tasks, settings, or Sandbox UI | [UI specification](ui-ux-design.md) |
 | Apply the approved visual, component, motion, and navigation direction | [Design language](design-language.md) (shared shell, page layouts, Chat and Pot icons implemented; acceptance limits documented) |
+| Change persistent execution preferences or preference-guided task routing | [Execution preferences](execution-preferences.md) |
 | Change token accounting, periodic allowances, or budget recovery | [Token usage](token-usage.md) |
 | Change scheduled triggers, time zones, or notifications | [Scheduled tasks](scheduled-tasks.md) |
 | Review long-term product boundaries and acceptance goals | [Product design](product-design.md) |

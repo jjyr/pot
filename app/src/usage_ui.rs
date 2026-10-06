@@ -271,6 +271,16 @@ impl UsageUI {
                     cx,
                 )),
         );
+        let routing = &d["routing_total"];
+        if n(routing, "requests") > 0 {
+            scroll = scroll.child(ui::card(cx)
+                .child(ui::section("含任务路由的主聊天用量"))
+                .child(div().mt_2().text_size(px(22.)).child(if tokens(routing) == 0 && n(routing,"unknown") > 0 {"用量尚未完整返回".into()} else {format!("{} tokens", count(tokens(routing)))}))
+                .child(ui::hint(format!("输入 {} · 输出 {} · 输入中缓存命中 {}{}",
+                    count(n(routing,"input")), count(n(routing,"output")), count(n(routing,"cache")),
+                    if n(routing,"unknown") > 0 {format!(" · {} 条用量不完整", n(routing,"unknown"))} else {String::new()}), cx))
+                .child(ui::hint("统计发生任务委派的整个主聊天轮次，包含理解和回复；已包含在总量中，不代表独立路由费用。",cx)));
+        }
         let groups = d["agent_models"].as_array().cloned().unwrap_or_default();
         if !groups.is_empty() || self.group_offset > 0 {
             let mut card = ui::card(cx).child(ui::section("Agent / 模型用量"));

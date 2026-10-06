@@ -504,6 +504,9 @@ impl Shell {
                                             .items_center()
                                             .gap_3()
                                             .child(
+                                                ui::brand_icon(&task.executor_icon).size(px(16.)),
+                                            )
+                                            .child(
                                                 div()
                                                     .id(SharedString::from(format!(
                                                         "task-title-{id}"
@@ -975,6 +978,7 @@ impl Shell {
                                             .child(div().w_full().flex().items_center().gap_2().text_size(px(12.)).font_weight(FontWeight::NORMAL)
                                                 .child(div().size(px(4.)).rounded_full().bg(rgb(if dark { 0x7d9ec3 } else { 0x6f8ba8 }))
                                                     .with_animation(SharedString::from(format!("activity-{}", task.id)), Animation::new(std::time::Duration::from_millis(2700)).repeat(), |el, t| el.opacity(0.825 + 0.175 * (t * std::f32::consts::TAU).cos())))
+                                                .child(ui::brand_icon(&task.executor_icon).size(px(14.)))
                                                 .child(div().max_w(px(560.)).overflow_hidden().whitespace_nowrap().child(task.title.clone())))
                                             .on_click(cx.listener(move |this, _, _, cx| { this.client.select(id.clone()); this.show_tasks=false; this.first=true; cx.notify(); }))
                                     }))

@@ -199,6 +199,22 @@ fn info(record: &Record) -> TaskInfo {
         .saturating_sub(usize::from(record.info.phase == TaskPhase::Waiting));
     i
 }
+fn lane_info(lane: &Lane) -> TaskInfo {
+    let mut task = info(&lane.record);
+    if let Ok(Some(binding)) = agent::current(&lane.service.inner.lock().unwrap().store) {
+        let icon = crate::gateway::executor_icon(&lane.service, &binding.spec);
+        // Missing old provider configuration must not erase a known historical icon.
+        if icon != "custom"
+            || task.executor_icon.is_empty()
+            || task.routing.as_ref().is_some_and(|r| {
+                r.profile != binding.spec.source_profile_id || r.provider != binding.spec.provider
+            })
+        {
+            task.executor_icon = icon;
+        }
+    }
+    task
+}
 fn job(request_id: String, text: String, order: u64) -> Job {
     Job {
         order,
@@ -270,7 +286,7 @@ pub(super) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
                     || i.title.to_lowercase().contains(&needle)
                     || i.id.to_lowercase().contains(&needle))
         })
-        .map(|l| info(&l.record))
+        .map(|lane| info(&lane.record))
         .collect();
     sort_tasks(&mut items);
     let total = items.len();
@@ -279,12 +295,15 @@ pub(super) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
         .min(total.saturating_sub(1) / query.limit * query.limit);
     let end = offset.saturating_add(query.limit).min(total);
     Ok(TaskPage {
-        items: items[offset..end].to_vec(),
+        items: items[offset..end]
+            .iter()
+            .map(|item| lane_info(&hub.lanes[&item.id]))
+            .collect(),
         total,
         offset,
         next_offset: (end < total).then_some(end),
         counts: counts(&hub),
-        selected: hub.lanes.get(&query.selected).map(|l| info(&l.record)),
+        selected: hub.lanes.get(&query.selected).map(lane_info),
     })
 }
 pub async fn query(
@@ -299,7 +318,7 @@ pub async fn query(
 pub async fn list(State(root): State<Service>, h: HeaderMap) -> ApiResult<Json<Vec<TaskInfo>>> {
     root.authorized(&h)?;
     let hub = root.tasks.lock().unwrap();
-    let mut list: Vec<_> = hub.lanes.values().map(|l| info(&l.record)).collect();
+    let mut list: Vec<_> = hub.lanes.values().map(lane_info).collect();
     list.sort_by_key(|i| i.created_at_ms);
     Ok(Json(list))
 }
@@ -364,7 +383,7 @@ fn enqueue_from(
                 "请求编号已用于其他内容",
             ));
         }
-        return Ok(info(&lane.record));
+        return Ok(lane_info(lane));
     }
     if hub.lanes.len() >= 1000 {
         return Err(error(
@@ -373,9 +392,41 @@ fn enqueue_from(
             "任务数量达到上限",
         ));
     }
-    let (spec, routing) =
+    if source == agent::routing::Source::Tool {
+        let prefs = agent::preferences::read(root).map_err(internal)?;
+        if req.preference_revision.is_some_and(|r| r != prefs.revision)
+            || (!prefs.text.is_empty() && req.preference_revision != Some(prefs.revision))
+        {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "preference_revision",
+                "Execution preferences changed or were not supplied; refresh before delegating",
+            ));
+        }
+    } else if req.preference_revision.is_some() || req.selection_reason.is_some() {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "preference_source",
+            "Preference metadata is only accepted from main-agent delegation",
+        ));
+    }
+    if req
+        .selection_reason
+        .as_ref()
+        .is_some_and(|v| v.len() > 2048 || v.chars().count() > 512)
+    {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "selection_reason",
+            "Selection reason exceeds 512 characters",
+        ));
+    }
+    let (spec, mut routing) =
         agent::routing::resolve(root, req.profile.as_deref(), source, &req.requirements)
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
+    routing.preference_revision = req.preference_revision;
+    routing.selection_reason = req.selection_reason.clone();
+    let executor_icon = crate::gateway::executor_icon(root, &spec);
     let task_id = id();
     let first = job(req.request_id.clone(), req.text.clone(), next_order(&hub));
     let record = Record {
@@ -388,6 +439,7 @@ fn enqueue_from(
             updated_at_ms: now(),
             resource: req.resource.clone(),
             routing: Some(routing),
+            executor_icon,
         },
         create_request: req,
         route_source: source,
@@ -1744,6 +1796,47 @@ pub(super) mod tests {
         pi::private_json(&s.data.join("providers.json"), &json!([{"id":"other","endpoint":"https://example.com/model","allowed_hosts":["example.com"],"api_key":"test-only","protocol":"unknown"}])).unwrap();
     }
     #[tokio::test]
+    async fn executor_icon_follows_task_binding_without_following_global_profile_edits() {
+        let s = fixture();
+        let task = add(&s, "original task", "").await;
+        assert_eq!(task.executor_icon, "deepseek");
+        let mut replacement = agent::Profile::legacy(s.pi.as_ref().unwrap());
+        replacement.engine = agent::Engine::Codex;
+        replacement.provider = "openai".into();
+        replacement.auth_ref = "cli:codex".into();
+        replacement.revision = 2;
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                "agent.profiles.v1",
+                &serde_json::to_string(&vec![replacement.clone()]).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
+            "deepseek"
+        );
+        let worker = s.tasks.lock().unwrap().lanes[&task.id].service.clone();
+        agent::assign_new(
+            &mut worker.inner.lock().unwrap().store,
+            replacement.resolve().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
+            "codex"
+        );
+        persist(&s, &s.tasks.lock().unwrap()).unwrap();
+        restore(&s).unwrap();
+        assert_eq!(
+            page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
+            "codex"
+        );
+        std::fs::remove_dir_all(&s.data).unwrap();
+    }
+    #[tokio::test]
     async fn profile_routes_are_pinned_authorized_and_idempotent() {
         let s = fixture();
         routing_profiles(&s);
@@ -2581,7 +2674,7 @@ pub(super) fn context(root: &Service) -> String {
         .lanes
         .values()
         .filter(|l| l.record.info.phase.scope() != "archived")
-        .map(|l| info(&l.record))
+        .map(|lane| info(&lane.record))
         .collect();
     sort_tasks(&mut open);
     let truncated = open.len() > 8;
