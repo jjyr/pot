@@ -100,6 +100,15 @@ fn midnight(tz: Tz, day: chrono::NaiveDate) -> Result<i64> {
     bail!("Date does not exist in timezone")
 }
 impl Ledger {
+    /// Observational subset of main-chat turns that attempted delegation.
+    /// Includes the whole turn, not an invented allocation of reasoning tokens.
+    pub fn mark_routing_turn(&self, turn: &str) -> Result<()> {
+        self.0.execute(
+            "INSERT OR IGNORE INTO routing_turns(turn_id) VALUES (?)",
+            [turn],
+        )?;
+        Ok(())
+    }
     pub fn route(&self, request: &str, spec: &agent::ResolvedSpec, epoch: u64) -> Result<()> {
         let engine = serde_json::to_value(&spec.engine)?;
         self.0.execute(
@@ -117,6 +126,8 @@ impl Ledger {
         CREATE INDEX IF NOT EXISTS usage_scope ON requests(scope,at);
         CREATE TABLE IF NOT EXISTS tools(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,name TEXT NOT NULL,at INTEGER NOT NULL,end_at INTEGER,bytes INTEGER,failed INTEGER NOT NULL DEFAULT 0);
         CREATE INDEX IF NOT EXISTS tools_scope ON tools(scope,at);
+        CREATE TABLE IF NOT EXISTS routing_turns(turn_id TEXT PRIMARY KEY);
+        CREATE INDEX IF NOT EXISTS usage_turn ON requests(scope,turn_id,at);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0);")?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS wait_routes(scope TEXT PRIMARY KEY,provider TEXT NOT NULL);
@@ -458,6 +469,10 @@ impl Ledger {
         } else {
             (0, i64::MAX)
         };
+        let routing_total: Totals = self.0.query_row(
+            "SELECT COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.input IS NULL OR r.output IS NULL OR r.state='native_incomplete' THEN 1 ELSE 0 END),0) FROM requests r WHERE r.scope='main' AND (?='' OR r.scope=?) AND r.at>=? AND r.at<? AND EXISTS(SELECT 1 FROM routing_turns t WHERE t.turn_id=r.turn_id)",
+            params![q.scope,q.scope,group_start,group_end],
+            |r| Ok(Totals { requests:r.get(0)?, input:r.get(1)?, output:r.get(2)?, cache:r.get(3)?, unknown:r.get(4)? }))?;
         let mut stmt = self.0.prepare("SELECT COALESCE(t.agent,'unknown'),r.model,COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),SUM(CASE WHEN r.input IS NULL OR r.output IS NULL OR r.state='native_incomplete' THEN 1 ELSE 0 END) FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? GROUP BY COALESCE(t.agent,'unknown'),r.model ORDER BY COALESCE(SUM(r.input),0)+COALESCE(SUM(r.output),0) DESC,1,2 LIMIT 21 OFFSET ?")?;
         let mut agent_models = stmt.query_map(params![q.scope,q.scope,group_start,group_end,q.offset], |r| Ok(json!({"agent":r.get::<_,String>(0)?,"model":r.get::<_,String>(1)?,"requests":r.get::<_,u64>(2)?,"input":r.get::<_,u64>(3)?,"output":r.get::<_,u64>(4)?,"cache":r.get::<_,u64>(5)?,"unknown":r.get::<_,u64>(6)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let agent_model_next_offset = if agent_models.len() > 20 {
@@ -505,7 +520,7 @@ impl Ledger {
             "SELECT EXISTS(SELECT 1 FROM requests WHERE (?='' OR scope=?) AND state LIKE 'native_%')",
             params![q.scope,q.scope], |row| row.get(0))?;
         Ok(
-            json!({"agent_models":agent_models,"agent_model_next_offset":agent_model_next_offset,"native_turn_usage":native_turn_usage,"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
+            json!({"routing_total":routing_total,"agent_models":agent_models,"agent_model_next_offset":agent_model_next_offset,"native_turn_usage":native_turn_usage,"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
         )
     }
 }

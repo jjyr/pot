@@ -144,12 +144,18 @@ pub fn resolve(
         {
             if let Some(binding) = current(&inner.store)? {
                 let spec = binding.spec;
+                anyhow::ensure!(
+                    spec.engine != Engine::Grok,
+                    "Grok currently supports main chat only, not background tasks"
+                );
                 check_requirements(&spec, requirements)?;
                 let routing = TaskRouting {
                     profile: spec.source_profile_id.clone(),
                     revision: spec.source_profile_revision,
                     provider: spec.provider.clone(),
                     reason: "chat_default".into(),
+                    preference_revision: None,
+                    selection_reason: None,
                 };
                 return Ok((spec, routing));
             }
@@ -189,6 +195,10 @@ pub fn resolve(
         .into_iter()
         .find(|p| p.id == selected)
         .ok_or_else(|| anyhow!("Selected worker profile is missing"))?;
+    anyhow::ensure!(
+        profile.engine != Engine::Grok,
+        "Grok currently supports main chat only, not background tasks"
+    );
     let spec = crate::gateway::resolve(root, &profile)?;
     check_requirements(&spec, requirements)?;
     let routing = TaskRouting {
@@ -196,6 +206,8 @@ pub fn resolve(
         revision: profile.revision,
         provider: spec.provider.clone(),
         reason: reason.into(),
+        preference_revision: None,
+        selection_reason: None,
     };
     Ok((spec, routing))
 }

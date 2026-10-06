@@ -18,6 +18,7 @@ pub struct RunningTask {
     pub id: String,
     pub title: String,
     pub progress: String,
+    pub executor_icon: String,
 }
 
 fn task_progress(snapshot: &Snapshot) -> String {
@@ -313,6 +314,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         running_tasks.push(RunningTask {
             id: task.id.clone(),
             title: task.title.clone(),
+            executor_icon: task.executor_icon.clone(),
             progress: progress
                 .as_ref()
                 .map(task_progress)

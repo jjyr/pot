@@ -71,3 +71,7 @@ Regular backend regressions, 11 App tests, 8 real Pi + local mock provider tests
 ## Issue #7: unified AI configuration
 
 Implemented in the isolated `codex/ai-configuration` worktree: unified settings navigation and Agent list, explicit main selection/save, shared Chat setup entry, API presets and metadata checks, dedicated guided login PTY, draft protection, task snapshot/default preservation, and credential-independent execution limits. Validation and remaining provider-account coverage are recorded in [AI configuration acceptance](validation/ai-configuration.md). Missing supported tools use environment preparation/manual terminal repair; an online CLI installer is not delivered by this change.
+
+## Issue #3: execution preferences
+
+Dedicated revisioned plain-text preferences, main Pi/Codex read/update tools, fresh delegation context, stale-decision rejection, immutable creation metadata, executor icons in task summaries/lists, and the whole-main-turn routing usage subset are implemented in this worktree. Chat remains the preference-management entry point; model details and explicit switching reuse task details. Current API/Pi and native Codex integration boundaries are retained; Grok is excluded from background selection. Validation and remaining visual/provider matrices are recorded in [Execution preference acceptance](validation/execution-preferences.md).

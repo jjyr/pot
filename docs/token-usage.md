@@ -20,6 +20,10 @@ Rust Runtime captures provider usage through the generic model gateway. Shared S
 
 Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages. App refreshes on demand every 3 seconds, rejects stale query responses, and does not present old disconnected data as new. Charts reuse gpui-kit `BarChart` hover/tooltips/ticks/themes; allowances use `Progress`, shared cards, and Kit forms.
 
+## Main-chat routing subset
+
+The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global scope follows the selected date window; main-chat details use lifetime scope. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](execution-preferences.md).
+
 ## Native Codex metering
 
 Codex bypasses the model gateway and records per-Pot-turn deltas of native thread cumulative usage. This includes native compaction within the turn,

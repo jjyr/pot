@@ -134,6 +134,16 @@ pub async fn initialize_with_agent_host(
             if use_agent && usage::paused(&worker).ok().flatten().is_none() {
                 req.text.push_str(&tasks::context(&worker));
             }
+            if use_agent && !req.request_id.starts_with(orchestration::RESULT_PREFIX) {
+                match agent::preferences::context(&worker) {
+                    Ok(context) => req.text.push_str(&context),
+                    Err(e) => {
+                        worker.phase(EnginePhase::Failed, Some(e.to_string()));
+                        worker.turn(None);
+                        continue;
+                    }
+                }
+            }
             let result = if use_agent {
                 agent::run(&worker, req).await
             } else {

@@ -443,6 +443,83 @@ mod tests {
     }
 
     #[test]
+    fn routing_usage_is_a_deduplicated_main_turn_subset_with_scope_and_window_precision() {
+        let path = std::env::temp_dir().join(format!("pot-routing-usage-{}.sqlite", id()));
+        let l = Ledger::open(&path).unwrap();
+        let t = at("2026-10-06T01:00:00Z");
+        let old = at("2026-09-01T01:00:00Z");
+        for (request, scope, turn, time) in [
+            ("before-tool", "main", "route", t),
+            ("after-tool", "main", "route", t),
+            ("plain-chat", "main", "plain", t),
+            ("worker", "task-1", "route", t),
+            ("old-route", "main", "old", old),
+            ("unknown", "main", "route", t),
+        ] {
+            l.reserve(request, scope, turn, time, "model", 100, 20)
+                .unwrap();
+            if request != "unknown" {
+                l.settle(request,&json!({"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":60})).unwrap();
+            }
+        }
+        // Marking after the first request also captures earlier work in that turn.
+        l.mark_routing_turn("route").unwrap();
+        l.mark_routing_turn("route").unwrap();
+        l.mark_routing_turn("old").unwrap();
+        let global = l.summary(&query("", 7), t).unwrap();
+        assert_eq!(
+            global["routing_total"],
+            json!({"input":200,"output":40,"cache":120,"requests":3,"unknown":1})
+        );
+        assert_eq!(global["total"]["input"], 400);
+        assert_eq!(global["total"]["output"], 80);
+        let main = l.summary(&query("main", 7), t).unwrap();
+        assert_eq!(main["routing_total"]["input"], 300);
+        assert_eq!(main["lifetime"]["input"], 400);
+        assert_eq!(
+            l.summary(&query("task-1", 7), t).unwrap()["routing_total"]["requests"],
+            0
+        );
+        let mut page = query("", 7);
+        page.offset = 20;
+        assert_eq!(
+            l.summary(&page, t).unwrap()["routing_total"],
+            global["routing_total"]
+        );
+        drop(l);
+        let restored = Ledger::open(&path).unwrap();
+        assert_eq!(
+            restored.summary(&query("", 7), t).unwrap()["routing_total"],
+            global["routing_total"]
+        );
+        drop(restored);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn routing_native_turn_metering_retains_incomplete_usage_without_double_counting() {
+        let l = ledger();
+        let profile = agent::Profile::api(&execution::Config {
+            model: "fixture-model".into(),
+            max_tokens: 128,
+            ..Default::default()
+        });
+        let mut spec = profile.resolve().unwrap();
+        spec.engine = agent::Engine::Codex;
+        l.begin_native("native", "main", "turn", &spec, 1).unwrap();
+        l.mark_routing_turn("turn").unwrap();
+        l.native_incomplete("native").unwrap();
+        let pending = l.summary(&query("main", 7), now()).unwrap();
+        assert_eq!(pending["routing_total"]["unknown"], 1);
+        l.0.execute(
+            "UPDATE requests SET input=40,output=10,state='native_reported' WHERE id='native'",
+            [],
+        )
+        .unwrap();
+        let reported = l.summary(&query("main", 7), now()).unwrap();
+        assert_eq!(reported["routing_total"], reported["lifetime"]);
+        assert_eq!(reported["lifetime"]["input"], 40);
+    }
+    #[test]
     fn usage_is_idempotent_scoped_and_excludes_cache_from_total() {
         let l = ledger();
         let t = at("2026-10-04T01:00:00Z");

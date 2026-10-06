@@ -2,7 +2,7 @@ use super::*;
 use gpui_kit::component::Icon;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
-fn brand_icon(kind: &str) -> Icon {
+pub(crate) fn brand_icon(kind: &str) -> Icon {
     let icon = match kind {
         "codex" | "openai" => Icon::empty().data(include_bytes!("../../assets/agents/openai.svg")),
         "anthropic" => Icon::empty().data(include_bytes!("../../assets/agents/claude.svg")),

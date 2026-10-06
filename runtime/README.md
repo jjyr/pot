@@ -123,3 +123,9 @@ mise exec -- cargo test --locked -p pot-runtime native_agent
 ```
 
 Native-agent tests use real HTTP streams and filesystem/shell tools against local mock providers, including four protocols, opaque replay fields, restart continuation, cancellation, unknown tool effects, metered compaction, and allowance checkpoints. These do not establish real-provider/account acceptance. Historical Pi validation pages remain dated historical evidence.
+
+## Persistent execution preferences
+
+The main Pot/Codex Agent can read and replace dedicated plain-text preferences through `pot_get_execution_preferences` / `pot_update_execution_preferences` (`text`, `expected_revision`; empty clears). Workers and summaries cannot mutate them. Per-turn context carries current text/revision and a credential-free eligible Profile catalog. Task tool requests may carry `preference_revision` and `selection_reason`; nonempty preferences require a fresh revision. Stored task routing metadata preserves the decision, and `executor_icon` follows the actual current binding. These tools do not grant routing authorization or add a classifier-model call. Grok currently lacks these orchestration tools. See [Execution preferences](../docs/execution-preferences.md).
+
+Usage summary `routing_total` is a durable, deduplicated subset of whole main turns attempting task creation, already counted in global/main totals. It is not a pure routing fee and does not attribute worker usage to main Chat.
