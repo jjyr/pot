@@ -121,7 +121,7 @@ pub async fn start(
     Json(req): Json<Start>,
 ) -> ApiResult<Json<Value>> {
     native(&s, &h)?;
-    if !matches!(req.engine.as_str(), "codex" | "grok") {
+    if req.engine != "codex" {
         return Err(error(
             StatusCode::BAD_REQUEST,
             "unsupported_engine",

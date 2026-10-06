@@ -2,8 +2,6 @@ use pot_protocol::*;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader, Write},
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -225,35 +223,16 @@ pub fn root() -> PathBuf {
 }
 fn endpoint() -> Result<(String, String), String> {
     let root = root();
-    let mut socket =
-        UnixStream::connect(root.join("helper.sock")).map_err(|_| "正在启动环境…".to_string())?;
-    socket
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|e| e.to_string())?;
-    socket
-        .write_all(b"{\"id\":\"chat-status\",\"method\":\"status\"}\n")
-        .map_err(|e| e.to_string())?;
-    let mut line = String::new();
-    BufReader::new(socket)
-        .read_line(&mut line)
-        .map_err(|e| e.to_string())?;
-    let state: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
-    let ip = state["result"]["ip"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            format!(
-                "环境：{} {}",
-                state["result"]["phase"], state["result"]["error"]
-            )
-        })?;
-    let bytes = std::fs::read(root.join("workspace/product/runtime.json"))
+    let bytes = std::fs::read(root.join("product/runtime.json"))
         .map_err(|_| "正在准备 Runtime…".to_string())?;
     let endpoint: RuntimeEndpoint = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if endpoint.api_version != API_VERSION {
         return Err("Runtime 协议版本不兼容".into());
     }
-    Ok((format!("http://{ip}:{}", endpoint.port), endpoint.token))
+    Ok((
+        format!("http://127.0.0.1:{}", endpoint.port),
+        endpoint.token,
+    ))
 }
 fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String> {
     let (url, token) = endpoint()?;

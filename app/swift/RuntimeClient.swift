@@ -5,12 +5,12 @@ import Foundation
     var root: URL?
     var ip = ""
     private func credentials() throws -> (URL, String, String) {
-        guard let root, !ip.isEmpty else { throw URLError(.notConnectedToInternet) }
-        let data = try Data(contentsOf: root.appendingPathComponent("workspace/product/runtime.json"))
+        guard let root else { throw URLError(.notConnectedToInternet) }
+        let data = try Data(contentsOf: root.appendingPathComponent("product/runtime.json"))
         guard let endpoint = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let port = endpoint["port"] as? Int, let token = endpoint["token"] as? String,
               let boot = endpoint["boot_id"] as? String,
-              let url = URL(string: "http://\(ip):\(port)") else { throw URLError(.badServerResponse) }
+              let url = URL(string: "http://127.0.0.1:\(port)") else { throw URLError(.badServerResponse) }
         return (url, token, boot)
     }
 

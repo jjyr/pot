@@ -428,9 +428,9 @@ impl Shell {
                                 el.child(ui::empty(
                                     IconName::Inbox,
                                     if !view.error.is_empty() && view.main_snapshot.is_some() {
-                                        "暂时无法读取任务，请检查 Sandbox 状态。"
+                                        "暂时无法读取任务，请检查本地后端状态。"
                                     } else if view.tasks_loading || view.main_snapshot.is_none() {
-                                        "正在连接 Sandbox，读取任务…"
+                                        "正在连接本地后端，读取任务…"
                                     } else if !view.task_query.q.is_empty() {
                                         "当前分组没有匹配任务。可切换分组查找历史任务。"
                                     } else {
@@ -559,7 +559,11 @@ impl Shell {
                                                     } else {
                                                         cx.theme().muted_foreground
                                                     })
-                                                    .child(task_phase(&task.phase)),
+                                                    .child(task_phase(&task.phase))
+                                                    .child(format!(
+                                                        " · Sandbox: {}",
+                                                        task.sandbox_id
+                                                    )),
                                             )
                                             .when(task.pending > 0, |el| {
                                                 el.child(
@@ -698,7 +702,8 @@ impl Shell {
                                                     )
                                                     .size(px(13.)),
                                                 )
-                                                .child(task_phase(&task.phase)),
+                                                .child(task_phase(&task.phase))
+                                                .child(format!(" · Sandbox: {}", task.sandbox_id)),
                                         )
                                         .when(
                                             task.phase.scope() == "archived",

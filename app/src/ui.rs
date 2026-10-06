@@ -606,19 +606,26 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                         ),
                 ),
         )
-        .when(!running, |el| {
+        .when(!connected, |el| {
             el.child(
                 content().h_auto().child(
                     card(cx)
-                        .child(hint("Sandbox 尚未就绪，启动后将在这里显示桌面。", cx))
+                        .child(hint(
+                            if running {
+                                "执行环境正在运行，可以按需打开桌面。"
+                            } else {
+                                "打开桌面时会按需启动 Sandbox。"
+                            },
+                            cx,
+                        ))
                         .child(
                             Button::new("start-sandbox")
                                 .primary()
                                 .small()
-                                .label("启动 Sandbox")
+                                .label("打开桌面")
                                 .disabled(!matches!(
                                     state["phase"].as_str(),
-                                    Some("stopped" | "failed")
+                                    Some("running" | "stopped" | "failed")
                                 ))
                                 .on_click(|_, _, _| command(json!({"action":"start"}))),
                         ),

@@ -175,7 +175,11 @@ fn make_context(
     };
     Ok(ExecutionContext {
         data: s.data.clone(),
-        workspace: s.workspace.clone(),
+        workspace: {
+            let path = s.data.join("agent-workspace");
+            std::fs::create_dir_all(&path)?;
+            path
+        },
         owner: s.usage_scope.clone(),
         role,
         backend_url: format!("http://127.0.0.1:{}", endpoint.port),

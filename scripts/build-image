@@ -6,6 +6,9 @@ import gzip, hashlib, json, os, pathlib, shutil, subprocess
 R = pathlib.Path(__file__).resolve().parents[1]
 resources = R / ".local/d1/resources"
 assets = [
+    "sandbox.sh",
+    "executor.py",
+    "file-tools.py",
     "desktop.sh",
     "desktop-config.sh",
     "desktop-session.sh",
@@ -18,10 +21,7 @@ assets = [
     "index.html",
     "close-browser.py",
     "open-browser.sh",
-    "pot-server",
     "novnc.tar.gz",
-    "pi-package.json",
-    "pi-package-lock.json",
 ]
 # Read source assets directly so bundle cannot accidentally reuse stale prepare output.
 for n in assets:

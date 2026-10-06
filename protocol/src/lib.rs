@@ -199,6 +199,7 @@ pub enum TaskPhase {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskInfo {
+    pub sandbox_id: String,
     pub id: String,
     pub title: String,
     pub phase: TaskPhase,
@@ -239,6 +240,8 @@ pub struct TaskRequirements {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CreateTask {
+    #[serde(default)]
+    pub sandbox_id: String,
     pub request_id: String,
     pub text: String,
     #[serde(default)]
@@ -332,6 +335,8 @@ fn enabled() -> bool {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScheduleSpec {
+    #[serde(default)]
+    pub sandbox_id: String,
     pub title: String,
     pub goal: String,
     #[serde(default = "default_zone")]

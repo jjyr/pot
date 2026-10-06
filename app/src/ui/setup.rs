@@ -57,13 +57,9 @@ impl Settings {
                         }),
                 ),
         );
-        for (i, (id, name)) in [
-            ("codex", "Codex"),
-            ("grok", "Grok"),
-            ("api", "OpenAI 兼容 API / Pot"),
-        ]
-        .into_iter()
-        .enumerate()
+        for (i, (id, name)) in [("codex", "Codex"), ("api", "OpenAI 兼容 API / Pi")]
+            .into_iter()
+            .enumerate()
         {
             let checked = selected.iter().any(|v| v == id);
             let present = id == "api"

@@ -51,6 +51,9 @@ if cmd == "prepare":
     download("https://github.com/novnc/noVNC/archive/refs/tags/v1.6.0.tar.gz", RES / "novnc.tar.gz")
     verify(RES / "novnc.tar.gz", "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa")
     for name in [
+        "sandbox.sh",
+        "executor.py",
+        "file-tools.py",
         "desktop.sh",
         "desktop-config.sh",
         "desktop-session.sh",
@@ -65,22 +68,25 @@ if cmd == "prepare":
         "open-browser.sh",
     ]:
         shutil.copy2(REPO / "image" / name, RES / name)
+    node_name = "node-v24.21.0-darwin-arm64"
+    node_archive = RES / (node_name + ".tar.gz")
+    download("https://nodejs.org/dist/v24.21.0/" + node_archive.name, node_archive)
+    sums = RES / "node-SHASUMS256.txt"
+    download("https://nodejs.org/dist/v24.21.0/SHASUMS256.txt", sums)
+    node_digest = next(
+        row.split()[0]
+        for row in sums.read_text().splitlines()
+        if row.split()[-1] == node_archive.name
+    )
+    verify(node_archive, node_digest)
+    if not (RES / "node/bin/node").exists():
+        call(["tar", "xzf", node_archive, "-C", RES])
+        (RES / node_name).rename(RES / "node")
     for name in ["package.json", "package-lock.json"]:
         shutil.copy2(REPO / "image/agents" / name, RES / ("agents-" + name))
 elif cmd == "build":
-    call(["cargo", "build", "--locked", "-p", "pot-app", "-j", "4"], cwd=REPO, env=env)
     call(
-        [
-            "cargo",
-            "zigbuild",
-            "--locked",
-            "-p",
-            "pot-server",
-            "--target",
-            "aarch64-unknown-linux-musl",
-            "-j",
-            "4",
-        ],
+        ["cargo", "build", "--locked", "-p", "pot-app", "-p", "pot-server", "-j", "4"],
         cwd=REPO,
         env=env,
     )
@@ -122,10 +128,6 @@ elif cmd == "bundle":
         tmp = dest.with_suffix(".new")
         shutil.copy2(src, tmp)
         tmp.replace(dest)
-    shutil.copy2(
-        pathlib.Path(env["CARGO_TARGET_DIR"]) / "aarch64-unknown-linux-musl/debug/pot-server",
-        RES / "pot-server",
-    )
     call([REPO / "scripts/build-image"])
     shutil.rmtree(APP / "Contents/Resources/runtime")
     (APP / "Contents/Resources/runtime").mkdir()
@@ -135,8 +137,32 @@ elif cmd == "bundle":
             shutil.rmtree(dest)
         shutil.copytree(RES / name, dest)
     shutil.copy2(RES / "sandbox-image.json", APP / "Contents/Resources/runtime/sandbox-image.json")
+    shutil.copytree(RES / "node", APP / "Contents/Resources/runtime/node")
     for name in ["vmlinux"]:
         shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
+    shutil.copy2(
+        pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug/pot-server",
+        APP / "Contents/Resources/runtime/pot-server",
+    )
+    host_tools = APP / "Contents/Resources/runtime/host-tools"
+    host_tools.mkdir(exist_ok=True)
+    shutil.copy2(REPO / "image/pi/package.json", host_tools / "package.json")
+    shutil.copy2(REPO / "image/pi/package-lock.json", host_tools / "package-lock.json")
+    call(
+        [
+            RES / "node/bin/node",
+            RES / "node/lib/node_modules/npm/bin/npm-cli.js",
+            "ci",
+            "--cache",
+            ROOT / "npm-cache",
+            "--prefix",
+            host_tools,
+            "--ignore-scripts",
+            "--omit=dev",
+            "--no-audit",
+            "--no-fund",
+        ]
+    )
     for name in ["Pot.icns", "PotTray.png"]:
         shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)
     (APP / "Contents/Info.plist").write_bytes(

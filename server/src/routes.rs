@@ -7,6 +7,11 @@ use pot_runtime::{Service, api::*, usage};
 /// Routes preserve the Control API while centralizing server assembly.
 pub fn router(s: Service) -> Router {
     Router::new()
+        .route(
+            "/api/v1/sandboxes",
+            get(sandbox::list).post(sandbox::manage),
+        )
+        .route("/api/v1/execution", post(sandbox::execute))
         .route("/api/v1/authorization/start", post(authorization::start))
         .route("/api/v1/authorization/status", get(authorization::status))
         .route("/api/v1/authorization/cancel", post(authorization::cancel))
