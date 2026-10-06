@@ -6,6 +6,7 @@ import Network
 @MainActor final class AuthorizationRelay {
     private var listener: NWListener?
     private var connections: [NWConnection] = []
+    private var forwarding = false
     private let path: String
     private let port: UInt16
     private let forward: (String) async throws -> Void
@@ -26,7 +27,7 @@ import Network
                 guard let self, self.listener != nil else { connection.cancel(); return }
                 guard self.connections.count < 8 else { connection.cancel(); return }
                 self.connections.append(connection); connection.start(queue: .main)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { connection.cancel() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 30) { connection.cancel() }
                 self.receive(connection, buffer: Data())
             }
         }
@@ -69,8 +70,17 @@ import Network
                 else {
                     self.respond(connection, success: false); return
                 }
-                do { try await self.forward(query); self.respond(connection, success: true) }
-                catch { self.respond(connection, success: false) }
+                guard !self.forwarding else { self.respond(connection, success: false); return }
+                self.forwarding = true
+                do {
+                    try await self.forward(query)
+                    // The callback is single-use. Keep the response connection alive
+                    // long enough to send its result, but accept no further callbacks.
+                    self.listener?.cancel(); self.listener = nil
+                    self.respond(connection, success: true)
+                } catch {
+                    self.forwarding = false; self.respond(connection, success: false)
+                }
             }
         }
     }
@@ -157,6 +167,7 @@ extension SettingsPanel {
                         }
                         self.loginMessage = "授权成功，选择模型后即可保存。"; self.result = self.loginMessage
                         self.refreshAgents()
+                        self.bridge?.showWindow()
                     } else {
                         self
                             .loginMessage = phase == "subscription_required" ? "登录成功，但当前账号尚无使用权限。请确认官方套餐后重试。" : phase ==

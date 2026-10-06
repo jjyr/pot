@@ -13,6 +13,7 @@ struct Attempt {
     url: String,
     code: String,
     callback: Option<reqwest::Url>,
+    callback_received: bool,
     state: String,
     started: Instant,
     models: Vec<String>,
@@ -28,6 +29,7 @@ impl Attempt {
         self.url.clear();
         self.code.clear();
         self.callback = None;
+        self.callback_received = false;
         self.state.clear();
     }
 }
@@ -154,6 +156,7 @@ pub async fn start(
             url: String::new(),
             code: String::new(),
             callback: None,
+            callback_received: false,
             state: String::new(),
             started: Instant::now(),
             models: vec![],
@@ -239,6 +242,7 @@ async fn begin(
         url: url.to_string(),
         code: reply["userCode"].as_str().unwrap_or("").into(),
         callback,
+        callback_received: false,
         state,
         started: Instant::now(),
         models: vec![],
@@ -251,6 +255,16 @@ async fn begin(
             tokio::select! {
                 _ = cancel.notified() => break "cancelled",
                 _ = s.stop_requested() => break "cancelled",
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                    let received = s.authorization.lock().await.attempt.as_ref()
+                        .is_some_and(|a| a.id == attempt_id && a.callback_received);
+                    // Completion notifications may be absent or lack a matching ID.
+                    // Only an official account response establishes authentication.
+                    if received && host.request("account/read", json!({"refreshToken":false})).await
+                        .is_ok_and(|v| !v["account"].is_null()) {
+                        break "authenticated";
+                    }
+                }
                 _ = tokio::time::sleep_until(tokio::time::Instant::from_std({ let hub=s.authorization.lock().await; hub.attempt.as_ref().map(|a|a.started+Duration::from_secs(300)).unwrap_or(Instant::now()) })) => break "expired",
                 event = events.recv() => match event {
                     Ok(v) if v["method"]=="account/login/completed" && v["params"]["loginId"]==native_id => break if v["params"]["success"]==true {"authenticated"} else {"failed"},
@@ -373,6 +387,7 @@ async fn start_grok(
         phase: "waiting".into(),
         url,
         callback,
+        callback_received: false,
         state,
         code: String::new(),
         started: Instant::now(),
@@ -519,6 +534,16 @@ pub async fn callback(
     if !response.status().is_success() && !response.status().is_redirection() {
         return Err(unavailable());
     }
+    if let Some(a) = s
+        .authorization
+        .lock()
+        .await
+        .attempt
+        .as_mut()
+        .filter(|a| a.id == req.attempt_id && a.phase == "waiting")
+    {
+        a.callback_received = true;
+    }
     Ok(Json(json!({"received":true})))
 }
 
@@ -550,6 +575,7 @@ mod tests {
             url: "secret-auth-url".into(),
             code: "device-code".into(),
             callback: Some(reqwest::Url::parse("http://localhost:1455/auth/callback").unwrap()),
+            callback_received: false,
             state: "expected".into(),
             started: Instant::now(),
             models: vec![],
