@@ -316,6 +316,7 @@ pub(crate) async fn run_driver_configured(
         failure: None,
     };
     let context = ExecutionContext {
+        instructions: String::new(),
         skill_resources: Default::default(),
         tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
         data: directory.to_path_buf(),

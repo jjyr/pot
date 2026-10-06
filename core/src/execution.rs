@@ -144,6 +144,8 @@ pub struct SkillResources {
 /// Fixed per-execution capabilities; never exposes the Runtime or database.
 #[derive(Clone)]
 pub struct ExecutionContext {
+    /// Caller-provided instructions, refreshed for this execution. No filesystem discovery.
+    pub instructions: String,
     pub skill_resources: SkillResources,
     pub data: PathBuf,
     pub workspace: PathBuf,

@@ -394,3 +394,62 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
         .unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
 }
+
+#[tokio::test]
+async fn runtime_injects_fresh_instructions_for_both_engines_and_roles_but_not_summary() {
+    let fixture = SandboxFixture::new().await;
+    let main = &fixture.service;
+    let base = main.sandboxes.workspace("default");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join(".git"), "gitdir").unwrap();
+    std::fs::write(base.join("AGENTS.md"), "PROJECT_FIRST").unwrap();
+    let host = main.data.join("agent-workspace");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(host.join("AGENTS.md"), "WRONG_HOST").unwrap();
+    let task = tasks::create(
+        State(main.clone()),
+        tasks::tests::headers(),
+        Json(CreateTask {
+            request_id: "instruction-task".into(),
+            text: "fixture".into(),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    let worker = tasks::owner(main, &task.id).unwrap();
+    std::fs::write(worker.workspace.join("AGENTS.md"), "WORKER_LOCAL").unwrap();
+    for engine in [Engine::Pot, Engine::Codex] {
+        for service in [main, &worker] {
+            let request = SandboxFixture::activate(service);
+            let mut binding = binding(service).unwrap();
+            binding.spec.engine = engine.clone();
+            for text in ["PROJECT_FIRST", "PROJECT_UPDATED"] {
+                std::fs::write(base.join("AGENTS.md"), text).unwrap();
+                let context = make_context(service, &binding, Some(&request)).unwrap();
+                assert!(context.instructions.contains(text));
+                assert!(!context.instructions.contains("WRONG_HOST"));
+                assert_eq!(
+                    context.instructions.contains("WORKER_LOCAL"),
+                    service.is_worker
+                );
+                if engine == Engine::Codex {
+                    assert_eq!(context.main_prompt.matches(text).count(), 1);
+                } else {
+                    assert!(!context.main_prompt.contains(text));
+                }
+                if text == "PROJECT_UPDATED" {
+                    assert!(!context.instructions.contains("PROJECT_FIRST"));
+                }
+            }
+            let mut summary = request.clone();
+            summary.request_id = format!("{}fixture", orchestration::RESULT_PREFIX);
+            let context = make_context(service, &binding, Some(&summary)).unwrap();
+            assert!(context.role == ExecutionRole::Summary);
+            assert!(context.instructions.is_empty());
+            assert!(!context.main_prompt.contains("PROJECT_"));
+        }
+    }
+    assert!(fixture.helper_calls.lock().unwrap().is_empty());
+}

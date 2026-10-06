@@ -756,6 +756,9 @@ async fn run(
             }
         )
     };
+    if s.role != ExecutionRole::Summary {
+        system.push_str(&extensions.instructions(s)?);
+    }
     // Match Pi's lazy loading: advertise metadata only when a file reader is
     // available. Main and Worker use the same provider and rendering path.
     if s.role != ExecutionRole::Summary && available.iter().any(|t| t["name"] == "exec_command") {

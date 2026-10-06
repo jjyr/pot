@@ -182,10 +182,21 @@ fn make_context(
     } else {
         orchestration::MAIN_PROMPT.into()
     };
+    let instructions = if role == ExecutionRole::Summary {
+        String::new()
+    } else {
+        let catalog = crate::instructions::load(s)?;
+        for message in catalog.diagnostics {
+            eprintln!("AGENTS.md discovery: {message}");
+        }
+        catalog.text
+    };
     if binding.spec.engine == Engine::Codex && role != ExecutionRole::Summary {
+        main_prompt.push_str(&instructions);
         main_prompt.push_str(&crate::skills::instructions(s, &skill_resources)?);
     }
     Ok(ExecutionContext {
+        instructions,
         skill_resources,
         tool_executor: {
             #[cfg(test)]
