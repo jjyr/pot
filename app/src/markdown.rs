@@ -6,7 +6,13 @@ use gpui_kit::base::{
 
 /// Stable IDs let TextView retain its parser, measured layout and selection across
 /// unrelated shell redraws. The component only reparses changed source text.
-pub fn render(id: &str, source: &str, user: bool, dark: bool, cx: &App) -> impl IntoElement {
+pub fn render(
+    id: &str,
+    source: &str,
+    user: bool,
+    dark: bool,
+    cx: &App,
+) -> impl IntoElement + use<> {
     let style = TextViewStyle::from_theme(&Theme::global(cx));
     let style = if user {
         style

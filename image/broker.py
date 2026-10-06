@@ -47,7 +47,9 @@ async def driver(expression=None):
 
 @web.middleware
 async def auth(request, handler):
-    if request.path.startswith("/api/") or request.path == "/rfb":
+    # Locale is public presentation metadata; only this read is available to the welcome page.
+    public_locale = request.path == "/api/locale" and request.method == "GET"
+    if not public_locale and (request.path.startswith("/api/") or request.path == "/rfb"):
         if request.headers.get("Origin") not in (None, "http://" + request.host):
             raise web.HTTPForbidden()
         if not secrets.compare_digest(
@@ -59,6 +61,21 @@ async def auth(request, handler):
     except (RuntimeError, ValueError, asyncio.TimeoutError) as e:
         log("error", reason=str(e))
         return web.json_response({"error": str(e)}, status=503)
+
+
+locale_value = "en"
+
+
+async def locale(request):
+    global locale_value
+    if request.method == "POST":
+        value = (await request.json()).get("locale")
+        if value not in ("en", "zh-CN"):
+            raise web.HTTPBadRequest(text="invalid_locale")
+        locale_value = value
+    return web.json_response(
+        {"locale": locale_value}, headers={"Access-Control-Allow-Origin": "http://127.0.0.1:8081"}
+    )
 
 
 async def status(request):
@@ -121,7 +138,7 @@ async def metrics(request):
 async def open_browser(request):
     async with lock:
         if state["owner"] != "human":
-            raise web.HTTPConflict(text="请先接管桌面")
+            raise web.HTTPConflict(text="take_over_required")
         process = await asyncio.create_subprocess_exec(
             "/bin/su",
             "potdesktop",
@@ -370,6 +387,8 @@ async def rfb(request):
 
 
 app = web.Application(middlewares=[auth], client_max_size=8192)
+app.router.add_get("/api/locale", locale)
+app.router.add_post("/api/locale", locale)
 app.router.add_get("/api/status", status)
 app.router.add_get("/api/metrics", metrics)
 app.router.add_post("/api/browser", open_browser)

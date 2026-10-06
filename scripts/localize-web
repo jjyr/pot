@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Embed web translations from the app catalogue; --check verifies checked-in assets."""
+
+import json
+from pathlib import Path
+import re
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+START = "<!-- POT_LOCALIZATION_START -->"
+END = "<!-- POT_LOCALIZATION_END -->"
+
+
+def generated():
+    translations = {}
+    for locale in ["en", "zh-CN"]:
+        values = json.loads((ROOT / f"app/locales/{locale}.json").read_text())
+        translations[locale] = {
+            key: value for key, value in values.items() if key.startswith("web.")
+        }
+    data = json.dumps(translations, ensure_ascii=False, separators=(",", ":")).replace(
+        "<", "\\u003c"
+    )
+    return (
+        START
+        + "\n<script>\n"
+        + "const potTranslations="
+        + data
+        + ";\n"
+        + r"""
+window.potLocale = 'en';
+window.potT = key => potTranslations[window.potLocale]?.[key] ?? potTranslations.en[key] ?? key;
+window.potF = (key, args) => potT(key).replace(/\{(\w+)\}/g, (match, name) => args[name] ?? match);
+window.potNumber = (number, digits = 0) => new Intl.NumberFormat(window.potLocale, {minimumFractionDigits: digits, maximumFractionDigits: digits}).format(number);
+window.potSetLocale = language => {
+    const locale = language === 'zh-CN' ? 'zh-CN' : 'en';
+    window.potLocale = locale;
+    document.documentElement.lang = locale;
+    try { localStorage.setItem('pot-language', locale); } catch {}
+    document.querySelectorAll('[data-pot-i18n]').forEach(el => el.textContent = potT(el.dataset.potI18n));
+    for (const attribute of ['title', 'aria-label']) {
+        document.querySelectorAll('[data-pot-' + attribute + ']').forEach(el => el.setAttribute(attribute, potT(el.getAttribute('data-pot-' + attribute))));
+    }
+    window.dispatchEvent(new Event('pot-locale'));
+};
+const potInitialLocale = () => {
+    try { const saved = localStorage.getItem('pot-language'); if (['en', 'zh-CN'].includes(saved)) return saved; } catch {}
+    for (const language of navigator.languages ?? []) {
+        const base = language.replaceAll('_', '-').toLowerCase().split('-')[0];
+        if (base === 'zh') return 'zh-CN';
+        if (base === 'en') return 'en';
+    }
+    return 'en';
+};
+document.addEventListener('DOMContentLoaded', () => potSetLocale(potInitialLocale()));
+""".strip()
+        + "\n</script>\n"
+        + END
+    )
+
+
+def main():
+    block = generated()
+    for name in ["index.html", "home.html"]:
+        path = ROOT / "image" / name
+        source = path.read_text()
+        if START in source:
+            result = re.sub(
+                re.escape(START) + r"[\s\S]*?" + re.escape(END), lambda _: block, source
+            )
+        else:
+            result = source.replace("<body>", block + "\n<body>")
+            if result == source:
+                result = source.replace("<main>", block + "\n<main>", 1)
+        if "--check" in sys.argv:
+            if result != source:
+                raise SystemExit(f"Stale translations: {path}. Run python scripts/localize-web.")
+        else:
+            path.write_text(result)
+
+
+if __name__ == "__main__":
+    main()

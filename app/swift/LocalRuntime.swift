@@ -8,7 +8,7 @@ import WebKit
     let process = Process()
     let root: URL
     weak var web: WKWebView?
-    let label = NSTextField(wrappingLabelWithString: "Local runtime: starting helper")
+    let label = NSTextField(wrappingLabelWithString: L.text("native.runtime-starting"))
     var timer: Timer?
     var polling = false
     var probing = false
@@ -162,7 +162,10 @@ import WebKit
             loaded = ""; displayReady = false
         }
         onState?(state)
-        label.stringValue = "Local runtime: \(phase)\n\(state["error"] ?? "")"
+        label.stringValue = L.format(
+            "native.runtime-status",
+            [L.phase(phase), L.message(String(describing: state["error"] ?? ""))]
+        )
         if phase == "running", let address = state["viewer"] as? String, !address.isEmpty, address != loaded, !probing,
            let url = URL(string: address)
         {

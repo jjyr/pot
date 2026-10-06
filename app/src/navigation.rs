@@ -198,41 +198,44 @@ impl Shell {
     pub fn toolbar(&self, view: &client::View, cx: &mut Context<Self>) -> Div {
         let route = self.route(view);
         let (context, title) = match route {
-            Route::Chat => ("", "聊天".into()),
+            Route::Chat => ("", crate::i18n::text("navigation.chat").into()),
             Route::Tasks => (
                 "",
                 if self.schedule_tab {
-                    "定时计划"
+                    crate::i18n::text("navigation.schedules")
                 } else {
-                    "任务"
+                    crate::i18n::text("navigation.tasks")
                 }
                 .into(),
             ),
             Route::Task(_) => (
-                "任务",
+                crate::i18n::text("navigation.tasks"),
                 view.selected_task
                     .as_ref()
                     .map(|t| t.title.clone())
-                    .unwrap_or("任务详情".into()),
+                    .unwrap_or(crate::i18n::text("navigation.task-details").into()),
             ),
             Route::Schedule(_) => (
-                "定时计划",
+                crate::i18n::text("navigation.schedules"),
                 view.schedules
                     .selected
                     .as_ref()
                     .map(|p| p.spec.title.clone())
-                    .unwrap_or("计划详情".into()),
+                    .unwrap_or(crate::i18n::text("navigation.schedule-details").into()),
             ),
-            Route::Settings => ("", "设置".into()),
+            Route::Settings => ("", crate::i18n::text("ui.settings").into()),
             Route::Sandbox => ("", "Sandbox".into()),
-            Route::Usage => ("", "用量".into()),
-            Route::Quota => ("用量", "用量限制".into()),
+            Route::Usage => ("", crate::i18n::text("navigation.usage").into()),
+            Route::Quota => (
+                crate::i18n::text("navigation.usage"),
+                crate::i18n::text("navigation.usage-limits").into(),
+            ),
             Route::ConversationUsage(_) => (
-                "用量",
+                crate::i18n::text("navigation.usage"),
                 if view.selected.is_empty() {
-                    "主聊天"
+                    crate::i18n::text("navigation.main-chat")
                 } else {
-                    "任务对话"
+                    crate::i18n::text("navigation.task-conversation")
                 }
                 .into(),
             ),
@@ -257,8 +260,8 @@ impl Shell {
                             .ghost()
                             .small()
                             .icon(IconName::ChevronLeft)
-                            .accessibility_label("后退")
-                            .tooltip("后退（⌘[）")
+                            .accessibility_label(crate::i18n::text("navigation.back"))
+                            .tooltip(crate::i18n::text("navigation.back-11"))
                             .disabled(!self.history.can_back())
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.travel(false, window, cx)),
@@ -269,8 +272,8 @@ impl Shell {
                             .ghost()
                             .small()
                             .icon(IconName::ChevronRight)
-                            .accessibility_label("前进")
-                            .tooltip("前进（⌘]）")
+                            .accessibility_label(crate::i18n::text("navigation.forward"))
+                            .tooltip(crate::i18n::text("navigation.forward-13"))
                             .disabled(!self.history.can_forward())
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.travel(true, window, cx)),

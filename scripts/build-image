@@ -4,6 +4,7 @@
 import gzip, hashlib, json, os, pathlib, shutil, subprocess
 
 R = pathlib.Path(__file__).resolve().parents[1]
+subprocess.run(["python3", R / "scripts/localize-web"], check=True)
 resources = R / ".local/d1/resources"
 assets = [
     "sandbox.sh",

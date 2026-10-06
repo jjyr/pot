@@ -52,6 +52,7 @@ if cmd == "prepare":
     download("https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz", novnc_archive)
     verify(novnc_archive, "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6")
     shutil.copy2(novnc_archive, RES / "novnc.tar.gz")
+    call(["python3", REPO / "scripts/localize-web"])
     for name in [
         "sandbox.sh",
         "executor.py",
@@ -195,6 +196,8 @@ elif cmd == "bundle":
             dict(
                 CFBundleIdentifier="dev.pot.app",
                 CFBundleName="Pot",
+                CFBundleLocalizations=["en", "zh_CN"],
+                CFBundleDevelopmentRegion="en",
                 CFBundleDisplayName="Pot",
                 CFBundleIconFile="Pot.icns",
                 CFBundleExecutable="pot-app",

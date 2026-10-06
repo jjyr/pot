@@ -33,7 +33,7 @@ fn brand_name(kind: &str) -> &'static str {
         "deepseek" => "DeepSeek",
         "opencode-go" => "OpenCode Go",
         "opencode-zen" => "OpenCode Zen",
-        _ => "自定义 API",
+        _ => crate::i18n::text("ai.custom-api"),
     }
 }
 
@@ -70,20 +70,22 @@ fn profile_brand<'a>(state: &'a Value, profile: &'a Value) -> &'a str {
 
 pub(super) fn agent_status(state: &Value, engine: &str) -> &'static str {
     if engine == "pot" {
-        return "已配置";
+        return crate::i18n::text("ai.configured");
     }
     if state["discovering"] == true {
-        return "检查中";
+        return crate::i18n::text("ai.checking");
     }
     let agent = state["agents"]
         .as_array()
         .and_then(|a| a.iter().find(|a| a["id"] == engine));
     match agent {
-        Some(a) if a["installation"] == "missing" => "未安装",
-        Some(a) if a["status_check"] == "failed" => "暂时无法检测",
-        Some(a) if a["authentication"] == "authenticated" => "已登录",
-        Some(a) if a["authentication"] == "required" => "需要登录",
-        _ => "状态未知",
+        Some(a) if a["installation"] == "missing" => crate::i18n::text("ai.not-installed"),
+        Some(a) if a["status_check"] == "failed" => {
+            crate::i18n::text("ai.unable-to-detect-right-now")
+        }
+        Some(a) if a["authentication"] == "authenticated" => crate::i18n::text("ai.signed-in"),
+        Some(a) if a["authentication"] == "required" => crate::i18n::text("ai.sign-in-required"),
+        _ => crate::i18n::text("ai.unknown-status"),
     }
 }
 
@@ -107,7 +109,10 @@ impl Settings {
             .flex_col()
             .gap_4();
         if screen == "add" {
-            body = body.child(hint("选择你想使用的 AI", cx));
+            body = body.child(hint(
+                crate::i18n::text("ai.choose-the-ai-you-want-to-use"),
+                cx,
+            ));
             let mut choices = div().flex().flex_wrap().gap_3();
             for (i, id) in [
                 "codex",
@@ -140,22 +145,24 @@ impl Settings {
             let kind = state["connection_kind"].as_str().unwrap_or("").to_owned();
             let mut form = super::form(cx);
             if (!native && self.api_advanced) || (native && self.commands_open) {
-                form = form.child(
-                    field("名称").child(Input::new(&self.fields[23]).aria_label("Agent 名称")),
-                );
+                form = form.child(field(crate::i18n::text("schedules-ui.name")).child(
+                    Input::new(&self.fields[23]).aria_label(crate::i18n::text("ai.agent-name")),
+                ));
             }
             if native {
                 let status = agent_status(state, &kind);
-                form = form.child(field("连接状态").child(status));
-                if status != "已登录" {
+                form = form.child(field(crate::i18n::text("ai.connection-status")).child(status));
+                if status != crate::i18n::text("ai.signed-in") {
                     let login_kind = kind.clone();
                     form = form.child(
-                        field("账号授权")
-                            .description("在浏览器完成官方授权，Pot 会自动获取可选模型。")
+                        field(crate::i18n::text("ai.account-authorization"))
+                            .description(crate::i18n::text(
+                                "ai.complete-official-authorization-in-your-browser-pot",
+                            ))
                             .child(
                                 Button::new("ai-login")
                                     .small()
-                                    .label("登录账号")
+                                    .label(crate::i18n::text("ai.sign-in"))
                                     .disabled(busy || state["login_visible"] == true)
                                     .on_click(move |_, _, _| {
                                         command(json!({"action":"login-open","engine":login_kind}))
@@ -165,7 +172,7 @@ impl Settings {
                 }
                 if state["login_visible"] == true {
                     form = form.child(
-                        field("等待授权")
+                        field(crate::i18n::text("ai.waiting-for-authorization"))
                             .description(state["login_message"].as_str().unwrap_or("").to_owned())
                             .child(
                                 div()
@@ -174,7 +181,7 @@ impl Settings {
                                     .child(
                                         Button::new("ai-login-reopen")
                                             .small()
-                                            .label("重新打开浏览器")
+                                            .label(crate::i18n::text("ai.reopen-browser"))
                                             .on_click(|_, _, _| {
                                                 command(json!({"action":"login-reopen"}))
                                             }),
@@ -182,7 +189,7 @@ impl Settings {
                                     .child(
                                         Button::new("ai-login-cancel")
                                             .small()
-                                            .label("取消")
+                                            .label(crate::i18n::text("schedules-ui.cancel"))
                                             .on_click(|_, _, _| {
                                                 command(json!({"action":"login-cancel"}))
                                             }),
@@ -191,10 +198,10 @@ impl Settings {
                     );
                 }
                 form = form.child(
-                    field("检查状态").child(
+                    field(crate::i18n::text("ai.check-status")).child(
                         Button::new("ai-check-native")
                             .small()
-                            .label("刷新状态")
+                            .label(crate::i18n::text("ai.refresh-status"))
                             .disabled(busy || state["discovering"] == true)
                             .on_click(|_, _, _| command(json!({"action":"agent-refresh"}))),
                     ),
@@ -202,9 +209,12 @@ impl Settings {
             } else {
                 if kind == "custom" || self.api_advanced {
                     form = form.child(
-                        field("API 地址")
-                            .description("填写 HTTPS 基础地址或完整请求地址，Pot 会补全必要路径。")
-                            .child(Input::new(&self.fields[14]).aria_label("API 地址")),
+                        field(crate::i18n::text("ai.api-url"))
+                            .description(crate::i18n::text("ai.enter-an-https-base-url-or-full"))
+                            .child(
+                                Input::new(&self.fields[14])
+                                    .aria_label(crate::i18n::text("ai.api-url")),
+                            ),
                     );
                 }
                 if (kind == "custom" || self.api_advanced)
@@ -238,14 +248,14 @@ impl Settings {
                                 }),
                         );
                     }
-                    form = form.child(field("请求格式").child(formats));
+                    form = form.child(field(crate::i18n::text("ai.request-format")).child(formats));
                 }
                 form = form.child(
                     field("API key")
                         .description(if state["has_api_key"] == true {
-                            "已保存；同一地址留空可保留。"
+                            crate::i18n::text("ai.saved-leave-blank-to-keep-the-key")
                         } else {
-                            "提供服务凭据，Pot 帮你完成配置。"
+                            crate::i18n::text("ai.provide-your-service-credentials-and-pot-will")
                         })
                         .child(Input::new(&self.fields[15]).aria_label("API key")),
                 );
@@ -264,17 +274,17 @@ impl Settings {
                         Button::new("ai-get-key")
                             .ghost()
                             .small()
-                            .label("获取 API Key ↗")
+                            .label(crate::i18n::text("ai.get-api-key"))
                             .on_click(move |_, _, cx| cx.open_url(url)),
                     ),
                 );
             }
-            if !native || agent_status(state, &kind) == "已登录" {
+            if !native || agent_status(state, &kind) == crate::i18n::text("ai.signed-in") {
                 let mut model_field = div().flex().items_center().gap_2().child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(Input::new(&self.fields[16]).aria_label("连接模型")),
+                    div().flex_1().min_w_0().child(
+                        Input::new(&self.fields[16])
+                            .aria_label(crate::i18n::text("ai.connection-model")),
+                    ),
                 );
                 if let Some(models) = state["model_options"].as_array().filter(|m| !m.is_empty()) {
                     let models: Vec<String> = models
@@ -285,7 +295,7 @@ impl Settings {
                     model_field = model_field.child(
                         Button::new("ai-model-options")
                             .small()
-                            .label("选择")
+                            .label(crate::i18n::text("ai.choose"))
                             .dropdown_caret(true)
                             .dropdown_menu(move |menu, _, _| {
                                 models.iter().fold(menu, |menu, model| {
@@ -303,11 +313,11 @@ impl Settings {
                     );
                 }
                 form = form.child(
-                    field("模型")
+                    field(crate::i18n::text("ai.model"))
                         .description(if native {
-                            "填写账号支持的模型名称。"
+                            crate::i18n::text("ai.enter-a-model-supported-by-your-account")
                         } else {
-                            "选择查询结果，或填写模型标识；模型列表不代表调用权限。"
+                            crate::i18n::text("ai.choose-a-result-or-enter-a-model")
                         })
                         .child(model_field),
                 );
@@ -316,19 +326,22 @@ impl Settings {
             let check_fields = self.fields.clone();
             let mut actions = div().flex().flex_wrap().justify_end().gap_2();
             if !native {
-                actions = actions.child(Button::new("ai-api-check").small().label(if busy {"正在处理…"} else {"检查连接"})
+                actions = actions.child(Button::new("ai-api-check").small().label(if busy {crate::i18n::text("ui.working")} else {crate::i18n::text("ai.check-connection")})
                     .disabled(busy).on_click(move |_, _, cx| command(json!({"action":"ai-api-check","endpoint":check_fields[14].read(cx).value(),"key":check_fields[15].read(cx).value()}))));
             }
             actions = actions.child(Button::new("ai-save-connection").primary().small().label(if state["active_spec"]["model"].as_str().is_none() && state["routing_owner"] == "main" {
-                    if state["return_to_chat"] == true { "保存并开始聊天" } else { "保存并设为主 Agent" }
-                } else { "保存连接" }).disabled(busy || state["login_visible"] == true || (native && agent_status(state, &kind) != "已登录"))
+                    if state["return_to_chat"] == true { crate::i18n::text("ai.save-and-start-chatting") } else { crate::i18n::text("ai.save-and-set-as-main-agent") }
+                } else { crate::i18n::text("ai.save-connection") }).disabled(busy || state["login_visible"] == true || (native && agent_status(state, &kind) != crate::i18n::text("ai.signed-in")))
                 .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value()}))));
             let mut details = div().flex().flex_col().gap_4();
             details = details.child(form);
             if !native {
                 details =
                     details
-                        .child(hint("检查可获取模型列表，也可以直接保存。", cx))
+                        .child(hint(
+                            crate::i18n::text("ai.check-to-fetch-available-models-or-save"),
+                            cx,
+                        ))
                         .when(
                             !state["check_message"].as_str().unwrap_or("").is_empty(),
                             |el| {
@@ -350,7 +363,7 @@ impl Settings {
                                 Button::new("ai-advanced")
                                     .ghost()
                                     .small()
-                                    .label("高级设置")
+                                    .label(crate::i18n::text("ai.advanced-settings"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         if native {
                                             this.settings.commands_open =
@@ -368,10 +381,10 @@ impl Settings {
             );
             if native && self.commands_open {
                 let fields = self.fields.clone();
-                body=body.child(card(cx).child(hint("先保存连接后编辑调用命令；不更改聊天选择。",cx))
-                    .child(Input::new(&self.fields[8]).aria_label("调用程序"))
-                    .child(Input::new(&self.fields[9]).aria_label("额外参数 JSON"))
-                    .child(Button::new("ai-save-invocation").small().label("保存调用命令").disabled(busy || state["connection_name"].is_null())
+                body=body.child(card(cx).child(hint(crate::i18n::text("ai.save-the-connection-before-editing-its-command"),cx))
+                    .child(Input::new(&self.fields[8]).aria_label(crate::i18n::text("ai.executable")))
+                    .child(Input::new(&self.fields[9]).aria_label(crate::i18n::text("ai.additional-arguments-json")))
+                    .child(Button::new("ai-save-invocation").small().label(crate::i18n::text("ai.save-command")).disabled(busy || state["connection_name"].is_null())
                         .on_click(move|_,_,cx|command(json!({"action":"save-invocation","executable":fields[8].read(cx).value(),"argv":fields[9].read(cx).value()})))));
             }
         } else {
@@ -380,7 +393,7 @@ impl Settings {
             let selected = profiles.iter().find(|p| p["id"] == draft);
             let label = selected
                 .and_then(|p| p["name"].as_str())
-                .unwrap_or("请选择 Agent")
+                .unwrap_or(crate::i18n::text("ai.choose-an-agent"))
                 .to_owned();
             let options = profiles.clone();
             let model_input = self.fields[22].clone();
@@ -411,25 +424,27 @@ impl Settings {
                     ),
                 )
                 .child(
-                    field("模型")
-                        .description("填写所选 Agent 支持的模型标识；更改需保存才生效。")
+                    field(crate::i18n::text("ai.model"))
+                        .description(crate::i18n::text(
+                            "ai.enter-a-model-supported-by-this-agent",
+                        ))
                         .child(
                             Input::new(&model_input)
-                                .aria_label("聊天模型")
+                                .aria_label(crate::i18n::text("ai.chat-model"))
                                 .disabled(busy),
                         ),
                 );
             if let Some(selected) = selected {
                 let engine = selected["engine"].as_str().unwrap_or("");
                 let status = agent_status(state, engine);
-                form = form.child(field("连接状态").child(status));
-                if engine != "pot" && status != "已登录" {
+                form = form.child(field(crate::i18n::text("ai.connection-status")).child(status));
+                if engine != "pot" && status != crate::i18n::text("ai.signed-in") {
                     let id = selected["id"].as_str().unwrap_or("").to_owned();
                     form = form.child(
-                        field("完成连接").child(
+                        field(crate::i18n::text("ai.finish-connection")).child(
                             Button::new("ai-complete")
                                 .small()
-                                .label("登录与模型设置")
+                                .label(crate::i18n::text("ai.sign-in-and-model-settings"))
                                 .disabled(busy)
                                 .on_click(move |_, _, _| {
                                     command(json!({"action":"ai-manage","id":id}))
@@ -445,8 +460,11 @@ impl Settings {
                     .find(|p| p["id"] == active["source_profile_id"]);
                 body = body.child(
                     card(cx)
-                        .child(section("主 Agent"))
-                        .child(hint("Pot 将使用此 Agent 作为主要对话 Agent。", cx))
+                        .child(section(crate::i18n::text("ai.main-agent")))
+                        .child(hint(
+                            crate::i18n::text("ai.pot-will-use-this-agent-for-the"),
+                            cx,
+                        ))
                         .child(
                             div()
                                 .flex()
@@ -465,23 +483,23 @@ impl Settings {
                                         state["active_name"]
                                             .as_str()
                                             .filter(|_| active["model"].as_str().is_some())
-                                            .unwrap_or("尚未配置")
+                                            .unwrap_or(crate::i18n::text("ai.not-configured"))
                                             .to_owned(),
                                     ),
                                 )
                                 .child(hint(
-                                    active["model"]
-                                        .as_str()
-                                        .unwrap_or("集成后选择 Agent 和模型"),
+                                    active["model"].as_str().unwrap_or(crate::i18n::text(
+                                        "ai.connect-an-agent-then-choose-a-model",
+                                    )),
                                     cx,
                                 ))
                                 .child(
                                     Button::new("ai-edit-main")
                                         .small()
                                         .label(if active["model"].as_str().is_some() {
-                                            "更改"
+                                            crate::i18n::text("ai.change")
                                         } else {
-                                            "设置"
+                                            crate::i18n::text("ui.settings")
                                         })
                                         .disabled(busy || profiles.is_empty())
                                         .on_click(|_, _, _| {
@@ -495,14 +513,14 @@ impl Settings {
             } else {
                 body = body
                     .child(form)
-                    .child(hint("保存后生效，已有任务保持原配置。", cx))
+                    .child(hint(crate::i18n::text("ai.save-to-apply-existing-tasks-keep-their"), cx))
                     .child(
                         Button::new("ai-save-main")
                             .primary()
                             .small().label(if state["return_to_chat"] == true {
-                                "保存并开始聊天"
+                                crate::i18n::text("ai.save-and-start-chatting")
                             } else {
-                                "保存更改"
+                                crate::i18n::text("ai.save-changes")
                             })
                             .disabled(busy || profiles.is_empty())
                             .on_click(move |_, _, cx| {
@@ -518,7 +536,7 @@ impl Settings {
                         .flex()
                         .items_center()
                         .justify_between()
-                        .child(section("已集成 Agent"))
+                        .child(section(crate::i18n::text("ai.integrated-agents")))
                         .child(
                             div()
                                 .flex()
@@ -528,9 +546,9 @@ impl Settings {
                                         .ghost()
                                         .small()
                                         .label(if state["discovering"] == true {
-                                            "正在检查…"
+                                            crate::i18n::text("ai.checking-53")
                                         } else {
-                                            "刷新状态"
+                                            crate::i18n::text("ai.refresh-status")
                                         })
                                         .disabled(busy || state["discovering"] == true)
                                         .on_click(|_, _, _| {
@@ -540,7 +558,7 @@ impl Settings {
                                 .child(
                                     Button::new("ai-add")
                                         .small()
-                                        .label("＋ 集成 Agent")
+                                        .label(crate::i18n::text("ai.connect-agent"))
                                         .disabled(busy)
                                         .on_click(|_, _, _| {
                                             command(json!({"action":"ai-screen","screen":"add"}))
@@ -549,7 +567,10 @@ impl Settings {
                         ),
                 );
                 if profiles.is_empty() {
-                    body = body.child(hint("尚未集成 Agent。选择你想使用的 AI 开始配置。", cx));
+                    body = body.child(hint(
+                        crate::i18n::text("ai.no-agents-connected-yet-choose-an-ai"),
+                        cx,
+                    ));
                 }
             }
             let mut integrated = card(cx).p_0();
@@ -589,17 +610,17 @@ impl Settings {
                                     .rounded_md()
                                     .bg(cx.theme().secondary)
                                     .text_sm()
-                                    .child("主 Agent"),
+                                    .child(crate::i18n::text("ai.main-agent")),
                             )
                         })
                         .child(
                             Button::new(("ai-manage", i))
                                 .ghost()
                                 .small()
-                                .label(if status == "需要登录" {
-                                    "去登录"
+                                .label(if status == crate::i18n::text("ai.sign-in-required") {
+                                    crate::i18n::text("ai.sign-in-56")
                                 } else {
-                                    "配置"
+                                    crate::i18n::text("ai.configure")
                                 })
                                 .disabled(busy)
                                 .on_click(move |_, _, _| {
@@ -630,12 +651,12 @@ impl Settings {
                         sheet(card(cx).rounded(px(12.)).w(px(620.)).max_w(relative(0.95)).max_h(relative(0.92)).min_h_0()
                             .child(div().flex().items_center().gap_3()
                                 .when(screen == "manage", |row| row.child(brand_icon(kind).size(px(28.))))
-                                .child(div().flex_1().child(title(if screen == "add" { "集成 Agent" } else if screen == "main-edit" { "主 Agent" } else { brand_name(kind) })))
+                                .child(div().flex_1().child(title(if screen == "add" { crate::i18n::text("ai.connect-agent-58") } else if screen == "main-edit" { crate::i18n::text("ai.main-agent") } else { brand_name(kind) })))
                                 .when(screen == "manage" && state["connection_profile_id"].as_str().unwrap_or("").is_empty(), |row| row.child(
-                                    Button::new("ai-back-choices").ghost().small().label("返回")
+                                    Button::new("ai-back-choices").ghost().small().label(crate::i18n::text("usage-ui.back"))
                                         .disabled(busy).on_click(|_,_,_| command(json!({"action":"ai-screen","screen":"add"}))),
                                 ))
-                                .child(Button::new("ai-panel-close").ghost().small().label("关闭").disabled(busy)
+                                .child(Button::new("ai-panel-close").ghost().small().label(crate::i18n::text("ai.close")).disabled(busy)
                                     .on_click(|_,_,_| command(json!({"action":"ai-back"}))))
                             )
                             .child(body)
@@ -646,14 +667,14 @@ impl Settings {
         }
         page(cx).child(
             content()
-                .child(title("AI 配置"))
+                .child(title(crate::i18n::text("ui.ai-configuration")))
                 .child(
                     segments(cx).children(
                         [
-                            (0, "通用"),
-                            (1, "AI 配置"),
-                            (4, "任务配置"),
-                            (3, "工作环境"),
+                            (0, crate::i18n::text("ui.general")),
+                            (1, crate::i18n::text("ui.ai-configuration")),
+                            (4, crate::i18n::text("ui.task-configuration")),
+                            (3, crate::i18n::text("ui.work-environment")),
                         ]
                         .into_iter()
                         .map(|(i, label)| {
@@ -676,9 +697,9 @@ impl Settings {
                             .small()
                             .label(
                                 if state["routing_owner"].as_str().is_some_and(|o| o != "main") {
-                                    "← 返回任务配置"
+                                    crate::i18n::text("ai.back-to-task-configuration")
                                 } else {
-                                    "← 返回 AI 配置"
+                                    crate::i18n::text("ai.back-to-ai-configuration")
                                 },
                             )
                             .disabled(busy)
@@ -698,7 +719,7 @@ impl Settings {
                         Button::new("ai-return-chat")
                             .ghost()
                             .small()
-                            .label("稍后设置 · 返回聊天")
+                            .label(crate::i18n::text("ai.set-up-later-back-to-chat"))
                             .on_click(|_, _, _| command(json!({"action":"page","value":0}))),
                     )
                 }),

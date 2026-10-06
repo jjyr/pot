@@ -31,11 +31,13 @@ pub fn entry(v: &client::View, cx: &mut Context<Shell>) -> Button {
         .icon(gpui_kit::component::IconName::ChartPie)
         .text_color(cx.theme().muted_foreground)
         .label(if v.usage.is_null() {
-            "用量".into()
+            crate::i18n::text("navigation.usage").into()
         } else {
             format!("{} tokens", count(tokens(&v.usage["lifetime"])))
         })
-        .tooltip("查看此会话的累计用量")
+        .tooltip(crate::i18n::text(
+            "usage-ui.view-total-usage-for-this-conversation",
+        ))
         .on_click(cx.listener(|this, _, _, cx| {
             this.usage_ui.show_all_tools = false;
             ui::command(json!({"action":"page","value":5}));
@@ -56,6 +58,15 @@ pub struct UsageUI {
     error: String,
 }
 impl UsageUI {
+    pub fn localize(&mut self, window: &mut Window, cx: &mut Context<Shell>) {
+        self.limit.update(cx, |input, cx| {
+            input.set_placeholder(
+                crate::i18n::text("usage-ui.for-example-2m-or-500k"),
+                window,
+                cx,
+            )
+        });
+    }
     pub fn open_settings(&mut self) {
         self.editing = false;
         self.error.clear();
@@ -67,7 +78,10 @@ impl UsageUI {
             group_offset: 0,
             group_context: None,
             show_all_tools: false,
-            limit: cx.new(|cx| InputState::new(window, cx).placeholder("例如 2M、500K")),
+            limit: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(crate::i18n::text("usage-ui.for-example-2m-or-500k"))
+            }),
             period: "none".into(),
             timezone: "Asia/Shanghai".into(),
             auto_resume: true,
@@ -96,56 +110,70 @@ impl UsageUI {
                 });
                 self.editing = true;
             }
-            let form = ui::form(cx)
-                .child(ui::field("Token 额度").child(ui::segments(cx).children(
-                    [("none", "不限"), ("day", "每天"), ("week", "每周")].map(|(value, label)| {
-                        Button::new(SharedString::from(format!("quota-{value}")))
-                            .ghost()
-                            .small()
-                            .label(label)
-                            .when(self.period == value, |b| b.bg(cx.theme().secondary))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.usage_ui.period = value.into();
-                                cx.notify();
-                            }))
-                    }),
-                )))
-                .when(self.period != "none", |f| {
-                    f.child(
-                        ui::field("额度")
-                            .description("输入 + 输出；缓存命中属于输入，支持 K / M")
-                            .child(Input::new(&self.limit).aria_label("Token 额度数值")),
-                    )
-                })
-                .when(self.period != "none", |f| {
-                    f.child(
-                        ui::field("额度恢复后").child(
-                            div().flex().child(
-                                Button::new("quota-auto")
-                                    .ghost()
-                                    .small()
-                                    .label(if self.auto_resume {
-                                        "自动继续"
-                                    } else {
-                                        "手动继续"
-                                    })
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.usage_ui.auto_resume = !this.usage_ui.auto_resume;
-                                        cx.notify();
-                                    })),
+            let form =
+                ui::form(cx)
+                    .child(
+                        ui::field(crate::i18n::text("usage-ui.token-allowance")).child(
+                            ui::segments(cx).children(
+                                [
+                                    ("none", crate::i18n::text("usage-ui.unlimited")),
+                                    ("day", crate::i18n::text("schedules-ui.daily")),
+                                    ("week", crate::i18n::text("schedules-ui.weekly")),
+                                ]
+                                .map(|(value, label)| {
+                                    Button::new(SharedString::from(format!("quota-{value}")))
+                                        .ghost()
+                                        .small()
+                                        .label(label)
+                                        .when(self.period == value, |b| b.bg(cx.theme().secondary))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.usage_ui.period = value.into();
+                                            cx.notify();
+                                        }))
+                                }),
                             ),
                         ),
                     )
-                });
-            return ui::page(cx).child(body.child(ui::section("周期额度"))
-                .child(ui::hint("作用于主聊天和所有任务。API 本身不按此周期重置；这是你为 Pot 设置的使用上限。",cx))
-                .child(ui::card(cx).child(form).when(self.period!="none",|el|el.child(ui::hint(format!("{} 00:00 重置 · {}",if self.period=="week"{"每周一"}else{"每天"},self.timezone),cx))))
-                .when(!self.error.is_empty(),|el|el.child(ui::hint(self.error.clone(),cx))).when(!v.usage_error.is_empty(),|el|el.child(ui::hint(v.usage_error.clone(),cx))).when(!v.usage_notice.is_empty(),|el|el.child(ui::hint(v.usage_notice.clone(),cx)))
-                .child(div().flex().gap_2().child(Button::new("save-quota").primary().small().label("保存").disabled(v.usage_pending||d.is_null()).on_click(cx.listener(|this,_,_,cx|{
+                    .when(self.period != "none", |f| {
+                        f.child(
+                            ui::field(crate::i18n::text("usage-ui.allowance"))
+                                .description(crate::i18n::text(
+                                    "usage-ui.input-output-cached-tokens-are-part-of",
+                                ))
+                                .child(Input::new(&self.limit).aria_label(crate::i18n::text(
+                                    "usage-ui.token-allowance-value",
+                                ))),
+                        )
+                    })
+                    .when(self.period != "none", |f| {
+                        f.child(
+                            ui::field(crate::i18n::text("usage-ui.when-allowance-resets")).child(
+                                div().flex().child(
+                                    Button::new("quota-auto")
+                                        .ghost()
+                                        .small()
+                                        .label(if self.auto_resume {
+                                            crate::i18n::text("usage-ui.resume-automatically")
+                                        } else {
+                                            crate::i18n::text("usage-ui.resume-manually")
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.usage_ui.auto_resume = !this.usage_ui.auto_resume;
+                                            cx.notify();
+                                        })),
+                                ),
+                            ),
+                        )
+                    });
+            return ui::page(cx).child(body.child(ui::section(crate::i18n::text("usage-ui.periodic-allowance")))
+                .child(ui::hint(crate::i18n::text("usage-ui.applies-to-the-main-chat-and-all"),cx))
+                .child(ui::card(cx).child(form).when(self.period!="none",|el|el.child(ui::hint(crate::i18n::tr!("usage-ui.resets-at-00-00",if self.period=="week"{crate::i18n::text("usage-ui.monday")}else{crate::i18n::text("schedules-ui.daily")},self.timezone),cx))))
+                .when(!self.error.is_empty(),|el|el.child(ui::hint(crate::i18n::message(&self.error),cx))).when(!v.usage_error.is_empty(),|el|el.child(ui::hint(crate::i18n::message(&crate::i18n::message(&v.usage_error)),cx))).when(!v.usage_notice.is_empty(),|el|el.child(ui::hint(crate::i18n::message(&v.usage_notice),cx)))
+                .child(div().flex().gap_2().child(Button::new("save-quota").primary().small().label(crate::i18n::text("usage-ui.save")).disabled(v.usage_pending||d.is_null()).on_click(cx.listener(|this,_,_,cx|{
                     let u=&mut this.usage_ui;let limit=match parse_count(&u.limit.read(cx).value()){Ok(n)=>n,Err(e)=>{u.error=e.into();cx.notify();return;}};
                     let zone=u.timezone.clone();
                     this.client.usage_action("policy",json!({"period":u.period,"limit":limit,"timezone":zone,"auto_resume":u.auto_resume}));u.error.clear();cx.notify();
-                }))).child(Button::new("quota-back").ghost().small().label("返回").on_click(|_,_,_|ui::command(json!({"action":"page","value":4}))))));
+                }))).child(Button::new("quota-back").ghost().small().label(crate::i18n::text("usage-ui.back")).on_click(|_,_,_|ui::command(json!({"action":"page","value":4}))))));
         }
         body = body.child(
             div()
@@ -153,16 +181,16 @@ impl UsageUI {
                 .items_center()
                 .justify_between()
                 .child(ui::section(if detail {
-                    "累计用量"
+                    crate::i18n::text("usage-ui.total-usage")
                 } else {
-                    "整体统计"
+                    crate::i18n::text("usage-ui.overall-statistics")
                 }))
                 .when(!detail, |el| {
                     el.child(
                         Button::new("quota-settings")
                             .ghost()
                             .small()
-                            .label("用量限制")
+                            .label(crate::i18n::text("navigation.usage-limits"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.usage_ui.editing = false;
                                 ui::command(json!({"action":"page","value":6}));
@@ -176,29 +204,33 @@ impl UsageUI {
                 v.selected_task
                     .as_ref()
                     .map(|t| t.title.clone())
-                    .unwrap_or("主聊天".into()),
+                    .unwrap_or(crate::i18n::text("navigation.main-chat").into()),
                 cx,
             ));
         }
         if !v.usage_error.is_empty() {
             body = body.child(ui::retry(cx)).child(ui::notice(
-                format!("读取用量失败：{}", v.usage_error),
+                crate::i18n::tr!(
+                    "usage-ui.unable-to-load-usage",
+                    crate::i18n::message(&v.usage_error)
+                ),
                 true,
                 cx,
             ));
         }
         if d.is_null() {
-            return ui::page(cx).child(body.child(ui::loading("正在读取用量…", cx)));
+            return ui::page(cx)
+                .child(body.child(ui::loading(crate::i18n::text("usage-ui.loading-usage"), cx)));
         }
         let total = if detail { &d["lifetime"] } else { &d["total"] };
         if !detail {
             body = body.child(
                 ui::segments(cx).children(
                     [
-                        (7, "最近 7 天"),
-                        (30, "最近 30 天"),
-                        (90, "最近 90 天"),
-                        (365, "最近一年"),
+                        (7, crate::i18n::text("usage-ui.last-7-days")),
+                        (30, crate::i18n::text("usage-ui.last-30-days")),
+                        (90, crate::i18n::text("usage-ui.last-90-days")),
+                        (365, crate::i18n::text("usage-ui.last-year")),
                     ]
                     .map(|(days, label)| {
                         Button::new(("usage-days", days as usize))
@@ -230,14 +262,14 @@ impl UsageUI {
                         [
                             (
                                 if detail {
-                                    "累计 Tokens"
+                                    crate::i18n::text("usage-ui.cumulative-tokens")
                                 } else {
-                                    "总 Tokens"
+                                    crate::i18n::text("usage-ui.total-tokens")
                                 },
                                 tokens(total),
                             ),
-                            ("输入", n(total, "input")),
-                            ("输出", n(total, "output")),
+                            (crate::i18n::text("usage-ui.input"), n(total, "input")),
+                            (crate::i18n::text("usage-ui.output"), n(total, "output")),
                         ]
                         .map(|(label, value)| {
                             div().flex_1().child(ui::hint(label, cx)).child(
@@ -251,13 +283,13 @@ impl UsageUI {
                     ),
                 )
                 .child(ui::hint(
-                    format!(
-                        "输入中缓存命中 {} · {} 条用量记录{}",
+                    crate::i18n::tr!(
+                        "usage-ui.cached-input-tokens-usage-records",
                         count(n(total, "cache")),
                         n(total, "requests"),
                         if n(total, "unknown") > 0 {
-                            format!(
-                                " · {} 次未返回完整用量，合计可能不完整",
+                            crate::i18n::tr!(
+                                "usage-ui.incomplete-records-totals-may-be-incomplete",
                                 n(total, "unknown")
                             )
                         } else {
@@ -269,26 +301,54 @@ impl UsageUI {
         );
         let routing = &d["routing_total"];
         if n(routing, "requests") > 0 {
-            scroll = scroll.child(ui::card(cx)
-                .child(ui::section("含任务路由的主聊天用量"))
-                .child(div().mt_2().text_size(px(22.)).child(if tokens(routing) == 0 && n(routing,"unknown") > 0 {"用量尚未完整返回".into()} else {format!("{} tokens", count(tokens(routing)))}))
-                .child(ui::hint(format!("输入 {} · 输出 {} · 输入中缓存命中 {}{}",
-                    count(n(routing,"input")), count(n(routing,"output")), count(n(routing,"cache")),
-                    if n(routing,"unknown") > 0 {format!(" · {} 条用量不完整", n(routing,"unknown"))} else {String::new()}), cx))
-                .child(ui::hint("统计发生任务委派的整个主聊天轮次，包含理解和回复；已包含在总量中，不代表独立路由费用。",cx)));
+            scroll = scroll.child(
+                ui::card(cx)
+                    .child(ui::section(crate::i18n::text(
+                        "usage-ui.main-chat-usage-including-task-routing",
+                    )))
+                    .child(div().mt_2().text_size(px(22.)).child(
+                        if tokens(routing) == 0 && n(routing, "unknown") > 0 {
+                            crate::i18n::text("usage-ui.usage-is-not-fully-reported-yet").into()
+                        } else {
+                            format!("{} tokens", count(tokens(routing)))
+                        },
+                    ))
+                    .child(ui::hint(
+                        crate::i18n::tr!(
+                            "usage-ui.input-output-cached-input",
+                            count(n(routing, "input")),
+                            count(n(routing, "output")),
+                            count(n(routing, "cache")),
+                            if n(routing, "unknown") > 0 {
+                                crate::i18n::tr!(
+                                    "usage-ui.incomplete-usage-records",
+                                    n(routing, "unknown")
+                                )
+                            } else {
+                                String::new()
+                            }
+                        ),
+                        cx,
+                    ))
+                    .child(ui::hint(
+                        crate::i18n::text("usage-ui.includes-the-entire-main-chat-turn-that"),
+                        cx,
+                    )),
+            );
         }
         let groups = d["agent_models"].as_array().cloned().unwrap_or_default();
         if !groups.is_empty() || self.group_offset > 0 {
-            let mut card = ui::card(cx).child(ui::section("Agent / 模型用量"));
+            let mut card =
+                ui::card(cx).child(ui::section(crate::i18n::text("usage-ui.agent-model-usage")));
             for (index, row) in groups.iter().enumerate() {
                 let agent = match row["agent"].as_str().unwrap_or("unknown") {
                     "pot" => "Pot",
                     "codex" => "Codex",
                     "claude" => "Claude",
-                    _ => "Agent 未知",
+                    _ => crate::i18n::text("usage-ui.unknown-agent"),
                 };
-                let tooltip = format!(
-                    "{} 条记录 · {} 条用量不完整",
+                let tooltip = crate::i18n::tr!(
+                    "usage-ui.records-incomplete-records",
                     n(row, "requests"),
                     n(row, "unknown")
                 );
@@ -304,20 +364,25 @@ impl UsageUI {
                                 .flex()
                                 .gap_3()
                                 .child(div().flex_1().min_w_0().truncate().child(format!(
-                                    "{} · {}",
-                                    agent,
-                                    row["model"].as_str().unwrap_or("模型未知")
-                                )))
+                                        "{} · {}",
+                                        agent,
+                                        row["model"]
+                                            .as_str()
+                                            .unwrap_or(crate::i18n::text("usage-ui.unknown-model"))
+                                    )))
                                 .child(div().child(format!("{} tokens", count(tokens(row))))),
                         )
                         .child(ui::hint(
-                            format!(
-                                "输入 {} · 输出 {} · 输入中缓存命中 {}{}",
+                            crate::i18n::tr!(
+                                "usage-ui.input-output-cached-input",
                                 count(n(row, "input")),
                                 count(n(row, "output")),
                                 count(n(row, "cache")),
                                 if n(row, "unknown") > 0 {
-                                    format!(" · {} 条用量不完整", n(row, "unknown"))
+                                    crate::i18n::tr!(
+                                        "usage-ui.incomplete-usage-records",
+                                        n(row, "unknown")
+                                    )
                                 } else {
                                     String::new()
                                 }
@@ -338,7 +403,7 @@ impl UsageUI {
                             Button::new("agent-model-prev")
                                 .ghost()
                                 .small()
-                                .label("上一页")
+                                .label(crate::i18n::text("schedules-ui.previous"))
                                 .disabled(self.group_offset == 0)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.usage_ui.group_offset =
@@ -350,7 +415,7 @@ impl UsageUI {
                             Button::new("agent-model-next")
                                 .ghost()
                                 .small()
-                                .label("下一页")
+                                .label(crate::i18n::text("schedules-ui.next-52"))
                                 .disabled(next.is_none())
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(offset) = next {
@@ -364,7 +429,10 @@ impl UsageUI {
             scroll = scroll.child(card);
         }
         if d["native_turn_usage"] == true {
-            scroll = scroll.child(ui::hint("原生 CLI 用量按轮次记录，包含其报告的原生压缩；不代表模型请求次数或订阅余额。Pot 额度只在新轮次开始前检查，轮次内可能超出。", cx));
+            scroll = scroll.child(ui::hint(
+                crate::i18n::text("usage-ui.native-cli-usage-is-recorded-by-turn"),
+                cx,
+            ));
         }
         if detail {
             let compression = &d["compaction_total"];
@@ -373,7 +441,8 @@ impl UsageUI {
             let conversation = total_tokens.saturating_sub(compressed);
             let primary = cx.theme().chart_1;
             let secondary = cx.theme().muted_foreground.opacity(0.65);
-            let mut model = ui::card(cx).child(ui::section("模型消耗"));
+            let mut model =
+                ui::card(cx).child(ui::section(crate::i18n::text("usage-ui.model-consumption")));
             if total_tokens > 0 {
                 model = model.child(
                     div()
@@ -406,7 +475,7 @@ impl UsageUI {
                 for (id, label, amount, color, input, output, cache) in [
                     (
                         "conversation",
-                        "任务对话",
+                        crate::i18n::text("navigation.task-conversation"),
                         conversation,
                         primary,
                         n(total, "input").saturating_sub(n(compression, "input")),
@@ -415,7 +484,7 @@ impl UsageUI {
                     ),
                     (
                         "compaction",
-                        "上下文压缩",
+                        crate::i18n::text("usage-ui.context-compaction"),
                         compressed,
                         secondary,
                         n(compression, "input"),
@@ -426,8 +495,8 @@ impl UsageUI {
                     if amount == 0 {
                         continue;
                     }
-                    let tooltip = format!(
-                        "输入 {} · 输出 {} · 输入中缓存命中 {}",
+                    let tooltip = crate::i18n::tr!(
+                        "usage-ui.input-output-cached-input-43",
                         count(input),
                         count(output),
                         count(cache)
@@ -453,7 +522,10 @@ impl UsageUI {
                     );
                 }
             } else {
-                model = model.child(ui::hint("暂无已确认的模型用量", cx));
+                model = model.child(ui::hint(
+                    crate::i18n::text("usage-ui.no-confirmed-model-usage-yet"),
+                    cx,
+                ));
             }
             scroll = scroll.child(model);
             let mut tools = d["tools"].as_array().cloned().unwrap_or_default();
@@ -475,14 +547,14 @@ impl UsageUI {
                         div()
                             .flex()
                             .justify_between()
-                            .child(div().child("工具输出量"))
+                            .child(div().child(crate::i18n::text("usage-ui.tool-output")))
                             .child(ui::hint(
-                                format!("约 {} tokens", count(sum.div_ceil(4))),
+                                crate::i18n::tr!("usage-ui.about-tokens", count(sum.div_ceil(4))),
                                 cx,
                             )),
                     )
                     .child(ui::hint(
-                        "按返回内容 UTF-8 字节数 ÷ 4 估算；不与模型消耗相加。",
+                        crate::i18n::text("usage-ui.estimated-from-utf-8-output-bytes-4"),
                         cx,
                     ));
                 for (index, r) in tools
@@ -491,8 +563,8 @@ impl UsageUI {
                     .enumerate()
                 {
                     let name = r["name"].as_str().unwrap_or("tool").to_string();
-                    let tooltip = format!(
-                        "{} · {} 次失败 · {:.1} 秒 · {} 次未结束",
+                    let tooltip = crate::i18n::tr!(
+                        "usage-ui.failed-1-seconds-unfinished",
                         name,
                         n(r, "failed"),
                         n(r, "duration_ms") as f64 / 1000.,
@@ -511,8 +583,8 @@ impl UsageUI {
                                     .gap_3()
                                     .child(div().flex_1().min_w_0().truncate().child(name))
                                     .child(ui::hint(
-                                        format!(
-                                            "约 {} tokens · {} 次",
+                                        crate::i18n::tr!(
+                                            "usage-ui.about-tokens-calls",
                                             count(n(r, "bytes").div_ceil(4)),
                                             n(r, "calls")
                                         ),
@@ -545,9 +617,9 @@ impl UsageUI {
                             .ghost()
                             .small()
                             .label(if self.show_all_tools {
-                                "收起".into()
+                                crate::i18n::text("usage-ui.show-less").into()
                             } else {
-                                format!("显示全部 {} 个工具", tools.len())
+                                crate::i18n::tr!("usage-ui.show-all-tools", tools.len())
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.usage_ui.show_all_tools = !this.usage_ui.show_all_tools;
@@ -563,12 +635,11 @@ impl UsageUI {
             scroll = scroll.child(
                 ui::card(cx)
                     .child(ui::hint(
-                        format!(
-                            "{} · {} · 今天尚未结束",
+                        crate::i18n::tr!("usage-ui.today-is-still-in-progress",
                             if self.days == 365 {
-                                "每柱最多 7 天"
+                                crate::i18n::text("usage-ui.up-to-7-days-per-bar")
                             } else {
-                                "每柱一天"
+                                crate::i18n::text("usage-ui.one-day-per-bar")
                             },
                             d["timezone"].as_str().unwrap_or("")
                         ),
@@ -581,9 +652,9 @@ impl UsageUI {
                             .when(tokens(total) == 0, |el| {
                                 el.flex().items_center().justify_center().child(ui::hint(
                                     if n(total, "requests") == 0 {
-                                        "所选时间范围暂无用量记录"
+                                        crate::i18n::text("usage-ui.no-usage-records-in-the-selected-range")
                                     } else {
-                                        "尚无已确认的 Token 用量"
+                                        crate::i18n::text("usage-ui.no-confirmed-token-usage-yet")
                                     },
                                     cx,
                                 ))
@@ -609,8 +680,7 @@ impl UsageUI {
                                                     d["range"].as_str().unwrap_or("").to_string(),
                                                 ))
                                                 .child(ui::hint(
-                                                    format!(
-                                                        "总量 {} · 输入 {} · 输出 {}",
+                                                    crate::i18n::tr!("usage-ui.total-input-output",
                                                         count(tokens(d)),
                                                         count(n(d, "input")),
                                                         count(n(d, "output"))
@@ -618,8 +688,7 @@ impl UsageUI {
                                                     cx,
                                                 ))
                                                 .child(ui::hint(
-                                                    format!(
-                                                        "其中缓存命中 {} · 未知用量 {} 次",
+                                                    crate::i18n::tr!("usage-ui.cached-input-unknown-usage-records",
                                                         count(n(d, "cache")),
                                                         n(d, "unknown")
                                                     ),
@@ -634,14 +703,14 @@ impl UsageUI {
             if q["active"] == true {
                 scroll = scroll.child(
                     ui::card(cx)
-                        .child(div().child("Pot 用量限制"))
+                        .child(div().child(crate::i18n::text("usage-ui.pot-usage-limits")))
                         .child(ui::hint(
-                            format!(
-                                "{} {} / {} tokens · 预留 {}",
+                            crate::i18n::tr!(
+                                "usage-ui.tokens-reserved",
                                 if q["policy"]["period"] == "week" {
-                                    "本周"
+                                    crate::i18n::text("usage-ui.this-week")
                                 } else {
-                                    "今日"
+                                    crate::i18n::text("usage-ui.today")
                                 },
                                 count(n(q, "used")),
                                 count(n(&q["policy"], "limit")),
@@ -657,7 +726,10 @@ impl UsageUI {
                             ),
                         )
                         .child(ui::hint(
-                            format!("{} 重置", q["reset_label"].as_str().unwrap_or("")),
+                            crate::i18n::tr!(
+                                "usage-ui.resets",
+                                q["reset_label"].as_str().unwrap_or("")
+                            ),
                             cx,
                         )),
                 );
@@ -667,14 +739,16 @@ impl UsageUI {
             scroll = scroll.child(
                 ui::card(cx)
                     .child(ui::hint(
-                        "此会话正在等待 Pot 额度。额度恢复后按设置继续。",
+                        crate::i18n::text(
+                            "usage-ui.this-conversation-is-waiting-for-pot-allowance",
+                        ),
                         cx,
                     ))
                     .child(
                         Button::new("usage-resume")
                             .ghost()
                             .small()
-                            .label("继续")
+                            .label(crate::i18n::text("usage-ui.continue"))
                             .disabled(v.usage_pending)
                             .on_click(cx.listener(|this, _, _, _| {
                                 let scope = this.client.view.lock().unwrap().usage["scope"].clone();
@@ -688,7 +762,7 @@ impl UsageUI {
                 Button::new("cancel-usage-wait")
                     .ghost()
                     .small()
-                    .label("取消等待")
+                    .label(crate::i18n::text("usage-ui.cancel-wait"))
                     .disabled(v.usage_pending)
                     .on_click(cx.listener(|this, _, _, _| {
                         if this.client.view.lock().unwrap().selected.is_empty() {
@@ -704,7 +778,7 @@ impl UsageUI {
             && n(&d["waiting"], "required") > n(&d["quota"]["policy"], "limit")
         {
             scroll = scroll.child(ui::hint(
-                "当前额度小于此会话的上下文预留量；重置也不足以继续，请提高 Pot 额度。",
+                crate::i18n::text("usage-ui.this-allowance-is-smaller-than-the-context"),
                 cx,
             ));
         }
@@ -728,32 +802,38 @@ fn parse_count(text: &str) -> Result<u64, &'static str> {
             .iter()
             .any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
     {
-        return Err("请输入正整数或 K / M 数值");
+        return Err(crate::i18n::text(
+            "usage-ui.enter-a-positive-integer-or-a-k",
+        ));
     }
     let a = parts[0]
         .parse::<u64>()
         .ok()
         .and_then(|n| n.checked_mul(factor))
-        .ok_or("数值过大")?;
+        .ok_or(crate::i18n::text("usage-ui.value-is-too-large"))?;
     let b = if parts.len() == 2 {
         let scale = 10u64
             .checked_pow(parts[1].len() as u32)
-            .ok_or("小数位数过多")?;
+            .ok_or(crate::i18n::text("usage-ui.too-many-decimal-places"))?;
         let n = parts[1]
             .parse::<u64>()
             .ok()
             .and_then(|n| n.checked_mul(factor))
-            .ok_or("数值过大")?;
+            .ok_or(crate::i18n::text("usage-ui.value-is-too-large"))?;
         if n % scale != 0 {
-            return Err("Token 数必须为整数");
+            return Err(crate::i18n::text(
+                "usage-ui.token-count-must-be-a-whole-number",
+            ));
         }
         n / scale
     } else {
         0
     };
-    let n = a.checked_add(b).ok_or("数值过大")?;
+    let n = a
+        .checked_add(b)
+        .ok_or(crate::i18n::text("usage-ui.value-is-too-large"))?;
     if !(1..=9_007_199_254_740_991).contains(&n) {
-        return Err("数值超出范围");
+        return Err(crate::i18n::text("usage-ui.value-is-out-of-range"));
     }
     Ok(n)
 }

@@ -40,6 +40,7 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
+mise run test:i18n     # Catalogue parity, native switching and embedded web assets
 ```
 
 Current real CLI/VM acceptance (build and bundle first; no paid model calls):

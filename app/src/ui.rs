@@ -4,6 +4,7 @@ pub(crate) use ai::brand_icon;
 mod routing;
 use crate::{Shell, design, gpui};
 use gpui::{prelude::*, *};
+use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable,
     button::{Button, ButtonVariants},
@@ -235,7 +236,7 @@ pub fn retry(cx: &mut Context<Shell>) -> Button {
         .ghost()
         .small()
         .icon(IconName::RefreshCw)
-        .label("重试")
+        .label(crate::i18n::text("ui.retry"))
         .on_click(cx.listener(|this, _, _, cx| {
             this.client.refresh();
             cx.notify();
@@ -244,6 +245,7 @@ pub fn retry(cx: &mut Context<Shell>) -> Button {
 
 pub struct Settings {
     pub scroll: ScrollHandle,
+    locale: String,
     fields: Vec<Entity<InputState>>,
     revision: Option<i64>,
     synced_values: Vec<String>,
@@ -261,15 +263,16 @@ impl Settings {
                     InputState::new(window, cx)
                         .masked(i == 0 || i == 15)
                         .placeholder(if i == 0 {
-                            "留空保留已保存的密钥"
+                            crate::i18n::text("ui.leave-blank-to-keep-the-saved-key")
                         } else {
-                            "请输入"
+                            crate::i18n::text("ui.enter-a-value")
                         })
                 })
             })
             .collect();
         Self {
             scroll: ScrollHandle::new(),
+            locale: String::new(),
             fields,
             revision: None,
             synced_values: vec![String::new(); 24],
@@ -279,6 +282,27 @@ impl Settings {
             commands_open: false,
             api_advanced: false,
         }
+    }
+    pub fn localize(&mut self, window: &mut Window, cx: &mut Context<Shell>) -> bool {
+        let locale = rust_i18n::locale().to_string();
+        if self.locale == locale {
+            return false;
+        }
+        self.locale = locale;
+        for (i, field) in self.fields.iter().enumerate() {
+            field.update(cx, |input, cx| {
+                input.set_placeholder(
+                    crate::i18n::text(if i == 0 {
+                        "ui.leave-blank-to-keep-the-saved-key"
+                    } else {
+                        "ui.enter-a-value"
+                    }),
+                    window,
+                    cx,
+                )
+            });
+        }
+        true
     }
     pub fn sync(&mut self, state: &Value, window: &mut Window, cx: &mut Context<Shell>) {
         let revision = state["revision"].as_i64();
@@ -358,8 +382,22 @@ impl Settings {
         match section {
             0 => {
                 form = form
-                    .child(field("外观").child(
-                        segments(cx).children(["跟随系统", "浅色", "深色"].iter().enumerate().map(
+                    .child(field(crate::i18n::text("settings.language"))
+                        .description(crate::i18n::text("settings.language.hint"))
+                        .child(Button::new("language-picker").ghost().small()
+                            .label(if state["locale"] == "zh-CN" { "简体中文" } else { "English" })
+                            .dropdown_menu({
+                                let locale = state["locale"].as_str().unwrap_or("en").to_owned();
+                                move |menu, _, _| {
+                                    [ ("en", "English"), ("zh-CN", "简体中文") ].into_iter().fold(menu, |menu, (value, name)| {
+                                        menu.item(gpui_kit::component::menu::PopupMenuItem::new(name)
+                                            .checked(locale == value)
+                                            .on_click(move |_, _, _| command(json!({"action":"language","value":value}))))
+                                    })
+                                }
+                            })))
+                    .child(field(crate::i18n::text("ui.appearance")).child(
+                        segments(cx).children([crate::i18n::text("ui.system"), crate::i18n::text("ui.light"), crate::i18n::text("ui.dark")].iter().enumerate().map(
                             |(i, name)| {
                                 Button::new(("appearance", i))
                                     .ghost()
@@ -376,8 +414,8 @@ impl Settings {
                         )),
                     ))
                     .child(label(
-                        "快捷键",
-                        "⌘[ 后退 · ⌘] 前进 · ⌘D Sandbox · ⌘, 设置 · Shift+Enter 换行",
+                        crate::i18n::text("ui.keyboard-shortcuts"),
+                        crate::i18n::text("ui.back-forward-d-sandbox-settings-shift-enter"),
                     ));
             }
             4 => {
@@ -385,15 +423,15 @@ impl Settings {
                     .routing_form(state, cx)
                     .child(input(
                         7,
-                        "同时处理的任务数",
-                        "默认 5；1–1000。修改全局限制需要重启环境。",
+                        crate::i18n::text("ui.concurrent-tasks"),
+                        crate::i18n::text("ui.default-5-range-1-1000-apply-global"),
                     ))
                     .child(
-                        field("周期 Token 额度").child(
+                        field(crate::i18n::text("ui.periodic-token-allowance")).child(
                             Button::new("task-usage-policy")
                                 .ghost()
                                 .small()
-                                .label("设置额度与自动继续 →")
+                                .label(crate::i18n::text("ui.set-allowance-and-automatic-resume"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.usage_ui.open_settings();
                                     command(json!({"action":"page","value":6}));
@@ -403,26 +441,38 @@ impl Settings {
                     );
                 if self.advanced {
                     form = form
-                        .child(input(1, "累计请求上限", "0–1000000；0 禁止请求。"))
-                        .child(input(2, "输出 token 上限", "支持 K/M，如 128K、1.5M。"))
-                        .child(input(3, "每轮请求上限", "1–1000。"));
+                        .child(input(
+                            1,
+                            crate::i18n::text("ui.lifetime-request-limit"),
+                            crate::i18n::text("ui.0-1000000-0-disables-requests"),
+                        ))
+                        .child(input(
+                            2,
+                            crate::i18n::text("ui.output-token-limit"),
+                            crate::i18n::text("ui.supports-k-m-such-as-128k-or"),
+                        ))
+                        .child(input(
+                            3,
+                            crate::i18n::text("ui.requests-per-turn"),
+                            "1–1000。",
+                        ));
                 }
             }
             _ => {
                 form = form.child(
-                    field("环境管理").child(
+                    field(crate::i18n::text("ui.environment-management")).child(
                         div()
                             .flex()
                             .flex_col()
                             .gap_3()
                             .child(hint(
-                                "在 Sandbox 页选择环境，管理该环境的名称、资源和桌面。",
+                                crate::i18n::text("ui.select-an-environment-on-the-sandbox-page"),
                                 cx,
                             ))
                             .child(
                                 Button::new("open-sandbox-page")
                                     .primary()
-                                    .label("打开 Sandbox")
+                                    .label(crate::i18n::text("ui.open-sandbox"))
                                     .on_click(|_, _, _| {
                                         command(json!({"action":"page","value":1}))
                                     }),
@@ -434,27 +484,33 @@ impl Settings {
         let fields = self.fields.clone();
         let mut actions = div().flex().items_center().justify_end().gap_2();
         if section == 4 {
-            actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {"收起高级限制"} else {"高级限制"})
+            actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {crate::i18n::text("ui.hide-advanced-limits")} else {crate::i18n::text("ui.advanced-limits")})
                 .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced = !this.settings.advanced;cx.notify();})))
-                .child(Button::new("save-task-limits").primary().small().label("应用全局限制…").on_click(move|_,_,cx|
+                .child(Button::new("save-task-limits").primary().small().label(crate::i18n::text("ui.apply-global-limits")).on_click(move|_,_,cx|
                     command(json!({"action":"save-agent","key":"","limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}))));
         }
 
         page(cx).child(
             content()
                 .child(title(
-                    ["通用", "AI 配置", "AI 配置", "工作环境", "任务配置"]
-                        .get(section as usize)
-                        .copied()
-                        .unwrap_or("设置"),
+                    [
+                        crate::i18n::text("ui.general"),
+                        crate::i18n::text("ui.ai-configuration"),
+                        crate::i18n::text("ui.ai-configuration"),
+                        crate::i18n::text("ui.work-environment"),
+                        crate::i18n::text("ui.task-configuration"),
+                    ]
+                    .get(section as usize)
+                    .copied()
+                    .unwrap_or(crate::i18n::text("ui.settings")),
                 ))
                 .child(
                     segments(cx).children(
                         [
-                            (0, "通用"),
-                            (1, "AI 配置"),
-                            (4, "任务配置"),
-                            (3, "工作环境"),
+                            (0, crate::i18n::text("ui.general")),
+                            (1, crate::i18n::text("ui.ai-configuration")),
+                            (4, crate::i18n::text("ui.task-configuration")),
+                            (3, crate::i18n::text("ui.work-environment")),
                         ]
                         .into_iter()
                         .map(|(i, name)| {
@@ -472,10 +528,12 @@ impl Settings {
                 )
                 .child(hint(
                     match section {
-                        0 => "让 Pot 按你的习惯工作。",
-                        1 => "连接 Agent，选择聊天使用的模型。",
-                        4 => "新任务默认沿用聊天配置；已有任务保持原配置。",
-                        _ => "资源调整重启后生效，聊天与工作文件保留。实时用量见环境信息。",
+                        0 => crate::i18n::text("ui.make-pot-work-the-way-you-prefer"),
+                        1 => crate::i18n::text("ui.connect-an-agent-and-choose-the-model"),
+                        4 => crate::i18n::text("ui.new-tasks-follow-the-chat-configuration-by"),
+                        _ => {
+                            crate::i18n::text("ui.resource-changes-apply-after-restarting-chat-and")
+                        }
                     },
                     cx,
                 ))
@@ -556,14 +614,16 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                     .child(item["name"].as_str().unwrap_or("Linux").to_owned()),
             )
             .child(hint(
-                format!(
-                    "{} · {} 个运行任务",
-                    item["state"]["phase"].as_str().unwrap_or("unknown"),
+                crate::i18n::tr!(
+                    "ui.running-tasks",
+                    crate::i18n::phase(item["state"]["phase"].as_str().unwrap_or("unknown")),
                     item["running_tasks"].as_u64().unwrap_or(0)
                 ),
                 cx,
             ))
-            .when(id == default, |row| row.child(hint("执行默认", cx)));
+            .when(id == default, |row| {
+                row.child(hint(crate::i18n::text("ui.execution-default"), cx))
+            });
         let row = Button::new(SharedString::from(format!("sandbox-{id}")))
             .ghost()
             .w_full()
@@ -574,54 +634,52 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
             } else {
                 design::navigation(cx)
             })
-            .accessibility_label(format!(
-                "选择 Sandbox：{}",
+            .accessibility_label(crate::i18n::tr!(
+                "ui.select-sandbox",
                 item["name"].as_str().unwrap_or("Linux")
             ))
             .child(row)
             .on_click(move |_, _, _| command(json!({"action":"sandbox-view","id":target})));
         list = list.child(row);
     }
-    let sidebar = div()
-        .w(px(SANDBOX_LIST))
-        .h_full()
-        .flex_shrink_0()
-        .bg(design::navigation(cx))
-        .border_r_1()
-        .border_color(cx.theme().border)
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .h(px(SANDBOX_HEADER))
-                .px_4()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child("Sandbox")
-                .child(
-                    Button::new("sandbox-new")
-                        .ghost()
-                        .small()
-                        .label("+ 新建")
-                        .disabled(pending)
-                        .on_click(|_, _, _| command(json!({"action":"sandbox-new"}))),
-                ),
-        )
-        .child(list)
-        .when(
-            state["sandbox_error"]
-                .as_str()
-                .is_some_and(|e| !e.is_empty()),
-            |el| {
-                el.child(
-                    div()
-                        .p_3()
-                        .text_color(design::attention(cx))
-                        .child(state["sandbox_error"].as_str().unwrap_or("").to_owned()),
-                )
-            },
-        );
+    let sidebar =
+        div()
+            .w(px(SANDBOX_LIST))
+            .h_full()
+            .flex_shrink_0()
+            .bg(design::navigation(cx))
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(px(SANDBOX_HEADER))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child("Sandbox")
+                    .child(
+                        Button::new("sandbox-new")
+                            .ghost()
+                            .small()
+                            .label(crate::i18n::text("ui.new"))
+                            .disabled(pending)
+                            .on_click(|_, _, _| command(json!({"action":"sandbox-new"}))),
+                    ),
+            )
+            .child(list)
+            .when(
+                state["sandbox_error"]
+                    .as_str()
+                    .is_some_and(|e| !e.is_empty()),
+                |el| {
+                    el.child(div().p_3().text_color(design::attention(cx)).child(
+                        crate::i18n::message(state["sandbox_error"].as_str().unwrap_or("")),
+                    ))
+                },
+            );
     let desktop = div()
         .flex_1()
         .min_w_0()
@@ -644,8 +702,10 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(name.to_owned()),
                 )
-                .child(hint(phase, cx))
-                .when(selected == default, |el| el.child(hint("执行默认", cx))),
+                .child(hint(crate::i18n::phase(phase), cx))
+                .when(selected == default, |el| {
+                    el.child(hint(crate::i18n::text("ui.execution-default"), cx))
+                }),
         )
         .child(
             div()
@@ -658,13 +718,13 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                 .border_color(cx.theme().border)
                 .child(hint(
                     if pending {
-                        "正在处理…"
+                        crate::i18n::text("ui.working")
                     } else if !connected {
-                        "桌面未连接"
+                        crate::i18n::text("ui.desktop-disconnected")
                     } else if human {
-                        "你正在控制桌面"
+                        crate::i18n::text("ui.you-control-the-desktop")
                     } else {
-                        "Agent 控制桌面"
+                        crate::i18n::text("ui.agent-controls-the-desktop")
                     },
                     cx,
                 ))
@@ -677,7 +737,11 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                             Button::new("take")
                                 .primary()
                                 .small()
-                                .label(if human { "交还控制" } else { "接管" })
+                                .label(if human {
+                                    crate::i18n::text("ui.give-back-control")
+                                } else {
+                                    crate::i18n::text("ui.take-over")
+                                })
                                 .disabled(!connected || pending)
                                 .on_click(|_, _, _| {
                                     command(json!({"action":"viewer","id":"take"}))
@@ -688,8 +752,8 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                                 .ghost()
                                 .small()
                                 .icon(IconName::Settings)
-                                .tooltip("环境设置")
-                                .accessibility_label("环境设置")
+                                .tooltip(crate::i18n::text("ui.environment-settings"))
+                                .accessibility_label(crate::i18n::text("ui.environment-settings"))
                                 .disabled(pending)
                                 .on_click(|_, _, _| command(json!({"action":"sandbox-settings"}))),
                         )
@@ -698,8 +762,8 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                                 .ghost()
                                 .small()
                                 .icon(IconName::Ellipsis)
-                                .tooltip("更多操作")
-                                .accessibility_label("更多操作")
+                                .tooltip(crate::i18n::text("ui.more-actions"))
+                                .accessibility_label(crate::i18n::text("ui.more-actions"))
                                 .disabled(pending)
                                 .on_click(|_, _, _| {
                                     command(json!({"action":"viewer","id":"more"}))
@@ -719,16 +783,16 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                     .gap_4()
                     .child(hint(
                         if phase == "running" {
-                            "正在连接桌面…"
+                            crate::i18n::text("ui.connecting-to-desktop")
                         } else {
-                            "环境尚未启动。启动桌面后可以查看和接管。"
+                            crate::i18n::text("ui.this-environment-is-stopped-start-the-desktop")
                         },
                         cx,
                     ))
                     .child(
                         Button::new("start-sandbox")
                             .primary()
-                            .label("启动桌面")
+                            .label(crate::i18n::text("ui.start-desktop"))
                             .disabled(pending || !matches!(phase, "running" | "stopped" | "failed"))
                             .on_click(|_, _, _| command(json!({"action":"start"}))),
                     ),

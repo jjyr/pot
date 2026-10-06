@@ -5309,6 +5309,7 @@ dependencies = [
  "async-channel",
  "gpui-kit",
  "pot-protocol",
+ "rust-i18n",
  "serde_json",
  "smol",
  "unicode-segmentation",

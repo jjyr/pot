@@ -1,0 +1,41 @@
+# Internationalization
+
+Pot supports English (`en`) and Simplified Chinese (`zh-CN`). Language is a local application preference, separate from Agent configuration, task state, and scheduling time zones.
+
+## Preference and startup
+
+`app/swift/Localization.swift` reads the saved `language` UserDefaults key before any UI is constructed. If it is missing or invalid, it scans `Locale.preferredLanguages` in order: English language tags resolve to `en`, Chinese tags (including Traditional Chinese) resolve to `zh-CN`, and other tags are skipped. No supported match resolves to English. The resolved choice is saved immediately; there is no persistent follow-system mode.
+
+Settings → General starts with Language, above Appearance. Its menu contains only **English** and **简体中文**, with the current language checked. Selecting one saves it immediately and refreshes Rust views, Kit components, native menus/tooltips/accessibility names/composer labels, and the embedded desktop. Changing macOS language later does not override the saved choice.
+
+Swift owns the preference. The existing bridge exposes `settings.locale`; Rust synchronizes the shared rust-i18n locale through `gpui_kit::component::set_locale`. Startup uses the native preference before creating input entities. Language changes update input placeholders without resetting values, focus, configuration revisions, secrets, navigation, scroll positions, or chat drafts. They never restart the backend or desktop.
+
+## Translation resources
+
+`app/locales/en.json` and `zh-CN.json` are the source of truth. Stable semantic keys separate text from code. English is the fallback.
+
+- Rust static labels use `i18n::text`. Both locale catalogues are cached once for controls requiring static references.
+- `app/build.rs` generates checked Rust formatting macros from `localization-format-keys.json`. Both language branches use Rust `format!`, so argument counts/types remain compiler checked. `localization-plurals.json` identifies count arguments and `.one` translations for English singular forms. Parameters are evaluated once.
+- The same build step generates the Swift dictionary. `L.text` and `L.format` translate native UI. Numbered native parameters are substituted in one pass; braces inside credentials, identifiers, diagnostics, or user text are literal. `LocalizedMessage` captures a notice's key/arguments so saved results follow live language changes.
+- `scripts/localize-web` embeds the `web.*` catalogue into `image/index.html` and `home.html`. It runs before resource preparation and image construction. `--check` detects stale checked-in HTML. Web locale changes update labelled text and accessibility attributes without replacing the noVNC connection or clipboard value. Web numbers use `Intl.NumberFormat`.
+
+Use complete sentence templates instead of concatenating translated fragments. Add both translations and keep their placeholders identical. Brand/model/protocol names and units such as GiB retain their standard spelling. Dates currently use the existing numeric year-month-day/time/zone representation; language selection never changes scheduling zones or persisted timestamps. Token entry still uses decimal K/M.
+
+## Backend notices and content boundaries
+
+Backend state values, request payloads, and stored transcripts remain locale independent. The existing backend has legacy prose messages; `localization-message-keys.json` maps recognized application notices at their presentation boundary. Unknown/provider diagnostics remain verbatim. This adapter does not translate arbitrary chat/model/tool content. Future backend notices should expose structured codes and parameters instead of adding new prose matching.
+
+Task-report display translates the generated title/status wrapper only, preserving the user title and model body. Both existing Chinese task-ID markers and English markers are recognized. Activity/allowance checks continue using the backend's canonical state, not translated labels. User-supplied names, saved messages, model responses and tool outputs are not rewritten.
+
+The Pot desktop welcome page reads the current viewer language from the broker's `/api/locale`. This public GET exposes only a language code and permits the loopback welcome-page origin. Updating language requires the viewer token and the existing same-origin policy. It does not control the environment or change Linux/Chromium/third-party application languages. The native viewer sends the app preference after loading and on every language change; stopped environments receive it when their viewer loads.
+
+## Verification
+
+```sh
+mise run test:i18n
+mise run test:app
+mise run lint
+mise run check:rust
+```
+
+The i18n suite checks key/placeholder parity, source references, English coverage, generated HTML freshness, native matching/fallback/saved preference/live notices, literal parameter preservation, web DOM updates and broker locale authorization. Application tests cover existing state/history/input contracts plus translation fallback, singular/plural forms, report-content preservation, and HTTP rejection fallbacks for invalid error bodies while preserving server diagnostics. These checks do not boot a VM or call models. Rebuild/bundle the Sandbox image to distribute changed embedded pages.

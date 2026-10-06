@@ -110,7 +110,7 @@ var bridge: PotBridge?
     let composer = Composer()
     let composerBox = NSView()
     let composerScroll = NSScrollView()
-    let placeholder = PlaceholderLabel(labelWithString: "给 Pot 发消息…")
+    let placeholder = PlaceholderLabel(labelWithString: L.text("bridge.message-pot"))
     let sendButton = NSButton()
     let settings = SettingsPanel()
     var navigation: [NSButton] = []
@@ -118,6 +118,7 @@ var bridge: PotBridge?
     var composerDark: Bool?
     var webDark: Bool?
     var viewer: [String: Any] = [:]
+    var lastUIState: [String: Any] = [:]
     var localRuntime: LocalRuntime?
     var termination: DispatchSourceSignal?
     var keyMonitor: Any?
@@ -150,7 +151,7 @@ var bridge: PotBridge?
     var sandboxItems: [[String: Any]] = []
     var sandboxDefault = "default"
     var sandboxBusy = false
-    var sandboxError = ""
+    @LocalizedMessage var sandboxError = ""
     var sandboxRefreshing = false
     var sandboxRefreshAt = Date.distantPast
     var desktopAttempt: String?
@@ -178,11 +179,11 @@ var bridge: PotBridge?
         railHighlight.wantsLayer = true; railHighlight.layer?.cornerRadius = 10
         rail.addSubview(railHighlight)
         for (index, symbol, title) in [
-            (0, "bubble.left", "聊天"),
-            (3, "list.bullet.rectangle", "任务"),
+            (0, "bubble.left", L.text("navigation.chat")),
+            (3, "list.bullet.rectangle", L.text("navigation.tasks")),
             (1, "desktopcomputer", "Sandbox"),
-            (4, "chart.bar.xaxis", "用量"),
-            (2, "gearshape", "设置"),
+            (4, "chart.bar.xaxis", L.text("navigation.usage")),
+            (2, "gearshape", L.text("ui.settings")),
         ] {
             let button = RailButton(
                 image: NSImage(systemSymbolName: symbol, accessibilityDescription: title)!,
@@ -294,35 +295,74 @@ var bridge: PotBridge?
         layout(); selectPage(page)
     }
 
+    func localize() {
+        lastIconState = ""
+        installMenu()
+        backMenuItem?.isEnabled = (lastUIState["can_back"] as? Bool) ?? false
+        forwardMenuItem?.isEnabled = (lastUIState["can_forward"] as? Bool) ?? false
+        let labels = [
+            0: "navigation.chat",
+            3: "navigation.tasks",
+            1: "Sandbox",
+            4: "navigation.usage",
+            2: "ui.settings",
+        ]
+        for button in navigation {
+            let key = labels[button.tag] ?? "Sandbox"
+            let title = key == "Sandbox" ? key : L.text(key)
+            button.toolTip = title; button.setAccessibilityLabel(title)
+        }
+        localizeComposer()
+        updateIcon()
+        localizeWeb()
+    }
+
+    func localizeComposer() {
+        placeholder.stringValue = selected == "new" ? L.text("bridge.describe-the-goal-of-a-new-task") : selected
+            .isEmpty ? L.text("bridge.message-pot") : L
+            .text("bridge.add-instructions-interrupted-tasks-resume-next-turn")
+        let stopping = selectedRunning && composer.string.isEmpty
+        sendButton.toolTip = stopping ? L.text("bridge.stop-task-41") : L.text("bridge.send-enter-new-line-shift-enter")
+        sendButton.setAccessibilityLabel(stopping ? L.text("bridge.stop-task") : L.text("bridge.send-message"))
+    }
+
+    func localizeWeb() {
+        web.evaluateJavaScript("window.potSetLocale?.('" + L.locale + "')")
+    }
+
     func installMenu() {
         let main = NSMenu(); main.autoenablesItems = false; let item = NSMenuItem(); main.addItem(item)
         let menu = NSMenu(title: "Pot"); menu.autoenablesItems = false; item.submenu = menu
         for (title, action, key) in [
-            ("Open Pot", #selector(showWindow), ""),
-            ("Hide Pot", #selector(hideWindow), "h"),
+            (L.text("menu.open-pot"), #selector(showWindow), ""),
+            (L.text("menu.hide-pot"), #selector(hideWindow), "h"),
             ("Sandbox", #selector(toggleDesktop), "d"),
-            ("设置…", #selector(openSettings), ","),
-            ("打开工作目录", #selector(openWorkspace), ""),
-            ("Quit Pot", #selector(quitApp), "q"),
+            (L.text("bridge.settings"), #selector(openSettings), ","),
+            (L.text("bridge.open-workspace"), #selector(openWorkspace), ""),
+            (L.text("menu.quit-pot"), #selector(quitApp), "q"),
         ] {
             let i = NSMenuItem(title: title, action: action, keyEquivalent: key); i.target = self; menu.addItem(i)
         }
-        let edit = NSMenu(title: "Edit"); edit.autoenablesItems = false; let e = NSMenuItem(); e.submenu = edit; main
+        let edit = NSMenu(title: L.text("menu.edit")); edit.autoenablesItems = false; let e = NSMenuItem(); e
+            .submenu = edit; main
             .addItem(e)
         for (title, action, key) in [
-            ("撤销", "undo:", "z"),
-            ("剪切", "cut:", "x"),
-            ("复制", "copy:", "c"),
-            ("粘贴", "paste:", "v"),
-            ("全选", "selectAll:", "a"),
+            (L.text("bridge.undo"), "undo:", "z"),
+            (L.text("bridge.cut"), "cut:", "x"),
+            (L.text("bridge.copy"), "copy:", "c"),
+            (L.text("bridge.paste"), "paste:", "v"),
+            (L.text("bridge.select-all"), "selectAll:", "a"),
         ] {
             let item = NSMenuItem(title: title, action: NSSelectorFromString(action), keyEquivalent: key); item
                 .representedObject = action; item.action = #selector(editAction(_:)); item.target = self; edit
                 .addItem(item)
         }
-        let navigationMenu = NSMenu(title: "导航"); navigationMenu.autoenablesItems = false
+        let navigationMenu = NSMenu(title: L.text("bridge.navigation")); navigationMenu.autoenablesItems = false
         let navigationItem = NSMenuItem(); navigationItem.submenu = navigationMenu; main.addItem(navigationItem)
-        for (title, action, key) in [("后退", #selector(historyBack), "["), ("前进", #selector(historyForward), "]")] {
+        for (title, action, key) in [
+            (L.text("navigation.back"), #selector(historyBack), "["),
+            (L.text("navigation.forward"), #selector(historyForward), "]"),
+        ] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
             item.target = self; item.isEnabled = false; navigationMenu.addItem(item)
             if key == "[" {
@@ -476,7 +516,8 @@ var bridge: PotBridge?
         guard ready,!isApplying,!composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard composer.string.utf8.count <= 65536
         else {
-            let alert = NSAlert(); alert.messageText = "消息过长"; alert.informativeText = "请将消息缩短至 64 KB 以内再发送。"; alert
+            let alert = NSAlert(); alert.messageText = L.text("bridge.message-too-long"); alert.informativeText = L
+                .text("bridge.shorten-the-message-to-less-than-64"); alert
                 .beginSheetModal(for: host); return
         }
         events.append(["action": "send", "text": composer.string])
@@ -515,10 +556,10 @@ var bridge: PotBridge?
 
     func sandboxBlocked(_ item: [String: Any]?) -> String? {
         if (item?["active_leases"] as? Int ?? 0) > 0 {
-            return "有任务或工具正在使用此环境"
+            return L.text("bridge.tasks-or-tools-are-using-this-environment")
         }
         if (item?["unsettled_operations"] as? Int ?? 0) > 0 {
-            return "有未确认完成的操作，请先让主 Agent 恢复环境"
+            return L.text("bridge.some-operations-are-unconfirmed-ask-the-main")
         }
         return nil
     }
@@ -530,15 +571,19 @@ var bridge: PotBridge?
         let blocked = sandboxBlocked(current)
         let connected = viewer["connected"] as? Bool == true
         for (title, id) in [
-            ("重新连接桌面", "connect"), ("打开浏览器", "browser"), ("剪贴板…", "clipboardOpen"),
-            ("", ""), ("打开工作目录", "workspace"), ("关联任务…", "tasks"),
-            ("设为执行默认", "select"), ("", ""),
-            (blocked.map { "停止不可用：" + $0 } ?? "停止环境…", "stop"),
+            (L.text("bridge.reconnect-desktop"), "connect"), (L.text("bridge.open-browser"), "browser"), (
+                L.text("bridge.clipboard"),
+                "clipboardOpen"
+            ),
+            ("", ""), (L.text("bridge.open-workspace"), "workspace"), (L.text("bridge.associated-tasks"), "tasks"),
+            (L.text("bridge.set-as-execution-default"), "select"), ("", ""),
+            (blocked.map { L.text("bridge.cannot-stop") + $0 } ?? L.text("bridge.stop-environment"), "stop"),
             (
                 blocked
-                    .map { "删除不可用：" + $0 } ??
-                    ((target == "default" || current?["referenced"] as? Bool == true) ? "删除不可用：默认环境或仍有关联任务/计划" :
-                        "删除环境…"),
+                    .map { L.text("bridge.cannot-delete") + $0 } ??
+                    ((target == "default" || current?["referenced"] as? Bool == true) ? L
+                        .text("bridge.cannot-delete-default-environment-or-referenced-by") :
+                        L.text("bridge.delete-environment")),
                 "delete"
             ),
         ] {
@@ -581,16 +626,24 @@ var bridge: PotBridge?
         case "workspace": openSandboxWorkspace(target)
         case "tasks":
             let tasks = (sandboxItems.first { $0["id"] as? String == target })?["tasks"] as? [[String: Any]] ?? []
-            let alert = NSAlert(); alert.messageText = "关联任务"
-            alert.informativeText = tasks.isEmpty ? "此环境没有关联任务。" : tasks
-                .map { "\($0["title"] as? String ?? $0["id"] as? String ?? "任务") · \($0["phase"] as? String ?? "")" }
+            let alert = NSAlert(); alert.messageText = L.text("bridge.associated-tasks-24")
+            alert.informativeText = tasks.isEmpty ? L.text("bridge.no-tasks-associated-with-this-environment") : tasks
+                .map { L.format(
+                    "bridge.associated-task-row",
+                    [
+                        String(describing: $0["title"] as? String ?? $0["id"] as? String ?? L.text("navigation.tasks")),
+                        String(describing: $0["phase"] as? String ?? ""),
+                    ]
+                ) }
                 .joined(separator: "\n")
-            alert.addButton(withTitle: "关闭"); alert.beginSheetModal(for: host)
+            alert.addButton(withTitle: L.text("ai.close")); alert.beginSheetModal(for: host)
         case "select": manageSandbox(["action": action, "sandbox_id": target])
         case "stop", "delete":
-            let alert = NSAlert(); alert.messageText = action == "stop" ? "停止环境？" : "删除环境？"
-            alert.informativeText = "操作仅影响此 Sandbox；工作文件保留。使用中的环境会拒绝此操作。"
-            alert.addButton(withTitle: action == "stop" ? "停止" : "删除"); alert.addButton(withTitle: "取消")
+            let alert = NSAlert(); alert.messageText = action == "stop" ? L.text("bridge.stop-environment-27") : L
+                .text("bridge.delete-environment-28")
+            alert.informativeText = L.text("bridge.only-this-sandbox-is-affected-work-files")
+            alert.addButton(withTitle: action == "stop" ? L.text("main.stop") : L.text("bridge.delete")); alert
+                .addButton(withTitle: L.text("schedules-ui.cancel"))
             alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
                 if reply == .alertFirstButtonReturn {
                     self?.manageSandbox(["action": action, "sandbox_id": target])
@@ -626,26 +679,29 @@ var bridge: PotBridge?
     func editSandbox(create: Bool) {
         guard !sandboxBusy, let target = localRuntime?.sandboxID else { return }
         let current = selectedSandbox()
-        let alert = NSAlert(); alert.messageText = create ? "新建 Linux Sandbox" : "环境设置"
-        alert.informativeText = create ? "创建后保持停止，启动桌面时才运行。" : "修改名称与资源前请先停止此环境。"
+        let alert = NSAlert(); alert.messageText = create ? L.text("bridge.new-linux-sandbox") : L
+            .text("ui.environment-settings")
+        alert.informativeText = create ? L.text("bridge.the-environment-stays-stopped-until-you-start") : L
+            .text("bridge.stop-this-environment-before-changing-its-name")
         let box = NSStackView(); box.orientation = .vertical; box.alignment = .leading; box.spacing = 8
-        let name = NSTextField(string: create ? "Linux Sandbox" : current?["name"] as? String ?? "Linux")
+        let name = NSTextField(string: create ? L.text("native.linux-sandbox") : current?["name"] as? String ?? "Linux")
         name.frame.size = NSSize(width: 300, height: 24)
-        box.addArrangedSubview(NSTextField(labelWithString: "名称")); box.addArrangedSubview(name)
+        box.addArrangedSubview(NSTextField(labelWithString: L.text("schedules-ui.name"))); box.addArrangedSubview(name)
         let config = current?["config"] as? [String: Any] ?? [:]
         var fields: [NSTextField] = []
         if !create {
             for (title, key, fallback) in [
                 ("vCPU (1–32)", "cpus", 4),
-                ("内存 GiB (1–128)", "memory_gib", 8),
-                ("系统盘 GiB (4–512)", "disk_gib", 32),
+                (L.text("bridge.memory-gib-1-128"), "memory_gib", 8),
+                (L.text("bridge.system-disk-gib-4-512"), "disk_gib", 32),
             ] {
                 let field = NSTextField(string: String(config[key] as? Int ?? fallback)); fields.append(field)
                 box.addArrangedSubview(NSTextField(labelWithString: title)); box.addArrangedSubview(field)
             }
         }
         box.frame = NSRect(x: 0, y: 0, width: 300, height: create ? 56 : 224); alert.accessoryView = box
-        alert.addButton(withTitle: create ? "创建" : "保存"); alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: create ? L.text("bridge.create") : L.text("usage-ui.save")); alert
+            .addButton(withTitle: L.text("schedules-ui.cancel"))
         alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
             guard reply == .alertFirstButtonReturn, let self else { return }
             if create {
@@ -769,7 +825,7 @@ var bridge: PotBridge?
     }
 
     func webView(_: WKWebView, didFinish _: WKNavigation!) {
-        webDark = nil; layout()
+        webDark = nil; layout(); localizeWeb()
         if let address = localRuntime?.loaded, !address.isEmpty,
            let expected = URL(string: address), web.url?.host == expected.host,
            web.url?.port == expected.port, web.url?.fragment == expected.fragment
@@ -795,6 +851,7 @@ var bridge: PotBridge?
     }
 
     func update(_ value: [String: Any]) {
+        lastUIState = value
         snapshot = value
         running = value["running"] as? Bool ?? false
         selectedRunning = value["selected_running"] as? Bool ?? false
@@ -816,7 +873,8 @@ var bridge: PotBridge?
             textDidChange(Notification(name: NSText.didChangeNotification))
         }
         composerBox.isHidden = (page != 0 && page != 3) || value["task_list"] as? Bool == true
-        placeholder.stringValue = next == "new" ? "描述新任务的目标…" : next.isEmpty ? "给 Pot 发消息…" : "追加指导；中断任务将在下一轮继续…"
+        placeholder.stringValue = next == "new" ? L.text("bridge.describe-the-goal-of-a-new-task") : next.isEmpty ? L
+            .text("bridge.message-pot") : L.text("bridge.add-instructions-interrupted-tasks-resume-next-turn")
         if page == 0 && value["needs_auth"] as? Bool == true {
             composerBox.isHidden = true
         }
@@ -824,9 +882,11 @@ var bridge: PotBridge?
         failed = (value["error"] as? Bool ?? false) || localPhase == "failed"
         sendButton.image = NSImage(
             systemSymbolName: selectedRunning && composer.string.isEmpty ? "stop.fill" : "arrow.up",
-            accessibilityDescription: selectedRunning && composer.string.isEmpty ? "停止任务" : "发送消息"
+            accessibilityDescription: selectedRunning && composer.string.isEmpty ? L.text("bridge.stop-task") : L
+                .text("bridge.send-message")
         )
-        sendButton.toolTip = selectedRunning && composer.string.isEmpty ? "停止任务（⌘.）" : "发送（Enter）；换行（Shift+Enter）"
+        sendButton.toolTip = selectedRunning && composer.string.isEmpty ? L.text("bridge.stop-task-41") : L
+            .text("bridge.send-enter-new-line-shift-enter")
         sendButton.isEnabled = selectedRunning || ready
         if let accepted = value["accepted"] as? String,
            accepted == composer
@@ -892,12 +952,17 @@ var bridge: PotBridge?
             unread: unread,
             highlighted: highlighted
         )
-        let state = (running ? "正在处理" : "待命") + (failed ? " · 环境异常" : waiting ? " · 等待你完成配置" : "")
-        let label = "Pot · \(state)" + (unread > 0 ? " · \(unread) 条未读" : "")
+        let state = (running ? L.text("client.working") : L.text("bridge.idle")) +
+            (failed ? L.text("bridge.environment-error") : waiting ? L.text("bridge.waiting-for-configuration") : "")
+        let label = "Pot · \(state)" + (unread > 0 ? L.format("bridge.0-unread", [String(describing: unread)]) : "")
         status.button?.title = ""
         status.button?.toolTip = nil
         status.button?.setAccessibilityLabel(label)
-        navigation.first?.setAccessibilityLabel("聊天 · \(state)" + (unread > 0 ? " · \(unread) 条未读" : ""))
+        navigation.first?
+            .setAccessibilityLabel(L.format("bridge.chat-0", [String(describing: state)]) + (unread > 0 ? L.format(
+                "bridge.0-unread",
+                [String(describing: unread)]
+            ) : ""))
     }
 }
 
@@ -934,6 +999,10 @@ var bridge: PotBridge?
             .withUnsafeBytes { memcpy(buffer, $0.baseAddress!, data.count)
             }; buffer[data.count] = 0; return Int32(data.count)
     }
+}
+
+@_cdecl("pot_bridge_chinese") public func chinese() -> Bool {
+    MainActor.assumeIsolated { L.locale == "zh-CN" }
 }
 
 @_cdecl("pot_bridge_dark") public func dark() -> Bool {
@@ -1002,7 +1071,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "profile-main": settings.useProfileForOwner()
         case "task-profile":
             settings.routingOwner = v["owner"] as? String ?? "main"
-            settings.routingOwnerName = v["title"] as? String ?? "此任务"
+            settings.routingOwnerName = v["title"] as? String ?? L.text("bridge.this-task")
             settings.section = 4; bridge.selectPage(2); settings.refreshRouting()
         case "history-section": settings.section = v["value"] as? Int ?? 0
         case "section": settings.section = v["value"] as? Int ?? 0; settings
@@ -1010,7 +1079,12 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 settings.routingOwner = "main"; settings.aiScreen = "main"
                 settings.refreshAgents()
             } else if settings.section == 4 {
-                settings.routingOwner = "main"; settings.routingOwnerName = "主会话"; settings.refreshRouting()
+                settings.routingOwner = "main"; settings.routingOwnerName = L
+                    .text("routing.main-conversation"); settings.refreshRouting()
+            }
+        case "language":
+            if let locale = v["value"] as? String, L.select(locale) {
+                bridge.localize(); bridgeWake?()
             }
         case "appearance": settings.changeAppearance(v["value"] as? Int ?? 0)
         case "save-agent":

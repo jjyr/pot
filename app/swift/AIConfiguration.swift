@@ -35,7 +35,7 @@ import Foundation
         guard !aiBusy else { return }
         draftProfile = id; draftRevision += 1
         draftModel = savedProfiles.first { $0["id"] as? String == id }?["model"] as? String ?? ""
-        revision += 1; result = "尚未保存；当前聊天配置保持不变。"
+        revision += 1; result = L.text("aiconfiguration.not-saved-yet-current-chat-configuration-kept")
     }
 
     func editConnection(_ id: String) {
@@ -93,7 +93,7 @@ import Foundation
             connectionName = "Gemini"; apiEndpoint =
                 "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent"; apiProtocol = "gemini"
         case "custom":
-            connectionName = "自定义 API"; apiEndpoint = ""; apiProtocol = "openai_chat"
+            connectionName = L.text("ai.custom-api"); apiEndpoint = ""; apiProtocol = "openai_chat"
         default:
             connectionName = "OpenAI API"; apiEndpoint = "https://api.openai.com/v1"; apiProtocol = "openai_chat"
         }
@@ -129,14 +129,14 @@ import Foundation
 
     func selectOpenCodeRoute(_ model: String) -> Bool {
         guard let route = APIIntegration.openCodeRoute(kind: connectionKind, model: model) else {
-            result = "此 OpenCode 模型尚无已验证的请求格式，请使用受支持模型或自定义 API。"; return false
+            result = L.text("aiconfiguration.this-opencode-model-has-no-verified-request"); return false
         }
         apiEndpoint = route.endpoint; apiProtocol = route.format; return true
     }
 
     func checkAPI(endpoint: String, key: String) {
         guard let bridge, !aiBusy else { return }
-        aiBusy = true; checkMessage = "正在检查连接并读取模型列表；不会发送模型请求…"
+        aiBusy = true; checkMessage = L.text("aiconfiguration.checking-connection-and-fetching-models-no-model")
         Task {
             defer { aiBusy = false }
             do {
@@ -151,7 +151,7 @@ import Foundation
                     modelOptions = modelOptions
                         .filter { APIIntegration.openCodeRoute(kind: connectionKind, model: $0) != nil }
                 }
-                checkMessage = response["message"] as? String ?? "检查完成。"
+                checkMessage = L.message(response["message"] as? String ?? L.text("aiconfiguration.check-complete"))
             } catch { modelOptions = []; checkMessage = error.localizedDescription }
         }
     }
@@ -160,18 +160,18 @@ import Foundation
         guard let bridge, !aiBusy else { return }
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { result = "请填写 Agent 名称。"; return }
-        guard !model.isEmpty else { result = "请选择或填写模型。"; return }
+        guard !name.isEmpty else { result = L.text("aiconfiguration.enter-an-agent-name"); return }
+        guard !model.isEmpty else { result = L.text("aiconfiguration.choose-or-enter-a-model"); return }
         let native = connectionKind == "codex"
         let firstMain = activeSpec.isEmpty && routingOwner == "main"
         if connectionKind.hasPrefix("opencode-"), !selectOpenCodeRoute(model) {
             return
         }
         if native, !nativeAccountReady(connectionKind) {
-            result = "请先完成安装和登录，再检查状态。"; return
+            result = L.text("aiconfiguration.finish-installation-and-sign-in-then-check"); return
         }
         if !native, endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            result = "请填写服务地址。"; return
+            result = L.text("aiconfiguration.enter-a-service-url"); return
         }
         let expected = profile["revision"] as? Int ?? 0
         if connectionDraftID.isEmpty {
@@ -179,7 +179,8 @@ import Foundation
         }
         let target = profile["id"] as? String ?? connectionDraftID
         let kind = connectionKind, protocolName = apiProtocol
-        aiBusy = true; result = firstMain ? "正在保存并设置主 Agent…" : "正在保存连接…"
+        aiBusy = true; result = firstMain ? L.text("aiconfiguration.saving-and-setting-the-main-agent") : L
+            .text("aiconfiguration.saving-connection")
         Task {
             defer { aiBusy = false }
             do {
@@ -234,12 +235,12 @@ import Foundation
                         if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
                             break
                         }
-                        result = "正在设置主 Agent，请等待当前会话交接…"
+                        result = L.text("aiconfiguration.setting-the-main-agent-waiting-for-the")
                         try await Task.sleep(nanoseconds: 750_000_000)
                     }
                     try await reloadAI()
                     guard activeSpec["source_profile_id"] as? String == target else {
-                        result = "连接已保存，主 Agent 尚未生效；请刷新后在主 Agent 中完成设置。"; return
+                        result = L.text("aiconfiguration.connection-saved-but-the-main-agent-is"); return
                     }
                     draftProfile = target; draftModel = model; draftRevision += 1
                 }
@@ -250,14 +251,14 @@ import Foundation
                 if routingOwner != "main" {
                     routingProfile = target; editRoutingProfile(target); section = 4
                 }
-                revision += 1; result = "连接已保存；未发送模型请求。"
+                revision += 1; result = L.text("aiconfiguration.connection-saved-no-model-requests-sent")
             } catch {
                 // A lost response may follow a successful save. Reconcile before retrying.
                 try? await reloadAI()
                 if let saved = savedProfiles.first(where: { $0["id"] as? String == target }) {
                     profile = saved
                 }
-                result = "保存未完成，请刷新后重试：" + error.localizedDescription
+                result = L.text("aiconfiguration.save-incomplete-refresh-and-retry") + error.localizedDescription
             }
         }
     }
@@ -265,23 +266,23 @@ import Foundation
     func saveMain(model: String) {
         guard let bridge, !aiBusy,
               var selected = savedProfiles.first(where: { $0["id"] as? String == draftProfile })
-        else { result = "请先添加并选择一个 Agent。"; return }
+        else { result = L.text("aiconfiguration.add-and-choose-an-agent-first"); return }
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !model.isEmpty else { result = "请填写聊天使用的模型。"; return }
+        guard !model.isEmpty else { result = L.text("aiconfiguration.enter-a-model-for-chat"); return }
         let engine = selected["engine"] as? String ?? ""
         if engine != "pot", !nativeAccountReady(engine) {
-            result = "此 Agent 需要安装或登录，请完成后重新检查。"; return
+            result = L.text("aiconfiguration.this-agent-needs-installation-or-sign-in"); return
         }
         if activeSpec["source_profile_id"] as? String == draftProfile, activeSpec["model"] as? String == model,
            activeSpec["source_profile_revision"] as? Int == selected["revision"] as? Int
         {
-            result = "当前配置已生效。"; aiScreen = "main"; if returnToChat {
+            result = L.text("aiconfiguration.current-configuration-is-active"); aiScreen = "main"; if returnToChat {
                 bridge.selectPage(0); returnToChat = false
             }; return
         }
         let expected = selected["revision"] as? Int ?? 0
         selected["revision"] = expected + 1; selected["model"] = model
-        aiBusy = true; result = "正在保存聊天配置…"
+        aiBusy = true; result = L.text("aiconfiguration.saving-chat-configuration")
         Task {
             defer { aiBusy = false }
             do {
@@ -300,21 +301,24 @@ import Foundation
                     if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
                         break
                     }
-                    result = "正在切换 Agent，等待当前轮次或暂停任务结束。请在原会话停止或继续后等待交接；请勿重复提交。"
+                    result = L.text("aiconfiguration.switching-agent-waiting-for-the-current-turn")
                     try await Task.sleep(nanoseconds: 750_000_000)
                 }
                 try await reloadAI()
                 guard activeSpec["source_profile_id"] as? String == draftProfile,
                       activeSpec["model"] as? String == model
                 else {
-                    result = "切换尚未生效，请刷新状态后重试。"; return
+                    result = L.text("aiconfiguration.switch-not-applied-yet-refresh-status-and"); return
                 }
-                draftModel = model; aiScreen = "main"; revision += 1; result = "主 Agent 已生效。已有后台任务保持原配置。"
+                draftModel = model; aiScreen = "main"; revision += 1; result = L
+                    .text("aiconfiguration.main-agent-is-active-existing-background-tasks")
                 if returnToChat {
                     bridge.selectPage(0); returnToChat = false
                 }
             } catch {
-                result = error.localizedDescription.contains("migration is pending") ? "已有切换正在等待，请等待当前会话结束后再试。" : "聊天配置未切换，请检查连接并刷新后重试。"
+                result = error.localizedDescription.contains("migration is pending") ? L
+                    .text("aiconfiguration.a-switch-is-already-pending-wait-for") : L
+                    .text("aiconfiguration.chat-configuration-unchanged-check-the-connection-refresh")
             }
         }
     }

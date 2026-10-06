@@ -4,7 +4,8 @@ import Foundation
 extension SettingsPanel {
     func startAuthorization(_ engine: String) {
         guard !loginVisible, let runtime = bridge?.runtime else { return }
-        loginEngine = engine; loginVisible = true; loginMessage = "正在打开官方授权…"; result = ""
+        loginEngine = engine; loginVisible = true; loginMessage = L
+            .text("authorization.opening-official-authorization"); result = ""
         let generation = UUID().uuidString
         authorizationID = generation
         authorizationTask = Task { [weak self] in
@@ -22,7 +23,11 @@ extension SettingsPanel {
                 self.authorizationID = attempt
                 self.authorizationURL = response["authorization_url"] as? String ?? ""
                 let code = response["user_code"] as? String ?? ""
-                self.loginMessage = code.isEmpty ? "请在浏览器完成官方授权，然后返回 Pot。" : "请在官方页面输入验证码：\(code)，然后返回 Pot。"
+                self.loginMessage = code.isEmpty ? L
+                    .text("authorization.complete-official-authorization-in-your-browser-then") : L.format(
+                        "authorization.enter-code-0-on-the-official-page",
+                        [String(describing: code)]
+                    )
                 if !self.authorizationURL.isEmpty {
                     guard let url = URL(string: self.authorizationURL),
                           NSWorkspace.shared.open(url) else { throw URLError(.badURL) }
@@ -41,13 +46,17 @@ extension SettingsPanel {
                         if self.connectionModel.isEmpty, let first = self.modelOptions.first {
                             self.connectionModel = first; self.draftRevision += 1
                         }
-                        self.loginMessage = "授权成功，选择模型后即可保存。"; self.result = self.loginMessage
+                        self.loginMessage = L.text("authorization.authorization-complete-choose-a-model-to-save"); self
+                            .result = self.loginMessage
                         self.refreshAgents()
                         self.bridge?.showWindow()
                     } else {
                         self
-                            .loginMessage = phase == "subscription_required" ? "登录成功，但当前账号尚无使用权限。请确认官方套餐后重试。" : phase ==
-                            "expired" ? "授权已超时，请重新登录。" : "授权未完成，请重试。"; self.result = self
+                            .loginMessage = phase == "subscription_required" ? L
+                            .text("authorization.signed-in-but-this-account-does-not") :
+                            phase ==
+                            "expired" ? L.text("authorization.authorization-timed-out-sign-in-again") : L
+                            .text("authorization.authorization-incomplete-try-again"); self.result = self
                             .loginMessage
                     }
                     return
@@ -55,7 +64,8 @@ extension SettingsPanel {
             } catch {
                 if self.authorizationID == generation || self.authorizationID == attempt {
                     self.loginVisible = false; self.authorizationID = ""; self.authorizationURL = ""
-                    self.loginMessage = "授权无法完成，请检查本地 Codex 与网络后重试。"; self.result = self.loginMessage
+                    self.loginMessage = L.text("authorization.unable-to-authorize-check-local-codex-and"); self
+                        .result = self.loginMessage
                 }
                 if !attempt.isEmpty {
                     _ = try? await runtime.request(
@@ -70,7 +80,7 @@ extension SettingsPanel {
     func stopAuthorization() {
         let attempt = authorizationID; authorizationID = ""; authorizationURL = ""
         authorizationTask?.cancel(); authorizationTask = nil
-        loginVisible = false; loginMessage = "授权已取消。"
+        loginVisible = false; loginMessage = L.text("authorization.authorization-cancelled")
         result = loginMessage
         if !attempt.isEmpty, let runtime = bridge?.runtime {
             Task { _ = try? await runtime.request("api/v1/authorization/cancel", body: ["attempt_id": attempt]) }
