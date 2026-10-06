@@ -2,10 +2,10 @@
 mod ai;
 mod routing;
 mod setup;
-use crate::{Shell, gpui};
+use crate::{Shell, design, gpui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName,
+    ActiveTheme, Disableable, Icon, IconName, Sizable,
     button::{Button, ButtonVariants},
     form::{Field, Form},
     input::{Input, InputState},
@@ -15,7 +15,7 @@ use std::ffi::CString;
 
 pub const PAGE_WIDTH: f32 = 820.;
 pub const SIDEBAR: f32 = 56.;
-pub const SANDBOX_HEADER: f32 = 112.;
+pub const SANDBOX_HEADER: f32 = 56.;
 
 /// Shape against the actual column width: GPUI's intrinsic text measurement can
 /// otherwise clip a child before the inherited ellipsis is painted.
@@ -103,7 +103,7 @@ pub fn content() -> Div {
         .py_8()
         .flex()
         .flex_col()
-        .gap_5()
+        .gap_4()
 }
 pub fn title(text: impl Into<SharedString>) -> Div {
     div()
@@ -121,16 +121,129 @@ pub fn card(cx: &App) -> Div {
     div()
         .w_full()
         .p_5()
-        .rounded_lg()
+        .rounded(px(10.))
         .border_1()
         .border_color(cx.theme().border)
-        .bg(cx.theme().background)
+        .bg(design::surface(cx))
         .flex()
         .flex_col()
         .gap_4()
 }
 
+/// Quiet grouped choices, with compact native proportions.
+pub fn segments(cx: &App) -> Div {
+    div()
+        .flex()
+        .self_start()
+        .flex_wrap()
+        .items_center()
+        .gap_1()
+        .p_1()
+        .rounded(px(7.))
+        .bg(design::navigation(cx))
+        .border_1()
+        .border_color(cx.theme().border)
+}
+pub fn form(cx: &App) -> Form {
+    (if design::compact(cx) {
+        Form::vertical()
+    } else {
+        Form::horizontal().label_width(px(144.))
+    })
+    .small()
+    .gap_4()
+}
+pub fn field(label: impl Into<SharedString>) -> Field {
+    let label = label.into();
+    Field::new().label_fn(move |_, cx| {
+        div()
+            .w_full()
+            .text_size(px(14.))
+            .font_weight(FontWeight::MEDIUM)
+            .when(!design::compact(cx), |el| el.text_right())
+            .child(label.clone())
+    })
+}
+/// Animate a newly opened panel without replaying motion on routine refreshes.
+pub fn sheet(panel: Div, key: SharedString, cx: &App) -> AnyElement {
+    if cx.reduce_motion() {
+        panel.into_any_element()
+    } else {
+        panel
+            .with_animation(
+                key,
+                Animation::new(std::time::Duration::from_millis(200)),
+                |el, t| el.opacity(0.92 + 0.08 * t),
+            )
+            .into_any_element()
+    }
+}
+pub fn section(text: impl Into<SharedString>) -> Div {
+    div()
+        .text_size(px(16.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(text.into())
+}
+pub fn empty(icon: IconName, text: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .w_full()
+        .py_12()
+        .px_6()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_3()
+        .text_color(cx.theme().muted_foreground)
+        .text_size(px(13.))
+        .child(Icon::new(icon).size(px(24.)))
+        .child(text.into())
+}
+pub fn loading(text: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .w_full()
+        .py_8()
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap_3()
+        .text_size(px(13.))
+        .text_color(cx.theme().muted_foreground)
+        .child(gpui_kit::component::spinner::Spinner::new().small())
+        .child(text.into())
+}
+pub fn notice(text: impl Into<SharedString>, error: bool, cx: &App) -> Div {
+    let color = if error {
+        cx.theme().danger
+    } else {
+        design::attention(cx)
+    };
+    div()
+        .w_full()
+        .p_3()
+        .rounded(px(8.))
+        .bg(color.opacity(0.07))
+        .flex()
+        .gap_2()
+        .text_size(px(13.))
+        .text_color(color)
+        .child(Icon::new(IconName::Info).size(px(15.)))
+        .child(text.into())
+}
+
+pub fn retry(cx: &mut Context<Shell>) -> Button {
+    Button::new("retry-refresh")
+        .ghost()
+        .small()
+        .icon(IconName::RefreshCw)
+        .label("重试")
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.client.refresh();
+            cx.notify();
+        }))
+}
+
 pub struct Settings {
+    pub scroll: ScrollHandle,
     fields: Vec<Entity<InputState>>,
     revision: Option<i64>,
     synced_values: Vec<String>,
@@ -156,6 +269,7 @@ impl Settings {
             })
             .collect();
         Self {
+            scroll: ScrollHandle::new(),
             fields,
             revision: None,
             synced_values: vec![String::new(); 24],
@@ -237,42 +351,38 @@ impl Settings {
         if section == 1 {
             return self.render_ai(state, cx);
         }
-        let mut form = Form::horizontal().label_width(px(160.));
-        let label = |name: &'static str, value: &'static str| {
-            Field::new().label(name).child(div().py_2().child(value))
-        };
+        let mut form = form(cx);
+        let label =
+            |name: &'static str, value: &'static str| field(name).child(div().py_2().child(value));
         let input = |i: usize, name: &'static str, description: &'static str| {
-            Field::new()
-                .label(name)
+            field(name)
                 .description(description)
                 .child(Input::new(&self.fields[i]).aria_label(name))
         };
         match section {
             0 => {
                 form = form
-                    .child(
-                        Field::new().label("外观").child(
-                            div().flex().gap_2().children(
-                                ["跟随系统", "浅色", "深色"]
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, name)| {
-                                        Button::new(("appearance", i))
-                                            .ghost()
-                                            .label(*name)
-                                            .toggled(state["appearance"].as_u64() == Some(i as u64))
-                                            .when(
-                                                state["appearance"].as_u64() == Some(i as u64),
-                                                |b| b.bg(cx.theme().secondary),
-                                            )
-                                            .on_click(move |_, _, _| {
-                                                command(json!({"action":"appearance","value":i}))
-                                            })
-                                    }),
-                            ),
-                        ),
-                    )
-                    .child(label("快捷键", "⌘D Sandbox · ⌘, 设置 · Shift+Enter 换行"));
+                    .child(field("外观").child(
+                        segments(cx).children(["跟随系统", "浅色", "深色"].iter().enumerate().map(
+                            |(i, name)| {
+                                Button::new(("appearance", i))
+                                    .ghost()
+                                    .small()
+                                    .label(*name)
+                                    .toggled(state["appearance"].as_u64() == Some(i as u64))
+                                    .when(state["appearance"].as_u64() == Some(i as u64), |b| {
+                                        b.bg(cx.theme().secondary)
+                                    })
+                                    .on_click(move |_, _, _| {
+                                        command(json!({"action":"appearance","value":i}))
+                                    })
+                            },
+                        )),
+                    ))
+                    .child(label(
+                        "快捷键",
+                        "⌘[ 后退 · ⌘] 前进 · ⌘D Sandbox · ⌘, 设置 · Shift+Enter 换行",
+                    ));
             }
             4 => {
                 form = self
@@ -283,9 +393,10 @@ impl Settings {
                         "默认 5；1–1000。修改全局限制需要重启环境。",
                     ))
                     .child(
-                        Field::new().label("周期 Token 额度").child(
+                        field("周期 Token 额度").child(
                             Button::new("task-usage-policy")
                                 .ghost()
+                                .small()
                                 .label("设置额度与自动继续 →")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.usage_ui.open_settings();
@@ -320,19 +431,24 @@ impl Settings {
             );
         }
         if section == 4 {
-            actions = actions.child(Button::new("advanced").ghost().label(if self.advanced {"收起高级限制"} else {"高级限制"})
+            actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {"收起高级限制"} else {"高级限制"})
                 .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced=!this.settings.advanced;cx.notify();})))
-                .child(Button::new("save-task-limits").label("应用全局限制…").on_click(move|_,_,cx|
+                .child(Button::new("save-task-limits").primary().small().label("应用全局限制…").on_click(move|_,_,cx|
                     command(json!({"action":"save-agent","key":"","limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}))));
         } else if section == 3 {
-            actions=actions.child(Button::new("workspace").ghost().label("打开工作目录").on_click(|_,_,_|command(json!({"action":"workspace"}))))
-                .child(Button::new("save-sandbox").primary().label("应用并重启…").on_click(move|_,_,cx|command(json!({"action":"save-sandbox","cpus":fields[4].read(cx).value(),"memory":fields[5].read(cx).value(),"disk":fields[6].read(cx).value()}))));
+            actions=actions.child(Button::new("workspace").ghost().small().label("打开工作目录").on_click(|_,_,_|command(json!({"action":"workspace"}))))
+                .child(Button::new("save-sandbox").primary().small().label("应用并重启…").on_click(move|_,_,cx|command(json!({"action":"save-sandbox","cpus":fields[4].read(cx).value(),"memory":fields[5].read(cx).value(),"disk":fields[6].read(cx).value()}))));
         }
         page(cx).child(
             content()
-                .child(title(if setup { "开始使用 Pot" } else { "设置" }))
+                .child(title(
+                    ["通用", "AI 配置", "AI 配置", "工作环境", "任务配置"]
+                        .get(section as usize)
+                        .copied()
+                        .unwrap_or("设置"),
+                ))
                 .child(
-                    div().flex().gap_2().children(
+                    segments(cx).children(
                         [
                             (0, "通用"),
                             (1, "AI 配置"),
@@ -343,6 +459,7 @@ impl Settings {
                         .map(|(i, name)| {
                             Button::new(("settings-tab", i as usize))
                                 .ghost()
+                                .small()
                                 .label(name)
                                 .toggled(section == i as u64)
                                 .when(section == i as u64, |b| b.bg(cx.theme().secondary))
@@ -369,15 +486,30 @@ impl Settings {
                             state["ai_screen"].as_str().unwrap_or("main"),
                             state["secret_revision"].as_i64().unwrap_or(0)
                         )))
+                        .track_scroll(&self.scroll)
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
-                        .child(card(cx).child(form).child(actions))
-                        .child(
-                            div()
-                                .mt_3()
-                                .child(hint(state["result"].as_str().unwrap_or("").to_owned(), cx)),
-                        ),
+                        .child(card(cx).child(form))
+                        .child(div().mt_3().when(
+                            !state["result"].as_str().unwrap_or("").is_empty(),
+                            |el| {
+                                el.child(notice(
+                                    state["result"].as_str().unwrap_or("").to_owned(),
+                                    false,
+                                    cx,
+                                ))
+                            },
+                        )),
+                )
+                .child(
+                    actions
+                        .flex_wrap()
+                        .w_full()
+                        .pt_3()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .flex_shrink_0(),
                 ),
         )
     }
@@ -391,6 +523,7 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
     let action = |id: &'static str, icon: IconName, tooltip: &'static str| {
         Button::new(id)
             .ghost()
+            .small()
             .icon(icon)
             .tooltip(tooltip)
             .accessibility_label(tooltip)
@@ -401,8 +534,11 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
         .child(
             div()
                 .h(px(SANDBOX_HEADER))
-                .px_8()
-                .py_6()
+                .bg(design::navigation(cx))
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .px_6()
+                .py_3()
                 .flex()
                 .flex_col()
                 .gap_2()
@@ -416,16 +552,21 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                                 .flex()
                                 .items_center()
                                 .gap_3()
-                                .child(title("Sandbox"))
+                                .child(hint("桌面", cx))
                                 .child(
                                     Button::new("connection-state")
                                         .ghost()
-                                        .label("●")
-                                        .text_color(rgb(if connected {
-                                            0x26a269
+                                        .small()
+                                        .label(if connected {
+                                            "● 已连接"
                                         } else {
-                                            0xd99a27
-                                        }))
+                                            "● 未连接"
+                                        })
+                                        .text_color(if connected {
+                                            design::success(cx)
+                                        } else {
+                                            design::attention(cx)
+                                        })
                                         .tooltip(if connected { "已连接" } else { "未连接" })
                                         .accessibility_label(if connected {
                                             "已连接"
@@ -442,6 +583,7 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                                 .child(
                                     Button::new("take")
                                         .primary()
+                                        .small()
                                         .label(if human { "交还控制" } else { "接管" })
                                         .disabled(!connected)
                                         .on_click(|_, _, _| {
@@ -453,6 +595,7 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                                 .child(
                                     Button::new("sandbox-settings")
                                         .ghost()
+                                        .small()
                                         .icon(IconName::Settings)
                                         .tooltip("环境设置")
                                         .accessibility_label("环境设置")
@@ -470,6 +613,7 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                         .child(
                             Button::new("start-sandbox")
                                 .primary()
+                                .small()
                                 .label("启动 Sandbox")
                                 .disabled(!matches!(
                                     state["phase"].as_str(),

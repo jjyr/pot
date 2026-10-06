@@ -4,7 +4,6 @@ use gpui_kit::component::{
     ActiveTheme, Disableable, Sizable,
     button::{Button, ButtonVariants},
     chart::BarChart,
-    form::{Field, Form},
     input::{Input, InputState},
     progress::Progress,
 };
@@ -44,6 +43,7 @@ pub fn entry(v: &client::View, cx: &mut Context<Shell>) -> Button {
         }))
 }
 pub struct UsageUI {
+    pub scroll: ScrollHandle,
     pub days: u32,
     pub group_offset: usize,
     pub group_context: Option<(String, u32, String)>,
@@ -62,6 +62,7 @@ impl UsageUI {
     }
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         Self {
+            scroll: ScrollHandle::new(),
             days: 7,
             group_offset: 0,
             group_context: None,
@@ -95,40 +96,34 @@ impl UsageUI {
                 });
                 self.editing = true;
             }
-            let form = Form::horizontal()
-                .label_width(px(160.))
-                .child(
-                    Field::new()
-                        .label("Token 额度")
-                        .child(div().flex().gap_2().children(
-                            [("none", "不限"), ("day", "每天"), ("week", "每周")].map(
-                                |(value, label)| {
-                                    Button::new(SharedString::from(format!("quota-{value}")))
-                                        .ghost()
-                                        .label(label)
-                                        .when(self.period == value, |b| b.bg(cx.theme().secondary))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.usage_ui.period = value.into();
-                                            cx.notify();
-                                        }))
-                                },
-                            ),
-                        )),
-                )
+            let form = ui::form(cx)
+                .child(ui::field("Token 额度").child(ui::segments(cx).children(
+                    [("none", "不限"), ("day", "每天"), ("week", "每周")].map(|(value, label)| {
+                        Button::new(SharedString::from(format!("quota-{value}")))
+                            .ghost()
+                            .small()
+                            .label(label)
+                            .when(self.period == value, |b| b.bg(cx.theme().secondary))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.usage_ui.period = value.into();
+                                cx.notify();
+                            }))
+                    }),
+                )))
                 .when(self.period != "none", |f| {
                     f.child(
-                        Field::new()
-                            .label("额度")
+                        ui::field("额度")
                             .description("输入 + 输出；缓存命中属于输入，支持 K / M")
                             .child(Input::new(&self.limit).aria_label("Token 额度数值")),
                     )
                 })
                 .when(self.period != "none", |f| {
                     f.child(
-                        Field::new().label("额度恢复后").child(
+                        ui::field("额度恢复后").child(
                             div().flex().child(
                                 Button::new("quota-auto")
                                     .ghost()
+                                    .small()
                                     .label(if self.auto_resume {
                                         "自动继续"
                                     } else {
@@ -142,37 +137,35 @@ impl UsageUI {
                         ),
                     )
                 });
-            return ui::page(cx).child(body.child(ui::title("Pot 用量限制"))
+            return ui::page(cx).child(body.child(ui::section("周期额度"))
                 .child(ui::hint("作用于主聊天和所有任务。API 本身不按此周期重置；这是你为 Pot 设置的使用上限。",cx))
                 .child(ui::card(cx).child(form).when(self.period!="none",|el|el.child(ui::hint(format!("{} 00:00 重置 · {}",if self.period=="week"{"每周一"}else{"每天"},self.timezone),cx))))
                 .when(!self.error.is_empty(),|el|el.child(ui::hint(self.error.clone(),cx))).when(!v.usage_error.is_empty(),|el|el.child(ui::hint(v.usage_error.clone(),cx))).when(!v.usage_notice.is_empty(),|el|el.child(ui::hint(v.usage_notice.clone(),cx)))
-                .child(div().flex().gap_2().child(Button::new("save-quota").primary().label("保存").disabled(v.usage_pending||d.is_null()).on_click(cx.listener(|this,_,_,cx|{
+                .child(div().flex().gap_2().child(Button::new("save-quota").primary().small().label("保存").disabled(v.usage_pending||d.is_null()).on_click(cx.listener(|this,_,_,cx|{
                     let u=&mut this.usage_ui;let limit=match parse_count(&u.limit.read(cx).value()){Ok(n)=>n,Err(e)=>{u.error=e.into();cx.notify();return;}};
                     let zone=u.timezone.clone();
                     this.client.usage_action("policy",json!({"period":u.period,"limit":limit,"timezone":zone,"auto_resume":u.auto_resume}));u.error.clear();cx.notify();
-                }))).child(Button::new("quota-back").ghost().label("返回").on_click(|_,_,_|ui::command(json!({"action":"page","value":4}))))));
-        }
-        if detail {
-            body=body.child(div().flex().child(Button::new("usage-back").ghost().label("‹ 返回对话").on_click(cx.listener(|this,_,_,cx|{this.show_tasks=false;ui::command(json!({"action":"page","value":if this.client.view.lock().unwrap().selected.is_empty(){0}else{3}}));cx.notify();}))));
+                }))).child(Button::new("quota-back").ghost().small().label("返回").on_click(|_,_,_|ui::command(json!({"action":"page","value":4}))))));
         }
         body = body.child(
             div()
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(ui::title(if detail {
+                .child(ui::section(if detail {
                     if v.selected.is_empty() {
-                        "主聊天用量"
+                        "累计用量"
                     } else {
-                        "任务用量"
+                        "累计用量"
                     }
                 } else {
-                    "用量"
+                    "整体统计"
                 }))
                 .when(!detail, |el| {
                     el.child(
                         Button::new("quota-settings")
                             .ghost()
+                            .small()
                             .label("用量限制")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.usage_ui.editing = false;
@@ -192,15 +185,19 @@ impl UsageUI {
             ));
         }
         if !v.usage_error.is_empty() {
-            body = body.child(ui::hint(format!("读取用量失败：{}", v.usage_error), cx));
+            body = body.child(ui::retry(cx)).child(ui::notice(
+                format!("读取用量失败：{}", v.usage_error),
+                true,
+                cx,
+            ));
         }
         if d.is_null() {
-            return ui::page(cx).child(body.child(ui::hint("正在读取用量…", cx)));
+            return ui::page(cx).child(body.child(ui::loading("正在读取用量…", cx)));
         }
         let total = if detail { &d["lifetime"] } else { &d["total"] };
         if !detail {
             body = body.child(
-                div().flex().gap_2().children(
+                ui::segments(cx).children(
                     [
                         (7, "最近 7 天"),
                         (30, "最近 30 天"),
@@ -210,6 +207,7 @@ impl UsageUI {
                     .map(|(days, label)| {
                         Button::new(("usage-days", days as usize))
                             .ghost()
+                            .small()
                             .label(label)
                             .when(self.days == days, |b| b.bg(cx.theme().secondary))
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -222,6 +220,7 @@ impl UsageUI {
         }
         let mut scroll = div()
             .id("usage-scroll")
+            .track_scroll(&self.scroll)
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
@@ -245,10 +244,13 @@ impl UsageUI {
                             ("输出", n(total, "output")),
                         ]
                         .map(|(label, value)| {
-                            div()
-                                .flex_1()
-                                .child(ui::hint(label, cx))
-                                .child(div().mt_2().text_size(px(26.)).child(count(value)))
+                            div().flex_1().child(ui::hint(label, cx)).child(
+                                div()
+                                    .mt_2()
+                                    .text_size(px(26.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(count(value)),
+                            )
                         }),
                     ),
                 )
@@ -271,7 +273,7 @@ impl UsageUI {
         );
         let groups = d["agent_models"].as_array().cloned().unwrap_or_default();
         if !groups.is_empty() || self.group_offset > 0 {
-            let mut card = ui::card(cx).child(div().child("Agent / 模型用量"));
+            let mut card = ui::card(cx).child(ui::section("Agent / 模型用量"));
             for (index, row) in groups.iter().enumerate() {
                 let agent = match row["agent"].as_str().unwrap_or("unknown") {
                     "pi" => "Pi",
@@ -363,9 +365,9 @@ impl UsageUI {
             let total_tokens = tokens(total);
             let compressed = tokens(compression).min(total_tokens);
             let conversation = total_tokens.saturating_sub(compressed);
-            let primary = cx.theme().blue.opacity(0.7);
+            let primary = cx.theme().chart_1;
             let secondary = cx.theme().muted_foreground.opacity(0.65);
-            let mut model = ui::card(cx).child(div().child("模型消耗"));
+            let mut model = ui::card(cx).child(ui::section("模型消耗"));
             if total_tokens > 0 {
                 model = model.child(
                     div()
@@ -551,7 +553,7 @@ impl UsageUI {
             }
         } else {
             let data = d["buckets"].as_array().cloned().unwrap_or_default();
-            let color = cx.theme().primary;
+            let color = cx.theme().chart_1;
             scroll = scroll.child(
                 ui::card(cx)
                     .child(ui::hint(
@@ -665,6 +667,7 @@ impl UsageUI {
                     .child(
                         Button::new("usage-resume")
                             .ghost()
+                            .small()
                             .label("继续")
                             .disabled(v.usage_pending)
                             .on_click(cx.listener(|this, _, _, _| {
@@ -678,6 +681,7 @@ impl UsageUI {
             scroll = scroll.child(
                 Button::new("cancel-usage-wait")
                     .ghost()
+                    .small()
                     .label("取消等待")
                     .disabled(v.usage_pending)
                     .on_click(cx.listener(|this, _, _, _| {

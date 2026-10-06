@@ -1,30 +1,28 @@
 use crate::{Shell, client, gpui, ui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable,
+    ActiveTheme, Disableable, Sizable,
     button::{Button, ButtonVariants},
-    form::{Field, Form},
     input::{Input, InputState},
 };
 use pot_protocol::ScheduleInfo;
 use serde_json::json;
 
 pub fn navigation(scheduled: bool, cx: &mut Context<Shell>) -> Div {
-    div()
-        .flex()
-        .gap_2()
-        .children([(false, "任务"), (true, "定时计划")].map(|(value, label)| {
-            Button::new(if value { "nav-schedules" } else { "nav-tasks" })
-                .ghost()
-                .label(label)
-                .when(value == scheduled, |b| b.bg(cx.theme().secondary))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.schedule_tab = value;
-                    cx.notify();
-                }))
-        }))
+    ui::segments(cx).children([(false, "任务"), (true, "定时计划")].map(|(value, label)| {
+        Button::new(if value { "nav-schedules" } else { "nav-tasks" })
+            .ghost()
+            .small()
+            .label(label)
+            .when(value == scheduled, |b| b.bg(cx.theme().secondary))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.schedule_tab = value;
+                cx.notify();
+            }))
+    }))
 }
 pub struct SchedulesUI {
+    pub scroll: ScrollHandle,
     fields: Vec<Entity<InputState>>,
     pub open: bool,
     editing: Option<String>,
@@ -39,6 +37,7 @@ pub struct SchedulesUI {
 impl SchedulesUI {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         Self {
+            scroll: ScrollHandle::new(),
             fields: (0..7)
                 .map(|_| cx.new(|cx| InputState::new(window, cx)))
                 .collect(),
@@ -100,27 +99,25 @@ impl SchedulesUI {
     pub fn render(&self, v: &client::View, cx: &mut Context<Shell>) -> Div {
         let mut body = ui::content()
             .child(navigation(true, cx))
-            .child(ui::title(if self.open {
-                "编辑定时计划"
-            } else {
-                "定时计划"
-            }))
+            .when(self.open, |el|el.child(ui::section("编辑定时计划")))
             .child(ui::hint(
                 "请在主聊天中描述目标和时间来创建计划。隐藏窗口后仍可执行；Quit、睡眠或关机期间不执行，恢复后按计划补跑或跳过。",
                 cx,
             ));
         if !v.schedule_error.is_empty() || !self.error.is_empty() {
-            body = body.child(ui::hint(format!("{} {}", self.error, v.schedule_error), cx));
+            body = body.child(ui::notice(
+                format!("{} {}", self.error, v.schedule_error),
+                true,
+                cx,
+            ));
         }
         if self.open {
             let input = |i, name, description| {
-                Field::new()
-                    .label(name)
+                ui::field(name)
                     .description(description)
                     .child(Input::new(&self.fields[i]).aria_label(name))
             };
-            let mut form = Form::horizontal()
-                .label_width(px(140.))
+            let mut form = ui::form(cx)
                 .child(input(0, "名称", "简短说明这个计划"))
                 .child(input(1, "目标", "每次执行的目标、数据来源和通知条件"))
                 .child(input(
@@ -129,8 +126,8 @@ impl SchedulesUI {
                     "IANA 名称，如 Asia/Shanghai 或 America/New_York",
                 ))
                 .child(
-                    Field::new().label("频率").child(
-                        div().flex().gap_1().children(
+                    ui::field("频率").child(
+                        ui::segments(cx).children(
                             [
                                 ("once", "一次"),
                                 ("interval", "间隔"),
@@ -140,6 +137,7 @@ impl SchedulesUI {
                             .map(|(value, label)| {
                                 Button::new(SharedString::from(format!("kind-{value}")))
                                     .ghost()
+                                    .small()
                                     .label(label)
                                     .when(self.kind == value, |b| b.bg(cx.theme().secondary))
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -169,27 +167,22 @@ impl SchedulesUI {
                 }
             }
             form = form
+                .child(ui::field("错过运行").child(ui::segments(cx).children(
+                    [("coalesce", "最多补跑一次"), ("skip", "跳过")].map(|(value, label)| {
+                        Button::new(SharedString::from(format!("miss-{value}")))
+                            .ghost()
+                            .small()
+                            .label(label)
+                            .when(self.misfire == value, |b| b.bg(cx.theme().secondary))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.schedules_ui.misfire = value.into();
+                                cx.notify();
+                            }))
+                    }),
+                )))
                 .child(
-                    Field::new()
-                        .label("错过运行")
-                        .child(div().flex().gap_2().children(
-                            [("coalesce", "最多补跑一次"), ("skip", "跳过")].map(
-                                |(value, label)| {
-                                    Button::new(SharedString::from(format!("miss-{value}")))
-                                        .ghost()
-                                        .label(label)
-                                        .when(self.misfire == value, |b| b.bg(cx.theme().secondary))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.schedules_ui.misfire = value.into();
-                                            cx.notify();
-                                        }))
-                                },
-                            ),
-                        )),
-                )
-                .child(
-                    Field::new().label("通知").child(
-                        div().flex().gap_1().children(
+                    ui::field("通知").child(
+                        ui::segments(cx).children(
                             [
                                 ("changes", "变化或失败"),
                                 ("all", "每次"),
@@ -198,6 +191,7 @@ impl SchedulesUI {
                             .map(|(value, label)| {
                                 Button::new(SharedString::from(format!("notify-{value}")))
                                     .ghost()
+                                    .small()
                                     .label(label)
                                     .when(self.notify == value, |b| b.bg(cx.theme().secondary))
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -209,9 +203,10 @@ impl SchedulesUI {
                     ),
                 )
                 .child(
-                    Field::new().label("状态").child(
+                    ui::field("状态").child(
                         Button::new("schedule-enabled")
                             .ghost()
+                            .small()
                             .label(if self.enabled { "启用" } else { "暂停" })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.schedules_ui.enabled = !this.schedules_ui.enabled;
@@ -219,15 +214,15 @@ impl SchedulesUI {
                             })),
                     ),
                 );
-            body=body.child(div().id("schedule-editor-scroll").flex_1().min_h_0().overflow_y_scroll().child(ui::card(cx).child(form)))
+            body=body.child(div().id("schedule-editor-scroll").track_scroll(&self.scroll).flex_1().min_h_0().overflow_y_scroll().child(ui::card(cx).child(form)))
                 .child(div().flex().gap_2()
-                    .child(Button::new("save-schedule").primary().label("保存计划").disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx| {
+                    .child(Button::new("save-schedule").primary().small().label("保存计划").disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx| {
                         let e=&mut this.schedules_ui;let values:Vec<String>=e.fields.iter().map(|f|f.read(cx).value().to_string()).collect();
                         let minutes=if e.kind=="interval" {match values[4].parse::<u64>() {Ok(n)=>n,Err(_)=>{e.error="间隔必须是整数分钟".into();cx.notify();return;}}}else{60};
                         let days:Vec<u32>=if e.kind=="weekly" {match values[6].split(',').map(|s|s.trim().parse()).collect::<Result<Vec<_>,_>>() {Ok(v)=>v,Err(_)=>{e.error="星期格式应为 1,2,3,4,5".into();cx.notify();return;}}}else{vec![]};
                         this.client.schedule_action(json!({"action":"update","schedule_id":e.editing,"spec":{"title":values[0],"goal":values[1],"timezone":values[2],"kind":e.kind,"at":values[3],"every_minutes":minutes,"time":values[5],"weekdays":days,"misfire":e.misfire,"notify":e.notify,"enabled":e.enabled}}));cx.notify();
                     })))
-                    .child(Button::new("cancel-schedule-edit").ghost().label("取消").disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx|{this.schedules_ui.open=false;cx.notify();})))
+                    .child(Button::new("cancel-schedule-edit").ghost().small().label("取消").disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx|{this.schedules_ui.open=false;cx.notify();})))
                 );
             return ui::page(cx).child(body);
         }
@@ -237,50 +232,56 @@ impl SchedulesUI {
             let toggle_id = id.clone();
             let delete_id = id.clone();
             let action = if plan.spec.enabled { "pause" } else { "resume" };
-            body=body.child(Button::new("back-schedules").ghost().label("‹ 所有计划").on_click(cx.listener(|this,_,_,cx|{this.client.schedule_select(String::new());this.schedules_ui.delete_confirm=false;cx.notify();})))
-                .child(ui::card(cx).child(ui::title(plan.spec.title.clone()))
+            body=body.child(ui::card(cx).child(ui::section("计划详情"))
                     .child(ui::hint(rule(plan),cx)).child(ui::hint(plan.spec.goal.clone(),cx))
                     .child(ui::hint(format!("下次：{}",if plan.next_label.is_empty(){"未安排"}else{&plan.next_label}),cx))
                     .when(!plan.last_error.is_empty(),|el|el.child(ui::hint(format!("调度错误：{}",plan.last_error),cx)))
                     .child(div().flex().gap_2()
-                        .child(Button::new("schedule-run").primary().label("立即运行").disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":"run","schedule_id":run_id}));cx.notify();})))
-                        .child(Button::new("schedule-pause").ghost().label(if plan.spec.enabled {"暂停"}else{"恢复"}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":action,"schedule_id":toggle_id}));cx.notify();})))
-                        .child(Button::new("schedule-edit").ghost().label("编辑").disabled(v.schedule_pending).on_click(cx.listener(|this,_,window,cx|{let plan=this.client.view.lock().unwrap().schedules.selected.clone();this.schedules_ui.edit(plan.as_ref(),window,cx);cx.notify();})))
-                        .child(Button::new("schedule-delete").ghost().label(if self.delete_confirm {"确认移除计划"}else{"移除"}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{if this.schedules_ui.delete_confirm {this.client.schedule_action(json!({"action":"delete","schedule_id":delete_id}));this.schedules_ui.delete_confirm=false;}else{this.schedules_ui.delete_confirm=true;}cx.notify();})))
+                        .child(Button::new("schedule-run").primary().small().label("立即运行").disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":"run","schedule_id":run_id}));cx.notify();})))
+                        .child(Button::new("schedule-pause").ghost().small().label(if plan.spec.enabled {"暂停"}else{"恢复"}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":action,"schedule_id":toggle_id}));cx.notify();})))
+                        .child(Button::new("schedule-edit").ghost().small().label("编辑").disabled(v.schedule_pending).on_click(cx.listener(|this,_,window,cx|{let plan=this.client.view.lock().unwrap().schedules.selected.clone();this.schedules_ui.edit(plan.as_ref(),window,cx);cx.notify();})))
+                        .child(Button::new("schedule-delete").ghost().small().text_color(cx.theme().danger).label(if self.delete_confirm {"确认移除计划"}else{"移除"}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{if this.schedules_ui.delete_confirm {this.client.schedule_action(json!({"action":"delete","schedule_id":delete_id}));this.schedules_ui.delete_confirm=false;}else{this.schedules_ui.delete_confirm=true;}cx.notify();})))
                     ).child(ui::hint("暂停或移除只影响未来触发，不会停止当前执行。首次成功观测视为变化。",cx))
                 )
                 .child(ui::hint("执行历史 · 最近 100 次 · 点击有任务的记录查看详情",cx))
-                .child(div().id("schedule-runs").flex_1().min_h_0().overflow_y_scroll().children(v.schedules.runs.iter().map(|run| {
+                .child(div().id("schedule-runs").track_scroll(&self.scroll).flex_1().min_h_0().overflow_y_scroll().children(v.schedules.runs.iter().map(|run| {
                     let task=run.task_id.clone();
-                    ui::card(cx).mb_3().child(ui::hint(format!("{} · {}",run.scheduled_label,state(&run.state)),cx))
+                    ui::card(cx).mb_2().child(ui::hint(format!("{} · {}",run.scheduled_label,state(&run.state)),cx))
                         .child(ui::hint(run.summary.clone(),cx))
-                        .when(task.is_some(),|el|el.child(Button::new(SharedString::from(format!("run-{}",run.id))).ghost().label("查看任务 →").on_click(cx.listener(move|this,_,_,cx|{this.show_tasks=false;this.client.select(task.clone().unwrap());this.first=true;cx.notify();}))))
+                        .when(task.is_some(),|el|el.child(Button::new(SharedString::from(format!("run-{}",run.id))).ghost().small().label("查看任务 →").on_click(cx.listener(move|this,_,_,cx|{this.show_tasks=false;this.client.select(task.clone().unwrap());this.first=true;cx.notify();}))))
                 })))
                 .child(div().flex().gap_2()
-                    .child(Button::new("runs-newer").ghost().label("较新记录").disabled(v.runs_offset==0).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();v.runs_offset=v.runs_offset.saturating_sub(20);cx.notify();})))
-                    .child(Button::new("runs-older").ghost().label("较早记录").disabled(v.schedules.runs_next_offset.is_none()).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();if let Some(offset)=v.schedules.runs_next_offset{v.runs_offset=offset;}cx.notify();})))
+                    .child(Button::new("runs-newer").ghost().small().label("较新记录").disabled(v.runs_offset==0).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();v.runs_offset=v.runs_offset.saturating_sub(20);cx.notify();})))
+                    .child(Button::new("runs-older").ghost().small().label("较早记录").disabled(v.schedules.runs_next_offset.is_none()).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();if let Some(offset)=v.schedules.runs_next_offset{v.runs_offset=offset;}cx.notify();})))
                 );
         } else {
             body = body
                 .child(
                     div()
                         .id("schedule-list")
+                        .track_scroll(&self.scroll)
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
                         .when(v.schedules.items.is_empty(), |el| {
-                            el.child(ui::hint("暂无计划。请在主聊天中告诉 Pot 何时做什么。", cx))
+                            el.child(ui::empty(
+                                gpui_kit::component::IconName::Inbox,
+                                "暂无计划。请在主聊天中告诉 Pot 何时做什么。",
+                                cx,
+                            ))
                         })
                         .children(v.schedules.items.iter().map(|plan| {
                             let id = plan.id.clone();
                             ui::card(cx)
-                                .mb_3()
+                                .mb_2()
                                 .child(
                                     Button::new(SharedString::from(format!(
                                         "schedule-{}",
                                         plan.id
                                     )))
                                     .ghost()
+                                    .small()
+                                    .justify_start()
                                     .label(plan.spec.title.clone())
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.client.schedule_select(id.clone());
@@ -322,6 +323,7 @@ impl SchedulesUI {
                                 .child(
                                     Button::new("schedule-prev")
                                         .ghost()
+                                        .small()
                                         .label("上一页")
                                         .disabled(v.schedule_offset == 0)
                                         .on_click(cx.listener(|this, _, _, cx| {
@@ -334,6 +336,7 @@ impl SchedulesUI {
                                 .child(
                                     Button::new("schedule-next")
                                         .ghost()
+                                        .small()
                                         .label("下一页")
                                         .disabled(v.schedules.next_offset.is_none())
                                         .on_click(cx.listener(|this, _, _, cx| {
@@ -354,7 +357,18 @@ fn rule(p: &ScheduleInfo) -> String {
     let frequency = match p.spec.kind.as_str() {
         "once" => format!("一次 · {}", p.spec.at),
         "interval" => format!("每 {} 分钟", p.spec.every_minutes),
-        "weekly" => format!("每周 {:?} · {}", p.spec.weekdays, p.spec.time),
+        "weekly" => format!(
+            "每周 {} · {}",
+            p.spec
+                .weekdays
+                .iter()
+                .filter_map(|day| ["一", "二", "三", "四", "五", "六", "日"]
+                    .get(day.saturating_sub(1) as usize)
+                    .copied())
+                .collect::<Vec<_>>()
+                .join("、"),
+            p.spec.time
+        ),
         _ => format!("每天 {}", p.spec.time),
     };
     format!(

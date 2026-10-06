@@ -131,6 +131,23 @@ Use the bright unified canvas, soft blue user bubbles and mostly unboxed assista
 
 Auto-scroll only while the reader remains near the bottom; otherwise expose the latest-message action. Keep task stage, archive state, pending guidance and conversation Usage available. Navigating away does not stop a task. Empty-chat examples may insert a draft but must not send it automatically.
 
+#### Running-task summary below the latest assistant message
+
+In main Chat, place a compact live summary directly below the latest assistant message. This replaces the proposed task-status entry in the Chat header; do not add a duplicate header summary or a hover interaction. The summary is transient UI, not generated assistant prose or a persisted part of message history. Move it with the latest assistant message rather than copying it below earlier messages.
+
+Each row contains a small activity dot, task title and concise current progress, for example:
+
+```text
+· Organize design references    Comparing sources
+· Summarize the weekly report   Preparing the summary
+```
+
+Use 12–13 px system text in the secondary text color. Keep the summary subordinate to the assistant reply, with compact row spacing, no card border, no filled container and no primary action styling. Truncate long titles/progress without obscuring the row's accessible name. Clicking a row opens that task's conversation through normal navigation history; keyboard activation does the same.
+
+Show only background tasks actually executing. Queued, completed, cancelled, interrupted, failed and waiting-for-user tasks do not belong in this summary. Use authoritative execution state rather than a stale progress sentence; when execution ends, remove its row and do not retain a completion receipt here. Hide the whole region when no background tasks are executing. Show up to three rows, with an “N more running” entry linking to task inspection when needed.
+
+To indicate ongoing activity, the small dot slowly changes brightness or shifts between secondary gray and a muted accent tone over approximately 2.4–3 seconds. Keep title/progress text stable and readable; do not flash, animate every word or synchronize multiple rows into a conspicuous effect. Activity motion runs only while execution is active and visible. Progress replacements may fade in briefly; ending rows collapse softly without forcing the reader to scroll or moving keyboard focus unexpectedly. Under Reduce Motion, use a static activity dot and immediate state updates. Expose a textual Running state to assistive technology, independent of the dot's color or motion.
+
 ### Tasks and schedules
 
 Keep the title, Tasks / Schedules switch, state groups and search outside the scrolling list; pagination stays at the bottom. Use grouped rows rather than separate cards for every item. Each task row shows title, useful context, textual status and change time.
@@ -157,6 +174,23 @@ Keep the desktop usable and full-width. The toolbar shows navigation/title, text
 
 Connection and control ownership reflect actual acknowledgment; viewing or navigating does not reclaim control. Show connected/observing, human control, starting, disconnected/retry and unavailable states. Environment information uses a compact resource panel. Mobile pairing/access remains separate under [#8](https://github.com/jjyr/pot/issues/8).
 
+### Menu-bar Pot activity and unread indicator
+
+The confirmed design combines a pot-shaped execution indicator with a compact numeric unread badge. These represent independent facts: the pot shows whether work is executing, and the badge shows unread main-chat replies. Replace the existing bare number presentation without changing unread accounting or the click-to-open-window behavior. Do not add a tray menu or rely on hovering to explain the state.
+
+| Execution state | Pot appearance |
+| --- | --- |
+| Neither main Chat nor a background task is executing | The existing empty pot |
+| Main Chat is processing or at least one background task is executing | A pot visibly simmering, with a few simple contents/boiling curves and restrained steam |
+
+Keep the small icon legible and predominantly monochrome. Depict cooking rather than detailed individual ingredients: simplify the contents to short boiling curves and, where legible, a small steam mark. The change from empty to simmering must be visible even without animation. A queued or waiting task alone does not make the pot cook. Return to the empty pot only after both main Chat and executing background work are idle.
+
+While actively cooking, boiling/steam may change gently over a slow cycle. Avoid a continuously bouncing pot, flashing whole icon or exaggerated lid movement. Stop the activity animation when idle; under Reduce Motion, show a static simmering pot. Preserve configuration/error distinctions without interpreting them as unread messages or active execution.
+
+Use the selected **compact numeric badge** next to the pot: fixed count area, tabular digits, a soft accent fill and `9+` above nine unread replies. Hide the badge at zero, retaining fixed status-item width so other menu-bar items do not move. Do not also show an unread dot or a second trailing number. An empty pot can have unread messages, and a simmering pot can have none.
+
+Set the exact unread count and actual execution state in the accessibility label; no hover tooltip is required for this design. Clicking opens Pot and does not itself mark all messages read. Retain the current main-chat completion/read-at-latest rules. Badge arrival may use a single 180 ms opacity/scale transition from zero to positive, without repeatedly pulsing on refresh or count changes. Validate real menu-bar backgrounds, selected-button appearance, Retina scale and VoiceOver before implementation acceptance.
+
 ## Motion
 
 Motion supplies liveliness through continuity and tactile feedback. Use gentle settling, typically `cubic-bezier(.22,1,.36,1)`, with no repeated bounce or overshoot. Every effect follows a user action or a meaningful state transition. Do not delay input or block controls for animation.
@@ -171,14 +205,19 @@ Motion supplies liveliness through continuity and tactile feedback. Use gentle s
 | Menu entry | 160 ms; 3 px translation / 0.985 scale | Trigger-relative origin; immediately interactive |
 | Sheet entry | 200 ms; 6 px translation / 0.985 scale | Backdrop fades once; correct initial focus |
 | Copy / Save acknowledgment | Inline text/check; 180 ms check settling from 0.85 scale | Reserve width; acknowledge actual success |
+| Running-task dot | Gentle brightness/muted-color cycle, approximately 2.4–3 seconds | Only for executing, visible tasks; stable text; static under Reduce Motion |
+| Running-task progress / removal | Brief progress fade; 180–220 ms row collapse | No forced scrolling, stale completed rows or lost focus |
+| Pot execution icon | Gentle simmering/steam cycle while work executes | Static empty/simmering shapes remain distinct; no whole-icon bounce |
 | Loading | Small indicator with reserved space | No fabricated percentages or decorative looping |
 
-Respect Reduce Motion: remove animated transforms and disclosure transitions, while preserving necessary selection positioning. Use immediate state changes or restrained opacity feedback. Announce meaningful results accessibly and do not announce every hover or streamed token.
+Activity cycles are semantic execution indicators, not decorative loops: run them only while work is executing and the relevant surface is visible. Respect Reduce Motion: remove animated transforms, activity cycles and disclosure transitions, while preserving necessary selection positioning. Use static execution indicators and immediate state changes or restrained opacity feedback. Announce meaningful results accessibly and do not announce every hover, activity cycle or streamed token.
 
 ## Implementation and validation
+
+2026-10-06 implementation: Chat light/dark colors, pale user bubbles, unboxed assistant messages, the native composer, running-task summary and Pot cooking/unread icons are implemented. Task progress uses runtime tool/reply states rather than invented semantic progress descriptions. Summary removal hides finished content immediately and briefly collapses the released space. Shared light/dark tokens, the 56 px contextual toolbar and Back/Forward history, grouped task rows, four Settings categories with compact AI connection choices, responsive forms and stable action footers, Usage styling, and native/embedded Sandbox toolbar styling are also implemented. Existing saved execution settings remain available under a collapsed advanced disclosure. After rebasing onto #10, the upstream browser authorization, provider integration and Terminal removal are preserved. Its provider grid, connection panels, model pickers and task configuration now use the shared design tokens, compact controls and responsive labels. The connection sheet enters with a restrained 200 ms fade, disabled under Reduce Motion. See [UI validation](validation/ui-ux.md) for verified scope and remaining native checks.
 
 Implement shared tokens and shell/history first, then conversation/task patterns, settings/usage and embedded toolbar consistency. Update the current UI specification as behavior ships. Do not change authentication, task bindings, accounting or desktop-control semantics through styling alone.
 
 Design previews contain illustrative counts, charts and files, a placeholder desktop and simulated login/save/control feedback. Their approval establishes visual and interaction direction, not real-provider or native-rendering acceptance. Full authorization failures, complete usage details and mobile access still require their own designs and implementation verification.
 
-Validate light/dark, 800 × 700, long Chinese titles, keyboard focus, IME input, per-conversation drafts, unsaved settings, scroll/filter restoration, history branching, missing routes, live updates during navigation, loading/errors, reduced motion and embedded desktop focus. Check rendered text/control contrast. UI-only verification requires no paid model calls. Compilation and a real App smoke test are necessary before claiming the design is delivered.
+Validate light/dark, 800 × 700, long Chinese titles, keyboard focus, IME input, per-conversation drafts, unsaved settings, scroll/filter restoration, history branching, missing routes, live updates during navigation, loading/errors, reduced motion and embedded desktop focus. Verify pot activity across main-only/background-only/concurrent execution and queue/wait/finish transitions; unread badges remain independent. Verify summary placement below only the latest assistant message, running-only membership, overflow, progress changes, row removal and navigation without forced scroll/focus changes. Check rendered text/control contrast. UI-only verification requires no paid model calls. Compilation and a real App smoke test are necessary before claiming the design is delivered.

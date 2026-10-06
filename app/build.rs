@@ -20,6 +20,7 @@ fn main() {
         .arg("swift/Authorization.swift")
         .arg("swift/UnreadTracker.swift")
         .arg("swift/TokenCount.swift")
+        .arg("swift/PotIcon.swift")
         .arg("-o")
         .arg(out.join("libpot_native.a"))
         .status()
@@ -41,4 +42,5 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/Authorization.swift");
     println!("cargo:rerun-if-changed=swift/UnreadTracker.swift");
     println!("cargo:rerun-if-changed=swift/TokenCount.swift");
+    println!("cargo:rerun-if-changed=swift/PotIcon.swift");
 }

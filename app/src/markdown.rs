@@ -6,14 +6,14 @@ use gpui_kit::base::{
 
 /// Stable IDs let TextView retain its parser, measured layout and selection across
 /// unrelated shell redraws. The component only reparses changed source text.
-pub fn render(id: &str, source: &str, user: bool, _dark: bool, cx: &App) -> impl IntoElement {
+pub fn render(id: &str, source: &str, user: bool, dark: bool, cx: &App) -> impl IntoElement {
     let style = TextViewStyle::from_theme(&Theme::global(cx));
     let style = if user {
         style
-            .with_foreground(rgb(0xffffff).into())
-            .with_link(rgb(0xffffff).into())
+            .with_foreground(rgb(if dark { 0xe3efff } else { 0x25435f }).into())
+            .with_link(rgb(if dark { 0x82b9f6 } else { 0x0068da }).into())
     } else {
-        style
+        style.with_foreground(rgb(if dark { 0xf2f2f2 } else { 0x262626 }).into())
     };
     TextView::markdown(
         SharedString::from(format!("markdown-{id}")),
