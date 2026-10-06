@@ -8,9 +8,12 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+pot-ui.workspace = true
 serde_json.workspace = true
+pot-protocol.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
+pot-ui = { workspace = true, features = ["presentation"] }
 gpui-kit = "=0.7.1"
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"

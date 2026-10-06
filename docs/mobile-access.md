@@ -92,7 +92,8 @@ Helper viewer URLs, tokens and private network addresses are filtered. Agent
 management-tool display replies use the same restricted state projection.
 
 The browser runs GPUI Kit 0.7.1 WASM. The authentication shell and same-origin
-transport adapter are JS. GPUI shares native design tokens and EN/zh-CN catalogs,
+transport adapter are JS. GPUI reuses `pot-ui` message/Markdown components, chat request/receipt state,
+native design tokens and EN/zh-CN catalogs,
 with touch navigation, per-conversation in-memory drafts, task filtering, browser
 history and read-only overview screens. Input retries preserve the original
 request UUID; an ambiguous write is never replayed with a new UUID automatically.
@@ -172,7 +173,7 @@ Exactly-once OS delivery is not promised.
 See [2026-10-07 acceptance report](validation/mobile-access-20261007.md).
 The desktop broker, RFB credentials and takeover remain unreachable. No
 restricted-Sandbox authority, production relay, complete App bundle boot,
-physical iOS/Android touch/IME/performance, reduced-motion preferences, mobile
+physical iOS/Android touch/IME/performance and mobile
 screen-reader parity or real
 push-provider delivery is declared accepted by these tests. The pilot preserves
 those gates instead of exposing unqualified desktop control.

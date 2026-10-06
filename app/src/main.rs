@@ -3,9 +3,9 @@ extern crate gpui_kit as gpui;
 rust_i18n::i18n!("locales", fallback = "en");
 mod artifacts;
 mod client;
-mod design;
+use pot_ui::design;
 mod i18n;
-mod markdown;
+
 mod navigation;
 mod schedules_ui;
 #[cfg(test)]
@@ -17,11 +17,10 @@ use gpui::{div, prelude::*, px, rgb, *};
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, Theme, ThemeMode,
     button::{Button, ButtonVariants},
-    clipboard::Clipboard,
     input::{Input, InputState},
     list::ListItem,
 };
-use pot_protocol::{MessageStatus, Role};
+use pot_protocol::Role;
 use std::{
     collections::HashSet,
     ffi::{CStr, CString},
@@ -812,188 +811,24 @@ impl Shell {
                                     .join(&view.selected)
                             },
                         );
-                        let user = m.role == Role::User;
-                        let tool = m.role == Role::Tool;
-                        let expanded = self.expanded.contains(&m.id);
-                        let id = m.id.clone();
-                        let label = if tool {
-                            format!(
-                                "{} {} · {}",
-                                if expanded { "⌄" } else { "›" },
-                                m.text.lines().next().unwrap_or(crate::i18n::text("client.tool")),
-                                match m.status {
-                                    MessageStatus::Streaming | MessageStatus::Accepted => crate::i18n::text("schedules-ui.running"),
-                                    MessageStatus::Failed => crate::i18n::text("schedules-ui.failed"),
-                                    MessageStatus::Cancelled => crate::i18n::text("main.stopped"),
-                                    _ => crate::i18n::text("main.done"),
-                                }
-                            )
-                        } else {
-                            String::new()
-                        };
-                        div()
-                            .w_full()
-                            .max_w(px(760.))
-                            .mx_auto()
-                            .flex()
-                            .flex_col()
-                            .group(SharedString::from(format!("message-{}", m.id)))
-                            .when(user, |el| el.items_end())
-                            .when(!user, |el| el.items_start())
-                            .child(
-                                div()
-                                    .id(SharedString::from(m.id.clone()))
-                                    .relative()
-                                    .max_w(px(if user { 620. } else { 720. }))
-                                    .min_w_0()
-                                    .when(user, |el| el.px_4().py_3().rounded(px(18.)).bg(rgb(if dark { 0x243a52 } else { 0xe7f2ff })))
-                                    .when(tool, |el| el.px_3().py_2().rounded(px(10.)).bg(rgb(bubble)))
-                                    .text_color(rgb(if user { if dark { 0xe3efff } else { 0x25435f } } else { ink }))
-                                    .when(tool, |el| {
-                                        el.child(
-                                            Button::new(SharedString::from(format!(
-                                                "tool-{}",
-                                                m.id
-                                            )))
-                                            .ghost()
-                                            .cursor_pointer()
-                                            .text_size(px(13.))
-                                            .label(label)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                if !this.expanded.remove(&id) {
-                                                    this.expanded.insert(id.clone());
-                                                }
-                                                cx.notify();
-                                            })),
-                                        )
-                                    })
-                                    .when(!tool || expanded, |el| {
-                                        let source: std::borrow::Cow<'_, str> = if m.id.starts_with("task-report-") {
-                                            crate::i18n::report(m.text
-                                                .rsplit_once("\n任务编号：")
-                                                .or_else(|| m.text.rsplit_once("\nTask ID:"))
-                                                .map(|(text, _)| text)
-                                                .unwrap_or(&m.text)).into()
-                                        } else if m.role == Role::System || m.request_id.as_deref().is_some_and(|id| id.starts_with("pot-result:")) {
-                                            crate::i18n::message(&m.text).into()
-                                        } else {
-                                            m.text.as_str().into()
-                                        };
-                                        el.child(markdown::render(&m.id, &source, user, dark, cx))
-                                    })
-                                    .when_some(artifact, |el, path| {
-                                        let label = crate::i18n::tr!("main.show-in-finder",
-                                            path.file_name().unwrap_or_default().to_string_lossy()
-                                        );
-                                        el.child(
-                                            div()
-                                                .id("artifact")
-                                                .mt_2()
-                                                .text_size(px(12.))
-                                                .cursor_pointer()
-                                                .text_color(rgb(0x079fee))
-                                                .child(label)
-                                                .on_click(move |_, _, _| {
-                                                    let _ = std::process::Command::new("open")
-                                                        .arg("-R")
-                                                        .arg(&path)
-                                                        .spawn();
-                                                }),
-                                        )
-                                    })
-                                    .when(
-                                        matches!(
-                                            m.status,
-                                            MessageStatus::Failed | MessageStatus::Cancelled
-                                        ),
-                                        |el| {
-                                            el.child(
-                                                div()
-                                                    .mt_2()
-                                                    .text_size(px(12.))
-                                                    .text_color(rgb(if user {
-                                                        0xffffff
-                                                    } else if m.status == MessageStatus::Failed {
-                                                        0xc96a40
-                                                    } else {
-                                                        muted
-                                                    }))
-                                                    .child(
-                                                        if m.status == MessageStatus::Cancelled {
-                                                            crate::i18n::text("main.stopped")
-                                                        } else {
-                                                            crate::i18n::text("main.unfinished-see-the-reason-above")
-                                                        },
-                                                    ),
-                                            )
-                                        },
-                                    )
-                                    .when(user && m.status == MessageStatus::Streaming, |el| {
-                                        el.child(div().text_size(px(11.)).child(crate::i18n::text("main.applied-running")))
-                                    })
-                                    .when(user && m.status == MessageStatus::Accepted, |el| {
-                                        el.child(
-                                            div()
-                                                .text_size(px(11.))
-                                                .child(crate::i18n::text("main.received-will-apply-next-turn")),
-                                        )
-                                    }),
-                            )
-                            .when(!tool, |el| {
-                                el.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .mt_1()
-                                        .text_color(rgb(muted))
-                                        // Reserve the row so hovering never moves messages.
-                                        .when(!latest_reply, |row| {
-                                            row.invisible().group_hover(
-                                                SharedString::from(format!("message-{}", m.id)),
-                                                |style| style.visible(),
-                                            )
-                                        })
-                                        .child(
-                                            Clipboard::new(SharedString::from(format!(
-                                                "copy-{}",
-                                                m.id
-                                            )))
-                                            .value(m.text.clone())
-                                            .tooltip(crate::i18n::text("main.copy-message"))
-                                            .small(),
-                                        )
-                                        .when_some(
-                                            m.id.starts_with("task-report-")
-                                                .then(|| {
-                                                    m.text
-                                                        .rsplit_once("任务编号：").or_else(|| m.text.rsplit_once("Task ID:"))
-                                                        .map(|(_, id)| id.trim().to_string())
-                                                })
-                                                .flatten()
-                                                .filter(|id| !id.is_empty()),
-                                            |row, task| {
-                                                row.child(
-                                                    Button::new(SharedString::from(format!(
-                                                        "open-{}",
-                                                        m.id
-                                                    )))
-                                                    .ghost()
-                                                    .small()
-                                                    .icon(IconName::ExternalLink)
-                                                    .tooltip(crate::i18n::text("main.view-task"))
-                                                    .accessibility_label(crate::i18n::text("main.view-task"))
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.client.select(task.clone());
-                                                        this.show_tasks = false;
-                                                        this.first = true;
-                                                        cx.notify();
-                                                    })),
-                                                )
-                                            },
-                                        ),
-                                )
-                            })
+                        let source = pot_ui::chat::display_source(m, crate::i18n::report, crate::i18n::message);
+                        let artifact = artifact.map(|path| {
+                            let label = crate::i18n::tr!("main.show-in-finder", path.file_name().unwrap_or_default().to_string_lossy());
+                            div().id("artifact").mt_2().text_size(px(12.)).cursor_pointer().text_color(rgb(0x079fee)).child(label)
+                                .on_click(move |_, _, _| { let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn(); }).into_any_element()
+                        });
+                        let labels = pot_ui::chat::Labels::new(|key| crate::i18n::text(key).into());
+                        let handler: pot_ui::chat::ChatHandler = std::rc::Rc::new(cx.listener(|this, action: &pot_ui::chat::ChatAction, _, cx| {
+                            match action {
+                                pot_ui::chat::ChatAction::ToggleTool(id) => { if !this.expanded.remove(id) { this.expanded.insert(id.clone()); } }
+                                pot_ui::chat::ChatAction::OpenTask(id) => { this.client.select(id.clone()); this.show_tasks=false; this.first=true; }
+                            }
+                            cx.notify();
+                        }));
+                        pot_ui::chat::message(pot_ui::chat::MessageView {
+                            message: m, source: &source, labels: &labels, artifact,
+                            options: pot_ui::chat::MessageOptions { dark, expanded:self.expanded.contains(&m.id), latest_reply, touch:false, available_width:f32::from(window.viewport_size().width) },
+                        }, handler, cx)
                             .when(view.selected.is_empty() && latest_assistant == Some(index) && (!view.running_tasks.is_empty() || self.summary_removal.is_some()), |el| {
                                 el.child(div().mt_2().w_full().max_w(px(600.)).flex().flex_col().gap_1().text_size(px(12.)).text_color(rgb(muted))
                                     .children(view.running_tasks.iter().map(|task| {

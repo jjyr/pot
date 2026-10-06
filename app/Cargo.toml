@@ -7,6 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+pot-ui = { workspace = true, features = ["presentation"] }
 gpui-kit = "=0.7.1"
 rust-i18n = "=4.2.4"
 unicode-segmentation = "=1.13.3"

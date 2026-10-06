@@ -69,6 +69,7 @@ pub struct View {
     /// Command errors survive background updates until the next user attempt.
     pub command_error: String,
     pub pending: bool,
+    sending: pot_ui::state::SendState,
     pub accepted_text: Option<String>,
     pub selected: String,
     pub tasks: Vec<TaskInfo>,
@@ -146,15 +147,12 @@ impl View {
         true
     }
     pub fn can_send(&self) -> bool {
-        !self.pending
-            && self.error.is_empty()
-            && self.snapshot.as_ref().is_some_and(|s| {
-                (s.turn.is_none() || !self.selected.is_empty())
-                    && (!self.selected.is_empty()
-                        || s.engine.detail.as_deref() != Some("等待 Pot 额度恢复"))
-                    && s.engine.phase == EnginePhase::Ready
-                    && s.budget.as_ref().is_none_or(|b| b.remaining() > 0)
-            })
+        pot_ui::state::can_send(
+            self.snapshot.as_ref(),
+            !self.selected.is_empty(),
+            self.pending,
+            self.error.is_empty(),
+        )
     }
     fn replace(&mut self, snapshot: Snapshot) -> Result<(), String> {
         if snapshot.api_version != API_VERSION {
@@ -199,7 +197,8 @@ impl View {
     }
     fn accepted(&mut self, req: &SendMessage, result: SendMessageAccepted) {
         self.pending = false;
-        self.accepted_text = Some(req.text.clone());
+        self.sending.accept(&req.request_id);
+        self.accepted_text = Some(pot_ui::state::Receipt::from_request(req).text);
         if let Some(s) = self
             .snapshot
             .as_mut()
@@ -501,6 +500,7 @@ impl Client {
                             );
                             let mut state = v.lock().unwrap();
                             state.pending = false;
+                            state.sending.reject(&req.request_id);
                             state.command_error = detail;
                             break;
                         }
@@ -514,6 +514,7 @@ impl Client {
                                         state.snapshot = None;
                                     }
                                     state.pending = false;
+                                    state.sending.accept(&req.request_id);
                                     state.accepted_text = Some(req.text.clone());
                                 } else {
                                     match serde_json::from_value::<SendMessageAccepted>(result) {
@@ -522,6 +523,7 @@ impl Client {
                                         }
                                         Err(_) => {
                                             state.pending = false;
+                                            state.sending.reject(&req.request_id);
                                             state.command_error = crate::i18n::text(
                                                 "client.invalid-send-response-format",
                                             )
@@ -780,22 +782,22 @@ impl Client {
         if !state.can_send() {
             return false;
         }
+        let conversation = if state.selected.is_empty() {
+            "main".into()
+        } else {
+            state.selected.clone()
+        };
+        let Ok(request) = state
+            .sending
+            .begin(uuid::Uuid::new_v4().to_string(), conversation, text)
+        else {
+            return false;
+        };
         state.pending = true;
         state.command_error.clear();
-        if self
-            .tx
-            .send(SendMessage {
-                request_id: uuid::Uuid::new_v4().to_string(),
-                conversation_id: if state.selected.is_empty() {
-                    "main".into()
-                } else {
-                    state.selected.clone()
-                },
-                text,
-            })
-            .is_err()
-        {
+        if self.tx.send(request.clone()).is_err() {
             state.pending = false;
+            state.sending.reject(&request.request_id);
             state.command_error =
                 crate::i18n::text("client.send-service-exited-reopen-the-app").into();
             return false;

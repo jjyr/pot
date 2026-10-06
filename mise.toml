@@ -103,3 +103,7 @@ run = "cargo run --locked -p pot-server"
 [tasks."build:mobile"]
 description = "Build the pinned nightly GPUI Web/WASM app and browser assets"
 run = "python scripts/build-mobile"
+
+[tasks."test:ui"]
+description = "Test portable shared UI state and locale contracts"
+run = "cargo test --locked -p pot-ui -j 4"

@@ -1,5 +1,5 @@
 import {createInstaller, isInstalled} from '/install.js';
-let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted, pending;
+let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
 let scope='active', query='', offset=0, nextOffset=null, pushStatus;
 const initialRoute=new URLSearchParams(location.search);
 task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','sandbox','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
@@ -33,17 +33,16 @@ async function refresh(){
     const current=await api(route?`/api/v1/tasks/${encodeURIComponent(route)}`:'/api/v1/snapshot');
     if(route!==task||requestedPage!==page)return;
     snapshot=current;
-    if(pending&&pending.conversation===(route||'main')&&current.messages?.some(m=>m.request_id===pending.body.request_id)){
-      accepted={id:pending.body.request_id,conversation:pending.conversation,text:pending.body.text};pending=null;notice=t('mobile.shell.received');
-    }
-    const data={page,conversation:task||'main',locale:language,notice,snapshot,accepted,installed:isInstalled(),dark:matchMedia('(prefers-color-scheme: dark)').matches};
+    const receipt=JSON.parse(module.reconcile_send(JSON.stringify(current)));
+    if(receipt){accepted=receipt;notice=t('mobile.shell.received');}
+    const data={connected:true,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches,page,conversation:task||'main',locale:language,notice,snapshot,accepted,installed:isInstalled(),dark:matchMedia('(prefers-color-scheme: dark)').matches};
     if(page==='tasks'){const result=await api(`/api/v1/tasks/query?scope=${scope}&q=${encodeURIComponent(query)}&offset=${offset}&limit=20`);data.tasks=result.items||[];nextOffset=result.next_offset;data.scope=scope;}
     if(page==='sandbox'){const result=await api('/api/v1/sandboxes');data.sandboxes=result.items||result.sandboxes||[];}
     if(page==='usage'){data.usage=await api('/api/v1/usage/summary?days=7&offset=0&timezone='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone));}
     if(page==='schedules'){data.schedules=await api('/api/v1/schedules');}
     if(route!==task||requestedPage!==page||requestedQuery!==`${scope}:${query}:${offset}`)return;
     module.update_view(JSON.stringify(data));
-  }catch(e){notice=t('mobile.shell.connection-unavailable')+e.message;module.update_view(JSON.stringify({page,conversation:task||'main',locale:language,notice,snapshot,accepted}));}
+  }catch(e){notice=t('mobile.shell.connection-unavailable')+e.message;module.update_view(JSON.stringify({connected:false,page,conversation:task||'main',locale:language,notice,snapshot,accepted}));}
   finally{refreshing=false;}
 }
 async function start(){
@@ -56,11 +55,12 @@ async function start(){
   }
 }
 async function sendPending(){
-  if(!pending)return;
-  const sent=pending;
-  await api(sent.path,sent.body);
-  accepted={id:sent.body.request_id,conversation:sent.conversation,text:sent.body.text};
-  if(pending===sent)pending=null;notice=t('mobile.shell.received');
+  const sent=JSON.parse(module.pending_send());
+  if(!sent)return;
+  const path=sent.conversation_id==='main'?'/api/v1/messages':`/api/v1/tasks/${encodeURIComponent(sent.conversation_id)}/messages`;
+  const result=await api(path,sent);
+  const receipt=JSON.parse(module.accept_send(sent.request_id,JSON.stringify(result)));
+  if(receipt)accepted=receipt;notice=t('mobile.shell.received');
 }
 window.potAction=async(action,value)=>{
   const write=action==='send'||action==='retry';
@@ -77,8 +77,8 @@ window.potAction=async(action,value)=>{
     if(action==='language'){language=language==='en'?'zh-CN':'en';try{localStorage.setItem('pot-locale',language);}catch{}if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}
     if(action==='logout'){await api('/access/logout',{});const reg=await navigator.serviceWorker?.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();location.reload();return;}
     if(action==='send'){
-      if(pending)throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));
-      const id=crypto.randomUUID();pending={conversation:task||'main',path:task?`/api/v1/tasks/${encodeURIComponent(task)}/messages`:'/api/v1/messages',body:{request_id:id,conversation_id:'main',text:value}};
+      if(JSON.parse(module.pending_send()))throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));
+      module.begin_send(task||'main',value,crypto.randomUUID());
       notice=t('mobile.shell.sending');await sendPending();
     }
     if(action==='retry')await sendPending();

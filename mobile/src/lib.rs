@@ -3,10 +3,4 @@
 mod web;
 
 #[cfg(target_family = "wasm")]
-mod gpui {
-    pub use gpui_kit::*;
-}
-#[cfg(target_family = "wasm")]
-#[path = "../../app/src/design.rs"]
-#[allow(dead_code)]
-mod design;
+use pot_ui::design;

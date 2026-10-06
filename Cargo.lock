@@ -6093,6 +6093,7 @@ dependencies = [
  "async-channel",
  "gpui-kit",
  "pot-protocol",
+ "pot-ui",
  "qrcode",
  "rust-i18n",
  "serde_json",
@@ -6162,6 +6163,8 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "gpui-kit",
+ "pot-protocol",
+ "pot-ui",
  "serde_json",
  "wasm-bindgen",
 ]
@@ -6258,6 +6261,16 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "pot-ui"
+version = "0.1.0"
+dependencies = [
+ "gpui-kit",
+ "pot-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
