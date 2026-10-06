@@ -1,6 +1,6 @@
 # Pot UI specification
 
-Updated: 2026-10-06. Current MVP UI specification; see [UI validation](validation/ui-ux.md) for historical acceptance and [Development plan](development-plan.md) for scope.
+Updated: 2026-10-06. Current MVP UI specification; see [Development plan](development-plan.md) for scope.
 
 For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Shared page colors, layouts, the contextual toolbar and navigation history, Chat, the composer and Pot activity/unread icons now follow that direction. The upstream browser-authorization/provider integration and Terminal removal are retained; the new AI panels share these visual tokens and responsive forms.
 
@@ -87,9 +87,13 @@ Token input is decimal: 1K=1, 000, 1M=1, 000, 000, stored as integers. Remove th
 
 ## Sandbox desktop
 
-The Host chat/backend stay available with every environment stopped. The native environment picker selects the displayed Linux Sandbox; main Agent tool selection is separately visible in inventory. Each task shows its immutable Sandbox ID. Desktop starts explicitly, independently of Agent/tool startup. Worker lifecycle/target changes are rejected by Runtime.
+The Host chat/backend stay available with every environment stopped. Sandbox uses the existing 56 pt global rail, a 224 pt environment sidebar, and a desktop area with two 56 pt toolbar rows. Selecting an environment shows its noVNC desktop directly. A stopped environment stays stopped until Start Desktop is pressed. Selecting a running execution environment requests its desktop component automatically. View selection never changes the execution default; Set Execution Default is an explicit menu action affecting future unspecified assignments. Each task retains its immutable Sandbox ID.
 
-Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent bottom Browser/Files/Terminal launchers/window switching and matching context menu. CJK fonts cover Chinese/Japanese/Korean. Software is preinstalled; see [Sandbox image](sandbox-image.md) for build/theme entries.
+The list shows environment name, phase, running task count and the execution-default marker. New creates a stopped Linux environment. The desktop toolbar provides Take Over / Give Back, selected-environment Settings and More. More contains reconnect, browser, clipboard, workspace, associated tasks, execution-default selection, stop and delete. Busy leases and unsettled operations explain disabled stop/delete actions; the Runtime rechecks restrictions. The default environment and environments referenced by durable tasks or schedules cannot be deleted. Files are retained after deletion.
+
+Settings edits the selected environment's name and CPU/memory/system-disk values through Runtime. The environment must be stopped or failed, with no active leases or unsettled operations. Resources persist in `sandboxes/<id>/sandbox.json` and apply on the next start; global resource files are no longer read. Worker lifecycle/target changes are rejected by Runtime. Async status, desktop probes and management requests capture their target; switching views invalidates prior view completions.
+
+Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent bottom Browser/Files/Terminal launchers/window switching and matching context menu. CJK fonts cover Chinese/Japanese/Korean. Software is preinstalled; see Sandbox image for build/theme entries.
 
 ## AI Configuration (#7)
 
@@ -105,7 +109,7 @@ OpenCode uses a maintained per-plan, per-model route table in `app/swift/APIInte
 
 For an empty main configuration, the final connection action also sets the Main Agent through the existing migration boundary. Entry from Chat uses Save and start chatting and restores its draft without sending. Settings explains Save and set as Main Agent. Existing main configurations are not replaced by ordinary additions. Save retains a stable draft connection identity and reconciles partially completed saves before retrying.
 
-Account authorization uses official Host Codex App Server interfaces. Grok integration is outside the current scope. The user explicitly approved native authentication endpoints and a temporary native callback relay on 2026-10-06. The shared panel opens the official browser URL, waits for the official completion result and account verification, then reads model options. Callback receipt alone never establishes authentication. Cancel, failure, expiry, app shutdown and environment loss close the Mac listener. Only native bearer-authenticated requests are accepted; browser Origins and worker tokens are rejected. Callback targets are pinned to the attempt's official Host loopback URL and state. No authorization codes, tokens or passwords enter product records or logs. Codex falls back to the official device-code flow if the Mac callback port is unavailable.
+Account authorization uses official Host Codex App Server interfaces. The panel opens the official browser URL; the official Codex process owns its Host loopback callback and credentials. Pot runs no callback listener or VM relay. Only the matching official login-completed event followed by account verification establishes success; Pot then reads model options. Native-only start/status/cancel APIs reject browser Origins and worker tokens. Cancellation, timeout and shutdown settle the official login attempt. The backend also supports official device-code authorization. Real-account acceptance must be renewed after this Host change.
 
 The existing Runtime PTY subsystem is retained; removal of this separate subsystem was also rejected by automatic review. This is separate from the deleted product Terminal UI and from Agent shell/tool execution.
 
@@ -113,9 +117,9 @@ Main Save reuses Runtime migration. Pending operations disable duplicate submiss
 
 Task Configuration preserves existing explicit worker defaults/routing and allows choosing Follow Chat. Advanced profile editing/copy, allowlists, profile/provider caps and allowances remain available. Task-specific Change Agent targets only that task and reuses AI connection management; completion returns to the task. Credential-independent product limits use private `execution-limits.json`, without implicitly selecting Pi or requiring a DeepSeek key.
 
-Initial setup opens ordinary AI Configuration directly and can be deferred. Status refresh never selects an Agent or makes paid model probes. Real-account/engine matrices are recorded separately in dated acceptance reports.
+Unconfigured Chat offers AI Configuration; the user can keep browsing without configuring an Agent. There is no environment/tool installation wizard. Status refresh never selects an Agent or makes paid model probes. Real-account/engine matrices are recorded separately in dated acceptance reports.
 
-Global/session usage both show Agent / model usage grouped by Pi/Codex/Grok and model (historical rows retain their original labels),
-including input/output/input-cache/incomplete records; missing legacy attribution shows Unknown Agent.
+Global/session usage both show Agent / model usage grouped by Pi/Codex and model (historical rows retain their original labels),
+including input/output/input-cache/incomplete records; missing attribution shows Unknown Agent.
 Global categories follow selected ranges; details use session totals, 20/page with previous/next.
 Category pages do not change totals/trends/allowances; range/session/zone changes reset pages.

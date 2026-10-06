@@ -1,12 +1,12 @@
 # Local Agents and managed Sandboxes
 
-Updated: 2026-10-06. Implemented boundaries; dated acceptance is recorded separately. This is the current target specification for Agent/Sandbox placement and permissions. See the [feasibility research](research/agent-sandbox-decoupling.md) for source evidence and the [architecture](architecture.md) for the current deployment.
+Updated: 2026-10-06. Implemented boundaries; dated acceptance is recorded separately. This is the current target specification for Agent/Sandbox placement and permissions. See the [architecture](architecture.md) for the current deployment.
 
 ## Confirmed scope
 
 Pot runs Agent loops and the persistent product control plane on the Host. Sandboxes are separately managed execution resources. The main Agent can control multiple Sandboxes; a task worker executes within exactly one assigned environment and cannot control Sandbox lifecycle or select another environment.
 
-- Pi and Codex are the initial supported Drivers for this design. Grok is excluded from this decoupling increment; Grok execution and its product setup entry are disabled.
+- Pi and Codex are the supported Drivers.
 - Host-side Agent execution does not mean local model inference. Model connections remain a separate configuration concern.
 - Model-selected shell, filesystem, browser and desktop operations execute in Sandboxes. Direct Host execution is out of scope, including fallback when a Sandbox is unavailable.
 - Multiple Sandbox instances are part of the target model. Start with Linux providers; macOS and Windows providers are later additions rather than prerequisites for the first slice.
@@ -31,6 +31,12 @@ This boundary must be enforced by tool loadouts, scoped credentials and Runtime 
 Runtime can prepare or recover the already assigned environment according to its lifecycle policy; that is infrastructure behavior, not worker lifecycle authority. Preparation must not silently create a different environment or change the task binding.
 
 ## Task bindings and multiple environments
+
+At creation, an explicit `sandbox_id` selects that environment. If omitted, Runtime snapshots the currently selected Sandbox; the initial selection is `default`. Creation does not allocate a new VM per task or balance tasks across existing VMs. Three tasks without an explicit target therefore share the selected Sandbox. To use three environments, the main Agent creates their definitions and assigns each task a different ID.
+
+The main Agent changes the execution default through `pot_manage_sandbox` with `action: select`; the Sandbox environment sidebar only selects the displayed environment. Prefer explicit IDs when creating tasks for several environments in one batch.
+
+The assignment persists before dispatch. Changing the main selection affects only later task creation and main environment tools, never existing tasks or saved schedules. Each task uses `/data/workspace/tasks/TASK_ID` in its assigned environment. Agent profile routing and global/profile/provider concurrency limits do not choose a Sandbox. Runtime starts the bound environment when required; it does not retarget a task to another ready VM.
 
 Persist the Sandbox identity separately from the Agent/profile binding. Each worker has one assigned Sandbox and workspace scope before environment execution begins. The worker cannot switch that binding across turns or after restart.
 
@@ -79,4 +85,4 @@ The UI should use one environment vocabulary for both Drivers. Pi extension rout
 4. Stopping/crashing one environment does not stop chat, corrupt native sessions or interrupt tasks in another environment. Busy-stop, task cancellation and shared-environment behavior follow the distinct contracts above.
 5. Persistent artifacts remain accessible after Sandbox shutdown; unknown side effects are reconciled without silent replay.
 
-These tests precede adding macOS/Windows providers. Direct Host tools and Grok decoupling are outside acceptance scope.
+These tests precede adding macOS/Windows providers. Direct Host tools are outside acceptance scope.

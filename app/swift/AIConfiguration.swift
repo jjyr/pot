@@ -5,12 +5,12 @@ import Foundation
 @MainActor extension SettingsPanel {
     var activeNeedsLogin: Bool {
         let engine = activeSpec["engine"] as? String ?? ""
-        return ["codex", "grok"].contains(engine) && agentStates
+        return engine == "codex" && agentStates
             .contains { $0["id"] as? String == engine && $0["authentication"] as? String == "required" }
     }
 
     func openAI(fromChat: Bool = false) {
-        setup = false; section = 1; returnToChat = fromChat
+        section = 1; returnToChat = fromChat
         bridge?.selectPage(2); refreshAgents()
     }
 
@@ -51,7 +51,7 @@ import Foundation
         apiEndpoint = connection?["endpoint"] as? String ?? ""
         apiProtocol = connection?["protocol"] as? String ?? "openai_chat"
         hasAPIKey = connection?["has_key"] as? Bool ?? false
-        if connectionKind == "pot" {
+        if connectionKind == "pi" {
             let host = URLComponents(string: apiEndpoint)?.host ?? ""
             connectionKind = host == "api.anthropic.com" && apiProtocol == "anthropic_messages" ? "anthropic" :
                 host == "generativelanguage.googleapis.com" && apiProtocol == "gemini" ? "gemini" :
@@ -79,7 +79,7 @@ import Foundation
         secretRevision += 1; profile = [:]; connectionKind = kind; aiScreen = "manage"
         checkMessage = ""; result = ""; modelOptions = []; hasAPIKey = false
         switch kind {
-        case "codex", "grok":
+        case "codex":
             connectionName = kind.capitalized; apiEndpoint = ""
         case "deepseek":
             connectionName = "DeepSeek"; apiEndpoint = "https://api.deepseek.com/v1/chat/completions"; apiProtocol = "openai_chat"
@@ -98,7 +98,7 @@ import Foundation
             connectionName = "OpenAI API"; apiEndpoint = "https://api.openai.com/v1"; apiProtocol = "openai_chat"
         }
         connectionModel = ""
-        if ["codex", "grok"].contains(kind),
+        if kind == "codex",
            let agent = agentStates
            .first(where: { $0["id"] as? String == kind && $0["authentication"] as? String == "authenticated" })
         {
@@ -162,12 +162,12 @@ import Foundation
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { result = "请填写 Agent 名称。"; return }
         guard !model.isEmpty else { result = "请选择或填写模型。"; return }
-        let native = ["codex", "grok"].contains(connectionKind)
+        let native = connectionKind == "codex"
         let firstMain = activeSpec.isEmpty && routingOwner == "main"
         if connectionKind.hasPrefix("opencode-"), !selectOpenCodeRoute(model) {
             return
         }
-        if native, !setupCanStart(connectionKind) {
+        if native, !nativeAccountReady(connectionKind) {
             result = "请先完成安装和登录，再检查状态。"; return
         }
         if !native, endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -187,7 +187,7 @@ import Foundation
                     var value = profile
                     value["id"] = target; value["revision"] = expected + 1; value["name"] = name
                     value["engine"] = kind; value["model"] = model
-                    value["provider"] = kind == "grok" ? "xai" : "openai"
+                    value["provider"] = "openai"
                     value["auth_ref"] = "cli:" + kind
                     if value["params"] == nil {
                         value["params"] = ["max_output_tokens": 8192]
@@ -196,7 +196,7 @@ import Foundation
                         value["tool_policy"] = [
                             "worker_orchestration": false,
                             "summary_read_only": true,
-                            "unattended": "guest_vm",
+                            "unattended": "sandbox",
                         ]
                     }
                     _ = try await bridge.runtime.request(
@@ -245,7 +245,7 @@ import Foundation
                 }
                 aiScreen = "main"; secretRevision += 1
                 if firstMain, returnToChat {
-                    finishSetup(); returnToChat = false
+                    bridge.selectPage(0); returnToChat = false
                 }
                 if routingOwner != "main" {
                     routingProfile = target; editRoutingProfile(target); section = 4
@@ -269,14 +269,14 @@ import Foundation
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { result = "请填写聊天使用的模型。"; return }
         let engine = selected["engine"] as? String ?? ""
-        if engine != "pot", !setupCanStart(engine) {
+        if engine != "pi", !nativeAccountReady(engine) {
             result = "此 Agent 需要安装或登录，请完成后重新检查。"; return
         }
         if activeSpec["source_profile_id"] as? String == draftProfile, activeSpec["model"] as? String == model,
            activeSpec["source_profile_revision"] as? Int == selected["revision"] as? Int
         {
             result = "当前配置已生效。"; aiScreen = "main"; if returnToChat {
-                finishSetup(); returnToChat = false
+                bridge.selectPage(0); returnToChat = false
             }; return
         }
         let expected = selected["revision"] as? Int ?? 0
@@ -311,7 +311,7 @@ import Foundation
                 }
                 draftModel = model; aiScreen = "main"; revision += 1; result = "主 Agent 已生效。已有后台任务保持原配置。"
                 if returnToChat {
-                    finishSetup(); returnToChat = false
+                    bridge.selectPage(0); returnToChat = false
                 }
             } catch {
                 result = error.localizedDescription.contains("migration is pending") ? "已有切换正在等待，请等待当前会话结束后再试。" : "聊天配置未切换，请检查连接并刷新后重试。"

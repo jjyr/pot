@@ -112,9 +112,6 @@ elif cmd == "build":
         ),
     )
 elif cmd == "bundle":
-    legacy = ROOT / "pot.app"
-    if legacy.exists() and (not APP.exists() or legacy.samefile(APP)):
-        legacy.rename(APP)
     for sub in ["MacOS", "Helpers", "Resources/runtime"]:
         (APP / "Contents" / sub).mkdir(parents=True, exist_ok=True)
     # Remove obsolete xterm resources from an existing development bundle.

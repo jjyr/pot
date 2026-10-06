@@ -9,7 +9,7 @@ Pot is a personal assistant accessed from the Mac menu bar. The approved target 
 - One long-lived main assistant, named Pot by default; task workers have no separate personas. Tasks/schedules are created only through the main Agent; UI handles viewing, guidance, and management.
 - Interaction references ChatGPT Dot. Agent Setup/Sandbox configuration follow local product needs without inferring or copying closed-source internals.
 - GUI, Runtime, and tools run locally; models may use cloud services. Default offline operation or data never leaving the machine is not promised.
-- Agent/Sandbox decoupling initially covers Pi and native Codex App Server. Grok decoupling and direct Host tool execution are out of scope. Validate each Driver's execution routing rather than treating a handshake/host login as readiness.
+- Agent/Sandbox decoupling initially covers Pi and native Codex App Server. Direct Host tool execution is out of scope. Validate each Driver's execution routing rather than treating a handshake/host login as readiness.
 - Local product bundles Containerization without requiring Docker Desktop. Remote Docker/Node Manager and multiple nodes are future directions without automatic task/identity migration.
 - Persistent project assistants, inter-assistant communication, environment migration, and a complete plugin ecosystem are not current MVP prerequisites.
 
@@ -17,7 +17,7 @@ Pot is a personal assistant accessed from the Mac menu bar. The approved target 
 
 Target flow: install -> environment/driver Setup and auth -> main chat naming/preferences -> delegation -> background execution -> artifacts or desktop takeover -> results -> reopen and continue.
 
-Chat onboarding is skippable; completion progress and explicit preferences persist. Setup failure identifies the specific step while retaining valid configuration/downloads. Unvalidated drivers must not appear ready.
+Unconfigured Chat opens the shared AI Configuration page on request. Saved connections and explicit preferences persist. Configuration failure retains the draft and valid settings. Unvalidated drivers must not appear ready.
 
 The main assistant answers short questions and delegates research, reports, and multistep execution to tasks with explicit goals. Main chat stays available during background work. Guidance first shows Received, then Applied after consumption; without real-time steering, explicitly queue it for the next turn.
 

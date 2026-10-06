@@ -23,7 +23,8 @@ import Foundation
         }
         var request = URLRequest(url: parts.url!)
         request.httpMethod = body == nil ? "GET" : "POST"; request
-            .timeoutInterval = path == "api/v1/authorization/start" ? 70 : 20
+            .timeoutInterval = path == "api/v1/authorization/start" ? 70 :
+            (path == "api/v1/sandboxes" && body != nil ? 120 : 20)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let body {

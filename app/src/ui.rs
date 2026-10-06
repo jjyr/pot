@@ -2,7 +2,6 @@
 mod ai;
 pub(crate) use ai::brand_icon;
 mod routing;
-mod setup;
 use crate::{Shell, design, gpui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
@@ -336,7 +335,7 @@ impl Settings {
             }
         }
         if clear_secrets && state["ai_screen"] == "manage" {
-            let native = matches!(state["connection_kind"].as_str(), Some("codex" | "grok"));
+            let native = matches!(state["connection_kind"].as_str(), Some("codex"));
             self.fields[if native { 16 } else { 15 }]
                 .read(cx)
                 .focus_handle(cx)
@@ -345,10 +344,6 @@ impl Settings {
     }
     pub fn render(&self, state: &Value, cx: &mut Context<Shell>) -> Div {
         let section = state["section"].as_u64().unwrap_or(0);
-        let setup = state["setup"].as_bool().unwrap_or(false);
-        if setup {
-            return self.render_setup(state, cx);
-        }
         if section == 1 {
             return self.render_ai(state, cx);
         }
@@ -414,32 +409,37 @@ impl Settings {
                 }
             }
             _ => {
-                form = form
-                    .child(label("环境", "本地 Linux VM · Alpine · ARM64"))
-                    .child(input(4, "vCPU", "1–32 个核心，受本机可用资源限制"))
-                    .child(input(5, "内存", "1–128 GiB，受本机可用资源限制"))
-                    .child(input(6, "系统盘", "4–512 GiB，工作文件独立持久保存。"));
+                form = form.child(
+                    field("环境管理").child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(hint(
+                                "在 Sandbox 页选择环境，管理该环境的名称、资源和桌面。",
+                                cx,
+                            ))
+                            .child(
+                                Button::new("open-sandbox-page")
+                                    .primary()
+                                    .label("打开 Sandbox")
+                                    .on_click(|_, _, _| {
+                                        command(json!({"action":"page","value":1}))
+                                    }),
+                            ),
+                    ),
+                );
             }
         }
         let fields = self.fields.clone();
         let mut actions = div().flex().items_center().justify_end().gap_2();
-        if setup {
-            actions = actions.child(
-                Button::new("setup-later")
-                    .ghost()
-                    .label("稍后设置 · 返回聊天")
-                    .on_click(|_, _, _| command(json!({"action":"page","value":0}))),
-            );
-        }
         if section == 4 {
             actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {"收起高级限制"} else {"高级限制"})
                 .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced = !this.settings.advanced;cx.notify();})))
                 .child(Button::new("save-task-limits").primary().small().label("应用全局限制…").on_click(move|_,_,cx|
                     command(json!({"action":"save-agent","key":"","limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}))));
-        } else if section == 3 {
-            actions=actions.child(Button::new("workspace").ghost().small().label("打开工作目录").on_click(|_,_,_|command(json!({"action":"workspace"}))))
-                .child(Button::new("save-sandbox").primary().small().label("应用并重启…").on_click(move|_,_,cx|command(json!({"action":"save-sandbox","cpus":fields[4].read(cx).value(),"memory":fields[5].read(cx).value(),"disk":fields[6].read(cx).value()}))));
         }
+
         page(cx).child(
             content()
                 .child(title(
@@ -516,120 +516,223 @@ impl Settings {
     }
 }
 
+pub const SANDBOX_LIST: f32 = 224.;
+
 pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
-    let connected = state["phase"].as_str() == Some("running")
-        && state["viewer"]["connected"].as_bool() == Some(true);
-    let human = state["viewer"]["human"].as_bool() == Some(true);
-    let running = state["phase"].as_str() == Some("running");
-    let action = |id: &'static str, icon: IconName, tooltip: &'static str| {
-        Button::new(id)
+    let selected = state["sandbox_view"].as_str().unwrap_or("default");
+    let default = state["sandbox_default"].as_str().unwrap_or("default");
+    let items = state["sandboxes"].as_array().cloned().unwrap_or_default();
+    let current = items.iter().find(|item| item["id"] == selected);
+    let name = current
+        .and_then(|item| item["name"].as_str())
+        .unwrap_or("Sandbox");
+    let phase = state["phase"].as_str().unwrap_or("unknown");
+    let connected = phase == "running" && state["viewer"]["connected"] == true;
+    let human = state["viewer"]["human"] == true;
+    let pending = state["sandbox_busy"] == true;
+    let mut list = div()
+        .id("sandbox-list")
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .p_3()
+        .flex()
+        .flex_col()
+        .gap_2();
+    for item in items.iter() {
+        let id = item["id"].as_str().unwrap_or("").to_owned();
+        let target = id.clone();
+        let active = id == selected;
+        let row = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .font_weight(FontWeight::MEDIUM)
+                    .overflow_hidden()
+                    .child(item["name"].as_str().unwrap_or("Linux").to_owned()),
+            )
+            .child(hint(
+                &format!(
+                    "{} · {} 个运行任务",
+                    item["state"]["phase"].as_str().unwrap_or("unknown"),
+                    item["running_tasks"].as_u64().unwrap_or(0)
+                ),
+                cx,
+            ))
+            .when(id == default, |row| row.child(hint("执行默认", cx)));
+        let row = Button::new(SharedString::from(format!("sandbox-{id}")))
             .ghost()
-            .small()
-            .icon(icon)
-            .tooltip(tooltip)
-            .accessibility_label(tooltip)
-            .disabled(!running)
-            .on_click(move |_, _, _| command(json!({"action":"viewer","id":id})))
-    };
-    page(cx)
+            .w_full()
+            .h_auto()
+            .p_3()
+            .bg(if active {
+                cx.theme().secondary
+            } else {
+                design::navigation(cx)
+            })
+            .accessibility_label(format!(
+                "选择 Sandbox：{}",
+                item["name"].as_str().unwrap_or("Linux")
+            ))
+            .child(row)
+            .on_click(move |_, _, _| command(json!({"action":"sandbox-view","id":target})));
+        list = list.child(row);
+    }
+    let sidebar = div()
+        .w(px(SANDBOX_LIST))
+        .h_full()
+        .flex_shrink_0()
+        .bg(design::navigation(cx))
+        .border_r_1()
+        .border_color(cx.theme().border)
+        .flex()
+        .flex_col()
         .child(
             div()
                 .h(px(SANDBOX_HEADER))
-                .bg(design::navigation(cx))
+                .px_4()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child("Sandbox")
+                .child(
+                    Button::new("sandbox-new")
+                        .ghost()
+                        .small()
+                        .label("+ 新建")
+                        .disabled(pending)
+                        .on_click(|_, _, _| command(json!({"action":"sandbox-new"}))),
+                ),
+        )
+        .child(list)
+        .when(
+            state["sandbox_error"]
+                .as_str()
+                .is_some_and(|e| !e.is_empty()),
+            |el| {
+                el.child(
+                    div()
+                        .p_3()
+                        .text_color(design::attention(cx))
+                        .child(state["sandbox_error"].as_str().unwrap_or("").to_owned()),
+                )
+            },
+        );
+    let desktop = div()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .h(px(SANDBOX_HEADER))
+                .px_6()
+                .flex()
+                .items_center()
+                .gap_3()
                 .border_b_1()
                 .border_color(cx.theme().border)
+                .child(
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(name.to_owned()),
+                )
+                .child(hint(phase, cx))
+                .when(selected == default, |el| el.child(hint("执行默认", cx))),
+        )
+        .child(
+            div()
+                .h(px(SANDBOX_HEADER))
                 .px_6()
-                .py_3()
                 .flex()
-                .flex_col()
-                .gap_2()
+                .items_center()
+                .justify_between()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .child(hint(
+                    if pending {
+                        "正在处理…"
+                    } else if !connected {
+                        "桌面未连接"
+                    } else if human {
+                        "你正在控制桌面"
+                    } else {
+                        "Agent 控制桌面"
+                    },
+                    cx,
+                ))
                 .child(
                     div()
                         .flex()
                         .items_center()
-                        .justify_between()
+                        .gap_2()
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .child(hint("桌面", cx))
-                                .child(
-                                    Button::new("connection-state")
-                                        .ghost()
-                                        .small()
-                                        .label(if connected {
-                                            "● 已连接"
-                                        } else {
-                                            "● 未连接"
-                                        })
-                                        .text_color(if connected {
-                                            design::success(cx)
-                                        } else {
-                                            design::attention(cx)
-                                        })
-                                        .tooltip(if connected { "已连接" } else { "未连接" })
-                                        .accessibility_label(if connected {
-                                            "已连接"
-                                        } else {
-                                            "未连接"
-                                        }),
-                                ),
+                            Button::new("take")
+                                .primary()
+                                .small()
+                                .label(if human { "交还控制" } else { "接管" })
+                                .disabled(!connected || pending)
+                                .on_click(|_, _, _| {
+                                    command(json!({"action":"viewer","id":"take"}))
+                                }),
                         )
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(
-                                    Button::new("take")
-                                        .primary()
-                                        .small()
-                                        .label(if human { "交还控制" } else { "接管" })
-                                        .disabled(!connected)
-                                        .on_click(|_, _, _| {
-                                            command(json!({"action":"viewer","id":"take"}))
-                                        }),
-                                )
-                                .child(action("info", IconName::Info, "环境信息"))
-                                .child(action("connect", IconName::RefreshCw, "重新连接"))
-                                .child(
-                                    Button::new("sandbox-settings")
-                                        .ghost()
-                                        .small()
-                                        .icon(IconName::Settings)
-                                        .tooltip("环境设置")
-                                        .accessibility_label("环境设置")
-                                        .on_click(|_, _, _| command(json!({"action":"manage"}))),
-                                )
-                                .child(action("more", IconName::Ellipsis, "更多操作")),
+                            Button::new("sandbox-settings")
+                                .ghost()
+                                .small()
+                                .icon(IconName::Settings)
+                                .tooltip("环境设置")
+                                .accessibility_label("环境设置")
+                                .disabled(pending)
+                                .on_click(|_, _, _| command(json!({"action":"sandbox-settings"}))),
+                        )
+                        .child(
+                            Button::new("sandbox-more")
+                                .ghost()
+                                .small()
+                                .icon(IconName::Ellipsis)
+                                .tooltip("更多操作")
+                                .accessibility_label("更多操作")
+                                .disabled(pending)
+                                .on_click(|_, _, _| {
+                                    command(json!({"action":"viewer","id":"more"}))
+                                }),
                         ),
                 ),
         )
         .when(!connected, |el| {
             el.child(
-                content().h_auto().child(
-                    card(cx)
-                        .child(hint(
-                            if running {
-                                "执行环境正在运行，可以按需打开桌面。"
-                            } else {
-                                "打开桌面时会按需启动 Sandbox。"
-                            },
-                            cx,
-                        ))
-                        .child(
-                            Button::new("start-sandbox")
-                                .primary()
-                                .small()
-                                .label("打开桌面")
-                                .disabled(!matches!(
-                                    state["phase"].as_str(),
-                                    Some("running" | "stopped" | "failed")
-                                ))
-                                .on_click(|_, _, _| command(json!({"action":"start"}))),
-                        ),
-                ),
+                div()
+                    .flex_1()
+                    .p_8()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_4()
+                    .child(hint(
+                        if phase == "running" {
+                            "正在连接桌面…"
+                        } else {
+                            "环境尚未启动。启动桌面后可以查看和接管。"
+                        },
+                        cx,
+                    ))
+                    .child(
+                        Button::new("start-sandbox")
+                            .primary()
+                            .label("启动桌面")
+                            .disabled(pending || !matches!(phase, "running" | "stopped" | "failed"))
+                            .on_click(|_, _, _| command(json!({"action":"start"}))),
+                    ),
             )
-        })
+        });
+    page(cx).flex().child(sidebar).child(desktop)
 }

@@ -1,6 +1,6 @@
 # Scheduled tasks
 
-Schedules are persistent definitions; each trigger creates an independent background task/Agent context. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
+Schedules are persistent definitions; each trigger creates an independent background task/Pi session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
 
 ```
 Chat / tasks -> schedules
@@ -38,15 +38,15 @@ DST: choose the earlier occurrence of repeated hours and trigger once; skip none
 
 Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, nonempty `evidence` array, optional relative-path `artifacts` array. Missing/invalid results fail rather than count as unchanged. Editing a goal resets the comparison baseline; old runs cannot overwrite the new baseline. Silent unchanged runs do not wake main Agent but retain task/schedule history; each check may still incur model costs.
 
-At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.v2`, reading old `tasks.v1` automatically. Older programs cannot understand new metadata; do not downgrade directly.
+At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.v2`. Old task metadata is not imported.
 
 API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID to prevent duplicate creation; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
 
 ## Validation
 
-Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates, and old-data migration. Real Pi with a local mock model validates creation, two independent runs, structured results, change summaries, and unchanged silence without paid services.
+Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and fixed environment assignment. The current Host Pi/Codex and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/agent-sandbox-20261006.md).
 
 ```sh
-CARGO_TARGET_DIR=.local/poc/cargo-target cargo test --locked -p pot-app -p pot-runtime -p pot-protocol
-mise exec -- cargo test --locked -p pot-runtime native_agent
+mise run test
+mise run test:app
 ```

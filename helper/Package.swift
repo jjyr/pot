@@ -15,8 +15,4 @@ let package = Package(name: "PotHelper", platforms: [.macOS("26.0")], dependenci
         name: "PotImageBuilder",
         dependencies: [.product(name: "Containerization", package: "containerization")]
     ),
-    .executableTarget(
-        name: "PotImageCheck",
-        dependencies: [.product(name: "Containerization", package: "containerization")]
-    ),
 ], swiftLanguageModes: [.v5])

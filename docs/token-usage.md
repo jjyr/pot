@@ -6,7 +6,7 @@ Each task (including archived tasks) and main chat has a usage entry. Details sh
 
 ## Metering
 
-Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent type (Pi/Codex/Grok; historical CLI labels remain in existing rows), profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
+Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent type (Pi/Codex), profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
 
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
@@ -77,13 +77,6 @@ unknown usage and conservative reservations. Its ResolvedSpec disables exact req
 safe checkpoint resume. Subscription quotas remain unintegrated and cannot be inferred from the API ledger.
 
 Terminal, official login queries, and command saves trigger no model calls/usage records. Terminal text enters neither usage nor product logs. CLI discovery Logged in means only official status, not validated real requests, model budgets, or role capabilities.
-
-## Native Claude metering
-
-Claude uses final-result cumulative turn usage. Input = input_tokens + cache_read_input_tokens +
-cache_creation_input_tokens; cache hits = cache_read_input_tokens, a subset of input.
-Repeated results overwrite the same turn rather than add again. Failure/cancellation retains known usage marked incomplete.
-Like Codex, checks occur before new turns without per-request CLI hard budgets or automatic checkpoint recovery.
 
 Responses codec reads usage from response.completed/incomplete/failed; Messages codec
 combines message_start input with message_delta output without releasing reservations at initial output=0;

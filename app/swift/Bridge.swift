@@ -147,8 +147,13 @@ var bridge: PotBridge?
     var lastIconState = ""
     var observations: [NSObjectProtocol] = []
     let runtime = RuntimeClient()
-    let sandboxPicker = NSPopUpButton(frame: .zero, pullsDown: false)
-    var sandboxIDs: [String] = []
+    var sandboxItems: [[String: Any]] = []
+    var sandboxDefault = "default"
+    var sandboxBusy = false
+    var sandboxError = ""
+    var sandboxRefreshing = false
+    var sandboxRefreshAt = Date.distantPast
+    var desktopAttempt: String?
     var guestIP = ""
     var localPhase = "starting"
     var isApplying = false
@@ -189,8 +194,6 @@ var bridge: PotBridge?
             button.wantsLayer = true; button.layer?.cornerRadius = 10
             rail.addSubview(button); navigation.append(button)
         }
-        rootView.addSubview(sandboxPicker); sandboxPicker.target = self; sandboxPicker
-            .action = #selector(chooseSandbox); sandboxPicker.isHidden = true
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
@@ -273,9 +276,6 @@ var bridge: PotBridge?
         localRuntime = LocalRuntime(view: rootView, web: web)
         localRuntime?.onState = { [weak self] state in self?.environmentChanged(state) }
         settings.load()
-        if !settings.hasConfiguration, !settings.setupCompleted {
-            selectPage(2); settings.showAgent(setup: true)
-        }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
@@ -390,9 +390,8 @@ var bridge: PotBridge?
         if gpuiView.frame != b {
             gpuiView.frame = b
         }
-        sandboxPicker.frame = NSRect(x: 260, y: b.height - 68, width: 220, height: 26)
-        sandboxPicker.isHidden = page != 1
-        let desktopArea = NSRect(x: 56, y: 0, width: area.width, height: max(0, area.height - 112))
+        // Must match ui::SANDBOX_LIST and shared 56 pt navigation header and two 56 pt desktop toolbar rows.
+        let desktopArea = NSRect(x: 280, y: 0, width: max(0, b.width - 280), height: max(0, b.height - 168))
         if web.frame != desktopArea {
             web.frame = desktopArea
         }
@@ -484,8 +483,7 @@ var bridge: PotBridge?
     }
 
     func selectPage(_ value: Int) {
-        page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.loaded
-            .isEmpty != false
+        page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.displayReady != true
         gpuiView.isHidden = false; composerBox.isHidden = value != 0 && value != 3
         if value == 0 {
             host.makeFirstResponder(composer)
@@ -511,41 +509,160 @@ var bridge: PotBridge?
 
     /// The toolbar is GPUI, above WKWebView. A web menu cannot extend into
     /// that header, so use an AppKit popup in the same window coordinate space.
+    func selectedSandbox() -> [String: Any]? {
+        sandboxItems.first { $0["id"] as? String == localRuntime?.sandboxID }
+    }
+
+    func sandboxBlocked(_ item: [String: Any]?) -> String? {
+        if (item?["active_leases"] as? Int ?? 0) > 0 {
+            return "有任务或工具正在使用此环境"
+        }
+        if (item?["unsettled_operations"] as? Int ?? 0) > 0 {
+            return "有未确认完成的操作，请先让主 Agent 恢复环境"
+        }
+        return nil
+    }
+
     func showSandboxMenu() {
-        guard page == 1, localPhase == "running" else { return }
+        guard page == 1, let target = localRuntime?.sandboxID else { return }
         let menu = NSMenu(); menu.autoenablesItems = false
-        let human = viewer["human"] as? Bool == true
+        let current = selectedSandbox()
+        let blocked = sandboxBlocked(current)
+        let connected = viewer["connected"] as? Bool == true
         for (title, id) in [
-            ("重新连接桌面", "connect"),
-            ("打开浏览器", "browser"),
-            ("剪贴板…", "clipboardOpen"),
-            ("", ""),
-            ("打开工作目录", "workspace"),
-            ("管理环境…", "manage"),
-            ("", ""),
-            ("停止环境…", "stop"),
-            ("重启环境…", "restart"),
+            ("重新连接桌面", "connect"), ("打开浏览器", "browser"), ("剪贴板…", "clipboardOpen"),
+            ("", ""), ("打开工作目录", "workspace"), ("关联任务…", "tasks"),
+            ("设为执行默认", "select"), ("", ""),
+            (blocked.map { "停止不可用：" + $0 } ?? "停止环境…", "stop"),
+            (
+                blocked
+                    .map { "删除不可用：" + $0 } ??
+                    ((target == "default" || current?["referenced"] as? Bool == true) ? "删除不可用：默认环境或仍有关联任务/计划" :
+                        "删除环境…"),
+                "delete"
+            ),
         ] {
             if id.isEmpty {
                 menu.addItem(.separator()); continue
             }
             let item = NSMenuItem(title: title, action: #selector(sandboxMenuAction(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = id
-            item.isEnabled = !["browser", "clipboardOpen"].contains(id) || human
+            item.target = self; item.representedObject = ["action": id, "target": target]
+            item.isEnabled = !sandboxBusy
+            if ["connect", "browser", "clipboardOpen"]
+                .contains(id)
+            {
+                item.isEnabled = connected && (id == "connect" || viewer["human"] as? Bool == true)
+            }
+            if id == "select" {
+                item.isEnabled = target != sandboxDefault
+            }
+            if id == "stop" {
+                item.isEnabled = blocked == nil && localPhase == "running"
+            }
+            if id ==
+                "delete"
+            {
+                item.isEnabled = blocked == nil && target != "default" && current?["referenced"] as? Bool != true
+            }
             menu.addItem(item)
         }
         menu.minimumWidth = 200
-        // Toolbar: 32 pt right inset, 24 pt top inset, 32 pt button height.
-        // Include AppKit popup padding so the visible menu clears the button.
-        let x = max(56, rootView.bounds.maxX - 32 - menu.size.width)
-        menu.popUp(positioning: nil, at: NSPoint(x: x, y: rootView.bounds.maxY - 68), in: rootView)
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: max(280, rootView.bounds.maxX - 32 - menu.size.width), y: rootView.bounds.maxY - 164),
+            in: rootView
+        )
     }
 
     @objc func sandboxMenuAction(_ item: NSMenuItem) {
-        guard page == 1, let id = item.representedObject as? String,
-              ["connect", "browser", "clipboardOpen", "workspace", "manage", "stop", "restart"].contains(id)
-        else { return }
-        web.evaluateJavaScript("document.getElementById('\(id)').click()", completionHandler: nil)
+        guard let info = item.representedObject as? [String: String], let action = info["action"],
+              let target = info["target"] else { return }
+        switch action {
+        case "workspace": openSandboxWorkspace(target)
+        case "tasks":
+            let tasks = (sandboxItems.first { $0["id"] as? String == target })?["tasks"] as? [[String: Any]] ?? []
+            let alert = NSAlert(); alert.messageText = "关联任务"
+            alert.informativeText = tasks.isEmpty ? "此环境没有关联任务。" : tasks
+                .map { "\($0["title"] as? String ?? $0["id"] as? String ?? "任务") · \($0["phase"] as? String ?? "")" }
+                .joined(separator: "\n")
+            alert.addButton(withTitle: "关闭"); alert.beginSheetModal(for: host)
+        case "select": manageSandbox(["action": action, "sandbox_id": target])
+        case "stop", "delete":
+            let alert = NSAlert(); alert.messageText = action == "stop" ? "停止环境？" : "删除环境？"
+            alert.informativeText = "操作仅影响此 Sandbox；工作文件保留。使用中的环境会拒绝此操作。"
+            alert.addButton(withTitle: action == "stop" ? "停止" : "删除"); alert.addButton(withTitle: "取消")
+            alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
+                if reply == .alertFirstButtonReturn {
+                    self?.manageSandbox(["action": action, "sandbox_id": target])
+                }
+            }}
+        default:
+            if target == localRuntime?.sandboxID {
+                web.evaluateJavaScript(
+                    "document.getElementById('\(action)').click()",
+                    completionHandler: nil
+                )
+            }
+        }
+    }
+
+    func manageSandbox(_ args: [String: Any], completion: (() -> Void)? = nil) {
+        guard !sandboxBusy else { return }
+        sandboxBusy = true; sandboxError = ""; bridgeWake?()
+        Task {
+            do {
+                _ = try await runtime.request("api/v1/sandboxes", body: args)
+                if args["action"] as? String == "delete",
+                   args["sandbox_id"] as? String == localRuntime?.sandboxID
+                {
+                    chooseSandbox("default")
+                }
+                completion?()
+            } catch { sandboxError = error.localizedDescription }
+            sandboxBusy = false; refreshSandboxes(); localRuntime?.poll(); bridgeWake?()
+        }
+    }
+
+    func editSandbox(create: Bool) {
+        guard !sandboxBusy, let target = localRuntime?.sandboxID else { return }
+        let current = selectedSandbox()
+        let alert = NSAlert(); alert.messageText = create ? "新建 Linux Sandbox" : "环境设置"
+        alert.informativeText = create ? "创建后保持停止，启动桌面时才运行。" : "修改名称与资源前请先停止此环境。"
+        let box = NSStackView(); box.orientation = .vertical; box.alignment = .leading; box.spacing = 8
+        let name = NSTextField(string: create ? "Linux Sandbox" : current?["name"] as? String ?? "Linux")
+        name.frame.size = NSSize(width: 300, height: 24)
+        box.addArrangedSubview(NSTextField(labelWithString: "名称")); box.addArrangedSubview(name)
+        let config = current?["config"] as? [String: Any] ?? [:]
+        var fields: [NSTextField] = []
+        if !create {
+            for (title, key, fallback) in [
+                ("vCPU (1–32)", "cpus", 4),
+                ("内存 GiB (1–128)", "memory_gib", 8),
+                ("系统盘 GiB (4–512)", "disk_gib", 32),
+            ] {
+                let field = NSTextField(string: String(config[key] as? Int ?? fallback)); fields.append(field)
+                box.addArrangedSubview(NSTextField(labelWithString: title)); box.addArrangedSubview(field)
+            }
+        }
+        box.frame = NSRect(x: 0, y: 0, width: 300, height: create ? 56 : 224); alert.accessoryView = box
+        alert.addButton(withTitle: create ? "创建" : "保存"); alert.addButton(withTitle: "取消")
+        alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
+            guard reply == .alertFirstButtonReturn, let self else { return }
+            if create {
+                let id = "linux-" + UUID().uuidString.lowercased().prefix(8)
+                self
+                    .manageSandbox(["action": "create", "sandbox_id": id, "name": name.stringValue]) {
+                        self.chooseSandbox(id)
+                    }
+            } else {
+                self.manageSandbox(["action": "update", "sandbox_id": target, "name": name.stringValue,
+                                    "config": [
+                                        "cpus": Int(fields[0].stringValue) ?? 0,
+                                        "memory_gib": Int(fields[1].stringValue) ?? 0,
+                                        "disk_gib": Int(fields[2].stringValue) ?? 0,
+                                    ]])
+            }
+        }}
     }
 
     @objc func toggleDesktop() {
@@ -565,41 +682,52 @@ var bridge: PotBridge?
     }
 
     func refreshSandboxes() {
+        guard !sandboxRefreshing else { return }
+        sandboxRefreshing = true; sandboxRefreshAt = Date()
         Task {
-            guard let value = try? await runtime.request("api/v1/sandboxes"),
-                  let items = value["items"] as? [[String: Any]] else { return }
-            sandboxIDs = items.compactMap { $0["id"] as? String }
-            sandboxPicker.removeAllItems()
-            sandboxPicker
-                .addItems(withTitles: items
-                    .map {
-                        "\($0["name"] as? String ?? "Linux") · \(($0["state"] as? [String: Any])?["phase"] as? String ?? "unknown")"
-                    })
-            if let current = localRuntime?.sandboxID,
-               let index = sandboxIDs.firstIndex(of: current)
-            {
-                sandboxPicker.selectItem(at: index)
-            }
+            defer { sandboxRefreshing = false }
+            do {
+                let value = try await runtime.request("api/v1/sandboxes")
+                sandboxItems = value["items"] as? [[String: Any]] ?? []
+                sandboxDefault = value["selected"] as? String ?? "default"
+                bridgeWake?()
+            } catch { sandboxError = error.localizedDescription; bridgeWake?() }
         }
     }
 
-    @objc func chooseSandbox() {
-        let index = sandboxPicker.indexOfSelectedItem
-        guard sandboxIDs.indices.contains(index), let localRuntime else { return }
-        localRuntime.sandboxID = sandboxIDs[index]; viewer = [:]; localRuntime.loaded = ""; web.stopLoading(); web
-            .isHidden = true; localRuntime.poll()
+    func chooseSandbox(_ id: String) {
+        guard let localRuntime, id != localRuntime.sandboxID else { return }
+        viewer = [:]; localPhase = "unknown"; desktopAttempt = nil; sandboxError = ""
+        localRuntime.selectSandbox(id); bridgeWake?()
     }
 
     @objc func startSandbox() {
-        localRuntime?.send("desktop")
+        guard let localRuntime, !sandboxBusy else { return }
+        let target = localRuntime.sandboxID
+        let generation = localRuntime.viewGeneration
+        desktopAttempt = target
+        sandboxBusy = true; sandboxError = ""; bridgeWake?()
+        localRuntime.send("desktop") { [weak self] response in
+            guard let self else { return }
+            self.sandboxBusy = false
+            if let error = response["error"] as? String {
+                self.sandboxError = error
+            }
+            self.refreshSandboxes(); bridgeWake?()
+        }
     }
 
     @objc func openWorkspace() {
+        openSandboxWorkspace(localRuntime?.sandboxID ?? "default")
+    }
+
+    func openSandboxWorkspace(_ target: String) {
         if let root = localRuntime?.root {
-            NSWorkspace.shared
-                .open(root
-                    .appendingPathComponent("sandboxes/" + (localRuntime?.sandboxID ?? "default") +
-                        "/workspace/workspace"))
+            let path = root.appendingPathComponent("sandboxes/" + target + "/workspace/workspace")
+            do {
+                try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true); NSWorkspace.shared
+                    .open(path)
+            } catch { sandboxError = error.localizedDescription; bridgeWake?() }
         }
     }
 
@@ -620,59 +748,48 @@ var bridge: PotBridge?
 
     func environmentChanged(_ state: [String: Any]) {
         localPhase = state["phase"] as? String ?? "unknown"
+        if ["stopped", "failed", "stopping"].contains(localPhase) {
+            viewer = [:]; desktopAttempt = nil
+        }
         guestIP = state["ip"] as? String ?? ""
         if page == 1 {
-            web.isHidden = localRuntime?.loaded.isEmpty != false
+            web.isHidden = localRuntime?.displayReady != true
         }
         settings.environment = state; settings.refreshStatus()
         runtime.root = localRuntime?.root; runtime.ip = "127.0.0.1"
-        if settings.setup, snapshot["connected"] as? Bool == true {
-            settings.refreshAgents()
+        if page == 1 {
+            if Date().timeIntervalSince(sandboxRefreshAt) > 3 {
+                refreshSandboxes()
+            }
+            if localPhase == "running", desktopAttempt != localRuntime?.sandboxID, !sandboxBusy {
+                startSandbox()
+            }
         }
+        bridgeWake?()
     }
 
     func webView(_: WKWebView, didFinish _: WKNavigation!) {
-        webDark = nil; layout(); if page == 1 {
-            web.isHidden = false
+        webDark = nil; layout()
+        if let address = localRuntime?.loaded, !address.isEmpty,
+           let expected = URL(string: address), web.url?.host == expected.host,
+           web.url?.port == expected.port, web.url?.fragment == expected.fragment
+        {
+            localRuntime?.displayReady = true
+            web.isHidden = page != 1
         }
     }
 
     func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, let loaded = localRuntime?.loaded, let expected = URL(string: loaded),
               let actual = message.frameInfo.request.url, actual.host == expected.host, actual.port == expected.port,
-              actual.scheme == expected.scheme, let body = message.body as? [String: Any],
+              actual.scheme == expected.scheme, actual.fragment == expected.fragment,
+              let body = message.body as? [String: Any],
               let action = body["action"] as? String else { return }
         switch action {
         case "viewer-state": viewer = body; bridgeWake?()
         case "workspace": openWorkspace()
-        case "manage": selectPage(2); settings.section = 3
-        case "stop", "restart":
-            guard !isApplying else { return }
-            let alert = NSAlert(); alert.messageText = action == "stop" ? "停止 Sandbox？" : "重启 Sandbox？"
-            alert.informativeText = running ? "有任务正在运行，将被中断。已保存的聊天与工作文件保留。" : "聊天与工作文件保留，浏览器将正常关闭。"
-            alert.addButton(withTitle: action == "stop" ? "停止" : "重启"); alert.addButton(withTitle: "取消")
-            alert
-                .beginSheetModal(for: host) { [weak self] response in
-                    MainActor
-                        .assumeIsolated { guard response == .alertFirstButtonReturn,
-                                                let self
-                            else { return }; self.isApplying = true; self.localRuntime?
-                                .send("stop") { [weak self] reply in
-                                    guard let self else { return }; if action == "restart",
-                                                                       let state = reply["result"] as? [String: Any],
-                                                                       state["phase"] as? String ==
-                                                                       "stopped"
-                                    {
-                                        self.localRuntime?
-                                            .send("desktop") { _ in
-                                                self.isApplying = false
-                                            }
-                                    } else {
-                                        self.isApplying = false
-                                    }
-                                }
-                        }
-                }
+        case "manage": editSandbox(create: false)
+        case "stop", "restart": showSandboxMenu()
         default: break
         }
     }
@@ -846,6 +963,11 @@ private var bridgeWake: (@convention(c) () -> Void)?
             "settings": bridge.settings.publicState,
             "viewer": bridge.viewer,
             "phase": bridge.localPhase,
+            "sandboxes": bridge.sandboxItems,
+            "sandbox_view": bridge.localRuntime?.sandboxID ?? "default",
+            "sandbox_default": bridge.sandboxDefault,
+            "sandbox_busy": bridge.sandboxBusy,
+            "sandbox_error": bridge.sandboxError,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: state),
               data.count < Int(capacity) else { return 0 }
@@ -881,22 +1003,9 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "task-profile":
             settings.routingOwner = v["owner"] as? String ?? "main"
             settings.routingOwnerName = v["title"] as? String ?? "此任务"
-            settings.setup = false; settings.section = 4; bridge.selectPage(2); settings.refreshRouting()
-        case "setup-stage": settings.setupNavigate(v["value"] as? Int ?? 0)
-        case "setup-later": settings.deferSetup()
-        case "setup-all": settings
-            .setupItems = v["selected"] as? Bool == true ? Set(["codex", "api"]) : []; settings
-            .persistSetup()
-        case "setup-item":
-            if let id = v["id"] as? String {
-                if settings.setupItems.contains(id) {
-                    settings.setupItems.remove(id)
-                } else {
-                    settings.setupItems.insert(id)
-                }; settings.persistSetup()
-            }
+            settings.section = 4; bridge.selectPage(2); settings.refreshRouting()
         case "history-section": settings.section = v["value"] as? Int ?? 0
-        case "section": settings.section = v["value"] as? Int ?? 0; settings.setup = false; settings
+        case "section": settings.section = v["value"] as? Int ?? 0; settings
             .result = ""; settings.returnToChat = false; if settings.section == 1 {
                 settings.routingOwner = "main"; settings.aiScreen = "main"
                 settings.refreshAgents()
@@ -908,13 +1017,13 @@ private var bridgeWake: (@convention(c) () -> Void)?
             settings.key = v["key"] as? String ?? ""; settings.limit = v["limit"] as? String ?? ""; settings
                 .tokens = v["tokens"] as? String ?? ""; settings.perTurn = v["per_turn"] as? String ?? ""; settings
                 .parallel = v["parallel"] as? String ?? ""; settings.saveAgent(); settings.key = ""
-        case "save-sandbox":
-            settings.cpuField = v["cpus"] as? String ?? ""; settings
-                .memoryField = v["memory"] as? String ?? ""; settings.diskField = v["disk"] as? String ?? ""; settings
-                .saveSandbox()
         case "workspace": bridge.openWorkspace()
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
-        case "manage": settings.section = 3; bridge.selectPage(2)
+        case "manage", "sandbox-settings": bridge.editSandbox(create: false)
+        case "sandbox-new": bridge.editSandbox(create: true)
+        case "sandbox-view": if let id = v["id"] as? String {
+                bridge.chooseSandbox(id)
+            }
         case "start": bridge.startSandbox()
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
         case "ai-open": settings.routingOwner = "main"; settings.openAI(fromChat: true)

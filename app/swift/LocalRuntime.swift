@@ -13,7 +13,15 @@ import WebKit
     var polling = false
     var probing = false
     var loaded = ""
+    var displayReady = false
     var sandboxID = "default"
+    var viewGeneration = 0
+
+    func selectSandbox(_ id: String) {
+        viewGeneration += 1; sandboxID = id; loaded = ""; displayReady = false; web?.stopLoading(); web?.isHidden = true
+        poll()
+    }
+
     var onState: (([String: Any]) -> Void)?
     init(view _: NSView, web: WKWebView) {
         self.web = web
@@ -89,25 +97,35 @@ import WebKit
     }
 
     func send(_ method: String, completion: (([String: Any]) -> Void)? = nil) {
+        let target = sandboxID
+        let generation = viewGeneration
         if ["start", "stop", "desktop"].contains(method) {
             Task {
                 let client = RuntimeClient(); client.root = root
                 do {
                     let value = try await client.request(
                         "api/v1/sandboxes",
-                        body: ["action": method, "sandbox_id": sandboxID]
+                        body: ["action": method, "sandbox_id": target]
                     )
                     let response: [String: Any] = ["result": value["state"] ?? value]
-                    render(response); completion?(response)
+                    if target == sandboxID, generation == viewGeneration {
+                        render(response)
+                    }; completion?(response)
                 } catch { completion?(["error": error.localizedDescription]) }
             }
             return
         }
         let path = root.appendingPathComponent("helper.sock").path
-        let target = sandboxID
         DispatchQueue.global().async {
             let response = Self.request(path: path, method: method, sandboxID: target)
-            DispatchQueue.main.async { self.render(response); completion?(response) }
+            DispatchQueue.main
+                .async {
+                    if target == self.sandboxID,
+                       generation == self.viewGeneration
+                    {
+                        self.render(response)
+                    }; completion?(response)
+                }
         }
     }
 
@@ -122,10 +140,17 @@ import WebKit
         }; polling = true
         let path = root.appendingPathComponent("helper.sock").path
         let target = sandboxID
+        let generation = viewGeneration
         DispatchQueue.global()
             .async {
                 let response = Self.request(path: path, method: "status", sandboxID: target); DispatchQueue.main
-                    .async { self.polling = false; self.render(response) }
+                    .async {
+                        self.polling = false; if target == self.sandboxID,
+                                                 generation == self.viewGeneration
+                        {
+                            self.render(response)
+                        }
+                    }
             }
     }
 
@@ -133,6 +158,9 @@ import WebKit
         guard let state = response["result"] as? [String: Any]
         else { label.stringValue = String(describing: response["error"] ?? "IPC error"); return }
         let phase = state["phase"] as? String ?? "unknown"
+        if ["stopped", "failed", "stopping"].contains(phase) {
+            loaded = ""; displayReady = false
+        }
         onState?(state)
         label.stringValue = "Local runtime: \(phase)\n\(state["error"] ?? "")"
         if phase == "running", let address = state["viewer"] as? String, !address.isEmpty, address != loaded, !probing,
@@ -140,6 +168,7 @@ import WebKit
         {
             // Guest package installation is asynchronous: probe HTTP before loading.
             probing = true
+            let generation = viewGeneration
             URLSession.shared.dataTask(with: URLRequest(
                 url: url,
                 cachePolicy: .reloadIgnoringLocalCacheData,
@@ -149,11 +178,13 @@ import WebKit
                 guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
                 DispatchQueue.main
                     .async { guard let self,
+                                   self.viewGeneration == generation,
                                    self.loaded != address
-                        else { return }; self.loaded = address; var components = URLComponents(
-                            url: url,
-                            resolvingAgainstBaseURL: false
-                        )!; components.queryItems = [URLQueryItem(name: "native", value: "1")]; self.web?
+                        else { return }; self.displayReady = false; self.web?.isHidden = true; self
+                            .loaded = address; var components = URLComponents(
+                                url: url,
+                                resolvingAgainstBaseURL: false
+                            )!; components.queryItems = [URLQueryItem(name: "native", value: "1")]; self.web?
                             .load(URLRequest(
                                 url: components.url!,
                                 cachePolicy: .reloadIgnoringLocalCacheData
