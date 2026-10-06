@@ -36,7 +36,8 @@ import Foundation
             throw NSError(
                 domain: "PotRuntime",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: String((value["message"] as? String ?? "Runtime 请求失败")
+                userInfo: [NSLocalizedDescriptionKey: String(L
+                        .message(value["message"] as? String ?? L.text("runtimeclient.runtime-request-failed"))
                         .prefix(1024))]
             )
         }

@@ -1,12 +1,12 @@
 # Pot UI specification
 
-Updated: 2026-10-06. Current MVP UI specification; see [Development plan](development-plan.md) for scope.
+Updated: 2026-10-07. Current MVP UI specification; see [Development plan](development-plan.md) for scope.
 
 For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Shared page colors, layouts, the contextual toolbar and navigation history, Chat, the composer and Pot activity/unread icons now follow that direction. The upstream browser-authorization/provider integration and Terminal removal are retained; the new AI panels share these visual tokens and responsive forms.
 
 ## Shared layout
 
-Tasks, settings, and Sandbox use **gpui-kit 0.7.0** (gpui-pre 0.3.7). Shared layout lives in `app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
+Tasks, settings, and Sandbox use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared layout lives in `app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
 
 | Element | Specification |
 | --- | --- |
@@ -38,7 +38,7 @@ Native conversation drafts and entity-backed unsaved forms remain intact during 
 - **Task conversation header**: Back/Forward, title and Usage live in the shared toolbar; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore old 48-character truncation from original task first lines. One row below shows stage/archive and task actions using small icons/secondary text. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
 - **Schedules**: reuse Tasks / Schedules navigation, Kit Button/Form/Field/Input/cards. Fixed bottom pagination matches tasks: total/page left, previous/next right. Details show next run/state/paginated history linking to tasks. Main Agent creates schedules; no manual creation. Existing edit forms scroll with fixed save/cancel and include zone/frequency/notification/missed policy. Pause/delete preserves current runs; second click confirms deletion. See [Scheduled tasks](scheduled-tasks.md).
 - **Usage**: overall statistics/charts only, last 7/30/90 days/year. No granularity selector; year automatically aggregates 7-day groups. Task/main usage belongs in each conversation and survives archive. Single-page details: totals, horizontal model stacks (conversation/compaction, real tokens/proportions/hover), tool rankings (estimated tokens/calls, shared scale, top 5 expandable). Hide zero compaction/empty tools; no tabs/per-request lists/Skills stats. Never add tool output to model consumption. Hide allowance cards without periodic limits. See [Token usage](token-usage.md).
-- **Settings**: General / AI Configuration / Task Configuration / Work Environment. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. The provider chooser uses compact branded controls; connection sheets use a 12 px radius, responsive shared labels, compact model/authorization actions, and a 200 ms fade respecting Reduce Motion. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances; Work Environment keeps Sandbox resources.
+- **Settings**: General starts with Language (English / 简体中文), above Appearance and keyboard shortcuts. First launch matches macOS preferred languages, falling back to English; the resolved choice is saved. Changes apply immediately without restarting or resetting drafts. See [Internationalization](internationalization.md). General / AI Configuration / Task Configuration / Work Environment. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. The provider chooser uses compact branded controls; connection sheets use a 12 px radius, responsive shared labels, compact model/authorization actions, and a 200 ms fade respecting Reduce Motion. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances; Work Environment keeps Sandbox resources.
 - **Sandbox**: shared 56 px toolbar plus 56 px desktop controls; desktop fills remaining space without the 820 px cap. Textual connection state with semantic color. Take over is primary; environment/reconnect/settings/more are icons. Environment displays image/state/CPU/memory/system disk/work-file sizes.
 - **Tray**: one pot-shaped status icon; click opens window, no menu. Unread count beside icon. Window close keeps background work; Quit stops the environment normally.
 

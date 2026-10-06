@@ -11,6 +11,13 @@ use std::{
     time::Duration,
 };
 
+/// Preserve server diagnostics; localize the fallback for invalid or empty error bodies.
+fn rejection_detail(body: &mut ureq::Body, fallback_key: &str) -> String {
+    body.read_json::<ApiError>()
+        .map(|error| error.message)
+        .unwrap_or_else(|_| crate::i18n::text(fallback_key).into())
+}
+
 #[derive(Clone, PartialEq)]
 pub struct RunningTask {
     pub id: String,
@@ -21,26 +28,26 @@ pub struct RunningTask {
 
 fn task_progress(snapshot: &Snapshot) -> String {
     if snapshot.turn.as_ref().is_some_and(|t| t.cancelling) {
-        return "正在停止".into();
+        return crate::i18n::text("client.stopping").into();
     }
     match snapshot.messages.last() {
         Some(m) if m.role == Role::Tool && m.status == MessageStatus::Streaming => {
             // Tool headers are runtime facts, not generated summaries.
-            format!(
-                "正在执行 {}",
+            crate::i18n::tr!(
+                "client.running",
                 m.text
                     .lines()
                     .next()
-                    .unwrap_or("工具")
+                    .unwrap_or(crate::i18n::text("client.tool"))
                     .chars()
                     .take(36)
                     .collect::<String>()
             )
         }
         Some(m) if m.role == Role::Assistant && m.status == MessageStatus::Streaming => {
-            "正在生成回复".into()
+            crate::i18n::text("client.generating-a-reply").into()
         }
-        _ => "正在处理".into(),
+        _ => crate::i18n::text("client.working").into(),
     }
 }
 
@@ -127,8 +134,10 @@ impl View {
         self.selected = id;
         self.command_error.clear();
         if self.snapshot.is_none() && self.error.is_empty() {
-            self.error = "正在加载…".into();
-        } else if self.snapshot.is_some() && self.error == "正在加载…" {
+            self.error = crate::i18n::text("client.loading").into();
+        } else if self.snapshot.is_some()
+            && crate::i18n::matches_message("client.loading", &self.error)
+        {
             self.error.clear();
         }
         true
@@ -146,7 +155,7 @@ impl View {
     }
     fn replace(&mut self, snapshot: Snapshot) -> Result<(), String> {
         if snapshot.api_version != API_VERSION {
-            return Err("Runtime 协议版本不兼容".into());
+            return Err(crate::i18n::text("client.incompatible-runtime-protocol-version").into());
         }
         self.snapshot = Some(snapshot);
         self.error.clear();
@@ -154,20 +163,23 @@ impl View {
     }
     #[cfg(test)]
     fn apply(&mut self, event: Event) -> Result<(), String> {
-        let s = self.snapshot.as_mut().ok_or("缺少聊天快照")?;
+        let s = self
+            .snapshot
+            .as_mut()
+            .ok_or(crate::i18n::text("client.chat-snapshot-missing"))?;
         if let Some(cursor) = event.cursor {
             if cursor <= s.cursor {
                 return Ok(());
             }
             if cursor != s.cursor + 1 {
-                return Err("事件缺失，正在重新同步…".into());
+                return Err(crate::i18n::text("client.missing-events-resynchronizing").into());
             }
             s.cursor = cursor;
         }
         match event.kind {
             EventKind::Message { message } => {
                 if message.conversation_id != s.conversation_id {
-                    return Err("会话不匹配".into());
+                    return Err(crate::i18n::text("client.session-mismatch").into());
                 }
                 if let Some(old) = s.messages.iter_mut().find(|m| m.id == message.id) {
                     *old = message;
@@ -224,10 +236,10 @@ pub fn root() -> PathBuf {
 fn endpoint() -> Result<(String, String), String> {
     let root = root();
     let bytes = std::fs::read(root.join("product/runtime.json"))
-        .map_err(|_| "正在准备 Runtime…".to_string())?;
+        .map_err(|_| crate::i18n::text("client.preparing-runtime").to_string())?;
     let endpoint: RuntimeEndpoint = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if endpoint.api_version != API_VERSION {
-        return Err("Runtime 协议版本不兼容".into());
+        return Err(crate::i18n::text("client.incompatible-runtime-protocol-version").into());
     }
     Ok((
         format!("http://127.0.0.1:{}", endpoint.port),
@@ -301,7 +313,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             progress: progress
                 .as_ref()
                 .map(task_progress)
-                .unwrap_or_else(|| "正在处理".into()),
+                .unwrap_or_else(|| crate::i18n::text("client.working").into()),
         });
     }
     let schedules: Option<SchedulePage> = if sq.0 {
@@ -384,7 +396,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     };
     let mut v = view.lock().unwrap();
     if main.api_version != API_VERSION || snapshot.api_version != API_VERSION {
-        return Err("Runtime 协议版本不兼容".into());
+        return Err(crate::i18n::text("client.incompatible-runtime-protocol-version").into());
     }
     if v.main_snapshot
         .as_ref()
@@ -415,7 +427,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
 impl Client {
     pub fn start() -> Self {
         let view = Arc::new(Mutex::new(View {
-            error: "正在连接环境…".into(),
+            error: crate::i18n::text("client.connecting-to-environment").into(),
             task_query: TaskQuery {
                 limit: 20,
                 ..Default::default()
@@ -472,11 +484,10 @@ impl Client {
                             if response.status().is_client_error()
                                 || response.status().is_server_error() =>
                         {
-                            let detail = response
-                                .body_mut()
-                                .read_json::<ApiError>()
-                                .map(|e| e.message)
-                                .unwrap_or_else(|_| "服务器拒绝请求".into());
+                            let detail = rejection_detail(
+                                response.body_mut(),
+                                "client.server-rejected-the-request",
+                            );
                             let mut state = v.lock().unwrap();
                             state.pending = false;
                             state.command_error = detail;
@@ -500,20 +511,27 @@ impl Client {
                                         }
                                         Err(_) => {
                                             state.pending = false;
-                                            state.command_error = "发送结果格式错误".into();
+                                            state.command_error = crate::i18n::text(
+                                                "client.invalid-send-response-format",
+                                            )
+                                            .into();
                                         }
                                     }
                                 }
                                 break;
                             }
                             Err(_) => {
-                                v.lock().unwrap().command_error =
-                                    "发送结果未确认，正在使用同一请求编号重试…".into();
+                                v.lock().unwrap().command_error = crate::i18n::text(
+                                    "client.send-not-confirmed-retrying-with-the-same",
+                                )
+                                .into();
                             }
                         },
                         Err(_) => {
-                            v.lock().unwrap().command_error =
-                                "发送结果未确认，正在使用同一请求编号重试…".into();
+                            v.lock().unwrap().command_error = crate::i18n::text(
+                                "client.send-not-confirmed-retrying-with-the-same",
+                            )
+                            .into();
                         }
                     }
                     std::thread::sleep(Duration::from_millis(500));
@@ -559,7 +577,8 @@ impl Client {
             })();
             if let Err(e) = result {
                 let mut state = view.lock().unwrap();
-                state.command_error = format!("停止请求未确认：{e}");
+                state.command_error =
+                    crate::i18n::tr!("client.stop-request-not-confirmed-e", e = e);
                 if let Some(turn) = state.snapshot.as_mut().and_then(|s| s.turn.as_mut()) {
                     turn.cancelling = false;
                 }
@@ -593,11 +612,10 @@ impl Client {
                     .send_json(body)
                     .map_err(|e| e.to_string())?;
                 if response.status().is_client_error() || response.status().is_server_error() {
-                    return Err(response
-                        .body_mut()
-                        .read_json::<ApiError>()
-                        .map(|e| e.message)
-                        .unwrap_or("操作被拒绝".into()));
+                    return Err(rejection_detail(
+                        response.body_mut(),
+                        "client.operation-rejected",
+                    ));
                 }
                 Ok(())
             })();
@@ -607,7 +625,7 @@ impl Client {
             if let Err(e) = result {
                 v.usage_error = e;
             } else {
-                v.usage_notice = "已保存".into();
+                v.usage_notice = crate::i18n::text("client.saved").into();
             }
             drop(v);
             let _ = refresh.try_send(());
@@ -654,11 +672,10 @@ impl Client {
                         Ok(mut r)
                             if r.status().is_client_error() || r.status().is_server_error() =>
                         {
-                            let detail = r
-                                .body_mut()
-                                .read_json::<ApiError>()
-                                .map(|e| e.message)
-                                .unwrap_or("计划操作被拒绝".into());
+                            let detail = rejection_detail(
+                                r.body_mut(),
+                                "client.schedule-operation-rejected",
+                            );
                             Ok(json!({"rejected":detail}))
                         }
                         Ok(mut r) => r.body_mut().read_json().map_err(|e| e.to_string()),
@@ -684,8 +701,10 @@ impl Client {
                         break;
                     }
                     Err(_) => {
-                        view.lock().unwrap().schedule_error =
-                            "连接中断，正在用同一请求编号重试…".into();
+                        view.lock().unwrap().schedule_error = crate::i18n::text(
+                            "client.connection-interrupted-retrying-with-the-same-request",
+                        )
+                        .into();
                         std::thread::sleep(Duration::from_millis(1000));
                     }
                 }
@@ -738,7 +757,8 @@ impl Client {
             .is_err()
         {
             state.pending = false;
-            state.command_error = "发送服务已退出，请重开 App".into();
+            state.command_error =
+                crate::i18n::text("client.send-service-exited-reopen-the-app").into();
             return false;
         }
         true
@@ -747,6 +767,27 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn http_rejection_preserves_diagnostics_and_localizes_invalid_bodies() {
+        for key in [
+            "client.server-rejected-the-request",
+            "client.operation-rejected",
+            "client.schedule-operation-rejected",
+        ] {
+            for data in ["", "<html>Bad gateway</html>", "{}"] {
+                let mut body = ureq::Body::builder().data(data);
+                let detail = rejection_detail(&mut body, key);
+                assert_eq!(detail, crate::i18n::text(key));
+                assert_eq!(crate::i18n::message(&detail), crate::i18n::text(key),);
+            }
+            let mut body = ureq::Body::builder()
+                .data(r#"{"code":"provider_rejected","message":"Provider diagnostic 中文 {0}"}"#);
+            let detail = rejection_detail(&mut body, key);
+            assert_eq!(detail, "Provider diagnostic 中文 {0}");
+            assert_eq!(crate::i18n::message(&detail), detail);
+        }
+    }
+
     #[test]
     fn stale_task_search_pages_do_not_replace_current_results_or_selection() {
         let mut v = View::default();
@@ -825,9 +866,15 @@ mod tests {
             created_at_ms: 0,
             request_id: None,
         });
-        assert_eq!(task_progress(&snapshot), "正在执行 读取文件");
+        assert_eq!(
+            task_progress(&snapshot),
+            crate::i18n::tr!("client.running", "读取文件")
+        );
         snapshot.messages[0].status = MessageStatus::Complete;
-        assert_eq!(task_progress(&snapshot), "正在处理");
+        assert_eq!(
+            task_progress(&snapshot),
+            crate::i18n::text("client.working")
+        );
         snapshot.messages.push(Message {
             id: "reply".into(),
             conversation_id: "task".into(),
@@ -837,12 +884,18 @@ mod tests {
             created_at_ms: 0,
             request_id: None,
         });
-        assert_eq!(task_progress(&snapshot), "正在生成回复");
+        assert_eq!(
+            task_progress(&snapshot),
+            crate::i18n::text("client.generating-a-reply")
+        );
         snapshot.turn = Some(TurnState {
             user_message_id: "u".into(),
             cancelling: true,
         });
-        assert_eq!(task_progress(&snapshot), "正在停止");
+        assert_eq!(
+            task_progress(&snapshot),
+            crate::i18n::text("client.stopping")
+        );
     }
 
     use super::*;

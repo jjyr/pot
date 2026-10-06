@@ -12,7 +12,9 @@ import Foundation
     var activeSpec: [String: Any] = [:], connections: [[String: Any]] = [], modelOptions: [String] = []
     var authorizationTask: Task<Void, Never>?
     var authorizationID = "", authorizationURL = ""
-    var loginEngine = "", loginVisible = false, loginMessage = "", checkMessage = ""
+    var loginEngine = "", loginVisible = false
+    @LocalizedMessage var loginMessage = ""
+    @LocalizedMessage var checkMessage = ""
     var agentStates: [[String: Any]] = []
     var invocationExecutable = "codex", invocationArgs = "[]", codexModel = ""
     var profile: [String: Any] = [:]
@@ -21,7 +23,7 @@ import Foundation
     var routingProfile = "", routingName = "", routingModel = ""
     var routingProfileLimit = "", routingProviderLimit = ""
     var routingBusy = false
-    var routingOwner = "main", routingOwnerName = "主会话"
+    var routingOwner = "main", routingOwnerName = L.text("routing.main-conversation")
     var providerAllowances: [[String: Any]] = []
     var providerAllowance: [String: Any] = [:]
     var providerPeriod = "none", providerTokens = "2000000", providerAutoResume = true
@@ -33,7 +35,8 @@ import Foundation
     var awaitingBoot: String?
     var cpu = 4, memory = 8, disk = 32
     var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "5"
-    var cpuField = "4", memoryField = "8", diskField = "32", result = ""
+    var cpuField = "4", memoryField = "8", diskField = "32"
+    @LocalizedMessage var result = ""
     func nativeAccountReady(_ engine: String) -> Bool {
         guard let agent = agentStates.first(where: { $0["id"] as? String == engine }),
               agent["installation"] as? String == "present",
@@ -61,7 +64,7 @@ import Foundation
         if let old = awaitingBoot, let boot = bridge.snapshot["boot_id"] as? String, boot != old,
            bridge.snapshot["connected"] as? Bool == true
         {
-            result = "配置已应用，环境已就绪。"; awaitingBoot = nil
+            result = L.text("settingspanel.configuration-applied-environment-ready"); awaitingBoot = nil
         }
     }
 
@@ -89,7 +92,7 @@ import Foundation
          "provider_period": providerPeriod, "provider_tokens": providerTokens,
          "provider_auto_resume": providerAutoResume,
          "runtime_ready": bridge?.snapshot["connected"] as? Bool ?? false,
-         "environment_phase": environment["phase"] as? String ?? "等待启动",
+         "environment_phase": environment["phase"] as? String ?? L.text("settingspanel.waiting-to-start"),
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
          "selected_engine": profile["engine"] as? String ?? "pot", "selected_model": profile["model"] as? String ?? "",
@@ -97,7 +100,7 @@ import Foundation
          "codex_model": codexModel, "agents": agentStates,
          "discovering": discovering,
          "executable": invocationExecutable, "argv": invocationArgs,
-         "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
+         "locale": L.locale, "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
     }
 
     func refreshAgents() {
@@ -118,15 +121,18 @@ import Foundation
                     }
                 }
                 try await reloadAI()
-                result = "状态已刷新；未发送模型请求。"
-            } catch { result = "暂时无法检测状态，请检查环境并重试。"; loginMessage = result }
+                result = L.text("settingspanel.status-refreshed-no-model-requests-sent")
+            } catch {
+                result = L.text("settingspanel.unable-to-detect-status-check-the-environment"); loginMessage = result
+            }
         }
     }
 
     func saveInvocation(executable: String, arguments: String) {
         guard profile["engine"] as? String == "codex", let bridge, let data = arguments.data(using: .utf8),
               let args = try? JSONSerialization.jsonObject(with: data) as? [String],
-              let revision = profile["revision"] as? Int else { result = "参数必须是 JSON 字符串数组，且需先保存连接。"; return }
+              let revision = profile["revision"] as? Int
+        else { result = L.text("settingspanel.arguments-must-be-a-json-array-of"); return }
         var updated = profile
         updated["revision"] = revision + 1
         updated["launch_spec"] = [
@@ -148,8 +154,11 @@ import Foundation
                         "follow_worker": false,
                     ]
                 )
-                result = "命令已保存；在 AI 配置中保存聊天选择后生效。"; refreshAgents()
-            } catch { result = "命令未保存：\(error.localizedDescription)" }
+                result = L.text("settingspanel.command-saved-save-the-chat-selection-in"); refreshAgents()
+            } catch { result = L.format(
+                "settingspanel.command-not-saved-0",
+                [String(describing: error.localizedDescription)]
+            ) }
         }
     }
 
@@ -175,7 +184,9 @@ import Foundation
         guard let l = parsed(limit, 0 ... 1_000_000), let t = TokenCount.parse(tokens), let p = parsed(
             perTurn,
             1 ... 1000
-        ), let n = parsed(parallel, 1 ... 1000) else { result = "请检查请求上限；输出 token 可填正整数或 K/M，例如 128K、1M、1.5M。"; return }
+        ),
+            let n = parsed(parallel, 1 ... 1000)
+        else { result = L.text("settingspanel.check-the-request-limit-output-tokens-accept"); return }
         apply(
             ["request_limit": l, "max_tokens": t, "max_requests_per_turn": p, "max_parallel_tasks": n],
             to: root.appendingPathComponent("product/execution-limits.json")
@@ -183,7 +194,9 @@ import Foundation
     }
 
     func apply(_ value: [String: Any], to path: URL) {
-        guard let bridge, !bridge.running, !bridge.isApplying else { result = "任务仍在运行，请结束后再应用。"; return }
+        guard let bridge, !bridge.running,
+              !bridge.isApplying
+        else { result = L.text("settingspanel.tasks-are-still-running-finish-them-before"); return }
         do {
             try FileManager.default.createDirectory(
                 at: path.deletingLastPathComponent(),
@@ -199,11 +212,11 @@ import Foundation
             ) else { throw NSError(domain: "Pot", code: 1) }
             let handle = try FileHandle(forWritingTo: temp); try handle.synchronize(); try handle.close()
             guard rename(temp.path, path.path) == 0 else { throw NSError(domain: "Pot", code: 2) }
-            load(); result = "配置已保存。"
+            load(); result = L.text("settingspanel.configuration-saved")
             if path.path.contains("/product/") {
                 bridge.localRuntime?.send("backend-restart")
             }
-        } catch { result = "保存失败，原配置保留。" }
+        } catch { result = L.text("settingspanel.save-failed-previous-configuration-kept") }
     }
 
     func refreshRouting() {
@@ -221,8 +234,11 @@ import Foundation
                     routingProfile = savedProfiles.first?["id"] as? String ?? ""
                 }
                 editRoutingProfile(routingProfile)
-                result = "配置已加载。已有任务保持创建时的选择；汇总沿用主会话。"
-            } catch { result = "配置读取失败：\(error.localizedDescription)" }
+                result = L.text("settingspanel.configuration-loaded-existing-tasks-keep-their-original")
+            } catch { result = L.format(
+                "settingspanel.unable-to-load-configuration-0",
+                [String(describing: error.localizedDescription)]
+            ) }
         }
     }
 
@@ -268,7 +284,8 @@ import Foundation
                 throw NSError(
                     domain: "Pot",
                     code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "并发上限应为 1–1000，留空表示仅受全局上限约束。"]
+                    userInfo: [NSLocalizedDescriptionKey: L
+                        .text("settingspanel.concurrency-must-be-1-1000-leave-blank")]
                 )
             }
             return limit
@@ -286,8 +303,11 @@ import Foundation
             defer { routingBusy = false }
             do {
                 routingPolicy = try await bridge.runtime.request("api/v1/agent/routing", body: update)
-                result = "路由已保存；新任务使用新默认，已有任务保持固定。"
-            } catch { result = "路由未保存：\(error.localizedDescription)；可刷新后重试。" }
+                result = L.text("settingspanel.routing-saved-new-tasks-use-the-new")
+            } catch { result = L.format(
+                "settingspanel.routing-not-saved-0-refresh-and-retry",
+                [String(describing: error.localizedDescription)]
+            ) }
         }
     }
 
@@ -311,7 +331,10 @@ import Foundation
                 ])
                 routingProfile = selected["id"] as? String ?? ""
                 routingBusy = false; refreshRouting()
-            } catch { routingBusy = false; result = "Profile 未保存：\(error.localizedDescription)" }
+            } catch { routingBusy = false; result = L.format(
+                "settingspanel.profile-not-saved-0",
+                [String(describing: error.localizedDescription)]
+            ) }
         }
     }
 
@@ -332,12 +355,12 @@ import Foundation
                     if response["pending_migration"] is NSNull || response["pending_migration"] == nil {
                         break
                     }
-                    result = "任务正在等待交接，请在任务中结束当前轮次后继续；请勿重复提交。"
+                    result = L.text("settingspanel.this-task-is-waiting-for-handoff-finish")
                     try await Task.sleep(nanoseconds: 750_000_000)
                 }
-                result = "此任务的 Agent 已切换；其他任务保持固定。"
+                result = L.text("settingspanel.this-task-s-agent-changed-other-tasks")
                 bridge.selectPage(3)
-            } catch { result = "任务未切换；请检查连接、结束已有交接并刷新后重试。" }
+            } catch { result = L.text("settingspanel.task-agent-unchanged-check-the-connection-finish") }
         }
     }
 }
@@ -348,7 +371,7 @@ import Foundation
               let provider = providerAllowance["provider"] as? String,
               let limit = UInt64(tokens), limit > 0, limit <= 9_007_199_254_740_991
         else {
-            result = "请填写有效的正整数 Token 额度。"; return
+            result = L.text("settingspanel.enter-a-valid-positive-integer-token-allowance"); return
         }
         let old = providerAllowance["policy"] as? [String: Any] ?? [:]
         let update: [String: Any] = ["provider": provider, "revision": providerAllowance["revision"] as? Int ?? 0,
@@ -366,8 +389,11 @@ import Foundation
                 providerAllowance["enforcement"] = "pre_request"
                 providerAllowances.removeAll { $0["provider"] as? String == provider }
                 providerAllowances.append(providerAllowance)
-                result = "服务商额度已保存；与全局额度同时生效，自动继续仅适用于支持检查点恢复的后端。"
-            } catch { result = "额度未保存：\(error.localizedDescription)" }
+                result = L.text("settingspanel.provider-allowance-saved-it-applies-alongside-the")
+            } catch { result = L.format(
+                "settingspanel.allowance-not-saved-0",
+                [String(describing: error.localizedDescription)]
+            ) }
         }
     }
 }

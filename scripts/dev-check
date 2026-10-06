@@ -81,6 +81,8 @@ def sources(args):
 
 def check(mode, args):
     files = sources(args)
+    if mode == "lint":
+        run("python", "scripts/localize-web", "--check")
     fix = mode == "fmt"
     if files["rust"]:
         run("cargo", "fmt", "--all", *([] if fix else ["--check"]))

@@ -1,6 +1,7 @@
 use std::{env, path::PathBuf, process::Command};
 fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    generate_localization(&out);
     let status = Command::new("xcrun")
         .args([
             "swiftc",
@@ -11,6 +12,8 @@ fn main() {
             "-module-cache-path",
         ])
         .arg(out.join("swift-modules"))
+        .arg(out.join("Translations.swift"))
+        .arg("swift/Localization.swift")
         .arg("swift/Bridge.swift")
         .arg("swift/RuntimeClient.swift")
         .arg("swift/LocalRuntime.swift")
@@ -43,4 +46,71 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/UnreadTracker.swift");
     println!("cargo:rerun-if-changed=swift/TokenCount.swift");
     println!("cargo:rerun-if-changed=swift/PotIcon.swift");
+}
+
+fn generate_localization(out: &std::path::Path) {
+    use std::{collections::BTreeMap, fs};
+    let read = |locale: &str| -> BTreeMap<String, String> {
+        serde_json::from_str(&fs::read_to_string(format!("locales/{locale}.json")).unwrap())
+            .unwrap()
+    };
+    let en = read("en");
+    let zh = read("zh-CN");
+    assert_eq!(
+        en.keys().collect::<Vec<_>>(),
+        zh.keys().collect::<Vec<_>>(),
+        "translation keys differ"
+    );
+    let formats: Vec<String> =
+        serde_json::from_str(&fs::read_to_string("localization-format-keys.json").unwrap())
+            .unwrap();
+    let plurals: BTreeMap<String, usize> =
+        serde_json::from_str(&fs::read_to_string("localization-plurals.json").unwrap()).unwrap();
+    let mut macros = String::from("macro_rules! tr {\n");
+    for key in &formats {
+        if let Some(position) = plurals.get(key) {
+            let count = en[key].matches('{').count();
+            let names: Vec<String> = (0..count).map(|i| format!("value{i}")).collect();
+            let pattern = names
+                .iter()
+                .map(|name| format!("${name}:expr"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let values = names.join(", ");
+            let bindings = names
+                .iter()
+                .map(|name| format!("let {name} = ${name};"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            macros.push_str(&format!("({key:?}, {pattern} $(,)?) => {{{{ {bindings} if crate::i18n::is_chinese() {{ format!({:?}, {values}) }} else if {{ let singular_count = {}.to_string(); singular_count == \"1\" }} {{ format!({:?}, {values}) }} else {{ format!({:?}, {values}) }} }}}};\n", zh[key], names[*position], en[&format!("{key}.one")], en[key]));
+            continue;
+        }
+        macros.push_str(&format!("({key:?}, $($args:tt)*) => {{ if crate::i18n::is_chinese() {{ format!({:?}, $($args)*) }} else {{ format!({:?}, $($args)*) }} }};\n", zh[key], en[key]));
+    }
+    macros.push_str("}\npub(crate) use tr;\n");
+    fs::write(out.join("localized_formats.rs"), macros).unwrap();
+    let mut swift = String::from(
+        "enum TranslationResources {\nstatic let values: [String: [String: String]] = [\n",
+    );
+    for (locale, values) in [("en", &en), ("zh-CN", &zh)] {
+        swift.push_str(&format!("{locale:?}: [\n"));
+        for (key, value) in values {
+            swift.push_str(&format!(
+                "{}: {},\n",
+                serde_json::to_string(key).unwrap(),
+                serde_json::to_string(value).unwrap()
+            ));
+        }
+        swift.push_str("],\n");
+    }
+    swift.push_str("]\n}\n");
+    fs::write(out.join("Translations.swift"), swift).unwrap();
+    for path in [
+        "locales",
+        "localization-format-keys.json",
+        "localization-plurals.json",
+        "swift/Localization.swift",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
+    }
 }

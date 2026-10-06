@@ -63,6 +63,10 @@ python -m venv .local/skill-tests
 [tasks."test:app"]
 run = "cargo test --locked -p pot-app -j 4"
 
+[tasks."test:i18n"]
+description = "Verify translation coverage, native language preferences and web localization"
+run = "python scripts/tests/localization.py"
+
 [tasks."test:eval"]
 description = "Run deterministic CLI contracts without credentials or model calls"
 run = """

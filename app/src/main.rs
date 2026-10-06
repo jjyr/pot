@@ -1,8 +1,10 @@
 extern crate gpui_kit as gpui;
 
+rust_i18n::i18n!("locales", fallback = "en");
 mod artifacts;
 mod client;
 mod design;
+mod i18n;
 mod markdown;
 mod navigation;
 mod schedules_ui;
@@ -33,6 +35,7 @@ unsafe extern "C" {
     fn pot_bridge_event(buffer: *mut std::ffi::c_char, capacity: i32) -> i32;
     fn pot_bridge_ui(buffer: *mut std::ffi::c_char, capacity: i32) -> i32;
     fn pot_bridge_command(json: *const std::ffi::c_char);
+    fn pot_bridge_chinese() -> bool;
     fn pot_bridge_dark() -> bool;
     fn pot_bridge_reduce_motion() -> bool;
     fn pot_bridge_composer_height() -> f64;
@@ -124,7 +127,13 @@ impl Shell {
             serde_json::Value::Null
         };
         let native_changed = native != self.native;
+        let language_changed = native["settings"]["locale"]
+            .as_str()
+            .is_some_and(crate::i18n::set_locale);
         self.native = native;
+        if language_changed {
+            cx.notify();
+        }
         {
             let mut v = self.client.view.lock().unwrap();
             let page = self.native["page"].as_u64().unwrap_or(0);
@@ -227,7 +236,7 @@ impl Shell {
             "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_auth":snapshot.is_some_and(|s|s.engine.phase == pot_protocol::EnginePhase::NeedsAuth),
             "error":snapshot.is_some_and(|s|s.engine.phase == pot_protocol::EnginePhase::Failed),
-            "engine":snapshot.map(|s|s.engine.engine.as_str()).unwrap_or("正在连接"),
+            "engine":snapshot.map(|s|s.engine.engine.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
             "used":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.used),
             "limit":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.limit),
             "accepted":accepted,"at_bottom":at_bottom,
@@ -264,6 +273,16 @@ impl Shell {
             design::install(cx);
         }
         cx.set_global(design::Viewport(window.viewport_size().width));
+        if self.settings.localize(window, cx) {
+            self.task_search.update(cx, |input, cx| {
+                input.set_placeholder(
+                    crate::i18n::text("main.search-task-title-or-id-47"),
+                    window,
+                    cx,
+                )
+            });
+            self.usage_ui.localize(window, cx);
+        }
         self.settings.sync(&self.native["settings"], window, cx);
         match self.native["page"].as_u64() {
             Some(4..=6) => {
@@ -299,17 +318,25 @@ impl Shell {
             return ui::page(cx).child(
                 ui::content().child(
                     ui::card(cx)
-                        .child(ui::title("先配置一个 Agent，开始聊天"))
-                        .child(ui::hint("集成一个 Agent 并选择模型。已有输入会保留。", cx))
+                        .child(ui::title(crate::i18n::text(
+                            "main.configure-an-agent-to-start-chatting",
+                        )))
+                        .child(ui::hint(
+                            crate::i18n::text("main.connect-an-agent-and-choose-a-model"),
+                            cx,
+                        ))
                         .child(
                             Button::new("chat-ai-setup")
                                 .primary()
-                                .label("前往 AI 配置")
+                                .label(crate::i18n::text("main.open-ai-configuration"))
                                 .on_click(|_, _, _| {
                                     ui::command(serde_json::json!({"action":"ai-open"}))
                                 }),
                         )
-                        .child(ui::hint("也可以先使用 Sandbox。", cx)),
+                        .child(ui::hint(
+                            crate::i18n::text("main.you-can-also-use-sandbox-first"),
+                            cx,
+                        )),
                 ),
             );
         }
@@ -321,14 +348,14 @@ impl Shell {
                 ui::content()
                     .child(ui::empty(
                         IconName::Inbox,
-                        "这个任务已不可用，请返回列表查看其他任务。",
+                        crate::i18n::text("main.this-task-is-no-longer-available-return"),
                         cx,
                     ))
                     .child(
                         Button::new("missing-task-list")
                             .ghost()
                             .small()
-                            .label("返回任务列表")
+                            .label(crate::i18n::text("main.back-to-tasks"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_tasks = true;
                                 ui::command(serde_json::json!({"action":"page","value":3}));
@@ -342,9 +369,9 @@ impl Shell {
         let muted = if dark { 0xb7b7b7 } else { 0x646464 };
         let bubble = if dark { 0x2b2b2b } else { 0xffffff };
         let error = if !view.command_error.is_empty() {
-            view.command_error.clone()
+            crate::i18n::message(&view.command_error)
         } else {
-            view.error.clone()
+            crate::i18n::message(&view.error)
         };
         if self.show_tasks && self.schedule_tab {
             return self.schedules_ui.render(&view, cx);
@@ -354,8 +381,7 @@ impl Shell {
                 ui::content()
                     .child(schedules_ui::navigation(false, cx))
                     .child(ui::hint(
-                        format!(
-                            "向主 Agent 描述目标即可创建任务。最多同时处理 {} 个任务。",
+                        crate::i18n::tr!("main.describe-a-goal-to-the-main-agent",
                             self.native["settings"]["parallel"].as_str().unwrap_or("5")
                         ),
                         cx,
@@ -363,9 +389,9 @@ impl Shell {
                     .child(
                         ui::segments(cx).children(
                             [
-                                ("active", "进行中", view.task_page.counts.active),
-                                ("attention", "需处理", view.task_page.counts.attention),
-                                ("archived", "已归档", view.task_page.counts.archived),
+                                ("active", crate::i18n::text("main.ongoing"), view.task_page.counts.active),
+                                ("attention", crate::i18n::text("main.needs-attention"), view.task_page.counts.attention),
+                                ("archived", crate::i18n::text("main.archived"), view.task_page.counts.archived),
                             ]
                             .into_iter()
                             .map(|(scope, label, count)| {
@@ -389,7 +415,7 @@ impl Shell {
                     .child(
                         Input::new(&self.task_search)
                             .small()
-                            .aria_label("搜索任务标题或编号"),
+                            .aria_label(crate::i18n::text("main.search-task-title-or-id")),
                     )
                     .when(
                         !view.error.is_empty() && view.main_snapshot.is_some(),
@@ -400,7 +426,7 @@ impl Shell {
                                     .items_center()
                                     .gap_2()
                                     .child(ui::notice(
-                                        "暂时无法刷新任务，保留上次读取的结果。",
+                                        crate::i18n::text("main.unable-to-refresh-tasks-showing-the-last"),
                                         true,
                                         cx,
                                     ))
@@ -428,20 +454,20 @@ impl Shell {
                                 el.child(ui::empty(
                                     IconName::Inbox,
                                     if !view.error.is_empty() && view.main_snapshot.is_some() {
-                                        "暂时无法读取任务，请检查本地后端状态。"
+                                        crate::i18n::text("main.unable-to-load-tasks-check-the-local")
                                     } else if view.tasks_loading || view.main_snapshot.is_none() {
-                                        "正在连接本地后端，读取任务…"
+                                        crate::i18n::text("main.connecting-to-local-backend-and-loading-tasks")
                                     } else if !view.task_query.q.is_empty() {
-                                        "当前分组没有匹配任务。可切换分组查找历史任务。"
+                                        crate::i18n::text("main.no-matching-tasks-in-this-group-switch")
                                     } else {
                                         match view.task_query.scope.as_str() {
                                             "archived" => {
-                                                "还没有归档任务。完成或取消的任务会自动移到这里。"
+                                                crate::i18n::text("main.no-archived-tasks-yet-completed-or-cancelled")
                                             }
                                             "attention" => {
-                                                "没有需要处理的任务。失败或中断的任务会显示在这里。"
+                                                crate::i18n::text("main.no-tasks-need-attention-failed-or-interrupted")
                                             }
-                                            _ => "没有进行中的任务。请在聊天中描述目标。",
+                                            _ => crate::i18n::text("main.no-ongoing-tasks-describe-a-goal-in"),
                                         }
                                     },
                                     cx,
@@ -453,7 +479,7 @@ impl Shell {
                                             Button::new("clear-task-search")
                                                 .ghost()
                                                 .small()
-                                                .label("清除搜索")
+                                                .label(crate::i18n::text("main.clear-search"))
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     this.task_search.update(cx, |f, cx| {
                                                         f.set_value("", window, cx)
@@ -570,8 +596,7 @@ impl Shell {
                                                     div()
                                                         .text_size(px(12.))
                                                         .text_color(cx.theme().muted_foreground)
-                                                        .child(format!(
-                                                            "· {} 条指导待处理",
+                                                        .child(crate::i18n::tr!("main.pending-instructions",
                                                             task.pending
                                                         )),
                                                 )
@@ -592,10 +617,9 @@ impl Shell {
                             .justify_between()
                             .child(ui::hint(
                                 if view.tasks_loading {
-                                    "正在加载…".into()
+                                    crate::i18n::text("client.loading").into()
                                 } else {
-                                    format!(
-                                        "共 {} 项 · 第 {} 页",
+                                    crate::i18n::tr!("main.items-page",
                                         view.task_page.total,
                                         view.task_query.offset / view.task_query.limit + 1
                                     )
@@ -609,7 +633,7 @@ impl Shell {
                                     .child(
                                         Button::new("tasks-previous")
                                             .ghost()
-                                            .label("上一页")
+                                            .label(crate::i18n::text("schedules-ui.previous"))
                                             .disabled(
                                                 view.tasks_loading || view.task_query.offset == 0,
                                             )
@@ -632,7 +656,7 @@ impl Shell {
                                     .child(
                                         Button::new("tasks-next")
                                             .ghost()
-                                            .label("下一页")
+                                            .label(crate::i18n::text("schedules-ui.next-52"))
                                             .disabled(
                                                 view.tasks_loading
                                                     || view.task_page.next_offset.is_none(),
@@ -717,7 +741,7 @@ impl Shell {
                                                             Icon::new(IconName::Inbox)
                                                                 .size(px(13.)),
                                                         )
-                                                        .child("已归档"),
+                                                        .child(crate::i18n::text("main.archived")),
                                                 )
                                             },
                                         )
@@ -725,7 +749,7 @@ impl Shell {
                                     .when_some(task, |el, task| {
                                         let owner = task.id.clone();
                                         let title = task.title.clone();
-                                        el.child(Button::new("task-profile").ghost().small().label("更换 Agent")
+                                        el.child(Button::new("task-profile").ghost().small().label(crate::i18n::text("main.change-agent"))
                                             .on_click(move |_,_,_|ui::command(serde_json::json!({"action":"task-profile","owner":owner,"title":title}))))
                                     })
                                     .when(
@@ -742,7 +766,7 @@ impl Shell {
                                                 Button::new("stop-task")
                                                     .ghost()
                                                     .small()
-                                                    .label("停止")
+                                                    .label(crate::i18n::text("main.stop"))
                                                     .on_click(cx.listener(|this, _, _, _| {
                                                         this.client.cancel()
                                                     })),
@@ -772,7 +796,7 @@ impl Shell {
                                 .mx_auto()
                                 .mt_16()
                                 .text_color(rgb(muted))
-                                .child("有什么想交给 Pot 的？"),
+                                .child(crate::i18n::text("main.what-would-you-like-pot-to-do")),
                         )
                     })
                     .children(messages.iter().enumerate().map(|(index, m)| {
@@ -796,12 +820,12 @@ impl Shell {
                             format!(
                                 "{} {} · {}",
                                 if expanded { "⌄" } else { "›" },
-                                m.text.lines().next().unwrap_or("工具"),
+                                m.text.lines().next().unwrap_or(crate::i18n::text("client.tool")),
                                 match m.status {
-                                    MessageStatus::Streaming | MessageStatus::Accepted => "执行中",
-                                    MessageStatus::Failed => "失败",
-                                    MessageStatus::Cancelled => "已停止",
-                                    _ => "完成",
+                                    MessageStatus::Streaming | MessageStatus::Accepted => crate::i18n::text("schedules-ui.running"),
+                                    MessageStatus::Failed => crate::i18n::text("schedules-ui.failed"),
+                                    MessageStatus::Cancelled => crate::i18n::text("main.stopped"),
+                                    _ => crate::i18n::text("main.done"),
                                 }
                             )
                         } else {
@@ -844,24 +868,21 @@ impl Shell {
                                         )
                                     })
                                     .when(!tool || expanded, |el| {
-                                        el.child(markdown::render(
-                                            &m.id,
-                                            if m.id.starts_with("task-report-") {
-                                                m.text
-                                                    .rsplit_once("\n任务编号：")
-                                                    .map(|(text, _)| text)
-                                                    .unwrap_or(&m.text)
-                                            } else {
-                                                &m.text
-                                            },
-                                            user,
-                                            dark,
-                                            cx,
-                                        ))
+                                        let source: std::borrow::Cow<'_, str> = if m.id.starts_with("task-report-") {
+                                            crate::i18n::report(m.text
+                                                .rsplit_once("\n任务编号：")
+                                                .or_else(|| m.text.rsplit_once("\nTask ID:"))
+                                                .map(|(text, _)| text)
+                                                .unwrap_or(&m.text)).into()
+                                        } else if m.role == Role::System || m.request_id.as_deref().is_some_and(|id| id.starts_with("pot-result:")) {
+                                            crate::i18n::message(&m.text).into()
+                                        } else {
+                                            m.text.as_str().into()
+                                        };
+                                        el.child(markdown::render(&m.id, &source, user, dark, cx))
                                     })
                                     .when_some(artifact, |el, path| {
-                                        let label = format!(
-                                            "▤ {} · 在 Finder 中显示",
+                                        let label = crate::i18n::tr!("main.show-in-finder",
                                             path.file_name().unwrap_or_default().to_string_lossy()
                                         );
                                         el.child(
@@ -899,22 +920,22 @@ impl Shell {
                                                     }))
                                                     .child(
                                                         if m.status == MessageStatus::Cancelled {
-                                                            "已停止"
+                                                            crate::i18n::text("main.stopped")
                                                         } else {
-                                                            "未完成 · 查看上方原因"
+                                                            crate::i18n::text("main.unfinished-see-the-reason-above")
                                                         },
                                                     ),
                                             )
                                         },
                                     )
                                     .when(user && m.status == MessageStatus::Streaming, |el| {
-                                        el.child(div().text_size(px(11.)).child("已应用 · 执行中"))
+                                        el.child(div().text_size(px(11.)).child(crate::i18n::text("main.applied-running")))
                                     })
                                     .when(user && m.status == MessageStatus::Accepted, |el| {
                                         el.child(
                                             div()
                                                 .text_size(px(11.))
-                                                .child("已接收 · 等待下一轮应用"),
+                                                .child(crate::i18n::text("main.received-will-apply-next-turn")),
                                         )
                                     }),
                             )
@@ -939,14 +960,14 @@ impl Shell {
                                                 m.id
                                             )))
                                             .value(m.text.clone())
-                                            .tooltip("复制消息")
+                                            .tooltip(crate::i18n::text("main.copy-message"))
                                             .small(),
                                         )
                                         .when_some(
                                             m.id.starts_with("task-report-")
                                                 .then(|| {
                                                     m.text
-                                                        .rsplit_once("任务编号：")
+                                                        .rsplit_once("任务编号：").or_else(|| m.text.rsplit_once("Task ID:"))
                                                         .map(|(_, id)| id.trim().to_string())
                                                 })
                                                 .flatten()
@@ -960,8 +981,8 @@ impl Shell {
                                                     .ghost()
                                                     .small()
                                                     .icon(IconName::ExternalLink)
-                                                    .tooltip("查看任务")
-                                                    .accessibility_label("查看任务")
+                                                    .tooltip(crate::i18n::text("main.view-task"))
+                                                    .accessibility_label(crate::i18n::text("main.view-task"))
                                                     .on_click(cx.listener(move |this, _, _, cx| {
                                                         this.client.select(task.clone());
                                                         this.show_tasks = false;
@@ -979,7 +1000,7 @@ impl Shell {
                                         let id = task.id.clone();
                                         Button::new(SharedString::from(format!("running-{}", task.id)))
                                             .ghost().small().text_size(px(12.)).text_color(rgb(muted))
-                                            .accessibility_label(format!("{}，{}，打开任务", task.title, task.progress))
+                                            .accessibility_label(crate::i18n::tr!("main.open-task", task.title, task.progress))
                                             .child(div().w_full().flex().items_center().gap_2().text_size(px(12.)).font_weight(FontWeight::NORMAL)
                                                 .child(div().size(px(4.)).rounded_full().bg(rgb(if dark { 0x7d9ec3 } else { 0x6f8ba8 }))
                                                     .with_animation(SharedString::from(format!("activity-{}", task.id)), Animation::new(std::time::Duration::from_millis(2700)).repeat(), |el, t| el.opacity(0.825 + 0.175 * (t * std::f32::consts::TAU).cos())))
@@ -992,7 +1013,7 @@ impl Shell {
                                             SharedString::from(format!("summary-collapse-{start:?}")), Animation::new(std::time::Duration::from_millis(210)),
                                             move |el, t| el.h(px(24. * count as f32 * (1. - t))).opacity(1. - t)))
                                     })
-                                    .when(view.running_total > 3, |el| el.child(Button::new("running-overflow").ghost().small().text_color(rgb(muted)).accessibility_label(format!("另有 {} 个运行中，查看任务列表", view.running_total-3)).child(div().w_full().text_size(px(12.)).font_weight(FontWeight::NORMAL).child(format!("另有 {} 个运行中", view.running_total-3)))
+                                    .when(view.running_total > 3, |el| el.child(Button::new("running-overflow").ghost().small().text_color(rgb(muted)).accessibility_label(crate::i18n::tr!("main.more-running-view-tasks", view.running_total-3)).child(div().w_full().text_size(px(12.)).font_weight(FontWeight::NORMAL).child(crate::i18n::tr!("main.more-running", view.running_total-3)))
                                         .on_click(cx.listener(|this, _, window, cx| { this.task_search.update(cx, |field, cx| field.set_value("", window, cx)); ui::command(serde_json::json!({"action":"page", "value":3})); this.show_tasks=true; this.schedule_tab=false; this.client.filter_tasks("active".into(), String::new(), 0); cx.notify(); })))))
                             })
                     })),
@@ -1008,16 +1029,16 @@ impl Shell {
                         .when(!error.is_empty(), |el| el.child(div().py_2().child(error)))
                         .when(running, |el| {
                             el.child(div().py_2().child(if stopping {
-                                "正在停止…"
+                                crate::i18n::text("main.stopping")
                             } else {
-                                "Pot 正在处理…"
+                                crate::i18n::text("main.pot-is-working")
                             }))
                         })
                         .when(
                             snapshot
                                 .and_then(|s| s.budget.as_ref())
                                 .is_some_and(|b| b.remaining() == 0),
-                            |el| el.child("请求额度已用完，可在设置 → Agent 中调整。"),
+                            |el| el.child(crate::i18n::text("main.request-allowance-exhausted-adjust-it-in-settings")),
                         )
                         .when(!at_bottom && !self.jumping_to_latest, |el| {
                             el.child(
@@ -1027,8 +1048,8 @@ impl Shell {
                                     .h(px(32.))
                                     .bg(rgb(bubble))
                                     .cursor_pointer()
-                                    .label("↓ 最新消息")
-                                    .accessibility_label("滚动到最新消息")
+                                    .label(crate::i18n::text("main.latest-messages"))
+                                    .accessibility_label(crate::i18n::text("main.scroll-to-latest-messages"))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.jumping_to_latest = true;
                                         this.scroll.scroll_to_bottom();
@@ -1101,13 +1122,13 @@ impl Render for Shell {
 fn task_phase(p: &pot_protocol::TaskPhase) -> &'static str {
     use pot_protocol::TaskPhase::*;
     match p {
-        Queued => "排队中",
-        Waiting => "等待额度",
-        Running => "执行中",
-        Complete => "已完成",
-        Failed => "失败 · 可追加指导",
-        Cancelled => "已停止",
-        Interrupted => "已中断 · 追加指导后继续",
+        Queued => crate::i18n::text("schedules-ui.queued"),
+        Waiting => crate::i18n::text("main.waiting-for-allowance"),
+        Running => crate::i18n::text("schedules-ui.running"),
+        Complete => crate::i18n::text("schedules-ui.completed"),
+        Failed => crate::i18n::text("main.failed-add-instructions-to-continue"),
+        Cancelled => crate::i18n::text("main.stopped"),
+        Interrupted => crate::i18n::text("main.interrupted-add-instructions-to-resume"),
     }
 }
 fn main() {
@@ -1115,6 +1136,11 @@ fn main() {
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx: &mut App| {
             gpui_kit::init(cx);
+            crate::i18n::set_locale(if unsafe { pot_bridge_chinese() } {
+                "zh-CN"
+            } else {
+                "en"
+            });
             cx.set_global(design::Viewport(px(1080.)));
             design::install(cx);
             gpui_kit::open_window(
@@ -1192,7 +1218,9 @@ fn main() {
                             schedule_tab: false,
                             schedules_ui: schedules_ui::SchedulesUI::new(window, cx),
                             task_search: cx.new(|cx| {
-                                InputState::new(window, cx).placeholder("搜索任务标题或编号…")
+                                InputState::new(window, cx).placeholder(crate::i18n::text(
+                                    "main.search-task-title-or-id-47",
+                                ))
                             }),
                         }
                     })
