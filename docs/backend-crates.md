@@ -5,7 +5,7 @@ Updated: 2026-10-06. See [architecture](architecture.md) for deployment and [Age
 | Crate | Responsibility |
 |---|---|
 | `pot-core` | Immutable profiles/bindings, execution/feedback/backend traits, shared environment and control tool schemas; no process or filesystem implementation |
-| `pot-agent` | Host in-process model loop, context, compaction, tool loadouts and metering; execution requires an injected ToolExecutor |
+| `pot-agent` | Host in-process model loop, context, compaction, tool loadouts, filesystem skill discovery and metering; execution requires an injected ToolExecutor |
 | `pot-driver` | Host Codex App Server sessions, native identities, normalized events and cleanup |
 | `pot-tool-executor` | Shared patch and pipe-session implementation; credential-free guest binary. Local execution is explicitly injected only in eval and isolated tests |
 | `pot-storage` | Host product SQLite, bindings, request/usage ledgers and durable transactions |

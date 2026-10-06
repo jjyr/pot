@@ -53,6 +53,7 @@ if cmd == "prepare":
     for name in [
         "sandbox.sh",
         "executor.py",
+        "skill_mounts.py",
         "desktop.sh",
         "desktop-config.sh",
         "desktop-session.sh",
@@ -161,6 +162,7 @@ elif cmd == "bundle":
         pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug/pot-server",
         APP / "Contents/Resources/runtime/pot-server",
     )
+    shutil.copytree(REPO / "skills", APP / "Contents/Resources/runtime/skills")
     host_tools = APP / "Contents/Resources/runtime/host-tools"
     host_tools.mkdir(exist_ok=True)
     shutil.copy2(REPO / "image/agents/package.json", host_tools / "package.json")

@@ -172,7 +172,21 @@ fn make_context(
     } else {
         ExecutionRole::Main
     };
+    let skill_resources = if role == ExecutionRole::Summary {
+        Default::default()
+    } else {
+        crate::skills::resources(s)?
+    };
+    let mut main_prompt = if s.is_worker {
+        String::new()
+    } else {
+        orchestration::MAIN_PROMPT.into()
+    };
+    if binding.spec.engine == Engine::Codex && role != ExecutionRole::Summary {
+        main_prompt.push_str(&crate::skills::instructions(s, &skill_resources)?);
+    }
     Ok(ExecutionContext {
+        skill_resources,
         tool_executor: {
             #[cfg(test)]
             if let Some(executor) = &s.test_tool_executor {
@@ -208,7 +222,7 @@ fn make_context(
         role,
         backend_url: format!("http://127.0.0.1:{}", endpoint.port),
         lane_token: s.token.clone(),
-        main_prompt: orchestration::MAIN_PROMPT.into(),
+        main_prompt,
         feedback: Arc::new(Feedback {
             service: s.clone(),
             epoch: binding.epoch,

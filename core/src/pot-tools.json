@@ -52,6 +52,13 @@
         "sandbox_id": {
           "type": "string",
           "description": "Immutable worker Sandbox assignment; omitted snapshots the execution default."
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional skill names restricting this task. Omitted automatically discovers global task/shared and project skills."
         }
       },
       "required": [

@@ -162,6 +162,10 @@ pub async fn invoke(
                 s,
                 h,
                 CreateTask {
+                    skills: serde_json::from_value(
+                        call.args.get("skills").cloned().unwrap_or(Value::Null),
+                    )
+                    .map_err(|e| error(StatusCode::BAD_REQUEST, "task_skills", &e.to_string()))?,
                     sandbox_id: call.args["sandbox_id"].as_str().unwrap_or("").into(),
                     request_id,
                     text: field(&call.args, "text")?,

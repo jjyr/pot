@@ -8,6 +8,7 @@ resources = R / ".local/d1/resources"
 assets = [
     "sandbox.sh",
     "executor.py",
+    "skill_mounts.py",
     "pot-tool-executor",
     "desktop.sh",
     "desktop-config.sh",

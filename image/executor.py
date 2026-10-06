@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Sandbox-only executor. No product credentials, Agent loop or Host API."""
 
+import ctypes
 import hmac
 import json
 import os
@@ -12,6 +13,7 @@ import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from skill_mounts import SKILL_SOURCES, SKILL_VIEW, skill_mounts, skill_namespace
 
 ROOT = Path(os.environ.get("POT_EXECUTOR_ROOT", "/data")).resolve()
 WORK = ROOT / "workspace"
@@ -34,22 +36,33 @@ DB.execute(
 )
 DB.commit()
 USER = pwd.getpwnam("potdesktop") if os.getuid() == 0 else None
+TASK_USER = pwd.getpwnam("pottask") if os.getuid() == 0 else None
+if USER:
+    # Hide raw sources even when main and task scopes share a VM.
+    os.chmod(SKILL_SOURCES, 0o700)
+    SKILL_VIEW.mkdir(mode=0o755, parents=True, exist_ok=True)
 
 
-def workspace(cwd):
+def workspace(cwd, role):
     # Host and Sandbox paths have different roots; only the declared guest namespace is accepted.
     prefix = "/data/workspace"
     if cwd != prefix and not cwd.startswith(prefix + "/"):
         raise ValueError("Invalid execution workspace")
+    if role == "task" and not cwd.startswith(prefix + "/tasks/"):
+        raise ValueError("Invalid task workspace")
     path = (WORK / cwd.removeprefix(prefix).lstrip("/")).resolve()
     if not path.is_relative_to(WORK):
         raise ValueError("Workspace escape")
     path.mkdir(parents=True, exist_ok=True)
     if USER:
         # Ancestors created by Runtime mounts may have host ownership.
+        user = TASK_USER if role == "task" else USER
         for parent in [WORK, *path.parents, path]:
             if parent.is_relative_to(WORK):
                 os.chown(parent, USER.pw_uid, USER.pw_gid)
+                os.chmod(parent, 0o755)
+        os.chown(path, user.pw_uid, USER.pw_gid)
+        os.chmod(path, 0o775 if role == "task" else 0o755)
     return path
 
 
@@ -82,17 +95,21 @@ def terminate(process):
             time.sleep(0.025)
 
 
-def demote():
+def demote(role):
     if USER:
         os.setgroups([])
+        user = TASK_USER if role == "task" else USER
         os.setgid(USER.pw_gid)
-        os.setuid(USER.pw_uid)
+        os.setuid(user.pw_uid)
+        os.umask(0o002 if role == "task" else 0o022)
+        if ctypes.CDLL(None, use_errno=True).prctl(38, 1, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), "Unable to set no_new_privs")
 
 
 class Runner:
-    def __init__(self, scope, cwd, policy):
+    def __init__(self, scope, cwd, policy, role):
         self.lock = threading.Lock()
-        self.cwd, self.policy = cwd, policy
+        self.cwd, self.policy, self.role = cwd, policy, role
         group = Path("/sys/fs/cgroup") / ("pot-" + scope)
         if not USER or not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
             raise RuntimeError("Root-owned cgroup v2 containment required")
@@ -100,7 +117,13 @@ class Runner:
 
         def contain():
             (group / "cgroup.procs").write_text(str(os.getpid()))
-            demote()
+            try:
+                skill_namespace(role)
+                demote(role)
+                os.write(1, b'{"ready":true}\n')
+            except Exception as error:
+                os.write(1, (json.dumps({"error": str(error)[:1024]}) + "\n").encode())
+                os._exit(125)
 
         self.process = subprocess.Popen(
             ["/opt/pot/pot-tool-executor"],
@@ -118,6 +141,11 @@ class Runner:
             preexec_fn=contain,
         )
         self.process.sandbox_cgroup = group
+        prepared = json.loads(self.process.stdout.readline(2048))
+        if prepared.get("ready") is not True:
+            terminate(self.process)
+            group.rmdir()
+            raise RuntimeError(prepared.get("error", "Scope preparation failed"))
 
     def execute(self, request):
         with self.lock:
@@ -175,12 +203,14 @@ def execute(request):
             return json.loads(row[1])
         if scope in CANCELLED:
             raise ValueError("Execution scope ended")
-        cwd = workspace(request["cwd"])
+        role = request["role"]
+        skill_mounts(role)  # Validate even before scope preparation.
+        cwd = workspace(request["cwd"], role)
         runner = RUNNERS.get(scope)
         if runner is None:
-            runner = Runner(scope, cwd, request["policy"])
+            runner = Runner(scope, cwd, request["policy"], role)
             RUNNERS[scope] = runner
-        if runner.cwd != cwd or runner.policy != request["policy"]:
+        if runner.cwd != cwd or runner.policy != request["policy"] or runner.role != role:
             raise ValueError("Scope configuration changed")
         DB.execute("INSERT INTO operations VALUES (?,?,NULL)", (op_id, encoded))
         DB.commit()

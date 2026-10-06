@@ -48,6 +48,10 @@ depends = ["lint", "check:rust", "check:swift"]
 description = "Run backend crate tests without model calls"
 run = "cargo test --locked -p pot-core -p pot-storage -p pot-driver -p pot-agent -p pot-tool-executor -p pot-gateway -p pot-runtime -p pot-server -p pot-protocol -p pot-eval -j 4"
 
+[tasks."test:skills"]
+description = "Verify guest per-scope skills mount policy without a VM"
+run = "python scripts/tests/skill-mounts.py"
+
 [tasks."test:app"]
 run = "cargo test --locked -p pot-app -j 4"
 

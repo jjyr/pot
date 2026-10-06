@@ -240,6 +240,8 @@ pub struct TaskRequirements {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CreateTask {
     #[serde(default)]
+    pub skills: Option<Vec<String>>,
+    #[serde(default)]
     pub sandbox_id: String,
     pub request_id: String,
     pub text: String,

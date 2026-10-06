@@ -7,6 +7,7 @@ mkdir -p /cache/apk /cache/npm
 # shellcheck disable=SC2046
 apk --cache-dir /cache/apk add $(cat /build/assets/packages.lock)
 adduser -D -H -h /data/engine-home potdesktop
+adduser -D -H -h /data/task-home pottask
 mkdir -p /opt/pot /opt/pi /opt/pot/novnc /data
 cp /build/assets/* /opt/pot/
 tar xzf /opt/pot/novnc.tar.gz -C /opt/pot/novnc --strip-components=1

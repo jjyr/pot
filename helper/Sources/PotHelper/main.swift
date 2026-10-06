@@ -146,6 +146,15 @@ actor Runtime {
                 ) else { throw NSError(domain: "pot", code: 6) }
             }
             let executorToken = try String(contentsOf: tokenPath, encoding: .utf8)
+            let skillUser = ProcessInfo.processInfo.environment["POT_AGENT_SKILLS_DIR"] ?? NSHomeDirectory() + "/.pot/agent/skills"
+            let skillBuiltin = resources.appendingPathComponent("skills").path
+            for role in ["shared", "main", "task"] {
+                try FileManager.default.createDirectory(
+                    atPath: skillUser + "/" + role,
+                    withIntermediateDirectories: true
+                )
+            }
+
             var metadata: [String: Any] = [
                 "image": imageReference,
                 "cpus": cpus,
@@ -175,8 +184,21 @@ actor Runtime {
             ) { config in
                 config.cpus = cpus; config.memoryInBytes = UInt64(memoryGiB) * 1024 * 1024 * 1024
                 config.process.arguments = ["/bin/sh", "/opt/pot/sandbox.sh"]
+                // Only the root broker creates per-scope mounts. Tool children
+                // drop to unprivileged users and set no_new_privs before exec.
+                var capabilities = LinuxCapabilities.defaultOCICapabilities
+                capabilities.bounding.append(.sysAdmin)
+                capabilities.effective.append(.sysAdmin)
+                capabilities.permitted.append(.sysAdmin)
+                config.process.capabilities = capabilities
                 config.process.environmentVariables.append("POT_EXECUTOR_TOKEN=" + executorToken)
                 config.mounts.append(.share(source: workspace.path, destination: "/data"))
+                config.mounts.append(.share(source: skillUser, destination: "/run/pot-skill-sources/user"))
+                config.mounts.append(.share(
+                    source: skillBuiltin,
+                    destination: "/run/pot-skill-sources/builtin",
+                    options: ["ro"]
+                ))
                 config.dns = DNS(nameservers: ["1.1.1.1"])
             }
             manager = creatingManager
@@ -287,6 +309,7 @@ actor Sandboxes {
         var environment = ProcessInfo.processInfo.environment
         environment["POT_DATA_DIR"] = root.appendingPathComponent("product").path
         environment["POT_WORKSPACE"] = root.appendingPathComponent("agent-workspace").path
+        environment["POT_BUILTIN_SKILLS_DIR"] = resources.appendingPathComponent("skills").path
         environment["POT_RUNTIME_BIND"] = "127.0.0.1:0"
         let hostTools = resources.appendingPathComponent("host-tools/node_modules/.bin").path
         environment["PATH"] = resources.appendingPathComponent("node/bin")
