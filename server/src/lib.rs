@@ -1,4 +1,5 @@
 //! Standalone backend hosting; no frontend, Helper or platform UI dependencies.
+pub mod access;
 mod config;
 mod hosting;
 mod routes;

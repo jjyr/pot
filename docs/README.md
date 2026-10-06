@@ -13,6 +13,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Inject skills into main and task pot-agent sessions | [Agent skill injection](agent-skills.md) |
 | Change APIs, pot-agent, task state, or recovery | [Runtime contract](../runtime/README.md) |
 | Build the Sandbox image, desktop theme, or CJK fonts | [Sandbox image](sandbox-image.md) |
+| Configure QR/Passkey mobile access and encrypted main-message push | [Mobile access](mobile-access.md) |
 | Change UI language, translations or locale matching | [Internationalization](internationalization.md) |
 | Change chat, tasks, settings, or Sandbox UI | [UI specification](ui-ux-design.md) |
 | Apply the approved visual, component, motion, and navigation direction | [Design language](design-language.md) (shared shell, page layouts, Chat and Pot icons implemented; acceptance limits documented) |

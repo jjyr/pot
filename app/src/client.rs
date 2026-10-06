@@ -53,6 +53,9 @@ fn task_progress(snapshot: &Snapshot) -> String {
 
 #[derive(Default, Clone, PartialEq)]
 pub struct View {
+    pub access: Value,
+    pub access_notice: String,
+    pub access_pending: bool,
     pub usage_query: Option<(String, u32, usize, String)>,
     pub usage: Value,
     pub usage_error: String,
@@ -369,6 +372,14 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             }
         }
     }
+    let access = agent
+        .get(&format!("{url}/api/v1/access"))
+        .header("Authorization", &auth)
+        .call()
+        .ok()
+        .and_then(|mut r| r.body_mut().read_json::<Value>().ok())
+        .unwrap_or(Value::Null);
+    view.lock().unwrap().access = access;
     let main: Snapshot = agent
         .get(&format!("{url}{PATH_SNAPSHOT}"))
         .header("Authorization", &auth)
@@ -710,6 +721,34 @@ impl Client {
                 }
             }
             let _ = refresh.try_send(());
+            crate::wake_ui();
+        });
+    }
+    pub fn access_command(&self, body: Value) {
+        let mut view = self.view.lock().unwrap();
+        if view.access_pending {
+            return;
+        }
+        view.access_pending = true;
+        let v = self.view.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(), String> {
+                let (url, token) = endpoint()?;
+                let agent = ureq::Agent::config_builder()
+                    .timeout_global(Some(Duration::from_secs(5)))
+                    .build()
+                    .new_agent();
+                agent
+                    .post(&format!("{url}/api/v1/access"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .send_json(body)
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            })();
+            let mut view = v.lock().unwrap();
+            view.access_pending = false;
+            view.access_notice = result.err().unwrap_or_default();
+            drop(view);
             crate::wake_ui();
         });
     }

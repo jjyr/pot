@@ -256,6 +256,109 @@ pub struct Settings {
     api_advanced: bool,
 }
 impl Settings {
+    fn mobile_access(&self, view: &crate::client::View, cx: &mut Context<Shell>) -> Div {
+        let mut panel = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .border_1()
+            .border_color(cx.theme().border)
+            .rounded_lg()
+            .child(crate::i18n::text("mobile.access"));
+        if view.access.is_null() {
+            return panel.child(crate::i18n::text("mobile.configure"));
+        }
+        let state = &view.access;
+        let origin = state["origin"].as_str().unwrap_or_default();
+        panel = panel
+            .child(origin.to_owned())
+            .child(crate::i18n::text("mobile.owner-scope"));
+        if let Ok(code) = qrcode::QrCode::new(origin) {
+            let width = code.width();
+            let colors = code.to_colors();
+            let rows = (0..width + 8).map(|y| {
+                div().flex().children((0..width + 8).map(|x| {
+                    let dark = x >= 4
+                        && y >= 4
+                        && x < width + 4
+                        && y < width + 4
+                        && colors[(y - 4) * width + x - 4] == qrcode::Color::Dark;
+                    div().w(px(4.)).h(px(4.)).bg(if dark {
+                        gpui::rgb(0x000000)
+                    } else {
+                        gpui::rgb(0xffffff)
+                    })
+                }))
+            });
+            panel = panel.child(div().flex().flex_col().items_start().children(rows));
+        }
+        let mut controls = div().flex().flex_wrap().gap_2();
+        for (action, key) in [
+            (
+                if state["enabled"] == true {
+                    "disable"
+                } else {
+                    "enable"
+                },
+                if state["enabled"] == true {
+                    "mobile.disable"
+                } else {
+                    "mobile.enable"
+                },
+            ),
+            ("pair", "mobile.pair"),
+            ("close_enrollment", "mobile.close-enrollment"),
+        ] {
+            controls = controls.child(
+                Button::new(action)
+                    .ghost()
+                    .label(crate::i18n::text(key))
+                    .disabled(view.access_pending)
+                    .on_click(cx.listener(move |this, _, _, _| {
+                        this.client.access_command(json!({"action":action}))
+                    })),
+            );
+        }
+        panel = panel.child(controls).child(view.access_notice.clone());
+        for (kind, action) in [
+            ("pending", "approve"),
+            ("credentials", "revoke_credential"),
+            ("sessions", "revoke_session"),
+        ] {
+            if let Some(items) = state[kind].as_array() {
+                for item in items {
+                    let id = item["id"].as_str().unwrap_or_default().to_owned();
+                    let label = if kind == "pending" {
+                        format!(
+                            "{} · {}",
+                            item["name"].as_str().unwrap_or_default(),
+                            item["code"].as_str().unwrap_or_default()
+                        )
+                    } else {
+                        item["name"].as_str().unwrap_or(&id).to_owned()
+                    };
+                    panel = panel.child(
+                        div().flex().gap_2().items_center().child(label).child(
+                            Button::new(id.clone())
+                                .ghost()
+                                .label(crate::i18n::text(if action == "approve" {
+                                    "mobile.approve"
+                                } else {
+                                    "mobile.revoke"
+                                }))
+                                .disabled(view.access_pending)
+                                .on_click(cx.listener(move |this, _, _, _| {
+                                    this.client.access_command(json!({"action":action,"id":id}))
+                                })),
+                        ),
+                    );
+                }
+            }
+        }
+        panel
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         let fields = (0..24)
             .map(|i| {
@@ -366,7 +469,12 @@ impl Settings {
                 .focus(window, cx);
         }
     }
-    pub fn render(&self, state: &Value, cx: &mut Context<Shell>) -> Div {
+    pub fn render(
+        &self,
+        state: &Value,
+        view: &crate::client::View,
+        cx: &mut Context<Shell>,
+    ) -> Div {
         let section = state["section"].as_u64().unwrap_or(0);
         if section == 1 {
             return self.render_ai(state, cx);
@@ -381,6 +489,9 @@ impl Settings {
         };
         match section {
             0 => {
+                form = form.child(
+                    field(crate::i18n::text("mobile.access")).child(self.mobile_access(view, cx)),
+                );
                 form = form
                     .child(field(crate::i18n::text("settings.language"))
                         .description(crate::i18n::text("settings.language.hint"))

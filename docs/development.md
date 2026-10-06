@@ -33,6 +33,10 @@ Server writes private bearer/boot/port data to `runtime.json` in its data direct
 
 App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
 
+## Mobile browser pilot
+
+See [Mobile access](mobile-access.md) for the optional owner-controlled HTTPS listener, QR/Passkey administration and `mise run build:mobile`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
+
 ## Validation
 
 ```sh

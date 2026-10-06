@@ -67,7 +67,8 @@ impl Transcript {
                     if message.status == MessageStatus::Complete {
                         self.failure = None;
                     }
-                    if message.text.is_empty() {
+                    let synthetic=message.text.is_empty();
+                    if synthetic {
                         message.text = if message.status == MessageStatus::Cancelled {
                             "已停止"
                         } else {
@@ -75,7 +76,7 @@ impl Transcript {
                         }
                         .into();
                     }
-                    s.save(message.clone())?;
+                    if synthetic {s.save_non_notifying(message.clone())?;} else {s.save(message.clone())?;}
                 }
             }
             Update::ToolStarted {

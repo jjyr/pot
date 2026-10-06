@@ -293,7 +293,7 @@ impl Shell {
                     cx,
                 );
             }
-            Some(2) => return self.settings.render(&self.native["settings"], cx),
+            Some(2) => return self.settings.render(&self.native["settings"], &view, cx),
             Some(1) => return ui::sandbox(&self.native, cx),
             _ => {}
         }
