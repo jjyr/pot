@@ -648,5 +648,10 @@
   "report.schedule-header": "Schedule “{0}”: {1}",
   "backend.task-unfinished-detail": "Task unfinished: {0}",
   "backend.task-failed-detail": "Task failed: {0}",
-  "report.schedule-id": "Schedule ID: {0}"
+  "report.schedule-id": "Schedule ID: {0}",
+  "about.developer": "Developed by {0}",
+  "about.license": "MIT License",
+  "about.project": "Project on GitHub",
+  "about.rust-licenses": "Rust dependency licenses",
+  "menu.about-pot": "About Pot"
 }

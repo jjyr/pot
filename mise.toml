@@ -3,6 +3,7 @@ rust = "1.98.1"
 python = "3.12.13"
 zig = "0.15.2"
 "cargo:cargo-zigbuild" = "0.23.4"
+"github:EmbarkStudios/cargo-about" = "0.9.2"
 hk = "2.4.0"
 pkl = "0.32.1"
 ruff = "0.16.10"
@@ -81,6 +82,17 @@ done
 cargo run --locked -p pot-eval -- run eval/scenarios/compaction.json "$eval_root/compaction-repeat"
 cargo run --locked -p pot-eval -- compare "$eval_root/compaction" "$eval_root/compaction-repeat"
 """
+
+[tasks.licenses]
+description = "Check Rust dependency licenses and generate bundled notices"
+run = """
+mkdir -p .local/licenses
+cargo about generate --locked --workspace --fail about.hbs --output-file .local/licenses/rust-dependencies.html
+"""
+
+[tasks."test:licenses"]
+description = "Verify disallowed and unknown license expressions fail"
+run = "python scripts/tests/licenses.py"
 
 [tasks.prepare]
 run = "scripts/pot prepare"
