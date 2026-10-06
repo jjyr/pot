@@ -11,7 +11,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{ChildStdin, Command},
     sync::{Notify, watch},
-    task::JoinHandle,
+    task::{JoinHandle, JoinSet},
     time::Instant,
 };
 
@@ -22,10 +22,11 @@ struct Group {
 impl Group {
     fn kill(&mut self) {
         if !self.cleaned {
-            unsafe {
-                libc::kill(-(self.pid as i32), libc::SIGKILL);
-            }
-            self.cleaned = true;
+            let result = unsafe { libc::kill(-(self.pid as i32), libc::SIGKILL) };
+            // A successful signal is not confirmation that the group is gone:
+            // a child being forked can survive the first signal on macOS.
+            self.cleaned =
+                result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
         }
     }
 }
@@ -175,15 +176,16 @@ impl Processes {
             let stderr = child.stderr.take().unwrap();
             let buffer_cap = policy.max_output_bytes;
             let task = tokio::spawn(async move {
-                let stdout = tokio::spawn(drain(
+                // Own the readers so every error/abort path cancels them too.
+                let mut readers = JoinSet::new();
+                readers.spawn(drain(
                     stdout,
                     out.clone(),
                     notify.clone(),
                     false,
                     buffer_cap,
                 ));
-                let stderr =
-                    tokio::spawn(drain(stderr, out.clone(), notify.clone(), true, buffer_cap));
+                readers.spawn(drain(stderr, out.clone(), notify.clone(), true, buffer_cap));
                 let (status, reason) = tokio::select! {
                     exit = child.wait() => (Some(exit?), None),
                     _ = tokio::time::sleep(Duration::from_millis(timeout)) => (None, Some("timeout")),
@@ -197,8 +199,16 @@ impl Processes {
                         .map_err(|_| anyhow!("Tool stop unconfirmed"))??;
                 }
                 tokio::time::timeout(Duration::from_secs(5), async {
-                    stdout.await??;
-                    stderr.await??;
+                    while !readers.is_empty() {
+                        tokio::select! {
+                            result = readers.join_next() => {
+                                if let Some(result) = result {
+                                    result??;
+                                }
+                            }
+                            _ = tokio::time::sleep(Duration::from_millis(10)) => group.kill(),
+                        }
+                    }
                     Ok::<_, anyhow::Error>(())
                 })
                 .await
