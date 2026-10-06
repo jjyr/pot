@@ -718,6 +718,7 @@ mod tests {
             state: Mutex::new(BTreeMap::new()),
         };
         let context = ExecutionContext {
+            instructions: String::new(),
             skill_resources: Default::default(),
             tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: path.clone(),
@@ -786,6 +787,7 @@ mod tests {
             state: Mutex::new(BTreeMap::new()),
         };
         let context = ExecutionContext {
+            instructions: String::new(),
             skill_resources: Default::default(),
             tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: path.clone(),

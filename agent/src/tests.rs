@@ -191,6 +191,7 @@ impl Fixture {
         std::fs::create_dir(&dir).unwrap();
         let feedback = Arc::new(Feedback::default());
         let context = ExecutionContext {
+            instructions: String::new(),
             skill_resources: Default::default(),
             tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: dir.clone(),
@@ -1495,4 +1496,68 @@ async fn allowed_tools_excluding_reader_skips_skill_provider() {
     let requests = f.services.requests.lock().unwrap();
     assert!(!requests[0]["body"].to_string().contains("available_skills"));
     assert_eq!(model_tools(&requests[0], "openai_chat").len(), 1);
+}
+
+#[tokio::test]
+async fn injected_instructions_refresh_for_main_and_worker_without_history_copies() {
+    for protocol in ["openai_chat", "openai_responses", "anthropic_messages"] {
+        for role in [ExecutionRole::Main, ExecutionRole::Worker] {
+            let mut f = Fixture::new(protocol);
+            f.context.role = role;
+            f.services.rpc_tools = Some(vec![]);
+            // Directory instructions are relevant even without an authorized reader.
+            f.binding.spec.params.agent.builtin_tools.clear();
+            for text in ["FIRST_INSTRUCTIONS", "UPDATED_INSTRUCTIONS"] {
+                f.context.instructions =
+                    format!("# AGENTS.md instructions for /data/workspace\n{text}");
+                f.services.queue(wire(protocol, "done", &[]));
+                f.turn(false).await.unwrap();
+                let requests = f.services.requests.lock().unwrap();
+                let body = requests.last().unwrap()["body"].to_string();
+                assert!(body.contains(text));
+                assert!(body.contains("Complete the task."));
+                assert_eq!(body.matches("# AGENTS.md instructions for").count(), 1);
+                if text == "UPDATED_INSTRUCTIONS" {
+                    assert!(!body.contains("FIRST_INSTRUCTIONS"));
+                }
+                assert!(
+                    !f.feedback
+                        .saved
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .to_string()
+                        .contains(text)
+                );
+            }
+        }
+    }
+}
+#[tokio::test]
+async fn summary_does_not_load_directory_instructions() {
+    let mut f = Fixture::new("openai_chat");
+    f.context.role = ExecutionRole::Summary;
+    f.context.instructions = "DO_NOT_INJECT".into();
+    f.services.rpc_tools = Some(vec![]);
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn(false).await.unwrap();
+    assert!(
+        !f.services.requests.lock().unwrap()[0]["body"]
+            .to_string()
+            .contains("DO_NOT_INJECT")
+    );
+}
+
+#[tokio::test]
+async fn instructions_are_caller_owned_and_never_discovered_from_agent_cwd() {
+    let mut f = Fixture::new("openai_chat");
+    std::fs::write(f.dir.join("AGENTS.md"), "WRONG_HOST_DOCUMENT").unwrap();
+    f.context.instructions = "\n\nCALLER_INSTRUCTIONS".into();
+    f.services.rpc_tools = Some(vec![]);
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn(false).await.unwrap();
+    let body = f.services.requests.lock().unwrap()[0]["body"].to_string();
+    assert!(body.contains("CALLER_INSTRUCTIONS"));
+    assert!(!body.contains("WRONG_HOST_DOCUMENT"));
 }

@@ -6,6 +6,7 @@ pub mod control;
 pub mod discovery;
 pub mod execution;
 pub mod gateway;
+mod instructions;
 pub mod orchestration;
 pub mod sandbox;
 pub mod schedules;

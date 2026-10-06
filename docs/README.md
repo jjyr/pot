@@ -9,6 +9,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
 | Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
 | Understand backend crate and standalone Server boundaries | [Backend crate split](backend-crates.md) |
+| Understand AGENTS.md discovery and injection | [Agent instructions](agent-instructions.md) |
 | Inject skills into main and task pot-agent sessions | [Agent skill injection](agent-skills.md) |
 | Change APIs, pot-agent, task state, or recovery | [Runtime contract](../runtime/README.md) |
 | Build the Sandbox image, desktop theme, or CJK fonts | [Sandbox image](sandbox-image.md) |

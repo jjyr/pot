@@ -182,6 +182,7 @@ async fn managed_config(host: &Connection, workspace: &std::path::Path) -> Resul
         )
         .await?;
     let mut config = json!({"features.multi_agent":false,"features.memory_tool":false,
+        "project_doc_max_bytes":0,
         "web_search":"disabled","features.codex_hooks":false,"features.apps":false,"features.view_image":false,"features.unified_exec":false,"features.code_mode":false,"features.code_mode_host":false,"features.code_mode_only":false,"features.image_generation":false,"mcp_servers":{}});
     // Do not copy native configuration or credentials into product storage.
     // Disable inherited servers/plugins so managed role policy cannot be bypassed

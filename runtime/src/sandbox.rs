@@ -101,6 +101,8 @@ impl Drop for Execution {
     }
 }
 pub struct Manager {
+    pub(crate) agent_home: PathBuf,
+    pub(crate) global_instructions: Mutex<crate::instructions::GlobalInstructions>,
     pub(crate) skill_user: PathBuf,
     pub(crate) skill_builtin: PathBuf,
     // Per-fixture ephemeral HTTP listeners; production always uses guest port 17701.
@@ -148,18 +150,22 @@ impl Manager {
             }
         };
         #[cfg(test)]
+        let agent_home = root.join("agent-home");
+        #[cfg(not(test))]
+        let agent_home =
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".pot/agent");
+        #[cfg(test)]
         let skill_user = root.join("skills-user");
         #[cfg(not(test))]
         let skill_user = std::env::var_os("POT_AGENT_SKILLS_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-                    .join(".pot/agent/skills")
-            });
+            .unwrap_or_else(|| agent_home.join("skills"));
         let skill_builtin = std::env::var_os("POT_BUILTIN_SKILLS_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills"));
         Ok(Self {
+            agent_home,
+            global_instructions: Mutex::new(Default::default()),
             skill_user,
             skill_builtin,
             #[cfg(test)]

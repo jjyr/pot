@@ -9,6 +9,11 @@ use pot_gateway::{
 use serde_json::Value;
 
 pub trait AgentExtensions: Send + Sync {
+    /// Caller-owned instruction injection for Main and Worker. No discovery or I/O.
+    /// Summary turns do not invoke this provider; history is not mutated.
+    fn instructions(&self, context: &ExecutionContext) -> Result<String> {
+        Ok(context.instructions.clone())
+    }
     /// Same catalog injection for Main and Worker; providers select by context
     /// and expose only assigned skills. Summary turns do not request skills.
     /// Bundles must be readable at their Sandbox locations when tools run.
