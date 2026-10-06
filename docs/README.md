@@ -7,6 +7,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Start, build, or test | [Development guide](development.md) |
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
+| Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
 | Understand backend crate and standalone Server boundaries | [Backend crate split](backend-crates.md) |
 | Change APIs, Agent execution, task state, or recovery | [Runtime contract](../runtime/README.md) |
 | Discuss controller/task execution isolation | [Proposed isolation boundaries](agent-isolation.md) |
@@ -21,6 +22,8 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Review completed tests and limitations | [Agent layer](validation/agent-layer.md), [Pi MVP](validation/pi-mvp.md), [Multitask](validation/multitask.md), [UI](validation/ui-ux.md), [Sandbox image](validation/sandbox-image.md), [Backend crates](validation/backend-crates.md), [AI configuration](validation/ai-configuration.md) |
 | Investigate old integrations or technical decisions | [Historical POC index](poc-plan.md) |
 
+Current decoupling acceptance: [Host Agents and managed Sandboxes, 2026-10-06](validation/agent-sandbox-20261006.md).
+
 ## Research on demand
 
 Current execution contract: [Pot Agent and native drivers](../runtime/README.md); [native Agent acceptance](validation/native-agent.md). Pi validation pages below are historical.
@@ -32,6 +35,7 @@ Latest AI integration acceptance: [Simplified AI integration, 2026-10-06](valida
 - UI framework: [GPUI Kit](research/gpui-kit-evaluation.md). See the UI specification for current component usage.
 - VMs and desktops: [Apple Containerization](research/apple-containerization.md), [Docker GUI](research/docker-gui.md).
 - Driver sessions: [Coordination comparison](research/session-coordination.md), [Hermes](research/hermes-sessions.md), [OpenClaw](research/openclaw-sessions.md).
+- Agent/tool execution placement: [Agent and Sandbox decoupling feasibility, 2026-10-06](research/agent-sandbox-decoupling.md).
 - Future memory: [Identity and memory](research/identity-memory.md).
 - Original note sources and hashes at import: [Source manifest](source-manifest.json). These are not hashes of the current files.
 

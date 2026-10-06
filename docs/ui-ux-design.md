@@ -87,13 +87,15 @@ Token input is decimal: 1K=1, 000, 1M=1, 000, 000, stored as integers. Remove th
 
 ## Sandbox desktop
 
+The Host chat/backend stay available with every environment stopped. The native environment picker selects the displayed Linux Sandbox; main Agent tool selection is separately visible in inventory. Each task shows its immutable Sandbox ID. Desktop starts explicitly, independently of Agent/tool startup. Worker lifecycle/target changes are rejected by Runtime.
+
 Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent bottom Browser/Files/Terminal launchers/window switching and matching context menu. CJK fonts cover Chinese/Japanese/Korean. Software is preinstalled; see [Sandbox image](sandbox-image.md) for build/theme entries.
 
 ## AI Configuration (#7)
 
 Unconfigured Chat links to AI Configuration; first-time setup and Settings use the same page. The Pot Terminal page, side-rail button, xterm assets and native renderer have been removed. Sandbox remains independently accessible. API setup never requires a Terminal.
 
-AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: Codex, Grok, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing API connections remain editable. Removed native CLI configurations are unsupported and require fresh configuration; no compatibility migration is provided. Main-Agent changes stay in AI Configuration, not the Chat header.
+AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: Codex, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing API connections remain editable. Removed native CLI configurations are unsupported and require fresh configuration; no compatibility migration is provided. Main-Agent changes stay in AI Configuration, not the Chat header.
 
 Preset API forms show only key/model and a Get API Key link. Endpoint/protocol are supplied by Pot. Claude has no account/API mode selector. Custom API shows endpoint and four explicit formats: OpenAI Chat Completions, OpenAI Responses, Claude Messages and Gemini. Model-list results appear in a picker alongside the editable model field.
 
@@ -103,9 +105,7 @@ OpenCode uses a maintained per-plan, per-model route table in `app/swift/APIInte
 
 For an empty main configuration, the final connection action also sets the Main Agent through the existing migration boundary. Entry from Chat uses Save and start chatting and restores its draft without sending. Settings explains Save and set as Main Agent. Existing main configurations are not replaced by ordinary additions. Save retains a stable draft connection identity and reconciles partially completed saves before retrying.
 
-Account authorization uses official Codex app-server and Grok ACP interfaces. The user explicitly approved native authentication endpoints and a temporary Mac-to-VM callback relay on 2026-10-06. The shared panel opens the official browser URL, waits for the official completion result and account verification, then reads model options. Callback receipt alone never establishes authentication. Cancel, failure, expiry, app shutdown and environment loss close the Mac listener. Only native bearer-authenticated requests are accepted; browser Origins and worker tokens are rejected. Callback targets are pinned to the attempt's official guest loopback URL and state. No authorization codes, tokens or passwords enter product records or logs. Codex falls back to the official device-code flow if the Mac callback port is unavailable. Grok currently requires browser loopback authorization.
-
-Grok 1.0.46 is pinned from the official npm distribution. Its initial ACP integration supports main-chat session creation/loading, model selection, streaming and cancellation. It does not claim tool-policy enforcement, MCP orchestration, background-task support, native usage reporting or checkpoint replay. Client permission requests fail closed pending a permission-review UI. Real-provider end-to-end verification remains outstanding; this machine's connection to auth.x.ai fails during TLS negotiation.
+Account authorization uses official Host Codex App Server interfaces. Grok integration is outside the current scope. The user explicitly approved native authentication endpoints and a temporary native callback relay on 2026-10-06. The shared panel opens the official browser URL, waits for the official completion result and account verification, then reads model options. Callback receipt alone never establishes authentication. Cancel, failure, expiry, app shutdown and environment loss close the Mac listener. Only native bearer-authenticated requests are accepted; browser Origins and worker tokens are rejected. Callback targets are pinned to the attempt's official Host loopback URL and state. No authorization codes, tokens or passwords enter product records or logs. Codex falls back to the official device-code flow if the Mac callback port is unavailable.
 
 The existing Runtime PTY subsystem is retained; removal of this separate subsystem was also rejected by automatic review. This is separate from the deleted product Terminal UI and from Agent shell/tool execution.
 

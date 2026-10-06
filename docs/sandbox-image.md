@@ -1,19 +1,18 @@
 # Sandbox image
 
-Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Codex, Grok, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
+Updated: 2026-10-06. The bundled Linux ARM64 OCI image contains the execution service, system dependencies and optional desktop/browser. Agent CLIs, product Server/Runtime and provider configuration live on Host.
 
 ## Build and startup
 
-See [Development guide](development.md) for entry points. `scripts/pot bundle` invokes `scripts/build-image`:
+`scripts/pot prepare` downloads checksum-verified kernel, noVNC and Host Node 24.21.0. `build` compiles Host App, Server and Helper. `bundle` builds the guest image and installs pinned Host Pi 0.87.1 / Codex 0.159.1 dependencies from npm locks, with lifecycle scripts disabled.
 
-1. In a separate build VM, use the pinned Alpine digest, install system packages from `image/packages.lock`, and official Codex/Grok CLI (including native platform binaries) from npm locks.
-2. Write `/opt/pot` and `/opt/agents`, export rootfs, and generate the OCI image plus `sandbox-image.json`.
-3. Bundle image/vminit/kernel in App. A build-input hash identifies the local image; identical inputs reuse caches, with separate APK/npm download caches.
-4. Helper imports the local image initially, creates the VM, and runs `/opt/pot/desktop.sh`. Initial import/unpack has a cost but does not depend on online package/npm sources.
+The image builder uses a separate Apple VM with no user workspace or credentials, pinned Alpine/system packages, and `/opt/pot` executor/desktop resources. Build hashes include guest sources; identical inputs reuse the immutable image. Bundle contains image/vminit/kernel and Host binaries. VM networking requires Apple Virtualization permissions.
 
-Build requires networking and Apple Virtualization permissions; image startup is offline, while models/web browsing need networking. The build VM mounts no user workspace/credentials. User configuration, chat databases, browser profiles, and files mount separately at `/data`; image upgrades neither bundle nor clear them. Software temporarily installed in rootfs does not persist into a newly created VM; permanent dependencies belong in the image.
+Helper starts Host Server immediately and imports/boots each Linux image only when requested. `/opt/pot/sandbox.sh` mounts cgroup v2 and starts the authenticated executor on port 17701. Shell/file subprocesses run as `potdesktop` with a minimal environment. Each call uses a root-owned cgroup; cancellation drains it, including detached descendants. The executor token stays on Host outside the mount and is injected into the root executor at startup, then removed from child environments. The guest ledger/output live in root-private `/run/pot-executor`, outside virtiofs. Host receipts remain the durable authority across VM recreation. Desktop starts separately through the managed environment action.
 
-Artifacts live in `.local/d1/resources/`; caches/build evidence in `.local/d1/image-build/`, outside Git. Rebundle and restart App after an image update.
+Each Sandbox mounts only `root/sandboxes/ID/workspace` at `/data`; files live beneath `/data/workspace`. No Host product database, CLI sessions, provider secrets or Helper socket are mounted. Artifacts survive VM shutdown. Temporary rootfs changes disappear on a new instance.
+
+Resources and build caches are under `.local/d1/`; rebundle after source changes. The new acceptance entry is `scripts/tests/sandbox-runtime.py`, documented in [Development](development.md), with [dated results](validation/agent-sandbox-20261006.md). Earlier guest-Agent checks below are historical.
 
 ## Desktop and fonts
 
@@ -33,19 +32,6 @@ Compare the old lockfile with new image `/lib/apk/db/installed` metadata; both i
 
 New completed image compressed layer: **656, 413, 994 bytes (626.00 MiB)**; rootfs tar: **1, 758, 677, 504 bytes (1.64 GiB)**. The old approach downloaded only a roughly 3.93 MiB Alpine base before installing the entire environment; base size is not total desktop size. No equivalent-content old completed OCI comparison exists here.
 
-## Offline acceptance
+## Historical offline acceptance
 
-```sh
-codesign --force --sign - --entitlements helper/virtualization.entitlements .local/d1/helper-build/release/PotImageCheck
-.local/d1/helper-build/release/PotImageCheck .local/d1/offline-image-check .local/d1/resources scripts/tests
-```
-
-`PotImageCheck` imports the local image into a fresh image store/data directory and starts a VM with `networking: false`. It checks broker, Chromium CDP, Runtime, native CLI versions, desktop processes, four-language sample glyphs, and normal browser exit. Results are in validation `data/offline-result.json`; no model calls. Use a fresh validation directory for each cold run.
-
-Later usability fix: persistent bottom launcher/window list adds 4 pinned packages. Current image `pot.local/sandbox:b637617123a0ce749783` has a 657, 315, 671-byte compressed layer (626.87 MiB). The table retains the initial no-panel acceptance scope.
-
-Antigravity and Claude CLI are no longer downloaded or installed in newly built images. Claude API remains available through the generic provider gateway. Older running VMs need the rebuilt image to remove previously bundled binaries; persistent user files are preserved.
-
-Grok uses the official `@xai-official/grok` 1.0.46 distribution and its pinned Linux ARM64 platform package. Build-time Node Brotli decompression writes the static native binary, then `grok` links directly to it. npm lifecycle scripts and the vendor launcher/updater are not run. Native authorization and session files stay in the persistent guest HOME; no host credentials are imported.
-
-2026-10-06 source update: `image/agents` pins only Codex/Grok and required dependencies; Pi and its extensions are removed. Pot Agent is linked into pot-server. Previously recorded image sizes/VM acceptance are historical; rebuilding and fresh offline VM acceptance for this revision remain separate checks.
+The 2026-10-04 size comparison above describes the previous guest-Agent image. Its `PotImageCheck` fixtures expected product Runtime and CLIs inside the guest and do not qualify the decoupled architecture. Use the current Host/VM contract instead.

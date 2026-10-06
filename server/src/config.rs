@@ -11,14 +11,14 @@ impl ServerConfig {
         Self {
             runtime: RuntimeConfig {
                 data: PathBuf::from(
-                    std::env::var("POT_DATA_DIR").unwrap_or_else(|_| "/data/product".into()),
+                    std::env::var("POT_DATA_DIR").unwrap_or_else(|_| "product".into()),
                 ),
                 workspace: PathBuf::from(
-                    std::env::var("POT_WORKSPACE").unwrap_or_else(|_| "/data/workspace".into()),
+                    std::env::var("POT_WORKSPACE").unwrap_or_else(|_| "agent-workspace".into()),
                 ),
             },
             bind: std::env::var("POT_RUNTIME_BIND")
-                .unwrap_or_else(|_| format!("0.0.0.0:{RUNTIME_PORT}")),
+                .unwrap_or_else(|_| format!("127.0.0.1:{RUNTIME_PORT}")),
         }
     }
 }

@@ -147,6 +147,8 @@ var bridge: PotBridge?
     var lastIconState = ""
     var observations: [NSObjectProtocol] = []
     let runtime = RuntimeClient()
+    let sandboxPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    var sandboxIDs: [String] = []
     var guestIP = ""
     var localPhase = "starting"
     var isApplying = false
@@ -187,6 +189,8 @@ var bridge: PotBridge?
             button.wantsLayer = true; button.layer?.cornerRadius = 10
             rail.addSubview(button); navigation.append(button)
         }
+        rootView.addSubview(sandboxPicker); sandboxPicker.target = self; sandboxPicker
+            .action = #selector(chooseSandbox); sandboxPicker.isHidden = true
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
@@ -386,6 +390,8 @@ var bridge: PotBridge?
         if gpuiView.frame != b {
             gpuiView.frame = b
         }
+        sandboxPicker.frame = NSRect(x: 260, y: b.height - 68, width: 220, height: 26)
+        sandboxPicker.isHidden = page != 1
         let desktopArea = NSRect(x: 56, y: 0, width: area.width, height: max(0, area.height - 112))
         if web.frame != desktopArea {
             web.frame = desktopArea
@@ -484,6 +490,9 @@ var bridge: PotBridge?
         if value == 0 {
             host.makeFirstResponder(composer)
         }
+        if value == 1 {
+            refreshSandboxes()
+        }
         if value == 2 {
             settings.refreshStatus()
         }
@@ -555,13 +564,42 @@ var bridge: PotBridge?
         host.orderOut(nil)
     }
 
+    func refreshSandboxes() {
+        Task {
+            guard let value = try? await runtime.request("api/v1/sandboxes"),
+                  let items = value["items"] as? [[String: Any]] else { return }
+            sandboxIDs = items.compactMap { $0["id"] as? String }
+            sandboxPicker.removeAllItems()
+            sandboxPicker
+                .addItems(withTitles: items
+                    .map {
+                        "\($0["name"] as? String ?? "Linux") · \(($0["state"] as? [String: Any])?["phase"] as? String ?? "unknown")"
+                    })
+            if let current = localRuntime?.sandboxID,
+               let index = sandboxIDs.firstIndex(of: current)
+            {
+                sandboxPicker.selectItem(at: index)
+            }
+        }
+    }
+
+    @objc func chooseSandbox() {
+        let index = sandboxPicker.indexOfSelectedItem
+        guard sandboxIDs.indices.contains(index), let localRuntime else { return }
+        localRuntime.sandboxID = sandboxIDs[index]; viewer = [:]; localRuntime.loaded = ""; web.stopLoading(); web
+            .isHidden = true; localRuntime.poll()
+    }
+
     @objc func startSandbox() {
-        localRuntime?.send("start")
+        localRuntime?.send("desktop")
     }
 
     @objc func openWorkspace() {
         if let root = localRuntime?.root {
-            NSWorkspace.shared.open(root.appendingPathComponent("workspace/workspace"))
+            NSWorkspace.shared
+                .open(root
+                    .appendingPathComponent("sandboxes/" + (localRuntime?.sandboxID ?? "default") +
+                        "/workspace/workspace"))
         }
     }
 
@@ -581,17 +619,14 @@ var bridge: PotBridge?
     }
 
     func environmentChanged(_ state: [String: Any]) {
-        if settings.loginVisible, state["phase"] as? String != "running" {
-            settings.cancelLogin()
-        }
         localPhase = state["phase"] as? String ?? "unknown"
         guestIP = state["ip"] as? String ?? ""
         if page == 1 {
             web.isHidden = localRuntime?.loaded.isEmpty != false
         }
         settings.environment = state; settings.refreshStatus()
-        runtime.root = localRuntime?.root; runtime.ip = guestIP
-        if settings.setup, localPhase == "running" {
+        runtime.root = localRuntime?.root; runtime.ip = "127.0.0.1"
+        if settings.setup, snapshot["connected"] as? Bool == true {
             settings.refreshAgents()
         }
     }
@@ -629,7 +664,7 @@ var bridge: PotBridge?
                                                                        "stopped"
                                     {
                                         self.localRuntime?
-                                            .send("start") { _ in
+                                            .send("desktop") { _ in
                                                 self.isApplying = false
                                             }
                                     } else {
@@ -850,7 +885,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "setup-stage": settings.setupNavigate(v["value"] as? Int ?? 0)
         case "setup-later": settings.deferSetup()
         case "setup-all": settings
-            .setupItems = v["selected"] as? Bool == true ? Set(["codex", "grok", "api"]) : []; settings
+            .setupItems = v["selected"] as? Bool == true ? Set(["codex", "api"]) : []; settings
             .persistSetup()
         case "setup-item":
             if let id = v["id"] as? String {

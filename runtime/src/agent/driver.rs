@@ -11,7 +11,24 @@ pub async fn execute(
     transcript: &mut super::transcript::Transcript,
     resuming: bool,
 ) -> Result<()> {
+    let _lease = if s.is_worker {
+        Some(
+            s.sandboxes
+                .acquire(
+                    s.sandbox_id
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("Worker environment missing"))?,
+                )
+                .await?,
+        )
+    } else {
+        None
+    };
     let binding = binding(s)?;
+    anyhow::ensure!(
+        binding.spec.engine != Engine::Grok,
+        "Grok is not supported by Host Agent / Sandbox execution; select Pi or Codex"
+    );
     if let Err(e) = crate::gateway::validate_spec(s, &binding.spec) {
         s.inner
             .lock()
@@ -42,10 +59,12 @@ pub async fn execute(
             pot_driver::grok::GrokHost.session(context(s, request, &binding)?, binding)?
         }
     };
-    run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
+    let result = run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
         transcript.record(s, update)
     })
-    .await
+    .await;
+    sandbox::drain(s).await?;
+    result
 }
 
 async fn run_session(

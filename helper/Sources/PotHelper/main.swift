@@ -43,11 +43,18 @@ actor Runtime {
             Void,
             Never
         >?
-    let id = "pot-local"
+    let id: String
+    let root: URL
+    init(sandboxID: String) {
+        id = "pot-" + sandboxID
+        root = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("sandboxes")
+            .appendingPathComponent(sandboxID)
+    }
+
     var cpus = 4; var memoryGiB = 8; var diskGiB = 32
     var imageReference = "pot.local/sandbox"
     func loadConfiguration() throws {
-        let path = root.appendingPathComponent("sandbox.json")
+        let path = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("sandbox.json")
         guard FileManager.default.fileExists(atPath: path.path) else { return }
         let values = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Int] ?? [:]
         guard let c = values["cpus"], let m = values["memory_gib"], let d = values["disk_gib"], (1 ... 32).contains(c),
@@ -130,6 +137,15 @@ actor Runtime {
             let workspace = root.appendingPathComponent("workspace")
             try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
             try? FileManager.default.removeItem(at: workspace.appendingPathComponent("browser-stopped"))
+            let tokenPath = root.appendingPathComponent("executor-token")
+            if !FileManager.default.fileExists(atPath: tokenPath.path) {
+                guard FileManager.default.createFile(
+                    atPath: tokenPath.path,
+                    contents: Data((UUID().uuidString + UUID().uuidString).utf8),
+                    attributes: [.posixPermissions: 0o600]
+                ) else { throw NSError(domain: "pot", code: 6) }
+            }
+            let executorToken = try String(contentsOf: tokenPath, encoding: .utf8)
             var metadata: [String: Any] = [
                 "image": imageReference,
                 "cpus": cpus,
@@ -158,7 +174,8 @@ actor Runtime {
                 )
             ) { config in
                 config.cpus = cpus; config.memoryInBytes = UInt64(memoryGiB) * 1024 * 1024 * 1024
-                config.process.arguments = ["/bin/sh", "/opt/pot/desktop.sh"]
+                config.process.arguments = ["/bin/sh", "/opt/pot/sandbox.sh"]
+                config.process.environmentVariables.append("POT_EXECUTOR_TOKEN=" + executorToken)
                 config.mounts.append(.share(source: workspace.path, destination: "/data"))
                 config.dns = DNS(nameservers: ["1.1.1.1"])
             }
@@ -257,12 +274,84 @@ actor Runtime {
     }
 }
 
-let runtime = Runtime()
+actor Sandboxes {
+    var instances: [String: Runtime] = [:]
+    var backend: Process
+    init() {
+        backend = Self.makeBackend()
+    }
+
+    static func makeBackend() -> Process {
+        let backend = Process()
+        backend.executableURL = resources.appendingPathComponent("pot-server")
+        var environment = ProcessInfo.processInfo.environment
+        environment["POT_DATA_DIR"] = root.appendingPathComponent("product").path
+        environment["POT_WORKSPACE"] = root.appendingPathComponent("agent-workspace").path
+        environment["POT_RUNTIME_BIND"] = "127.0.0.1:0"
+        let hostTools = resources.appendingPathComponent("host-tools/node_modules/.bin").path
+        environment["PATH"] = resources.appendingPathComponent("node/bin")
+            .path + ":" + hostTools + ":/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
+        environment["POT_PI_BIN"] = hostTools + "/pi"
+        backend.environment = environment
+        do { try backend.run() } catch { event("backend.failed") }
+        return backend
+    }
+
+    func request(_ object: [String: Any]) async -> [String: Any] {
+        if object["method"] as? String == "backend-restart" {
+            if backend.isRunning {
+                backend.terminate()
+                for _ in 0 ..< 200 {
+                    if !backend.isRunning {
+                        break
+                    }; try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+            guard !backend.isRunning else { return ["error": "Backend shutdown unconfirmed"] }
+            backend = Self.makeBackend()
+            return ["result": ["phase": "backend-ready"]]
+        }
+        let key = object["sandbox_id"] as? String ?? "default"
+        guard !key.isEmpty, key.count <= 48,
+              key.utf8
+              .allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 122) || $0 == 45 })
+        else { return ["error": "Invalid Sandbox ID"] }
+        if instances[key] == nil {
+            instances[key] = Runtime(sandboxID: key)
+        }
+        return await instances[key]!.request(object)
+    }
+
+    func stop() async -> [String: Any] {
+        // Settle Agent turns and remote operations before tearing down VMs.
+        if backend.isRunning {
+            backend.terminate()
+            for _ in 0 ..< 200 {
+                if !backend.isRunning {
+                    break
+                }; try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+        if backend.isRunning {
+            // Unknown operations were durably recorded; prevent an orphan Host backend.
+            kill(backend.processIdentifier, SIGKILL)
+            while backend.isRunning {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+        for instance in instances.values {
+            _ = await instance.stop()
+        }
+        return ["phase": "stopped"]
+    }
+}
+
+let runtime = Sandboxes()
 signal(SIGTERM, SIG_IGN); signal(SIGINT, SIG_IGN)
 let sig = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global()); sig
     .setEventHandler {
         DispatchQueue.global()
-            .asyncAfter(deadline: .now() + 15) { unlink(socketPath); exit(1) }; Task {
+            .asyncAfter(deadline: .now() + 240) { unlink(socketPath); exit(1) }; Task {
                 _ = await runtime.stop(); unlink(socketPath); exit(0)
             }
     }; sig.resume()
@@ -276,7 +365,7 @@ let watchdog = DispatchSource.makeTimerSource(queue: .global()); watchdog
             parent
         {
             DispatchQueue.global()
-                .asyncAfter(deadline: .now() + 15) { unlink(socketPath); exit(1) }; Task {
+                .asyncAfter(deadline: .now() + 240) { unlink(socketPath); exit(1) }; Task {
                     _ = await runtime.stop(); unlink(socketPath); exit(0)
                 }
         }

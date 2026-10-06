@@ -1,15 +1,15 @@
 # Pot product goals
 
-Updated: 2026-10-04. This page maintains long-term product constraints. See the [Development plan](development-plan.md) for delivered scope and [UI specification](ui-ux-design.md) for interfaces. Unfinished goals must not be promised as existing capabilities.
+Updated: 2026-10-06. This page maintains long-term product constraints. See the [Development plan](development-plan.md) for delivered scope and [UI specification](ui-ux-design.md) for interfaces. Unfinished goals must not be promised as existing capabilities.
 
 ## Positioning and boundaries
 
-Pot is a personal assistant accessed from the Mac menu bar. It works in a persistent Linux Sandbox, coordinates background tasks, and saves results. Users delegate/follow up through main chat and can inspect separate tasks and the shared desktop.
+Pot is a personal assistant accessed from the Mac menu bar. The approved target runs Agents and persistent product state on the Host, with separately managed Sandboxes for environment operations. The main Agent controls multiple Sandboxes; each task worker executes in one fixed assigned environment and cannot manage Sandbox lifecycle. Users delegate/follow up through main chat and inspect tasks, environments and their desktops. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for the authoritative target boundary; the implemented deployment now runs Host Pi/Codex with multiple Linux execution Sandboxes.
 
 - One long-lived main assistant, named Pot by default; task workers have no separate personas. Tasks/schedules are created only through the main Agent; UI handles viewing, guidance, and management.
 - Interaction references ChatGPT Dot. Agent Setup/Sandbox configuration follow local product needs without inferring or copying closed-source internals.
 - GUI, Runtime, and tools run locally; models may use cloud services. Default offline operation or data never leaving the machine is not promised.
-- Direct APIs use Pot Agent (Chat Completions, Responses, Anthropic and Gemini). Codex App Server and Grok ACP are native drivers; validate each independently.
+- Agent/Sandbox decoupling initially covers Pi and native Codex App Server. Grok decoupling and direct Host tool execution are out of scope. Validate each Driver's execution routing rather than treating a handshake/host login as readiness.
 - Local product bundles Containerization without requiring Docker Desktop. Remote Docker/Node Manager and multiple nodes are future directions without automatic task/identity migration.
 - Persistent project assistants, inter-assistant communication, environment migration, and a complete plugin ecosystem are not current MVP prerequisites.
 
@@ -32,7 +32,8 @@ Completed tasks enter archive; failed/interrupted tasks need attention. Archivin
 | View desktop | Observe without human input; viewing is not takeover |
 | Take over desktop | Aim to pause Agent input/new observations and drain in-flight input; disconnect does not reclaim control automatically; observe again after handback |
 | Hide window | Keep background work running; tray click reopens |
-| Quit / emergency environment stop | Stop the owned VM; restart does not treat interrupted work as success |
+| Stop a Sandbox | Affect only that environment; ordinary stop respects active leases and leaves Host chat and unrelated environments available |
+| Quit / emergency environment stop | Settle or mark interrupted the affected execution; restart does not treat interrupted work as success. See the Sandbox target design for implemented lifecycle boundaries |
 
 Desktop takeover ultimately needs a separate controller permission domain, not just model cooperation or flags. See the development plan for current gaps.
 

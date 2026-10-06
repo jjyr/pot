@@ -1,0 +1,716 @@
+#!/usr/bin/env python3
+"""Real Host Pi/Codex + two Linux VMs; loopback models, isolated data, no paid calls."""
+
+import argparse
+import asyncio
+import json
+import os
+from pathlib import Path
+import re
+import tempfile
+import urllib.error
+import urllib.request
+import uuid
+
+
+class Model:
+    def __init__(self):
+        self.requests = []
+        self.errors = []
+        self.worker_loadouts = 0
+        self.summary_requests = 0
+        self.codex_summary_requests = 0
+
+    async def handle(self, reader, writer):
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+            lines = head.decode().split("\r\n")
+            headers = dict(line.lower().split(":", 1) for line in lines[1:] if ":" in line)
+            body = json.loads(await reader.readexactly(int(headers["content-length"])))
+            codex = lines[0].split()[1] == "/v1/responses"
+            inputs = body.get("input", body.get("messages", []))
+            user_index = max(
+                (i for i, item in enumerate(inputs) if item.get("role") == "user"), default=0
+            )
+            current = inputs[user_index:]
+            text = json.dumps(current[0], ensure_ascii=False)
+            # Extract the JSON value directly from user text, regardless of transport wrapping.
+            marker = None
+            for item in (
+                current[0].get("content", []) if isinstance(current[0].get("content"), list) else []
+            ):
+                if isinstance(item, dict):
+                    matches = re.findall(r"(?m)^PROBE:(.*)", item.get("text", ""))
+                    if matches:
+                        marker = matches[-1]
+            if marker is None and isinstance(current[0].get("content"), str):
+                matches = re.findall(r"(?m)^PROBE:(.*)", current[0]["content"])
+                if matches:
+                    marker = matches[-1]
+            if marker is None:
+                actions = []  # auxiliary title / completion-summary requests
+                worker = False
+            else:
+                probe, _ = json.JSONDecoder().raw_decode(marker)
+                actions, worker = probe["actions"], probe.get("worker", False)
+            tools = []
+            for tool in body.get("tools", []):
+                if tool.get("type") == "namespace":
+                    tools.extend(tool["name"] + "__" + t["name"] for t in tool.get("tools", []))
+                else:
+                    tools.append(
+                        tool.get("name", tool.get("function", {}).get("name", tool.get("type", "")))
+                    )
+            forbidden = {
+                "exec_command",
+                "shell",
+                "shell_command",
+                "apply_patch",
+                "read_file",
+                "view_image",
+                "node_repl",
+                "spawn_agent",
+                "send_input",
+                "wait_agent",
+                "web_search",
+            }
+            assert not any(t.rsplit("__", 1)[-1] in forbidden for t in tools), tools
+            assert not any("unmanaged" in t for t in tools), tools
+            if "Pot task completion notification." in text:
+                pot_names = {
+                    t.rsplit("__", 1)[-1] for t in tools if t.rsplit("__", 1)[-1].startswith("pot_")
+                }
+                assert pot_names == {"pot_list_tasks", "pot_get_task"}, pot_names
+                self.summary_requests += 1
+                if codex:
+                    self.codex_summary_requests += 1
+            if worker:
+                expected = {"read", "write", "edit", "bash", "grep", "find", "ls"}
+                names = {
+                    t.rsplit("__", 1)[-1].removeprefix("pot_sandbox_")
+                    for t in tools
+                    if not codex or t.rsplit("__", 1)[-1].startswith("pot_")
+                }
+                assert names == expected, names
+                self.worker_loadouts += 1
+            self.requests.append({"codex": codex, "tools": tools, "worker": worker})
+            count = sum(
+                item.get("type") == "function_call_output" if codex else item.get("role") == "tool"
+                for item in current
+            )
+            action = actions[count] if count < len(actions) else None
+
+            call_id = "probe-" + str(count)
+            if codex:
+                if action:
+                    name = next((t for t in tools if t.rsplit("__", 1)[-1] == action["name"]), None)
+                    assert name is not None, {
+                        "action": action["name"],
+                        "tools": tools,
+                        "user": current[0],
+                    }
+                    item = {
+                        "type": "function_call",
+                        "id": "fc_" + call_id,
+                        "call_id": call_id,
+                        "name": name.rsplit("__", 1)[-1],
+                        "arguments": json.dumps(action["args"]),
+                    }
+                    if "__" in name:
+                        item["namespace"] = name.rsplit("__", 1)[0]
+                else:
+                    item = {
+                        "type": "message",
+                        "id": "msg_" + call_id,
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [{"type": "output_text", "text": "VERIFIED", "annotations": []}],
+                    }
+                complete = {
+                    "id": "resp-" + str(len(self.requests)),
+                    "object": "response",
+                    "status": "completed",
+                    "output": [item],
+                    "usage": {
+                        "input_tokens": 20,
+                        "output_tokens": 5,
+                        "total_tokens": 25,
+                        "input_tokens_details": {"cached_tokens": 0},
+                    },
+                }
+                events = [
+                    {
+                        "type": "response.created",
+                        "response": {"id": complete["id"], "status": "in_progress", "output": []},
+                    },
+                    {"type": "response.output_item.added", "output_index": 0, "item": item},
+                ]
+                if not action:
+                    events.append(
+                        {
+                            "type": "response.output_text.delta",
+                            "item_id": item["id"],
+                            "output_index": 0,
+                            "content_index": 0,
+                            "delta": "VERIFIED",
+                        }
+                    )
+                events += [
+                    {"type": "response.output_item.done", "output_index": 0, "item": item},
+                    {"type": "response.completed", "response": complete},
+                ]
+                response = "".join(
+                    f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events
+                ).encode()
+            else:
+                delta = {"role": "assistant", "content": "VERIFIED"}
+                if action:
+                    assert action["name"] in tools, tools
+                    delta = {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": action["name"],
+                                    "arguments": json.dumps(action["args"]),
+                                },
+                            }
+                        ],
+                    }
+
+                def chunk(delta, finish=None):
+                    return {
+                        "id": "chat-" + str(len(self.requests)),
+                        "object": "chat.completion.chunk",
+                        "created": 1,
+                        "model": body["model"],
+                        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                    }
+
+                events = [
+                    chunk(delta),
+                    chunk({}, "tool_calls" if action else "stop"),
+                    {
+                        "choices": [],
+                        "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25},
+                    },
+                ]
+                response = (
+                    "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+                ).encode()
+            writer.write(
+                f"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {len(response)}\r\nConnection: close\r\n\r\n".encode()
+                + response
+            )
+            await writer.drain()
+        except Exception as error:
+            self.errors.append(repr(error))
+            print("MODEL ERROR", repr(error), flush=True)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+
+def action(tool, **args):
+    return {"name": tool, "args": args}
+
+
+def prompt(actions, worker=False):
+    return "PROBE:" + json.dumps({"actions": actions, "worker": worker})
+
+
+async def run(args):
+    model = Model()
+    mock = await asyncio.start_server(model.handle, "127.0.0.1", 0)
+    port = mock.sockets[0].getsockname()[1]
+    resources = Path(args.resources).resolve()
+    helper = Path(args.helper).resolve()
+    with tempfile.TemporaryDirectory(prefix="pot-sbx-", dir="/tmp") as temp:
+        root = Path(temp)
+        native = root / "native"
+        native.mkdir()
+        (native / "config.toml").write_text(
+            'model = "pot-mock"\nmodel_provider = "pot_mock"\n[model_providers.pot_mock]\nname = "Pot mock"\n'
+            + f'base_url = "http://127.0.0.1:{port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[mcp_servers.unmanaged]\nurl = "http://127.0.0.1:1/mcp"\n'
+        )
+        (root / "sandbox.json").write_text(json.dumps({"cpus": 2, "memory_gib": 2, "disk_gib": 8}))
+        environment = {
+            "PATH": str(resources / "node/bin")
+            + ":"
+            + str(resources / "host-tools/node_modules/.bin")
+            + ":/usr/bin:/bin:/opt/homebrew/bin",
+            "HOME": temp,
+            "CODEX_HOME": str(native),
+        }
+        log_path = Path(args.output).resolve().with_suffix(".helper.log")
+        log = log_path.open("wb")
+        process = await asyncio.create_subprocess_exec(
+            str(helper), temp, str(resources), env=environment, stdout=log, stderr=log
+        )
+        endpoint = None
+
+        async def wait_endpoint(old_boot=None):
+            nonlocal endpoint
+            for _ in range(400):
+                path = root / "product/runtime.json"
+                if path.exists():
+                    candidate = json.loads(path.read_text())
+                    endpoint = candidate
+                    try:
+                        snap = await api("snapshot")
+                        if old_boot is None or snap["boot_id"] != old_boot:
+                            return snap
+                    except (OSError, urllib.error.URLError):
+                        pass
+                assert process.returncode is None, log_path.read_text()[-4000:]
+                await asyncio.sleep(0.05)
+            raise AssertionError("Host Runtime unavailable")
+
+        async def api(path, body=None, token=None):
+            def request():
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{endpoint['port']}/api/v1/{path}",
+                    data=None if body is None else json.dumps(body).encode(),
+                    headers={
+                        "Authorization": "Bearer " + (token or endpoint["token"]),
+                        "Content-Type": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=180) as response:
+                    return json.load(response)
+
+            return await asyncio.to_thread(request)
+
+        async def ipc(method):
+            reader, writer = await asyncio.open_unix_connection(str(root / "helper.sock"))
+            writer.write((json.dumps({"id": str(uuid.uuid4()), "method": method}) + "\n").encode())
+            await writer.drain()
+            reply = json.loads(await reader.readline())
+            writer.close()
+            await writer.wait_closed()
+            assert "error" not in reply, reply
+            return reply
+
+        async def submit(text):
+            body = {"conversation_id": "main", "request_id": str(uuid.uuid4()), "text": text}
+            for _ in range(400):
+                try:
+                    return await api("messages", body)
+                except urllib.error.HTTPError as error:
+                    if error.code != 409:
+                        raise
+                    await asyncio.sleep(0.05)
+            raise AssertionError("Main lane remained occupied")
+
+        async def finish(receipt, expected="complete"):
+            for _ in range(4000):
+                snapshot = await api("snapshot")
+                msg = next(m for m in snapshot["messages"] if m["id"] == receipt["message_id"])
+                if msg["status"] in ("complete", "failed", "cancelled"):
+                    assert msg["status"] == expected, snapshot
+                    return snapshot
+                await asyncio.sleep(0.05)
+            raise AssertionError("Turn failed to settle")
+
+        async def turn(actions):
+            return await finish(await submit(prompt(actions)))
+
+        async def reject(path, body, token=None):
+            try:
+                await api(path, body, token)
+            except urllib.error.HTTPError as error:
+                assert error.code in (401, 403, 409, 500), error.code
+                return
+            raise AssertionError("Forbidden operation accepted")
+
+        report = {}
+        try:
+            await wait_endpoint()
+            initial = await api("sandboxes")
+            assert initial["items"][0]["state"]["phase"] == "stopped", initial
+            assert not (root / "sandboxes/default/workspace/executor-token").exists()
+            report["lazy_start"] = True
+            await api(
+                "providers",
+                {
+                    "request_id": str(uuid.uuid4()),
+                    "profile_id": "pi-test",
+                    "name": "Pi fixture",
+                    "expected_revision": 0,
+                    "endpoint": f"http://127.0.0.1:{port}/v1/chat/completions",
+                    "model": "pot-mock",
+                    "protocol": "openai_chat",
+                    "api_key": "fixture",
+                    "follow_main": True,
+                },
+            )
+            await turn([])
+            assert (await api("sandboxes"))["items"][0]["state"]["phase"] == "stopped"
+            await turn(
+                [
+                    action(
+                        "pot_manage_sandbox",
+                        action="create",
+                        sandbox_id="linux-b",
+                        name="Second Linux",
+                    ),
+                    action("write", path="pi.txt", content="PI_DEFAULT"),
+                    action("bash", command="uname -s > os.txt; cat pi.txt"),
+                    action("read", path="pi.txt"),
+                    action("write", sandbox_id="linux-b", path="pi.txt", content="PI_SECOND"),
+                ]
+            )
+            default = root / "sandboxes/default/workspace/workspace"
+            second = root / "sandboxes/linux-b/workspace/workspace"
+            assert (default / "pi.txt").read_text() == "PI_DEFAULT"
+            assert (second / "pi.txt").read_text() == "PI_SECOND"
+            assert (default / "os.txt").read_text().strip() == "Linux"
+            assert not (root / "product/agent-workspace/pi.txt").exists()
+            report["pi_main_two_environments"] = True
+            # Persistent worker credential and immutable assignment, including API bypass attempts.
+            task = await api(
+                "tasks",
+                {
+                    "request_id": str(uuid.uuid4()),
+                    "text": prompt([action("write", path="worker.txt", content="WORKER")], True),
+                    "profile": "pi-test",
+                    "sandbox_id": "linux-b",
+                },
+            )
+            task_id = task.get("id", task.get("task", {}).get("id"))
+            assert task_id, task
+            for _ in range(1000):
+                info = next(
+                    t
+                    for t in (await api("tasks/query?scope=all&limit=50"))["items"]
+                    if t["id"] == task_id
+                )
+                if info.get("phase") in ("failed", "interrupted"):
+                    raise AssertionError(info)
+                if info.get("task", info).get("phase") == "complete":
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError(info)
+            task_workspace = second / "tasks" / task_id
+            assert (task_workspace / "worker.txt").read_text() == "WORKER"
+            worker_token = json.loads(
+                (root / "product/tasks" / task_id / "runtime.json").read_text()
+            )["token"]
+            await reject("sandboxes", {"action": "stop", "sandbox_id": "linux-b"}, worker_token)
+            await reject(
+                "execution",
+                {
+                    "name": "pot_sandbox_bash",
+                    "call_id": "override",
+                    "args": {"command": "true", "sandbox_id": "default"},
+                },
+                worker_token,
+            )
+            report["pi_worker_fixed_assignment"] = True
+            await reject("sandboxes", {"action": "delete", "sandbox_id": "linux-b"})
+            profile = {
+                "id": "codex-test",
+                "revision": 1,
+                "name": "Codex fixture",
+                "engine": "codex",
+                "provider": "pot_mock",
+                "model": "pot-mock",
+                "auth_ref": "cli:codex",
+                "launch_spec": {
+                    "transport": "codex_app_server",
+                    "executable": str(resources / "host-tools/node_modules/.bin/codex"),
+                    "cwd_policy": "workspace",
+                    "argv": [{"kind": "runtime_arguments"}],
+                },
+                "params": {"max_output_tokens": 256, "reasoning_effort": None},
+                "tool_policy": {
+                    "worker_orchestration": False,
+                    "summary_read_only": True,
+                    "unattended": "guest_vm",
+                },
+            }
+            await api(
+                "agent",
+                {
+                    "profile": profile,
+                    "expected_revision": 0,
+                    "request_id": "codex-setup",
+                    "follow_main": True,
+                },
+            )
+            await turn(
+                [
+                    action("pot_list_sandboxes"),
+                    action("pot_manage_sandbox", action="select", sandbox_id="default"),
+                    action("pot_sandbox_write", path="codex.txt", content="CODEX_DEFAULT"),
+                    action("pot_sandbox_read", path="codex.txt"),
+                    action(
+                        "pot_sandbox_bash",
+                        sandbox_id="linux-b",
+                        command="echo CODEX_SECOND > codex.txt",
+                    ),
+                ]
+            )
+            before = (await api("agent"))["bindings"][0]["native_ref"]
+            await turn([action("pot_sandbox_bash", command="echo RESUMED >> codex.txt")])
+            assert (default / "codex.txt").read_text() == "CODEX_DEFAULTRESUMED\n"
+            assert (second / "codex.txt").read_text().strip() == "CODEX_SECOND"
+            report["codex_main_and_resume"] = True
+            task2 = await api(
+                "tasks",
+                {
+                    "request_id": str(uuid.uuid4()),
+                    "text": prompt(
+                        [
+                            action(
+                                "pot_sandbox_write", path="codex-worker.txt", content="CODEX_WORKER"
+                            )
+                        ],
+                        True,
+                    ),
+                    "profile": "codex-test",
+                    "sandbox_id": "default",
+                },
+            )
+            task2_id = task2.get("id", task2.get("task", {}).get("id"))
+            for _ in range(1000):
+                info = next(
+                    t
+                    for t in (await api("tasks/query?scope=all&limit=50"))["items"]
+                    if t["id"] == task2_id
+                )
+                if info.get("phase") in ("failed", "interrupted"):
+                    raise AssertionError(info)
+                if info.get("task", info).get("phase") == "complete":
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError(info)
+            assert (default / "tasks" / task2_id / "codex-worker.txt").read_text() == "CODEX_WORKER"
+            report["codex_worker_loadout"] = True
+            # Exercise the real read-only summary before restoring main environment tools.
+            for _ in range(400):
+                if model.codex_summary_requests and (await api("snapshot"))["turn"] is None:
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Read-only completion summary did not settle")
+            # Cancellation must contain double-fork / setsid descendants as well as the shell.
+            receipt = await submit(
+                prompt(
+                    [
+                        action(
+                            "pot_sandbox_bash",
+                            command="setsid sh -c 'sleep 6; echo ESCAPED > escaped.txt' >/dev/null 2>&1 & echo STARTED > started.txt; sleep 60",
+                            timeout=120,
+                        )
+                    ]
+                )
+            )
+            for _ in range(400):
+                if (default / "started.txt").exists():
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Sandbox cancellation command not started")
+            await reject("sandboxes", {"action": "stop", "sandbox_id": "default"})
+            await api(
+                "turn/cancel",
+                {"request_id": str(uuid.uuid4()), "user_message_id": receipt["message_id"]},
+            )
+            await finish(receipt, "cancelled")
+            await asyncio.sleep(7)
+            assert not (default / "escaped.txt").exists(), (
+                "Detached descendant survived cancellation"
+            )
+            report["cgroup_cancellation_busy_stop"] = True
+            boot = (await api("snapshot"))["boot_id"]
+            await ipc("backend-restart")
+            await wait_endpoint(boot)
+            await turn([action("pot_sandbox_read", path="codex.txt")])
+            after = (await api("agent"))["bindings"][0]["native_ref"]
+            assert before == after, (before, after)
+            report["host_restart_native_resume"] = True
+            # Resume the original worker after Host restart; target remains immutable.
+            await api(
+                "tasks/" + task_id + "/messages",
+                {
+                    "request_id": str(uuid.uuid4()),
+                    "text": prompt(
+                        [action("write", path="worker-resumed.txt", content="FIXED")], True
+                    ),
+                },
+            )
+            for _ in range(400):
+                if (task_workspace / "worker-resumed.txt").exists():
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Worker did not resume in its assigned environment")
+            assert (
+                next(
+                    t
+                    for t in (await api("tasks/query?scope=all&limit=50"))["items"]
+                    if t["id"] == task_id
+                )["sandbox_id"]
+                == "linux-b"
+            )
+            report["worker_restart_assignment"] = True
+            # Keep a worker busy in B while stopping A, and probe target override during its active turn.
+            long_task = await api(
+                "tasks",
+                {
+                    "request_id": str(uuid.uuid4()),
+                    "text": prompt(
+                        [
+                            action(
+                                "pot_sandbox_bash",
+                                command="echo RUNNING > running.txt; sleep 8; echo DONE > done.txt",
+                            )
+                        ],
+                        True,
+                    ),
+                    "profile": "codex-test",
+                    "sandbox_id": "linux-b",
+                },
+            )
+            long_id = long_task["id"]
+            long_workspace = second / "tasks" / long_id
+            for _ in range(400):
+                if (long_workspace / "running.txt").exists():
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Concurrent worker did not start")
+            long_token = json.loads(
+                (root / "product/tasks" / long_id / "runtime.json").read_text()
+            )["token"]
+            await reject(
+                "execution",
+                {
+                    "name": "pot_sandbox_bash",
+                    "call_id": "wrong-target",
+                    "args": {"command": "true", "sandbox_id": "default"},
+                },
+                long_token,
+            )
+            await reject(
+                "execution",
+                {
+                    "name": "pot_manage_sandbox",
+                    "call_id": "manage",
+                    "args": {"action": "stop", "sandbox_id": "linux-b"},
+                },
+                long_token,
+            )
+            await api("sandboxes", {"action": "stop", "sandbox_id": "default"})
+            await turn([action("pot_sandbox_read", sandbox_id="linux-b", path="codex.txt")])
+            for _ in range(400):
+                if (long_workspace / "done.txt").exists():
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Stopping A interrupted worker B")
+            inventory = await api("sandboxes")
+            assert (
+                next(i for i in inventory["items"] if i["id"] == "default")["state"]["phase"]
+                == "stopped"
+            ), inventory
+            assert (default / "codex.txt").exists()
+            report["stop_independence_artifacts"] = True
+            # Desktop is separate from Agent execution; static HTTP must never expose executor credentials.
+            desktop = await api("sandboxes", {"action": "desktop", "sandbox_id": "default"})
+            ip = desktop["state"]["ip"]
+
+            async def desktop_ready():
+                def request():
+                    with urllib.request.urlopen(f"http://{ip}:17681/", timeout=2) as response:
+                        return response.status == 200
+
+                return await asyncio.to_thread(request)
+
+            for _ in range(300):
+                try:
+                    if await desktop_ready():
+                        break
+                except OSError:
+                    pass
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("Optional desktop unavailable")
+            await turn(
+                [
+                    action(
+                        "pot_sandbox_bash",
+                        command="""test ! -e /data/executor-token && test ! -r /run/pot-executor/operations.sqlite && python3 - > desktop-check.txt <<'CHECK'
+import urllib.request, urllib.error, os
+assert 'POT_EXECUTOR_TOKEN' not in os.environ
+assert urllib.request.urlopen('http://127.0.0.1:8081/home.html').status == 200
+try:
+    urllib.request.urlopen('http://127.0.0.1:8081/executor-token')
+    raise AssertionError('Credential exposed')
+except urllib.error.HTTPError as error:
+    assert error.code == 404
+print('DESKTOP_OK')
+CHECK
+""",
+                    )
+                ]
+            )
+            assert (default / "desktop-check.txt").exists(), "Guest credential boundary failed"
+            assert (default / "desktop-check.txt").read_text().strip() == "DESKTOP_OK"
+
+            def no_token_http():
+                try:
+                    urllib.request.urlopen(f"http://{ip}:8081/executor-token", timeout=2)
+                except urllib.error.HTTPError as error:
+                    assert error.code == 404
+                except urllib.error.URLError:
+                    pass  # server deliberately binds guest loopback
+                else:
+                    raise AssertionError("Executor credential exposed")
+
+            await asyncio.to_thread(no_token_http)
+            await api("sandboxes", {"action": "stop", "sandbox_id": "default"})
+            assert (root / "sandboxes/default/workspace/browser-stopped").exists()
+            report["optional_desktop_and_shutdown"] = True
+            assert not model.errors, model.errors
+            assert model.worker_loadouts >= 4, model.worker_loadouts
+            report["model_requests"] = len(model.requests)
+            report["summary_requests"] = model.summary_requests
+            report["native_versions"] = {}
+            for cli in ["pi", "codex"]:
+                version = await asyncio.create_subprocess_exec(
+                    str(resources / "host-tools/node_modules/.bin" / cli),
+                    "--version",
+                    env=environment,
+                    stdout=asyncio.subprocess.PIPE,
+                )
+                report["native_versions"][cli] = (await version.communicate())[0].decode().strip()
+            Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
+            print(json.dumps(report, indent=2), flush=True)
+        finally:
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), 60)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+            log.close()
+            mock.close()
+            await mock.wait_closed()
+            if model.errors:
+                print("MODEL ERRORS", model.errors, flush=True)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--helper", required=True)
+    parser.add_argument("--resources", required=True)
+    parser.add_argument("--output", default="/tmp/pot-sandbox-acceptance.json")
+    asyncio.run(run(parser.parse_args()))

@@ -1,97 +1,54 @@
 # Current architecture
 
-Updated: 2026-10-06. This page describes the implemented structure; see [Product design](product-design.md) for future product constraints.
+Updated: 2026-10-06. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for authority and lifecycle contracts.
 
-```text
-macOS
-+---------------------------------------------+
-| Pot App: GPUI + Swift bridge                 |
-| chat / tasks / settings / tray / WebViews    |
-+--------+----------------------+-------------+
-         | Unix IPC             | bearer HTTP/SSE
-         v                      |
-      Helper                    |
-         | Containerization     |
-         v                      v
-+---------------------- Linux VM ----------------------+
-| pot-server: HTTP / SSE / MCP / PTY hosting             |
-|      |                                               |
-| pot-runtime: bindings / tasks / schedules / recovery   |
-|      |-- Storage: SQLite + request/usage ledgers       |
-|      |-- Agent / Driver: Pot Agent / Codex / Grok sessions            |
-|      +-- Gateway: provider HTTP + protocol codecs     |
-|                                                      |
-| Desktop / broker <---- App native WebView bridge      |
-+------------------------------------------------------+
+```mermaid
+flowchart TB
+    App[macOS App: chat, tasks, settings, environments] --> Server[Host Server / Runtime / Storage / Gateway]
+    Helper[Host Helper] --> Server
+    Server --> Pi[Host Pi RPC]
+    Server --> Codex[Host Codex App Server]
+    Pi --> Tools[Scoped Pot tool API]
+    Codex --> MCP[Scoped Pot MCP]
+    MCP --> Tools
+    Tools --> Manager[Host Sandbox manager]
+    Manager --> Helper
+    Manager --> A[Linux Sandbox A: executor and optional desktop]
+    Manager --> B[Linux Sandbox B: executor and optional desktop]
 ```
 
-## Backend split design
+## Placement and entry points
 
-Issue [#5](https://github.com/jjyr/pot/issues/5) separates Core/Storage/Driver/Gateway/Runtime/Server in an independent worktree according to the [Backend crate split](backend-crates.md). Server starts the backend independently; App accesses it through the protocol. Remote deployment is not exposed as a product feature. HTTP adapter arguments retain their existing types; APIs, storage layouts, and session semantics remain compatible.
-
-## Responsibilities and code entry points
-
-| Layer | Responsibility | Entry points |
+| Component | Responsibility | Entry points |
 |---|---|---|
-| App | Chat, tasks, schedules, settings; caches and background synchronization | `app/src/main.rs`, `client.rs`, `ui.rs`, `schedules_ui.rs` |
-| Native bridge | Shared NSApplication/window, input methods, tray, WKWebView, configuration writes | `app/swift/Bridge.swift`, `SettingsPanel.swift` |
-| Helper | User process managing VM, resources, and normal/abnormal shutdown | `helper/` |
-| Server | Standalone program, configuration, routes, listener, and lifecycle | `server/src/main.rs`, `config.rs`, `routes.rs`, `hosting.rs` |
-| Runtime / Storage | Authoritative task state, message events, usage, recovery, and persistence | `runtime/src/lib.rs`, `bootstrap.rs`, `storage/src/` |
-| Orchestration / scheduling | Single-level delegation, queues, completion delivery, scheduled triggers | `tasks.rs`, `orchestration.rs`, `schedules.rs` |
-| Agent / Driver | Profile snapshots, epoch bindings and migration; DriverHost / SessionHandle; Pot Agent, Codex App Server, Grok ACP and their contexts | `core/src/`, `agent/src/`, `driver/src/`, `runtime/src/agent/` |
-| Gateway / tool bridge | Provider routing, request reservations, protocol codecs; shared Agent / MCP tool definitions and dispatcher | `gateway/src/`, `core/src/pot-tools.json`, `runtime/src/tool_bridge.rs`, `orchestration.rs` |
-| Protocol / desktop | Shared types; guest startup, browser, and input arbitration | `protocol/`, `image/` |
+| App / Swift bridge | Persistent chat, immutable task environments, settings, environment selector and optional noVNC desktop | `app/src/`, `app/swift/` |
+| Helper | Start Host Server; separate VM instances and mounts; graceful product/VM shutdown | `helper/Sources/PotHelper/main.swift` |
+| Server / Runtime | HTTP/SSE/MCP/PTY hosting, authoritative messages, scheduling, sessions, cancellations | `server/src/`, `runtime/src/` |
+| Sandbox manager | Inventory, selection, lifecycle serialization, scoped execution, leases, durable operation receipts/quarantine | `runtime/src/sandbox.rs` |
+| Drivers | Host Pi RPC and Codex App Server; environment tools routed through trusted extensions/MCP | `driver/src/pi.rs`, `codex.rs`, `pot-tools.mjs` |
+| Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite and native session bindings | `gateway/src/`, `storage/src/` |
+| Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `image/executor.py`, `file-tools.py`, `sandbox.sh` |
 
-GPUI and Swift share the main window and event loop, bridged through a C ABI. Standard pages reuse Kit; native NSTextView handles chat editing, while separate WKWebViews host the desktop and bundled xterm terminal. The terminal connects to Runtime PTY through Swift URLSessionWebSocketTask; bearer credentials stay in the native networking layer, and the web page cannot access the network or navigate externally. Closing the window keeps background work running; Quit closes Chromium normally before stopping Helper/VM.
+The Helper starts the Host backend without booting a VM. The App discovers `root/product/runtime.json` on loopback. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exactly seven environment tools, a lane token and one persistent assignment; Runtime rejects management and target overrides. Grok execution is unsupported in this design.
 
-The build VM preinstalls Sandbox system dependencies into an OCI image shipped with App. Helper imports and starts the local image without installing packages at startup. User data is mounted separately at `/data`. See [Sandbox image](sandbox-image.md) for desktop, fonts, and image sizes.
+Pi's seven native tools are overridden by trusted Host adapters. Its shell shortcut is blocked and project context/extensions/skills are disabled. Codex has native shell, patch, image, code execution, apps, plugins, subagent and inherited MCP capabilities disabled; its environment list is empty and Pot MCP supplies Sandbox operations. Both CLIs use a private Host working directory. Host tool execution has no fallback.
 
-## Main assistant, tasks, and schedules
+Model inference location is independent: Agent processes are local, model APIs can be remote or an explicitly configured loopback endpoint.
 
-Main Agent chooses between a direct reply and task tools based on the goal. Runtime enforces concurrency, idempotency, and state transitions; each task has its own directory and execution context. Workers receive explicit task instructions without copies of the main chat history and cannot recursively delegate through the orchestration API.
+## Persistence and lifecycle
 
-Background concurrency defaults to 5, with additional user-configured profile/provider limits. Runnable tasks queue FIFO; a limited provider does not block others. Main chat has a separate slot. Each task executes serially; follow-up guidance is durably queued and consumed on the next turn. `shared` is an explicit cooperative lock, not permission isolation. Completion reports persist with state; when the main session is idle, up to 8 reports are combined into a summary.
+Host state lives in `root/product`: SQLite messages/usage, tasks/schedules, private Agent sessions and bearer endpoint. `sandboxes.json` holds definitions and main selection; `sandbox-operations.json` holds execution outcomes requiring reconciliation. Each Sandbox mounts only `root/sandboxes/ID/workspace` at `/data`. Guest artifacts are `/data/workspace`; task artifacts are `/data/workspace/tasks/TASK_ID`. Executor credentials remain in the Host Sandbox directory outside the mounted workspace and enter the root guest process only at startup. The guest removes the credential from child environments; its operation ledger and temporary output use root-private `/run/pot-executor`, outside virtiofs. The guest receives no provider credentials, Agent session, Host endpoint token or Helper socket.
 
-Schedules are persistent definitions; each trigger creates a new task. The scheduler owns time zones, deduplication, missed-run policy, and overlap prevention; the model checks the target and produces structured results. Runs can stay silent when nothing changes; see [Scheduled tasks](scheduled-tasks.md).
+Tasks keep independent Agent/profile snapshots and immutable `sandbox_id`. Schedules resolve and save their environment when configured. A worker turn holds an environment lease, and dispatched tools hold operation leases. Stop/delete rejects active task/operation leases and unknown outcomes. Task cancellation settles its remote processes without stopping the shared VM. A cgroup contains background and `setsid` descendants. Completed execution receipts replay the saved result, while conflicting/incomplete requests never reexecute. Client disconnects do not discard cleanup.
 
-## State and recovery
+Host restart preserves CLI bindings and artifacts, marks interrupted turns visibly and quarantines unsettled executions. Main-only `recover` confirms executor cancellation or VM termination; it never repeats a command. Definitions referenced by tasks or schedules cannot be deleted. Deleted identities cannot be reused, and deletion retains workspace artifacts. Desktop is optional and explicitly started; stopping its environment closes it along with the guest.
 
-- Runtime stores product messages/task state; Storage persists Pot context and native CLIs own their execution context. `agent.bindings.v1` stores immutable ResolvedSpec, SHA-256, epoch, and native_ref per owner. Pot Agent stores provider-native execution context through Storage; old Pi development databases are not imported. Recovery uses only the binding snapshot.
-- Profile settings switch main chat through a persistent migration operation, waiting for an active turn to stop. Existing tasks stay pinned by default; new tasks resolve the current worker default. External handoff and the new session are written first, then one SQLite transaction archives the old binding, activates the new one, and inserts a conversation boundary. Deterministic handoff is bounded and redacted; the next real input instructs the model to read it without an extra model call.
-- Agent execution events become Driver events carrying epoch/turn/seq before projection into product records. Cancellation waits for model/tool settlement; an owner cannot restart before shutdown is confirmed. Implementing an enum alone does not establish support for other drivers.
-- API commands carry request IDs; message events have persistent cursors. Runtime provides SSE; App currently uses background snapshot/paginated polling (about 500 ms), rejects stale query results, and shows cached conversations first on navigation.
-- SQLite uses DELETE journal + synchronous=EXTRA to avoid observed WAL loss on the shared filesystem. Inspect live state through Runtime APIs; the host must not open an active guest database.
-- Tasks and schedules persist together as `tasks.v2`, with compatible reads of `tasks.v1`. Restart preserves queued work and marks running tasks interrupted; unknown external side effects are not replayed automatically.
-- Token usage uses a shared SQLite request ledger for time aggregation, task attribution, and Pot periodic allowances. After execution has settled, tasks without enough allowance save a recovery checkpoint, enter waiting, and release their execution slot. See [Token usage](token-usage.md).
+Multiple tasks sharing a VM are cooperative users of the same guest account. Workspace directories are organization, not task-level filesystem isolation. macOS/Windows providers and direct Host tools are outside this increment.
 
-Model requests reserve allowance durably before networking. Tool continuations and failed requests also count. Cancellation waits for execution to settle and cannot undo completed external actions.
+## Tasks, profiles and usage
 
-The [Runtime README](../runtime/README.md) maintains API, pagination, report delivery, and Agent constraints.
+Background concurrency defaults to 5, with profile/provider limits, FIFO runnable queues, independent main chat and serial turns within each lane. Follow-ups persist; workers cannot recursively delegate. Completion reports are durable and summarized by a read-only main turn. Schedules own time zones, occurrence deduplication, missed-run policy and overlap prevention.
 
-## Current boundaries
+`agent.bindings.v1` holds resolved immutable Agent specifications, checksums, epochs and native refs. Profile changes use durable migration; existing tasks keep their bindings. Model requests reserve allowance before networking, including tool continuations and failures. Pi uses a gateway token rather than provider secrets; Codex retains its native Host authorization home. Product execution limits remain separate from credentials.
 
-Current use is a local VM with Pot Agent or native Codex/Grok drivers. Remote Docker is a historical POC; Node Manager, multiple nodes, and other drivers are not productized.
-
-The VM isolates the host, but tools and Runtime still share the guest user domain. Worker tokens restrict APIs, not same-user file access. The desktop broker offers cooperative arbitration without full shell/CDP/X11 isolation. Dedicated browser tools, dependency DAGs, long-term memory, and service authorization remain in the [Development plan](development-plan.md).
-
-## Terminal and command configuration
-
-`runtime/src/terminal.rs` manages up to 8 in-memory PTYs, each with at most one connection and a 64 KiB replay buffer.
-Disconnect only detaches; closing a terminal or normal Runtime termination ends the session. Terminal input/output is not stored in the product database, logs, or disk scrollback; the default shell disables HISTFILE.
-Terminal and Sandbox have separate sidebar entries. Navigation and reconnect reuse the same PTY without injecting commands into a shell or busy CLI. Pot provides a guided, dedicated login PTY (`purpose: login`) separate from the regular shell (`purpose: shell`). It presents verified official commands for explicit user copying/execution and checks official status. Pot never injects login commands or extracts CLI credentials. Explicit HTTP(S) link clicks open the Mac browser; guest localhost OAuth callbacks are not forwarded automatically.
-
-CLI and Runtime inherit the same guest user and persistent HOME; `~/.local/bin` and `~/.npm-global/bin` are added to their shared PATH.
-`discovery.rs` checks executables and supported official status interfaces only on explicit calls. Identity, installation, compatibility, and readiness remain separate states.
-Profile launch_spec/protocol_contract enter the immutable binding and checksum. Diagnostic versions do not enter new checksums, and version probes are not launched. Old snapshots continue to validate their original checksums; compatible upgrades do not migrate bindings merely because the version string changes.
-
-Claude runs one original CLI process per turn and resumes with a fixed UUID. Strict MCP configuration and built-in tool allowlists
-restrict tools by lane; summary and worker Runtime tokens cannot orchestrate.
-After a result event, Runtime still waits for background cleanup and process exit. If shutdown cannot be confirmed, it retains occupancy and blocks new turns.
-Official auth status queries only login state without reading or exporting credentials. Usage is settled from cumulative CLI turn reports.
-
-## Unified AI configuration
-
-AI Configuration shares first-time Chat setup and ordinary Settings. Agent selection/model edits remain drafts until explicit save. Connection-only profile/provider writes use `follow_main: false, follow_worker: false`; main selection uses the existing binding/migration mechanism without modifying explicit worker defaults. API metadata and model checks never return keys. Supported model-list checks are bounded GET requests with no redirects or inference calls; unsupported CLI discovery uses manual model identifiers.
-
-Product execution limits live in private `product/execution-limits.json`, separately from provider credentials. New workers can follow the active main binding snapshot; existing explicit routing/defaults and task bindings remain unchanged.
+Runtime exposes HTTP/SSE; App uses cached snapshots and paginated polling with stale-result rejection. SQLite uses DELETE journal and synchronous=EXTRA. Query live state through the API. [Runtime contract](../runtime/README.md) documents the API, and [validation](validation/agent-sandbox-20261006.md) records current acceptance.

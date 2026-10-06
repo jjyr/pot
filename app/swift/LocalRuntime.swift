@@ -13,6 +13,7 @@ import WebKit
     var polling = false
     var probing = false
     var loaded = ""
+    var sandboxID = "default"
     var onState: (([String: Any]) -> Void)?
     init(view _: NSView, web: WKWebView) {
         self.web = web
@@ -48,7 +49,6 @@ import WebKit
             let handle = try FileHandle(forWritingTo: log); process.standardOutput = handle; process
                 .standardError = handle
             try process.run()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.send("start") }
             timer = Timer
                 .scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.poll() }
@@ -56,7 +56,7 @@ import WebKit
         } catch { label.stringValue = "Helper failed: \(error)" }
     }
 
-    nonisolated static func request(path: String, method: String) -> [String: Any] {
+    nonisolated static func request(path: String, method: String, sandboxID: String = "default") -> [String: Any] {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0); defer { close(fd) }
         var timeout = timeval(tv_sec: 15, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -71,7 +71,11 @@ import WebKit
             socklen_t(MemoryLayout<sockaddr_un>.size)
         ) }}
         guard result == 0 else { return ["error": "Helper IPC unavailable"] }
-        var data = try! JSONSerialization.data(withJSONObject: ["id": UUID().uuidString, "method": method]); data
+        var data = try! JSONSerialization.data(withJSONObject: [
+            "id": UUID().uuidString,
+            "method": method,
+            "sandbox_id": sandboxID,
+        ]); data
             .append(10)
         data.withUnsafeBytes { _ = Darwin.write(fd, $0.baseAddress, data.count) }
         var response = Data(); var byte: UInt8 = 0
@@ -85,12 +89,26 @@ import WebKit
     }
 
     func send(_ method: String, completion: (([String: Any]) -> Void)? = nil) {
-        let path = root.appendingPathComponent("helper.sock").path
-        DispatchQueue.global()
-            .async {
-                let response = Self.request(path: path, method: method); DispatchQueue.main
-                    .async { self.render(response); completion?(response) }
+        if ["start", "stop", "desktop"].contains(method) {
+            Task {
+                let client = RuntimeClient(); client.root = root
+                do {
+                    let value = try await client.request(
+                        "api/v1/sandboxes",
+                        body: ["action": method, "sandbox_id": sandboxID]
+                    )
+                    let response: [String: Any] = ["result": value["state"] ?? value]
+                    render(response); completion?(response)
+                } catch { completion?(["error": error.localizedDescription]) }
             }
+            return
+        }
+        let path = root.appendingPathComponent("helper.sock").path
+        let target = sandboxID
+        DispatchQueue.global().async {
+            let response = Self.request(path: path, method: method, sandboxID: target)
+            DispatchQueue.main.async { self.render(response); completion?(response) }
+        }
     }
 
     func poll() {
@@ -103,9 +121,10 @@ import WebKit
             return
         }; polling = true
         let path = root.appendingPathComponent("helper.sock").path
+        let target = sandboxID
         DispatchQueue.global()
             .async {
-                let response = Self.request(path: path, method: "status"); DispatchQueue.main
+                let response = Self.request(path: path, method: "status", sandboxID: target); DispatchQueue.main
                     .async { self.polling = false; self.render(response) }
             }
     }

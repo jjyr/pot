@@ -6,16 +6,18 @@ use std::{
     path::PathBuf,
 };
 pub fn private_json(path: &std::path::Path, value: &Value) -> Result<()> {
-    let temp = path.with_extension("tmp");
+    let temp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
     let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .write(true)
         .mode(0o600)
         .open(&temp)?;
     file.write_all(&serde_json::to_vec(value)?)?;
     file.sync_all()?;
-    std::fs::rename(temp, path)?;
+    std::fs::rename(&temp, path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
     Ok(())
 }
 

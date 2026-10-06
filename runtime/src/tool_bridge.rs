@@ -3,15 +3,19 @@
 use crate::*;
 use axum::response::Response;
 
-pub fn schemas(summary: bool) -> Vec<Value> {
+pub fn schemas(summary: bool, worker: bool) -> Vec<Value> {
     let all: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).expect("bundled schemas");
     all.into_iter()
         .filter(|tool| {
-            !summary
-                || matches!(
-                    tool["name"].as_str(),
-                    Some("pot_list_tasks" | "pot_get_task")
-                )
+            (!worker
+                || tool["name"]
+                    .as_str()
+                    .is_some_and(|n| n.starts_with("pot_sandbox_")))
+                && (!summary
+                    || matches!(
+                        tool["name"].as_str(),
+                        Some("pot_list_tasks" | "pot_get_task")
+                    ))
         })
         .collect()
 }
@@ -87,11 +91,17 @@ pub async fn mcp(
             json!({"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"pot","version":env!("CARGO_PKG_VERSION")}})
         }
         "ping" => json!({}),
-        "tools/list" => json!({"tools":if s.is_worker {vec![]} else {schemas(turn.starts_with(orchestration::RESULT_PREFIX))}}),
+        "tools/list" => json!({"tools":schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker)}),
         "tools/call" => {
-            if s.is_worker { return Err(error(StatusCode::FORBIDDEN,"worker_orchestration","Workers cannot invoke orchestration")); }
             let name = call["params"]["name"].as_str().unwrap_or("");
-            if !schemas(turn.starts_with(orchestration::RESULT_PREFIX)).iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
+            if !schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker).iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
+            if name.starts_with("pot_sandbox_") || matches!(name,"pot_list_sandboxes" | "pot_manage_sandbox") {
+                let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));
+                let operation = tokio::spawn(async move { sandbox::tool(&s,&name,&id,&args).await });
+                let result = operation.await.map_err(|e|internal(e.into()))?;
+                let (value,failed) = match result { Ok(v)=>{let failed=v.get("error").is_some();(v,failed)}, Err(e)=>(json!({"error":e.to_string()}),true) };
+                return Ok(Json(json!({"jsonrpc":"2.0","id":rpc_id,"result":{"content":[{"type":"text","text":value.to_string()}],"isError":failed}})).into_response());
+            }
             let dispatch: orchestration::Call = serde_json::from_value(json!({"name":name,"call_id":format!("mcp:{rpc_id}"),"args":call["params"].get("arguments").cloned().unwrap_or_else(||json!({}))})).map_err(|e|internal(e.into()))?;
             match orchestration::invoke(State(root),h,Json(dispatch)).await {
                 Ok(Json(value)) => json!({"content":[{"type":"text","text":value.to_string()}],"isError":false}),

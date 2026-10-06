@@ -114,7 +114,6 @@ impl Settings {
             let mut choices = div().flex().flex_wrap().gap_3();
             for (i, id) in [
                 "codex",
-                "grok",
                 "anthropic",
                 "gemini",
                 "deepseek",
