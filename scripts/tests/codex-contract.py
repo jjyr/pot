@@ -273,7 +273,55 @@ class Mock:
                     self.runtime_tools
                     and "This is one independent scheduled run." in json.dumps(inputs)
                 )
-                if scheduled and not has_output:
+                preference_save = self.runtime_tools and "PREF_SAVE" in json.dumps(current_user)
+                preference_read = self.runtime_tools and "PREF_READ" in json.dumps(current_user)
+                preference_route = self.runtime_tools and "PREF_ROUTE" in json.dumps(current_user)
+                preference_outputs = sum(
+                    item.get("type") == "function_call_output" for item in inputs
+                )
+                preference_steps = (
+                    [
+                        ("pot_get_execution_preferences", {}),
+                        (
+                            "pot_update_execution_preferences",
+                            {"text": "Use Codex test for coding.", "expected_revision": 0},
+                        ),
+                        ("pot_get_execution_preferences", {}),
+                    ]
+                    if preference_save
+                    else [("pot_get_execution_preferences", {})]
+                )
+                if preference_route:
+                    preference_steps = [
+                        (
+                            "pot_create_task",
+                            {
+                                "text": "Preference routed worker",
+                                "profile": "codex-test",
+                                "preference_revision": 1,
+                                "selection_reason": "Your coding preference",
+                            },
+                        )
+                    ]
+                if (
+                    preference_save or preference_read or preference_route
+                ) and preference_outputs < len(preference_steps):
+                    name, arguments = preference_steps[preference_outputs]
+                    command = next(
+                        name_in_tools
+                        for name_in_tools in tools
+                        if name_in_tools.rsplit("__", 1)[-1] == name
+                    )
+                    item = {
+                        "type": "function_call",
+                        "id": f"fc_preference_{preference_outputs}",
+                        "call_id": f"call_preference_{preference_outputs}",
+                        "name": command.rsplit("__", 1)[-1],
+                        "arguments": json.dumps(arguments),
+                    }
+                    if "__" in command:
+                        item["namespace"] = command.rsplit("__", 1)[0]
+                elif scheduled and not has_output:
                     command = next(
                         name for name in tools if name.rsplit("__", 1)[-1] == "exec_command"
                     )

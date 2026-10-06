@@ -1,5 +1,6 @@
 //! Shared page structure and Kit settings/Sandbox surfaces.
 mod ai;
+pub(crate) use ai::brand_icon;
 mod routing;
 mod setup;
 use crate::{Shell, design, gpui};

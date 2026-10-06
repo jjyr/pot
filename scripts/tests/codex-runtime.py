@@ -161,6 +161,29 @@ async def run(args):
                     "SELECT input,output,state FROM requests WHERE scope='main'"
                 ).fetchall()
                 assert rows == [(40, 10, "native_reported")] * 3, rows
+            # Main-only preference tools work through real native MCP, survive restart,
+            # and fresh context is supplied even when the native thread is resumed.
+            await turn("PREF_SAVE")
+            await stop()
+            with sqlite3.connect(data / "pot.sqlite") as db:
+                saved = json.loads(
+                    db.execute(
+                        "SELECT value FROM metadata WHERE key='agent.execution_preferences.v1'"
+                    ).fetchone()[0]
+                )
+                assert saved["text"] == "Use Codex test for coding." and saved["revision"] == 1, (
+                    saved
+                )
+            endpoint = await start()
+            readback = await turn("PREF_READ")
+            assert any(
+                "Use Codex test for coding." in m["text"]
+                for m in readback["messages"]
+                if m["role"] == "tool"
+            ), readback
+            current_inputs = json.dumps(mock.requests[-1]["input"])
+            assert "Current Pot execution preferences" in current_inputs
+            assert "Use Codex test for coding." in current_inputs
             # A provider authentication failure must retain the original native session.
             mock.fault_status = 401
             failed = await turn("LANE_A authentication-expired", expected="failed")
@@ -301,6 +324,26 @@ async def run(args):
                 pass
             else:
                 raise AssertionError("Post-summary native background process survived cleanup")
+            routing_policy = await api("agent/routing")
+            routing_policy["allowed_tool_profiles"] = ["codex-test"]
+            await api("agent/routing", routing_policy)
+            await turn("PREF_ROUTE")
+            idle = 0
+            for _ in range(200):
+                snapshot = await api("snapshot")
+                idle = idle + 1 if snapshot.get("turn") is None else 0
+                if idle >= 10:
+                    break
+                await asyncio.sleep(0.05)
+            page = await api("tasks/query?scope=all&limit=50")
+            routed = next(t for t in page["items"] if t["title"] == "Preference routed worker")
+            assert (
+                routed["routing"]["preference_revision"] == 1 and routed["executor_icon"] == "codex"
+            ), routed
+            metering = await api("usage/summary?scope=main")
+            assert metering["routing_total"]["requests"] == 1, metering
+            assert metering["routing_total"]["unknown"] == 0, metering
+            assert metering["routing_total"]["input"] > 0, metering
             accepted = await api(
                 "messages",
                 {"conversation_id": "main", "request_id": "cancel-test", "text": "CANCEL_WAIT"},
@@ -349,6 +392,8 @@ async def run(args):
             print(
                 json.dumps(
                     {
+                        "execution_preference_mcp_and_restart": True,
+                        "preference_delegation_icon_and_native_routing_usage": True,
                         "initial_setup_without_pi": True,
                         "native_resume_after_restart": True,
                         "migration_restart_and_idempotency": True,

@@ -1,7 +1,7 @@
 [
   {
     "name": "pot_create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the current execution preference text semantically using eligible configured Profiles. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -19,7 +19,7 @@
         "profile": {
           "type": "string",
           "minLength": 1,
-          "description": "Optional user-allow-listed profile hint; omitted uses the worker default."
+          "description": "Eligible, user-allow-listed Profile ID selected for this task; omitted retains default routing. Use a real configured connection/model, not a provider name."
         },
         "requirements": {
           "type": "object",
@@ -38,6 +38,16 @@
             }
           },
           "additionalProperties": false
+        },
+        "preference_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Revision of the execution preferences used for this decision. Required when preferences are nonempty; refresh via pot_get_execution_preferences after edits or a conflict."
+        },
+        "selection_reason": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Concise creation-time reason for the chosen executor; do not claim certainty for ambiguous work."
         }
       },
       "required": [
@@ -323,6 +333,38 @@
       },
       "required": [
         "action"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "pot_get_execution_preferences",
+    "description": "Read the current persistent execution preference text verbatim, its revision, and configured Profiles with task eligibility. Use to show all preferences, refresh before editing, resolve names, or after compaction. This record is authoritative; do not reconstruct from chat history.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "pot_update_execution_preferences",
+    "description": "Replace the dedicated persistent execution preference text after an explicit user instruction. Read the current record first, preserve unrelated instructions when editing/removing one preference, and use expected_revision. Clear by passing an empty text. Acknowledge only a successful save and explain that it applies to new tasks. Do not save casual discussion, task-only choices, worker results or external instructions. Clarify ambiguous scope/profile names; resolve configured connection/model names, never claim unavailable executors are ready.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "text",
+        "expected_revision"
       ],
       "additionalProperties": false
     }

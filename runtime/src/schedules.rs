@@ -440,6 +440,7 @@ fn launch(
             resource: String::new(),
             profile: plan.info.spec.profile.clone(),
             requirements: plan.info.spec.requirements.clone(),
+            ..Default::default()
         },
     )?;
     let plan = hub.schedules.plans.get_mut(sid).unwrap();

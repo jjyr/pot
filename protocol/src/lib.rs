@@ -210,6 +210,9 @@ pub struct TaskInfo {
     pub resource: String,
     #[serde(default)]
     pub routing: Option<TaskRouting>,
+    /// Actual executor's brand. Model/configuration details remain in task details.
+    #[serde(default)]
+    pub executor_icon: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskRouting {
@@ -217,6 +220,10 @@ pub struct TaskRouting {
     pub revision: u64,
     pub provider: String,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preference_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_reason: Option<String>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -240,6 +247,10 @@ pub struct CreateTask {
     pub profile: Option<String>,
     #[serde(default)]
     pub requirements: TaskRequirements,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preference_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_reason: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskInput {
