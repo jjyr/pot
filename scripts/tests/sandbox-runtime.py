@@ -103,10 +103,12 @@ class Model:
             )
             if marker is not None:
                 if worker:
-                    assert "<name>skill-manager</name>" not in system
+                    assert "<name>skill-creator</name>" not in system
+                    assert "<name>skill-installer</name>" not in system
                     assert "<name>probe-main</name>" not in system
                 else:
-                    assert "<name>skill-manager</name>" in system
+                    assert "<name>skill-creator</name>" in system
+                    assert "<name>skill-installer</name>" in system
             self.requests.append({"codex": codex, "tools": tools, "worker": worker})
             for output in current:
                 if output.get("role") == "tool" or output.get("type") == "function_call_output":
@@ -455,10 +457,12 @@ async def run(args):
                         "exec_command",
                         cmd=r"""python3 - <<'SKILLS'
 from pathlib import Path
-import os
+import os, errno, subprocess
 base=Path('/mnt/pot-skills')
-assert (base/'builtin/main/skill-manager/SKILL.md').is_file()
-for path in [base/'user/shared',base/'builtin/main/skill-manager']:
+for name in ['skill-creator', 'skill-installer']:
+    assert (base/'builtin/main'/name/'SKILL.md').is_file()
+    subprocess.run(['python3', str(base/'builtin/main/skill-creator/scripts/quick_validate.py'), str(base/'builtin/main'/name)], check=True)
+for path in [base/'user/shared',base/'builtin/main/skill-creator']:
     stat=path.stat()
     print(str(path),stat.st_uid,stat.st_gid,oct(stat.st_mode),flush=True)
 for role,name in [('shared','probe-shared'),('main','probe-main'),('task','probe-task')]:
@@ -466,15 +470,25 @@ for role,name in [('shared','probe-shared'),('main','probe-main'),('task','probe
     bundle.mkdir(parents=True,exist_ok=True)
     (bundle/'SKILL.md').write_text(f'---\nname: {name}\ndescription: Skills mapping acceptance\n---\nREADONLY_PAYLOAD\n')
 Path('skills-main.uid').write_text(str(os.getuid()))
-try:
-    (base/'builtin/main/skill-manager/SKILL.md').write_text('forged')
-    raise AssertionError('Builtin skill writable')
-except OSError:
-    pass
+for name in ['skill-creator', 'skill-installer']:
+    try:
+        (base/'builtin/main'/name/'SKILL.md').write_text('forged')
+        raise AssertionError('Builtin skill writable')
+    except OSError as error:
+        assert error.errno == errno.EROFS, error
+draft=Path('draft/probe-installed')
+draft.mkdir(parents=True)
+(draft/'SKILL.md').write_text('---\nname: probe-installed\ndescription: Installation acceptance\n---\nInstalled instructions\n')
+subprocess.run(['python3', str(base/'builtin/main/skill-installer/scripts/install_skill.py'), '--local', str(draft), '--dest', str(base/'user/shared')], check=True)
+Path('builtin-skills-readonly.txt').write_text('EROFS')
 SKILLS""",
                     )
                 ]
             )
+            assert (default / "builtin-skills-readonly.txt").read_text() == "EROFS"
+            assert (root / "skills-user/shared/probe-installed/SKILL.md").is_file()
+            report["builtin_skills_readonly_mapping"] = True
+            report["packaged_skill_helpers"] = True
             await turn(
                 [action("exec_command", cmd="id -u > skills-main.uid", sandbox_id="linux-b")]
             )

@@ -52,7 +52,7 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
     }
     Ok(SkillResources {
         roots,
-        reserved_names: vec!["skill-manager".into()],
+        reserved_names: vec!["skill-creator".into(), "skill-installer".into()],
         selection: s.skill_selection.clone(),
     })
 }
@@ -78,6 +78,37 @@ mod tests {
             format!("---\nname: {name}\ndescription: {description}\n---\n"),
         )
         .unwrap();
+    }
+    #[test]
+    fn builtin_management_skills_use_guest_locations_and_ignore_user_overrides() {
+        let root = tasks::tests::fixture();
+        for name in ["skill-creator", "skill-installer"] {
+            bundle(
+                &root.sandboxes.workspace("default").join(".agents/skills"),
+                name,
+                "forged project override",
+            );
+            bundle(
+                &root.sandboxes.skill_user.join("main"),
+                name,
+                "forged user override",
+            );
+        }
+        let catalog = pot_agent::discover_skills(&resources(&root).unwrap()).unwrap();
+        for name in ["skill-creator", "skill-installer"] {
+            let skill = catalog
+                .skills
+                .iter()
+                .find(|skill| skill.name == name)
+                .unwrap();
+            assert_eq!(
+                skill.location,
+                format!("/mnt/pot-skills/builtin/main/{name}/SKILL.md")
+            );
+            assert!(!skill.description.contains("forged"));
+        }
+        assert_eq!(catalog.diagnostics.len(), 4);
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }
     #[tokio::test]
     async fn task_project_discovery_stops_at_git_directory_or_worktree_file() {
@@ -183,7 +214,9 @@ mod tests {
         }
         let main = resources(&root).unwrap();
         let catalog = pot_agent::discover_skills(&main).unwrap();
-        assert!(catalog.skills.iter().any(|s| s.name == "skill-manager"));
+        for name in ["skill-creator", "skill-installer"] {
+            assert!(catalog.skills.iter().any(|s| s.name == name));
+        }
         assert!(catalog.skills.iter().any(|s| s.name == "main"));
         assert!(!catalog.skills.iter().any(|s| s.name == "task"));
         assert_eq!(
@@ -229,10 +262,9 @@ mod tests {
         let automatic = pot_agent::discover_skills(&resources(&unfiltered).unwrap()).unwrap();
         assert!(automatic.skills.iter().any(|s| s.name == "task"));
         assert!(
-            !automatic
-                .skills
-                .iter()
-                .any(|s| s.name == "main" || s.name == "skill-manager")
+            !automatic.skills.iter().any(|s| s.name == "main"
+                || s.name == "skill-creator"
+                || s.name == "skill-installer")
         );
         tasks::restore(&root).unwrap();
         assert_eq!(

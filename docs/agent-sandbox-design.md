@@ -71,7 +71,7 @@ Qualification covers native tool loadouts, real CLI execution, resume, cancellat
 
 ## Agent skills
 
-Skills use filesystem catalogs and per-role mappings; see [Agent skills](agent-skills.md). Runtime supplies discovery roots and task filters. Main manages user bundles through its builtin skill-manager and existing execution tools; workers see shared/task global skills read-only. Builtins are distributed from repo `skills/` and remain read-only.
+Skills use filesystem catalogs and per-role mappings; see [Agent skills](agent-skills.md). Runtime supplies discovery roots and task filters. Main manages user bundles through its builtin skill-creator/skill-installer and existing execution tools; workers see shared/task global skills read-only. Builtins are distributed from repo `skills/` and remain read-only.
 
 ## Product surfaces
 

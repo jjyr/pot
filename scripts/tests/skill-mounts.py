@@ -15,6 +15,32 @@ spec.loader.exec_module(module)
 
 
 class SkillMounts(unittest.TestCase):
+    def test_main_namespace_remounts_every_builtin_but_keeps_user_mounts_writable(self):
+        libc = MagicMock()
+        libc.unshare.return_value = libc.mount.return_value = 0
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            for source in ["user", "builtin"]:
+                for role in ["shared", "main", "task"]:
+                    (base / "sources" / source / role).mkdir(parents=True)
+            with (
+                patch.object(module, "SKILL_SOURCES", base / "sources"),
+                patch.object(module, "SKILL_VIEW", base / "view"),
+                patch.object(module.ctypes, "CDLL", return_value=libc),
+            ):
+                module.skill_namespace("main")
+            calls = libc.mount.call_args_list
+            readonly_targets = {call.args[1].decode() for call in calls if call.args[3] == 0x1021}
+            self.assertEqual(
+                readonly_targets,
+                {str(base / "view/builtin/shared"), str(base / "view/builtin/main")},
+            )
+            bound_targets = {call.args[1].decode() for call in calls if call.args[3] == 0x1000}
+            self.assertEqual(
+                bound_targets - readonly_targets,
+                {str(base / "view/user" / role) for role in ["shared", "main", "task"]},
+            )
+
     def test_unshare_failure_prevents_all_mounts(self):
         libc = MagicMock()
         libc.unshare.return_value = -1

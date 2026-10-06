@@ -92,3 +92,21 @@ Date: 2026-10-06. Added nine Rust tests and four portable Python tests without c
 Verification: `mise run test` passed **213 tests**, with one existing live-provider test ignored. `mise run test:skills` passed **7 tests**. `mise run clippy:backend` and `mise run lint` passed. Mount syscall tests use doubles; actual readonly enforcement remains established by the preceding real-VM acceptance, which was not repeated for this test-only follow-up.
 
 Local evidence: `/tmp/pot-skills-extra-{targeted,test,clippy,lint}.log`.
+
+## Builtin creator/installer and readonly mapping follow-up
+
+Date: 2026-10-06. Replaced skill-manager with main-only skill-creator and skill-installer. Their instructions describe Agent-visible locations, format, audience, validation and next-turn discovery; they omit Host persistence and product source layout. Runtime reserves both builtin names. The creator's Python validator follows Codex's YAML/metadata/unfinished-scaffold checks, adapted to Pot, and additionally validates ordinary resource files and inline local resource links. Authored bundles require explicit names and matching directories. The installer handles local/GitHub sources, preserves resources and executable scripts, validates before publication, rejects implicit replacement, and restores a previous directory on publication failure. Imported scripts are not executed during installation.
+
+A shared JSON corpus exercises Rust discovery and Python validation. It exposed acceptance of a closing delimiter prefix such as `---suffix`; the loader now requires a complete delimiter line. Guest PyYAML is pinned through Alpine packages, local tests pin the same version, and CI runs the authoring and mount suites. Packaging excludes Python bytecode caches.
+
+Verification:
+
+- Backend: **215 passed**, one existing live-provider test ignored. Includes shared format fixtures and Runtime builtin locations/override rejection. After adding the final delimiter corpus case, the shared-loader test passed again.
+- Authoring/installer: **13 passed**, including CLI exit codes, valid packaged skills, resource checks, metadata limits, conflicting/invalid updates, rollback, preserved permissions, mocked GitHub download, archive traversal/symlink rejection and download failure.
+- Mount policy: **8 passed**, including actual syscall-argument inspection for main builtin readonly remounts and writable user mounts. These unit tests use syscall doubles.
+- Backend Clippy, source/script lint, Rust/App/Swift build and bundle passed.
+- Real dual-VM acceptance passed with image `pot.local/sandbox:8cfc1117bfcff16f330d` and Codex `0.159.1`, **47 local mock model requests and four summaries**. Main attempted writes to both builtin SKILL.md files and received **EROFS**. Both packaged bundles passed the packaged validator; the packaged installer installed a local bundle into shared user skills. Worker readonly shared/task mapping, hidden main directories and existing routing/restart/cancellation/desktop checks passed. Test VMs and Helper were stopped afterward.
+
+Evidence: `/tmp/pot-skill-tools-acceptance.json`, `/tmp/pot-skill-tools-acceptance.helper.log`, `/tmp/pot-skill-tools-{test,clippy,lint,build,bundle,e2e}.log`, `/tmp/pot-skill-authoring.log` and `/tmp/pot-skill-format-test.log`.
+
+Limits: remote GitHub behavior uses a local HTTP response double in unit tests, not a live/private repository. The format validator checks inline resource links and does not establish script behavior or instruction quality. Installation rollback is tested for an ordinary publication error; crash recovery and concurrent installers are not transactional.
