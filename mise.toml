@@ -91,6 +91,18 @@ run = "scripts/pot bundle"
 [tasks.open]
 run = "scripts/pot open"
 
+[tasks.release]
+description = "Build the release ZIP, checksum and Homebrew cask (pass a version)"
+usage = '''
+arg "<version>" help="Release version, e.g. 0.1.0 or v0.1.0"
+flag "--output <path>" default=".local/releases" help="Release artifact directory"
+'''
+run = 'python scripts/release "$usage_version" --output "$usage_output"'
+
+[tasks."test:release"]
+description = "Verify macOS release packaging without a build or VM"
+run = "python scripts/tests/release-packaging.py"
+
 [tasks."check:swift"]
 description = "Compile Helper executables without starting a VM"
 run = "swift build -c release --package-path helper --disable-sandbox --scratch-path .local/d1/helper-build --force-resolved-versions -j 4"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build and package the product directories."""
 
-import hashlib, os, pathlib, plistlib, shutil, subprocess, sys
+import hashlib, os, pathlib, plistlib, re, shutil, subprocess, sys, tomllib
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 ROOT = REPO / ".local/d1"
@@ -29,6 +29,15 @@ def download(url, path):
 
 cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
 env = dict(os.environ, CARGO_TARGET_DIR=str(REPO / ".local/poc/cargo-target"))
+profile = os.environ.get("POT_BUILD_PROFILE", "debug")
+if profile not in {"debug", "release"}:
+    raise SystemExit("POT_BUILD_PROFILE must be debug or release")
+version = os.environ.get(
+    "POT_APP_VERSION",
+    tomllib.loads((REPO / "Cargo.toml").read_text())["workspace"]["package"]["version"],
+)
+if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+    raise SystemExit("POT_APP_VERSION must be a numeric major.minor.patch version")
 if cmd == "prepare":
     # Reuse verified immutable downloads when available, without depending on POC code.
     for name in ["vmlinux"]:
@@ -89,7 +98,8 @@ if cmd == "prepare":
         shutil.copy2(REPO / "image/agents" / name, RES / ("agents-" + name))
 elif cmd == "build":
     call(
-        ["cargo", "build", "--locked", "-p", "pot-app", "-p", "pot-server", "-j", "4"],
+        ["cargo", "build", "--locked", "-p", "pot-app", "-p", "pot-server", "-j", "4"]
+        + (["--release"] if profile == "release" else []),
         cwd=REPO,
         env=env,
     )
@@ -122,7 +132,10 @@ elif cmd == "bundle":
     if obsolete_terminal.exists():
         shutil.rmtree(obsolete_terminal)
     for src, dest in [
-        (pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug/pot-app", APP / "Contents/MacOS/pot-app"),
+        (
+            pathlib.Path(env["CARGO_TARGET_DIR"]) / profile / "pot-app",
+            APP / "Contents/MacOS/pot-app",
+        ),
         (ROOT / "helper-build/release/PotHelper", APP / "Contents/Helpers/PotHelper"),
     ]:
         tmp = dest.with_suffix(".new")
@@ -162,7 +175,7 @@ elif cmd == "bundle":
     for name in ["vmlinux"]:
         shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
     shutil.copy2(
-        pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug/pot-server",
+        pathlib.Path(env["CARGO_TARGET_DIR"]) / profile / "pot-server",
         APP / "Contents/Resources/runtime/pot-server",
     )
     shutil.copytree(
@@ -202,7 +215,9 @@ elif cmd == "bundle":
                 CFBundleIconFile="Pot.icns",
                 CFBundleExecutable="pot-app",
                 CFBundlePackageType="APPL",
-                CFBundleVersion="1",
+                CFBundleVersion=version,
+                CFBundleShortVersionString=version,
+                LSMinimumSystemVersion="26.0",
                 NSHighResolutionCapable=True,
                 NSAppTransportSecurity={"NSAllowsLocalNetworking": True},
             )
