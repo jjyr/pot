@@ -2,6 +2,8 @@
 
 Updated: 2026-10-05. Current MVP UI specification; see [UI validation](validation/ui-ux.md) for historical acceptance and [Development plan](development-plan.md) for scope.
 
+For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Those changes are not yet reflected in this implementation specification.
+
 ## Shared layout
 
 Tasks, settings, and Sandbox use **gpui-kit 0.7.0** (gpui-pre 0.3.7). Shared layout lives in `app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
