@@ -33,6 +33,16 @@ Server writes private bearer/boot/port data to `runtime.json` in its data direct
 
 App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
 
+## Dependency baseline
+
+The 2026-10-07 dependency refresh uses GPUI Kit 0.7.1, reqwest 0.13.5,
+rusqlite 0.40.2, ureq 3.4.2, sha2 0.11.0, tokio-tungstenite 0.30.0,
+Containerization 0.48.0 (pinned commit), Host Codex 0.160.1, noVNC 1.7.0,
+and PyYAML 6.0.3. Cargo, Swift and npm lockfiles pin resolved dependencies.
+Node 24.21.0 remains the latest LTS baseline; the pinned Alpine image,
+system package lock and Kata kernel remain at their existing VM baseline.
+Rebuild and rebundle before VM acceptance with the refreshed dependencies.
+
 ## Validation
 
 ```sh

@@ -4,7 +4,7 @@ Updated: 2026-10-06. The bundled Linux ARM64 OCI image contains the execution se
 
 ## Build and startup
 
-`scripts/pot prepare` downloads checksum-verified kernel, noVNC and Host Node 24.21.0. `build` compiles Host App, Server and Helper. `bundle` builds the guest image and installs pinned Host Codex 0.159.1 dependencies from npm locks, with lifecycle scripts disabled.
+`scripts/pot prepare` downloads checksum-verified kernel, noVNC 1.7.0 and Host Node 24.21.0. `build` compiles Host App, Server and Helper. `bundle` builds the guest image and installs pinned Host Codex 0.160.1 dependencies from npm locks, with lifecycle scripts disabled.
 
 The image builder uses a separate Apple VM with no user workspace or credentials, pinned Alpine/system packages, and `/opt/pot` executor/desktop resources. The guest Rust binary is cross-compiled for Linux ARM64 musl. Build hashes include guest sources and that binary; identical inputs reuse the immutable image. Bundle contains image/vminit/kernel and Host binaries. VM networking requires Apple Virtualization permissions.
 

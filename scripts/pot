@@ -31,7 +31,7 @@ cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
 env = dict(os.environ, CARGO_TARGET_DIR=str(REPO / ".local/poc/cargo-target"))
 if cmd == "prepare":
     # Reuse verified immutable downloads when available, without depending on POC code.
-    for name in ["vmlinux", "novnc.tar.gz"]:
+    for name in ["vmlinux"]:
         cached = REPO / ".local/poc/local-resources" / name
         if not (RES / name).exists() and cached.exists():
             shutil.copy2(cached, RES / name)
@@ -48,8 +48,10 @@ if cmd == "prepare":
                 stdout=out,
             )
     verify(RES / "vmlinux", "fb2cfb79eb1ae19447a85d75682d7fa5cfec97e24beb2609a492b806e8072c8d")
-    download("https://github.com/novnc/noVNC/archive/refs/tags/v1.6.0.tar.gz", RES / "novnc.tar.gz")
-    verify(RES / "novnc.tar.gz", "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa")
+    novnc_archive = RES / "novnc-1.7.0.tar.gz"
+    download("https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz", novnc_archive)
+    verify(novnc_archive, "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6")
+    shutil.copy2(novnc_archive, RES / "novnc.tar.gz")
     for name in [
         "sandbox.sh",
         "executor.py",

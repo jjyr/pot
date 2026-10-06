@@ -250,20 +250,22 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         )
     };
     let auth = format!("Bearer {token}");
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(3))
-        .build();
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(3)))
+        .build()
+        .new_agent();
     let task_page: TaskPage = agent
         .get(&format!("{url}{PATH_TASKS}/query"))
         .query("scope", &query.scope)
         .query("q", &query.q)
-        .query("offset", &query.offset.to_string())
-        .query("limit", &query.limit.to_string())
+        .query("offset", query.offset.to_string())
+        .query("limit", query.limit.to_string())
         .query("selected", &selected)
-        .set("Authorization", &auth)
+        .header("Authorization", &auth)
         .call()
         .map_err(|e| e.to_string())?
-        .into_json()
+        .body_mut()
+        .read_json()
         .map_err(|e| e.to_string())?;
     // Independent of the visible task filter and page. Only executing lanes
     // count as activity; queued and budget/user waits do not.
@@ -271,20 +273,21 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .get(&format!("{url}{PATH_TASKS}/query"))
         .query("phase", "running")
         .query("limit", "3")
-        .set("Authorization", &auth)
+        .header("Authorization", &auth)
         .call()
         .map_err(|e| e.to_string())?
-        .into_json()
+        .body_mut()
+        .read_json()
         .map_err(|e| e.to_string())?;
     let mut running_tasks = Vec::new();
     let mut finished = 0;
     for task in &executing.items {
         let progress = agent
             .get(&format!("{url}{PATH_TASKS}/{}", task.id))
-            .set("Authorization", &auth)
+            .header("Authorization", &auth)
             .call()
             .ok()
-            .and_then(|r| r.into_json::<Snapshot>().ok());
+            .and_then(|mut r| r.body_mut().read_json::<Snapshot>().ok());
         // A finished snapshot removes the row; a transient fetch failure
         // retains the authoritative running lane with a neutral status.
         if progress.as_ref().is_some_and(|s| s.turn.is_none()) {
@@ -306,12 +309,13 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             agent
                 .get(&format!("{url}/api/v1/schedules"))
                 .query("selected", &sq.1)
-                .query("offset", &sq.2.to_string())
-                .query("runs_offset", &sq.3.to_string())
-                .set("Authorization", &auth)
+                .query("offset", sq.2.to_string())
+                .query("runs_offset", sq.3.to_string())
+                .header("Authorization", &auth)
                 .call()
                 .map_err(|e| e.to_string())?
-                .into_json()
+                .body_mut()
+                .read_json()
                 .map_err(|e| e.to_string())?,
         )
     } else {
@@ -330,13 +334,14 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             agent
                 .get(&format!("{url}/api/v1/usage/summary"))
                 .query("scope", &q.0)
-                .query("days", &q.1.to_string())
-                .query("offset", &q.2.to_string())
+                .query("days", q.1.to_string())
+                .query("offset", q.2.to_string())
                 .query("timezone", &q.3)
-                .set("Authorization", &auth)
+                .header("Authorization", &auth)
                 .call()
                 .map_err(|e| e.to_string())?
-                .into_json()
+                .body_mut()
+                .read_json()
                 .map_err(|e| e.to_string())
         })();
         let mut v = view.lock().unwrap();
@@ -354,10 +359,11 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     }
     let main: Snapshot = agent
         .get(&format!("{url}{PATH_SNAPSHOT}"))
-        .set("Authorization", &auth)
+        .header("Authorization", &auth)
         .call()
         .map_err(|e| e.to_string())?
-        .into_json()
+        .body_mut()
+        .read_json()
         .map_err(|e| e.to_string())?;
     let path = if selected.is_empty() || selected == "new" {
         PATH_SNAPSHOT.to_string()
@@ -369,10 +375,11 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     } else {
         agent
             .get(&format!("{url}{path}"))
-            .set("Authorization", &auth)
+            .header("Authorization", &auth)
             .call()
             .map_err(|e| e.to_string())?
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| e.to_string())?
     };
     let mut v = view.lock().unwrap();
@@ -434,9 +441,10 @@ impl Client {
         let v = view.clone();
         let active = running.clone();
         std::thread::spawn(move || {
-            let agent = ureq::AgentBuilder::new()
-                .timeout(Duration::from_secs(3))
-                .build();
+            let agent = ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(3)))
+                .build()
+                .new_agent();
             while let Ok(req) = rx.recv() {
                 while active.load(Ordering::Relaxed) {
                     let (url, token) = match endpoint() {
@@ -454,10 +462,27 @@ impl Client {
                     };
                     match agent
                         .post(&format!("{url}{path}"))
-                        .set("Authorization", &format!("Bearer {token}"))
+                        .header("Authorization", &format!("Bearer {token}"))
+                        .config()
+                        .http_status_as_error(false)
+                        .build()
                         .send_json(json!(req))
                     {
-                        Ok(response) => match response.into_json::<Value>() {
+                        Ok(mut response)
+                            if response.status().is_client_error()
+                                || response.status().is_server_error() =>
+                        {
+                            let detail = response
+                                .body_mut()
+                                .read_json::<ApiError>()
+                                .map(|e| e.message)
+                                .unwrap_or_else(|_| "服务器拒绝请求".into());
+                            let mut state = v.lock().unwrap();
+                            state.pending = false;
+                            state.command_error = detail;
+                            break;
+                        }
+                        Ok(mut response) => match response.body_mut().read_json::<Value>() {
                             Ok(result) => {
                                 let mut state = v.lock().unwrap();
                                 state.command_error.clear();
@@ -486,16 +511,6 @@ impl Client {
                                     "发送结果未确认，正在使用同一请求编号重试…".into();
                             }
                         },
-                        Err(ureq::Error::Status(_, response)) => {
-                            let detail = response
-                                .into_json::<ApiError>()
-                                .map(|e| e.message)
-                                .unwrap_or_else(|_| "服务器拒绝请求".into());
-                            let mut state = v.lock().unwrap();
-                            state.pending = false;
-                            state.command_error = detail;
-                            break;
-                        }
                         Err(_) => {
                             v.lock().unwrap().command_error =
                                 "发送结果未确认，正在使用同一请求编号重试…".into();
@@ -532,11 +547,12 @@ impl Client {
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
                 let (url, token) = endpoint()?;
-                ureq::AgentBuilder::new()
-                    .timeout(Duration::from_secs(3))
+                ureq::Agent::config_builder()
+                    .timeout_global(Some(Duration::from_secs(3)))
                     .build()
+                    .new_agent()
                     .post(&format!("{url}{}",if selected.is_empty(){PATH_CANCEL.to_string()}else{format!("{PATH_TASKS}/{selected}/cancel")}))
-                    .set("Authorization", &format!("Bearer {token}"))
+                    .header("Authorization", &format!("Bearer {token}"))
                     .send_json(json!({"request_id":uuid::Uuid::new_v4().to_string(),"user_message_id":message_id}))
                     .map_err(|e| e.to_string())?;
                 Ok(())
@@ -565,19 +581,24 @@ impl Client {
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
                 let (url, token) = endpoint()?;
-                ureq::AgentBuilder::new()
-                    .timeout(Duration::from_secs(5))
+                let mut response = ureq::Agent::config_builder()
+                    .timeout_global(Some(Duration::from_secs(5)))
                     .build()
+                    .new_agent()
                     .post(&format!("{url}/api/v1/usage/{path}"))
-                    .set("Authorization", &format!("Bearer {token}"))
+                    .header("Authorization", &format!("Bearer {token}"))
+                    .config()
+                    .http_status_as_error(false)
+                    .build()
                     .send_json(body)
-                    .map_err(|e| match e {
-                        ureq::Error::Status(_, r) => r
-                            .into_json::<ApiError>()
-                            .map(|e| e.message)
-                            .unwrap_or("操作被拒绝".into()),
-                        other => other.to_string(),
-                    })?;
+                    .map_err(|e| e.to_string())?;
+                if response.status().is_client_error() || response.status().is_server_error() {
+                    return Err(response
+                        .body_mut()
+                        .read_json::<ApiError>()
+                        .map(|e| e.message)
+                        .unwrap_or("操作被拒绝".into()));
+                }
                 Ok(())
             })();
             let mut v = view.lock().unwrap();
@@ -615,25 +636,32 @@ impl Client {
         let active = self.running.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
-            let agent = ureq::AgentBuilder::new()
-                .timeout(Duration::from_secs(5))
-                .build();
+            let agent = ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(5)))
+                .build()
+                .new_agent();
             while active.load(Ordering::Relaxed) {
                 let result = (|| -> Result<Value, String> {
                     let (url, token) = endpoint()?;
                     match agent
                         .post(&format!("{url}/api/v1/schedules"))
-                        .set("Authorization", &format!("Bearer {token}"))
+                        .header("Authorization", &format!("Bearer {token}"))
+                        .config()
+                        .http_status_as_error(false)
+                        .build()
                         .send_json(req.clone())
                     {
-                        Ok(r) => r.into_json().map_err(|e| e.to_string()),
-                        Err(ureq::Error::Status(_, r)) => {
+                        Ok(mut r)
+                            if r.status().is_client_error() || r.status().is_server_error() =>
+                        {
                             let detail = r
-                                .into_json::<ApiError>()
+                                .body_mut()
+                                .read_json::<ApiError>()
                                 .map(|e| e.message)
                                 .unwrap_or("计划操作被拒绝".into());
                             Ok(json!({"rejected":detail}))
                         }
+                        Ok(mut r) => r.body_mut().read_json().map_err(|e| e.to_string()),
                         Err(e) => Err(e.to_string()),
                     }
                 })();
