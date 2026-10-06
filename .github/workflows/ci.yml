@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  licenses:
+    name: Rust dependency licenses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.6.0
+          install_args: rust python github:EmbarkStudios/cargo-about
+      - run: mise run licenses
+      - run: mise run test:licenses
+
   backend:
     name: Linux backend and deterministic eval
     runs-on: ubuntu-24.04

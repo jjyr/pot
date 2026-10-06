@@ -125,6 +125,7 @@ elif cmd == "build":
         ),
     )
 elif cmd == "bundle":
+    call(["mise", "run", "licenses"], cwd=REPO)
     for sub in ["MacOS", "Helpers", "Resources/runtime"]:
         (APP / "Contents" / sub).mkdir(parents=True, exist_ok=True)
     # Remove obsolete xterm resources from an existing development bundle.
@@ -204,11 +205,20 @@ elif cmd == "bundle":
     )
     for name in ["Pot.icns", "PotTray.png"]:
         shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)
+    shutil.copy2(REPO / "LICENSE", APP / "Contents/Resources/LICENSE.txt")
+    shutil.copy2(
+        REPO / ".local/licenses/rust-dependencies.html",
+        APP / "Contents/Resources/RustDependencyLicenses.html",
+    )
+    copyright_notice = next(
+        line for line in (REPO / "LICENSE").read_text().splitlines() if line.startswith("Copyright")
+    ).replace("(c)", "©")
     (APP / "Contents/Info.plist").write_bytes(
         plistlib.dumps(
             dict(
                 CFBundleIdentifier="dev.pot.app",
                 CFBundleName="Pot",
+                NSHumanReadableCopyright=copyright_notice,
                 CFBundleLocalizations=["en", "zh_CN"],
                 CFBundleDevelopmentRegion="en",
                 CFBundleDisplayName="Pot",

@@ -1,0 +1,16 @@
+# Approved terms for Rust dependencies. Order prefers MIT for dual-licensed crates.
+accepted = [
+    "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD",
+    "Zlib", "CC0-1.0", "Unicode-3.0", "CDLA-Permissive-2.0", "bzip2-1.0.6",
+]
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-gnu"]
+ignore-dev-dependencies = true
+# Build and transitive dependencies remain checked. Unknown licenses fail.
+
+# MPL is accepted only for these unchanged crates, not globally. Preserve the
+# license notices and versioned source download links in the generated report.
+# cbindgen: build-time binding generator; option-ext: runtime via dirs-sys.
+[cbindgen]
+accepted = ["MPL-2.0"]
+[option-ext]
+accepted = ["MPL-2.0"]

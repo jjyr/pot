@@ -648,5 +648,10 @@
   "report.schedule-header": "定时计划「{0}」：{1}",
   "backend.task-unfinished-detail": "任务未完成：{0}",
   "backend.task-failed-detail": "任务执行失败：{0}",
-  "report.schedule-id": "计划编号：{0}"
+  "report.schedule-id": "计划编号：{0}",
+  "about.developer": "开发者：{0}",
+  "about.license": "MIT 许可证",
+  "about.project": "GitHub 项目",
+  "about.rust-licenses": "Rust 依赖许可证",
+  "menu.about-pot": "关于 Pot"
 }

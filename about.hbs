@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pot — Rust dependency licenses</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.6 system-ui, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 24px; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, monospace; }
+  section { margin: 32px 0; border-top: 1px solid #888; }
+</style>
+<h1>Rust dependency licenses</h1>
+<p>Pot is licensed under MIT. Its dependencies retain their own licenses below.
+This report covers the Rust dependency graph, including build dependencies.
+Swift, Node/npm, and Sandbox system packages are outside this report.</p>
+<ul>
+{{#each overview}}
+  <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+{{#each licenses}}
+<section>
+  {{#if first_of_kind}}<h2 id="{{id}}">{{name}}</h2>{{else}}<h2>{{name}}</h2>{{/if}}
+  <ul>
+  {{#each used_by}}
+    <li>{{crate.name}} {{crate.version}}
+      {{#if crate.repository}} — <a href="{{crate.repository}}">Project</a>{{/if}}
+      {{#if crate.source}}— <a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">Source (this version)</a>{{/if}}
+    </li>
+  {{/each}}
+  </ul>
+  <pre>{{text}}</pre>
+</section>
+{{/each}}
+</html>

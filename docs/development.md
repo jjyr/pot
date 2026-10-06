@@ -74,6 +74,8 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
+mise run licenses      # Enforce Rust license policy and generate dependency notices
+mise run test:licenses # Check approved, disallowed and unknown license cases
 mise run test:release   # ZIP metadata, permissions, symlinks and Cask checksum
 mise run test:i18n     # Catalogue parity, native switching and embedded web assets
 ```
@@ -122,3 +124,10 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 ### Supported integrations
 
 Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. Direct Host tools and macOS/Windows Sandbox providers are outside this increment. Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.
+
+## About and dependency licenses
+
+The native Pot menu includes About Pot with version, developer, MIT, project link,
+and Rust dependency notices. Bundling enforces the cargo-about policy and embeds
+its report. See [About and license policy](licenses-and-about.md) for scope,
+reviewed MPL dependencies, and CI checks.

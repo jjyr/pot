@@ -333,6 +333,10 @@ var bridge: PotBridge?
     func installMenu() {
         let main = NSMenu(); main.autoenablesItems = false; let item = NSMenuItem(); main.addItem(item)
         let menu = NSMenu(title: "Pot"); menu.autoenablesItems = false; item.submenu = menu
+        let about = NSMenuItem(title: L.text("menu.about-pot"), action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+        menu.addItem(.separator())
         for (title, action, key) in [
             (L.text("menu.open-pot"), #selector(showWindow), ""),
             (L.text("menu.hide-pot"), #selector(hideWindow), "h"),
@@ -385,6 +389,10 @@ var bridge: PotBridge?
             return
         }
         events.append(["action": forward ? "history-forward" : "history-back"]); bridgeWake?()
+    }
+
+    @objc func showAbout() {
+        PotAbout.show()
     }
 
     @objc func historyBack() {
