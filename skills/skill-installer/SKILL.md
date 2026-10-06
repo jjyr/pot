@@ -5,17 +5,14 @@ description: Install skills from a local directory or GitHub, inspect installed 
 
 # Install and manage user skills
 
-Choose the destination based on the user's requested audience:
-
-- `/mnt/pot-skills/user/shared`: main and task agents; default.
-- `/mnt/pot-skills/user/main`: main agent only.
-- `/mnt/pot-skills/user/task`: task agents only.
-- `<project>/.agents/skills`: the selected project's skills.
+Global skills are installed at `~/.pot/agent/skills/<name>`. Main and task agents
+discover the same global skills. Use `--dest <project>/.agents/skills` when the user
+requests a project-specific installation.
 
 List installed bundles by reading SKILL.md metadata in these directories.
-Project bundles take priority over user bundles; role-specific user bundles take
-priority over shared bundles. When listing remote skills, use the user's specified
-repository or catalog. There is no default curated catalog.
+Project bundles take priority over user global bundles. When listing remote
+skills, use the user's specified repository or catalog. There is no default
+curated catalog.
 
 ## Install
 
@@ -24,9 +21,9 @@ resources and executable script permissions, prepares a sibling staging director
 and publishes only after validation succeeds.
 
 ```sh
-python3 /mnt/pot-skills/builtin/main/skill-installer/scripts/install_skill.py --local /data/workspace/downloads/example-skill --dest /mnt/pot-skills/user/shared
-python3 /mnt/pot-skills/builtin/main/skill-installer/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main --dest /mnt/pot-skills/user/task
-python3 /mnt/pot-skills/builtin/main/skill-installer/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill --dest /mnt/pot-skills/user/shared
+python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --local /data/workspace/downloads/example-skill
+python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main
+python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill
 ```
 
 For branch names containing slashes, prefer `--repo`, `--path` and `--ref`.
@@ -45,7 +42,7 @@ user's task.
 The shared format validator is available at:
 
 ```sh
-python3 /mnt/pot-skills/builtin/main/skill-creator/scripts/quick_validate.py /mnt/pot-skills/user/shared/example-skill
+python3 ~/.pot/agent/skills/skill-creator/scripts/quick_validate.py ~/.pot/agent/skills/example-skill
 ```
 
 It checks structure and metadata, not instruction quality or script behavior.

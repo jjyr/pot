@@ -125,9 +125,12 @@ def main(argv=None):
     source.add_argument("--url")
     parser.add_argument("--path")
     parser.add_argument("--ref", default="main")
-    parser.add_argument("--dest", type=Path, default=Path("/mnt/pot-skills/user/shared"))
+    parser.add_argument("--dest", type=Path, default=Path.home() / ".pot/agent/skills")
     parser.add_argument("--replace", action="store_true")
     args = parser.parse_args(argv)
+    args.dest = args.dest.expanduser()
+    if args.local:
+        args.local = args.local.expanduser()
     try:
         if args.local:
             installed = install_bundle(args.local, args.dest, args.replace)

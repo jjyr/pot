@@ -110,3 +110,21 @@ Verification:
 Evidence: `/tmp/pot-skill-tools-acceptance.json`, `/tmp/pot-skill-tools-acceptance.helper.log`, `/tmp/pot-skill-tools-{test,clippy,lint,build,bundle,e2e}.log`, `/tmp/pot-skill-authoring.log` and `/tmp/pot-skill-format-test.log`.
 
 Limits: remote GitHub behavior uses a local HTTP response double in unit tests, not a live/private repository. The format validator checks inline resource links and does not establish script behavior or instruction quality. Installation rollback is tested for an ordinary publication error; crash recovery and concurrent installers are not transactional.
+
+## Unified global skills directory follow-up
+
+Date: 2026-10-06. Removed shared/main/task resource categories and flattened repo builtin bundles. Both agent roles now discover global user and builtin skills in one execution view: `~/.pot/agent/skills/<name>`. Project `.agents/skills` discovery and explicit task selections remain. Runtime resolves injected paths against the execution home and derives reserved names from the builtin catalog. The installer defaults to the execution home without an audience parameter; skill instructions use the unified path and omit source/mount details.
+
+Helper creates only the global user root. Each guest scope binds that root under its assigned HOME, then overlays each builtin bundle with a readonly bind mount. Task scopes also remount the entire user root readonly. Empty builtin mountpoints in the user backing store contain no builtin content. Setup rejects missing/symlink sources or redirected views and fails on syscall errors. Main/task Unix identities and authorization remain unchanged.
+
+Verification:
+
+- Backend: **215 passed**, one existing live-provider test ignored. Updated common global catalogs, home-relative locations, project precedence, reserved names, task selection restoration and fixed Sandbox bindings. The simplified discovery-priority test passed again after its final update.
+- Authoring/installer: **14 passed**, including a default-destination regression that changes HOME and checks direct installation into `.pot/agent/skills` without category directories.
+- Mount policy: **9 passed**, covering identical bundle sets for both roles, readonly builtin binds, task user-root readonly remount, missing sources, failed syscalls, symlink sources/mountpoints/home paths and restrictive umask handling.
+- Backend Clippy, source/script lint, Rust/App/Swift build and bundle passed.
+- Real dual-VM acceptance passed with image `pot.local/sandbox:ca7bc86b80ad909747c8`, Codex `0.159.1`, **47 local mock model requests and four summaries**. Packaged helpers ran using Path.home's unified directory; installer publication used its default destination. Main created global user bundles and builtin writes returned EROFS. Task read the same user and builtin bundles, all attempted writes returned EROFS, and creating a new global directory returned EROFS. Both roles' model contexts advertised the builtin creator/installer. Existing routing, cancellation, restart, artifacts and desktop/stop checks passed. All test VMs and Helper were stopped.
+
+Evidence: `/tmp/pot-flat-skills-acceptance.json`, `/tmp/pot-flat-skills-acceptance.helper.log` and `/tmp/pot-flat-skills-{test,authoring,discovery,clippy,lint,build,bundle,e2e}.log`.
+
+Limits: global task skills are readonly, but project skill files retain existing workspace permissions. There is no migration for prior audience directories. Direct Host execution and additional Sandbox providers remain outside this acceptance; they must implement the same home-relative path contract when introduced.

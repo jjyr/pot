@@ -56,7 +56,7 @@ run = "python scripts/tests/skill-mounts.py"
 description = "Verify builtin skill validation and installation helpers"
 run = """
 python -m venv .local/skill-tests
-.local/skill-tests/bin/python -m pip install --disable-pip-version-check -r skills/main/skill-creator/scripts/requirements.txt
+.local/skill-tests/bin/python -m pip install --disable-pip-version-check -r skills/skill-creator/scripts/requirements.txt
 .local/skill-tests/bin/python scripts/tests/skill-authoring.py
 """
 

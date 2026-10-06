@@ -4,6 +4,7 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -13,8 +14,8 @@ from unittest.mock import patch
 import zipfile
 
 REPO = Path(__file__).resolve().parents[2]
-CREATOR = REPO / "skills/main/skill-creator/scripts/quick_validate.py"
-INSTALLER = REPO / "skills/main/skill-installer/scripts/install_skill.py"
+CREATOR = REPO / "skills/skill-creator/scripts/quick_validate.py"
+INSTALLER = REPO / "skills/skill-installer/scripts/install_skill.py"
 
 
 def load(name, path):
@@ -50,8 +51,16 @@ class Authoring(unittest.TestCase):
 
     def test_both_packaged_bundles_validate(self):
         for name in ["skill-creator", "skill-installer"]:
-            valid, message = validator.validate_skill(REPO / "skills/main" / name)
+            valid, message = validator.validate_skill(REPO / "skills" / name)
             self.assertTrue(valid, message)
+
+    def test_default_destination_uses_execution_home_without_audience_directories(self):
+        home = self.base / "execution-home"
+        with patch.dict(os.environ, {"HOME": str(home)}):
+            self.assertEqual(installer.main(["--local", str(self.bundle)]), 0)
+        target = home / ".pot/agent/skills/example"
+        self.assertTrue(validator.validate_skill(target)[0])
+        self.assertEqual(list(target.parent.iterdir()), [target])
 
     def test_authoring_constraints_and_cli_exit_status(self):
         for text in [

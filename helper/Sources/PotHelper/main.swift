@@ -148,12 +148,10 @@ actor Runtime {
             let executorToken = try String(contentsOf: tokenPath, encoding: .utf8)
             let skillUser = ProcessInfo.processInfo.environment["POT_AGENT_SKILLS_DIR"] ?? NSHomeDirectory() + "/.pot/agent/skills"
             let skillBuiltin = resources.appendingPathComponent("skills").path
-            for role in ["shared", "main", "task"] {
-                try FileManager.default.createDirectory(
-                    atPath: skillUser + "/" + role,
-                    withIntermediateDirectories: true
-                )
-            }
+            try FileManager.default.createDirectory(
+                atPath: skillUser,
+                withIntermediateDirectories: true
+            )
 
             var metadata: [String: Any] = [
                 "image": imageReference,

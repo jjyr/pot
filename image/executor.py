@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from skill_mounts import SKILL_SOURCES, SKILL_VIEW, skill_mounts, skill_namespace
+from skill_mounts import SKILL_SOURCES, skill_namespace
 
 ROOT = Path(os.environ.get("POT_EXECUTOR_ROOT", "/data")).resolve()
 WORK = ROOT / "workspace"
@@ -40,7 +40,6 @@ TASK_USER = pwd.getpwnam("pottask") if os.getuid() == 0 else None
 if USER:
     # Hide raw sources even when main and task scopes share a VM.
     os.chmod(SKILL_SOURCES, 0o700)
-    SKILL_VIEW.mkdir(mode=0o755, parents=True, exist_ok=True)
 
 
 def workspace(cwd, role):
@@ -118,7 +117,7 @@ class Runner:
         def contain():
             (group / "cgroup.procs").write_text(str(os.getpid()))
             try:
-                skill_namespace(role)
+                skill_namespace(role, cwd)
                 demote(role)
                 os.write(1, b'{"ready":true}\n')
             except Exception as error:
@@ -204,7 +203,8 @@ def execute(request):
         if scope in CANCELLED:
             raise ValueError("Execution scope ended")
         role = request["role"]
-        skill_mounts(role)  # Validate even before scope preparation.
+        if role not in ("main", "task"):
+            raise ValueError("Invalid execution role")
         cwd = workspace(request["cwd"], role)
         runner = RUNNERS.get(scope)
         if runner is None:
