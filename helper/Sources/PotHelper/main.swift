@@ -291,7 +291,6 @@ actor Sandboxes {
         let hostTools = resources.appendingPathComponent("host-tools/node_modules/.bin").path
         environment["PATH"] = resources.appendingPathComponent("node/bin")
             .path + ":" + hostTools + ":/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
-        environment["POT_PI_BIN"] = hostTools + "/pi"
         backend.environment = environment
         do { try backend.run() } catch { event("backend.failed") }
         return backend

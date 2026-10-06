@@ -8,7 +8,7 @@ resources = R / ".local/d1/resources"
 assets = [
     "sandbox.sh",
     "executor.py",
-    "file-tools.py",
+    "pot-tool-executor",
     "desktop.sh",
     "desktop-config.sh",
     "desktop-session.sh",
@@ -26,9 +26,9 @@ assets = [
 # Read source assets directly so bundle cannot accidentally reuse stale prepare output.
 for n in assets:
     source = R / "image" / n
-    if n.startswith("pi-package"):
-        source = R / "image/pi" / n.removeprefix("pi-")
-    if source.is_file():
+    if n == "pot-tool-executor":
+        source = resources / n
+    if source.is_file() and source != resources / n:
         shutil.copy2(source, resources / n)
 fingerprint = hashlib.sha256()
 for source in [

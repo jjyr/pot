@@ -173,8 +173,33 @@ fn make_context(
         ExecutionRole::Main
     };
     Ok(ExecutionContext {
+        tool_executor: {
+            #[cfg(test)]
+            if let Some(executor) = &s.test_tool_executor {
+                Some(executor.clone())
+            } else {
+                Some(Arc::new(crate::sandbox::Tools {
+                    service: s.clone(),
+                    epoch: binding.epoch,
+                }))
+            }
+            #[cfg(not(test))]
+            {
+                Some(Arc::new(crate::sandbox::Tools {
+                    service: s.clone(),
+                    epoch: binding.epoch,
+                }))
+            }
+        },
         data: s.data.clone(),
         workspace: {
+            #[cfg(test)]
+            let path = if s.test_tool_executor.is_some() {
+                s.workspace.clone()
+            } else {
+                s.data.join("agent-workspace")
+            };
+            #[cfg(not(test))]
             let path = s.data.join("agent-workspace");
             std::fs::create_dir_all(&path)?;
             path
@@ -265,3 +290,7 @@ mod tests {
         std::fs::remove_dir_all(&s.data).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "feedback_tool_tests.rs"]
+mod tool_tests;

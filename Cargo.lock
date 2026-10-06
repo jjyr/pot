@@ -5180,6 +5180,7 @@ dependencies = [
  "libc",
  "pot-core",
  "pot-gateway",
+ "pot-tool-executor",
  "reqwest",
  "serde",
  "serde_json",
@@ -5236,6 +5237,7 @@ dependencies = [
  "pot-agent",
  "pot-core",
  "pot-gateway",
+ "pot-tool-executor",
  "reqwest",
  "serde",
  "serde_json",
@@ -5280,6 +5282,7 @@ dependencies = [
  "pot-gateway",
  "pot-protocol",
  "pot-storage",
+ "pot-tool-executor",
  "reqwest",
  "rusqlite",
  "serde",
@@ -5318,6 +5321,19 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "pot-tool-executor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "libc",
+ "pot-core",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 

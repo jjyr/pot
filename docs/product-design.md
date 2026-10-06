@@ -4,12 +4,12 @@ Updated: 2026-10-06. This page maintains long-term product constraints. See the 
 
 ## Positioning and boundaries
 
-Pot is a personal assistant accessed from the Mac menu bar. The approved target runs Agents and persistent product state on the Host, with separately managed Sandboxes for environment operations. The main Agent controls multiple Sandboxes; each task worker executes in one fixed assigned environment and cannot manage Sandbox lifecycle. Users delegate/follow up through main chat and inspect tasks, environments and their desktops. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for the authoritative target boundary; the implemented deployment now runs Host Pi/Codex with multiple Linux execution Sandboxes.
+Pot is a personal assistant accessed from the Mac menu bar. The approved target runs Agents and persistent product state on the Host, with separately managed Sandboxes for environment operations. The main Agent controls multiple Sandboxes; each task worker executes in one fixed assigned environment and cannot manage Sandbox lifecycle. Users delegate/follow up through main chat and inspect tasks, environments and their desktops. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for the authoritative target boundary; the implemented deployment now runs Host Pot/Codex with multiple Linux execution Sandboxes.
 
 - One long-lived main assistant, named Pot by default; task workers have no separate personas. Tasks/schedules are created only through the main Agent; UI handles viewing, guidance, and management.
 - Interaction references ChatGPT Dot. Agent Setup/Sandbox configuration follow local product needs without inferring or copying closed-source internals.
 - GUI, Runtime, and tools run locally; models may use cloud services. Default offline operation or data never leaving the machine is not promised.
-- Agent/Sandbox decoupling initially covers Pi and native Codex App Server. Direct Host tool execution is out of scope. Validate each Driver's execution routing rather than treating a handshake/host login as readiness.
+- Agent/Sandbox decoupling initially covers pot-agent and native Codex App Server. Direct Host tool execution is out of scope. Validate each Driver's execution routing rather than treating a handshake/host login as readiness.
 - Local product bundles Containerization without requiring Docker Desktop. Remote Docker/Node Manager and multiple nodes are future directions without automatic task/identity migration.
 - Persistent project assistants, inter-assistant communication, environment migration, and a complete plugin ecosystem are not current MVP prerequisites.
 

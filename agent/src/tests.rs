@@ -90,6 +90,8 @@ struct Services {
     requests: Mutex<Vec<Value>>,
     lifecycle: Mutex<Vec<Value>>,
     reject_complete: AtomicBool,
+    rpc_tools: Option<Vec<Value>>,
+    rpc_calls: Mutex<Vec<Value>>,
 }
 impl Services {
     fn queue(&self, frames: Vec<Value>) {
@@ -134,10 +136,26 @@ impl ExecutionServices for Services {
         &'a self,
         _: Option<&'a str>,
         _: &'a str,
-        _: &'a str,
-        _: Value,
+        method: &'a str,
+        params: Value,
     ) -> BoxFuture<'a, Result<(Value, Option<String>)>> {
-        Box::pin(async { bail!("Unexpected external RPC") })
+        Box::pin(async move {
+            self.rpc_calls
+                .lock()
+                .unwrap()
+                .push(json!({"method":method,"params":params}));
+            let tools = self
+                .rpc_tools
+                .as_ref()
+                .ok_or_else(|| anyhow!("Unexpected external RPC"))?;
+            let result = match method {
+                "initialize" => json!({}),
+                "tools/list" => json!({"tools":tools}),
+                "tools/call" => json!({"managed":true}),
+                _ => bail!("Unexpected RPC method"),
+            };
+            Ok((result, Some("unit-session".into())))
+        })
     }
     fn compaction(&self, event: Value) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
@@ -173,6 +191,7 @@ impl Fixture {
         std::fs::create_dir(&dir).unwrap();
         let feedback = Arc::new(Feedback::default());
         let context = ExecutionContext {
+            tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: dir.clone(),
             workspace: dir.clone(),
             owner: "unit".into(),
@@ -212,7 +231,6 @@ impl Fixture {
     }
     async fn turn(&self, resuming: bool) -> Result<Vec<Update>> {
         let mut updates = vec![];
-        let mut processes = processes::Processes::default();
         let result = run(
             &self.context,
             &self.binding,
@@ -223,14 +241,15 @@ impl Fixture {
             resuming,
             &Defaults,
             Some(&self.services),
-            &mut processes,
             &mut |u| {
                 updates.push(u);
                 Ok(())
             },
         )
         .await;
-        processes.shutdown().await?;
+        if let Some(executor) = &self.context.tool_executor {
+            executor.finish(&self.context).await?;
+        }
         result?;
         Ok(updates)
     }
@@ -772,7 +791,6 @@ async fn context_window_guard_includes_output_reservation_and_rejects_before_tra
         f.binding.spec.context_window = window;
         f.binding.spec.params.max_output_tokens = output;
         f.services.queue(wire("openai_chat", "done", &[]));
-        let mut processes = processes::Processes::default();
         let result = run(
             &f.context,
             &f.binding,
@@ -783,11 +801,12 @@ async fn context_window_guard_includes_output_reservation_and_rejects_before_tra
             false,
             &Estimate(estimate),
             Some(&f.services),
-            &mut processes,
             &mut |_| Ok(()),
         )
         .await;
-        processes.shutdown().await.unwrap();
+        if let Some(executor) = &f.context.tool_executor {
+            executor.finish(&f.context).await.unwrap();
+        }
         assert_eq!(result.is_ok(), accepted);
         assert_eq!(
             f.services.requests.lock().unwrap().len(),
@@ -1086,4 +1105,220 @@ async fn cancelling_two_shell_sessions_cleans_both_process_groups() {
                 .is_err()
         );
     }
+}
+
+#[tokio::test]
+async fn missing_execution_backend_never_executes_on_host() {
+    let mut f = Fixture::new("openai_chat");
+    f.context.tool_executor = None;
+    f.services.queue(wire("openai_chat", "", &[call("effect")]));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    let updates = f.turn(false).await.unwrap();
+    assert!(!f.dir.join("effects.txt").exists());
+    assert!(updates.iter().any(|u|matches!(u, Update::ToolFinished{failed:true,result,..} if result.to_string().contains("no Host fallback"))));
+}
+
+fn role_name(role: ExecutionRole) -> &'static str {
+    match role {
+        ExecutionRole::Main => "main",
+        ExecutionRole::Worker => "worker",
+        ExecutionRole::Summary => "summary",
+    }
+}
+#[derive(Default)]
+struct RecordingExecutor {
+    calls: Mutex<Vec<Value>>,
+    finishes: Mutex<Vec<String>>,
+}
+impl pot_core::ToolExecutor for RecordingExecutor {
+    fn execute<'a>(
+        &'a self,
+        context: &'a ExecutionContext,
+        policy: &'a ShellSettings,
+        name: &'a str,
+        args: &'a Value,
+        call: &'a str,
+        _: &'a mut (dyn FnMut(Update) -> Result<()> + Send),
+    ) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(json!({"role":role_name(context.role),
+                "owner":context.owner,"policy":policy,"name":name,"args":args,"call":call}));
+            Ok(json!({"exit_code":0}))
+        })
+    }
+    fn finish<'a>(&'a self, context: &'a ExecutionContext) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.finishes.lock().unwrap().push(context.owner.clone());
+            Ok(())
+        })
+    }
+}
+fn model_tools(request: &Value, protocol: &str) -> Vec<Value> {
+    request["body"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| {
+            if protocol == "openai_chat" {
+                tool["function"].clone()
+            } else {
+                tool.clone()
+            }
+        })
+        .collect()
+}
+fn parameters<'a>(tool: &'a Value, protocol: &str) -> &'a Value {
+    &tool[if protocol == "anthropic_messages" {
+        "input_schema"
+    } else {
+        "parameters"
+    }]
+}
+fn full_loadout(f: &mut Fixture) {
+    f.binding.spec.params.agent.builtin_tools = vec![
+        "exec_command".into(),
+        "write_stdin".into(),
+        "apply_patch".into(),
+    ];
+    let mut control: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).unwrap();
+    // MCP publishes the same execution tools for Codex; Pot must use its injected backend once.
+    control.extend(tools::schemas(&f.binding.spec.params.agent.shell));
+    f.services.rpc_tools = Some(control);
+}
+#[tokio::test]
+async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
+    for protocol in ["openai_chat", "openai_responses", "anthropic_messages"] {
+        for role in [ExecutionRole::Main, ExecutionRole::Worker] {
+            let mut f = Fixture::new(protocol);
+            full_loadout(&mut f);
+            f.context.role = role;
+            f.binding.spec.params.agent.shell.max_output_bytes = 4096;
+            let executor = Arc::new(RecordingExecutor::default());
+            f.context.tool_executor = Some(executor.clone());
+            let calls = vec![
+                call("exec"),
+                model::ToolCall {
+                    id: "patch".into(),
+                    name: "apply_patch".into(),
+                    arguments: json!({"patch":"*** Begin Patch\n*** Add File: effects.txt\n+patched\n*** End Patch"}),
+                },
+                model::ToolCall {
+                    id: "stdin".into(),
+                    name: "write_stdin".into(),
+                    arguments: json!({"session_id":"session","chars":"hello"}),
+                },
+                model::ToolCall {
+                    id: "manage".into(),
+                    name: "pot_manage_sandbox".into(),
+                    arguments: json!({"action":"select","sandbox_id":"linux-b"}),
+                },
+                model::ToolCall {
+                    id: "delegate".into(),
+                    name: "pot_create_task".into(),
+                    arguments: json!({"text":"task"}),
+                },
+            ];
+            f.services.queue(wire(protocol, "", &calls));
+            f.services.queue(wire(protocol, "done", &[]));
+            let updates = f.turn(false).await.unwrap();
+            let requests = f.services.requests.lock().unwrap();
+            let actual = model_tools(&requests[0], protocol);
+            let names: std::collections::BTreeSet<_> =
+                actual.iter().map(|t| t["name"].as_str().unwrap()).collect();
+            assert_eq!(names.len(), actual.len(), "duplicate injected tools");
+            let mut expected: std::collections::BTreeSet<String> =
+                ["exec_command", "write_stdin", "apply_patch"]
+                    .map(str::to_owned)
+                    .into();
+            if role == ExecutionRole::Main {
+                expected.extend(
+                    serde_json::from_str::<Vec<Value>>(pot_core::TOOL_SCHEMA)
+                        .unwrap()
+                        .iter()
+                        .map(|t| t["name"].as_str().unwrap().to_owned()),
+                );
+            }
+            assert_eq!(names, expected.iter().map(String::as_str).collect());
+            for name in ["exec_command", "write_stdin", "apply_patch"] {
+                let schema = actual.iter().find(|t| t["name"] == name).unwrap();
+                assert_eq!(
+                    parameters(schema, protocol)["properties"]
+                        .get("sandbox_id")
+                        .is_some(),
+                    role == ExecutionRole::Main && name != "write_stdin"
+                );
+            }
+            assert_eq!(
+                parameters(
+                    actual.iter().find(|t| t["name"] == "exec_command").unwrap(),
+                    protocol
+                )["properties"]["max_output_chars"]["maximum"],
+                4096
+            );
+            for id in ["exec", "patch", "stdin"] {
+                assert!(updates.iter().any(
+                    |u| matches!(u,Update::ToolFinished{id:actual,failed:false,..} if actual==id)
+                ));
+            }
+            let dispatched = executor.calls.lock().unwrap();
+            assert_eq!(dispatched.len(), 3);
+            for (record, call) in dispatched.iter().zip(&calls) {
+                assert_eq!(
+                    *record,
+                    json!({"role":role_name(role),"owner":f.context.owner,"policy":f.binding.spec.params.agent.shell,"name":call.name,"args":call.arguments,"call":call.id})
+                );
+            }
+            assert_eq!(*executor.finishes.lock().unwrap(), vec!["unit"]);
+            let rpc = f.services.rpc_calls.lock().unwrap();
+            if role == ExecutionRole::Worker {
+                assert!(rpc.is_empty(), "worker fetched or dispatched control tools");
+                for id in ["manage", "delegate"] {
+                    assert!(updates.iter().any(
+                        |u| matches!(u,Update::ToolFinished{id:actual,failed:true,..} if actual==id)
+                    ));
+                }
+            } else {
+                let external: Vec<_> = rpc.iter().filter(|r| r["method"] == "tools/call").collect();
+                assert_eq!(external.len(), 2);
+                assert_eq!(external[0]["params"]["name"], "pot_manage_sandbox");
+                assert_eq!(external[1]["params"]["name"], "pot_create_task");
+            }
+            assert!(
+                !f.dir.join("effects.txt").exists(),
+                "builtin bypassed injected executor"
+            );
+        }
+    }
+}
+#[tokio::test]
+async fn configured_loadout_restricts_model_tools_and_dispatch() {
+    let mut f = Fixture::new("openai_chat");
+    full_loadout(&mut f);
+    f.context.role = ExecutionRole::Main;
+    f.binding.spec.params.agent.builtin_tools = vec!["apply_patch".into()];
+    f.binding.spec.params.agent.allowed_tools =
+        Some(vec!["apply_patch".into(), "pot_list_tasks".into()]);
+    let executor = Arc::new(RecordingExecutor::default());
+    f.context.tool_executor = Some(executor.clone());
+    f.services
+        .queue(wire("openai_chat", "", &[call("disabled")]));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    let updates = f.turn(false).await.unwrap();
+    let actual = model_tools(&f.services.requests.lock().unwrap()[0], "openai_chat");
+    assert_eq!(
+        actual
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["apply_patch", "pot_list_tasks"]
+    );
+    assert!(executor.calls.lock().unwrap().is_empty());
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u,Update::ToolFinished{failed:true,id,..} if id=="disabled"))
+    );
 }

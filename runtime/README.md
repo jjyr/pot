@@ -1,24 +1,24 @@
 # Runtime contract
 
-Runtime owns product commands, Agent bindings, environment routing and projection. `pot-core` defines immutable execution contracts, `pot-storage` persists messages/bindings/usage, `pot-driver` runs Host Pi/Codex, and `pot-gateway` implements provider transport/codecs. Server owns listener/route assembly. See [architecture](../docs/architecture.md) and [development](../docs/development.md).
+Runtime owns product commands, Agent bindings, environment routing and projection. `pot-core` defines immutable execution contracts, `pot-storage` persists messages/bindings/usage, `pot-driver` runs Host Pot/Codex, and `pot-gateway` implements provider transport/codecs. Server owns listener/route assembly. See [architecture](../docs/architecture.md) and [development](../docs/development.md).
 
 ## Configuration and startup
 
-App starts Helper and Host Server independently of Linux VMs. Unconfigured Chat offers the shared AI Configuration page. Node, Pi and Codex ship in the bundle; installation/authorization does not require a Sandbox.
+App starts Helper and Host Server independently of Linux VMs. Unconfigured Chat offers the shared AI Configuration page. pot-agent is compiled into the Host Server; Node and Codex ship in the bundle; installation/authorization does not require a Sandbox.
 
 API connections are saved through `POST /api/v1/providers`, with immutable credentials in private Host `product/providers.json` and versioned profiles in SQLite. Codex uses official Host App Server browser or device authorization. Discovery is read-only and does not send model requests. Saving a connection and selecting the Main Agent are separate operations, except that first-time Chat can save both together.
 
 `product/execution-limits.json` contains `request_limit`, `max_tokens`, `max_requests_per_turn` and `max_parallel_tasks`; it carries no credentials or implicit Agent selection. Default limits are 10,000 lifetime requests, 8,192 output tokens, 100 requests per turn and five parallel tasks. Zero lifetime requests disables new requests. Output tokens accept integers up to 9,007,199,254,740,991; per-turn/concurrency limits are 1–1,000. Changing limits restarts Host backend independently of VM lifecycle.
 
-Only Pi and Codex engines/transports/session identities are accepted. There are no configuration importers, guest-Agent deployment routes or direct API smoke-test adapters. Removed deployment and integration records remain in Git history. Native session recovery requires the current persisted binding; it cannot silently manufacture a replacement for missing/corrupt history.
+Only Pot and Codex engines/transports/session identities are accepted. There are no configuration importers, guest-Agent deployment routes or direct API smoke-test adapters. Removed deployment and integration records remain in Git history. Native session recovery requires the current persisted binding; it cannot silently manufacture a replacement for missing/corrupt history.
 
 ## Agent execution
 
-Each Pi turn starts `pi --mode rpc --session <explicit file>` in a private Host Agent workspace. Pot's trusted extension overrides read/write/edit/bash/grep/find/ls, blocks shell shortcuts and sends environment operations to Runtime. Project context, unmanaged extensions and skills are disabled. Pi sees a scoped gateway token, never the provider credential.
+pot-agent runs in-process on Host. Runtime injects a ToolExecutor, with no implicit local backend. The execution tools are exec_command, write_stdin and apply_patch; search/list/read use shell commands. Main receives task/schedule and Sandbox management tools; workers cannot delegate, manage or retarget. Agent context, compaction, usage, execution preferences and deterministic evaluation remain Host-owned.
 
 Codex App Server runs on Host with an empty native environment list. Native shell/patch/image/code/web/hooks/apps/plugins/subagent tools and inherited MCP are disabled. Lane-scoped Pot MCP exposes the common execution protocol. Each turn gets a distinct managed MCP URL to rediscover its role's tools after native resume; the native thread identity remains fixed.
 
-Main loadouts include task/schedule and Sandbox management. Workers receive exactly seven environment tools, a lane token and a fixed Sandbox. Summary turns can only inspect tasks. Credentials, Host data and Helper sockets are never mounted in guest workspaces.
+Main loadouts include task/schedule and Sandbox management. Workers receive exec_command, write_stdin and apply_patch, a lane token and a fixed Sandbox. Summary turns can only inspect tasks. Credentials, Host data and Helper sockets are never mounted in guest workspaces.
 
 Cancellation settles the native session and drains remote operations. Executor subprocesses run as an ordinary guest user inside root-owned cgroups, including detached descendants. Unknown outcomes quarantine the environment until explicit main-only recovery; commands are never replayed automatically. Quit settles Host work and stops VMs. Artifacts and native/product history persist.
 
@@ -30,7 +30,7 @@ Task creation uses explicit `sandbox_id`, or snapshots the main selection when o
 
 Agent profile routing determines Driver/model, not environment. Global/profile/provider concurrency limits determine dispatch capacity, not placement. Runtime starts a bound environment when needed and never falls back to Host or retargets a worker. Task turns and operations hold leases; stop/delete rejects occupied or quarantined environments. Definitions referenced by tasks/schedules cannot be deleted, and deleted IDs cannot be reused. Deletion retains workspace artifacts.
 
-Tasks in one Sandbox share its guest account. Separate directories do not establish mutual filesystem/process isolation. Background descendants are drained at operation completion; persistent services are not an execution contract. Desktop starts explicitly and stops with its environment.
+Tasks in one Sandbox share its guest account. Separate directories do not establish mutual filesystem/process isolation. Command groups are drained on completion/timeout; the turn cgroup drains all descendants, including detached setsid processes, on cancellation or turn completion. Live pipe sessions exist only within the active turn. The HTTP executor currently batches output per execution/poll response; use yield_time_ms and write_stdin for bounded progress polling. Desktop starts explicitly and stops with its environment.
 
 ## Control API
 
@@ -56,7 +56,7 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `POST /api/v1/execution` | Active lane `{name,call_id,args}`; fixed worker scope, durable receipts |
 | `POST /api/v1/mcp`, `POST /api/v1/orchestration` | Role-scoped shared product tool dispatcher |
 | `/gw/{provider}/{*path}` | Internal lane-authorized provider gateway |
-| `POST /api/pi/compactions` | Active-lane compaction lifecycle, no cross-lane writes |
+| `POST /api/agent/compactions` | Active-lane compaction lifecycle, no cross-lane writes |
 | `/api/v1/tasks`, `/api/v1/tasks/query`, `/api/v1/tasks/{id}` | Main task creation, bounded list/search and scoped detail |
 | `/api/v1/tasks/{id}/messages`, `/cancel` | Persistent guidance and per-lane cancellation |
 | `GET/POST /api/v1/schedules` | Durable schedules, occurrences and user actions |
@@ -88,6 +88,6 @@ mise run bundle
 mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/Contents/Helpers/PotHelper --resources .local/d1/Pot.app/Contents/Resources/runtime
 ```
 
-Real CLI/VM tests use isolated Host homes and local mock models, require Apple Virtualization privileges, and make no paid model calls. See [dated acceptance](../docs/validation/agent-sandbox-20261006.md) for tested scope. Real-provider login/inference and full interactive UI matrices require separate acceptance.
+Real CLI/VM tests use isolated Host homes and local mock models, require Apple Virtualization privileges, and make no paid model calls. See [dated acceptance](../docs/validation/host-pot-agent-20261006.md) for tested scope. Real-provider login/inference and full interactive UI matrices require separate acceptance.
 
 Sandbox management also supports `update` with `name` and `config` (`cpus`, `memory_gib`, `disk_gib`). Updates require a stopped/failed environment without active leases or unsettled operations; resources apply on the next start. Inventory exposes per-environment configuration, running-task counts, associated tasks and durable-reference status for the native UI.

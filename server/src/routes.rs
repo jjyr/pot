@@ -15,10 +15,6 @@ pub fn router(s: Service) -> Router {
         .route("/api/v1/authorization/start", post(authorization::start))
         .route("/api/v1/authorization/status", get(authorization::status))
         .route("/api/v1/authorization/cancel", post(authorization::cancel))
-        .route(
-            "/api/v1/authorization/callback",
-            post(authorization::callback),
-        )
         .route("/api/v1/agents/tools", get(discovery::list))
         .route("/api/v1/agents/refresh", post(discovery::refresh))
         .route(
@@ -77,6 +73,5 @@ pub fn router(s: Service) -> Router {
         .route("/api/v1/turn/control", post(control::control))
         .route("/api/v1/tasks/{id}/control", post(control::control_task))
         .route("/api/v1/agent/diagnostics", get(control::diagnostics))
-        .route(PATH_AUTHENTICATE, post(authenticate))
         .with_state(s)
 }

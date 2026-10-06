@@ -189,7 +189,7 @@ async fn occupied_listener_does_not_initialize_product_storage() {
 }
 
 #[tokio::test]
-async fn shutdown_settles_active_main_and_worker_processes() {
+async fn shutdown_settles_active_main_and_worker_model_requests_without_host_execution() {
     use axum::{
         Router,
         response::sse::{Event, Sse},
@@ -199,11 +199,19 @@ async fn shutdown_settles_active_main_and_worker_processes() {
     let fixture = Fixture::new();
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = upstream.local_addr().unwrap();
+    let active = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = active.clone();
     let model = tokio::spawn(async move {
-        let router=Router::new().route("/model",post(||async {
-            let event=json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"shell","type":"function","function":{"name":"exec_command","arguments":json!({"cmd":"echo $$ > child.pid; sleep 30; echo bad > late","timeout_ms":60000}).to_string()}}]},"finish_reason":"tool_calls"}]}).to_string();
-            Sse::new(futures::stream::iter([Ok::<_,Infallible>(Event::default().data(event))]))
-        }));
+        let router = Router::new().route(
+            "/model",
+            post(move || {
+                let observed = observed.clone();
+                async move {
+                    observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Sse::new(futures::stream::pending::<Result<Event, Infallible>>())
+                }
+            }),
+        );
         axum::serve(upstream, router).await.unwrap();
     });
     let server = Server::bind(fixture.config()).await.unwrap();
@@ -236,14 +244,10 @@ async fn shutdown_settles_active_main_and_worker_processes() {
         .json()
         .await
         .unwrap();
-    let task_dir = fixture
-        .0
-        .join("workspace/tasks")
-        .join(task["id"].as_str().unwrap());
-    let main_dir = fixture.0.join("workspace");
+    assert!(!task["id"].as_str().unwrap().is_empty());
     tokio::time::timeout(Duration::from_secs(10), async {
-        while !main_dir.join("child.pid").exists() || !task_dir.join("child.pid").exists() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        while active.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+            tokio::task::yield_now().await;
         }
     })
     .await
@@ -254,14 +258,6 @@ async fn shutdown_settles_active_main_and_worker_processes() {
         .unwrap()
         .unwrap()
         .unwrap();
-    for dir in [main_dir, task_dir] {
-        let pid: i32 = std::fs::read_to_string(dir.join("child.pid"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
-        assert!(!dir.join("late").exists());
-    }
+    assert!(!fixture.0.join("workspace/child.pid").exists());
     model.abort();
 }

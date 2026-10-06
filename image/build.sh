@@ -12,7 +12,7 @@ cp /build/assets/* /opt/pot/
 tar xzf /opt/pot/novnc.tar.gz -C /opt/pot/novnc --strip-components=1
 rm /opt/pot/novnc.tar.gz
 chmod -R a+rX /opt/pot
-chmod +x /opt/pot/open-browser.sh
+chmod +x /opt/pot/open-browser.sh /opt/pot/pot-tool-executor
 ln -sf /opt/pot/open-browser.sh /usr/local/bin/pot-browser
 fc-cache -f
 apk info -v | sort >/build/installed-packages.txt

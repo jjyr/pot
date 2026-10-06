@@ -39,9 +39,7 @@ pub fn bindings(store: &Store) -> Result<Vec<Binding>> {
         ensure!(
             matches!(
                 (&b.spec.engine, &b.native_ref),
-                (Engine::Pot, NativeRef::Pot { .. })
-                    | (Engine::Codex, NativeRef::Codex { .. })
-                    | (Engine::Grok, NativeRef::Grok { .. })
+                (Engine::Pot, NativeRef::Pot { .. }) | (Engine::Codex, NativeRef::Codex { .. })
             ),
             "Engine and native session identity mismatch"
         );
@@ -218,7 +216,6 @@ pub fn select_initial(
     spec.validate()?;
     let native_ref = match spec.engine {
         Engine::Codex => NativeRef::Codex { thread_id: None },
-        Engine::Grok => NativeRef::Grok { session_id: None },
         Engine::Pot => NativeRef::Pot {
             file: data.join("agent-context.json"),
             session_id: None,
@@ -281,26 +278,5 @@ pub fn save_codex_thread(store: &mut Store, thread: &str) -> Result<()> {
         }
         _ => anyhow::bail!("Expected a Codex binding"),
     }
-    store.set(BINDINGS, &serde_json::to_string(&all)?)
-}
-
-pub fn save_grok_session(store: &mut Store, session: &str) -> Result<()> {
-    ensure!(
-        uuid::Uuid::parse_str(session).is_ok(),
-        "Invalid Grok session identity"
-    );
-    let mut all = bindings(store)?;
-    let binding = all
-        .iter_mut()
-        .find(|b| b.state == BindingState::Active)
-        .ok_or_else(|| anyhow!("Active binding missing"))?;
-    let NativeRef::Grok { session_id } = &mut binding.native_ref else {
-        anyhow::bail!("Expected Grok binding");
-    };
-    ensure!(
-        session_id.as_deref().is_none_or(|old| old == session),
-        "Grok changed native identity"
-    );
-    *session_id = Some(session.into());
     store.set(BINDINGS, &serde_json::to_string(&all)?)
 }

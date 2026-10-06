@@ -8,7 +8,7 @@ Chat is the management entry point. An explicit lasting instruction ("From now o
 
 When asked to show all preferences, the main Agent reads and displays the complete saved text rather than reconstructing it from conversation history. Selective changes replace the whole document while preserving unrelated text; clearing saves an empty document. There are no extra task-summary labels, rule-management buttons, or confirmation screens. Running-task summaries in Chat and task-list rows show only an executor icon in addition to their existing content. Open the task to inspect its specific Agent/model or use its existing Change Agent interaction.
 
-Configured connections determine executable selections. Claude, Gemini, DeepSeek, OpenCode and Custom API use Pot Agent; Codex uses official App Server. Grok currently supports main Chat only and is excluded from background selection. Antigravity and Claude native CLI are unsupported. Display names/model names are resolved against configured Profiles; ambiguous or unavailable names need clarification or connection recovery. A configured connection is not proof of successful inference or authentication.
+Configured connections determine Agent/model selections. Claude, Gemini, DeepSeek, OpenCode and Custom API use Pot Agent; Codex uses official App Server. Antigravity and Claude native CLI are unsupported. Display names/model names are resolved against configured Profiles; ambiguous or unavailable names need clarification or connection recovery. A configured connection is not proof of successful inference or authentication.
 
 ## Tools and routing
 
@@ -23,7 +23,7 @@ The main Agent interprets the deliverable and picks an eligible Profile ID. Expl
 
 Schedules retain their explicit Profile or existing default behavior; this feature adds no scheduled classification call. Unavailable preferred executors must not be silently replaced. Concurrency queues work with its selected executor.
 
-Pot and Codex main Agents expose these tools. Grok's current main integration has no Pot orchestration tools and cannot save/edit/clear these preferences; use a main Agent supporting Pot tools for those operations.
+Pot and Codex main Agents expose these tools. Workers and read-only summary turns cannot edit preferences.
 
 ## Usage
 

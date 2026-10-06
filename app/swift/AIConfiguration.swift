@@ -51,7 +51,7 @@ import Foundation
         apiEndpoint = connection?["endpoint"] as? String ?? ""
         apiProtocol = connection?["protocol"] as? String ?? "openai_chat"
         hasAPIKey = connection?["has_key"] as? Bool ?? false
-        if connectionKind == "pi" {
+        if connectionKind == "pot" {
             let host = URLComponents(string: apiEndpoint)?.host ?? ""
             connectionKind = host == "api.anthropic.com" && apiProtocol == "anthropic_messages" ? "anthropic" :
                 host == "generativelanguage.googleapis.com" && apiProtocol == "gemini" ? "gemini" :
@@ -269,7 +269,7 @@ import Foundation
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { result = "请填写聊天使用的模型。"; return }
         let engine = selected["engine"] as? String ?? ""
-        if engine != "pi", !nativeAccountReady(engine) {
+        if engine != "pot", !nativeAccountReady(engine) {
             result = "此 Agent 需要安装或登录，请完成后重新检查。"; return
         }
         if activeSpec["source_profile_id"] as? String == draftProfile, activeSpec["model"] as? String == model,

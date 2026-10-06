@@ -23,16 +23,67 @@ struct Pending {
     #[serde(skip)]
     active: bool,
 }
-struct RemoteOperation {
-    manager: Arc<Manager>,
+#[derive(Clone)]
+struct Scope {
     id: String,
+    target: String,
+    owner: String,
+    turn: String,
+    generation: u64,
 }
-impl Drop for RemoteOperation {
-    fn drop(&mut self) {
-        if let Some(pending) = self.manager.pending.lock().unwrap().get_mut(&self.id) {
-            pending.active = false;
-        }
+/// In-process Agent calls use the same Runtime authorization as MCP calls.
+pub struct Tools {
+    pub service: Service,
+    pub epoch: u64,
+}
+impl pot_core::ToolExecutor for Tools {
+    fn execute<'a>(
+        &'a self,
+        _: &'a pot_core::ExecutionContext,
+        policy: &'a pot_core::ShellSettings,
+        name: &'a str,
+        args: &'a Value,
+        call: &'a str,
+        emit: &'a mut (dyn FnMut(pot_core::Update) -> Result<()> + Send),
+    ) -> futures::future::BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            anyhow::ensure!(
+                agent::binding(&self.service)?.epoch == self.epoch,
+                "Execution binding changed"
+            );
+            let mut value = tool(&self.service, name, call, args).await?;
+            if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
+                let mut remaining = policy.max_output_bytes.saturating_mul(2);
+                for event in events.drain(..) {
+                    emit(guest_output(event, call, &mut remaining)?)?;
+                }
+            }
+            Ok(value.get("result").cloned().unwrap_or(value))
+        })
     }
+    fn finish<'a>(
+        &'a self,
+        _: &'a pot_core::ExecutionContext,
+    ) -> futures::future::BoxFuture<'a, Result<()>> {
+        Box::pin(finish(&self.service))
+    }
+}
+// Guest output cannot manufacture Agent lifecycle/control events. IDs are
+// remapped from the execution receipt to the caller's model tool invocation.
+fn guest_output(value: Value, call: &str, remaining: &mut usize) -> Result<pot_core::Update> {
+    let pot_core::Update::ToolOutput { stream, text, .. } = serde_json::from_value(value)? else {
+        bail!("Guest sent a non-output execution event");
+    };
+    anyhow::ensure!(
+        matches!(stream.as_str(), "stdout" | "stderr") && text.len() <= *remaining,
+        "Invalid guest output"
+    );
+    *remaining -= text.len();
+    Ok(pot_core::Update::ToolOutput {
+        id: call.into(),
+        stream,
+        text,
+    })
 }
 struct Execution {
     manager: Arc<Manager>,
@@ -50,6 +101,9 @@ impl Drop for Execution {
     }
 }
 pub struct Manager {
+    // Per-fixture ephemeral HTTP listeners; production always uses guest port 17701.
+    #[cfg(test)]
+    pub(crate) test_executor_urls: Mutex<BTreeMap<String, String>>,
     root: PathBuf,
     data: PathBuf,
     pending: Mutex<BTreeMap<String, Pending>>,
@@ -57,6 +111,8 @@ pub struct Manager {
     book: Mutex<Inventory>,
     committed: Mutex<Inventory>,
     leases: Mutex<BTreeMap<String, usize>>,
+    scopes: Mutex<BTreeMap<String, Scope>>,
+    sessions: Mutex<BTreeMap<String, String>>,
     lifecycle: tokio::sync::Mutex<()>,
     client: reqwest::Client,
 }
@@ -90,6 +146,8 @@ impl Manager {
             }
         };
         Ok(Self {
+            #[cfg(test)]
+            test_executor_urls: Mutex::new(BTreeMap::new()),
             root,
             data: data.to_path_buf(),
             running: Mutex::new(BTreeMap::new()),
@@ -101,6 +159,8 @@ impl Manager {
             committed: Mutex::new(book.clone()),
             book: Mutex::new(book),
             leases: Mutex::new(BTreeMap::new()),
+            scopes: Mutex::new(BTreeMap::new()),
+            sessions: Mutex::new(BTreeMap::new()),
             lifecycle: tokio::sync::Mutex::new(()),
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -108,10 +168,17 @@ impl Manager {
                 .build()?,
         })
     }
+    fn executor_url(&self, ip: &str) -> String {
+        #[cfg(test)]
+        if let Some(url) = self.test_executor_urls.lock().unwrap().get(ip) {
+            return url.clone();
+        }
+        format!("http://{ip}:17701")
+    }
     fn persist(&self, data: &std::path::Path) -> Result<()> {
         let mut book = self.book.lock().unwrap();
         let path = data.join("sandboxes.json");
-        if let Err(error) = pi::private_json(&path, &serde_json::to_value(&*book)?) {
+        if let Err(error) = execution::private_json(&path, &serde_json::to_value(&*book)?) {
             *book = self.committed.lock().unwrap().clone();
             return Err(error);
         }
@@ -119,10 +186,52 @@ impl Manager {
         Ok(())
     }
     fn persist_operations(&self) -> Result<()> {
-        pi::private_json(
+        execution::private_json(
             &self.data.join("sandbox-operations.json"),
             &serde_json::to_value(&*self.pending.lock().unwrap())?,
         )
+    }
+    fn scope(&self, target: &str, owner: &str, turn: &str, generation: u64) -> Result<Scope> {
+        let mut scopes = self.scopes.lock().unwrap();
+        if let Some(scope) = scopes
+            .values()
+            .find(|v| v.owner == owner && v.turn == turn && v.target == target)
+        {
+            anyhow::ensure!(
+                scope.generation == generation,
+                "Sandbox generation changed; session outcome unknown"
+            );
+            return Ok(scope.clone());
+        }
+        let scope = Scope {
+            id: store::id(),
+            target: target.into(),
+            owner: owner.into(),
+            turn: turn.into(),
+            generation,
+        };
+        // Keep initialization serialized through persistence; concurrent calls
+        // cannot dispatch into a scope before its durable receipt exists.
+        self.pending.lock().unwrap().insert(
+            scope.id.clone(),
+            Pending {
+                target: target.into(),
+                owner: owner.into(),
+                active: true,
+            },
+        );
+        if let Err(error) = self.persist_operations() {
+            self.pending.lock().unwrap().remove(&scope.id);
+            return Err(error);
+        }
+        *self
+            .leases
+            .lock()
+            .unwrap()
+            .entry(target.into())
+            .or_default() += 1;
+        scopes.insert(scope.id.clone(), scope.clone());
+        Ok(scope)
     }
     fn settle(&self, operation: &str) -> Result<()> {
         let old = self.pending.lock().unwrap().remove(operation);
@@ -209,7 +318,7 @@ impl Manager {
                 let token = std::fs::read_to_string(
                     self.root.join("sandboxes").join(id).join("executor-token"),
                 )?;
-                let url = format!("http://{ip}:17701");
+                let url = self.executor_url(ip);
                 if self
                     .client
                     .get(format!("{url}/health"))
@@ -387,7 +496,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         );
         let path = s.sandboxes.root.join("sandboxes").join(&id);
         std::fs::create_dir_all(&path)?;
-        pi::private_json(
+        execution::private_json(
             &path.join("sandbox.json"),
             &json!({"cpus":c,"memory_gib":m,"disk_gib":d}),
         )?;
@@ -432,7 +541,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
                 let result: Value = s
                     .sandboxes
                     .client
-                    .post(format!("http://{ip}:17701/cancel"))
+                    .post(format!("{}/cancel", s.sandboxes.executor_url(ip)))
                     .bearer_auth(token.trim())
                     .json(&json!({"id":op}))
                     .timeout(std::time::Duration::from_secs(15))
@@ -502,7 +611,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
 
 pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Result<Value> {
     anyhow::ensure!(
-        !call_id.is_empty() && call_id.len() <= 128,
+        !call_id.is_empty() && call_id.len() <= 256,
         "Invalid execution call ID"
     );
     let turn = {
@@ -529,15 +638,76 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     if name == "pot_manage_sandbox" {
         return management(s, args).await;
     }
-    let operation = name
-        .strip_prefix("pot_sandbox_")
-        .ok_or_else(|| anyhow!("Unknown environment tool"))?;
     anyhow::ensure!(
-        ["read", "write", "edit", "bash", "grep", "find", "ls"].contains(&operation),
+        ["exec_command", "write_stdin", "apply_patch"].contains(&name),
         "Unknown execution operation"
     );
+    let binding = agent::binding(s)?;
+    let settings = &binding.spec.params.agent;
+    anyhow::ensure!(
+        binding.spec.engine != agent::Engine::Pot
+            || (settings.builtin_tools.iter().any(|n| n == name)
+                && settings
+                    .allowed_tools
+                    .as_ref()
+                    .is_none_or(|names| names.iter().any(|n| n == name))),
+        "Tool disabled by execution policy"
+    );
+    let mut validated = args.clone();
+    if let Some(object) = validated.as_object_mut() {
+        object.remove("sandbox_id");
+    }
+    pot_core::environment_tools::validate(name, &validated)?;
+
+    let receipt = format!("sandbox.operation:{turn}:{call_id}");
+    if let Some(old) = s.inner.lock().unwrap().store.get(&receipt)? {
+        let old: Value = serde_json::from_str(&old)?;
+        anyhow::ensure!(
+            old["name"] == name && old["args"] == *args,
+            "Execution ID reused with different arguments"
+        );
+        if old["status"] == "complete" {
+            return Ok(old["result"].clone());
+        }
+        bail!("Prior execution outcome unknown; inspect before retrying with a new call ID");
+    }
+    anyhow::ensure!(
+        args.get("sandbox_id").is_none_or(Value::is_string),
+        "Invalid Sandbox identity"
+    );
     let requested = args["sandbox_id"].as_str().unwrap_or("");
-    let target = if s.is_worker {
+    let prior_scope = if name == "write_stdin" {
+        anyhow::ensure!(requested.is_empty(), "write_stdin cannot switch Sandbox");
+        let session = args["session_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing session ID"))?;
+        let id = s
+            .sandboxes
+            .sessions
+            .lock()
+            .unwrap()
+            .get(session)
+            .cloned()
+            .ok_or_else(|| anyhow!("Session expired or belongs to another turn"))?;
+        let scope = s
+            .sandboxes
+            .scopes
+            .lock()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Session scope expired"))?;
+        anyhow::ensure!(
+            scope.owner == s.usage_scope && scope.turn == turn,
+            "Session belongs to another task/turn"
+        );
+        Some(scope)
+    } else {
+        None
+    };
+    let target = if let Some(scope) = &prior_scope {
+        scope.target.clone()
+    } else if s.is_worker {
         let assigned = s
             .sandbox_id
             .as_deref()
@@ -560,72 +730,46 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         manager: s.sandboxes.clone(),
         owner: s.usage_scope.clone(),
     };
-    // Lease acquisition and stop/delete serialize on the lifecycle lock.
-    let lease = {
-        let _lock = s.sandboxes.lifecycle.lock().await;
-        s.sandboxes.lease(&target)?
-    };
-    let receipt = format!("sandbox.operation:{turn}:{call_id}");
+    let _preparation = s.sandboxes.acquire(&target).await?;
+    let (url, token) = s.sandboxes.ready(&target, s).await?;
+    let generation = s.sandboxes.helper(&target, "status").await?["generation"]
+        .as_u64()
+        .unwrap_or(0);
+    anyhow::ensure!(
+        turn_alive(s, &turn) && !s.stopping(),
+        "Execution turn ended during Sandbox preparation"
+    );
+    let scope = s
+        .sandboxes
+        .scope(&target, &s.usage_scope, &turn, generation)?;
     let mut record =
         json!({"id":store::id(),"target":target,"name":name,"args":args,"status":"accepted"});
-    {
-        let inner = s.inner.lock().unwrap();
-        if let Some(old) = inner.store.get(&receipt)? {
-            let old: Value = serde_json::from_str(&old)?;
-            anyhow::ensure!(
-                old["name"] == name && old["args"] == *args && old["target"] == target,
-                "Execution ID reused with different arguments"
-            );
-            if old["status"] == "complete" {
-                return Ok(old["result"].clone());
-            }
-            bail!("Prior execution outcome unknown; inspect before retrying with a new call ID");
-        }
-        inner.store.set(&receipt, &record.to_string())?;
-    }
-    let operation_id = record["id"].as_str().unwrap().to_owned();
-    let (url, token) = s.sandboxes.ready(&target, s).await?;
-    s.sandboxes.pending.lock().unwrap().insert(
-        operation_id.clone(),
-        Pending {
-            target: target.clone(),
-            owner: s.usage_scope.clone(),
-            active: true,
-        },
-    );
-    let _remote = RemoteOperation {
-        manager: s.sandboxes.clone(),
-        id: operation_id.clone(),
-    };
-    s.sandboxes.persist_operations()?;
+    s.inner
+        .lock()
+        .unwrap()
+        .store
+        .set(&receipt, &record.to_string())?;
     let cwd = if s.is_worker {
         format!("/data/workspace/tasks/{}", s.usage_scope)
     } else {
         "/data/workspace".into()
     };
-    let response = s
-        .sandboxes
-        .client
-        .post(format!("{url}/execute"))
-        .bearer_auth(&token)
-        .json(&json!({"id":operation_id,"operation":operation,"args":args,"cwd":cwd}))
-        .send();
+    let mut tool_args = args.clone();
+    if let Some(object) = tool_args.as_object_mut() {
+        object.remove("sandbox_id");
+    }
+    let response=s.sandboxes.client.post(format!("{url}/execute")).bearer_auth(&token)
+        .json(&json!({"id":record["id"],"scope":scope.id,"operation":name,"args":tool_args,"cwd":cwd,"policy":agent::binding(s)?.spec.params.agent.shell})).send();
     tokio::pin!(response);
     let result = loop {
         tokio::select! {
-            result = &mut response => break result?,
-            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+            result=&mut response=>break result?,
+            _=tokio::time::sleep(std::time::Duration::from_millis(100))=>{
                 if !turn_alive(s,&turn) || s.stopping() {
-                    let cancellation = s.sandboxes.client.post(format!("{url}/cancel")).bearer_auth(&token).json(&json!({"id":operation_id})).timeout(std::time::Duration::from_secs(15)).send().await?;
-                    anyhow::ensure!(cancellation.status().is_success(), "Executor cancellation unconfirmed");
-                    let settled: Value = cancellation.json().await?;
-                    anyhow::ensure!(settled["settled"] == true, "Executor cancellation unconfirmed");
-                    record["status"] = json!("complete");
-                    record["result"] = json!({"sandbox_id":target,"cancelled":true});
-                    s.inner.lock().unwrap().store.set(&receipt, &record.to_string())?;
-                    s.sandboxes.settle(&operation_id)?;
-                    drop(lease);
-                    return Ok(record["result"].clone());
+                    cancel_scope(s,&scope).await?;
+                    let result=json!({"result":{"sandbox_id":target,"cancelled":true},"events":[]});
+                    record["status"]=json!("complete");record["result"]=result.clone();s.inner.lock().unwrap().store.set(&receipt,&record.to_string())?;
+                    return Ok(result);
                 }
             }
         }
@@ -635,7 +779,14 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         "Sandbox execution request failed"
     );
     let mut result: Value = result.json().await?;
-    result["sandbox_id"] = json!(target);
+    if let Some(session) = result["result"]["session_id"].as_str() {
+        s.sandboxes
+            .sessions
+            .lock()
+            .unwrap()
+            .insert(session.to_owned(), scope.id.clone());
+    }
+    result["result"]["sandbox_id"] = json!(target);
     record["status"] = json!("complete");
     record["result"] = result.clone();
     s.inner
@@ -643,16 +794,109 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         .unwrap()
         .store
         .set(&receipt, &record.to_string())?;
-    s.sandboxes.settle(&operation_id)?;
-    drop(lease);
     Ok(result)
+}
+async fn cancel_scope(s: &Service, scope: &Scope) -> Result<()> {
+    let state = s.sandboxes.helper(&scope.target, "status").await?;
+    if state["phase"] != "stopped" && state["phase"] != "failed" {
+        let ip = state["ip"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Executor cleanup stop unconfirmed"))?;
+        let token = std::fs::read_to_string(
+            s.sandboxes
+                .root
+                .join("sandboxes")
+                .join(&scope.target)
+                .join("executor-token"),
+        )?;
+        let response: Value = s
+            .sandboxes
+            .client
+            .post(format!("{}/finish", s.sandboxes.executor_url(ip)))
+            .bearer_auth(token.trim())
+            .json(&json!({"id":scope.id}))
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        anyhow::ensure!(
+            response["settled"] == true,
+            "Executor cleanup stop unconfirmed"
+        );
+    }
+    s.sandboxes.settle(&scope.id)?;
+    release_scope(&s.sandboxes, scope);
+    Ok(())
+}
+fn release_scope(manager: &Manager, scope: &Scope) {
+    if manager.scopes.lock().unwrap().remove(&scope.id).is_some() {
+        *manager
+            .leases
+            .lock()
+            .unwrap()
+            .get_mut(&scope.target)
+            .unwrap() -= 1;
+    }
+    manager
+        .sessions
+        .lock()
+        .unwrap()
+        .retain(|_, id| id != &scope.id);
+}
+pub async fn finish(s: &Service) -> Result<()> {
+    let mut errors = vec![];
+    for _ in 0..200 {
+        let scopes: Vec<_> = s
+            .sandboxes
+            .scopes
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|v| v.owner == s.usage_scope)
+            .cloned()
+            .collect();
+        for scope in scopes {
+            if let Err(error) = cancel_scope(s, &scope).await {
+                if let Some(pending) = s.sandboxes.pending.lock().unwrap().get_mut(&scope.id) {
+                    pending.active = false;
+                }
+                // Durable unknown outcomes still quarantine the environment;
+                // release transient leases so explicit recovery can settle it.
+                release_scope(&s.sandboxes, &scope);
+                errors.push(error.to_string());
+            }
+        }
+        s.sandboxes.persist_operations()?;
+        if *s
+            .sandboxes
+            .running
+            .lock()
+            .unwrap()
+            .get(&s.usage_scope)
+            .unwrap_or(&0)
+            == 0
+        {
+            anyhow::ensure!(
+                errors.is_empty(),
+                "Sandbox cleanup stop unconfirmed: {}",
+                errors.join("; ")
+            );
+            return Ok(());
+        }
+        // Preparation is counted too. Re-snapshot after it settles so a late
+        // scope cannot escape the cleanup barrier at cancellation/turn end.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    bail!("Sandbox execution cleanup timed out; stop unconfirmed")
 }
 pub async fn execute(
     State(root): State<Service>,
     h: HeaderMap,
     Json(call): Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    let s = tasks::pi_service(&root, &h)?;
+    let s = tasks::execution_service(&root, &h)?;
     let operation = tokio::spawn(async move {
         tool(
             &s,
@@ -668,6 +912,42 @@ pub async fn execute(
             .map_err(|e| internal(e.into()))?
             .map_err(|e| error(StatusCode::CONFLICT, "sandbox_execution", &e.to_string()))?,
     ))
+}
+
+fn turn_alive(s: &Service, request: &str) -> bool {
+    let inner = s.inner.lock().unwrap();
+    inner
+        .turn
+        .as_ref()
+        .filter(|t| !t.cancelling)
+        .and_then(|t| inner.store.message(&t.user_message_id).ok().flatten())
+        .is_some_and(|m| m.request_id.as_deref() == Some(request))
+}
+pub async fn drain(s: &Service) -> Result<()> {
+    for _ in 0..200 {
+        if *s
+            .sandboxes
+            .running
+            .lock()
+            .unwrap()
+            .get(&s.usage_scope)
+            .unwrap_or(&0)
+            == 0
+        {
+            anyhow::ensure!(
+                !s.sandboxes
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|v| v.owner == s.usage_scope),
+                "Sandbox execution outcome unknown; stop unconfirmed, recover environment before continuing"
+            );
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    bail!("Sandbox operation cleanup timed out; stop unconfirmed")
 }
 
 #[cfg(test)]
@@ -728,9 +1008,9 @@ mod tests {
         assert!(
             tool(
                 &worker,
-                "pot_sandbox_bash",
+                "exec_command",
                 "switch",
-                &json!({"command":"true","sandbox_id":"linux-b"})
+                &json!({"cmd":"true","sandbox_id":"linux-b"})
             )
             .await
             .unwrap_err()
@@ -738,11 +1018,13 @@ mod tests {
             .contains("cannot switch")
         );
         let tools = tool_bridge::schemas(false, true);
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 3);
         assert!(
             tools
                 .iter()
-                .all(|t| t["name"].as_str().unwrap().starts_with("pot_sandbox_"))
+                .all(|t| t["name"].as_str().unwrap() == "exec_command"
+                    || t["name"] == "write_stdin"
+                    || t["name"] == "apply_patch")
         );
         std::fs::remove_dir_all(&s.data).unwrap();
     }
@@ -800,25 +1082,13 @@ mod tests {
         active(&s);
         let result = tool(
             &s,
-            "pot_sandbox_write",
+            "apply_patch",
             "write",
-            &json!({"path":"host-sentinel","content":"bad"}),
+            &json!({"patch":"*** Begin Patch\n*** Add File: host-sentinel\n+bad\n*** End Patch"}),
         )
         .await;
         assert!(result.is_err());
         assert!(!s.workspace.join("host-sentinel").exists());
-        assert!(
-            tool(
-                &s,
-                "pot_sandbox_write",
-                "write",
-                &json!({"path":"host-sentinel","content":"bad"})
-            )
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("unknown")
-        );
         s.sandboxes.pending.lock().unwrap().insert(
             "unknown-operation".into(),
             Pending {
@@ -852,12 +1122,15 @@ mod tests {
                 active: true,
             },
         );
-        let operation = RemoteOperation {
-            manager: s.sandboxes.clone(),
-            id: "op".into(),
-        };
+
         assert!(s.sandboxes.acquire("default").await.is_ok());
-        drop(operation);
+        s.sandboxes
+            .pending
+            .lock()
+            .unwrap()
+            .get_mut("op")
+            .unwrap()
+            .active = false;
         assert!(s.sandboxes.acquire("default").await.is_err());
         drop(lease);
         s.sandboxes.pending.lock().unwrap().clear();
@@ -870,40 +1143,121 @@ mod tests {
         assert!(s.sandboxes.assignment("unsaved").is_err());
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
-}
-
-fn turn_alive(s: &Service, request: &str) -> bool {
-    let inner = s.inner.lock().unwrap();
-    inner
-        .turn
-        .as_ref()
-        .filter(|t| !t.cancelling)
-        .and_then(|t| inner.store.message(&t.user_message_id).ok().flatten())
-        .is_some_and(|m| m.request_id.as_deref() == Some(request))
-}
-pub async fn drain(s: &Service) -> Result<()> {
-    for _ in 0..200 {
-        if *s
-            .sandboxes
-            .running
+    #[tokio::test]
+    async fn command_sessions_reject_foreign_owners_turns_overrides_and_expired_ids() {
+        let s = tasks::tests::fixture();
+        active(&s);
+        let scope = Scope {
+            id: "scope".into(),
+            target: "default".into(),
+            owner: "other-task".into(),
+            turn: "turn".into(),
+            generation: 1,
+        };
+        s.sandboxes
+            .scopes
             .lock()
             .unwrap()
-            .get(&s.usage_scope)
-            .unwrap_or(&0)
-            == 0
-        {
-            anyhow::ensure!(
-                !s.sandboxes
-                    .pending
-                    .lock()
-                    .unwrap()
-                    .values()
-                    .any(|v| v.owner == s.usage_scope),
-                "Sandbox execution outcome unknown; stop unconfirmed, recover environment before continuing"
+            .insert(scope.id.clone(), scope.clone());
+        s.sandboxes
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("session".into(), scope.id.clone());
+        for args in [
+            json!({"session_id":"session"}),
+            json!({"session_id":"session","sandbox_id":"default"}),
+            json!({"session_id":"expired"}),
+        ] {
+            let error = tool(&s, "write_stdin", "call", &args)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("another task/turn")
+                    || error.contains("cannot switch")
+                    || error.contains("expired"),
+                "{error}"
             );
-            return Ok(());
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut prior = scope.clone();
+        prior.owner = s.usage_scope.clone();
+        prior.turn = "prior-turn".into();
+        s.sandboxes
+            .scopes
+            .lock()
+            .unwrap()
+            .insert(prior.id.clone(), prior);
+        assert!(
+            tool(&s, "write_stdin", "call", &json!({"session_id":"session"}))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("another task/turn")
+        );
+        assert!(!s.data.parent().unwrap().join("helper.sock").exists());
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
-    bail!("Sandbox operation cleanup timed out; stop unconfirmed")
+    #[test]
+    fn guest_events_cannot_forge_agent_lifecycle_and_use_model_call_identity() {
+        let mut remaining = 8;
+        assert!(guest_output(json!({"TurnFinished":"Success"}), "model", &mut remaining).is_err());
+        let output = guest_output(
+            serde_json::to_value(pot_core::Update::ToolOutput {
+                id: "guest-receipt".into(),
+                stream: "stdout".into(),
+                text: "hello".into(),
+            })
+            .unwrap(),
+            "model",
+            &mut remaining,
+        )
+        .unwrap();
+        assert!(matches!(output,pot_core::Update::ToolOutput{id,..} if id=="model"));
+        assert_eq!(remaining, 3);
+        assert!(
+            guest_output(
+                serde_json::to_value(pot_core::Update::ToolOutput {
+                    id: "guest".into(),
+                    stream: "stdout".into(),
+                    text: "oversized".into()
+                })
+                .unwrap(),
+                "model",
+                &mut remaining
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn concurrent_calls_share_one_durably_initialized_scope_and_generation() {
+        let s = tasks::tests::fixture();
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let manager = s.sandboxes.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    manager.scope("default", "main", "turn", 1).unwrap().id
+                })
+            })
+            .collect();
+        let ids: std::collections::BTreeSet<_> =
+            threads.into_iter().map(|t| t.join().unwrap()).collect();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(s.sandboxes.pending.lock().unwrap().len(), 1);
+        assert_eq!(s.sandboxes.leases.lock().unwrap()["default"], 1);
+        assert!(s.sandboxes.scope("default", "main", "turn", 2).is_err());
+        assert_eq!(
+            Manager::open(&s.data)
+                .unwrap()
+                .pending
+                .lock()
+                .unwrap()
+                .len(),
+            1
+        );
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
+    }
 }

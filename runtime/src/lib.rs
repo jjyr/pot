@@ -1,12 +1,13 @@
 //! Reusable backend application services. The executable and route assembly live in pot-server.
 pub mod agent;
 pub mod authorization;
+mod budget;
 pub mod control;
-mod deepseek;
 pub mod discovery;
 pub mod execution;
 pub mod gateway;
 pub mod orchestration;
+pub mod sandbox;
 pub mod schedules;
 mod store;
 pub mod tasks;
@@ -28,10 +29,10 @@ mod bootstrap;
 pub use bootstrap::{Backend, RuntimeConfig, initialize, initialize_with_agent_host};
 pub mod api {
     pub use crate::usage as accounting;
-    pub use crate::{Service, authenticate, cancel, events_handler, send, snapshot, usage};
+    pub use crate::{Service, cancel, events_handler, send, snapshot, usage};
     pub use crate::{
-        agent, authorization, control, discovery, execution, gateway, orchestration, schedules,
-        tasks, terminal, tool_bridge,
+        agent, authorization, control, discovery, execution, gateway, orchestration, sandbox,
+        schedules, tasks, terminal, tool_bridge,
     };
 }
 #[cfg(test)]
@@ -57,6 +58,10 @@ struct Inner {
 }
 #[derive(Clone)]
 pub struct Service {
+    #[cfg(test)]
+    test_tool_executor: Option<Arc<dyn pot_core::ToolExecutor>>,
+    sandboxes: Arc<sandbox::Manager>,
+    sandbox_id: Option<String>,
     usage: Arc<Mutex<usage::Ledger>>,
     usage_scope: String,
     inner: Arc<Mutex<Inner>>,
@@ -65,7 +70,7 @@ pub struct Service {
     token: String,
     boot: String,
     workspace: PathBuf,
-    api_budget: Option<deepseek::BudgetSettings>,
+    api_budget: Option<budget::BudgetSettings>,
     execution: Option<execution::Config>,
     agent_upstream: String,
     is_worker: bool,
@@ -408,23 +413,11 @@ pub async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Val
     let budget = s.budget_for(&inner.store).map_err(internal)?;
     let usage = inner
         .store
-        .get(if s.execution.is_some() {
-            "execution.usage"
-        } else {
-            "deepseek.usage"
-        })
+        .get("execution.usage")
         .map_err(internal)?
         .unwrap_or_else(|| "[]".into());
     Ok(Json(
         json!({"requests":budget.as_ref().map(|b|b.used),"request_limit":budget.as_ref().map(|b|b.limit),"usage":serde_json::from_str::<Value>(&usage).unwrap_or(json!([]))}),
-    ))
-}
-pub async fn authenticate(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
-    s.authorized(&h)?;
-    Err(error(
-        StatusCode::NOT_IMPLEMENTED,
-        "interactive_login_required",
-        "Use AI Configuration to start official browser authorization",
     ))
 }
 // Keep the endpoint name distinct from the broadcast sender in main.
@@ -443,6 +436,16 @@ mod tests {
         let (events, _) = broadcast::channel(8);
         let (commands, _rx) = mpsc::unbounded_channel();
         Service {
+            test_tool_executor: None,
+            sandboxes: Arc::new(
+                sandbox::Manager::open(
+                    &std::env::temp_dir()
+                        .join(format!("pot-inventory-{}", id()))
+                        .join("product"),
+                )
+                .unwrap(),
+            ),
+            sandbox_id: None,
             usage: Arc::new(Mutex::new(
                 usage::Ledger::open(std::path::Path::new(":memory:")).unwrap(),
             )),
@@ -557,7 +560,7 @@ mod tests {
         s.commands = tx;
         let data = std::env::temp_dir().join(format!("pot-budget-{}", id()));
         std::fs::create_dir_all(data.join("deepseek-attempts")).unwrap();
-        s.api_budget = Some(deepseek::BudgetSettings {
+        s.api_budget = Some(budget::BudgetSettings {
             namespace: "deepseek-attempts",
             data: data.clone(),
             limit: 1,

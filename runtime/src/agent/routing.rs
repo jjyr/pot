@@ -144,10 +144,6 @@ pub fn resolve(
             && let Some(binding) = current(&inner.store)?
         {
             let spec = binding.spec;
-            anyhow::ensure!(
-                spec.engine != Engine::Grok,
-                "Grok currently supports main chat only, not background tasks"
-            );
             check_requirements(&spec, requirements)?;
             let routing = TaskRouting {
                 profile: spec.source_profile_id.clone(),
@@ -194,10 +190,6 @@ pub fn resolve(
         .into_iter()
         .find(|p| p.id == selected)
         .ok_or_else(|| anyhow!("Selected worker profile is missing"))?;
-    anyhow::ensure!(
-        profile.engine != Engine::Grok,
-        "Grok currently supports main chat only, not background tasks"
-    );
     let spec = crate::gateway::resolve(root, &profile)?;
     check_requirements(&spec, requirements)?;
     let routing = TaskRouting {

@@ -23,7 +23,7 @@ PRIVATE = Path("/run/pot-executor")
 PRIVATE.mkdir(mode=0o700, parents=True, exist_ok=True)
 os.chmod(PRIVATE, 0o700)
 LOCK = threading.RLock()
-PROCESSES = {}
+RUNNERS = {}
 CANCELLED = set()
 DESKTOP = None
 DB = sqlite3.connect(PRIVATE / "operations.sqlite", check_same_thread=False)
@@ -50,20 +50,6 @@ def workspace(cwd):
         for parent in [WORK, *path.parents, path]:
             if parent.is_relative_to(WORK):
                 os.chown(parent, USER.pw_uid, USER.pw_gid)
-    return path
-
-
-def target(cwd, name):
-    raw = Path(name or ".")
-    if raw.is_absolute():
-        prefix = "/data/workspace"
-        text = str(raw)
-        if text != prefix and not text.startswith(prefix + "/"):
-            raise ValueError("File path outside Sandbox workspace")
-        raw = WORK / text.removeprefix(prefix).lstrip("/")
-    path = (cwd / raw).resolve()
-    if not path.is_relative_to(WORK):
-        raise ValueError("File path outside Sandbox workspace")
     return path
 
 
@@ -103,126 +89,105 @@ def demote():
         os.setuid(USER.pw_uid)
 
 
-def command(op_id, argv, cwd, timeout, payload=None):
-    output = PRIVATE / ("output-" + op_id)
-    env = {
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
-        "LANG": "C.UTF-8",
-        "HOME": str(WORK),
-        "TMPDIR": "/tmp",
-    }
-    with output.open("wb") as out:
-        cgroup = None
-        if os.uname().sysname == "Linux":
-            if not USER or not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
-                raise RuntimeError("Root-owned cgroup v2 containment required")
-            cgroup = Path("/sys/fs/cgroup") / ("pot-" + op_id)
-            cgroup.mkdir(mode=0o700)
+class Runner:
+    def __init__(self, scope, cwd, policy):
+        self.lock = threading.Lock()
+        self.cwd, self.policy = cwd, policy
+        group = Path("/sys/fs/cgroup") / ("pot-" + scope)
+        if not USER or not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
+            raise RuntimeError("Root-owned cgroup v2 containment required")
+        group.mkdir(mode=0o700)
 
         def contain():
-            if cgroup is not None:
-                (cgroup / "cgroup.procs").write_text(str(os.getpid()))
+            (group / "cgroup.procs").write_text(str(os.getpid()))
             demote()
 
-        process = None
-        timed_out = False
-        try:
-            with LOCK:
-                if op_id in CANCELLED:
-                    return {"cancelled": True}
-                process = subprocess.Popen(
-                    argv,
-                    cwd=cwd,
-                    env=env,
-                    stdout=out,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                    preexec_fn=contain,
-                    stdin=subprocess.PIPE if payload is not None else subprocess.DEVNULL,
-                )
-                process.sandbox_cgroup = cgroup
-                PROCESSES[op_id] = process
-            if payload is not None:
-                process.stdin.write(payload)
-                process.stdin.close()
-            deadline = time.monotonic() + timeout
-            while process.poll() is None:
-                if time.monotonic() >= deadline or output.stat().st_size > 8 * 1024 * 1024:
-                    timed_out = True
-                    break
-                time.sleep(0.05)
-        finally:
-            if process is not None:
-                terminate(process)
-            with LOCK:
-                PROCESSES.pop(op_id, None)
-            if cgroup is not None:
-                cgroup.rmdir()
-    with output.open("rb") as stream:
-        size = output.stat().st_size
-        stream.seek(max(0, size - 65536))
-        text = stream.read(65536).decode("utf-8", errors="replace")
-    output.unlink(missing_ok=True)
-    return {
-        "output": text,
-        "exit_code": process.returncode,
-        "truncated": size > 65536,
-        "timed_out": timed_out,
-        "cancelled": op_id in CANCELLED,
-    }
+        self.process = subprocess.Popen(
+            ["/opt/pot/pot-tool-executor"],
+            cwd=cwd,
+            env={
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "LANG": "C.UTF-8",
+                "HOME": str(cwd),
+                "TMPDIR": "/tmp",
+            },
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            preexec_fn=contain,
+        )
+        self.process.sandbox_cgroup = group
+
+    def execute(self, request):
+        with self.lock:
+            if self.process.poll() is not None:
+                raise RuntimeError("Execution scope ended; sessions cannot be resumed")
+            self.process.stdin.write((json.dumps(request) + "\n").encode())
+            self.process.stdin.flush()
+            events = []
+            while True:
+                line = self.process.stdout.readline(2 * 1024 * 1024)
+                if not line:
+                    raise RuntimeError(
+                        "Execution scope interrupted; external effects may have occurred"
+                    )
+                value = json.loads(line)
+                if "result" in value:
+                    return {"result": value["result"], "events": events}
+                if "event" in value:
+                    events.append(value["event"])
+
+
+def valid_id(value):
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 64
+        and all(c.isalnum() or c == "-" for c in value)
+    )
+
+
+def cancel(scope):
+    if not valid_id(scope):
+        raise ValueError("Invalid execution scope")
+    with LOCK:
+        CANCELLED.add(scope)
+        runner = RUNNERS.get(scope)
+        if runner:
+            terminate(runner.process)
+            runner.process.sandbox_cgroup.rmdir()
+            RUNNERS.pop(scope, None)
+    return {"settled": True}
 
 
 def execute(request):
-    op_id = request["id"]
-    if (
-        not isinstance(op_id, str)
-        or len(op_id) > 64
-        or not all(c.isalnum() or c == "-" for c in op_id)
-    ):
-        raise ValueError("Invalid operation ID")
+    op_id, scope = request["id"], request["scope"]
+    if not valid_id(op_id) or not valid_id(scope):
+        raise ValueError("Invalid operation/scope ID")
     encoded = json.dumps(request, sort_keys=True)
     with LOCK:
         row = DB.execute("SELECT input,result FROM operations WHERE id=?", (op_id,)).fetchone()
         if row:
-            if row[0] != encoded and row[0] != "cancelled":
+            if row[0] != encoded:
                 raise ValueError("Operation ID conflict")
             if row[1] is None:
                 raise ValueError("Operation in progress; do not replay")
             return json.loads(row[1])
+        if scope in CANCELLED:
+            raise ValueError("Execution scope ended")
+        cwd = workspace(request["cwd"])
+        runner = RUNNERS.get(scope)
+        if runner is None:
+            runner = Runner(scope, cwd, request["policy"])
+            RUNNERS[scope] = runner
+        if runner.cwd != cwd or runner.policy != request["policy"]:
+            raise ValueError("Scope configuration changed")
         DB.execute("INSERT INTO operations VALUES (?,?,NULL)", (op_id, encoded))
         DB.commit()
     try:
-        cwd = workspace(request["cwd"])
-        args = request.get("args", {})
-        op = request["operation"]
-        path = target(cwd, args.get("path", "."))
-        if op == "bash":
-            result = command(
-                op_id,
-                ["/bin/bash", "-lc", args["command"]],
-                cwd,
-                min(600, max(1, args.get("timeout", 120))),
-            )
-        elif op in ("read", "write", "edit", "ls"):
-            response = command(
-                op_id,
-                ["python3", str(Path(__file__).with_name("file-tools.py"))],
-                cwd,
-                30,
-                json.dumps({"operation": op, "args": args, "path": str(path)}).encode(),
-            )
-            result = response if response.get("cancelled") else json.loads(response["output"])
-        elif op in ("grep", "find"):
-            argv = (
-                ["rg", "--no-heading", "--", args["pattern"], str(path)]
-                if op == "grep"
-                else ["find", str(path), "-name", args["pattern"]]
-            )
-            result = command(op_id, argv, cwd, 30)
-        else:
-            raise ValueError("Unknown executor operation")
+        result = runner.execute({**request, "cwd": str(cwd)})
     except Exception as error:
-        result = {"error": str(error)[:1024]}
+        result = {"result": {"isError": True, "error": str(error)[:1024]}, "events": []}
     with LOCK:
         DB.execute("UPDATE operations SET result=? WHERE id=?", (json.dumps(result), op_id))
         DB.commit()
@@ -274,28 +239,8 @@ class Handler(BaseHTTPRequestHandler):
                             ["/bin/sh", "/opt/pot/desktop.sh"], start_new_session=True
                         )
                 self.respond(200, {"starting": True})
-            elif self.path == "/cancel":
-                op_id = request["id"]
-                with LOCK:
-                    CANCELLED.add(op_id)
-                    process = PROCESSES.get(op_id)
-                    if process:
-                        terminate(process)
-                    DB.execute(
-                        "INSERT OR IGNORE INTO operations VALUES (?,?,?)",
-                        (op_id, "cancelled", json.dumps({"cancelled": True})),
-                    )
-                    DB.commit()
-                deadline = time.monotonic() + 10
-                while time.monotonic() < deadline:
-                    with LOCK:
-                        row = DB.execute(
-                            "SELECT result FROM operations WHERE id=?", (op_id,)
-                        ).fetchone()
-                    if row and row[0] is not None:
-                        break
-                    time.sleep(0.05)
-                self.respond(200, {"settled": row is not None and row[0] is not None})
+            elif self.path in ("/cancel", "/finish"):
+                self.respond(200, cancel(request["id"]))
             else:
                 self.respond(404, {})
         except Exception as error:
@@ -304,8 +249,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def shutdown(*_):
     with LOCK:
-        for process in list(PROCESSES.values()):
-            terminate(process)
+        for scope in list(RUNNERS):
+            cancel(scope)
     if DESKTOP and DESKTOP.poll() is None:
         DESKTOP.terminate()
         try:

@@ -63,13 +63,25 @@ pub(super) fn task_phase(hub: &Hub, task_id: &str) -> Option<TaskPhase> {
 pub(super) fn remove_uncommitted(hub: &mut Hub, task_id: &str) {
     hub.lanes.remove(task_id);
 }
-fn child(root: &Service, task_id: &str) -> Result<Service> {
+fn child(root: &Service, task_id: &str, sandbox_id: &str) -> Result<Service> {
     anyhow::ensure!(
         uuid::Uuid::parse_str(task_id).is_ok(),
         "Invalid persisted task ID"
     );
+    anyhow::ensure!(
+        !sandbox_id.is_empty(),
+        "Persisted task Sandbox assignment missing"
+    );
+    root.sandboxes.assignment(sandbox_id)?;
     let data = root.data.join("tasks").join(task_id);
-    let workspace = root.workspace.join("tasks").join(task_id);
+    let workspace = root
+        .data
+        .parent()
+        .unwrap()
+        .join("sandboxes")
+        .join(sandbox_id)
+        .join("workspace/workspace/tasks")
+        .join(task_id);
     std::fs::create_dir_all(&data)?;
     std::fs::create_dir_all(&workspace)?;
     let endpoint: RuntimeEndpoint =
@@ -85,6 +97,10 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     let (events, _) = broadcast::channel(256);
     let (commands, _) = mpsc::unbounded_channel();
     let service = Service {
+        #[cfg(test)]
+        test_tool_executor: root.test_tool_executor.clone(),
+        sandboxes: root.sandboxes.clone(),
+        sandbox_id: Some(sandbox_id.into()),
         terminals: root.terminals.clone(),
         codex: root.codex.clone(),
         agent_host: root.agent_host.clone(),
@@ -135,10 +151,11 @@ pub(super) fn restore(root: &Service) -> Result<()> {
         )
     };
     let mut hub = root.tasks.lock().unwrap();
+    schedules::validate_bindings(root, &book)?;
     hub.schedules = book;
     for mut record in records {
         restore_title(&mut record);
-        let service = child(root, &record.info.id)?;
+        let service = child(root, &record.info.id, &record.info.sandbox_id)?;
         if let Some(job) = record.active.take() {
             if usage::paused(&service)?.is_some() {
                 record.queue.push_front(job);
@@ -422,10 +439,15 @@ fn enqueue_from(
     routing.preference_revision = req.preference_revision;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
+    let sandbox_id = root
+        .sandboxes
+        .assignment(&req.sandbox_id)
+        .map_err(internal)?;
     let task_id = id();
     let first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
     let record = Record {
         info: TaskInfo {
+            sandbox_id: sandbox_id.clone(),
             id: task_id.clone(),
             title: task_title(&req.text),
             phase: TaskPhase::Queued,
@@ -442,7 +464,7 @@ fn enqueue_from(
         active: None,
         receipts: vec![first],
     };
-    let service = child(root, &task_id).map_err(internal)?;
+    let service = child(root, &task_id, &sandbox_id).map_err(internal)?;
     {
         let mut inner = service.inner.lock().unwrap();
         if agent::current(&inner.store).map_err(internal)?.is_none() {
@@ -961,6 +983,42 @@ pub(super) fn request_shutdown(root: &Service) {
     }
 }
 
+pub(super) fn uses_sandbox(root: &Service, sandbox_id: &str) -> bool {
+    let hub = root.tasks.lock().unwrap();
+    hub.lanes
+        .values()
+        .any(|lane| lane.record.info.sandbox_id == sandbox_id)
+        || schedules::uses_sandbox(&hub.schedules, sandbox_id)
+}
+
+/// Serialize the final identity removal with task/schedule assignment.
+pub(super) fn guard_sandbox_delete(
+    root: &Service,
+    sandbox_id: &str,
+    delete: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let hub = root.tasks.lock().unwrap();
+    anyhow::ensure!(
+        !hub.lanes
+            .values()
+            .any(|lane| lane.record.info.sandbox_id == sandbox_id)
+            && !schedules::uses_sandbox(&hub.schedules, sandbox_id),
+        "Sandbox is assigned to a persisted task or schedule"
+    );
+    delete()
+}
+
+/// Snapshot task attribution without retaining the task lock during Helper I/O.
+pub(super) fn sandbox_tasks(root: &Service) -> Vec<TaskInfo> {
+    root.tasks
+        .lock()
+        .unwrap()
+        .lanes
+        .values()
+        .map(|lane| lane.record.info.clone())
+        .collect()
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -1057,6 +1115,7 @@ pub(super) mod tests {
             State(s.clone()),
             headers(),
             Json(CreateTask {
+                sandbox_id: String::new(),
                 request_id: "full-title".into(),
                 text: format!("{title}\nAdditional instructions"),
                 resource: "".into(),
@@ -1283,7 +1342,7 @@ pub(super) mod tests {
         add(&s, "new", "").await;
         let a = claim(&s).unwrap().unwrap();
         finish(&s, &a.0, Err(anyhow!("observed failure"))).unwrap();
-        s.api_budget = Some(deepseek::BudgetSettings {
+        s.api_budget = Some(budget::BudgetSettings {
             namespace: "test-budget",
             data: s.data.clone(),
             limit: 0,
@@ -1729,6 +1788,7 @@ pub(super) mod tests {
         let s = fixture();
         routing_profiles(&s);
         let request = CreateTask {
+            sandbox_id: String::new(),
             request_id: "routed".into(),
             text: "test".into(),
             profile: Some("alternate".into()),
@@ -1833,6 +1893,7 @@ pub(super) mod tests {
                     State(s.clone()),
                     headers(),
                     Json(CreateTask {
+                        sandbox_id: String::new(),
                         request_id: id(),
                         requirements,
                         ..request.clone()
@@ -1847,6 +1908,7 @@ pub(super) mod tests {
                 State(s.clone()),
                 headers(),
                 Json(CreateTask {
+                    sandbox_id: String::new(),
                     request_id: id(),
                     profile: Some("other".into()),
                     requirements: TaskRequirements {
@@ -1886,6 +1948,7 @@ pub(super) mod tests {
                     State(s.clone()),
                     headers(),
                     Json(CreateTask {
+                        sandbox_id: String::new(),
                         request_id: id(),
                         text: "job".into(),
                         profile: Some(profile.into()),
@@ -2002,7 +2065,10 @@ pub(super) mod tests {
     }
     pub(crate) fn fixture() -> Service {
         let mut s = crate::tests::service();
-        s.data = std::env::temp_dir().join(format!("pot-tasks-{}", id()));
+        s.data = std::env::temp_dir()
+            .join(format!("pot-tasks-{}", id()))
+            .join("product");
+        s.sandboxes = Arc::new(sandbox::Manager::open(&s.data).unwrap());
         s.workspace = s.data.join("workspace");
         std::fs::create_dir_all(&s.workspace).unwrap();
         s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
@@ -2031,6 +2097,7 @@ pub(super) mod tests {
             State(s.clone()),
             headers(),
             Json(CreateTask {
+                sandbox_id: String::new(),
                 request_id: text.into(),
                 text: text.into(),
                 resource: resource.into(),
@@ -2361,6 +2428,7 @@ pub(super) mod tests {
                 State(s),
                 HeaderMap::new(),
                 Json(CreateTask {
+                    sandbox_id: String::new(),
                     request_id: "x".into(),
                     text: "x".into(),
                     resource: "".into(),

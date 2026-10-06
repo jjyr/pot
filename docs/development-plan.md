@@ -4,15 +4,15 @@ Updated: 2026-10-06.
 
 ## Delivered
 
-- Host Runtime, product storage and Pi/Codex Agent loops run independently of Sandbox readiness.
-- Main chat configures API/Pi or official Codex through one AI Configuration page. Pinned CLIs and Node ship in the App; no guest Agent installer or configuration importer exists.
+- Host Runtime, product storage and Pot/Codex Agent loops run independently of Sandbox readiness.
+- Main chat configures API/Pot or official Codex through one AI Configuration page. pot-agent is compiled into Server; pinned Codex and Node ship in the App; no guest Agent installer or configuration importer exists.
 - Main Agent manages up to 16 Linux Sandbox definitions. Task creation saves one immutable environment assignment; workers cannot manage or switch environments.
 - Environment tools use the authenticated guest executor. Active leases, cgroup cancellation, durable receipts and explicit recovery protect operation outcomes. Artifacts survive environment shutdown.
 - Tasks support independent sessions, bounded concurrency, persistent guidance, cancellation, summaries and archive/search. Schedules save their environment assignment and resolve Agent profiles per occurrence.
 - API gateway supports Chat, Responses, Messages and Gemini, with request/usage accounting and allowances. Native Codex reports turn usage separately.
 - GPUI/Swift provides Chat, Tasks, Usage, AI/Task/Environment settings and optional Sandbox desktop.
 
-See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/agent-sandbox-20261006.md).
+See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
 
 ## Remaining validation and scope
 

@@ -2,7 +2,7 @@
 
 Pot is an open-source implementation of the Dot experience.
 
-Pot runs local Pi/Codex Agents with separately managed Linux sandboxes. Pot manages environments and background tasks—you simply tell it what to do and provide guidance along the way.
+Pot runs local Pot/Codex Agents with separately managed Linux sandboxes. Pot manages environments and background tasks—you simply tell it what to do and provide guidance along the way.
 
 ## Features
 

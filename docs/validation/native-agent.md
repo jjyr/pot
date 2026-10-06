@@ -59,7 +59,7 @@ Verification: `mise run test` passes **119 backend tests**, `mise run test:app` 
 
 Eight added tests cover configurable large/invalid limits, effective prompt/output/tool policy, code tool/context/token hooks, interactive pipe input and incremental output, turn-end process cleanup, durable/idempotent guidance and pause/resume, cancel while paused with zero model requests, and oversized-context rejection before networking. Existing four-protocol, budget/recovery, timeout/cancellation and Server shutdown checks remain passing.
 
-[Isolation boundaries](../agent-isolation.md) are proposed for discussion. Controller and shell still share the guest user; this follow-up does not claim controller, task or browser permission separation.
+At the time, isolation boundaries were proposed for discussion. The proposal has since been removed; see the current [Agent/Sandbox design](../agent-sandbox-design.md). Controller and shell still share the guest user; this follow-up does not claim controller, task or browser permission separation.
 
 ## Follow-up: context estimation and usage calibration (2026-10-06)
 
@@ -94,3 +94,7 @@ The tests also exposed and accompany these fixes:
 - Preserve initial Anthropic text-block content as well as later text deltas, without duplicating replay text.
 
 Verification: `mise run test` passes **178 backend tests**; `mise run check` passes formatting/script lint, Rust workspace checks and Swift Helper compilation. The final pot-agent-only rerun passes all 28 tests after making persistence-failure injection depend on checkpoint phase rather than save-call counts. `git diff --check` passes. No paid inference, image rebuild/boot, line-coverage percentage or exhaustive fault/fuzz coverage is claimed. Product billing remains covered separately by Runtime/Storage tests; Agent unit observations are not an authoritative settlement ledger.
+
+## Host/Sandbox follow-up
+
+The guest controller placement described above is historical. Current deployment and independently rerun routing/cleanup validation are recorded in [Host pot-agent acceptance](host-pot-agent-20261006.md).

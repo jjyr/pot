@@ -244,20 +244,20 @@ async fn begin(
                 Ok(v) if !v["account"].is_null() => {}
                 _ => final_phase = "failed",
             }
-            if final_phase == "authenticated" {
-                if let Ok(v) = host.request("model/list", json!({})).await {
-                    models = v["data"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|m| {
-                            m["model"]
-                                .as_str()
-                                .or_else(|| m["id"].as_str())
-                                .map(str::to_owned)
-                        })
-                        .collect();
-                }
+            if final_phase == "authenticated"
+                && let Ok(v) = host.request("model/list", json!({})).await
+            {
+                models = v["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|m| {
+                        m["model"]
+                            .as_str()
+                            .or_else(|| m["id"].as_str())
+                            .map(str::to_owned)
+                    })
+                    .collect();
             }
         } else {
             let _ = host

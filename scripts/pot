@@ -53,7 +53,6 @@ if cmd == "prepare":
     for name in [
         "sandbox.sh",
         "executor.py",
-        "file-tools.py",
         "desktop.sh",
         "desktop-config.sh",
         "desktop-session.sh",
@@ -125,6 +124,27 @@ elif cmd == "bundle":
         tmp = dest.with_suffix(".new")
         shutil.copy2(src, tmp)
         tmp.replace(dest)
+    call(
+        [
+            "cargo",
+            "zigbuild",
+            "--locked",
+            "--release",
+            "--target",
+            "aarch64-unknown-linux-musl",
+            "-p",
+            "pot-tool-executor",
+            "-j",
+            "4",
+        ],
+        cwd=REPO,
+        env=env,
+    )
+    shutil.copy2(
+        pathlib.Path(env["CARGO_TARGET_DIR"])
+        / "aarch64-unknown-linux-musl/release/pot-tool-executor",
+        RES / "pot-tool-executor",
+    )
     call([REPO / "scripts/build-image"])
     shutil.rmtree(APP / "Contents/Resources/runtime")
     (APP / "Contents/Resources/runtime").mkdir()
@@ -143,8 +163,8 @@ elif cmd == "bundle":
     )
     host_tools = APP / "Contents/Resources/runtime/host-tools"
     host_tools.mkdir(exist_ok=True)
-    shutil.copy2(REPO / "image/pi/package.json", host_tools / "package.json")
-    shutil.copy2(REPO / "image/pi/package-lock.json", host_tools / "package-lock.json")
+    shutil.copy2(REPO / "image/agents/package.json", host_tools / "package.json")
+    shutil.copy2(REPO / "image/agents/package-lock.json", host_tools / "package-lock.json")
     call(
         [
             RES / "node/bin/node",

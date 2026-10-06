@@ -1,5 +1,6 @@
 //! Product domain and execution contracts. No database, HTTP server or CLI implementation.
 mod agent;
+pub mod environment_tools;
 mod execution;
 pub use agent::*;
 mod model;

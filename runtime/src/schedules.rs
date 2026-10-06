@@ -275,8 +275,12 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             {
                 return Err(invalid("最多 100 个计划"));
             }
-            let spec: ScheduleSpec =
+            let mut spec: ScheduleSpec =
                 serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
+            spec.sandbox_id = root
+                .sandboxes
+                .assignment(&spec.sandbox_id)
+                .map_err(invalid)?;
             validate(&spec).map_err(invalid)?;
             agent::routing::resolve(
                 root,
@@ -340,8 +344,15 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
         let plan = hub.schedules.plans.get_mut(&sid).unwrap();
         match action {
             "update" => {
-                let spec: ScheduleSpec =
+                let mut spec: ScheduleSpec =
                     serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
+                spec.sandbox_id = if spec.sandbox_id.is_empty() {
+                    plan.info.spec.sandbox_id.clone()
+                } else {
+                    root.sandboxes
+                        .assignment(&spec.sandbox_id)
+                        .map_err(invalid)?
+                };
                 validate(&spec).map_err(invalid)?;
                 agent::routing::resolve(
                     root,
@@ -434,6 +445,7 @@ fn launch(
         root,
         hub,
         CreateTask {
+            sandbox_id: plan.info.spec.sandbox_id.clone(),
             request_id: format!("schedule:{}", id()),
             text: brief,
             resource: String::new(),
@@ -724,6 +736,22 @@ pub(super) fn complete(
     None
 }
 
+pub(super) fn validate_bindings(root: &Service, book: &Book) -> Result<()> {
+    for plan in book.plans.values() {
+        anyhow::ensure!(
+            !plan.info.spec.sandbox_id.is_empty(),
+            "Persisted schedule Sandbox assignment missing"
+        );
+        root.sandboxes.assignment(&plan.info.spec.sandbox_id)?;
+    }
+    Ok(())
+}
+pub(super) fn uses_sandbox(book: &Book, sandbox_id: &str) -> bool {
+    book.plans
+        .values()
+        .any(|plan| plan.info.spec.sandbox_id == sandbox_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -984,5 +1012,43 @@ mod tests {
         next.tasks = Arc::new(Mutex::new(tasks::Hub::default()));
         tasks::restore(&next).unwrap();
         assert_eq!(page(&next, QueryPage::default()).unwrap().total, 1);
+    }
+    #[tokio::test]
+    async fn saved_schedule_environment_survives_default_change_update_and_restore() {
+        let s = tasks::tests::fixture();
+        let sid = create(&s, spec(), 0);
+        sandbox::management(&s, &json!({"action":"create","sandbox_id":"second"}))
+            .await
+            .unwrap();
+        sandbox::management(&s, &json!({"action":"select","sandbox_id":"second"}))
+            .await
+            .unwrap();
+        apply(
+            &s,
+            json!({"request_id":"update","action":"update","schedule_id":sid,"spec":spec()}),
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            s.tasks.lock().unwrap().schedules.plans[&sid]
+                .info
+                .spec
+                .sandbox_id,
+            "default"
+        );
+        let mut reopened = s.clone();
+        reopened.tasks = Arc::new(Mutex::new(tasks::Hub::default()));
+        tasks::restore(&reopened).unwrap();
+        apply(
+            &reopened,
+            json!({"request_id":"run-bound","action":"run","schedule_id":sid}),
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            tasks::page(&reopened, &TaskQuery::default()).unwrap().items[0].sandbox_id,
+            "default"
+        );
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
 }
