@@ -19,7 +19,7 @@ run = "python scripts/dev-check doctor"
 
 [tasks.setup]
 description = "Prepare Rust components and install repository-local Git hooks"
-run = ["rustup component add rustfmt", "rustup target add aarch64-unknown-linux-musl", "hk install --mise", "mise run doctor"]
+run = ["rustup component add rustfmt clippy", "rustup target add aarch64-unknown-linux-musl", "hk install --mise", "mise run doctor"]
 
 [tasks.fmt]
 description = "Format Rust, Swift, Python and Shell sources"
@@ -31,6 +31,14 @@ run = "python scripts/dev-check lint"
 
 [tasks."check:rust"]
 run = "cargo check --workspace --locked -j 4"
+
+[tasks.clippy]
+description = "Lint every Rust workspace target, treating warnings as errors"
+run = "cargo clippy --workspace --all-targets --locked -j 4 -- -D warnings"
+
+[tasks."clippy:backend"]
+description = "Lint portable backend targets without the macOS App"
+run = "cargo clippy --workspace --exclude pot-app --all-targets --locked -j 4 -- -D warnings"
 
 [tasks.check]
 description = "Run formatting, script and Rust compilation checks"

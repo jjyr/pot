@@ -106,10 +106,10 @@ impl Connection {
                 };
                 if value.get("method").is_some() {
                     let _ = events.send(value);
-                } else if let Some(id) = value["id"].as_u64() {
-                    if let Some(tx) = pending.lock().unwrap().remove(&id) {
-                        let _ = tx.send(value);
-                    }
+                } else if let Some(id) = value["id"].as_u64()
+                    && let Some(tx) = pending.lock().unwrap().remove(&id)
+                {
+                    let _ = tx.send(value);
                 }
             }
             // Loss of the host does not prove its detached tool children settled.

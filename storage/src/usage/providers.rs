@@ -51,6 +51,8 @@ impl Ledger {
         )?;
         Ok(())
     }
+    // Ledger fields mirror the persisted reservation and immutable route identity.
+    #[allow(clippy::too_many_arguments)]
     pub fn reserve_routed(
         &self,
         id: &str,

@@ -328,7 +328,7 @@ fn spawn(cwd: &std::path::Path, size: &Size) -> Result<Arc<Session>> {
         loop {
             let ready = reader.master.readable().await;
             let Ok(mut ready) = ready else { break };
-            match ready.try_io(|fd| (&*fd.get_ref()).read(&mut buffer)) {
+            match ready.try_io(|fd| fd.get_ref().read(&mut buffer)) {
                 Ok(Ok(0)) | Ok(Err(_)) => break,
                 Ok(Ok(n)) => {
                     let mut history = reader.history.lock().unwrap();
@@ -348,7 +348,7 @@ fn spawn(cwd: &std::path::Path, size: &Size) -> Result<Arc<Session>> {
 async fn write(session: &Session, mut bytes: &[u8]) -> Result<()> {
     while !bytes.is_empty() {
         let mut ready = session.master.writable().await?;
-        match ready.try_io(|fd| (&*fd.get_ref()).write(bytes)) {
+        match ready.try_io(|fd| fd.get_ref().write(bytes)) {
             Ok(Ok(0)) => bail!("Terminal closed"),
             Ok(Ok(n)) => bytes = &bytes[n..],
             Ok(Err(e)) => return Err(e.into()),

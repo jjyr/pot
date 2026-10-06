@@ -40,6 +40,7 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
+mise run clippy         # All Rust targets; warnings fail the check
 mise run test:eval      # Deterministic CLI suite, compaction, validation and comparison
 mise exec -- cargo test --locked -p pot-runtime native_agent
 ```
@@ -48,7 +49,7 @@ The final command runs the Rust Agent against local HTTP model fixtures with rea
 
 ### GitHub CI
 
-[CI](../.github/workflows/ci.yml) runs on pull requests, pushes to `main`, and manual dispatch. Linux runs all backend tests and `test:eval`; Apple Silicon macOS 26 runs source formatting/script checks, workspace compilation, the Swift Helper build, backend tests and App unit tests. Tool versions come from `mise.toml`, with Actions pinned to commit hashes. Dependency/build caches are separated by OS and architecture; evaluation records, credentials and VM images are not cached.
+[CI](../.github/workflows/ci.yml) runs on pull requests, pushes to `main`, and manual dispatch. Linux runs backend Clippy, all backend tests and `test:eval`; Apple Silicon macOS 26 runs source formatting/script checks, workspace compilation, workspace Clippy, the Swift Helper build, backend tests and App unit tests. Clippy includes all targets (including tests) and treats warnings as errors. Linux excludes the macOS-only App; the macOS job covers it. Tool versions come from `mise.toml`, with Actions pinned to commit hashes. Dependency/build caches are separated by OS and architecture; evaluation records, credentials and VM images are not cached.
 
 The deterministic evaluation checks five-turn retention, cache request identity, injected failures/recovery, child-task delegation, tool execution and compaction. It also reconstructs records and compares repeated compaction runs. These are contract checks, not measurements of real provider efficiency. CI requires no model credentials and does not run live evaluations, account authorization, GUI acceptance, image builds or VM boot tests. Local development still covers those acceptance steps separately.
 
@@ -77,7 +78,7 @@ Use a new result directory for each cold validation. This tests real CLI behavio
 `mise run setup` installs repository-local hk pre-commit/pre-push hooks without changing global hooks. Run it once per clone. Git hooks load tools through mise without shell activation; mise itself must be on PATH.
 
 - pre-commit: checks formatting/scripts for changed files; Rust formatting covers the workspace, and rule/check-entry changes trigger all lightweight checks. Also checks staged whitespace.
-- pre-push: relevant Rust/Swift changes trigger `check:rust` and core tests; Helper changes additionally trigger `check:swift`.
+- pre-push: relevant Rust/Swift changes trigger `check:rust`, workspace Clippy (all targets, warnings as errors), and backend tests; Helper changes additionally trigger `check:swift`. Clippy does not run in pre-commit.
 - Hooks only check; they neither fix nor stage. Source checks read the working tree, so partially staged content must also be formatted. Image/VM/paid model tests are excluded. A new machine may compile slowly; later runs reuse caches.
 
 Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.

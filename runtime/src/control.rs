@@ -313,13 +313,12 @@ pub(crate) fn record(s: &Service, epoch: u64, metadata: &Value) -> Result<()> {
         "failed",
         "cached",
     ] {
-        if let Some(value) = metadata.get(key) {
-            if value.is_boolean()
+        if let Some(value) = metadata.get(key)
+            && (value.is_boolean()
                 || value.is_number()
-                || value.as_str().is_some_and(|v| v.len() <= 256)
-            {
-                entry[key] = value.clone();
-            }
+                || value.as_str().is_some_and(|v| v.len() <= 256))
+        {
+            entry[key] = value.clone();
         }
     }
     entries.push(entry);

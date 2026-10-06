@@ -655,10 +655,10 @@ pub fn validate(directory: &Path) -> Result<Report> {
             errors.push(format!("Output assertion failed: {turn}"));
         }
     }
-    if let Some(expected) = scenario.expected_final_text {
-        if final_text != expected {
-            errors.push("Final answer assertion failed".into());
-        }
+    if let Some(expected) = scenario.expected_final_text
+        && final_text != expected
+    {
+        errors.push("Final answer assertion failed".into());
     }
     let workspace = directory.join("workspace").canonicalize()?;
     for (name, expected) in scenario.expected_files {

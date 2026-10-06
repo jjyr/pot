@@ -271,16 +271,15 @@ impl Decoder {
         if e.get("error").is_some() || e["type"] == "error" {
             bail!("Model stream reported an error");
         }
-        if let Some(usage) = self.observer.observe(&self.protocol, e)? {
-            if let (Some(input), Some(output)) = (
+        if let Some(usage) = self.observer.observe(&self.protocol, e)?
+            && let (Some(input), Some(output)) = (
                 usage["prompt_tokens"].as_u64(),
                 usage["completion_tokens"].as_u64(),
-            ) {
-                if input.checked_add(output).is_some_and(|total| total > 0) {
-                    // Usage frames are cumulative snapshots, not deltas to add together.
-                    self.usage = Some(TokenUsage { input, output });
-                }
-            }
+            )
+            && input.checked_add(output).is_some_and(|total| total > 0)
+        {
+            // Usage frames are cumulative snapshots, not deltas to add together.
+            self.usage = Some(TokenUsage { input, output });
         }
         let mut delta = String::new();
         match self.protocol {
@@ -401,10 +400,10 @@ impl Decoder {
                 if let Some(c) = e["candidates"].as_array().and_then(|c| c.first()) {
                     if let Some(parts) = c["content"]["parts"].as_array() {
                         for p in parts {
-                            if p["thought"] != true {
-                                if let Some(s) = p["text"].as_str() {
-                                    delta.push_str(s);
-                                }
+                            if p["thought"] != true
+                                && let Some(s) = p["text"].as_str()
+                            {
+                                delta.push_str(s);
                             }
                             self.blocks.insert(self.blocks.len(), p.clone());
                         }

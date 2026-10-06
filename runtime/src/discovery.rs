@@ -48,11 +48,10 @@ pub fn tools(s: &Service) -> Result<Vec<Tool>> {
         if let Some(profile) = profiles
             .iter()
             .find(|p| p.id == format!("{}-default", tool.id))
+            && let Some(launch) = &profile.launch_spec
         {
-            if let Some(launch) = &profile.launch_spec {
-                tool.invocation.executable = launch.executable.clone();
-                tool.invocation.argv = launch.expand(&[])?;
-            }
+            tool.invocation.executable = launch.executable.clone();
+            tool.invocation.argv = launch.expand(&[])?;
         }
     }
     Ok(tools)
@@ -113,31 +112,31 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
         }
         if auth == "authenticated" {
             if tool.id == "codex" {
-                if let Ok(host) = s.codex.connect(&agent::LaunchSpec::codex()).await {
-                    if let Ok(reply) = host.request("model/list", json!({})).await {
-                        models = reply["data"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|m| {
-                                m["model"]
-                                    .as_str()
-                                    .or_else(|| m["id"].as_str())
-                                    .map(str::to_owned)
-                            })
-                            .collect();
-                    }
+                if let Ok(host) = s.codex.connect(&agent::LaunchSpec::codex()).await
+                    && let Ok(reply) = host.request("model/list", json!({})).await
+                {
+                    models = reply["data"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|m| {
+                            m["model"]
+                                .as_str()
+                                .or_else(|| m["id"].as_str())
+                                .map(str::to_owned)
+                        })
+                        .collect();
                 }
-            } else if tool.id == "grok" {
-                if let Ok(host) = pot_driver::grok::connect().await {
-                    if let Ok(session) = host
-                        .request("session/new", json!({"cwd":s.workspace,"mcpServers":[]}))
-                        .await
-                    {
-                        models = pot_driver::grok::models(&session);
-                    }
-                    host.shutdown().await;
+            } else if tool.id == "grok"
+                && let Ok(host) = pot_driver::grok::connect().await
+            {
+                if let Ok(session) = host
+                    .request("session/new", json!({"cwd":s.workspace,"mcpServers":[]}))
+                    .await
+                {
+                    models = pot_driver::grok::models(&session);
                 }
+                host.shutdown().await;
             }
         }
         results.push(json!({"id":tool.id,"installation":installation,

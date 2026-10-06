@@ -107,10 +107,10 @@ fn next(spec: &ScheduleSpec, after: i64) -> Result<Option<i64>> {
                 {
                     continue;
                 }
-                if let Some(t) = tz.from_local_datetime(&date.and_time(time)).earliest() {
-                    if t.timestamp_millis() > after {
-                        return Ok(Some(t.timestamp_millis()));
-                    }
+                if let Some(t) = tz.from_local_datetime(&date.and_time(time)).earliest()
+                    && t.timestamp_millis() > after
+                {
+                    return Ok(Some(t.timestamp_millis()));
                 }
             }
             bail!("无法计算下次运行")
@@ -201,12 +201,11 @@ pub(super) fn page(root: &Service, q: QueryPage) -> ApiResult<SchedulePage> {
                             })
                         })
                         .unwrap_or_default();
-                    if let Some(t) = &r.task_id {
-                        if r.finished_at_ms.is_none() {
-                            if let Some(p) = tasks::task_phase(&hub, t) {
-                                r.state = serde_json::to_value(p).unwrap().as_str().unwrap().into();
-                            }
-                        }
+                    if let Some(t) = &r.task_id
+                        && r.finished_at_ms.is_none()
+                        && let Some(p) = tasks::task_phase(&hub, t)
+                    {
+                        r.state = serde_json::to_value(p).unwrap().as_str().unwrap().into();
                     }
                     r
                 })
@@ -501,15 +500,14 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
             .enumerate()
             .filter(|(_, r)| r.finished_at_ms.is_none())
         {
-            if let Some(task) = &r.task_id {
-                if let Some(phase) = tasks::task_phase(&hub, task) {
-                    if !matches!(
-                        phase,
-                        TaskPhase::Running | TaskPhase::Queued | TaskPhase::Waiting
-                    ) {
-                        recovered.push((sid.clone(), index, phase));
-                    }
-                }
+            if let Some(task) = &r.task_id
+                && let Some(phase) = tasks::task_phase(&hub, task)
+                && !matches!(
+                    phase,
+                    TaskPhase::Running | TaskPhase::Queued | TaskPhase::Waiting
+                )
+            {
+                recovered.push((sid.clone(), index, phase));
             }
         }
     }
@@ -528,11 +526,9 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
         }
         changed = true;
     }
-    if changed {
-        if let Err(error) = tasks::persist(root, &hub) {
-            hub.schedules = recovery_before;
-            return Err(error);
-        }
+    if changed && let Err(error) = tasks::persist(root, &hub) {
+        hub.schedules = recovery_before;
+        return Err(error);
     }
     // Flush durable notifications with their removal in the same transaction.
     if let Some(message) = hub.schedules.outbox.first().cloned() {

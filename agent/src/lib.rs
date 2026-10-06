@@ -232,6 +232,8 @@ async fn rpc(
     ensure!(result["error"].is_null(), "Pot tool API failed");
     Ok((result["result"].clone(), session))
 }
+// Keep request state and injected services explicit at this execution boundary.
+#[allow(clippy::too_many_arguments)]
 async fn sample(
     services: Option<&dyn ExecutionServices>,
     client: &reqwest::Client,
@@ -443,6 +445,8 @@ async fn compaction_event(
     );
     s.feedback.observe(&observation)
 }
+// Keep request state and injected services explicit at this execution boundary.
+#[allow(clippy::too_many_arguments)]
 async fn compact(
     services: Option<&dyn ExecutionServices>,
     client: &reqwest::Client,
@@ -579,6 +583,8 @@ async fn compact(
     result
 }
 
+// Keep request state and injected services explicit at this execution boundary.
+#[allow(clippy::too_many_arguments)]
 async fn run(
     s: &ExecutionContext,
     binding: &Binding,
@@ -840,10 +846,10 @@ async fn run(
                 .await
                 .map(|r| r.0)
             };
-            if let Err(e) = &result {
-                if e.to_string().contains("stop unconfirmed") {
-                    return Err(anyhow!("{e}"));
-                }
+            if let Err(e) = &result
+                && e.to_string().contains("stop unconfirmed")
+            {
+                return Err(anyhow!("{e}"));
             }
             let value = match result {
                 Ok(v) => v,

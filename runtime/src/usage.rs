@@ -121,6 +121,28 @@ pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Js
     Ok(Json(json!({"cancelled":true})))
 }
 
+pub fn settle_cancelled_pause(s: &Service) -> Result<()> {
+    let mut inner = s.inner.lock().unwrap();
+    if !inner.turn.as_ref().is_some_and(|t| t.cancelling) {
+        return Ok(());
+    }
+    if let Some(raw) = inner
+        .store
+        .get("execution.paused")?
+        .filter(|s| !s.is_empty())
+    {
+        let req: SendMessage = serde_json::from_str(&raw)?;
+        if let Some(mut m) = inner.store.duplicate(&req.request_id)? {
+            m.status = MessageStatus::Cancelled;
+            inner.store.save(m)?;
+        }
+        inner.store.set("execution.paused", "")?;
+        inner.engine.detail = None;
+        s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -725,26 +747,4 @@ mod tests {
         );
         assert!(summary(State(s), h, Query(query("", 7))).await.is_ok());
     }
-}
-
-pub fn settle_cancelled_pause(s: &Service) -> Result<()> {
-    let mut inner = s.inner.lock().unwrap();
-    if !inner.turn.as_ref().is_some_and(|t| t.cancelling) {
-        return Ok(());
-    }
-    if let Some(raw) = inner
-        .store
-        .get("execution.paused")?
-        .filter(|s| !s.is_empty())
-    {
-        let req: SendMessage = serde_json::from_str(&raw)?;
-        if let Some(mut m) = inner.store.duplicate(&req.request_id)? {
-            m.status = MessageStatus::Cancelled;
-            inner.store.save(m)?;
-        }
-        inner.store.set("execution.paused", "")?;
-        inner.engine.detail = None;
-        s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
-    }
-    Ok(())
 }

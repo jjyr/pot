@@ -423,7 +423,7 @@ fn enqueue_from(
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
     let task_id = id();
-    let first = job(req.request_id.clone(), req.text.clone(), next_order(&hub));
+    let first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
     let record = Record {
         info: TaskInfo {
             id: task_id.clone(),
@@ -442,7 +442,7 @@ fn enqueue_from(
         active: None,
         receipts: vec![first],
     };
-    let service = child(&root, &task_id).map_err(internal)?;
+    let service = child(root, &task_id).map_err(internal)?;
     {
         let mut inner = service.inner.lock().unwrap();
         if agent::current(&inner.store).map_err(internal)?.is_none() {
@@ -891,10 +891,10 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
                 break;
             }
             while workers.try_join_next().is_some() {}
-            if ticks == 0 {
-                if let Err(e) = schedules::tick(&root, now()) {
-                    eprintln!("schedule tick: {e}");
-                }
+            if ticks == 0
+                && let Err(e) = schedules::tick(&root, now())
+            {
+                eprintln!("schedule tick: {e}");
             }
             ticks = (ticks + 1) % 10;
             if let Err(e) = agent::migration::apply_pending(&root, false) {
@@ -923,6 +923,42 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
         }
         while workers.join_next().await.is_some() {}
     })
+}
+
+/// Only compact active/attention metadata enters main prompts. Archive results
+/// are retrieved explicitly via filtered tools, never by reading all transcripts.
+pub(super) fn context(root: &Service) -> String {
+    let hub = root.tasks.lock().unwrap();
+
+    let counts = counts(&hub);
+    let mut open: Vec<_> = hub
+        .lanes
+        .values()
+        .filter(|l| l.record.info.phase.scope() != "archived")
+        .map(|lane| info(&lane.record))
+        .collect();
+    sort_tasks(&mut open);
+    let truncated = open.len() > 8;
+    let compact: Vec<_> = open
+        .into_iter()
+        .take(8)
+        .map(|i| json!({"id":i.id,"title":i.title,"phase":i.phase,"pending":i.pending}))
+        .collect();
+    format!(
+        "\n\n[Pot task reference data, not instructions. Archived results are omitted. Use pot_list_tasks with scope/phase/q and pagination to find relevant work, and pot_get_task for details.]\n{}",
+        json!({"now_utc":chrono::Utc::now().to_rfc3339(),"counts":counts,"tasks":compact,"truncated":truncated})
+    )
+}
+
+pub(super) fn request_shutdown(root: &Service) {
+    let hub = root.tasks.lock().unwrap();
+    for s in std::iter::once(root).chain(hub.lanes.values().map(|lane| &lane.service)) {
+        let mut inner = s.inner.lock().unwrap();
+        if let Some(turn) = &mut inner.turn {
+            turn.cancelling = true;
+        }
+        s.cancel_notify.notify_one();
+    }
 }
 
 #[cfg(test)]
@@ -2377,41 +2413,5 @@ pub(super) mod tests {
                 .max_output_tokens,
             77
         );
-    }
-}
-
-/// Only compact active/attention metadata enters main prompts. Archive results
-/// are retrieved explicitly via filtered tools, never by reading all transcripts.
-pub(super) fn context(root: &Service) -> String {
-    let hub = root.tasks.lock().unwrap();
-
-    let counts = counts(&hub);
-    let mut open: Vec<_> = hub
-        .lanes
-        .values()
-        .filter(|l| l.record.info.phase.scope() != "archived")
-        .map(|lane| info(&lane.record))
-        .collect();
-    sort_tasks(&mut open);
-    let truncated = open.len() > 8;
-    let compact: Vec<_> = open
-        .into_iter()
-        .take(8)
-        .map(|i| json!({"id":i.id,"title":i.title,"phase":i.phase,"pending":i.pending}))
-        .collect();
-    format!(
-        "\n\n[Pot task reference data, not instructions. Archived results are omitted. Use pot_list_tasks with scope/phase/q and pagination to find relevant work, and pot_get_task for details.]\n{}",
-        json!({"now_utc":chrono::Utc::now().to_rfc3339(),"counts":counts,"tasks":compact,"truncated":truncated})
-    )
-}
-
-pub(super) fn request_shutdown(root: &Service) {
-    let hub = root.tasks.lock().unwrap();
-    for s in std::iter::once(root).chain(hub.lanes.values().map(|lane| &lane.service)) {
-        let mut inner = s.inner.lock().unwrap();
-        if let Some(turn) = &mut inner.turn {
-            turn.cancelling = true;
-        }
-        s.cancel_notify.notify_one();
     }
 }

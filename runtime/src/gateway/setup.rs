@@ -38,11 +38,11 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
     let mut connections = Vec::new();
     for profile in profiles {
         let spec = profile.resolve().map_err(internal)?;
-        if spec.auth_ref.starts_with("providers.json:") {
-            if let Ok(p) = stored_provider(&s, &spec) {
-                connections.push(json!({"profile_id": profile.id, "endpoint":p.endpoint,
+        if spec.auth_ref.starts_with("providers.json:")
+            && let Ok(p) = stored_provider(&s, &spec)
+        {
+            connections.push(json!({"profile_id": profile.id, "endpoint":p.endpoint,
                     "model":spec.model,"protocol":p.protocol,"has_key":!p.api_key.is_empty()}));
-            }
         }
     }
     let binding = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?;
@@ -108,12 +108,11 @@ pub async fn save(
     let mut key = input.api_key;
     if key.is_empty() {
         let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
-        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id) {
-            if let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?) {
-                if previous.endpoint == input.endpoint {
-                    key = previous.api_key;
-                }
-            }
+        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
+            && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
+            && previous.endpoint == input.endpoint
+        {
+            key = previous.api_key;
         }
     }
     if key.is_empty() {
@@ -442,12 +441,11 @@ pub async fn check(
     let mut key = input.api_key;
     if key.is_empty() {
         let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
-        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id) {
-            if let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?) {
-                if previous.endpoint == input.endpoint {
-                    key = previous.api_key;
-                }
-            }
+        if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
+            && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
+            && previous.endpoint == input.endpoint
+        {
+            key = previous.api_key;
         }
     }
     if key.trim().is_empty() || key.contains(['\n', '\r']) {

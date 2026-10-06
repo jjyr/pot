@@ -433,7 +433,7 @@ impl Settings {
         }
         if section == 4 {
             actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {"收起高级限制"} else {"高级限制"})
-                .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced=!this.settings.advanced;cx.notify();})))
+                .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced = !this.settings.advanced;cx.notify();})))
                 .child(Button::new("save-task-limits").primary().small().label("应用全局限制…").on_click(move|_,_,cx|
                     command(json!({"action":"save-agent","key":"","limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}))));
         } else if section == 3 {

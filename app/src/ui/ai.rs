@@ -403,7 +403,7 @@ impl Settings {
                                         PopupMenuItem::new(
                                             p["name"].as_str().unwrap_or("Agent").to_owned(),
                                         )
-                                        .checked(id == draft.to_owned())
+                                        .checked(id == draft)
                                         .on_click(
                                             move |_, _, _| {
                                                 command(json!({"action":"ai-choose","id":id}))

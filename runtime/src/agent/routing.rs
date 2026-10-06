@@ -138,27 +138,26 @@ pub fn resolve(
     if profile.is_none() {
         let policy = policy(root)?;
         let inner = root.inner.lock().unwrap();
-        if policy.follow_chat
+        if (policy.follow_chat
             || (policy.worker_profile.is_none()
-                && inner.store.get("agent.default.worker")?.is_none())
+                && inner.store.get("agent.default.worker")?.is_none()))
+            && let Some(binding) = current(&inner.store)?
         {
-            if let Some(binding) = current(&inner.store)? {
-                let spec = binding.spec;
-                anyhow::ensure!(
-                    spec.engine != Engine::Grok,
-                    "Grok currently supports main chat only, not background tasks"
-                );
-                check_requirements(&spec, requirements)?;
-                let routing = TaskRouting {
-                    profile: spec.source_profile_id.clone(),
-                    revision: spec.source_profile_revision,
-                    provider: spec.provider.clone(),
-                    reason: "chat_default".into(),
-                    preference_revision: None,
-                    selection_reason: None,
-                };
-                return Ok((spec, routing));
-            }
+            let spec = binding.spec;
+            anyhow::ensure!(
+                spec.engine != Engine::Grok,
+                "Grok currently supports main chat only, not background tasks"
+            );
+            check_requirements(&spec, requirements)?;
+            let routing = TaskRouting {
+                profile: spec.source_profile_id.clone(),
+                revision: spec.source_profile_revision,
+                provider: spec.provider.clone(),
+                reason: "chat_default".into(),
+                preference_revision: None,
+                selection_reason: None,
+            };
+            return Ok((spec, routing));
         }
     }
     let (selected, reason) = match profile {

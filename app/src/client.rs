@@ -110,14 +110,15 @@ impl View {
         if self.pending || self.selected == id {
             return false;
         }
-        if !self.selected.is_empty() && self.selected != "new" {
-            if let Some(snapshot) = &self.snapshot {
-                if self.cached_tasks.len() >= 16 {
-                    self.cached_tasks.clear();
-                }
-                self.cached_tasks
-                    .insert(self.selected.clone(), Arc::new(snapshot.clone()));
+        if !self.selected.is_empty()
+            && self.selected != "new"
+            && let Some(snapshot) = &self.snapshot
+        {
+            if self.cached_tasks.len() >= 16 {
+                self.cached_tasks.clear();
             }
+            self.cached_tasks
+                .insert(self.selected.clone(), Arc::new(snapshot.clone()));
         }
         self.snapshot = if id.is_empty() || id == "new" {
             self.main_snapshot.clone()
@@ -405,17 +406,16 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     {
         v.cached_tasks.clear();
     }
-    if let Some(page) = schedules {
-        if (
+    if let Some(page) = schedules
+        && (
             v.schedules_visible,
             v.schedule_selected.clone(),
             v.schedule_offset,
             v.runs_offset,
         ) == sq
-        {
-            v.schedule_offset = page.offset;
-            v.schedules = page;
-        }
+    {
+        v.schedule_offset = page.offset;
+        v.schedules = page;
     }
     v.running_total = executing.total.saturating_sub(finished);
     v.running_tasks = running_tasks;

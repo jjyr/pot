@@ -153,11 +153,7 @@ impl UsageUI {
                 .items_center()
                 .justify_between()
                 .child(ui::section(if detail {
-                    if v.selected.is_empty() {
-                        "累计用量"
-                    } else {
-                        "累计用量"
-                    }
+                    "累计用量"
                 } else {
                     "整体统计"
                 }))

@@ -266,7 +266,7 @@ impl Shell {
         cx.set_global(design::Viewport(window.viewport_size().width));
         self.settings.sync(&self.native["settings"], window, cx);
         match self.native["page"].as_u64() {
-            Some(4 | 5 | 6) => {
+            Some(4..=6) => {
                 return self.usage_ui.render(
                     &view,
                     self.native["page"].as_u64().unwrap(),
@@ -774,7 +774,7 @@ impl Shell {
                         let latest_reply =
                             !running && index + 1 == messages.len() && m.role == Role::Assistant;
                         let artifact = artifacts::from_message(
-                            &m,
+                            m,
                             &if view.selected.is_empty() {
                                 client::root().join("workspace/workspace")
                             } else {
@@ -1056,19 +1056,18 @@ impl Render for Shell {
         if !restoring_view.tasks_loading
             && !restoring_view.usage_pending
             && !restoring_view.schedule_pending
+            && let Some(mut offsets) = self.pending_offsets.take()
         {
-            if let Some(mut offsets) = self.pending_offsets.take() {
-                if let Some((id, inset)) = self.pending_task_anchor.take() {
-                    if let Some(index) = restoring_view.tasks.iter().position(|t| t.id == id) {
-                        offsets[1].y = px(-(index as f32 * 80. + inset));
-                    }
-                }
-                self.scroll.set_offset(offsets[0]);
-                self.tasks_scroll.set_offset(offsets[1]);
-                self.settings.scroll.set_offset(offsets[2]);
-                self.schedules_ui.scroll.set_offset(offsets[3]);
-                self.usage_ui.scroll.set_offset(offsets[4]);
+            if let Some((id, inset)) = self.pending_task_anchor.take()
+                && let Some(index) = restoring_view.tasks.iter().position(|t| t.id == id)
+            {
+                offsets[1].y = px(-(index as f32 * 80. + inset));
             }
+            self.scroll.set_offset(offsets[0]);
+            self.tasks_scroll.set_offset(offsets[1]);
+            self.settings.scroll.set_offset(offsets[2]);
+            self.schedules_ui.scroll.set_offset(offsets[3]);
+            self.usage_ui.scroll.set_offset(offsets[4]);
         }
         let body = self.render_content(window, cx);
         self.observe_navigation();

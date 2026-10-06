@@ -220,6 +220,8 @@ impl Ledger {
         )
     }
     // Called under the shared ledger mutex: every lane observes the same reservation.
+    // Ledger fields mirror the persisted reservation and immutable route identity.
+    #[allow(clippy::too_many_arguments)]
     pub fn reserve(
         &self,
         id: &str,

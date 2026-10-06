@@ -68,11 +68,11 @@ pub fn native_session(s: &Service) -> Result<(PathBuf, Option<String>)> {
     );
     match binding.native_ref {
         NativeRef::Pot { file, session_id } => {
-            if let Some(expected) = &session_id {
-                if let Err(e) = validate_agent_session(&file, expected) {
-                    mark_broken(&mut s.inner.lock().unwrap().store, &e.to_string())?;
-                    return Err(e);
-                }
+            if let Some(expected) = &session_id
+                && let Err(e) = validate_agent_session(&file, expected)
+            {
+                mark_broken(&mut s.inner.lock().unwrap().store, &e.to_string())?;
+                return Err(e);
             }
             Ok((file, session_id))
         }

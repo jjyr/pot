@@ -218,9 +218,8 @@ async fn execute(
                     } else {host.write(json!({"id":id,"error":{"code":-32601,"message":"Client capability unavailable"}})).await?;}
                 } else if event["method"]=="session/update" && event["params"]["sessionId"]==native {
                     let update=&event["params"]["update"];
-                    if update["sessionUpdate"]=="agent_message_chunk" && update["content"]["type"]=="text" {
-                        if let Some(delta)=update["content"]["text"].as_str() {text.push_str(delta);emit(driver::Update::TextDelta(delta.into()))?;}
-                    }
+                    if update["sessionUpdate"]=="agent_message_chunk" && update["content"]["type"]=="text"
+                        && let Some(delta)=update["content"]["text"].as_str() {text.push_str(delta);emit(driver::Update::TextDelta(delta.into()))?;}
                 }
             }
             result=&mut prompt=>{let result=result??;break if result["stopReason"]=="cancelled" {driver::Outcome::Cancelled} else if result["stopReason"]=="end_turn" {driver::Outcome::Success} else {driver::Outcome::Failed("Grok stopped without completing the turn".into())};},

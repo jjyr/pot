@@ -97,12 +97,12 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
 }
 /// API profiles keep their own request ledger even when the legacy smoke route exists.
 pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::BudgetSettings> {
-    if let Some(budget) = &s.api_budget {
-        if budget.namespace != "deepseek-attempts" {
-            let mut budget = budget.clone();
-            budget.max_output_tokens = max_output_tokens;
-            return Ok(budget);
-        }
+    if let Some(budget) = &s.api_budget
+        && budget.namespace != "deepseek-attempts"
+    {
+        let mut budget = budget.clone();
+        budget.max_output_tokens = max_output_tokens;
+        return Ok(budget);
     }
     let data = if s.is_worker {
         s.data
@@ -316,12 +316,12 @@ pub async fn forward(
                 max_output,
             )
             .map_err(internal)?;
-        if output.is_some() {
-            if let Some(operation) = operation {
-                ledger
-                    .tag_compaction(&request_id, operation)
-                    .map_err(internal)?;
-            }
+        if output.is_some()
+            && let Some(operation) = operation
+        {
+            ledger
+                .tag_compaction(&request_id, operation)
+                .map_err(internal)?;
         }
         output
     };
@@ -430,8 +430,8 @@ pub async fn forward(
                     pending.push_str(&String::from_utf8_lossy(&bytes));
                     while let Some(end) = pending.find('\n') {
                         let line = pending[..end].trim().to_owned(); pending.drain(..=end);
-                        if let Some(data) = line.strip_prefix("data:") {
-                            if let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
+                        if let Some(data) = line.strip_prefix("data:")
+                            && let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
                                 let result = observer.observe(&provider.protocol,&value).and_then(|usage| {
                                     if let Some(usage) = usage { service.usage.lock().unwrap().settle(&request_id,&usage)?; }
                                     Ok(())
@@ -441,7 +441,6 @@ pub async fn forward(
                                     return;
                                 }
                             }
-                        }
                     }
                     if pending.len()>1024*1024 { pending.clear(); }
                     yield Ok::<_,std::io::Error>(bytes);

@@ -81,6 +81,19 @@ async fn run_session(
     }
 }
 
+/// Validate a candidate before settings commit; preparation never calls a model.
+pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRef>> {
+    // Initial selection is metadata-only; open the native session on the first real turn.
+    if current(&s.inner.lock().unwrap().store)?.is_none() {
+        return Ok(None);
+    }
+    if spec.engine == Engine::Codex {
+        codex::prepare(&prepare_context(s)?, &s.codex, spec).await
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,18 +216,5 @@ mod tests {
         assert!(!gate.accept(&event));
         assert_eq!(gate.finish(), Outcome::Cancelled);
         assert_eq!(EventGate::new(1, "missing").finish(), Outcome::Unknown);
-    }
-}
-
-/// Validate a candidate before settings commit; preparation never calls a model.
-pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRef>> {
-    // Initial selection is metadata-only; open the native session on the first real turn.
-    if current(&s.inner.lock().unwrap().store)?.is_none() {
-        return Ok(None);
-    }
-    if spec.engine == Engine::Codex {
-        codex::prepare(&prepare_context(s)?, &s.codex, spec).await
-    } else {
-        Ok(None)
     }
 }

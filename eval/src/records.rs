@@ -135,11 +135,12 @@ fn checked(report: &UsageReport) -> Result<Totals> {
 /// Explicit scope prevents adding parent totals to their child measurements.
 /// Sources for the same measurement must reconcile; they are never summed.
 pub fn aggregate(reports: &[UsageReport], scope: Scope) -> Result<Totals> {
+    type CumulativeSnapshot = (Option<u64>, Option<u64>, Option<u64>, Option<u64>);
     struct SourceState {
         counter: Counter,
         total: Totals,
         events: BTreeMap<String, String>,
-        cumulative: Option<(Option<u64>, Option<u64>, Option<u64>, Option<u64>)>,
+        cumulative: Option<CumulativeSnapshot>,
     }
     let mut sources: BTreeMap<(String, String), SourceState> = BTreeMap::new();
     for report in reports.iter().filter(|r| r.scope == scope) {

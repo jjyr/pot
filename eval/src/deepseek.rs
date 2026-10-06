@@ -225,13 +225,12 @@ impl ExecutionServices for DeepSeekServices {
             request.body["thinking"] = json!({"type":self.config["thinking"]});
             request.body.as_object_mut().unwrap().remove("reasoning_effort");
             if let Some(effort) = self.config["reasoning_effort"].as_str() {request.body["reasoning_effort"] = json!(effort);}
-            if self.connection.compat["requiresReasoningContentOnAssistantMessages"] == true {
-                if let Some(messages) = request.body["messages"].as_array_mut() {
+            if self.connection.compat["requiresReasoningContentOnAssistantMessages"] == true
+                && let Some(messages) = request.body["messages"].as_array_mut() {
                     for message in messages.iter_mut().filter(|m| m["role"] == "assistant") {
                         message.as_object_mut().unwrap().entry("reasoning_content").or_insert(json!(""));
                     }
                 }
-            }
             let bytes = serde_json::to_vec(&request.body)?;
             let output = request.body["max_tokens"].as_u64().ok_or_else(|| anyhow::anyhow!("Output bound missing"))?;
             let bound = (bytes.len() as u64).checked_add(output).ok_or_else(|| anyhow::anyhow!("Request reservation overflow"))?;
