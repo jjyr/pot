@@ -13,6 +13,38 @@ use std::{
     time::Duration,
 };
 
+#[derive(Clone, PartialEq)]
+pub struct RunningTask {
+    pub id: String,
+    pub title: String,
+    pub progress: String,
+}
+
+fn task_progress(snapshot: &Snapshot) -> String {
+    if snapshot.turn.as_ref().is_some_and(|t| t.cancelling) {
+        return "正在停止".into();
+    }
+    match snapshot.messages.last() {
+        Some(m) if m.role == Role::Tool && m.status == MessageStatus::Streaming => {
+            // Tool headers are runtime facts, not generated summaries.
+            format!(
+                "正在执行 {}",
+                m.text
+                    .lines()
+                    .next()
+                    .unwrap_or("工具")
+                    .chars()
+                    .take(36)
+                    .collect::<String>()
+            )
+        }
+        Some(m) if m.role == Role::Assistant && m.status == MessageStatus::Streaming => {
+            "正在生成回复".into()
+        }
+        _ => "正在处理".into(),
+    }
+}
+
 #[derive(Default, Clone, PartialEq)]
 pub struct View {
     pub usage_query: Option<(String, u32, usize, String)>,
@@ -31,6 +63,8 @@ pub struct View {
     pub accepted_text: Option<String>,
     pub selected: String,
     pub tasks: Vec<TaskInfo>,
+    pub running_tasks: Vec<RunningTask>,
+    pub running_total: usize,
     pub task_query: TaskQuery,
     pub task_page: TaskPage,
     pub selected_task: Option<TaskInfo>,
@@ -47,6 +81,15 @@ pub struct View {
     cached_tasks: HashMap<String, Arc<Snapshot>>,
 }
 impl View {
+    pub fn is_cooking(&self) -> bool {
+        self.running_total > 0
+            || self.main_snapshot.as_ref().is_some_and(|s| {
+                s.turn.is_some()
+                    && s.engine.phase == EnginePhase::Ready
+                    && s.engine.detail.as_deref() != Some("等待 Pot 额度恢复")
+            })
+    }
+
     fn apply_task_page(&mut self, query: &TaskQuery, selected: &str, page: TaskPage) {
         // Counts describe all tasks, never just the visible page. Keep lifecycle
         // guards correct when a running task is hidden by a search or archive tab.
@@ -241,6 +284,41 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .map_err(|e| e.to_string())?
         .into_json()
         .map_err(|e| e.to_string())?;
+    // Independent of the visible task filter and page. Only executing lanes
+    // count as activity; queued and budget/user waits do not.
+    let executing: TaskPage = agent
+        .get(&format!("{url}{PATH_TASKS}/query"))
+        .query("phase", "running")
+        .query("limit", "3")
+        .set("Authorization", &auth)
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    let mut running_tasks = Vec::new();
+    let mut finished = 0;
+    for task in &executing.items {
+        let progress = agent
+            .get(&format!("{url}{PATH_TASKS}/{}", task.id))
+            .set("Authorization", &auth)
+            .call()
+            .ok()
+            .and_then(|r| r.into_json::<Snapshot>().ok());
+        // A finished snapshot removes the row; a transient fetch failure
+        // retains the authoritative running lane with a neutral status.
+        if progress.as_ref().is_some_and(|s| s.turn.is_none()) {
+            finished += 1;
+            continue;
+        }
+        running_tasks.push(RunningTask {
+            id: task.id.clone(),
+            title: task.title.clone(),
+            progress: progress
+                .as_ref()
+                .map(task_progress)
+                .unwrap_or_else(|| "正在处理".into()),
+        });
+    }
     let schedules: Option<SchedulePage> = if sq.0 {
         Some(
             agent
@@ -337,6 +415,8 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             v.schedules = page;
         }
     }
+    v.running_total = executing.total.saturating_sub(finished);
+    v.running_tasks = running_tasks;
     v.main_snapshot = Some(main);
     v.apply_task_page(&query, &selected, task_page);
     if v.selected == selected {
@@ -605,6 +685,11 @@ impl Client {
             crate::wake_ui();
         });
     }
+    pub fn refresh(&self) {
+        self.view.lock().unwrap().usage_fetched = None;
+        let _ = self.refresh.try_send(());
+        crate::wake_ui();
+    }
     pub fn filter_tasks(&self, scope: String, q: String, offset: usize) {
         let mut v = self.view.lock().unwrap();
         if v.task_query.scope == scope && v.task_query.q == q && v.task_query.offset == offset {
@@ -691,6 +776,64 @@ mod tests {
         );
         assert!(!v.tasks_loading);
         assert_eq!(v.task_page.counts.active, 5);
+    }
+
+    #[test]
+    fn cooking_uses_execution_independently_of_visible_filters() {
+        let mut v = view();
+        v.main_snapshot = v.snapshot.clone();
+        v.task_page.counts.active = 8; // Queued/waiting lanes alone are idle.
+        assert!(!v.is_cooking());
+        v.running_total = 1;
+        v.task_query.scope = "archived".into();
+        v.task_query.q = "unrelated".into();
+        assert!(v.is_cooking());
+        v.running_total = 0;
+        let main = v.main_snapshot.as_mut().unwrap();
+        main.turn = Some(TurnState {
+            user_message_id: "u".into(),
+            cancelling: false,
+        });
+        assert!(v.is_cooking());
+        v.main_snapshot.as_mut().unwrap().engine.detail = Some("等待 Pot 额度恢复".into());
+        assert!(!v.is_cooking());
+        v.running_total = 1;
+        assert!(v.is_cooking()); // A paused main does not hide background execution.
+        v.running_total = 0;
+        v.main_snapshot.as_mut().unwrap().turn = None;
+        assert!(!v.is_cooking());
+    }
+
+    #[test]
+    fn progress_uses_current_message_not_a_completed_tool() {
+        let mut snapshot = view().snapshot.unwrap();
+        snapshot.messages.push(Message {
+            id: "tool".into(),
+            conversation_id: "task".into(),
+            role: Role::Tool,
+            text: "读取文件\nprivate body".into(),
+            status: MessageStatus::Streaming,
+            created_at_ms: 0,
+            request_id: None,
+        });
+        assert_eq!(task_progress(&snapshot), "正在执行 读取文件");
+        snapshot.messages[0].status = MessageStatus::Complete;
+        assert_eq!(task_progress(&snapshot), "正在处理");
+        snapshot.messages.push(Message {
+            id: "reply".into(),
+            conversation_id: "task".into(),
+            role: Role::Assistant,
+            text: "draft".into(),
+            status: MessageStatus::Streaming,
+            created_at_ms: 0,
+            request_id: None,
+        });
+        assert_eq!(task_progress(&snapshot), "正在生成回复");
+        snapshot.turn = Some(TurnState {
+            user_message_id: "u".into(),
+            cancelling: true,
+        });
+        assert_eq!(task_progress(&snapshot), "正在停止");
     }
 
     use super::*;

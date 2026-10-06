@@ -1,6 +1,8 @@
 # Pot UI specification
 
-Updated: 2026-10-05. Current MVP UI specification; see [UI validation](validation/ui-ux.md) for historical acceptance and [Development plan](development-plan.md) for scope.
+Updated: 2026-10-06. Current MVP UI specification; see [UI validation](validation/ui-ux.md) for historical acceptance and [Development plan](development-plan.md) for scope.
+
+For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Shared page colors, layouts, the contextual toolbar and navigation history, Chat, the composer and Pot activity/unread icons now follow that direction. The upstream browser-authorization/provider integration and Terminal removal are retained; the new AI panels share these visual tokens and responsive forms.
 
 ## Shared layout
 
@@ -8,29 +10,36 @@ Tasks, settings, and Sandbox use **gpui-kit 0.7.0** (gpui-pre 0.3.7). Shared lay
 
 | Element | Specification |
 | --- | --- |
-| Sidebar | 56 px, icons only; name tooltips, selected/hover backgrounds |
+| Sidebar | 56 px, 36 px icon hit areas; Pot is Chat, Settings at bottom; 220 ms moving selection and 140 ms hover feedback |
+| Toolbar | Shared 56 px row with Back/Forward, contextual title and conversation Usage action |
 | Page | `ui::page(cx)`: reserves sidebar, uses Kit theme background/text |
-| Standard content | `ui::content()`: centered, max 820 px, 32 px padding, 20 px section spacing |
+| Standard content | `ui::content()`: centered, max 820 px, 32 px padding, 16 px section spacing |
 | Title / hint | `ui::title()`: 24 px semibold; `ui::hint()`: 13 px secondary text |
-| Card | `ui::card(cx)`: 20 px padding, 8 px radius, 1 px themed border |
-| Form | Kit `Form::horizontal().label_width(px(160.))` + `Field` + `Input` |
+| Card | `ui::card(cx)`: 20 px padding, 10 px radius, 1 px themed border |
+| Form | Shared Kit Form: 144 px horizontal labels; vertical below 900 px window width; compact controls |
 | Actions | Kit `Button`: `primary()` for primary, `ghost()` for secondary |
 | Icon actions | Kit `IconName` with tooltip and accessibility label |
-| List | Kit `ListItem` with shared card border/radius/20 px padding |
+| List | Kit `ListItem`: 80 px task rows inside one grouped surface, fine row dividers, 16 px padding |
 
 Prefer `cx.theme()` background, foreground, muted_foreground, border, secondary; reserve green/amber/red for status. Selection backgrounds must not depend solely on hover. General settings switch light/dark/system appearance.
 
-Content scrolls while titles/main navigation remain. Minimum window 800 x 700; long forms must scroll to action buttons.
+Content scrolls while titles/main navigation remain. Minimum window 800 x 700; forms scroll while Settings and schedule Save/Cancel actions remain outside the scrolling region. Page entry uses a 180 ms opacity transition; Reduce Motion disables it.
+
+## Navigation history
+
+History is window-local. Chat, task lists/details, schedule details, overall/conversation Usage, allowance configuration, Settings and Sandbox are destinations. Back/Forward buttons and ⌘[ / ⌘] restore task filters/page/scroll anchor, schedule selection/page, Usage range/ranking page, Settings section and scroll offsets. Search/group/tab changes checkpoint the current destination without adding entries; navigating to a new destination after Back discards the forward branch.
+
+Native conversation drafts and entity-backed unsaved forms remain intact during navigation. History does not send messages, save settings, execute tasks or reclaim desktop control. Returning to Settings changes its section without reopening or resetting an in-progress AI connection panel. Embedded WebView focus and active marked-text composition retain their shortcut handling. Task scroll restoration uses the visible task ID plus inset to tolerate reordering. Missing task destinations show an inline recovery action.
 
 ## Pages and interactions
 
 - **Chat**: Pot icon opens chat; no central avatar. Blue user/neutral assistant bubbles. Small action bar below messages: Copy left, linked View task right, both with tooltips. Latest assistant actions show when idle; historical/user actions show on hover. Reserve height to avoid movement. Latest messages shares native input width/centering, sits above it, is fully clickable, and hides immediately on click. Preserve native IME/edit shortcuts. Opened conversations show cache before background refresh.
-- **Tasks**: fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running), Needs attention (failed/interrupted), Archived (completed/cancelled). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Cards retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Task Configuration concurrency defaults to 5.
-- **Task conversation header**: separate back row; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore old 48-character truncation from original task first lines. One row below shows stage/archive/cumulative tokens using small icons/secondary text; tokens open details. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
+- **Tasks**: fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running), Needs attention (failed/interrupted), Archived (completed/cancelled). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Grouped rows retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Task Configuration concurrency defaults to 5.
+- **Task conversation header**: Back/Forward, title and Usage live in the shared toolbar; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore old 48-character truncation from original task first lines. One row below shows stage/archive and task actions using small icons/secondary text. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
 - **Schedules**: reuse Tasks / Schedules navigation, Kit Button/Form/Field/Input/cards. Fixed bottom pagination matches tasks: total/page left, previous/next right. Details show next run/state/paginated history linking to tasks. Main Agent creates schedules; no manual creation. Existing edit forms scroll with fixed save/cancel and include zone/frequency/notification/missed policy. Pause/delete preserves current runs; second click confirms deletion. See [Scheduled tasks](scheduled-tasks.md).
 - **Usage**: overall statistics/charts only, last 7/30/90 days/year. No granularity selector; year automatically aggregates 7-day groups. Task/main usage belongs in each conversation and survives archive. Single-page details: totals, horizontal model stacks (conversation/compaction, real tokens/proportions/hover), tool rankings (estimated tokens/calls, shared scale, top 5 expandable). Hide zero compaction/empty tools; no tabs/per-request lists/Skills stats. Never add tool output to model consumption. Hide allowance cards without periodic limits. See [Token usage](token-usage.md).
-- **Settings**: General / AI Configuration / Task Configuration / Work Environment. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances; Work Environment keeps Sandbox resources.
-- **Sandbox**: Kit title/toolbar 112 px; desktop fills remaining space without the 820 px cap. Green connection dot with hover text. Take over is primary; environment/reconnect/settings/more are icons. Environment displays image/state/CPU/memory/system disk/work-file sizes.
+- **Settings**: General / AI Configuration / Task Configuration / Work Environment. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. The provider chooser uses compact branded controls; connection sheets use a 12 px radius, responsive shared labels, compact model/authorization actions, and a 200 ms fade respecting Reduce Motion. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances; Work Environment keeps Sandbox resources.
+- **Sandbox**: shared 56 px toolbar plus 56 px desktop controls; desktop fills remaining space without the 820 px cap. Textual connection state with semantic color. Take over is primary; environment/reconnect/settings/more are icons. Environment displays image/state/CPU/memory/system disk/work-file sizes.
 - **Tray**: one pot-shaped status icon; click opens window, no menu. Unread count beside icon. Window close keeps background work; Quit stops the environment normally.
 
 ## Implementation boundaries

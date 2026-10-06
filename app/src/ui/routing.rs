@@ -6,10 +6,12 @@ impl Settings {
         let busy = state["routing_busy"] == true;
         let selected = state["routing_profile"].as_str().unwrap_or("");
         let profiles = state["profiles"].as_array().cloned().unwrap_or_default();
-        let mut form = Form::horizontal().label_width(px(160.)).child(
-            Field::new().label("已保存的配置").child(
+        let mut form = form(_cx).child(
+            field("已保存的配置").child(
                 Button::new("routing-refresh")
                     .ghost()
+                    .small()
+                    .small()
                     .label("刷新 / 放弃修改")
                     .disabled(busy)
                     .on_click(|_, _, _| command(json!({"action":"routing-refresh"}))),
@@ -35,11 +37,11 @@ impl Settings {
             .unwrap_or("选择要查看的 Agent")
             .to_owned();
         form = form.child(
-            Field::new()
-                .label("后台任务 Agent")
+            field("后台任务 Agent")
                 .description("默认沿用聊天配置；独立选择只影响新任务。已有任务保持固定。")
                 .child(
                     Button::new("worker-follow-chat")
+                        .small()
                         .label(if independent {
                             "改为沿用聊天配置"
                         } else {
@@ -53,13 +55,14 @@ impl Settings {
                 ),
         );
         if state["routing_owner"] == "main" {
-            form = form.child(Field::new().label("独立任务配置").child(Button::new("worker-pick").label(worker_label).dropdown_caret(true).disabled(busy)
+            form = form.child(field("独立任务配置").child(Button::new("worker-pick").small().label(worker_label).dropdown_caret(true).disabled(busy)
                 .dropdown_menu(move|menu,_,_| worker_choices.iter().fold(menu,|menu,p| {let id=p["id"].as_str().unwrap_or("").to_owned();
                     menu.item(PopupMenuItem::new(p["name"].as_str().unwrap_or("Agent").to_owned()).on_click(move|_,_,_|command(json!({"action":"routing-choice","kind":"worker","id":id}))))}))));
         }
         form = form.child(
-            Field::new().label("配置详情").child(
+            field("配置详情").child(
                 Button::new("routing-details")
+                    .small()
                     .label(details_label)
                     .dropdown_caret(true)
                     .disabled(busy)
@@ -84,26 +87,24 @@ impl Settings {
             ),
         );
         if profiles.is_empty() {
-            return form.child(
-                Field::new()
-                    .label("尚无配置")
-                    .child("先在 AI 配置中添加一个 Agent。"),
-            );
+            return form.child(field("尚无配置").child("先在 AI 配置中添加一个 Agent。"));
         }
         if state["routing_owner"] != "main" {
             let id = selected.to_owned();
             form = form.child(
-                Field::new().label("连接与登录").child(
+                field("连接与登录").child(
                     Button::new("task-ai-manage")
+                        .small()
                         .label("管理所选 Agent 的连接")
                         .on_click(move |_, _, _| command(json!({"action":"ai-manage","id":id}))),
                 ),
             );
         }
         form = form.child(
-            Field::new().label("高级路由").child(
+            field("高级路由").child(
                 Button::new("routing-advanced")
                     .ghost()
+                    .small()
                     .label(if self.advanced {
                         "收起高级路由"
                     } else {
@@ -117,7 +118,7 @@ impl Settings {
         );
         if !self.advanced && state["routing_owner"] == "main" {
             let fields = self.fields.clone();
-            return form.child(Field::new().label("任务配置").child(Button::new("routing-save-simple").primary().label("保存任务配置").disabled(busy)
+            return form.child(field("任务配置").child(Button::new("routing-save-simple").primary().small().label("保存任务配置").disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"routing-save","profile_limit":fields[19].read(cx).value(),"provider_limit":fields[20].read(cx).value()})))));
         }
         for (i, p) in profiles.iter().enumerate() {
@@ -126,21 +127,20 @@ impl Settings {
                 .as_array()
                 .is_some_and(|a| a.iter().any(|p| p == &id));
             form = form.child(
-                Field::new()
-                    .label(p["name"].as_str().unwrap_or("Agent").to_owned())
-                    .child(
-                        Button::new(("routing-hint", i))
-                            .ghost()
-                            .label(if allowed {
-                                "☑ 允许 Agent 指定"
-                            } else {
-                                "☐ 允许 Agent 指定"
-                            })
-                            .disabled(busy)
-                            .on_click(move |_, _, _| {
-                                command(json!({"action":"routing-choice","kind":"hint","id":id}))
-                            }),
-                    ),
+                field(p["name"].as_str().unwrap_or("Agent").to_owned()).child(
+                    Button::new(("routing-hint", i))
+                        .ghost()
+                        .small()
+                        .label(if allowed {
+                            "☑ 允许 Agent 指定"
+                        } else {
+                            "☐ 允许 Agent 指定"
+                        })
+                        .disabled(busy)
+                        .on_click(move |_, _, _| {
+                            command(json!({"action":"routing-choice","kind":"hint","id":id}))
+                        }),
+                ),
             );
         }
         for (index, label, description) in [
@@ -158,15 +158,14 @@ impl Settings {
             ),
         ] {
             form = form.child(
-                Field::new()
-                    .label(label)
+                field(label)
                     .description(description)
                     .child(Input::new(&self.fields[index]).aria_label(label)),
             );
         }
-        form = form.child(Field::new().label("无人值守权限").child(div().w_full().min_w_0().whitespace_normal().child("Agent 可在 Sandbox 内执行文件和命令操作；主 Agent 可创建任务，worker 不可委派，汇总只读。额外权限请求会被拒绝并显示在会话中。")));
+        form = form.child(field("无人值守权限").child(div().w_full().min_w_0().whitespace_normal().child("Agent 可在 Sandbox 内执行文件和命令操作；主 Agent 可创建任务，worker 不可委派，汇总只读。额外权限请求会被拒绝并显示在会话中。")));
         form = form.child(
-            Field::new().label("迁移对象").child(
+            field("迁移对象").child(
                 state["routing_owner_name"]
                     .as_str()
                     .unwrap_or("主会话")
@@ -183,6 +182,8 @@ impl Settings {
                 periods = periods.child(
                     Button::new(("provider-period", i))
                         .ghost()
+                        .small()
+                        .small()
                         .label(name)
                         .toggled(state["provider_period"] == period)
                         .disabled(busy)
@@ -192,10 +193,9 @@ impl Settings {
                 );
             }
             form = form
-                .child(Field::new().label("服务商 Token 周期").child(periods))
+                .child(field("服务商 Token 周期").child(periods))
                 .child(
-                    Field::new()
-                        .label("服务商 Token 额度")
+                    field("服务商 Token 额度")
                         .description(format!(
                             "与全局额度同时生效；时区 {}。当前使用 {}，预留 {}。",
                             quota["policy"]["timezone"]
@@ -207,12 +207,13 @@ impl Settings {
                         .child(Input::new(&self.fields[21]).aria_label("服务商 Token 额度")),
                 )
                 .child(
-                    Field::new()
-                        .label("额度恢复")
+                    field("额度恢复")
                         .description("自动继续还要求引擎支持安全检查点；服务商自身的限流独立处理。")
                         .child(
                             Button::new("provider-auto")
                                 .ghost()
+                                .small()
+                                .small()
                                 .label(if state["provider_auto_resume"] == true {
                                     "☑ 自动继续"
                                 } else {
@@ -223,11 +224,11 @@ impl Settings {
                         ),
                 );
             let fields = self.fields.clone();
-            form = form.child(Field::new().label("服务商额度").child(Button::new("provider-save").label("保存服务商额度").disabled(busy)
+            form = form.child(field("服务商额度").child(Button::new("provider-save").small().label("保存服务商额度").disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"provider-save","tokens":fields[21].read(cx).value()})))));
         } else {
             form =
-                form.child(Field::new().label("服务商 Token 额度").child(
+                form.child(field("服务商 Token 额度").child(
                     div().w_full().min_w_0().whitespace_normal().child(
                         "CLI 登录路线仅统计原生报告的用量；无法在每次模型请求前执行硬额度。",
                     ),
@@ -236,20 +237,21 @@ impl Settings {
         let mut actions = div().flex().flex_wrap().gap_2();
         for (i, copy) in [false, true].into_iter().enumerate() {
             let fields = self.fields.clone();
-            actions = actions.child(Button::new(("save-profile",i)).label(if copy {"复制为新配置"}else{"保存配置"}).disabled(busy)
+            actions = actions.child(Button::new(("save-profile",i)).small().label(if copy {"复制为新配置"}else{"保存配置"}).disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"profile-save","copy":copy,"name":fields[17].read(cx).value(),"model":fields[18].read(cx).value()}))));
         }
         if state["routing_owner"] != "main" {
             actions = actions.child(
                 Button::new("profile-main")
+                    .small()
                     .label("保存并切换此任务的 Agent")
                     .disabled(busy)
                     .on_click(|_, _, _| command(json!({"action":"profile-main"}))),
             );
         }
         let fields = self.fields.clone();
-        form.child(Field::new().label("配置操作").child(actions))
-            .child(Field::new().label("任务路由").child(Button::new("save-routing").primary().label("保存默认、白名单和并发限制").disabled(busy)
+        form.child(field("配置操作").child(actions))
+            .child(field("任务路由").child(Button::new("save-routing").primary().small().small().label("保存默认、白名单和并发限制").disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"routing-save","profile_limit":fields[19].read(cx).value(),"provider_limit":fields[20].read(cx).value()})))))
     }
 }

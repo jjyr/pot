@@ -14,9 +14,14 @@ var bridge: PotBridge?
 
 @MainActor final class RailButton: NSButton {
     var selected = false {
-        didSet { refresh() }
+        didSet {
+            if oldValue != selected {
+                refresh()
+            }
+        }
     }
 
+    private var lastBackground: CGColor?
     private var hovered = false
     private var tracking: NSTrackingArea?
     override func updateTrackingAreas() {
@@ -43,9 +48,18 @@ var bridge: PotBridge?
 
     func refresh() {
         let color = selected ? NSColor.controlAccentColor
-            .withAlphaComponent(hovered ? 0.20 : 0.12) :
+            .withAlphaComponent(hovered ? 0.08 : 0) :
             (hovered ? NSColor.labelColor.withAlphaComponent(0.07) : .clear)
-        layer?.backgroundColor = color.cgColor
+        if lastBackground != color.cgColor {
+            let previous = layer?.presentation()?.backgroundColor ?? layer?.backgroundColor
+            lastBackground = color.cgColor
+            layer?.backgroundColor = color.cgColor
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let previous {
+                let animation = CABasicAnimation(keyPath: "backgroundColor")
+                animation.fromValue = previous; animation.toValue = color.cgColor
+                animation.duration = 0.14; layer?.add(animation, forKey: "selection")
+            }
+        }
         contentTintColor = selected || hovered ? .controlAccentColor : .secondaryLabelColor
     }
 }
@@ -107,6 +121,9 @@ var bridge: PotBridge?
     var localRuntime: LocalRuntime?
     var termination: DispatchSourceSignal?
     var keyMonitor: Any?
+    let railHighlight = PlaceholderLabel(labelWithString: "")
+    var backMenuItem: NSMenuItem?
+    var forwardMenuItem: NSMenuItem?
     var animation: Timer?
     var events: [[String: Any]] = [] {
         didSet {
@@ -127,6 +144,7 @@ var bridge: PotBridge?
     var unreadTracker = UnreadTracker()
     var savedSeen: [String]?
     var tick: Double = 0
+    var lastIconState = ""
     var observations: [NSObjectProtocol] = []
     let runtime = RuntimeClient()
     var guestIP = ""
@@ -140,7 +158,7 @@ var bridge: PotBridge?
         self.host = host; gpuiView = host.contentView!
         rootView = HostView(frame: gpuiView.frame)
         web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        status = NSStatusBar.system.statusItem(withLength: 58)
         super.init()
         NSApp.setActivationPolicy(.regular)
         host.isReleasedWhenClosed = false
@@ -150,6 +168,8 @@ var bridge: PotBridge?
         rootView.addSubview(gpuiView)
         rootView.addSubview(rail)
         rail.wantsLayer = true
+        railHighlight.wantsLayer = true; railHighlight.layer?.cornerRadius = 10
+        rail.addSubview(railHighlight)
         for (index, symbol, title) in [
             (0, "bubble.left", "聊天"),
             (3, "list.bullet.rectangle", "任务"),
@@ -171,7 +191,7 @@ var bridge: PotBridge?
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
         rootView.addSubview(composerBox); composerBox.wantsLayer = true; composerBox.layer?
-            .cornerRadius = 22; composerBox.layer?.borderWidth = 1
+            .cornerRadius = 16; composerBox.layer?.borderWidth = 1
         composer.isRichText = false; composer.font = .systemFont(ofSize: 15); composer.drawsBackground = false; composer
             .textContainerInset = NSSize(
                 width: 8,
@@ -204,6 +224,14 @@ var bridge: PotBridge?
             MainActor.assumeIsolated {
                 guard let self else { return event }
                 if event.modifierFlags.contains(.command) {
+                    if ["[", "]"].contains(event.charactersIgnoringModifiers ?? ""),
+                       event.window === self.host,
+                       (self.host.firstResponder as? NSTextInputClient)?.hasMarkedText() != true,
+                       (self.host.firstResponder as? NSView)?.isDescendant(of: self.web) != true,
+                       NSApp.mainMenu?.performKeyEquivalent(with: event) == true
+                    {
+                        return nil
+                    }
                     if let text = self.host.firstResponder as? NSTextView {
                         switch event.charactersIgnoringModifiers {
                         case "a": text.selectAll(nil); return nil
@@ -288,7 +316,39 @@ var bridge: PotBridge?
                 .representedObject = action; item.action = #selector(editAction(_:)); item.target = self; edit
                 .addItem(item)
         }
+        let navigationMenu = NSMenu(title: "导航"); navigationMenu.autoenablesItems = false
+        let navigationItem = NSMenuItem(); navigationItem.submenu = navigationMenu; main.addItem(navigationItem)
+        for (title, action, key) in [("后退", #selector(historyBack), "["), ("前进", #selector(historyForward), "]")] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.target = self; item.isEnabled = false; navigationMenu.addItem(item)
+            if key == "[" {
+                backMenuItem = item
+            } else {
+                forwardMenuItem = item
+            }
+        }
         NSApp.mainMenu = main
+    }
+
+    func navigateHistory(_ forward: Bool) {
+        // The embedded desktop and marked input retain their own shortcuts.
+        if let view = host.firstResponder as? NSView,
+           view.isDescendant(of: web)
+        {
+            return
+        }
+        if let input = host.firstResponder as? NSTextInputClient, input.hasMarkedText() {
+            return
+        }
+        events.append(["action": forward ? "history-forward" : "history-back"]); bridgeWake?()
+    }
+
+    @objc func historyBack() {
+        navigateHistory(false)
+    }
+
+    @objc func historyForward() {
+        navigateHistory(true)
     }
 
     @objc func editAction(_ item: NSMenuItem) {
@@ -315,10 +375,10 @@ var bridge: PotBridge?
         rail.frame = NSRect(x: 0, y: 0, width: 56, height: b.height)
         for (index, button) in navigation.enumerated() {
             button.frame = NSRect(
-                x: 8,
+                x: 10,
                 y: button.tag == 2 ? 16 : b.height - 60 - CGFloat(index) * 48,
-                width: 40,
-                height: 40
+                width: 36,
+                height: 36
             )
         }
         let area = NSRect(x: 56, y: 0, width: max(0, b.width - 56), height: b.height)
@@ -354,17 +414,36 @@ var bridge: PotBridge?
             webDark = dark
             web.evaluateJavaScript("document.documentElement.dataset.theme='" + (dark ? "dark" : "light") + "'")
         }
-        let background = NSColor(white: dark ? 0.10 : 1, alpha: 1)
-        let sidebar = NSColor(white: dark ? 0.13 : 0.97, alpha: 1)
+        let background = NSColor(white: dark ? 0.125 : 0.992, alpha: 1)
+        let sidebar = NSColor(white: dark ? 0.157 : 0.957, alpha: 1)
         rootView.layer?.backgroundColor = background.cgColor
         rail.layer?.backgroundColor = sidebar.cgColor
-        composerBox.layer?.backgroundColor = background.cgColor
-        composerBox.layer?.borderColor = NSColor(white: dark ? 0.28 : 0.87, alpha: 1).cgColor
+        composerBox.layer?.backgroundColor = NSColor(white: dark ? 0.169 : 1, alpha: 1).cgColor
+        composerBox.layer?.shadowColor = NSColor.black.cgColor
+        composerBox.layer?.shadowOpacity = dark ? 0.12 : 0.04
+        composerBox.layer?.shadowRadius = 6
+        composerBox.layer?.shadowOffset = NSSize(width: 0, height: -1)
+        composerBox.layer?.borderColor = NSColor(white: dark ? 0.255 : 0.91, alpha: 1).cgColor
         for button in navigation {
             (button as? RailButton)?.selected = button
                 .tag == (page == 6 ? 4 : page == 5 ? (selected.isEmpty ? 0 : 3) : page)
+            (button as? RailButton)?.refresh()
         }
-        sendButton.layer?.backgroundColor = (running || ready ? NSColor.systemBlue : NSColor(
+        if let selectedButton = navigation.first(where: { ($0 as? RailButton)?.selected == true }) {
+            railHighlight.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+            if railHighlight.frame != selectedButton.frame {
+                if railHighlight.frame.isEmpty || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    railHighlight.frame = selectedButton.frame
+                } else {
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.22
+                        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1, 0.36, 1)
+                        railHighlight.animator().frame = selectedButton.frame
+                    }
+                }
+            }
+        }
+        sendButton.layer?.backgroundColor = (selectedRunning || ready ? NSColor.systemBlue : NSColor(
             white: dark ? 0.28 : 0.8,
             alpha: 1
         )).cgColor
@@ -573,6 +652,8 @@ var bridge: PotBridge?
         {
             composer.string = ""; drafts[selected] = ""; textDidChange(Notification(name: NSText.didChangeNotification))
         }
+        backMenuItem?.isEnabled = value["can_back"] as? Bool ?? false
+        forwardMenuItem?.isEnabled = value["can_forward"] as? Bool ?? false
         let next = value["selected"] as? String ?? ""
         if next != selected {
             drafts[selected] = composer.string
@@ -641,37 +722,31 @@ var bridge: PotBridge?
     }
 
     func updateIcon() {
-        tick += 0.1
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let lift = running ? (reduce ? 1 : (sin(tick * .pi) + 1) / 2) : 0
         let waiting = (snapshot["needs_auth"] as? Bool ?? false)
-        let icon = potIcon(lift: lift, waiting: waiting)
-        status.button?.image = icon; navigation.first?.image = icon
-        let state = failed ? "环境异常" : waiting ? "等待你完成配置" : running ? "正在处理" : "待命"
-        let title = (failed ? " !" : "") + (unread > 0 ? " \(unread > 99 ? "99+" : String(unread))" : "")
-        status.button?.title = title; status.button?.toolTip = "Pot · \(state)" + (unread > 0 ? " · \(unread) 条未读" : "")
-        navigation.first?.toolTip = unread > 0 ? "聊天 · \(unread) 条未读" : "聊天"
-        navigation.first?.setAccessibilityLabel(unread > 0 ? "聊天 · \(unread) 条未读" : "聊天")
+        let highlighted = status.button?.cell?.isHighlighted ?? false
+        let signature = "\(running)-\(unread)-\(waiting)-\(failed)-\(reduce)-\(highlighted)-\(NSApp.effectiveAppearance.name.rawValue)"
+        guard signature != lastIconState || (running && !reduce) else { return }
+        lastIconState = signature
+        tick += 0.1
+        let phase = running && !reduce ? (sin(tick * .pi * 2 / 2.7) + 1) / 2 : 0.5
+        let icon = potIcon(cooking: running, phase: phase, waiting: waiting)
+        navigation.first?.image = icon
+        status.button?.image = trayIcon(
+            cooking: running,
+            phase: phase,
+            waiting: waiting,
+            failed: failed,
+            unread: unread,
+            highlighted: highlighted
+        )
+        let state = (running ? "正在处理" : "待命") + (failed ? " · 环境异常" : waiting ? " · 等待你完成配置" : "")
+        let label = "Pot · \(state)" + (unread > 0 ? " · \(unread) 条未读" : "")
+        status.button?.title = ""
+        status.button?.toolTip = nil
+        status.button?.setAccessibilityLabel(label)
+        navigation.first?.setAccessibilityLabel("聊天 · \(state)" + (unread > 0 ? " · \(unread) 条未读" : ""))
     }
-}
-
-@MainActor func potIcon(lift: Double = 0, waiting: Bool = false) -> NSImage {
-    let image = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { _ in
-        NSColor.labelColor.setStroke()
-        let bowl = NSBezierPath(); bowl.move(to: NSPoint(x: 4, y: 12)); bowl.line(to: NSPoint(x: 5, y: 6)); bowl.curve(
-            to: NSPoint(x: 17, y: 6),
-            controlPoint1: NSPoint(x: 6, y: 1),
-            controlPoint2: NSPoint(x: 16, y: 1)
-        ); bowl.line(to: NSPoint(x: 18, y: 12)); bowl.lineWidth = 1.8; bowl.lineCapStyle = .round; bowl.stroke()
-        let lid = NSBezierPath(); let y = 15 + lift * 2
-        lid.move(to: NSPoint(x: 4, y: y + (waiting ? 1 : 0))); lid
-            .line(to: NSPoint(x: 18, y: y - (waiting ? 1 : 0))); lid.lineWidth = 1.8; lid.lineCapStyle = .round; lid
-            .stroke()
-        if waiting {
-            NSColor.labelColor.setFill(); NSBezierPath(ovalIn: NSRect(x: 10, y: 11, width: 2, height: 2)).fill()
-        }
-        return true
-    }; image.isTemplate = true; return image
 }
 
 @_cdecl("pot_bridge_install") public func install(_ html: UnsafePointer<CChar>) {
@@ -785,6 +860,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
                     settings.setupItems.insert(id)
                 }; settings.persistSetup()
             }
+        case "history-section": settings.section = v["value"] as? Int ?? 0
         case "section": settings.section = v["value"] as? Int ?? 0; settings.setup = false; settings
             .result = ""; settings.returnToChat = false; if settings.section == 1 {
                 settings.routingOwner = "main"; settings.aiScreen = "main"
@@ -852,4 +928,8 @@ private var bridgeWake: (@convention(c) () -> Void)?
         }
         bridgeWake?()
     }
+}
+
+@_cdecl("pot_bridge_reduce_motion") public func reduceMotion() -> Bool {
+    MainActor.assumeIsolated { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 }

@@ -7,6 +7,7 @@ impl Settings {
         let agents = state["agents"].as_array().cloned().unwrap_or_default();
         let mut body = div()
             .id("onboarding-scroll")
+            .track_scroll(&self.scroll)
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()

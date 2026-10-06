@@ -161,3 +161,50 @@ bulk user data injection; ledger27, 0 paid calls.
 - Remove tabs/detail pagination; totals/conversation-compaction actual stacks/tool rankings, descending/top5-expand, estimates excluded from totals.
 - Workspace/lint/54 regular pass, 6 Pi not rerun; App/Linux/bundle, 0 paid.
 - Real main lifetime/single stack/empty-tools hidden/no tabs-page. No fresh tools/compaction so nonempty ranks/expand/two stacks untested; no dark/minimum-size rerun.
+
+
+### 2026-10-06: Chat and Pot activity design
+
+Implemented the near-white/light-dark chat palette, pale-blue user bubble, unboxed assistant text, refined native composer, ephemeral running-task summary, simmering Pot and fixed-width compact unread pill.
+
+- Validation uses an isolated temporary native App bundle with a local HTTP/Unix-socket fixture, no production data or model calls. Confirmed three running rows plus overflow, task-row navigation, return to Chat, overflow navigation to Tasks, and removal/empty-pot transition after all fixture tasks finish. The composer retained focus through the finish update. Confirmed the final left-aligned secondary summary layout and that a Chinese draft is restored unchanged after opening a task and returning to Chat.
+- App Rust tests cover execution independently of task filters, queued/waiting exclusion, main budget pauses, and progress derived from current streaming tool/assistant messages. Existing client and unread-tracker regressions remain passing.
+- Standalone Swift icon rendering verifies distinct static idle/cooking shapes, independent idle unread, constant image width and identical `9+` rendering for 10 and 1,000 replies. Light/dark drawings were visually inspected. Run with `xcrun swiftc -module-cache-path /tmp/pot-design-swift-modules app/swift/PotIcon.swift app/tests/pot-icon.swift -o /tmp/pot-icon-tests && /tmp/pot-icon-tests`.
+- Native composer remains NSTextView; no text engine, draft or unread-accounting changes. Reduce Motion is passed from AppKit into GPUI; icon activity is static under that preference. Completed summaries never enter persistent messages.
+- Remaining acceptance: real backend/VM progress under concurrent model execution, minimum-window/long-history scrolling, live menu-bar selection/backgrounds, VoiceOver announcements, and toggling Reduce Motion in the running native window. No real-provider or complete cross-page design acceptance is claimed.
+
+
+### 2026-10-06: Shared design language and page layouts
+
+Implemented shared Kit light/dark tokens, a 56 px contextual toolbar with window-local Back/Forward history, grouped task rows, compact page controls, responsive Settings/schedule/allowance forms, stable Settings actions, muted Usage charts, animated native rail selection/hover, and neutral embedded viewer CSS. Settings now exposes General / AI Configuration / Task Configuration / Work Environment; AI connection selection changes the visible form without activating a provider. Existing execution configuration is available under a collapsed disclosure.
+
+- `mise run lint`, `mise run test:app` (14 passing tests), and `cargo build --locked -p pot-app -j 4` passed. The navigation test covers local-state checkpoints, Back/Forward boundaries and forward-branch replacement. The build compiles the Swift bridge. The existing `block 0.1.6` dependency future-compatibility warning remains.
+- Native verification used an isolated temporary App with local HTTP/Unix-socket fixtures and 24 tasks, one schedule, conversation messages and Usage data. Confirmed populated task rows in light/dark, title search, task opening, Back restoring the search, Forward restoring the same task, second-page task navigation/Back restoring page 2, conversation Usage, overall Usage, schedule detail/editor, and schedule draft retention across navigation. Confirmed an unsaved concurrency value survives navigation/Back. Inspected the final four Settings categories and AI connection choices/custom API form, fixed Settings footer, and Sandbox unavailable/disabled controls. No settings saves, task execution or paid model calls were used.
+- Native inspection found and fixed a duplicate Kit ListItem hover registration that caused a panic when populated task rows rendered. Removed the redundant task Usage action and made page-entry animation respect Reduce Motion.
+- Embedded viewer script blocks are byte-identical to HEAD; only CSS changed. The image was not rebuilt, so deployed noVNC/VM rendering and live control ownership are not validated by this pass.
+- Remaining acceptance: exact 800 × 700 rendering, live list reordering/scroll anchors, long loaded-history restoration, full keyboard/VoiceOver traversal and IME composition with history shortcuts, runtime Reduce Motion toggling, real provider login/save/restart flows, and actual embedded desktop focus. Browser authorization and Terminal removal remain separate work under #7. These limits do not establish backend/provider acceptance from simulated data.
+
+
+### 2026-10-06: Rebase onto simplified AI integration (#10)
+
+Rebased the design work onto `origin/main` at `975e421`. Preserved upstream AI connection, browser authorization, model selection, credential revision synchronization, task bindings and Terminal removal. Adapted the new AI list/provider grid/connection sheets and task configuration to shared tokens, compact controls, responsive labels, grouped navigation and sheet-entry motion. Removed the obsolete Terminal history route and shortcut-focus reference. Preserved main Chat Agent/model information in the shared toolbar.
+
+- App build and all 14 App tests passed after conflict resolution. Source formatting and staged whitespace checks passed.
+- Isolated native fixture inspection confirmed the five-entry sidebar without Terminal, AI Configuration empty/main state, eight-provider chooser, custom API form and masked key field. A nonsensitive model draft survived navigation to Usage and Back, with the same connection panel restored. History changes Settings section without reopening the AI connection or clearing its fields.
+- No real provider login, credential save, activation, VM rebuild or paid inference was performed. The local fixture cannot establish populated provider/model lists or successful authorization; upstream integration acceptance remains in [Simplified AI integration acceptance](ai-integration-20261006.md).
+
+### 2026-10-06: Minimum-window UI acceptance after rebase
+
+Acceptance used the native App in an isolated temporary bundle with local HTTP/Unix-socket fixtures, 24 tasks, one weekly schedule, Chinese messages, Usage data and two populated AI profiles (configured API / login required). No production account, credential save, task execution or paid model request was used. To reliably inspect exactly 800 × 700, only the test build's initial window bounds were changed; the product source was restored to 1080 × 760 before the final normal build.
+
+- Light-mode Chat, running summary (three rows plus overflow), native multiline composer, compact rail and contextual toolbar fit at minimum size. Chinese multiline drafts survived navigation with focus restored. Task scrolling reached items 16–20; Back/Forward restored the same list position. General, populated AI list, eight-provider chooser, API editor, custom API advanced form, task configuration and Work Environment were inspected without horizontal clipping. Long task settings scroll while the bottom actions remain accessible. Usage totals and chart layout were inspected; Sandbox inspection covers the disconnected toolbar only.
+- Dark-mode populated AI list/editor, Chat and schedule list/editor were inspected. The weekly editor scrolls to notification/status fields while Save/Cancel remain visible. An unsaved Chinese schedule name survived Chat navigation and Back. After all fixture tasks finished, the running summary disappeared, Chat changed to idle and the composer retained its draft and focus.
+- Found and fixed native history shortcuts being intercepted by the focused composer: Command-bracket now goes through the native navigation menu before editor key handling, retaining the marked-text and embedded-desktop guards. Rebuilt native verification confirmed Forward from the focused composer and Back restoring the draft/list scroll position. Active IME composition and remote-desktop focus were not exercised.
+- Found and fixed settings field synchronization missing two reserved slots, shifting API/routing/model fields. The mapping now has a compile-time length of 24. Rebuilt native inspection confirmed the profile name/model and empty concurrency limits match fixture values, and the API model is correctly restored. No configuration was saved.
+- All 14 App tests, lint, whitespace checks and the normal App build passed. The existing `block 0.1.6` future-compatibility warning remains. The temporary App was closed after acceptance.
+
+The inspected layouts and navigation pass this fixture-based acceptance. Remaining scope: real authorization/save/restart flows, concurrent live task reordering and long loaded conversation history, full keyboard/VoiceOver traversal, active IME composition, runtime Reduce Motion switching, live menu-bar unread/background rendering, and deployed embedded desktop/control ownership. These remain unverified and are not implied by the page-layout result.
+
+### 2026-10-06: Title-only running summary visual follow-up
+
+Reopened the isolated native fixture after removing the visible progress suffix. Light and dark screenshots confirm each row shows only the activity dot and task title beneath the latest assistant reply, with small secondary text and three rows plus overflow. No visible "Generating reply" suffix remains; the accessible label retains progress information. Observed activity dots at different brightness levels across captures. Clicking a title still opens its task and Back restores Chat. Completing all fixture tasks removes the summary and returns the Pot icon to idle without moving composer focus. No production data or model calls were used. This follow-up did not repeat exact minimum-window or Reduce Motion acceptance.
