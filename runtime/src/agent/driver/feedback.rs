@@ -72,7 +72,6 @@ impl ExecutionFeedback for Feedback {
         {
             Engine::Pot => save_agent_session(&mut inner.store, identity),
             Engine::Codex => save_codex_thread(&mut inner.store, identity),
-            Engine::Grok => save_grok_session(&mut inner.store, identity),
         }
     }
     fn binding_broken(&self, reason: &str) -> Result<()> {

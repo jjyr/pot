@@ -54,7 +54,7 @@ actor Runtime {
     var cpus = 4; var memoryGiB = 8; var diskGiB = 32
     var imageReference = "pot.local/sandbox"
     func loadConfiguration() throws {
-        let path = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("sandbox.json")
+        let path = root.appendingPathComponent("sandbox.json")
         guard FileManager.default.fileExists(atPath: path.path) else { return }
         let values = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Int] ?? [:]
         guard let c = values["cpus"], let m = values["memory_gib"], let d = values["disk_gib"], (1 ... 32).contains(c),

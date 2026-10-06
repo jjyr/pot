@@ -9,17 +9,16 @@ mise trust
 mise install
 mise run setup        # Rust components, Linux target, repository hk hooks, environment checks
 mise run prepare
-mise exec -- scripts/configure-pi # Optional: Pi + DeepSeek only
 mise run build
 mise run bundle
 mise run open
 ```
 
-`bundle` preinstalls dependencies in a separate VM and builds the complete Sandbox OCI image. Software downloads happen only during build; Helper starts the Host backend immediately and boots an environment on demand. See [Sandbox image](sandbox-image.md) for caches, fonts, and sizes.
+`bundle` preinstalls dependencies in a separate VM and builds the complete Sandbox OCI image. Software downloads happen only during build; Helper starts the Host backend immediately and boots an environment on demand. See Sandbox image for caches, fonts, and sizes.
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
-`configure-pi` imports host Pi DeepSeek credentials into private Host configuration without model calls or embedding keys in App. The model is `deepseek-v4-flash`; see [UI specification](ui-ux-design.md#allowance-configuration) for configuration, default allowances, and K/M token input rules. Existing configuration is not overwritten automatically; the usage ledger is not reset.
+Configure the Main Agent in Chat or Settings → AI Configuration. Pi uses saved API connections; Codex uses official Host browser authorization. Node, Pi and Codex are bundled. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
 
 ## Standalone Server (development entry point)
 
@@ -49,9 +48,9 @@ Current real CLI/VM acceptance (build and bundle first; no paid model calls):
 mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/Contents/Helpers/PotHelper --resources .local/d1/Pot.app/Contents/Resources/runtime --output /tmp/pot-sandbox-acceptance.json
 ```
 
-Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host Pi/Codex and local mock models, validates lazy startup, worker scope, environment independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/agent-sandbox-20261006.md). Older `codex-runtime.py`, guest CLI checks and ignored Pi native-tool fixtures document the old deployment and are not current acceptance commands.
+Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host Pi/Codex and local mock models, validates lazy startup, worker scope, environment independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/agent-sandbox-20261006.md).
 
-Application account authorization uses official Host Codex App Server APIs. Pi supports API connections; Grok execution/authorization is excluded. The callback listener is ephemeral, and account credentials remain with the native CLI. Real-provider account/inference acceptance is separate from the credential-free Sandbox routing contract.
+Application account authorization uses official Host Codex App Server APIs. Pi supports API connections. The official Host Codex process handles browser callbacks directly; account credentials remain with the native CLI. Real-provider account/inference acceptance is separate from the credential-free Sandbox routing contract.
 
 ### Git hooks
 
@@ -77,7 +76,7 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
 | `image/` | Guest desktop, browser, broker/viewer resources |
-| `scripts/` | Build, bundle, configuration import, icon generation |
+| `scripts/` | Build, bundle, icon generation |
 
 `poc/` is removed; experiment code/evidence remain in Git history. `.local/poc/` is a retained local build/download cache path without dependencies on old experiment sources.
 
@@ -85,4 +84,4 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Grok execution, direct Host tools and macOS/Windows Sandbox providers are outside this increment. Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.
+Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Direct Host tools and macOS/Windows Sandbox providers are outside this increment. Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.

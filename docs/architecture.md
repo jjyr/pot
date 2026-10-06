@@ -29,7 +29,7 @@ flowchart TB
 | Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite and native session bindings | `gateway/src/`, `storage/src/` |
 | Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `image/executor.py`, `file-tools.py`, `sandbox.sh` |
 
-The Helper starts the Host backend without booting a VM. The App discovers `root/product/runtime.json` on loopback. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exactly seven environment tools, a lane token and one persistent assignment; Runtime rejects management and target overrides. Grok execution is unsupported in this design.
+The Helper starts the Host backend without booting a VM. The App discovers `root/product/runtime.json` on loopback. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exactly seven environment tools, a lane token and one persistent assignment; Runtime rejects management and target overrides.
 
 Pi's seven native tools are overridden by trusted Host adapters. Its shell shortcut is blocked and project context/extensions/skills are disabled. Codex has native shell, patch, image, code execution, apps, plugins, subagent and inherited MCP capabilities disabled; its environment list is empty and Pot MCP supplies Sandbox operations. Both CLIs use a private Host working directory. Host tool execution has no fallback.
 

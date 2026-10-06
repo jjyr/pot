@@ -15,7 +15,6 @@ pub const RUNTIME_ENDPOINT_FILE: &str = "runtime.json";
 pub const PATH_SNAPSHOT: &str = "/api/v1/snapshot";
 pub const PATH_EVENTS: &str = "/api/v1/events";
 pub const PATH_MESSAGES: &str = "/api/v1/messages";
-pub const PATH_AUTHENTICATE: &str = "/api/v1/engine/authenticate";
 pub const PATH_CANCEL: &str = "/api/v1/turn/cancel";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

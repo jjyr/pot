@@ -42,3 +42,13 @@ This qualifies local Host Pi/Codex with multiple Linux VMs and the common execut
 Tasks sharing one VM share a guest account: task directories are organization, not mutual filesystem/process isolation. Detached tool processes are drained when a command finishes, so persistent background services are not part of this execution contract. Optional desktop lifetime follows explicit environment start/stop rather than a separate persistent desktop lease.
 
 The old guest deployment has no migration/compatibility layer. Historical ignored tests and guest-Agent fixtures are not current routing acceptance. New environments use the Host data layout; old guest data is not deleted.
+
+## Follow-up: retired design cleanup (2026-10-06)
+
+The earlier counts above describe the pre-cleanup commit. Retired guest-Agent onboarding/state, Grok engine/ACP adapter/authorization, Pi/DeepSeek file import and direct smoke adapter, legacy session/usage importers, checksum fallback and internal model route are removed. Old guest validation scripts, `PotImageCheck`, configuration-import scripts and superseded POC/acceptance/design pages are deleted; current specifications and their links are updated. The eight ignored guest/Pi fixtures above are deleted rather than retained as compatibility tests.
+
+Codex authorization now opens the official Host browser URL directly. Codex owns its loopback callback; Pot has no listener, callback forwarding endpoint or VM relay. Success requires a matching official completion event and official account verification. Unit coverage includes stale/mismatched completion, native authorization boundaries and cancellation; real account completion is not claimed.
+
+`mise run check`, `test`, `test:app`, `build`, `bundle` and whitespace verification passed. Backend: 99 tests passed, zero ignored; App: 14 tests passed. New regression coverage checks three tasks sharing the selected default, explicit target selection, unchanged bindings after selection/restart, rejection of retired engines/transports, ignored retired configuration files and HTTP 404 for removed routes.
+
+Rebuilt signed Helper/App and the same immutable guest image passed the actual two-VM Host Pi/Codex test again: 34 local mock requests, four summaries, lazy startup, worker scope, native resume/Host restart, active-turn isolation, cancellation, independent stop, artifacts and optional desktop. The test exited successfully after cleanup. No real-provider credentials or paid inference were used. Local artifacts: `/tmp/pot-cleanup-sandbox-acceptance.json` and `/tmp/pot-cleanup-e2e.log`. Full interactive UI and real-provider login/inference remain outside this follow-up's acceptance.

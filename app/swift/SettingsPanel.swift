@@ -12,10 +12,9 @@ import Foundation
     var activeSpec: [String: Any] = [:], connections: [[String: Any]] = [], modelOptions: [String] = []
     var authorizationTask: Task<Void, Never>?
     var authorizationID = "", authorizationURL = ""
-    var authorizationRelay: AuthorizationRelay?
     var loginEngine = "", loginVisible = false, loginMessage = "", checkMessage = ""
     var agentStates: [[String: Any]] = []
-    var invocationExecutable = "pot", invocationArgs = "[]", codexModel = ""
+    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = ""
     var profile: [String: Any] = [:]
     var savedProfiles: [[String: Any]] = []
     var routingPolicy: [String: Any] = [:]
@@ -31,49 +30,11 @@ import Foundation
     var discovering = false
     var environment: [String: Any] = [:]
     var section = 0, revision = 0
-    var setup = false, hasConfiguration = false
-    var config: [String: Any] = [:]
     var awaitingBoot: String?
     var cpu = 4, memory = 8, disk = 32
     var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "5"
     var cpuField = "4", memoryField = "8", diskField = "32", result = ""
-    var setupStage = 0
-    var setupItems = Set(["codex", "grok", "api"])
-    var setupAutoPending = false
-    var setupKey: String {
-        "onboarding.\(root.path)"
-    }
-
-    var setupCompleted: Bool {
-        UserDefaults.standard.bool(forKey: setupKey + ".complete")
-    }
-
-    func persistSetup() {
-        UserDefaults.standard.set(setupStage, forKey: setupKey + ".stage")
-        UserDefaults.standard.set(Array(setupItems), forKey: setupKey + ".items")
-    }
-
-    func finishSetup() {
-        UserDefaults.standard.set(true, forKey: setupKey + ".complete")
-        setup = false; setupAutoPending = false
-        bridge?.selectPage(0)
-    }
-
-    func setupNavigate(_ stage: Int) {
-        if stage == 1 {
-            setup = false; section = 1; returnToChat = true
-        } else {
-            setup = true; setupStage = 0; section = 2
-        }
-        setupAutoPending = false; persistSetup(); bridge?.selectPage(2); refreshAgents()
-    }
-
-    func deferSetup() {
-        UserDefaults.standard.set(true, forKey: setupKey + ".complete")
-        setup = false; setupAutoPending = false; bridge?.selectPage(0)
-    }
-
-    func setupCanStart(_ engine: String) -> Bool {
+    func nativeAccountReady(_ engine: String) -> Bool {
         guard let agent = agentStates.first(where: { $0["id"] as? String == engine }),
               agent["installation"] as? String == "present",
               agent["status_check"] as? String != "failed" else { return false }
@@ -89,17 +50,6 @@ import Foundation
         super.init(); changeAppearance(UserDefaults.standard.integer(forKey: "appearance"))
     }
 
-    func showAgent(setup: Bool = false) {
-        self.setup = false; section = 1; returnToChat = setup
-        if setup {
-            setupAutoPending = false
-            setupStage = 0
-            if let saved = UserDefaults.standard.stringArray(forKey: setupKey + ".items") {
-                setupItems = Set(saved).intersection(["codex", "grok", "api"])
-            }
-        }
-    }
-
     func changeAppearance(_ value: Int) {
         guard (0 ... 2).contains(value) else { return }
         UserDefaults.standard.set(value, forKey: "appearance")
@@ -109,15 +59,14 @@ import Foundation
     func refreshStatus() {
         guard let bridge else { return }
         if let old = awaitingBoot, let boot = bridge.snapshot["boot_id"] as? String, boot != old,
-           bridge.snapshot["connected"] as? Bool == true,
-           bridge.localPhase == "running"
+           bridge.snapshot["connected"] as? Bool == true
         {
             result = "配置已应用，环境已就绪。"; awaitingBoot = nil
         }
     }
 
     var publicState: [String: Any] {
-        ["revision": revision, "section": section, "setup": setup,
+        ["revision": revision, "section": section,
          "ai_screen": aiScreen, "secret_revision": secretRevision, "draft_revision": draftRevision,
          "draft_profile": draftProfile,
          "draft_model": draftModel,
@@ -139,12 +88,11 @@ import Foundation
          "provider_allowance": providerAllowance,
          "provider_period": providerPeriod, "provider_tokens": providerTokens,
          "provider_auto_resume": providerAutoResume,
-         "setup_stage": setupStage, "setup_items": Array(setupItems),
          "runtime_ready": bridge?.snapshot["connected"] as? Bool ?? false,
-         "environment_phase": environment["phase"] as? String ?? "等待启动", "has_key": hasConfiguration,
+         "environment_phase": environment["phase"] as? String ?? "等待启动",
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
-         "selected_engine": profile["engine"] as? String ?? "pot", "selected_model": profile["model"] as? String ?? "",
+         "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
          "codex_model": codexModel, "agents": agentStates,
          "discovering": discovering,
@@ -161,7 +109,7 @@ import Foundation
             do {
                 let facts = try await bridge.runtime.request("api/v1/agents/refresh", body: [:])
                 agentStates = facts["agents"] as? [[String: Any]] ?? []
-                if ["codex", "grok"].contains(connectionKind),
+                if connectionKind == "codex",
                    let agent = agentStates.first(where: { $0["id"] as? String == connectionKind })
                 {
                     modelOptions = agent["models"] as? [String] ?? []
@@ -170,9 +118,6 @@ import Foundation
                     }
                 }
                 try await reloadAI()
-                if setup, setupAutoPending, !activeSpec.isEmpty {
-                    finishSetup()
-                }
                 result = "状态已刷新；未发送模型请求。"
             } catch { result = "暂时无法检测状态，请检查环境并重试。"; loginMessage = result }
         }
@@ -185,9 +130,9 @@ import Foundation
         var updated = profile
         updated["revision"] = revision + 1
         updated["launch_spec"] = [
-            "transport": profile["engine"] as? String == "grok" ? "grok_acp" : profile["engine"] as? String == "codex" ?
+            "transport": profile["engine"] as? String == "codex" ?
                 "codex_app_server" :
-                "pot_agent",
+                "pi_rpc",
             "executable": executable,
             "argv": args
                 .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],
@@ -211,26 +156,14 @@ import Foundation
     }
 
     func load() {
-        config = [:]
-        hasConfiguration = false
-        key = ""
-        limit = String(config["request_limit"] as? Int ?? 10000)
-        tokens = String(config["max_tokens"] as? Int ?? 8192)
-        perTurn = String(config["max_requests_per_turn"] as? Int ?? 100)
-        parallel = String(config["max_parallel_tasks"] as? Int ?? 5)
-        if let data = try? Data(contentsOf: root.appendingPathComponent("workspace/product/execution-limits.json")),
+        key = ""; limit = "10000"; tokens = "8192"; perTurn = "100"; parallel = "5"
+        if let data = try? Data(contentsOf: root.appendingPathComponent("product/execution-limits.json")),
            let limits = try? JSONSerialization.jsonObject(with: data) as? [String: Int]
         {
             limit = String(limits["request_limit"] ?? 10000); tokens = String(limits["max_tokens"] ?? 8192)
             perTurn = String(limits["max_requests_per_turn"] ?? 100); parallel =
                 String(limits["max_parallel_tasks"] ?? 5)
         }
-        if let data = try? Data(contentsOf: root.appendingPathComponent("sandbox.json")),
-           let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Int]
-        {
-            cpu = value["cpus"] ?? 4; memory = value["memory_gib"] ?? 8; disk = value["disk_gib"] ?? 32
-        }
-        cpuField = String(cpu); memoryField = String(memory); diskField = String(disk)
         revision += 1
     }
 
@@ -247,77 +180,34 @@ import Foundation
         ), let n = parsed(parallel, 1 ... 1000) else { result = "请检查请求上限；输出 token 可填正整数或 K/M，例如 128K、1M、1.5M。"; return }
         apply(
             ["request_limit": l, "max_tokens": t, "max_requests_per_turn": p, "max_parallel_tasks": n],
-            to: root.appendingPathComponent("workspace/product/execution-limits.json")
+            to: root.appendingPathComponent("product/execution-limits.json")
         )
     }
 
-    @objc func saveSandbox() {
-        guard let c = parsed(cpuField, 1 ... 32), let m = parsed(memoryField, 1 ... 128), let d = parsed(
-            diskField,
-            4 ... 512
-        ) else { result = "请输入范围内的 CPU、内存与系统盘容量。"; return }
-        apply(["cpus": c, "memory_gib": m, "disk_gib": d], to: root.appendingPathComponent("sandbox.json"))
-    }
-
     func apply(_ value: [String: Any], to path: URL) {
-        guard let bridge,!bridge.running,!bridge.isApplying else { result = "任务仍在运行或环境正在更新，请结束后再应用。"; return }
-        guard ["running", "stopped", "failed"].contains(bridge.localPhase) else { result = "环境正在切换状态，请稍后再试。"; return }
-        // A disconnected Runtime cannot prove that there is no active task.
-        guard bridge.localPhase != "running" || bridge.snapshot["connected"] as? Bool == true
-        else { result = "Runtime 尚未连接，无法确认任务状态，请稍后重试。"; return }
-        let alert = NSAlert(); alert.messageText = setup ? "保存配置并启动 Pot？" : "应用配置并重启 Sandbox？"
-        alert.informativeText = "当前没有运行中的任务。聊天、工作文件和用量记录会保留；浏览器将正常关闭。此操作不调用模型。"
-        alert.addButton(withTitle: "应用"); alert.addButton(withTitle: "取消")
-        let performApply: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            MainActor.assumeIsolated {
-                guard response == .alertFirstButtonReturn, let self, let bridge = self.bridge else { return }
-                guard !bridge.running else { self.result = "刚有任务开始，请完成后再应用。"; return }
-                bridge.isApplying = true; bridge.ready = false; bridge.sendButton.isEnabled = false
-                self.result = "正在正常停止环境并保存配置…"
-                guard let runtime = bridge.localRuntime else { return }
-                runtime.send("stop") { [weak self] response in
-                    guard let self, let bridge = self.bridge else { return }
-                    guard let state = response["result"] as? [String: Any],
-                          state["phase"] as? String == "stopped"
-                    else { bridge.isApplying = false; self.result = "停止失败，配置未修改。"; return }
-                    do {
-                        try FileManager.default.createDirectory(
-                            at: path.deletingLastPathComponent(),
-                            withIntermediateDirectories: true
-                        )
-                        let data = try JSONSerialization.data(withJSONObject: value, options: .sortedKeys)
-                        // Atomic replacement and mode 0600; never include credentials in UI errors.
-                        let temp = path.deletingLastPathComponent()
-                            .appendingPathComponent(".config-" + UUID().uuidString)
-                        guard FileManager.default.createFile(
-                            atPath: temp.path,
-                            contents: nil,
-                            attributes: [.posixPermissions: 0o600]
-                        ) else { throw NSError(domain: "Pot", code: 1) }
-                        defer { try? FileManager.default.removeItem(at: temp) }
-                        let handle = try FileHandle(forWritingTo: temp); try handle.write(contentsOf: data); try handle
-                            .synchronize(); try handle.close()
-                        guard rename(temp.path, path.path) == 0 else { throw NSError(domain: "Pot", code: 2) }
-                        self.awaitingBoot = bridge.snapshot["boot_id"] as? String ?? ""
-                        self.load(); self.result = "配置已保存，正在启动环境…"; self.setup = false
-                        runtime.send("start") { _ in bridge.isApplying = false }
-                    } catch { bridge.isApplying = false; self.result = "保存失败，原配置保留。可从 Sandbox 重新启动环境。" }
-                }
+        guard let bridge, !bridge.running, !bridge.isApplying else { result = "任务仍在运行，请结束后再应用。"; return }
+        do {
+            try FileManager.default.createDirectory(
+                at: path.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let temp = path.deletingLastPathComponent().appendingPathComponent(".config-" + UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let data = try JSONSerialization.data(withJSONObject: value, options: .sortedKeys)
+            guard FileManager.default.createFile(
+                atPath: temp.path,
+                contents: data,
+                attributes: [.posixPermissions: 0o600]
+            ) else { throw NSError(domain: "Pot", code: 1) }
+            let handle = try FileHandle(forWritingTo: temp); try handle.synchronize(); try handle.close()
+            guard rename(temp.path, path.path) == 0 else { throw NSError(domain: "Pot", code: 2) }
+            load(); result = "配置已保存。"
+            if path.path.contains("/product/") {
+                bridge.localRuntime?.send("backend-restart")
             }
-        }
-        if setup {
-            performApply(.alertFirstButtonReturn)
-        } else {
-            alert.beginSheetModal(for: bridge.host, completionHandler: performApply)
-        }
+        } catch { result = "保存失败，原配置保留。" }
     }
 
-    @objc func openWorkspace() {
-        bridge?.openWorkspace()
-    }
-}
-
-@MainActor extension SettingsPanel {
     func refreshRouting() {
         guard let bridge, !routingBusy else { return }
         routingBusy = true

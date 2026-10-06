@@ -12,7 +12,6 @@ pub struct Hosts {
 }
 pub struct Connection {
     stdin: tokio::sync::Mutex<tokio::process::ChildStdin>,
-    acp: bool,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
     pub events: broadcast::Sender<Value>,
     sequence: AtomicU64,
@@ -55,14 +54,8 @@ impl Connection {
         let _ = done.wait_for(|done| *done).await;
     }
     async fn spawn(launch: &LaunchSpec) -> Result<Arc<Self>> {
-        let acp = launch.transport == "grok_acp";
-        let arguments = if acp {
-            vec!["agent".into(), "--no-leader".into(), "stdio".into()]
-        } else {
-            vec!["app-server".into()]
-        };
         let mut child = tokio::process::Command::new(&launch.executable)
-            .args(launch.expand(&arguments)?)
+            .args(launch.expand(&["app-server".into()])?)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             // Never persist provider diagnostics, native auth, prompts or lane headers.
@@ -77,7 +70,6 @@ impl Connection {
         let (done_tx, done) = tokio::sync::watch::channel(false);
         let connection = Arc::new(Self {
             stdin: tokio::sync::Mutex::new(stdin),
-            acp,
             pending: Arc::new(Mutex::new(HashMap::new())),
             events,
             sequence: AtomicU64::new(1),
@@ -123,21 +115,13 @@ impl Connection {
             let _ = child.wait().await;
             let _ = done_tx.send(true);
         });
-        if acp {
-            let init = connection.request("initialize", json!({"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"pot","version":env!("CARGO_PKG_VERSION")}})).await?;
-            anyhow::ensure!(init["protocolVersion"] == 1, "Unsupported ACP protocol");
-            return Ok(connection);
-        }
         connection.request("initialize", json!({"clientInfo":{"name":"pot","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}})).await?;
         connection
             .write(json!({"method":"initialized","params":{}}))
             .await?;
         Ok(connection)
     }
-    pub async fn write(&self, mut value: Value) -> Result<()> {
-        if self.acp {
-            value["jsonrpc"] = json!("2.0");
-        }
+    pub async fn write(&self, value: Value) -> Result<()> {
         anyhow::ensure!(
             self.alive.load(Ordering::SeqCst),
             "Codex host exited; stop unconfirmed"

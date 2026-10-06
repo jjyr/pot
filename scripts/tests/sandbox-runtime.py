@@ -236,7 +236,10 @@ async def run(args):
             'model = "pot-mock"\nmodel_provider = "pot_mock"\n[model_providers.pot_mock]\nname = "Pot mock"\n'
             + f'base_url = "http://127.0.0.1:{port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[mcp_servers.unmanaged]\nurl = "http://127.0.0.1:1/mcp"\n'
         )
-        (root / "sandbox.json").write_text(json.dumps({"cpus": 2, "memory_gib": 2, "disk_gib": 8}))
+        for sandbox_id in ("default", "linux-b"):
+            config_path = root / "sandboxes" / sandbox_id / "sandbox.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(json.dumps({"cpus": 2, "memory_gib": 2, "disk_gib": 8}))
         environment = {
             "PATH": str(resources / "node/bin")
             + ":"
@@ -332,6 +335,20 @@ async def run(args):
             initial = await api("sandboxes")
             assert initial["items"][0]["state"]["phase"] == "stopped", initial
             assert not (root / "sandboxes/default/workspace/executor-token").exists()
+            await api(
+                "sandboxes",
+                {
+                    "action": "update",
+                    "sandbox_id": "default",
+                    "name": "Primary Linux",
+                    "config": {"cpus": 2, "memory_gib": 2, "disk_gib": 8},
+                },
+            )
+            configured = (await api("sandboxes"))["items"][0]
+            assert configured["name"] == "Primary Linux" and configured["config"]["memory_gib"] == 2
+            assert configured["running_tasks"] == 0 and configured["tasks"] == []
+            assert configured["state"]["phase"] == "stopped"
+            report["scoped_settings_without_start"] = True
             report["lazy_start"] = True
             await api(
                 "providers",
@@ -430,7 +447,7 @@ async def run(args):
                 "tool_policy": {
                     "worker_orchestration": False,
                     "summary_read_only": True,
-                    "unattended": "guest_vm",
+                    "unattended": "sandbox",
                 },
             }
             await api(
@@ -518,6 +535,15 @@ async def run(args):
             else:
                 raise AssertionError("Sandbox cancellation command not started")
             await reject("sandboxes", {"action": "stop", "sandbox_id": "default"})
+            await reject(
+                "sandboxes",
+                {
+                    "action": "update",
+                    "sandbox_id": "default",
+                    "name": "Busy",
+                    "config": {"cpus": 2, "memory_gib": 2, "disk_gib": 8},
+                },
+            )
             await api(
                 "turn/cancel",
                 {"request_id": str(uuid.uuid4()), "user_message_id": receipt["message_id"]},

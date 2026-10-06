@@ -543,7 +543,7 @@ mod lifecycle_tests {
                 .is_err()
         );
         assert_eq!(s.terminals.lock().unwrap().sessions.len(), 1);
-        // A rejected legacy login request never creates another process or writes PTY input.
+        // A rejected command-injection request never creates another process or writes PTY input.
         shutdown(&s).await;
         assert!(session.exit.borrow().is_some());
     }

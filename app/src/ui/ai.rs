@@ -7,7 +7,6 @@ pub(crate) fn brand_icon(kind: &str) -> Icon {
         "codex" | "openai" => Icon::empty().data(include_bytes!("../../assets/agents/openai.svg")),
         "anthropic" => Icon::empty().data(include_bytes!("../../assets/agents/claude.svg")),
         "gemini" => Icon::empty().data(include_bytes!("../../assets/agents/gemini.svg")),
-        "grok" => Icon::new(IconName::Bot),
         "deepseek" => Icon::empty().data(include_bytes!("../../assets/agents/deepseek.svg")),
         "opencode-go" | "opencode-zen" => {
             Icon::empty().data(include_bytes!("../../assets/agents/opencode.svg"))
@@ -18,7 +17,6 @@ pub(crate) fn brand_icon(kind: &str) -> Icon {
         "codex" | "openai" => 0x159B7D,
         "anthropic" => 0xD97757,
         "gemini" => 0x4285F4,
-        "grok" => 0xD79026,
         "deepseek" => 0x4D6BFE,
         "opencode-go" => 0x0E9B9B,
         "opencode-zen" => 0x8B5CF6,
@@ -32,7 +30,6 @@ fn brand_name(kind: &str) -> &'static str {
         "anthropic" => "Claude",
         "gemini" => "Gemini",
         "openai" => "OpenAI API",
-        "grok" => "Grok",
         "deepseek" => "DeepSeek",
         "opencode-go" => "OpenCode Go",
         "opencode-zen" => "OpenCode Zen",
@@ -139,7 +136,7 @@ impl Settings {
             }
             body = body.child(choices);
         } else if screen == "manage" {
-            let native = matches!(state["connection_kind"].as_str(), Some("codex" | "grok"));
+            let native = matches!(state["connection_kind"].as_str(), Some("codex"));
             let kind = state["connection_kind"].as_str().unwrap_or("").to_owned();
             let mut form = super::form(cx);
             if (!native && self.api_advanced) || (native && self.commands_open) {

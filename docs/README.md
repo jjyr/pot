@@ -8,36 +8,28 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
 | Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
-| Understand backend crate and standalone Server boundaries | [Backend crate split](backend-crates.md) |
-| Change APIs, Agent execution, task state, or recovery | [Runtime contract](../runtime/README.md) |
-| Discuss controller/task execution isolation | [Proposed isolation boundaries](agent-isolation.md) |
-| Build the Sandbox image, desktop theme, or CJK fonts | [Sandbox image](sandbox-image.md) |
+| Understand backend crate and standalone Server boundaries | Backend crate split |
+| Change APIs, Pi, task state, or recovery | [Runtime contract](../runtime/README.md) |
+| Build the Sandbox image, desktop theme, or CJK fonts | Sandbox image |
 | Change chat, tasks, settings, or Sandbox UI | [UI specification](ui-ux-design.md) |
 | Apply the approved visual, component, motion, and navigation direction | [Design language](design-language.md) (shared shell, page layouts, Chat and Pot icons implemented; acceptance limits documented) |
-| Change persistent execution preferences or preference-guided task routing | [Execution preferences](execution-preferences.md) |
 | Change token accounting, periodic allowances, or budget recovery | [Token usage](token-usage.md) |
-| Design long-term cross-runtime token evaluation | [Token evaluation framework](token-evaluation.md), [Small-budget suite](token-evaluation-next-suite.md), [CLI usage](../eval/README.md), [validation](validation/token-evaluation.md), [Small-budget results](validation/small-budget-evaluation.md), [Pi CLI comparison](validation/pi-token-comparison.md) |
 | Change scheduled triggers, time zones, or notifications | [Scheduled tasks](scheduled-tasks.md) |
 | Review long-term product boundaries and acceptance goals | [Product design](product-design.md) |
-| Review completed tests and limitations | [Agent layer](validation/agent-layer.md), [Pi MVP](validation/pi-mvp.md), [Multitask](validation/multitask.md), [UI](validation/ui-ux.md), [Sandbox image](validation/sandbox-image.md), [Backend crates](validation/backend-crates.md), [AI configuration](validation/ai-configuration.md) |
-| Investigate old integrations or technical decisions | [Historical POC index](poc-plan.md) |
+| Review completed tests and limitations | [Host Agents and managed Sandboxes](validation/agent-sandbox-20261006.md) |
+
+Sandbox UI acceptance: [Sandbox environment list and desktop, 2026-10-06](validation/sandbox-ui-20261006.md).
 
 Current decoupling acceptance: [Host Agents and managed Sandboxes, 2026-10-06](validation/agent-sandbox-20261006.md).
 
 ## Research on demand
-
-Current execution contract: [Pot Agent and native drivers](../runtime/README.md); [native Agent acceptance](validation/native-agent.md). Pi validation pages below are historical.
-
-Latest AI integration acceptance: [Simplified AI integration, 2026-10-06](validation/ai-integration-20261006.md). Earlier Terminal-based screenshots are historical.
 
 `research/` contains dated background material, not current implementation specifications:
 
 - UI framework: [GPUI Kit](research/gpui-kit-evaluation.md). See the UI specification for current component usage.
 - VMs and desktops: [Apple Containerization](research/apple-containerization.md), [Docker GUI](research/docker-gui.md).
 - Driver sessions: [Coordination comparison](research/session-coordination.md), [Hermes](research/hermes-sessions.md), [OpenClaw](research/openclaw-sessions.md).
-- Agent/tool execution placement: [Agent and Sandbox decoupling feasibility, 2026-10-06](research/agent-sandbox-decoupling.md).
 - Future memory: [Identity and memory](research/identity-memory.md).
-- Original note sources and hashes at import: [Source manifest](source-manifest.json). These are not hashes of the current files.
 
 ## Maintenance rules
 

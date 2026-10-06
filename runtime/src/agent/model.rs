@@ -5,7 +5,7 @@ mod launch_tests {
 
     #[test]
     fn native_wrapper_arguments_are_preserved_but_managed_flags_are_rejected() {
-        for mut launch in [LaunchSpec::codex(), LaunchSpec::grok()] {
+        for mut launch in [LaunchSpec::codex()] {
             launch.executable = "/opt/my wrapper".into();
             launch.argv = vec![
                 LaunchArgument::Literal("--wrapper-label".into()),

@@ -241,6 +241,7 @@ async fn inventory(s: &Service) -> Value {
             book.selected.clone(),
         )
     };
+    let task_snapshot = tasks::sandbox_tasks(s);
     let mut rows = vec![];
     for item in items {
         let state = s
@@ -255,7 +256,21 @@ async fn inventory(s: &Service) -> Value {
             .unwrap()
             .get(&item.id)
             .unwrap_or(&0);
-        rows.push(json!({"id":item.id,"name":item.name,"os":"linux","active_leases":active,"unsettled_operations":s.sandboxes.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":state}));
+        let assigned: Vec<_> = task_snapshot
+            .iter()
+            .filter(|task| task.sandbox_id == item.id)
+            .collect();
+        let config = std::fs::read(
+            s.sandboxes
+                .root
+                .join("sandboxes")
+                .join(&item.id)
+                .join("sandbox.json"),
+        )
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .unwrap_or(json!({"cpus":4,"memory_gib":8,"disk_gib":32}));
+        rows.push(json!({"running_tasks":assigned.iter().filter(|task| task.phase == TaskPhase::Running).count(),"tasks":assigned,"config":config,"referenced":tasks::uses_sandbox(s,&item.id),"id":item.id,"name":item.name,"os":"linux","active_leases":active,"unsettled_operations":s.sandboxes.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":state}));
     }
     json!({"selected":selected,"items":rows})
 }
@@ -307,7 +322,11 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'),
             "Invalid Sandbox ID"
         );
-        let name = args["name"].as_str().unwrap_or(id);
+        let name = args["name"].as_str().unwrap_or(id).trim();
+        anyhow::ensure!(
+            !name.is_empty() && name.chars().count() <= 80,
+            "Name must contain 1–80 characters"
+        );
         {
             let mut book = s.sandboxes.book.lock().unwrap();
             anyhow::ensure!(
@@ -333,6 +352,56 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     let id = s
         .sandboxes
         .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
+    if action == "update" {
+        let name = args["name"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Name required"))?
+            .trim();
+        anyhow::ensure!(
+            !name.is_empty() && name.chars().count() <= 80,
+            "Name must contain 1–80 characters"
+        );
+        let config = &args["config"];
+        let c = config["cpus"].as_u64().unwrap_or(0);
+        let m = config["memory_gib"].as_u64().unwrap_or(0);
+        let d = config["disk_gib"].as_u64().unwrap_or(0);
+        anyhow::ensure!(
+            (1..=32).contains(&c) && (1..=128).contains(&m) && (4..=512).contains(&d),
+            "Invalid Sandbox resources"
+        );
+        anyhow::ensure!(
+            *s.sandboxes.leases.lock().unwrap().get(&id).unwrap_or(&0) == 0
+                && !s
+                    .sandboxes
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|v| v.target == id),
+            "Sandbox busy; finish or recover operations first"
+        );
+        let state = s.sandboxes.helper(&id, "status").await?;
+        anyhow::ensure!(
+            state["phase"] == "stopped" || state["phase"] == "failed",
+            "Stop the environment before changing settings"
+        );
+        let path = s.sandboxes.root.join("sandboxes").join(&id);
+        std::fs::create_dir_all(&path)?;
+        pi::private_json(
+            &path.join("sandbox.json"),
+            &json!({"cpus":c,"memory_gib":m,"disk_gib":d}),
+        )?;
+        s.sandboxes
+            .book
+            .lock()
+            .unwrap()
+            .items
+            .get_mut(&id)
+            .unwrap()
+            .name = name.into();
+        s.sandboxes.persist(&s.data)?;
+        return Ok(json!({"sandbox_id":id}));
+    }
     if action == "recover" {
         anyhow::ensure!(
             *s.sandboxes.leases.lock().unwrap().get(&id).unwrap_or(&0) == 0,
@@ -676,6 +745,54 @@ mod tests {
                 .all(|t| t["name"].as_str().unwrap().starts_with("pot_sandbox_"))
         );
         std::fs::remove_dir_all(&s.data).unwrap();
+    }
+    #[tokio::test]
+    async fn settings_validate_before_io_and_refuse_busy_environment() {
+        let s = tasks::tests::fixture();
+        let args = json!({"action":"update","sandbox_id":"default","name":"Linux","config":{"cpus":2,"memory_gib":2,"disk_gib":8}});
+        let mut invalid = args.clone();
+        invalid["config"]["cpus"] = json!(0);
+        assert!(
+            management(&s, &invalid)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("resources")
+        );
+        invalid = args.clone();
+        invalid["name"] = json!("   ");
+        assert!(
+            management(&s, &invalid)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Name")
+        );
+        let lease = s.sandboxes.acquire("default").await.unwrap();
+        assert!(
+            management(&s, &args)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("busy")
+        );
+        assert!(
+            !s.sandboxes
+                .root
+                .join("sandboxes/default/sandbox.json")
+                .exists()
+        );
+        let mut worker = s.clone();
+        worker.is_worker = true;
+        assert!(
+            management(&worker, &args)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Workers")
+        );
+        drop(lease);
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
     #[tokio::test]
     async fn no_host_fallback_and_unknown_outcomes_block_stop_and_survive_restart() {

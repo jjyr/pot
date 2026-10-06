@@ -52,5 +52,5 @@ pub fn reserve_in(dir: &std::path::Path, limit: u64) -> Result<u64> {
             Err(e) => return Err(e.into()),
         }
     }
-    bail!("DeepSeek smoke-test request budget exhausted (3 maximum)")
+    bail!("Model request budget exhausted")
 }

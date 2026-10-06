@@ -25,10 +25,6 @@ pub async fn execute(
         None
     };
     let binding = binding(s)?;
-    anyhow::ensure!(
-        binding.spec.engine != Engine::Grok,
-        "Grok is not supported by Host Agent / Sandbox execution; select Pi or Codex"
-    );
     if let Err(e) = crate::gateway::validate_spec(s, &binding.spec) {
         s.inner
             .lock()
@@ -55,9 +51,6 @@ pub async fn execute(
             hosts: s.codex.clone(),
         }
         .session(context(s, request, &binding)?, binding)?,
-        Engine::Grok => {
-            pot_driver::grok::GrokHost.session(context(s, request, &binding)?, binding)?
-        }
     };
     let result = run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
         transcript.record(s, update)
