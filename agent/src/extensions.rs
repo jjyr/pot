@@ -9,6 +9,20 @@ use pot_gateway::{
 use serde_json::Value;
 
 pub trait AgentExtensions: Send + Sync {
+    /// Same catalog injection for Main and Worker; providers select by context
+    /// and expose only assigned skills. Summary turns do not request skills.
+    /// Bundles must be readable at their Sandbox locations when tools run.
+    /// Discovery, installation and resource synchronization belong to callers.
+    fn skills(&self, _context: &ExecutionContext) -> Result<Vec<crate::Skill>> {
+        let catalog = crate::discover_skills(&_context.skill_resources)?;
+        for diagnostic in &catalog.diagnostics {
+            _context
+                .feedback
+                .diagnostic(&serde_json::json!({"kind":"skill_diagnostic","message":diagnostic}))?;
+        }
+        Ok(catalog.skills)
+    }
+
     fn tools(&self, _context: &ExecutionContext) -> Result<Vec<Value>> {
         Ok(vec![])
     }

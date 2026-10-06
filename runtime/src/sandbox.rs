@@ -101,6 +101,8 @@ impl Drop for Execution {
     }
 }
 pub struct Manager {
+    pub(crate) skill_user: PathBuf,
+    pub(crate) skill_builtin: PathBuf,
     // Per-fixture ephemeral HTTP listeners; production always uses guest port 17701.
     #[cfg(test)]
     pub(crate) test_executor_urls: Mutex<BTreeMap<String, String>>,
@@ -145,7 +147,21 @@ impl Manager {
                 retired: Default::default(),
             }
         };
+        #[cfg(test)]
+        let skill_user = root.join("skills-user");
+        #[cfg(not(test))]
+        let skill_user = std::env::var_os("POT_AGENT_SKILLS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join(".pot/agent/skills")
+            });
+        let skill_builtin = std::env::var_os("POT_BUILTIN_SKILLS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills"));
         Ok(Self {
+            skill_user,
+            skill_builtin,
             #[cfg(test)]
             test_executor_urls: Mutex::new(BTreeMap::new()),
             root,
@@ -167,6 +183,12 @@ impl Manager {
                 .timeout(std::time::Duration::from_secs(660))
                 .build()?,
         })
+    }
+    pub(crate) fn workspace(&self, target: &str) -> PathBuf {
+        self.root
+            .join("sandboxes")
+            .join(target)
+            .join("workspace/workspace")
     }
     fn executor_url(&self, ip: &str) -> String {
         #[cfg(test)]
@@ -759,7 +781,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         object.remove("sandbox_id");
     }
     let response=s.sandboxes.client.post(format!("{url}/execute")).bearer_auth(&token)
-        .json(&json!({"id":record["id"],"scope":scope.id,"operation":name,"args":tool_args,"cwd":cwd,"policy":agent::binding(s)?.spec.params.agent.shell})).send();
+        .json(&json!({"id":record["id"],"scope":scope.id,"operation":name,"args":tool_args,"cwd":cwd,"role":if s.is_worker {"task"} else {"main"},"policy":agent::binding(s)?.spec.params.agent.shell})).send();
     tokio::pin!(response);
     let result = loop {
         tokio::select! {

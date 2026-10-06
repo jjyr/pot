@@ -248,6 +248,7 @@ async fn main_context_routes_commands_patch_and_sessions_through_sandbox() {
         assert_eq!(record["auth"], format!("Bearer fixture-{target}"));
         assert_eq!(record["body"]["operation"], operation);
         assert_eq!(record["body"]["cwd"], "/data/workspace");
+        assert_eq!(record["body"]["role"], "main");
         assert_eq!(
             record["body"]["policy"],
             serde_json::to_value(policy).unwrap()
@@ -363,6 +364,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
         format!("/data/workspace/tasks/{}", task.id)
     );
     assert_eq!(dispatched[0]["auth"], "Bearer fixture-default");
+    assert_eq!(dispatched[0]["body"]["role"], "task");
     for (name, args) in [
         ("exec_command", json!({"cmd":"true","sandbox_id":"linux-b"})),
         (

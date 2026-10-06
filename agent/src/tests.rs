@@ -191,6 +191,7 @@ impl Fixture {
         std::fs::create_dir(&dir).unwrap();
         let feedback = Arc::new(Feedback::default());
         let context = ExecutionContext {
+            skill_resources: Default::default(),
             tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: dir.clone(),
             workspace: dir.clone(),
@@ -230,6 +231,13 @@ impl Fixture {
         }
     }
     async fn turn(&self, resuming: bool) -> Result<Vec<Update>> {
+        self.turn_with(resuming, &Defaults).await
+    }
+    async fn turn_with(
+        &self,
+        resuming: bool,
+        extensions: &dyn AgentExtensions,
+    ) -> Result<Vec<Update>> {
         let mut updates = vec![];
         let result = run(
             &self.context,
@@ -239,7 +247,7 @@ impl Fixture {
                 text: "task".into(),
             },
             resuming,
-            &Defaults,
+            extensions,
             Some(&self.services),
             &mut |u| {
                 updates.push(u);
@@ -1321,4 +1329,170 @@ async fn configured_loadout_restricts_model_tools_and_dispatch() {
             .iter()
             .any(|u| matches!(u,Update::ToolFinished{failed:true,id,..} if id=="disabled"))
     );
+}
+
+#[derive(Default)]
+struct CatalogExtension {
+    contexts: Mutex<Vec<Value>>,
+}
+impl AgentExtensions for CatalogExtension {
+    fn skills(&self, context: &ExecutionContext) -> Result<Vec<Skill>> {
+        self.contexts
+            .lock()
+            .unwrap()
+            .push(json!({"role":role_name(context.role),"owner":context.owner}));
+        Ok(vec![Skill {
+            name: format!("{}-skill", role_name(context.role)),
+            description: "Use for a catalog injection test".into(),
+            // Deliberately nonexistent: injection must never read files eagerly.
+            location: "/data/skills/example/SKILL.md".into(),
+            disable_model_invocation: false,
+        }])
+    }
+}
+#[tokio::test]
+async fn main_and_task_agents_share_skill_injection_across_model_protocols() {
+    for protocol in ["openai_chat", "openai_responses", "anthropic_messages"] {
+        for role in [ExecutionRole::Main, ExecutionRole::Worker] {
+            let mut f = Fixture::new(protocol);
+            full_loadout(&mut f);
+            f.context.role = role;
+            let catalog = CatalogExtension::default();
+            f.services.queue(wire(protocol, "done", &[]));
+            f.turn_with(false, &catalog).await.unwrap();
+            let captured = f.services.requests.lock().unwrap();
+            let body = captured[0]["body"].to_string();
+            assert!(body.contains("<available_skills>"));
+            assert!(body.contains(&format!("{}-skill", role_name(role))));
+            assert!(!body.contains(&format!(
+                "{}-skill",
+                if role == ExecutionRole::Main {
+                    "worker"
+                } else {
+                    "main"
+                }
+            )));
+            assert!(body.contains("/data/skills/example/SKILL.md"));
+            assert!(
+                body.contains("Complete the task."),
+                "custom system prompt lost"
+            );
+            assert_eq!(
+                *catalog.contexts.lock().unwrap(),
+                vec![json!({"role":role_name(role),"owner":"unit"})]
+            );
+            assert!(
+                !f.feedback
+                    .saved
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .to_string()
+                    .contains("available_skills"),
+                "catalog polluted persistent history"
+            );
+            let tools = model_tools(&captured[0], protocol);
+            assert!(
+                tools
+                    .iter()
+                    .all(|t| !t["name"].as_str().unwrap().contains("skill")),
+                "skills changed tool permissions"
+            );
+        }
+    }
+}
+#[tokio::test]
+async fn skills_are_not_requested_for_summary_or_without_authorized_reader() {
+    for role in [ExecutionRole::Summary, ExecutionRole::Worker] {
+        let mut f = Fixture::new("openai_chat");
+        f.context.role = role;
+        f.binding.spec.params.agent.builtin_tools = vec![];
+        f.services.rpc_tools = Some(vec![]);
+        let catalog = CatalogExtension::default();
+        f.services.queue(wire("openai_chat", "done", &[]));
+        f.turn_with(false, &catalog).await.unwrap();
+        assert!(catalog.contexts.lock().unwrap().is_empty());
+        assert!(
+            !f.services.requests.lock().unwrap()[0]["body"]
+                .to_string()
+                .contains("available_skills")
+        );
+    }
+}
+
+#[tokio::test]
+async fn filesystem_skills_refresh_in_model_requests_without_persisting_catalogs() {
+    for role in [ExecutionRole::Main, ExecutionRole::Worker] {
+        let mut f = Fixture::new("openai_chat");
+        f.context.role = role;
+        f.services.rpc_tools = Some(vec![]);
+        let bundle = f.dir.join("skills/example");
+        std::fs::create_dir_all(&bundle).unwrap();
+        f.context.skill_resources.roots = vec![pot_core::SkillRoot {
+            path: f.dir.join("skills"),
+            location: "/mapped/skills".into(),
+            builtin: false,
+        }];
+        for description in ["first-version", "second-version"] {
+            std::fs::write(
+                bundle.join("SKILL.md"),
+                format!("---\ndescription: {description}\n---\nPRIVATE FULL INSTRUCTIONS"),
+            )
+            .unwrap();
+            f.services.queue(wire("openai_chat", "done", &[]));
+            f.turn(false).await.unwrap();
+            let requests = f.services.requests.lock().unwrap();
+            let body = requests.last().unwrap()["body"].to_string();
+            assert!(body.contains(description));
+            assert_eq!(body.matches("<available_skills>").count(), 1);
+            assert!(body.contains("/mapped/skills/example/SKILL.md"));
+            assert!(!body.contains("PRIVATE FULL INSTRUCTIONS"));
+            if description == "second-version" {
+                assert!(!body.contains("first-version"));
+            }
+            assert!(
+                !f.feedback
+                    .saved
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .to_string()
+                    .contains("available_skills")
+            );
+        }
+        f.context.skill_resources.selection = Some(vec![]);
+        f.services.queue(wire("openai_chat", "done", &[]));
+        f.turn(false).await.unwrap();
+        assert!(
+            !f.services.requests.lock().unwrap().last().unwrap()["body"]
+                .to_string()
+                .contains("available_skills")
+        );
+    }
+}
+
+#[tokio::test]
+async fn unavailable_selected_skill_fails_before_model_request() {
+    let mut f = Fixture::new("openai_chat");
+    f.services.rpc_tools = Some(vec![]);
+    f.context.skill_resources.selection = Some(vec!["missing".into()]);
+    let error = f.turn(false).await.unwrap_err();
+    assert!(format!("{error:#}").contains("Selected skill unavailable: missing"));
+    assert!(f.services.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn allowed_tools_excluding_reader_skips_skill_provider() {
+    let mut f = Fixture::new("openai_chat");
+    full_loadout(&mut f);
+    f.binding.spec.params.agent.allowed_tools = Some(vec!["apply_patch".into()]);
+    let catalog = CatalogExtension::default();
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn_with(false, &catalog).await.unwrap();
+    assert!(catalog.contexts.lock().unwrap().is_empty());
+    let requests = f.services.requests.lock().unwrap();
+    assert!(!requests[0]["body"].to_string().contains("available_skills"));
+    assert_eq!(model_tools(&requests[0], "openai_chat").len(), 1);
 }

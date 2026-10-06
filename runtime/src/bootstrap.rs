@@ -73,6 +73,7 @@ pub async fn initialize_with_agent_host(
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
     let s = Service {
+        skill_selection: None,
         #[cfg(test)]
         test_tool_executor: None,
         sandboxes: Arc::new(sandbox::Manager::open(&data)?),

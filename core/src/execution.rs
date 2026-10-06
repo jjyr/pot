@@ -126,9 +126,25 @@ pub enum ExecutionRole {
     Summary,
 }
 
+/// Ordered resource directories, highest priority first. The Agent does not
+/// interpret roles or mount policies; callers own the visible filesystem view.
+#[derive(Clone, Debug)]
+pub struct SkillRoot {
+    pub path: PathBuf,
+    pub location: PathBuf,
+    pub builtin: bool,
+}
+#[derive(Clone, Debug, Default)]
+pub struct SkillResources {
+    pub roots: Vec<SkillRoot>,
+    pub reserved_names: Vec<String>,
+    pub selection: Option<Vec<String>>,
+}
+
 /// Fixed per-execution capabilities; never exposes the Runtime or database.
 #[derive(Clone)]
 pub struct ExecutionContext {
+    pub skill_resources: SkillResources,
     pub data: PathBuf,
     pub workspace: PathBuf,
     pub owner: String,

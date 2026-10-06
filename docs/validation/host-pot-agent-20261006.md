@@ -57,3 +57,38 @@ The doubles exercise production authorization, durable receipts and HTTP dispatc
 Verification: `mise run test` passed **198 tests**, with the existing live-provider test ignored. After separating the two mocked executor listeners, both affected Runtime tests passed again. `mise run clippy` passed across all targets with warnings treated as errors, and `mise run lint` passed. No paid model calls or real VMs were required for this follow-up.
 
 Local evidence: `/tmp/pot-injection-{test,agent,runtime,clippy,lint}.log`.
+
+## Role-scoped filesystem skills follow-up
+
+Date: 2026-10-06. Implemented repo `skills/{shared,main,task}`, Host `~/.pot/agent/skills/{shared,main,task}`, and project `.agents/skills` discovery. Runtime supplies ordered roots and optional task selections; pot-agent uses the same filesystem loader for main and task roles, without mount or Sandbox knowledge. Project overrides user, user overrides builtin, and role-specific overrides shared. Reserved skill-manager overrides are diagnosed and ignored. Metadata refreshes each turn and full instructions remain lazy. No skill registry/content/version database was introduced; the normal task request record preserves an optional selected-name list.
+
+The packaged builtin `main/skill-manager` manages Host user bundles through existing Sandbox tools. Helper shares the user source and readonly builtin source under a root-only guest directory. Broker scopes get private mount views: main can manage all user role directories, tasks see only shared/task as read-only, and builtins remain read-only. Main/task UID separation prevents writable-view access through another role's `/proc` root. Shared workspace group permissions retain desktop access to task files. Root broker mount preparation uses CAP_SYS_ADMIN; tool children have zero effective capabilities and no_new_privs. Failed mount preparation returns a visible error without an unrestricted fallback.
+
+Verification:
+
+- Backend tests: **204 passed**, one existing live-provider test ignored. Added common model skill injection, discovery/priority/YAML/diagnostics/reserved-name/refresh tests and Runtime role-root/task-selection restoration tests. Existing Sandbox adapter tests also check authoritative main/task role transport.
+- `mise run test:skills`: **3 passed**, covering role mount views, readonly remount policy, traversable view parents and fail-closed syscall behavior.
+- `mise run test:app`: **14 passed**.
+- Clippy, source/script lint, deterministic evaluation, Rust/App/Swift build and bundle passed.
+- Final real dual-VM acceptance passed using image `pot.local/sandbox:3bb69f0eedb7a69f955c` and Codex `0.159.1`. It used **47 local mock model requests and four read-only summaries**, without paid inference.
+
+Real VM checks confirmed that main-generated shared/main/task bundles persisted on Host; a task in the second VM read the shared/task bundles, received **EROFS** when modifying either, could not see main user/builtin paths or raw source shares, and ran with a distinct UID, no_new_privs and zero effective capabilities. Mock model inspection checked that worker prompts omitted skill-manager/main-only skills. Existing Pot/Codex scope routing, pipe sessions, cancellation, busy-stop, native restart/resume, artifact persistence and desktop/shutdown checks also passed.
+
+Initial real runs exposed missing broker mount capabilities and umask-restricted view parent directories. Both were corrected before the final successful run. The final acceptance stopped its test VMs/Helper and used isolated user/data directories.
+
+Local evidence: `/tmp/pot-skills-acceptance.json`, `/tmp/pot-skills-acceptance.helper.log`, and `/tmp/pot-skills-{all-test,mount-test,app-test,clippy,lint,eval,build,bundle,e2e}.log`.
+
+Limits: explicit `/skill:name` command expansion, a skills UI and mutually isolated task project files are not part of this change. Main project discovery reflects the default environment at turn preparation; default changes or another explicitly targeted environment refresh the catalog next turn. Skills follow current files rather than immutable version snapshots.
+
+## Additional skills unit tests
+
+Date: 2026-10-06. Added nine Rust tests and four portable Python tests without changing production behavior.
+
+- Filesystem discovery: recursive groups, bundle asset boundaries, hidden directories, linked SKILL.md files and linked roots; BOM/CRLF and quoted YAML, fallback names and explicit-only metadata; malformed neighbors; deterministic same-root collisions; missing directories and empty versus unavailable selections.
+- Agent model requests: the default filesystem provider for both Main and Worker, metadata refresh between turns, mapped paths, lazy body loading and absence of persistent catalog copies; empty selections; unavailable selected skills failing before inference; the final tool allow-list excluding the skill reader.
+- Runtime: repository boundaries represented by either a `.git` directory or a worktree file, ancestor discovery when no repository boundary exists, and fixed task skill roots after the main default Sandbox changes.
+- Guest mount setup: namespace creation failure before any mount, readonly remount failure before subsequent sources, direct and parent-directory symlink rejection, and traversable empty views under a restrictive umask without source bindings.
+
+Verification: `mise run test` passed **213 tests**, with one existing live-provider test ignored. `mise run test:skills` passed **7 tests**. `mise run clippy:backend` and `mise run lint` passed. Mount syscall tests use doubles; actual readonly enforcement remains established by the preceding real-VM acceptance, which was not repeated for this test-only follow-up.
+
+Local evidence: `/tmp/pot-skills-extra-{targeted,test,clippy,lint}.log`.

@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
         }
         .validate()?;
         let context = ExecutionContext {
+            skill_resources: Default::default(),
             data: PathBuf::new(),
             workspace: PathBuf::from(request["cwd"].as_str().unwrap()),
             owner: String::new(),

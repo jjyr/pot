@@ -9,6 +9,7 @@ pub mod gateway;
 pub mod orchestration;
 pub mod sandbox;
 pub mod schedules;
+mod skills;
 mod store;
 pub mod tasks;
 pub mod terminal;
@@ -58,6 +59,7 @@ struct Inner {
 }
 #[derive(Clone)]
 pub struct Service {
+    skill_selection: Option<Vec<String>>,
     #[cfg(test)]
     test_tool_executor: Option<Arc<dyn pot_core::ToolExecutor>>,
     sandboxes: Arc<sandbox::Manager>,
@@ -436,6 +438,7 @@ mod tests {
         let (events, _) = broadcast::channel(8);
         let (commands, _rx) = mpsc::unbounded_channel();
         Service {
+            skill_selection: None,
             test_tool_executor: None,
             sandboxes: Arc::new(
                 sandbox::Manager::open(

@@ -97,7 +97,32 @@ class Model:
                 }
                 assert names == expected, names
                 self.worker_loadouts += 1
+            system = json.dumps(
+                [item for item in inputs if item.get("role") in ("system", "developer")],
+                ensure_ascii=False,
+            )
+            if marker is not None:
+                if worker:
+                    assert "<name>skill-manager</name>" not in system
+                    assert "<name>probe-main</name>" not in system
+                else:
+                    assert "<name>skill-manager</name>" in system
             self.requests.append({"codex": codex, "tools": tools, "worker": worker})
+            for output in current:
+                if output.get("role") == "tool" or output.get("type") == "function_call_output":
+                    raw = output.get("output", output.get("content", ""))
+                    try:
+                        value = json.loads(raw) if isinstance(raw, str) else raw
+                        if isinstance(value, dict) and (
+                            value.get("isError") or value.get("exit_code", 0) not in (None, 0)
+                        ):
+                            print(
+                                "TOOL_FAILURE",
+                                json.dumps(value, ensure_ascii=False)[:5000],
+                                flush=True,
+                            )
+                    except ValueError:
+                        pass
             count = sum(
                 item.get("type") == "function_call_output" if codex else item.get("role") == "tool"
                 for item in current
@@ -275,6 +300,7 @@ async def run(args):
             + str(resources / "host-tools/node_modules/.bin")
             + ":/usr/bin:/bin:/opt/homebrew/bin",
             "HOME": temp,
+            "POT_AGENT_SKILLS_DIR": str(root / "skills-user"),
             "CODEX_HOME": str(native),
         }
         log_path = Path(args.output).resolve().with_suffix(".helper.log")
@@ -423,6 +449,37 @@ async def run(args):
             assert (default / "os.txt").read_text().strip() == "Linux"
             assert not (root / "product/agent-workspace/pot.txt").exists()
             report["pot_main_two_environments"] = True
+            await turn(
+                [
+                    action(
+                        "exec_command",
+                        cmd=r"""python3 - <<'SKILLS'
+from pathlib import Path
+import os
+base=Path('/mnt/pot-skills')
+assert (base/'builtin/main/skill-manager/SKILL.md').is_file()
+for path in [base/'user/shared',base/'builtin/main/skill-manager']:
+    stat=path.stat()
+    print(str(path),stat.st_uid,stat.st_gid,oct(stat.st_mode),flush=True)
+for role,name in [('shared','probe-shared'),('main','probe-main'),('task','probe-task')]:
+    bundle=base/'user'/role/name
+    bundle.mkdir(parents=True,exist_ok=True)
+    (bundle/'SKILL.md').write_text(f'---\nname: {name}\ndescription: Skills mapping acceptance\n---\nREADONLY_PAYLOAD\n')
+Path('skills-main.uid').write_text(str(os.getuid()))
+try:
+    (base/'builtin/main/skill-manager/SKILL.md').write_text('forged')
+    raise AssertionError('Builtin skill writable')
+except OSError:
+    pass
+SKILLS""",
+                    )
+                ]
+            )
+            await turn(
+                [action("exec_command", cmd="id -u > skills-main.uid", sandbox_id="linux-b")]
+            )
+            assert (root / "skills-user/shared/probe-shared/SKILL.md").is_file()
+            report["main_manages_host_skills"] = True
 
             await turn(
                 [
@@ -460,7 +517,31 @@ async def run(args):
                             action(
                                 "apply_patch",
                                 patch="*** Begin Patch\n*** Add File: worker.txt\n+WORKER\n*** End Patch",
-                            )
+                            ),
+                            action(
+                                "exec_command",
+                                cmd=r"""python3 - <<'SKILLS'
+from pathlib import Path
+import errno,os
+base=Path('/mnt/pot-skills')
+assert not (base/'user/main').exists()
+assert not (base/'builtin/main').exists()
+assert not os.access('/run/pot-skill-sources',os.R_OK)
+assert os.getuid() != int(Path('/data/workspace/skills-main.uid').read_text())
+status=dict(line.split(':',1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
+assert int(status['NoNewPrivs']) == 1
+assert int(status['CapEff'],16) == 0
+for role,name in [('shared','probe-shared'),('task','probe-task')]:
+    path=base/'user'/role/name/'SKILL.md'
+    assert 'READONLY_PAYLOAD' in path.read_text()
+    try:
+        path.write_text('forged')
+        raise AssertionError('Task modified Host skill')
+    except OSError as error:
+        assert error.errno == errno.EROFS,error
+Path('skills-task.txt').write_text('READONLY')
+SKILLS""",
+                            ),
                         ],
                         True,
                     ),
@@ -498,6 +579,12 @@ async def run(args):
                 },
                 worker_token,
             )
+            assert (task_workspace / "skills-task.txt").read_text() == "READONLY"
+            assert (
+                "READONLY_PAYLOAD"
+                in (root / "skills-user/shared/probe-shared/SKILL.md").read_text()
+            )
+            report["task_skills_readonly_mapping"] = True
             report["pot_worker_fixed_assignment"] = True
             await reject("sandboxes", {"action": "delete", "sandbox_id": "linux-b"})
             await api("sandboxes", {"action": "stop", "sandbox_id": "default"})

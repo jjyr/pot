@@ -63,7 +63,12 @@ pub(super) fn task_phase(hub: &Hub, task_id: &str) -> Option<TaskPhase> {
 pub(super) fn remove_uncommitted(hub: &mut Hub, task_id: &str) {
     hub.lanes.remove(task_id);
 }
-fn child(root: &Service, task_id: &str, sandbox_id: &str) -> Result<Service> {
+fn child(
+    root: &Service,
+    task_id: &str,
+    sandbox_id: &str,
+    skills: Option<Vec<String>>,
+) -> Result<Service> {
     anyhow::ensure!(
         uuid::Uuid::parse_str(task_id).is_ok(),
         "Invalid persisted task ID"
@@ -97,6 +102,7 @@ fn child(root: &Service, task_id: &str, sandbox_id: &str) -> Result<Service> {
     let (events, _) = broadcast::channel(256);
     let (commands, _) = mpsc::unbounded_channel();
     let service = Service {
+        skill_selection: skills,
         #[cfg(test)]
         test_tool_executor: root.test_tool_executor.clone(),
         sandboxes: root.sandboxes.clone(),
@@ -155,7 +161,12 @@ pub(super) fn restore(root: &Service) -> Result<()> {
     hub.schedules = book;
     for mut record in records {
         restore_title(&mut record);
-        let service = child(root, &record.info.id, &record.info.sandbox_id)?;
+        let service = child(
+            root,
+            &record.info.id,
+            &record.info.sandbox_id,
+            record.create_request.skills.clone(),
+        )?;
         if let Some(job) = record.active.take() {
             if usage::paused(&service)?.is_some() {
                 record.queue.push_front(job);
@@ -369,6 +380,23 @@ fn enqueue_from(
     source: agent::routing::Source,
 ) -> ApiResult<TaskInfo> {
     validate(&req.text, &req.request_id)?;
+    if req.skills.as_ref().is_some_and(|skills| {
+        skills.len() > 128
+            || skills.iter().any(|name| {
+                name.is_empty()
+                    || name.len() > 64
+                    || !name
+                        .bytes()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+            })
+    }) {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "task_skills",
+            "Invalid skill selection",
+        ));
+    }
+
     if !agent::configured(root) {
         return Err(error(
             StatusCode::NOT_IMPLEMENTED,
@@ -464,7 +492,13 @@ fn enqueue_from(
         active: None,
         receipts: vec![first],
     };
-    let service = child(root, &task_id, &sandbox_id).map_err(internal)?;
+    let service = child(
+        root,
+        &task_id,
+        &sandbox_id,
+        record.create_request.skills.clone(),
+    )
+    .map_err(internal)?;
     {
         let mut inner = service.inner.lock().unwrap();
         if agent::current(&inner.store).map_err(internal)?.is_none() {
