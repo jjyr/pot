@@ -94,7 +94,7 @@ recovery, request caps and missing-session handling without paid model requests.
 When `pi.json` is absent, `deepseek.json` selects the old direct Rust smoke adapter;
 otherwise Runtime requires an explicitly selected Agent profile. The smoke adapter keeps its separate
 `deepseek-attempts` ledger (3 requests, 128 output tokens, restricted write_file).
-Its original ledger is exhausted and must not be reset. Antigravity and Claude CLI adapters are removed. Their configuration snapshots are archived before typed deserialization; a removed active binding requires explicit reconfiguration. Historical messages and usage are retained.
+Its original ledger is exhausted and must not be reset. Antigravity and Claude CLI adapters are removed. Their old configuration values are unsupported; no compatibility migration or conversion is provided. Historical messages and usage are retained.
 
 ## Web access
 
@@ -367,7 +367,7 @@ These limits apply to background workers; the main/summary lane remains separate
 
 ## Supported native sessions
 
-Codex uses official App Server authorization/session APIs; Grok uses official ACP authorization and main-chat sessions. Only Pi, Codex and Grok are accepted engine values. Claude is API-only via the Anthropic Messages gateway codec. Removed CLI values are rejected by new profile requests. A startup migration archives removed profile/binding snapshots and pending migration receipts; it never chooses a replacement Agent or deletes native account/session files.
+Codex uses official App Server authorization/session APIs; Grok uses official ACP authorization and main-chat sessions. Only Pi, Codex and Grok are accepted engine values. Claude is API-only via the Anthropic Messages gateway codec. Removed CLI values are rejected by new profile requests. No startup compatibility migration, archive or conversion is provided for removed CLI configurations. Native account/session files are not deleted.
 
 ## Native provider codecs
 

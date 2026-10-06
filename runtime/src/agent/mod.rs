@@ -19,18 +19,6 @@ pub fn initialize(s: &Service) -> Result<()> {
 }
 
 pub fn configured(s: &Service) -> bool {
-    if s.inner
-        .lock()
-        .unwrap()
-        .store
-        .get("agent.retired.active")
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("true")
-    {
-        return false;
-    }
     s.pi.is_some()
         || current(&s.inner.lock().unwrap().store)
             .ok()

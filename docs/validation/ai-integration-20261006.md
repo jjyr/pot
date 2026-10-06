@@ -1,6 +1,10 @@
 # Simplified AI integration acceptance — 2026-10-06
 
-## Follow-up: retired CLI removal
+## Follow-up: no legacy CLI configuration compatibility
+
+At the user’s request, removed the configuration archiving/migration function, database-open hook, retired-binding flags/guards and migration tests. Old Claude CLI/Antigravity engine values remain unsupported. No legacy configuration is migrated, converted or archived; generic persistence of messages and usage is unchanged. The archive-based observations below describe the preceding commit only and are superseded.
+
+## Follow-up: retired CLI removal (historical compatibility behavior)
 
 Antigravity and Claude CLI execution adapters, engine/transport/session types, status probes, native usage parsers, onboarding controls, install/download steps and executable tests are removed. Only Pi, Codex and Grok remain accepted engine values. Claude API and all provider codecs remain available. The former AGY task-tool exception is removed. Grok native specs use their native gateway validation path.
 

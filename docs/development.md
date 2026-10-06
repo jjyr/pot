@@ -98,7 +98,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Only Codex and Grok use native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Antigravity and Claude CLI adapters, binaries, discovery and tests have been removed. On database open, removed CLI profiles/bindings and pending migrations are archived as raw `retired-cli.v1/*` metadata; a removed active binding requires explicit AI reconfiguration. Account files, messages, tasks and historical usage are not deleted.
+Only Codex and Grok use native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Antigravity and Claude CLI adapters, binaries, discovery and tests have been removed. Removed CLI configurations are unsupported; no compatibility migration, conversion or archive is provided. Account files, messages, tasks and historical usage are not deleted.
 
 ### Terminal process cleanup (Linux guest)
 
