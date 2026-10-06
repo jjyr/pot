@@ -43,6 +43,7 @@ pub fn bindings(store: &Store) -> Result<Vec<Binding>> {
                     | (Engine::Codex, NativeRef::Codex { .. })
                     | (Engine::Claude, NativeRef::Claude { .. })
                     | (Engine::Agy, NativeRef::Agy { .. })
+                    | (Engine::Grok, NativeRef::Grok { .. })
             ),
             "Engine and native session identity mismatch"
         );
@@ -199,6 +200,7 @@ pub fn select_initial(
             session_id: crate::id(),
             started: false,
         },
+        Engine::Grok => NativeRef::Grok { session_id: None },
         Engine::Agy => NativeRef::Agy {
             conversation_id: None,
         },
@@ -320,5 +322,26 @@ pub fn save_agy_conversation(store: &mut Store, conversation: &str) -> Result<()
         "AGY changed native identity"
     );
     *conversation_id = Some(conversation.into());
+    store.set(BINDINGS, &serde_json::to_string(&all)?)
+}
+
+pub fn save_grok_session(store: &mut Store, session: &str) -> Result<()> {
+    ensure!(
+        uuid::Uuid::parse_str(session).is_ok(),
+        "Invalid Grok session identity"
+    );
+    let mut all = bindings(store)?;
+    let binding = all
+        .iter_mut()
+        .find(|b| b.state == BindingState::Active)
+        .ok_or_else(|| anyhow!("Active binding missing"))?;
+    let NativeRef::Grok { session_id } = &mut binding.native_ref else {
+        anyhow::bail!("Expected Grok binding");
+    };
+    ensure!(
+        session_id.as_deref().is_none_or(|old| old == session),
+        "Grok changed native identity"
+    );
+    *session_id = Some(session.into());
     store.set(BINDINGS, &serde_json::to_string(&all)?)
 }

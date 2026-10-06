@@ -122,6 +122,10 @@ elif cmd == "bundle":
         legacy.rename(APP)
     for sub in ["MacOS", "Helpers", "Resources/runtime"]:
         (APP / "Contents" / sub).mkdir(parents=True, exist_ok=True)
+    # Remove obsolete xterm resources from an existing development bundle.
+    obsolete_terminal = APP / "Contents/Resources/terminal"
+    if obsolete_terminal.exists():
+        shutil.rmtree(obsolete_terminal)
     for src, dest in [
         (pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug/pot-app", APP / "Contents/MacOS/pot-app"),
         (ROOT / "helper-build/release/PotHelper", APP / "Contents/Helpers/PotHelper"),
@@ -144,9 +148,6 @@ elif cmd == "bundle":
     shutil.copy2(RES / "sandbox-image.json", APP / "Contents/Resources/runtime/sandbox-image.json")
     for name in ["vmlinux"]:
         shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
-    shutil.copytree(
-        REPO / "app/assets/terminal", APP / "Contents/Resources/terminal", dirs_exist_ok=True
-    )
     for name in ["Pot.icns", "PotTray.png"]:
         shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)
     (APP / "Contents/Info.plist").write_bytes(

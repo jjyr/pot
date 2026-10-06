@@ -40,6 +40,9 @@ pub async fn execute(
             pot_driver::claude::ClaudeHost.session(context(s, request, &binding)?, binding)?
         }
         Engine::Agy => pot_driver::agy::AgyHost.session(context(s, request, &binding)?, binding)?,
+        Engine::Grok => {
+            pot_driver::grok::GrokHost.session(context(s, request, &binding)?, binding)?
+        }
     };
     run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
         transcript.record(s, update)

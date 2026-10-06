@@ -3,15 +3,30 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
 fn brand_icon(kind: &str) -> Icon {
-    match kind {
+    let icon = match kind {
         "codex" | "openai" => Icon::empty().data(include_bytes!("../../assets/agents/openai.svg")),
         "claude" | "anthropic" => {
             Icon::empty().data(include_bytes!("../../assets/agents/claude.svg"))
         }
         "gemini" => Icon::empty().data(include_bytes!("../../assets/agents/gemini.svg")),
-        "agy" => Icon::new(IconName::SquareTerminal),
+        "grok" => Icon::new(IconName::Bot),
+        "deepseek" => Icon::empty().data(include_bytes!("../../assets/agents/deepseek.svg")),
+        "opencode-go" | "opencode-zen" => {
+            Icon::empty().data(include_bytes!("../../assets/agents/opencode.svg"))
+        }
+        "agy" => Icon::new(IconName::Globe),
         _ => Icon::new(IconName::Globe),
-    }
+    };
+    icon.text_color(gpui::rgb(match kind {
+        "codex" | "openai" => 0x159B7D,
+        "claude" | "anthropic" => 0xD97757,
+        "gemini" => 0x4285F4,
+        "grok" => 0xD79026,
+        "deepseek" => 0x4D6BFE,
+        "opencode-go" => 0x0E9B9B,
+        "opencode-zen" => 0x8B5CF6,
+        _ => 0x6379A8,
+    }))
 }
 
 fn brand_name(kind: &str) -> &'static str {
@@ -20,6 +35,10 @@ fn brand_name(kind: &str) -> &'static str {
         "claude" | "anthropic" => "Claude",
         "gemini" => "Gemini",
         "openai" => "OpenAI API",
+        "grok" => "Grok",
+        "deepseek" => "DeepSeek",
+        "opencode-go" => "OpenCode Go",
+        "opencode-zen" => "OpenCode Zen",
         "agy" => "AGY",
         _ => "自定义 API",
     }
@@ -45,6 +64,12 @@ fn profile_brand<'a>(state: &'a Value, profile: &'a Value) -> &'a str {
         "anthropic"
     } else if endpoint.starts_with("https://generativelanguage.googleapis.com/") {
         "gemini"
+    } else if endpoint.starts_with("https://api.deepseek.com/") {
+        "deepseek"
+    } else if endpoint.starts_with("https://opencode.ai/zen/go/") {
+        "opencode-go"
+    } else if endpoint.starts_with("https://opencode.ai/zen/") {
+        "opencode-zen"
     } else {
         "custom"
     }
@@ -88,9 +113,18 @@ impl Settings {
         if screen == "add" {
             body = body.child(hint("选择你想使用的 AI", cx));
             let mut choices = div().flex().flex_wrap().gap_3();
-            for (i, id) in ["codex", "claude", "gemini", "openai", "custom", "agy"]
-                .into_iter()
-                .enumerate()
+            for (i, id) in [
+                "codex",
+                "grok",
+                "anthropic",
+                "gemini",
+                "deepseek",
+                "opencode-go",
+                "opencode-zen",
+                "custom",
+            ]
+            .into_iter()
+            .enumerate()
             {
                 choices = choices.child(
                     div().w(relative(0.31)).child(
@@ -108,7 +142,7 @@ impl Settings {
         } else if screen == "manage" {
             let native = matches!(
                 state["connection_kind"].as_str(),
-                Some("codex" | "claude" | "agy")
+                Some("codex" | "grok" | "claude" | "agy")
             );
             let kind = state["connection_kind"].as_str().unwrap_or("").to_owned();
             let mut form = Form::horizontal().label_width(px(90.));
@@ -119,68 +153,51 @@ impl Settings {
                         .child(Input::new(&self.fields[23]).aria_label("Agent 名称")),
                 );
             }
-            if matches!(kind.as_str(), "claude" | "anthropic")
-                && state["connection_profile_id"]
-                    .as_str()
-                    .unwrap_or("")
-                    .is_empty()
-            {
-                form = form.child(
-                    Field::new().label("连接方式").child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                Button::new("ai-claude-login")
-                                    .label("账号登录")
-                                    .toggled(native)
-                                    .disabled(busy)
-                                    .on_click(|_, _, _| {
-                                        command(json!({"action":"ai-new","kind":"claude"}))
-                                    }),
-                            )
-                            .child(
-                                Button::new("ai-claude-api")
-                                    .label("API key")
-                                    .toggled(!native)
-                                    .disabled(busy)
-                                    .on_click(|_, _, _| {
-                                        command(json!({"action":"ai-new","kind":"anthropic"}))
-                                    }),
-                            ),
-                    ),
-                );
-            }
             if native {
                 let status = agent_status(state, &kind);
-                let login_kind = kind.clone();
-                form = form
-                    .child(Field::new().label("连接状态").child(status))
-                    .child(
+                form = form.child(Field::new().label("连接状态").child(status));
+                if status != "已登录" {
+                    let login_kind = kind.clone();
+                    form = form.child(
                         Field::new()
-                            .label("登录")
-                            .description("在 Terminal 完成登录后，返回这里继续设置。")
+                            .label("账号授权")
+                            .description("在浏览器完成官方授权，Pot 会自动获取可选模型。")
                             .child(
                                 Button::new("ai-login")
-                                    .label(if status == "已登录" {
-                                        "查看登录终端"
-                                    } else {
-                                        "前往 Terminal 登录"
-                                    })
-                                    .disabled(busy)
+                                    .label("登录账号")
+                                    .disabled(busy || state["login_visible"] == true)
                                     .on_click(move |_, _, _| {
                                         command(json!({"action":"login-open","engine":login_kind}))
                                     }),
                             ),
                     );
-                if status == "未安装" {
-                    form = form.child(Field::new().label("安装工具").description("Pot 镜像预装支持的 CLI；可重试环境准备，或在 Terminal 自行修复缺失工具。")
-                        .child(Button::new("ai-install").label("准备环境与工具").on_click(|_,_,_|command(json!({"action":"setup-stage","value":0})))));
+                }
+                if state["login_visible"] == true {
+                    form = form.child(
+                        Field::new()
+                            .label("等待授权")
+                            .description(state["login_message"].as_str().unwrap_or("").to_owned())
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("ai-login-reopen")
+                                            .label("重新打开浏览器")
+                                            .on_click(|_, _, _| {
+                                                command(json!({"action":"login-reopen"}))
+                                            }),
+                                    )
+                                    .child(Button::new("ai-login-cancel").label("取消").on_click(
+                                        |_, _, _| command(json!({"action":"login-cancel"})),
+                                    )),
+                            ),
+                    );
                 }
                 form = form.child(
                     Field::new().label("检查状态").child(
                         Button::new("ai-check-native")
-                            .label("重新检查")
+                            .label("刷新状态")
                             .disabled(busy || state["discovering"] == true)
                             .on_click(|_, _, _| command(json!({"action":"agent-refresh"}))),
                     ),
@@ -194,17 +211,17 @@ impl Settings {
                             .child(Input::new(&self.fields[14]).aria_label("API 地址")),
                     );
                 }
-                if self.api_advanced
+                if (kind == "custom" || self.api_advanced)
                     && matches!(
                         state["api_protocol"].as_str(),
                         Some("openai_chat" | "openai_responses" | "anthropic_messages" | "gemini")
                     )
                 {
-                    let mut formats = div().flex().gap_2();
+                    let mut formats = div().flex().flex_wrap().gap_2();
                     for (i, (protocol, label)) in [
-                        ("openai_chat", "Chat Completions"),
-                        ("openai_responses", "Responses"),
-                        ("anthropic_messages", "Messages"),
+                        ("openai_chat", "OpenAI Chat Completions"),
+                        ("openai_responses", "OpenAI Responses"),
+                        ("anthropic_messages", "Claude Messages"),
                         ("gemini", "Gemini"),
                     ]
                     .into_iter()
@@ -234,16 +251,40 @@ impl Settings {
                         .child(Input::new(&self.fields[15]).aria_label("API key")),
                 );
             }
-            if let Some(models) = state["model_options"].as_array().filter(|m| !m.is_empty()) {
-                let models: Vec<String> = models
-                    .iter()
-                    .filter_map(|m| m.as_str().map(str::to_owned))
-                    .collect();
-                let field = self.fields[16].clone();
+            let key_url = match kind.as_str() {
+                "anthropic" => Some("https://platform.claude.com/settings/keys"),
+                "gemini" => Some("https://aistudio.google.com/api-keys"),
+                "deepseek" => Some("https://platform.deepseek.com/api_keys"),
+                "opencode-go" | "opencode-zen" => Some("https://opencode.ai/auth"),
+                "openai" => Some("https://platform.openai.com/api-keys"),
+                _ => None,
+            };
+            if let Some(url) = key_url {
                 form = form.child(
-                    Field::new().label("可用模型").child(
+                    Field::new().label("").child(
+                        Button::new("ai-get-key")
+                            .ghost()
+                            .label("获取 API Key ↗")
+                            .on_click(move |_, _, cx| cx.open_url(url)),
+                    ),
+                );
+            }
+            if !native || agent_status(state, &kind) == "已登录" {
+                let mut model_field = div().flex().items_center().gap_2().child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(&self.fields[16]).aria_label("连接模型")),
+                );
+                if let Some(models) = state["model_options"].as_array().filter(|m| !m.is_empty()) {
+                    let models: Vec<String> = models
+                        .iter()
+                        .filter_map(|m| m.as_str().map(str::to_owned))
+                        .collect();
+                    let field = self.fields[16].clone();
+                    model_field = model_field.child(
                         Button::new("ai-model-options")
-                            .label("选择模型")
+                            .label("选择")
                             .dropdown_caret(true)
                             .dropdown_menu(move |menu, _, _| {
                                 models.iter().fold(menu, |menu, model| {
@@ -258,19 +299,19 @@ impl Settings {
                                     ))
                                 })
                             }),
-                    ),
+                    );
+                }
+                form = form.child(
+                    Field::new()
+                        .label("模型")
+                        .description(if native {
+                            "填写账号支持的模型名称。"
+                        } else {
+                            "选择查询结果，或填写模型标识；模型列表不代表调用权限。"
+                        })
+                        .child(model_field),
                 );
             }
-            form = form.child(
-                Field::new()
-                    .label("模型")
-                    .description(if native {
-                        "填写账号支持的模型名称。"
-                    } else {
-                        "选择查询结果，或填写模型名称。"
-                    })
-                    .child(Input::new(&self.fields[16]).aria_label("连接模型")),
-            );
             let fields = self.fields.clone();
             let check_fields = self.fields.clone();
             let mut actions = div().flex().flex_wrap().justify_end().gap_2();
@@ -278,7 +319,9 @@ impl Settings {
                 actions = actions.child(Button::new("ai-api-check").label(if busy {"正在处理…"} else {"检查连接"})
                     .disabled(busy).on_click(move |_, _, cx| command(json!({"action":"ai-api-check","endpoint":check_fields[14].read(cx).value(),"key":check_fields[15].read(cx).value()}))));
             }
-            actions = actions.child(Button::new("ai-save-connection").primary().label("保存连接").disabled(busy)
+            actions = actions.child(Button::new("ai-save-connection").primary().label(if state["active_spec"]["model"].as_str().is_none() && state["routing_owner"] == "main" {
+                    if state["return_to_chat"] == true { "保存并开始聊天" } else { "保存并设为主 Agent" }
+                } else { "保存连接" }).disabled(busy || state["login_visible"] == true || (native && agent_status(state, &kind) != "已登录"))
                 .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value()}))));
             let mut details = div().flex().flex_col().gap_4();
             details = details.child(form);
@@ -302,19 +345,23 @@ impl Settings {
                         .items_center()
                         .justify_between()
                         .gap_2()
-                        .child(
-                            Button::new("ai-advanced")
-                                .ghost()
-                                .label("高级设置")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if native {
-                                        this.settings.commands_open = !this.settings.commands_open;
-                                    } else {
-                                        this.settings.api_advanced = !this.settings.api_advanced;
-                                    }
-                                    cx.notify();
-                                })),
-                        )
+                        .when(kind == "custom" || native, |row| {
+                            row.child(
+                                Button::new("ai-advanced")
+                                    .ghost()
+                                    .label("高级设置")
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if native {
+                                            this.settings.commands_open =
+                                                !this.settings.commands_open;
+                                        } else {
+                                            this.settings.api_advanced =
+                                                !this.settings.api_advanced;
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                        })
                         .child(actions),
                 ),
             );
@@ -394,10 +441,7 @@ impl Settings {
                 body = body.child(
                     card(cx)
                         .child(title("主 Agent"))
-                        .child(hint(
-                            "Pot 将使用此 Agent 进行主要对话，并默认用于新任务。",
-                            cx,
-                        ))
+                        .child(hint("Pot 将使用此 Agent 作为主要对话 Agent。", cx))
                         .child(
                             div()
                                 .flex()

@@ -23,6 +23,13 @@ chmod -R a+rX /opt/pot /opt/pi
 chmod +x /opt/pot/pot-server /opt/pot/agy /opt/pot/open-browser.sh
 ln -sf /opt/pi/node_modules/.bin/pi /usr/local/bin/pi
 ln -sf /opt/pi/node_modules/.bin/codex /usr/local/bin/codex
+node - <<'JS'
+const fs = require('node:fs');
+const zlib = require('node:zlib');
+const binary = '/opt/pi/node_modules/@xai-official/grok-linux-arm64/bin/grok';
+fs.writeFileSync(binary, zlib.brotliDecompressSync(fs.readFileSync(binary + '.br')), { mode: 0o755 });
+JS
+ln -sf /opt/pi/node_modules/@xai-official/grok-linux-arm64/bin/grok /usr/local/bin/grok
 ln -sf /opt/pi/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude /usr/local/bin/claude
 ln -sf /opt/pot/agy /usr/local/bin/agy
 ln -sf /opt/pot/open-browser.sh /usr/local/bin/pot-browser

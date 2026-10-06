@@ -128,8 +128,7 @@ var bridge: PotBridge?
     var savedSeen: [String]?
     var tick: Double = 0
     var observations: [NSObjectProtocol] = []
-    let terminal = SandboxTerminal()
-    let loginTerminal = SandboxTerminal(purpose: "login")
+    let runtime = RuntimeClient()
     var guestIP = ""
     var localPhase = "starting"
     var isApplying = false
@@ -154,7 +153,6 @@ var bridge: PotBridge?
         for (index, symbol, title) in [
             (0, "bubble.left", "聊天"),
             (3, "list.bullet.rectangle", "任务"),
-            (7, "terminal", "Terminal"),
             (1, "desktopcomputer", "Sandbox"),
             (4, "chart.bar.xaxis", "用量"),
             (2, "gearshape", "设置"),
@@ -169,8 +167,6 @@ var bridge: PotBridge?
             button.wantsLayer = true; button.layer?.cornerRadius = 10
             rail.addSubview(button); navigation.append(button)
         }
-        rootView.addSubview(terminal.web)
-        rootView.addSubview(loginTerminal.web)
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
@@ -334,8 +330,6 @@ var bridge: PotBridge?
         if web.frame != desktopArea {
             web.frame = desktopArea
         }
-        terminal.web.frame = desktopArea
-        loginTerminal.web.frame = NSRect(x: 56, y: 0, width: area.width, height: max(0, area.height - 208))
         let width = min(760, area.width - 64)
         composer.layoutManager?.ensureLayout(for: composer.textContainer!)
         let used = (composer.layoutManager?.usedRect(for: composer.textContainer!).height ?? 24) +
@@ -405,28 +399,14 @@ var bridge: PotBridge?
     }
 
     func selectPage(_ value: Int) {
-        let returningFromTerminal = page == 7 && value != 7
         page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.loaded
             .isEmpty != false
-        terminal.show(
-            value == 7 && !settings.loginVisible && localPhase == "running",
-            root: localRuntime?.root,
-            ip: guestIP
-        )
-        loginTerminal.show(
-            value == 7 && settings.loginVisible && localPhase == "running",
-            root: localRuntime?.root,
-            ip: guestIP
-        )
         gpuiView.isHidden = false; composerBox.isHidden = value != 0 && value != 3
         if value == 0 {
             host.makeFirstResponder(composer)
         }
         if value == 2 {
             settings.refreshStatus()
-        }
-        if returningFromTerminal {
-            settings.refreshAgents()
         }
         layout()
     }
@@ -511,6 +491,7 @@ var bridge: PotBridge?
     }
 
     func cleanup() {
+        settings.cancelLogin()
         animation?
             .invalidate(); animation = nil; if let keyMonitor
         {
@@ -521,28 +502,17 @@ var bridge: PotBridge?
     }
 
     func environmentChanged(_ state: [String: Any]) {
+        if settings.loginVisible, state["phase"] as? String != "running" {
+            settings.cancelLogin()
+        }
         localPhase = state["phase"] as? String ?? "unknown"
         guestIP = state["ip"] as? String ?? ""
         if page == 1 {
             web.isHidden = localRuntime?.loaded.isEmpty != false
         }
         settings.environment = state; settings.refreshStatus()
-        terminal.show(
-            page == 7 && !settings.loginVisible && localPhase == "running",
-            root: localRuntime?.root,
-            ip: guestIP
-        )
-        loginTerminal.show(
-            page == 7 && settings.loginVisible && localPhase == "running",
-            root: localRuntime?.root,
-            ip: guestIP
-        )
-        if page == 7 {
-            terminal.show(localPhase == "running" && !settings.loginVisible, root: localRuntime?.root, ip: guestIP)
-            loginTerminal.show(localPhase == "running" && settings.loginVisible, root: localRuntime?.root, ip: guestIP)
-        }
+        runtime.root = localRuntime?.root; runtime.ip = guestIP
         if settings.setup, localPhase == "running" {
-            terminal.show(page == 7 && localPhase == "running", root: localRuntime?.root, ip: guestIP)
             settings.refreshAgents()
         }
     }
@@ -835,15 +805,20 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage": settings.section = 3; bridge.selectPage(2)
         case "start": bridge.startSandbox()
-        case "terminal": settings.loginVisible = false; bridge.selectPage(7)
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
         case "ai-open": settings.routingOwner = "main"; settings.openAI(fromChat: true)
         case "ai-back":
+            if settings.loginVisible {
+                settings.cancelLogin()
+            }
             settings.aiScreen = "main"
             if settings.routingOwner != "main" {
                 settings.section = 4
             }
         case "ai-screen": if !settings.aiBusy {
+                if settings.loginVisible {
+                    settings.cancelLogin()
+                }
                 settings.aiScreen = v["screen"] as? String ?? "main"
             }
         case "ai-new": settings.newConnection(v["kind"] as? String ?? "custom")
@@ -858,24 +833,13 @@ private var bridgeWake: (@convention(c) () -> Void)?
             )
         case "ai-save-main": settings.saveMain(model: v["model"] as? String ?? "")
         case "login-open": settings.openLogin(v["engine"] as? String ?? "")
-        case "login-copy": NSPasteboard.general.clearContents(); NSPasteboard.general.setString(
-                settings.loginCommand,
-                forType: .string
-            )
-        case "login-continue": settings.continueLogin()
-        case "login-back": settings.loginVisible = false; bridge.selectPage(2); settings.section = 1; settings
-            .refreshAgents()
+        case "login-cancel": settings.cancelLogin()
+        case "login-reopen": settings.reopenLogin()
         case "agent-refresh": settings.refreshAgents()
         case "save-invocation": settings.saveInvocation(
                 executable: v["executable"] as? String ?? "",
                 arguments: v["argv"] as? String ?? ""
             )
-        case "terminal-close": if settings.loginVisible {
-                bridge.loginTerminal.close()
-            } else {
-                bridge.terminal.close()
-            }
-        case "terminal-reconnect": bridge.selectPage(7)
         case "viewer":
             if let id = v["id"] as? String, ["take", "info", "more", "connect"].contains(id) {
                 if id == "more" {

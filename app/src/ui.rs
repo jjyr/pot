@@ -320,8 +320,8 @@ impl Settings {
             actions = actions.child(
                 Button::new("setup-later")
                     .ghost()
-                    .label("稍后设置 · 打开 Terminal")
-                    .on_click(|_, _, _| command(json!({"action":"terminal","value":true}))),
+                    .label("稍后设置 · 返回聊天")
+                    .on_click(|_, _, _| command(json!({"action":"page","value":0}))),
             );
         }
         if section == 4 {
@@ -474,55 +474,6 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                         .child(hint("Sandbox 尚未就绪，启动后将在这里显示桌面。", cx))
                         .child(
                             Button::new("start-sandbox")
-                                .primary()
-                                .label("启动 Sandbox")
-                                .disabled(!matches!(
-                                    state["phase"].as_str(),
-                                    Some("stopped" | "failed")
-                                ))
-                                .on_click(|_, _, _| command(json!({"action":"start"}))),
-                        ),
-                ),
-            )
-        })
-}
-
-pub fn terminal(state: &Value, cx: &mut Context<Shell>) -> Div {
-    let running = state["phase"] == "running";
-    let settings = &state["settings"];
-    let login = settings["login_visible"] == true;
-    let engine = settings["login_engine"].as_str().unwrap_or("");
-    let authenticated = settings["agents"].as_array().is_some_and(|a| {
-        a.iter()
-            .any(|a| a["id"] == engine && a["authentication"] == "authenticated")
-    });
-    page(cx).child(if login {
-        div().h(px(208.)).px_8().py_4().flex().flex_col().gap_2()
-            .child(title(format!("连接 {} · 登录", engine)))
-            .child(hint(if engine == "agy" {"此 CLI 尚无可确认的登录命令与状态接口；先运行 agy --help，按官方指引操作。"} else {"复制下方命令，粘贴到终端并按 Enter；按提示打开授权链接，若有设备码请复制到授权页面。"},cx))
-            .child(hint(format!("{} · {}", settings["login_command"].as_str().unwrap_or(""), settings["login_message"].as_str().unwrap_or("")),cx))
-            .child(div().flex().flex_wrap().gap_2()
-                .child(Button::new("login-copy").label(if engine == "agy" {"复制帮助命令"}else{"复制登录命令"}).disabled(!running)
-                    .on_click(|_,_,_|command(json!({"action":"login-copy"}))))
-                .child(Button::new("login-check").label(if settings["discovering"] == true {"正在检查…"}else{"检查登录状态"}).disabled(!running || settings["discovering"] == true)
-                    .on_click(|_,_,_|command(json!({"action":"agent-refresh"}))))
-                .child(Button::new("login-continue").primary().label(if authenticated {"继续选择模型"}else if settings["login_can_continue"] == true {"确认终端结果并继续"}else{"登录后继续选择模型"}).disabled(!running || settings["discovering"] == true || settings["login_can_continue"] != true)
-                    .on_click(|_,_,_|command(json!({"action":"login-continue"}))))
-                .child(Button::new("login-back").ghost().label("返回 AI 配置").on_click(|_,_,_|command(json!({"action":"login-back"}))))
-                .child(Button::new("login-close").ghost().label("关闭登录终端").on_click(|_,_,_|command(json!({"action":"terminal-close"})))))
-    } else {
-        div().h(px(SANDBOX_HEADER)).px_8().py_6().flex().items_center().justify_between().child(title("Terminal"))
-            .child(div().flex().gap_2()
-                .child(Button::new("terminal-reconnect").ghost().label("重新连接").disabled(!running).on_click(|_,_,_|command(json!({"action":"terminal-reconnect"}))))
-                .child(Button::new("terminal-close").ghost().label("关闭终端").disabled(!running).on_click(|_,_,_|command(json!({"action":"terminal-close"})))))
-    })
-        .when(!running, |el| {
-            el.child(
-                content().h_auto().child(
-                    card(cx)
-                        .child(hint("Sandbox Runtime 尚未就绪，启动后可使用终端。", cx))
-                        .child(
-                            Button::new("terminal-start")
                                 .primary()
                                 .label("启动 Sandbox")
                                 .disabled(!matches!(

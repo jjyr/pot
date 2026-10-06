@@ -305,6 +305,7 @@ mod tests {
             agent::Engine::Codex => "cli:codex",
             agent::Engine::Claude => "cli:claude",
             agent::Engine::Agy => "cli:agy",
+            agent::Engine::Grok => "cli:grok",
         }
         .into();
         profile.engine = engine;

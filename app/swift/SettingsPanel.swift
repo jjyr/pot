@@ -7,8 +7,12 @@ import Foundation
     var aiScreen = "main", draftProfile = "", draftModel = "", connectionKind = "", connectionName = "",
         connectionModel = ""
     var secretRevision = 0, draftRevision = 0
+    var connectionDraftID = ""
     var returnToChat = false, aiBusy = false, draftInitialized = false
     var activeSpec: [String: Any] = [:], connections: [[String: Any]] = [], modelOptions: [String] = []
+    var authorizationTask: Task<Void, Never>?
+    var authorizationID = "", authorizationURL = ""
+    var authorizationRelay: AuthorizationRelay?
     var loginEngine = "", loginVisible = false, loginMessage = "", checkMessage = ""
     var agentStates: [[String: Any]] = []
     var invocationExecutable = "pi", invocationArgs = "[]", codexModel = "", claudeModel = "", agyModel = ""
@@ -66,7 +70,7 @@ import Foundation
 
     func deferSetup() {
         UserDefaults.standard.set(true, forKey: setupKey + ".complete")
-        setup = false; setupAutoPending = false; bridge?.selectPage(7)
+        setup = false; setupAutoPending = false; bridge?.selectPage(0)
     }
 
     func setupCanStart(_ engine: String) -> Bool {
@@ -86,9 +90,9 @@ import Foundation
     }
 
     func showAgent(setup: Bool = false) {
-        self.setup = setup; section = setup ? 2 : 1
+        self.setup = false; section = 1; returnToChat = setup
         if setup {
-            setupAutoPending = true
+            setupAutoPending = false
             setupStage = 0
             if let saved = UserDefaults.standard.stringArray(forKey: setupKey + ".items") {
                 setupItems = Set(saved)
@@ -124,7 +128,7 @@ import Foundation
              .first { $0["id"] as? String == activeSpec["source_profile_id"] as? String }?["name"] as? String ??
              (activeSpec["engine"] as? String ?? "Agent"),
          "connections": connections, "model_options": modelOptions,
-         "login_command": loginCommand, "login_can_continue": setupCanStart(loginEngine), "login_engine": loginEngine,
+         "login_engine": loginEngine,
          "login_visible": loginVisible,
          "login_message": loginMessage,
          "check_message": checkMessage,
@@ -155,23 +159,19 @@ import Foundation
         Task {
             defer { discovering = false }
             do {
-                let facts = try await bridge.terminal.request("api/v1/agents/refresh", body: [:])
+                let facts = try await bridge.runtime.request("api/v1/agents/refresh", body: [:])
                 agentStates = facts["agents"] as? [[String: Any]] ?? []
+                if ["codex", "grok"].contains(connectionKind),
+                   let agent = agentStates.first(where: { $0["id"] as? String == connectionKind })
+                {
+                    modelOptions = agent["models"] as? [String] ?? []
+                    if connectionModel.isEmpty, let first = modelOptions.first {
+                        connectionModel = first; draftRevision += 1
+                    }
+                }
                 try await reloadAI()
                 if setup, setupAutoPending, !activeSpec.isEmpty {
                     finishSetup()
-                }
-                if !loginEngine.isEmpty {
-                    let status = agentStates.first { $0["id"] as? String == loginEngine }
-                    if status?["authentication"] as? String == "authenticated" {
-                        loginMessage = "已登录。点击继续选择模型，返回 AI 配置。"
-                    } else if status?["status_check"] as? String == "failed" {
-                        loginMessage = "暂时无法检测登录状态，请重试；这不表示你尚未登录。"
-                    } else if status?["authentication"] as? String == "required" {
-                        loginMessage = "尚未登录。请在终端完成授权后重新检查。"
-                    } else {
-                        loginMessage = "无法确认登录状态。请核对终端结果；继续不代表已经登录。"
-                    }
                 }
                 result = "状态已刷新；未发送模型请求。"
             } catch { result = "暂时无法检测状态，请检查环境并重试。"; loginMessage = result }
@@ -185,7 +185,8 @@ import Foundation
         var updated = profile
         updated["revision"] = revision + 1
         updated["launch_spec"] = [
-            "transport": profile["engine"] as? String == "codex" ? "codex_app_server" :
+            "transport": profile["engine"] as? String == "grok" ? "grok_acp" : profile["engine"] as? String == "codex" ?
+                "codex_app_server" :
                 (profile["engine"] as? String == "agy" ? "agy_json" :
                     (profile["engine"] as? String == "claude" ? "claude_json" : "pi_rpc")),
             "executable": executable,
@@ -195,7 +196,7 @@ import Foundation
         ]
         Task {
             do {
-                _ = try await bridge.terminal.request(
+                _ = try await bridge.runtime.request(
                     "api/v1/agent",
                     body: [
                         "profile": updated,
@@ -325,10 +326,10 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                let state = try await bridge.terminal.request("api/v1/agent")
+                let state = try await bridge.runtime.request("api/v1/agent")
                 savedProfiles = state["profiles"] as? [[String: Any]] ?? []
-                routingPolicy = try await bridge.terminal.request("api/v1/agent/routing")
-                providerAllowances = try await bridge.terminal
+                routingPolicy = try await bridge.runtime.request("api/v1/agent/routing")
+                providerAllowances = try await bridge.runtime
                     .request("api/v1/usage/providers")["providers"] as? [[String: Any]] ?? []
                 if !savedProfiles.contains(where: { $0["id"] as? String == routingProfile }) {
                     routingProfile = savedProfiles.first?["id"] as? String ?? ""
@@ -398,7 +399,7 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                routingPolicy = try await bridge.terminal.request("api/v1/agent/routing", body: update)
+                routingPolicy = try await bridge.runtime.request("api/v1/agent/routing", body: update)
                 result = "路由已保存；新任务使用新默认，已有任务保持固定。"
             } catch { result = "路由未保存：\(error.localizedDescription)；可刷新后重试。" }
         }
@@ -417,7 +418,7 @@ import Foundation
         routingBusy = true
         Task {
             do {
-                _ = try await bridge.terminal.request("api/v1/agent", body: [
+                _ = try await bridge.runtime.request("api/v1/agent", body: [
                     "profile": selected, "expected_revision": expected,
                     "request_id": UUID().uuidString, "follow_main": false,
                     "follow_worker": false,
@@ -436,12 +437,12 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                _ = try await bridge.terminal.request("api/v1/agent/migrate", body: [
+                _ = try await bridge.runtime.request("api/v1/agent/migrate", body: [
                     "request_id": UUID().uuidString, "target_profile": target,
                     "owner": owner, "reason": "settings_changed",
                 ])
                 while true {
-                    let response = try await bridge.terminal.request("api/v1/agent?owner=" + owner)
+                    let response = try await bridge.runtime.request("api/v1/agent?owner=" + owner)
                     if response["pending_migration"] is NSNull || response["pending_migration"] == nil {
                         break
                     }
@@ -475,7 +476,7 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                providerAllowance = try await bridge.terminal.request("api/v1/usage/providers", body: update)
+                providerAllowance = try await bridge.runtime.request("api/v1/usage/providers", body: update)
                 providerAllowance["enforcement"] = "pre_request"
                 providerAllowances.removeAll { $0["provider"] as? String == provider }
                 providerAllowances.append(providerAllowance)

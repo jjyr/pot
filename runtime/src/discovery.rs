@@ -15,7 +15,7 @@ pub struct Tool {
     pub invocation: CommandSpec,
 }
 fn defaults() -> Vec<Tool> {
-    ["pi", "codex", "claude", "agy"]
+    ["pi", "codex", "grok", "claude", "agy"]
         .into_iter()
         .map(|id| Tool {
             id: id.into(),
@@ -34,6 +34,15 @@ pub fn tools(s: &Service) -> Result<Vec<Tool>> {
         .map(|v| Ok(serde_json::from_str(&v)?))
         .unwrap_or_else(|| Ok::<_, anyhow::Error>(defaults()))?;
     let profiles = agent::profiles(&inner.store)?;
+    if !tools.iter().any(|t| t.id == "grok") {
+        tools.push(Tool {
+            id: "grok".into(),
+            invocation: CommandSpec {
+                executable: "grok".into(),
+                argv: vec![],
+            },
+        });
+    }
     for tool in &mut tools {
         if let Some(profile) = profiles
             .iter()
@@ -81,8 +90,9 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
         };
         let mut auth = "unknown";
         let mut check = "unsupported";
+        let mut models = Vec::<String>::new();
         // Only official, documented status commands are queried; wrappers stay unknown.
-        if matches!(tool.id.as_str(), "codex" | "claude")
+        if matches!(tool.id.as_str(), "codex" | "claude" | "grok")
             && name == tool.id
             && tool.invocation.argv.is_empty()
             && present
@@ -100,7 +110,37 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
                 Err(_) => check = "failed",
             }
         }
+        if auth == "authenticated" {
+            if tool.id == "codex" {
+                if let Ok(host) = s.codex.connect(&agent::LaunchSpec::codex()).await {
+                    if let Ok(reply) = host.request("model/list", json!({})).await {
+                        models = reply["data"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|m| {
+                                m["model"]
+                                    .as_str()
+                                    .or_else(|| m["id"].as_str())
+                                    .map(str::to_owned)
+                            })
+                            .collect();
+                    }
+                }
+            } else if tool.id == "grok" {
+                if let Ok(host) = pot_driver::grok::connect().await {
+                    if let Ok(session) = host
+                        .request("session/new", json!({"cwd":s.workspace,"mcpServers":[]}))
+                        .await
+                    {
+                        models = pot_driver::grok::models(&session);
+                    }
+                    host.shutdown().await;
+                }
+            }
+        }
         results.push(json!({"id":tool.id,"installation":installation,
+            "models":models,
             "authentication":auth,"auth_type":"unknown","status_check":check,
             "compatibility":if tool.id == "pi" {"compatible"} else {"unchecked"},
             "readiness":"unchecked","accepted_roles":if tool.id == "pi" {vec!["main","worker","summary"]} else {vec![]}}));
@@ -108,6 +148,16 @@ pub async fn refresh(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
     Ok(Json(json!({"agents":results})))
 }
 async fn native_status(engine: &str, cwd: &std::path::Path) -> Result<Option<bool>> {
+    if engine == "grok" {
+        return tokio::time::timeout(Duration::from_secs(8), async {
+            let host = pot_driver::grok::connect().await?;
+            let status = pot_driver::grok::account(&host).await;
+            host.shutdown().await;
+            status.map(Some)
+        })
+        .await
+        .map_err(|_| anyhow!("Grok account check timed out"))?;
+    }
     let args: &[&str] = if engine == "claude" {
         &["auth", "status", "--json"]
     } else {

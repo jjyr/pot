@@ -1,5 +1,6 @@
 //! Reusable backend application services. The executable and route assembly live in pot-server.
 pub mod agent;
+pub mod authorization;
 mod deepseek;
 pub mod discovery;
 pub mod gateway;
@@ -28,7 +29,8 @@ pub mod api {
     pub use crate::usage as accounting;
     pub use crate::{Service, authenticate, cancel, events_handler, send, snapshot, usage};
     pub use crate::{
-        agent, discovery, gateway, orchestration, pi, schedules, tasks, terminal, tool_bridge,
+        agent, authorization, discovery, gateway, orchestration, pi, schedules, tasks, terminal,
+        tool_bridge,
     };
 }
 #[cfg(test)]
@@ -73,6 +75,7 @@ pub struct Service {
     tasks: Arc<Mutex<tasks::Hub>>,
     terminals: Arc<Mutex<terminal::Hub>>,
     codex: Arc<agent::codex::Hosts>,
+    authorization: Arc<tokio::sync::Mutex<authorization::Hub>>,
 }
 impl Service {
     fn stopping(&self) -> bool {
@@ -468,6 +471,7 @@ mod tests {
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
             codex: Arc::new(agent::codex::Hosts::default()),
+            authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
         }
     }
     #[test]

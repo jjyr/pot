@@ -30,7 +30,7 @@ mise exec -- cargo build --locked -p pot-server
 POT_DATA_DIR=/tmp/pot-server/product POT_WORKSPACE=/tmp/pot-server/workspace POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-`POT_PI_BIN` selects the Pi executable. Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat rejects sends while Terminal remains available. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
+`POT_PI_BIN` selects the Pi executable. Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
 
 App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
 
@@ -48,10 +48,7 @@ The final command uses host-installed Pi and a local mock model without paid cal
 
 ### Codex validation
 
-Users needing authentication run the official CLI login command in the dedicated login Terminal (Codex supports
-`codex login --device-auth`); Pot provides a guided login terminal and read-only checks in Settings -> AI Configuration.
-Return to the shared AI Configuration page, confirm an account-supported model, and explicitly save the Chat selection.
-Only the guest CLI manages login state, stored in persistent engine-home.
+Application-initiated account authorization uses official Codex app-server and Grok ACP methods through native-only `/api/v1/authorization/{start,status,cancel,callback}` endpoints. Attempts are ephemeral and expire after five minutes. The Mac callback listener exists only during the login attempt; Codex offers official device-code fallback if its port is occupied. There is no dedicated login Terminal. Grok main-chat support is initial and does not yet support enforced task tools or native token accounting. See issue #7 and dated validation reports for real-account verification limits.
 
 Credential-free integration test (explicitly select an installed official Codex CLI; no paid model calls):
 
@@ -101,7 +98,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Claude offline contract
 
-Pot checks Claude status only through official interfaces; users authenticate in the normal Terminal themselves.
+New Claude integrations use API keys. Legacy Claude CLI profiles and official status checks are preserved; new CLI login onboarding has been removed.
 Confirm the model in AI Configuration and explicitly save the Chat selection. Real Claude account testing is skipped by user decision (no account).
 Account-free development validation uses the original CLI and a local mock Anthropic service:
 
@@ -127,7 +124,7 @@ Processes deliberately detached with setsid are outside this contract and remain
 ### AGY Driver regression
 
 AGY integrates the original CLI. Main chat, background tasks, schedules, and summaries are enabled by user decision, without Pot orchestration tools; roles are constrained by prompts.
-Users log in through Terminal; status remains unknown. Account-free mock transport regression:
+Existing AGY profiles are preserved but new AGY onboarding is removed; status remains unknown. Account-free mock transport regression:
 
 ```sh
 mise exec -- cargo build --locked -p pot-server

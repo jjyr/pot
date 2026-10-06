@@ -48,6 +48,7 @@ impl ExecutionFeedback for Feedback {
             Engine::Codex => save_codex_thread(&mut inner.store, identity),
             Engine::Claude => save_claude_session(&mut inner.store, identity),
             Engine::Agy => save_agy_conversation(&mut inner.store, identity),
+            Engine::Grok => save_grok_session(&mut inner.store, identity),
         }
     }
     fn binding_broken(&self, reason: &str) -> Result<()> {

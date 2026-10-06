@@ -119,6 +119,7 @@ pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
             codex: Arc::new(agent::codex::Hosts::default()),
+            authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
     };
     let configured = agent::configured(&s) || use_api;
     s.inner.lock().unwrap().store.set(

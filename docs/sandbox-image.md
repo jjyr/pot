@@ -1,6 +1,6 @@
 # Sandbox image
 
-Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Pi, Codex, AGY, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
+Sandbox starts from a completed Linux ARM64 OCI image bundled in App. Desktop, fonts, Chromium, noVNC, Pi, Codex, Grok, Claude, AGY, and Pot Runtime are installed at build time. Startup neither runs `apk add` / `npm ci` nor pulls the Alpine base. Kernel/vminit are bundled too.
 
 ## Build and startup
 
@@ -48,3 +48,5 @@ Claude Code image baseline is the original official `@anthropic-ai/claude-code-l
 Installation disables npm lifecycle scripts; `claude` links directly to the platform binary, not placeholders for other platforms.
 This version is a build baseline, not a Runtime lock; upgrades must satisfy required flags/lifecycle contracts.
 Login/execution share persistent guest HOME; installation/startup imports no host Claude credentials.
+
+Grok uses the official `@xai-official/grok` 1.0.46 distribution and its pinned Linux ARM64 platform package. Build-time Node Brotli decompression writes the static native binary, then `grok` links directly to it. npm lifecycle scripts and the vendor launcher/updater are not run. Native authorization and session files stay in the persistent guest HOME; no host credentials are imported.

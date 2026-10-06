@@ -87,6 +87,7 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     let service = Service {
         terminals: root.terminals.clone(),
         codex: root.codex.clone(),
+        authorization: root.authorization.clone(),
         usage: root.usage.clone(),
         usage_scope: task_id.into(),
         inner: Arc::new(Mutex::new(Inner {

@@ -244,7 +244,6 @@ impl Render for Shell {
             }
             Some(2) => return self.settings.render(&self.native["settings"], cx),
             Some(1) => return ui::sandbox(&self.native, cx),
-            Some(7) => return ui::terminal(&self.native, cx),
             _ => {}
         }
         let active_engine = self.native["settings"]["active_spec"]["engine"]
@@ -269,10 +268,7 @@ impl Render for Shell {
                 ui::content().child(
                     ui::card(cx)
                         .child(ui::title("先配置一个 Agent，开始聊天"))
-                        .child(ui::hint(
-                            "连接 Agent、完成登录并选择模型。已有输入会保留。",
-                            cx,
-                        ))
+                        .child(ui::hint("集成一个 Agent 并选择模型。已有输入会保留。", cx))
                         .child(
                             Button::new("chat-ai-setup")
                                 .primary()
@@ -281,7 +277,7 @@ impl Render for Shell {
                                     ui::command(serde_json::json!({"action":"ai-open"}))
                                 }),
                         )
-                        .child(ui::hint("也可以先使用 Terminal 或 Sandbox。", cx)),
+                        .child(ui::hint("也可以先使用 Sandbox。", cx)),
                 ),
             );
         }

@@ -5,7 +5,7 @@ import Foundation
 @MainActor extension SettingsPanel {
     var activeNeedsLogin: Bool {
         let engine = activeSpec["engine"] as? String ?? ""
-        return ["codex", "claude", "agy"].contains(engine) && agentStates
+        return ["codex", "grok", "claude", "agy"].contains(engine) && agentStates
             .contains { $0["id"] as? String == engine && $0["authentication"] as? String == "required" }
     }
 
@@ -16,13 +16,13 @@ import Foundation
 
     func reloadAI() async throws {
         guard let bridge else { return }
-        let state = try await bridge.terminal.request("api/v1/agent")
+        let state = try await bridge.runtime.request("api/v1/agent")
         savedProfiles = state["profiles"] as? [[String: Any]] ?? []
         let bindings = state["bindings"] as? [[String: Any]] ?? []
         activeSpec = bindings
             .first { $0["pot_owner"] as? String == "main" && $0["state"] as? String == "active"
             }?["spec"] as? [String: Any] ?? [:]
-        let providerState = try await bridge.terminal.request("api/v1/providers")
+        let providerState = try await bridge.runtime.request("api/v1/providers")
         connections = providerState["connections"] as? [[String: Any]] ?? []
         if !draftInitialized {
             draftProfile = activeSpec["source_profile_id"] as? String ?? ""
@@ -39,6 +39,9 @@ import Foundation
     }
 
     func editConnection(_ id: String) {
+        if loginVisible {
+            cancelLogin()
+        }
         guard !aiBusy, let selected = savedProfiles.first(where: { $0["id"] as? String == id }) else { return }
         section = 1; profile = selected; connectionKind = selected["engine"] as? String ?? ""
         connectionName = selected["name"] as? String ?? ""
@@ -52,7 +55,9 @@ import Foundation
             let host = URLComponents(string: apiEndpoint)?.host ?? ""
             connectionKind = host == "api.anthropic.com" && apiProtocol == "anthropic_messages" ? "anthropic" :
                 host == "generativelanguage.googleapis.com" && apiProtocol == "gemini" ? "gemini" :
-                host == "api.openai.com" ? "openai" : "custom"
+                host == "api.openai.com" ? "openai" :
+                host == "api.deepseek.com" ? "deepseek" :
+                host == "opencode.ai" ? (apiEndpoint.contains("/zen/go/") ? "opencode-go" : "opencode-zen") : "custom"
         }
         let launch = selected["launch_spec"] as? [String: Any] ?? [:]
         invocationExecutable = launch["executable"] as? String ?? connectionKind
@@ -67,11 +72,21 @@ import Foundation
 
     func newConnection(_ kind: String) {
         guard !aiBusy else { return }
+        if loginVisible {
+            cancelLogin()
+        }
+        connectionDraftID = "agent-" + UUID().uuidString.lowercased()
         secretRevision += 1; profile = [:]; connectionKind = kind; aiScreen = "manage"
         checkMessage = ""; result = ""; modelOptions = []; hasAPIKey = false
         switch kind {
-        case "codex", "claude", "agy":
-            connectionName = kind == "agy" ? "AGY" : kind.capitalized; apiEndpoint = ""
+        case "codex", "grok":
+            connectionName = kind.capitalized; apiEndpoint = ""
+        case "deepseek":
+            connectionName = "DeepSeek"; apiEndpoint = "https://api.deepseek.com/v1/chat/completions"; apiProtocol = "openai_chat"
+        case "opencode-go", "opencode-zen":
+            connectionName = kind == "opencode-go" ? "OpenCode Go" : "OpenCode Zen"
+            apiEndpoint = kind == "opencode-go" ? "https://opencode.ai/zen/go/v1/chat/completions" : "https://opencode.ai/zen/v1/chat/completions"
+            apiProtocol = "openai_chat"
         case "anthropic":
             connectionName = "Claude"; apiEndpoint = "https://api.anthropic.com/v1/messages"; apiProtocol = "anthropic_messages"
         case "gemini":
@@ -82,23 +97,41 @@ import Foundation
         default:
             connectionName = "OpenAI API"; apiEndpoint = "https://api.openai.com/v1"; apiProtocol = "openai_chat"
         }
-        connectionModel = ""; revision += 1
+        connectionModel = ""
+        if ["codex", "grok"].contains(kind),
+           let agent = agentStates
+           .first(where: { $0["id"] as? String == kind && $0["authentication"] as? String == "authenticated" })
+        {
+            modelOptions = agent["models"] as? [String] ?? []
+            connectionModel = modelOptions.first ?? ""
+        }
+        revision += 1
     }
 
     /// Accept a compatible base URL as well as an existing full request endpoint.
     func connectionEndpoint(_ value: String) -> String {
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["openai_chat", "openai_responses"].contains(apiProtocol),
-              var parts = URLComponents(string: value), parts.host != nil,
+        guard var parts = URLComponents(string: value), parts.host != nil,
               parts.query == nil, parts.fragment == nil else { return value }
         let path = parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if path.hasSuffix("chat/completions") || path.hasSuffix("responses") {
+        if path.hasSuffix("chat/completions") || path.hasSuffix("responses") || path.hasSuffix("messages") || path
+            .contains("/models/")
+        {
             return value
         }
-        guard path.isEmpty || path == "v1" || path.hasSuffix("/v1") else { return value }
-        let suffix = apiProtocol == "openai_responses" ? "/responses" : "/chat/completions"
-        parts.path = (path.isEmpty ? "/v1" : "/" + path) + suffix
+        guard path.isEmpty || path == "v1" || path == "v1beta" || path.hasSuffix("/v1") else { return value }
+        let base = path.isEmpty ? (apiProtocol == "gemini" ? "/v1beta" : "/v1") : "/" + path
+        let suffix = apiProtocol == "openai_responses" ? "/responses" : apiProtocol == "anthropic_messages" ?
+            "/messages" : apiProtocol == "gemini" ? "/models/{model}:streamGenerateContent" : "/chat/completions"
+        parts.path = base + suffix
         return parts.string ?? value
+    }
+
+    func selectOpenCodeRoute(_ model: String) -> Bool {
+        guard let route = APIIntegration.openCodeRoute(kind: connectionKind, model: model) else {
+            result = "此 OpenCode 模型尚无已验证的请求格式，请使用受支持模型或自定义 API。"; return false
+        }
+        apiEndpoint = route.endpoint; apiProtocol = route.format; return true
     }
 
     func checkAPI(endpoint: String, key: String) {
@@ -107,11 +140,17 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                let response = try await bridge.terminal.request("api/v1/providers/check", body: [
+                let response = try await bridge.runtime.request("api/v1/providers/check", body: [
                     "endpoint": connectionEndpoint(endpoint), "api_key": key,
                     "protocol": apiProtocol, "profile_id": profile["id"] as? String ?? "",
                 ])
                 modelOptions = response["models"] as? [String] ?? []
+                if connectionKind
+                    .hasPrefix("opencode-")
+                {
+                    modelOptions = modelOptions
+                        .filter { APIIntegration.openCodeRoute(kind: connectionKind, model: $0) != nil }
+                }
                 checkMessage = response["message"] as? String ?? "检查完成。"
             } catch { modelOptions = []; checkMessage = error.localizedDescription }
         }
@@ -121,8 +160,13 @@ import Foundation
         guard let bridge, !aiBusy else { return }
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !model.isEmpty else { result = "请填写 Agent 名称和模型标识。"; return }
-        let native = ["codex", "claude", "agy"].contains(connectionKind)
+        guard !name.isEmpty else { result = "请填写 Agent 名称。"; return }
+        guard !model.isEmpty else { result = "请选择或填写模型。"; return }
+        let native = ["codex", "grok", "claude", "agy"].contains(connectionKind)
+        let firstMain = activeSpec.isEmpty && routingOwner == "main"
+        if connectionKind.hasPrefix("opencode-"), !selectOpenCodeRoute(model) {
+            return
+        }
         if native, !setupCanStart(connectionKind) {
             result = "请先完成安装和登录，再检查状态。"; return
         }
@@ -130,9 +174,12 @@ import Foundation
             result = "请填写服务地址。"; return
         }
         let expected = profile["revision"] as? Int ?? 0
-        let target = profile["id"] as? String ?? "agent-" + UUID().uuidString.lowercased()
+        if connectionDraftID.isEmpty {
+            connectionDraftID = "agent-" + UUID().uuidString.lowercased()
+        }
+        let target = profile["id"] as? String ?? connectionDraftID
         let kind = connectionKind, protocolName = apiProtocol
-        aiBusy = true; result = "正在保存连接；当前聊天配置保持不变…"
+        aiBusy = true; result = firstMain ? "正在保存并设置主 Agent…" : "正在保存连接…"
         Task {
             defer { aiBusy = false }
             do {
@@ -140,7 +187,8 @@ import Foundation
                     var value = profile
                     value["id"] = target; value["revision"] = expected + 1; value["name"] = name
                     value["engine"] = kind; value["model"] = model
-                    value["provider"] = kind == "claude" ? "anthropic" : kind == "agy" ? "google" : "openai"
+                    value["provider"] = kind == "grok" ? "xai" : kind == "claude" ? "anthropic" : kind == "agy" ?
+                        "google" : "openai"
                     value["auth_ref"] = "cli:" + kind
                     if value["params"] == nil {
                         value["params"] = ["max_output_tokens": 8192]
@@ -152,42 +200,66 @@ import Foundation
                             "unattended": "guest_vm",
                         ]
                     }
-                    _ = try await bridge.terminal.request(
+                    _ = try await bridge.runtime.request(
                         "api/v1/agent",
                         body: [
                             "profile": value,
                             "expected_revision": expected,
                             "request_id": UUID().uuidString,
-                            "follow_main": false,
+                            "follow_main": firstMain,
                             "follow_worker": false,
                         ]
                     )
                 } else {
-                    _ = try await bridge.terminal.request(
+                    _ = try await bridge.runtime.request(
                         "api/v1/providers",
                         body: [
                             "profile_id": target,
                             "name": name,
                             "expected_revision": expected,
                             "request_id": UUID().uuidString,
-                            "endpoint": connectionEndpoint(endpoint),
+                            "endpoint": connectionEndpoint(kind.hasPrefix("opencode-") ? apiEndpoint : endpoint),
                             "api_key": key,
                             "model": model,
                             "protocol": protocolName,
-                            "follow_main": false,
+                            "follow_main": firstMain,
                         ]
                     )
                 }
                 try await reloadAI()
+                // Keep the saved identity if activation later needs a retry.
+                profile = savedProfiles.first { $0["id"] as? String == target } ?? [:]
+                if firstMain {
+                    while true {
+                        let state = try await bridge.runtime.request("api/v1/agent")
+                        if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
+                            break
+                        }
+                        result = "正在设置主 Agent，请等待当前会话交接…"
+                        try await Task.sleep(nanoseconds: 750_000_000)
+                    }
+                    try await reloadAI()
+                    guard activeSpec["source_profile_id"] as? String == target else {
+                        result = "连接已保存，主 Agent 尚未生效；请刷新后在主 Agent 中完成设置。"; return
+                    }
+                    draftProfile = target; draftModel = model; draftRevision += 1
+                }
                 aiScreen = "main"; secretRevision += 1
-                if returnToChat, activeSpec.isEmpty {
-                    draftProfile = target; draftModel = model; draftRevision += 1; aiScreen = "main-edit"
+                if firstMain, returnToChat {
+                    finishSetup(); returnToChat = false
                 }
                 if routingOwner != "main" {
                     routingProfile = target; editRoutingProfile(target); section = 4
                 }
-                revision += 1; result = "连接已保存。请在上方确认聊天 Agent 和模型后保存；未发送模型请求。"
-            } catch { result = "连接未保存：" + error.localizedDescription }
+                revision += 1; result = "连接已保存；未发送模型请求。"
+            } catch {
+                // A lost response may follow a successful save. Reconcile before retrying.
+                try? await reloadAI()
+                if let saved = savedProfiles.first(where: { $0["id"] as? String == target }) {
+                    profile = saved
+                }
+                result = "保存未完成，请刷新后重试：" + error.localizedDescription
+            }
         }
     }
 
@@ -214,7 +286,7 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                _ = try await bridge.terminal.request(
+                _ = try await bridge.runtime.request(
                     "api/v1/agent",
                     body: [
                         "profile": selected,
@@ -225,7 +297,7 @@ import Foundation
                     ]
                 )
                 while true {
-                    let state = try await bridge.terminal.request("api/v1/agent")
+                    let state = try await bridge.runtime.request("api/v1/agent")
                     if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
                         break
                     }
@@ -249,24 +321,16 @@ import Foundation
     }
 
     func openLogin(_ engine: String) {
-        guard ["codex", "claude", "agy"].contains(engine), !aiBusy else { return }
-        loginEngine = engine; loginVisible = true; loginMessage = "在下方粘贴登录命令并按 Enter，按终端提示在浏览器完成授权。"
-        bridge?.selectPage(7); refreshAgents()
+        startAuthorization(engine)
     }
 
-    var loginCommand: String {
-        switch loginEngine {
-        case "codex": "codex login --device-auth"
-        case "claude": "claude auth login"
-        default: "agy --help"
+    func cancelLogin() {
+        stopAuthorization()
+    }
+
+    func reopenLogin() {
+        if let url = URL(string: authorizationURL), loginVisible {
+            NSWorkspace.shared.open(url)
         }
-    }
-
-    func continueLogin() {
-        let status = agentStates.first { $0["id"] as? String == loginEngine }
-        let authenticated = status?["authentication"] as? String == "authenticated"
-        guard authenticated || setupCanStart(loginEngine) else { loginMessage = "请先完成登录，或重新检查状态。"; return }
-        loginVisible = false; section = 1; bridge?.selectPage(2)
-        result = authenticated ? "登录完成，请确认模型并保存。" : "登录状态未知，请根据终端结果确认可用后填写模型。"
     }
 }

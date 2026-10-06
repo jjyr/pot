@@ -3,6 +3,7 @@ pub mod agy;
 pub mod claude;
 pub mod codex;
 mod files;
+pub mod grok;
 pub mod pi;
 use anyhow::{Result, anyhow, bail};
 pub use files::{executable, private_json};

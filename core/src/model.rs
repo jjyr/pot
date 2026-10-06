@@ -13,6 +13,7 @@ pub enum Engine {
     Codex,
     Claude,
     Agy,
+    Grok,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Capabilities {
@@ -105,7 +106,10 @@ impl Profile {
     }
     pub fn resolve(&self) -> Result<ResolvedSpec> {
         self.validate()?;
-        if matches!(self.engine, Engine::Codex | Engine::Claude | Engine::Agy) {
+        if matches!(
+            self.engine,
+            Engine::Codex | Engine::Claude | Engine::Agy | Engine::Grok
+        ) {
             return self.resolve_native();
         }
         self.launch_spec.clone().unwrap_or_default().validate()?;
@@ -168,21 +172,28 @@ impl Profile {
     fn resolve_native(&self) -> Result<ResolvedSpec> {
         let claude = self.engine == Engine::Claude;
         let agy = self.engine == Engine::Agy;
-        let expected_auth = if agy {
+        let grok = self.engine == Engine::Grok;
+        let expected_auth = if grok {
+            "cli:grok"
+        } else if agy {
             "cli:agy"
         } else if claude {
             "cli:claude"
         } else {
             "cli:codex"
         };
-        let default_launch = if agy {
+        let default_launch = if grok {
+            LaunchSpec::grok()
+        } else if agy {
             LaunchSpec::agy()
         } else if claude {
             LaunchSpec::claude()
         } else {
             LaunchSpec::codex()
         };
-        let default_protocol = if agy {
+        let default_protocol = if grok {
+            ProtocolContract::grok()
+        } else if agy {
             ProtocolContract::agy()
         } else if claude {
             ProtocolContract::claude()
@@ -227,11 +238,11 @@ impl Profile {
             gateway_protocol: "native_reported".into(),
             context_window: 0,
             capabilities: Capabilities {
-                native_compaction: !agy,
-                usage_reporting: true,
-                tool_policy_enforcement: !agy,
-                mcp_tools: !agy,
-                subagents_disableable: !agy,
+                native_compaction: !agy && !grok,
+                usage_reporting: !grok,
+                tool_policy_enforcement: !agy && !grok,
+                mcp_tools: !agy && !grok,
+                subagents_disableable: !agy && !grok,
                 ..Default::default()
             },
             source_profile_id: self.id.clone(),
@@ -308,6 +319,7 @@ impl ResolvedSpec {
                         && protocol.events == "codex_app_server_v2",
                 Engine::Claude =>
                     launch.transport == "claude_json" && protocol.events == "claude_stream_json",
+                Engine::Grok => launch.transport == "grok_acp" && protocol.events == "grok_acp_v1",
                 Engine::Agy =>
                     launch.transport == "agy_json" && protocol.events == "agy_stream_json",
             },
@@ -336,6 +348,9 @@ pub enum NativeRef {
     },
     Agy {
         conversation_id: Option<String>,
+    },
+    Grok {
+        session_id: Option<String>,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -389,6 +404,13 @@ impl Default for LaunchSpec {
     }
 }
 impl LaunchSpec {
+    pub fn grok() -> Self {
+        Self {
+            transport: "grok_acp".into(),
+            executable: "grok".into(),
+            ..Default::default()
+        }
+    }
     pub fn agy() -> Self {
         Self {
             transport: "agy_json".into(),
@@ -414,7 +436,7 @@ impl LaunchSpec {
         ensure!(
             matches!(
                 self.transport.as_str(),
-                "pi_rpc" | "codex_app_server" | "claude_json" | "agy_json"
+                "pi_rpc" | "codex_app_server" | "claude_json" | "agy_json" | "grok_acp"
             ),
             "Transport has not passed driver acceptance"
         );
@@ -595,6 +617,12 @@ impl Default for ProtocolContract {
     }
 }
 impl ProtocolContract {
+    pub fn grok() -> Self {
+        Self {
+            events: "grok_acp_v1".into(),
+            native_session: "grok_session".into(),
+        }
+    }
     pub fn agy() -> Self {
         Self {
             events: "agy_stream_json".into(),
@@ -618,7 +646,8 @@ impl ProtocolContract {
             (self.events == "pi_rpc_v1" && self.native_session == "pi_jsonl_v3")
                 || (self.events == "codex_app_server_v2" && self.native_session == "codex_thread")
                 || (self.events == "claude_stream_json" && self.native_session == "claude_session")
-                || (self.events == "agy_stream_json" && self.native_session == "agy_conversation"),
+                || (self.events == "agy_stream_json" && self.native_session == "agy_conversation")
+                || (self.events == "grok_acp_v1" && self.native_session == "grok_session"),
             "Unsupported protocol/session contract; restore the command or migrate explicitly"
         );
         Ok(())

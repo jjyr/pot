@@ -19,6 +19,8 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 
 ## Research on demand
 
+Latest AI integration acceptance: [Simplified AI integration, 2026-10-06](validation/ai-integration-20261006.md). Earlier Terminal-based screenshots are historical.
+
 `research/` contains dated background material, not current implementation specifications:
 
 - UI framework: [GPUI Kit](research/gpui-kit-evaluation.md). See the UI specification for current component usage.

@@ -1,5 +1,7 @@
 # AI configuration acceptance — 2026-10-05
 
+The Terminal-based observations below are historical. The current browser-authorization implementation and its acceptance limits are recorded in [Simplified AI integration acceptance](ai-integration-20261006.md).
+
 Implementation for [issue #7](https://github.com/jjyr/pot/issues/7), based on `origin/main` at `a5a579f`, in branch `codex/ai-configuration`. This report separates native UI observations from backend contract tests and real-provider acceptance.
 
 ## Verification
