@@ -12,6 +12,7 @@ pub struct Hosts {
 }
 pub struct Connection {
     stdin: tokio::sync::Mutex<tokio::process::ChildStdin>,
+    acp: bool,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
     pub events: broadcast::Sender<Value>,
     sequence: AtomicU64,
@@ -48,9 +49,20 @@ impl Drop for Connection {
     }
 }
 impl Connection {
+    pub async fn shutdown(&self) {
+        self.stop.notify_one();
+        let mut done = self.done.clone();
+        let _ = done.wait_for(|done| *done).await;
+    }
     async fn spawn(launch: &LaunchSpec) -> Result<Arc<Self>> {
+        let acp = launch.transport == "grok_acp";
+        let arguments = if acp {
+            vec!["agent".into(), "--no-leader".into(), "stdio".into()]
+        } else {
+            vec!["app-server".into()]
+        };
         let mut child = tokio::process::Command::new(&launch.executable)
-            .args(launch.expand(&["app-server".into()])?)
+            .args(launch.expand(&arguments)?)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             // Never persist provider diagnostics, native auth, prompts or lane headers.
@@ -65,6 +77,7 @@ impl Connection {
         let (done_tx, done) = tokio::sync::watch::channel(false);
         let connection = Arc::new(Self {
             stdin: tokio::sync::Mutex::new(stdin),
+            acp,
             pending: Arc::new(Mutex::new(HashMap::new())),
             events,
             sequence: AtomicU64::new(1),
@@ -110,13 +123,21 @@ impl Connection {
             let _ = child.wait().await;
             let _ = done_tx.send(true);
         });
+        if acp {
+            let init = connection.request("initialize", json!({"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"pot","version":env!("CARGO_PKG_VERSION")}})).await?;
+            anyhow::ensure!(init["protocolVersion"] == 1, "Unsupported ACP protocol");
+            return Ok(connection);
+        }
         connection.request("initialize", json!({"clientInfo":{"name":"pot","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}})).await?;
         connection
             .write(json!({"method":"initialized","params":{}}))
             .await?;
         Ok(connection)
     }
-    pub async fn write(&self, value: Value) -> Result<()> {
+    pub async fn write(&self, mut value: Value) -> Result<()> {
+        if self.acp {
+            value["jsonrpc"] = json!("2.0");
+        }
         anyhow::ensure!(
             self.alive.load(Ordering::SeqCst),
             "Codex host exited; stop unconfirmed"
@@ -127,6 +148,24 @@ impl Connection {
         Ok(())
     }
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        self.request_timeout(method, params, Duration::from_secs(30))
+            .await
+    }
+    pub async fn request_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value> {
+        self.request_with_ready(method, params, timeout, None).await
+    }
+    pub async fn request_with_ready(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        ready: Option<oneshot::Sender<()>>,
+    ) -> Result<Value> {
         let id = self.sequence.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         {
@@ -136,12 +175,13 @@ impl Connection {
         }
         let result = async {
             self.write(json!({"id":id,"method":method,"params":params})).await?;
-            let reply = tokio::time::timeout(Duration::from_secs(30), rx).await
+            if let Some(ready) = ready { let _ = ready.send(()); }
+            let reply = tokio::time::timeout(timeout, rx).await
                 .map_err(|_| anyhow!("Codex {method} timed out; outcome unknown"))?
                 .map_err(|_| anyhow!("Codex host exited; stop unconfirmed"))?;
             if reply.get("error").is_some() {
                 // Error messages can embed native config/credentials. Only expose the code.
-                bail!("Codex {method} rejected (code {}); check login and protocol compatibility in Terminal", reply["error"]["code"]);
+                bail!("Codex {method} rejected (code {}); check account authorization and protocol compatibility", reply["error"]["code"]);
             }
             reply.get("result").cloned().ok_or_else(|| anyhow!("Codex {method} returned incompatible output"))
         }.await;

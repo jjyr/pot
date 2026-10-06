@@ -58,8 +58,7 @@ impl Settings {
         );
         for (i, (id, name)) in [
             ("codex", "Codex"),
-            ("claude", "Claude"),
-            ("agy", "AGY"),
+            ("grok", "Grok"),
             ("api", "OpenAI 兼容 API / Pi"),
         ]
         .into_iter()
@@ -94,15 +93,15 @@ impl Settings {
             );
         }
         body = body.child(hint(
-                "镜像已提供这些运行环境；选择不会触发登录或模型调用。缺失工具也可在 Terminal 自行安装。",
-                cx,
-            ));
+            "镜像已提供这些运行环境；选择不会触发登录或模型调用。缺失工具请更新或重新准备环境。",
+            cx,
+        ));
         footer = footer
             .child(
                 Button::new("setup-manual")
                     .ghost()
-                    .label("自行安装 / 打开 Terminal")
-                    .on_click(|_, _, _| command(json!({"action":"terminal","value":true}))),
+                    .label("稍后设置")
+                    .on_click(|_, _, _| command(json!({"action":"setup-later"}))),
             )
             .child(
                 Button::new("setup-next")

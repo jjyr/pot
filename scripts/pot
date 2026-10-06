@@ -50,17 +50,6 @@ if cmd == "prepare":
     verify(RES / "vmlinux", "fb2cfb79eb1ae19447a85d75682d7fa5cfec97e24beb2609a492b806e8072c8d")
     download("https://github.com/novnc/noVNC/archive/refs/tags/v1.6.0.tar.gz", RES / "novnc.tar.gz")
     verify(RES / "novnc.tar.gz", "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa")
-    download(
-        "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.16-5594158052802560/linux-arm-musl/cli_linux_arm64_musl.tar.gz",
-        RES / "agy-musl.tar.gz",
-    )
-    verify(
-        RES / "agy-musl.tar.gz",
-        "3f5ef952365b58c358ed79e0bb61768b17afdfd8fd00ccfd39b06f50789c8c0069890cf88583e0edfa194c1ddd9640211f02a8daac58a41f9bd73bac786e414c",
-        "sha512",
-    )
-    call(["tar", "xzf", RES / "agy-musl.tar.gz", "-C", RES])
-    shutil.copy2(RES / "antigravity", RES / "agy")
     for name in [
         "desktop.sh",
         "desktop-config.sh",
@@ -122,6 +111,10 @@ elif cmd == "bundle":
         legacy.rename(APP)
     for sub in ["MacOS", "Helpers", "Resources/runtime"]:
         (APP / "Contents" / sub).mkdir(parents=True, exist_ok=True)
+    # Remove obsolete xterm resources from an existing development bundle.
+    obsolete_terminal = APP / "Contents/Resources/terminal"
+    if obsolete_terminal.exists():
+        shutil.rmtree(obsolete_terminal)
     for src, dest in [
         (pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug/pot-app", APP / "Contents/MacOS/pot-app"),
         (ROOT / "helper-build/release/PotHelper", APP / "Contents/Helpers/PotHelper"),
@@ -144,9 +137,6 @@ elif cmd == "bundle":
     shutil.copy2(RES / "sandbox-image.json", APP / "Contents/Resources/runtime/sandbox-image.json")
     for name in ["vmlinux"]:
         shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
-    shutil.copytree(
-        REPO / "app/assets/terminal", APP / "Contents/Resources/terminal", dirs_exist_ok=True
-    )
     for name in ["Pot.icns", "PotTray.png"]:
         shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)
     (APP / "Contents/Info.plist").write_bytes(

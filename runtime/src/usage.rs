@@ -158,44 +158,6 @@ mod tests {
         assert_eq!(summary["native_turn_usage"], true);
     }
 
-    #[test]
-    fn claude_usage_counts_cache_once_and_preserves_incomplete_totals() {
-        let l = ledger();
-        l.0.execute("INSERT INTO requests(id,scope,turn_id,at,model,state) VALUES ('c','main','turn',0,'mock','native_pending')", []).unwrap();
-        let usage = json!({"input_tokens":20,"output_tokens":5,"cache_read_input_tokens":10,"cache_creation_input_tokens":3});
-        assert!(l.settle_claude("missing", &usage).is_err());
-        l.settle_claude("c", &usage).unwrap();
-        l.settle_claude("c", &usage).unwrap();
-        assert!(l.settle_claude("c", &json!({"input_tokens":1})).is_err());
-        assert!(l.settle_claude("c", &json!({"input_tokens":u64::MAX,"output_tokens":5,"cache_read_input_tokens":1,"cache_creation_input_tokens":0})).is_err());
-        l.native_incomplete("c").unwrap();
-        let summary = l.summary(&query("main", 7), now()).unwrap();
-        assert_eq!(summary["lifetime"]["input"], 33);
-        assert_eq!(summary["lifetime"]["output"], 5);
-        assert_eq!(summary["lifetime"]["cache"], 10);
-        assert_eq!(summary["lifetime"]["unknown"], 1);
-    }
-
-    #[test]
-    fn agy_usage_counts_final_totals_once_and_rejects_inconsistent_counters() {
-        let l = ledger();
-        l.0.execute("INSERT INTO requests(id,scope,turn_id,at,model,state) VALUES ('a','main','turn',0,'mock','native_pending')", []).unwrap();
-        let usage = json!({"input_tokens":10418,"output_tokens":589,"cache_read_tokens":8113,"thinking_tokens":551,"total_tokens":11007});
-        l.settle_agy("a", &usage).unwrap();
-        l.settle_agy("a", &usage).unwrap();
-        assert!(l.settle_agy("missing", &usage).is_err());
-        let mut bad = usage.clone();
-        bad["total_tokens"] = json!(12000);
-        assert!(l.settle_agy("a", &bad).is_err());
-        bad = usage.clone();
-        bad["cache_read_tokens"] = json!(10419);
-        assert!(l.settle_agy("a", &bad).is_err());
-        let summary = l.summary(&query("main", 7), now()).unwrap();
-        assert_eq!(summary["lifetime"]["input"], 10418);
-        assert_eq!(summary["lifetime"]["output"], 589);
-        assert_eq!(summary["lifetime"]["cache"], 8113);
-    }
-
     fn at(s: &str) -> i64 {
         chrono::DateTime::parse_from_rfc3339(s)
             .unwrap()
@@ -303,8 +265,7 @@ mod tests {
         profile.auth_ref = match engine {
             agent::Engine::Pi => "pi.json:api_key",
             agent::Engine::Codex => "cli:codex",
-            agent::Engine::Claude => "cli:claude",
-            agent::Engine::Agy => "cli:agy",
+            agent::Engine::Grok => "cli:grok",
         }
         .into();
         profile.engine = engine;
@@ -317,10 +278,10 @@ mod tests {
         for (key, engine, scope, model, stamp) in [
             ("p", agent::Engine::Pi, "main", "shared", t),
             ("c", agent::Engine::Codex, "main", "shared", t),
-            ("a", agent::Engine::Agy, "task-1", "shared", t),
+            ("a", agent::Engine::Grok, "task-1", "shared", t),
             (
                 "older",
-                agent::Engine::Claude,
+                agent::Engine::Codex,
                 "main",
                 "old-model",
                 t - 10 * 86400000,
@@ -361,14 +322,14 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|v| v["agent"] == "claude" && v["model"] == "old-model")
+                .any(|v| v["agent"] == "codex" && v["model"] == "old-model")
         );
         assert!(
             !main["agent_models"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|v| v["agent"] == "agy")
+                .any(|v| v["agent"] == "grok")
         );
         let row = main["requests"]
             .as_array()
@@ -379,12 +340,12 @@ mod tests {
         assert_eq!(row["agent"], "codex");
         assert_eq!(row["profile_id"], "pending-profile");
         assert_eq!(row["epoch"], 3);
-        let native = attributed_spec(agent::Engine::Agy, "native-model", "agy-native");
+        let native = attributed_spec(agent::Engine::Grok, "native-model", "grok-native");
         l.begin_native("native", "task-native", "turn", &native, 4)
             .unwrap();
         assert_eq!(
             l.summary(&query("task-native", 7), t).unwrap()["requests"][0]["agent"],
-            "agy"
+            "grok"
         );
     }
     #[test]

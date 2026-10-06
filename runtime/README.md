@@ -4,9 +4,9 @@
 
 Runtime owns product commands and projection. `pot-storage` owns SQLite, request/usage ledgers and binding persistence; `pot-core` owns immutable models and execution contracts.
 `agent/` owns epoch migration, driver event filtering and product projection;
-`pot-driver` owns Pi/Codex/Claude/AGY subprocess transports through fixed execution
+`pot-driver` owns Pi/Codex/Grok subprocess transports through fixed execution
 contexts and scoped feedback, without a Runtime Service or database dependency. Pi (image baseline 0.87.1, not a runtime lock) owns its native JSONL session and built-in read/write/edit/
-bash/grep/find/ls tools. The first MVP uses Pi with DeepSeek Flash; AGY/Codex are
+bash/grep/find/ls tools. The first MVP uses Pi with DeepSeek Flash; Codex/Grok are
 not required to use it. See [MVP validation](../docs/validation/pi-mvp.md).
 
 ## Pi configuration and execution
@@ -94,8 +94,7 @@ recovery, request caps and missing-session handling without paid model requests.
 When `pi.json` is absent, `deepseek.json` selects the old direct Rust smoke adapter;
 otherwise Runtime requires an explicitly selected Agent profile. The smoke adapter keeps its separate
 `deepseek-attempts` ledger (3 requests, 128 output tokens, restricted write_file).
-Its original ledger is exhausted and must not be reset. The old AGY direct adapter
-has been removed; AGY now uses the same profile/binding/Driver boundary as Claude.
+Its original ledger is exhausted and must not be reset. Antigravity and Claude CLI adapters are removed. Their old configuration values are unsupported; no compatibility migration or conversion is provided. Historical messages and usage are retained.
 
 ## Web access
 
@@ -220,7 +219,7 @@ and tool_policy `{worker_orchestration:false, summary_read_only:true,
 unattended:"guest_vm"}`. Only accepted engine routes can be selected. Model names
 are validated by the provider, not guessed by the Runtime.
 
-Assistant API settings still edit pi.json and restart the environment. Agent settings edit Pi launch commands through the versioned API without a model call.
+AI Configuration saves API connections and CLI launch commands through the versioned Agent/provider APIs without a model call. Chat selection is a separate explicit save; product execution limits use execution-limits.json and restart the environment independently of credentials. Legacy pi.json remains supported.
 Its model/output-limit edit is imported into this same migration operation on
 startup. The task-routing settings page edits/copies saved profiles, selects a main profile through
 migration, and configures the worker default, tool-hint whitelist and concurrency caps.
@@ -307,7 +306,7 @@ Disconnect detaches; reconnect replays up to 64 KiB in memory. No terminal outpu
 is stored in SQLite, disk scrollback or logs; default Shell HISTFILE is disabled.
 Normal Runtime shutdown closes PTYs; VM restart loses them. The native bridge
 uses Authorization headers, never URL credentials or webview JavaScript tokens.
-Bundled xterm 5.5.0 / fit 0.10.0 have adjacent MIT licenses. No remote UI scripts.
+The product Terminal page and xterm assets are removed. These Runtime PTY facilities remain independent of browser authorization.
 
 - `GET /api/v1/agents/tools`: read-only executable catalog; versioned default-profile
   invocation overrides historical catalog entries; no login-command field
@@ -366,30 +365,9 @@ provider does not block another. Cancelling tasks retain capacity until settled;
 unconfirmed engine shutdown holds the lane and all its leases until Runtime restart.
 These limits apply to background workers; the main/summary lane remains separate.
 
-## Claude native sessions
+## Supported native sessions
 
-Claude uses the original CLI's stream-json print mode, one process per turn with an
-explicit UUID (`--session-id`, then `--resume`). A fresh UUID is marked unstarted
-until init confirms it; a previously started session that cannot resume becomes
-broken. Settings prepare checks required CLI controls without a model request.
-`--system-prompt-snapshot off` keeps current lane/summary instructions effective
-across resume. Strict MCP configuration carries the lane bearer; an explicit
-built-in tool whitelist excludes native delegation and scheduling. Summary turns
-also exclude shell and mutation tools. Guest VM is the unattended boundary.
-
-Completion waits for process exit and an empty native background-task list after
-the result. Cancellation sends SIGINT and waits; uncertain cleanup blocks further
-execution on that lane. Usage comes from the final cumulative turn report, with
-cache read/create tokens included in input. Missing/failed/cancelled usage remains
-incomplete; request-level budget enforcement and safe checkpoint replay are disabled.
-An observed `system/api_retry` with `error: authentication_failed` uses the same
-SIGINT lifecycle rather than waiting through native authentication retries. After
-a terminal result and resource shutdown, Runtime reports authentication required
-and keeps the native binding for an explicit retry after login. Provider diagnostic
-text is not copied into this error; usage remains incomplete. Synthetic assistant
-API-error events also use a generic failure message instead of the provider diagnostic. Missing terminal or
-unconfirmed shutdown still blocks the lane.
-CLI login is `claude auth login`, and discovery uses official `claude auth status --json`.
+Codex uses official App Server authorization/session APIs; Grok uses official ACP authorization and main-chat sessions. Only Pi, Codex and Grok are accepted engine values. Claude is API-only via the Anthropic Messages gateway codec. Removed CLI values are rejected by new profile requests. No startup compatibility migration, archive or conversion is provided for removed CLI configurations. Native account/session files are not deleted.
 
 ## Native provider codecs
 
@@ -437,62 +415,11 @@ Codex extra permission requests are denied by the guest-VM policy and surfaced a
 credential-free system message; permitted Pot MCP requests still use per-role authorization.
 
 
-Claude capability checks are cached for each launch command and executable metadata
-(device/inode, size, modification/change timestamps). Unchanged commands do not run
-`--help` before every turn. Replacing/reinstalling the executable invalidates the check,
-without changing the binding or imposing an exact version lock. Failed controls or a
-missing executable set an actionable `needs_rebind` reason before model execution;
-restoring a compatible command allows an explicit retry in the same native session.
-Probe output is bounded and a timeout/output failure stops the probe process group.
-Offline original-CLI tests remain separate from real-account acceptance; current
-acceptance scope is recorded in the development plan and validation report.
+## AI connection management (#7)
 
-
-## AGY native sessions
-
-AGY uses the original CLI's `--print --input-format text --output-format stream-json`
-transport, one process per turn. The CLI creates the conversation UUID; Runtime
-persists it only after `init` and supplies `--conversation` for later turns and
-Runtime restarts. Missing/incompatible commands set `needs_rebind` without discarding
-the binding; restoring the command allows retry on the original conversation.
-The driver validates help controls without a model request, bounds NDJSON frames,
-redacts diagnostics, requires an explicit terminal status, and waits for process
-exit before publishing the final response. SIGINT cancellation has a bounded wait;
-on disposal Runtime kills remaining process-group descendants. Native background
-agents that detach from this group are not proven settled by this implementation.
-
-Final per-run usage includes cached input and thinking output. Step/checkpoint
-usage is never added to the final envelope. Missing, malformed, failed-process or
-cancelled usage remains incomplete; no exact request budget or interrupted-turn
-replay is claimed. The original CLI owns its guest HOME, login and conversation
-history. AGY has no verified official read-only auth-status command, so discovery
-keeps authentication `unknown`; Runtime never probes login by calling a model.
-
-Main chat, workers, schedules and result summaries are enabled by the user's
-explicit acceptance of AGY's native tool permissions. Each turn carries current
-role guidance in the input text: workers must not delegate/manage schedules;
-summaries must only summarize supplied results without commands or file edits.
-AGY has no verified system-prompt override, so this is prompt guidance rather than
-an enforced read-only contract. Native conversations and cancellation scopes stay
-independent for workers; summaries resume the main conversation.
-
-Pot supplies no MCP configuration or task/schedule tools to AGY and removes
-inherited `POT_TASK_API`/`POT_TASK_TOKEN` variables from its process. It does not
-provide `pot_create_task` or any other Pot orchestration tool. Users' native CLI
-settings/plugins/MCP and their guest tool permissions remain CLI-owned; Pot does
-not overwrite them or pass blanket approval. Selecting AGY updates the main and
-worker defaults like the other native backends.
-
-`tool_policy_enforcement`, `mcp_tools`, `subagents_disableable` and
-`native_compaction` capabilities remain false. Routing explicitly permits AGY
-with `requirements.tools` under the accepted native-permission policy; exact
-request budgets, live steering and desktop requirements remain unsupported.
-This does not claim original CLI role isolation/account acceptance or vendor licensing.
-
-
-The common Driver interface covers native identity, turn events, usage and cancellation;
-it does not require identical CLI permissions. Codex uses App Server configuration
-and feature overrides; Claude uses stream-json with explicit tools/settings/MCP flags;
-AGY uses its stream-json/conversation interface and per-turn prompt guidance. Drivers
-must declare only capabilities supported by their backend. AGY's accepted native-tool
-routing exception does not enable its strict isolation capability or alter Codex/Claude controls.
+- `GET /api/v1/providers`: selected connection plus all saved API connection metadata (`connections`, keyed by `profile_id`), never secrets; Gemini endpoint templates remain templates.
+- `POST /api/v1/providers`: accepts optional `profile_id`, `name`, and `follow_main`. `follow_main: false` adds/updates a connection without selecting it; omitted fields preserve the legacy request contract. Never updates the worker default. Empty keys retain only the same profile's same-endpoint credential, even when another Agent is active.
+- `POST /api/v1/providers/check`: endpoint/protocol/key or same-profile retained key; bounded supported model-list GET only, 12-second timeout, no redirects or inference. Returns models and safe status, never upstream response bodies or secrets. Custom unsupported paths permit manual configuration.
+- `POST /api/v1/terminals`: optional purpose `shell` (default) or `login`, returned by list; both open a shell only, never execute authentication commands. `agent` command injection remains rejected.
+- Routing supports `follow_chat: true`, which pins new tasks to the active main binding snapshot rather than an unapplied profile revision. Existing explicit defaults remain effective until changed.
+- `execution-limits.json` contains request_limit, max_tokens, max_requests_per_turn and max_parallel_tasks; no credentials or model selection. Bounds match existing settings. Limits do not create an implicit legacy Pi binding.

@@ -3,12 +3,14 @@ use pot_runtime::RuntimeConfig;
 use pot_server::{Server, ServerConfig};
 use serde_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
+static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
         Self(std::env::temp_dir().join(format!(
-                "pot-server-{}-{}",
+                "pot-server-{}-{}-{}",
                 std::process::id(),
+                NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
@@ -168,33 +170,36 @@ async fn occupied_listener_does_not_initialize_product_storage() {
 #[tokio::test]
 async fn shutdown_settles_active_main_and_worker_processes() {
     let fixture = Fixture::new();
-    let server = Server::bind(fixture.config()).await.unwrap();
-    let endpoint = server.endpoint().unwrap();
-    let base = format!("http://{}", server.local_addr().unwrap());
-    let cli = fixture.0.join("agy-fixture");
+    let cli = fixture.0.join("pi-fixture");
+    std::fs::create_dir_all(fixture.0.join("data")).unwrap();
+    std::fs::write(fixture.0.join("data/pi.json"), r#"{"api_key":"fixture-key","model":"deepseek-v4-flash","request_limit":100,"max_tokens":256,"max_requests_per_turn":10,"max_parallel_tasks":2}"#).unwrap();
     std::fs::write(&cli, r#"#!/usr/bin/env python3
-import json, signal, sys, time
+import json, sys, uuid
 from pathlib import Path
-if sys.argv[1:] == ['--help']:
-    print('--print --output-format stream-json --conversation --model --disable-slash-commands'); sys.exit(0)
-text=sys.stdin.read()
-def stop(*_):
-    Path('stopped').write_text('interrupt acknowledged'); sys.exit(0)
-signal.signal(signal.SIGINT, stop)
-print(json.dumps({'event':'init','conversation_id':'00000000-0000-4000-8000-000000000001'}), flush=True)
-Path('started').write_text('ready')
-while True: time.sleep(0.05)
+session=Path(sys.argv[sys.argv.index('--session')+1])
+identity=str(uuid.uuid4())
+session.write_text(json.dumps({'type':'session','version':3,'id':identity})+'\n')
+for line in sys.stdin:
+    v=json.loads(line)
+    if v['type']=='get_state':
+        print(json.dumps({'id':v['id'],'type':'response','success':True,'data':{'sessionId':identity}}),flush=True)
+    elif v['type']=='prompt':
+        Path('started').write_text('ready')
+    elif v['type']=='abort':
+        Path('stopped').write_text('interrupt acknowledged')
+        print(json.dumps({'id':v['id'],'type':'response','success':True}),flush=True)
 "#).unwrap();
     std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut config = fixture.config();
+    config.runtime.pi_program = cli.to_string_lossy().into_owned();
+    let server = Server::bind(config).await.unwrap();
+    let endpoint = server.endpoint().unwrap();
+    let base = format!("http://{}", server.local_addr().unwrap());
     let (stop, shutdown) = tokio::sync::oneshot::channel();
     let serving = tokio::spawn(server.serve(async {
         let _ = shutdown.await;
     }));
     let client = reqwest::Client::new();
-    let profile = json!({"id":"agy-shutdown","revision":1,"name":"fixture","engine":"agy","provider":"google","model":"agy-fixture","auth_ref":"cli:agy",
-        "launch_spec":{"transport":"agy_json","executable":cli,"cwd_policy":"workspace","argv":[{"kind":"runtime_arguments"}]},
-        "params":{"max_output_tokens":256,"reasoning_effort":null},"tool_policy":{"worker_orchestration":false,"summary_read_only":true,"unattended":"guest_vm"}});
-    client.post(format!("{base}/api/v1/agent")).bearer_auth(&endpoint.token).json(&json!({"profile":profile,"expected_revision":0,"request_id":"setup","follow_worker":true})).send().await.unwrap().error_for_status().unwrap();
     client
         .post(format!("{base}/api/v1/messages"))
         .bearer_auth(&endpoint.token)

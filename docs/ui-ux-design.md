@@ -1,6 +1,6 @@
 # Pot UI specification
 
-Updated: 2026-10-04. Current MVP UI specification; see [UI validation](validation/ui-ux.md) for historical acceptance and [Development plan](development-plan.md) for scope.
+Updated: 2026-10-05. Current MVP UI specification; see [UI validation](validation/ui-ux.md) for historical acceptance and [Development plan](development-plan.md) for scope.
 
 ## Shared layout
 
@@ -25,11 +25,11 @@ Content scrolls while titles/main navigation remain. Minimum window 800 x 700; l
 ## Pages and interactions
 
 - **Chat**: Pot icon opens chat; no central avatar. Blue user/neutral assistant bubbles. Small action bar below messages: Copy left, linked View task right, both with tooltips. Latest assistant actions show when idle; historical/user actions show on hover. Reserve height to avoid movement. Latest messages shares native input width/centering, sits above it, is fully clickable, and hides immediately on click. Preserve native IME/edit shortcuts. Opened conversations show cache before background refresh.
-- **Tasks**: fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running), Needs attention (failed/interrupted), Archived (completed/cancelled). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Cards retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Agent settings concurrency defaults to 5.
+- **Tasks**: fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running), Needs attention (failed/interrupted), Archived (completed/cancelled). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Cards retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Task Configuration concurrency defaults to 5.
 - **Task conversation header**: separate back row; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore old 48-character truncation from original task first lines. One row below shows stage/archive/cumulative tokens using small icons/secondary text; tokens open details. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
 - **Schedules**: reuse Tasks / Schedules navigation, Kit Button/Form/Field/Input/cards. Fixed bottom pagination matches tasks: total/page left, previous/next right. Details show next run/state/paginated history linking to tasks. Main Agent creates schedules; no manual creation. Existing edit forms scroll with fixed save/cancel and include zone/frequency/notification/missed policy. Pause/delete preserves current runs; second click confirms deletion. See [Scheduled tasks](scheduled-tasks.md).
 - **Usage**: overall statistics/charts only, last 7/30/90 days/year. No granularity selector; year automatically aggregates 7-day groups. Task/main usage belongs in each conversation and survives archive. Single-page details: totals, horizontal model stacks (conversation/compaction, real tokens/proportions/hover), tool rankings (estimated tokens/calls, shared scale, top 5 expandable). Hide zero compaction/empty tools; no tabs/per-request lists/Skills stats. Never add tool output to model consumption. Hide allowance cards without periodic limits. See [Token usage](token-usage.md).
-- **Settings**: General / Assistant / Agent / Sandbox share forms. Assistant explicitly selects Codex/Claude/AGY/Pi-API; Agent checks read-only status/edits launch commands. API keys belong to model services; show supported options only. Expand limits on demand. Reuse normal Assistant settings after environment/tool preparation. General contains appearance/shortcuts without Window and background/Unread messages explanations.
+- **Settings**: General / AI Configuration / Task Configuration / Work Environment. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances; Work Environment keeps Sandbox resources.
 - **Sandbox**: Kit title/toolbar 112 px; desktop fills remaining space without the 820 px cap. Green connection dot with hover text. Take over is primary; environment/reconnect/settings/more are icons. Environment displays image/state/CPU/memory/system disk/work-file sizes.
 - **Tray**: one pot-shaped status icon; click opens window, no menu. Unread count beside icon. Window close keeps background work; Quit stops the environment normally.
 
@@ -80,31 +80,33 @@ Token input is decimal: 1K=1, 000, 1M=1, 000, 000, stored as integers. Remove th
 
 Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent bottom Browser/Files/Terminal launchers/window switching and matching context menu. CJK fonts cover Chinese/Japanese/Korean. Software is preinstalled; see [Sandbox image](sandbox-image.md) for build/theme entries.
 
-Settings navigation: General / Assistant / Agent / Sandbox. Agent shows CLI installation/official login status, refresh, current profile executable/argv editing. Command saves use profile revisions without model tests.
-Terminal and Sandbox are independent sidebar entries. Sandbox contains desktop/environment controls; Terminal
-connects to the same Runtime-owned PTY independently of noVNC/main Agent/first setup. Navigation/reconnect injects no commands;
-terminal close is separate. Agent settings offers read-only installation/auth, refresh, ordinary Open Terminal, and launch command editing,
-without clickable login status/login-command fields/dedicated auth PTYs/wizards. Users operate native CLIs in Terminal themselves.
+## AI Configuration (#7)
 
-First launch prepares environment/tools, then normal Assistant settings explicitly choose a main Agent or configure API.
-Set up later still permits Terminal/Sandbox/settings; without a main profile no chat/tasks execute.
-Known logged-out/check-failed CLIs are unavailable; unknown does not mean logged in, and accepted CLIs require explicit selection.
-Refresh neither selects backends automatically nor sends paid tests/creates native main sessions; the first real message creates one.
-Tool selection/completion persist per data directory, not entered keys. Install other Agents reuses preparation.
+Unconfigured Chat links to AI Configuration; first-time setup and Settings use the same page. The Pot Terminal page, side-rail button, xterm assets and native renderer have been removed. Sandbox remains independently accessible. API setup never requires a Terminal.
 
-Routing settings list saved profiles for model edit/copy, background defaults, Agent-selectable
-profile allowlists, and profile/provider background concurrency limits. API providers configure daily/weekly token
-allowances alongside global limits; CLI subscriptions show post-execution metering only. Change Agent in task chat opens
-the same settings with migration target; save migrates only that task, while normal settings target main chat.
+AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: Codex, Grok, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing API connections remain editable. Removed native CLI configurations are unsupported and require fresh configuration; no compatibility migration is provided. Main-Agent changes stay in AI Configuration, not the Chat header.
 
+Preset API forms show only key/model and a Get API Key link. Endpoint/protocol are supplied by Pot. Claude has no account/API mode selector. Custom API shows endpoint and four explicit formats: OpenAI Chat Completions, OpenAI Responses, Claude Messages and Gemini. Model-list results appear in a picker alongside the editable model field.
 
-AGY supports main/background/schedules/summaries with user-entered models. Users accept original
-CLI permissions; per-turn prompts constrain roles, with no enforced read-only summary claim. Pot gives AGY no task creation,
-schedule management, or other orchestration tools. Selecting AGY sets main/background default profiles together.
-AGY has no validated official read-only login query; show Unknown without model probes.
+Check and Save are separate adjacent buttons. Check performs supported model-list GETs without inference or saving. Save validates configuration through the existing Runtime API; it does not force a separate Check click or claim successful inference. Unsupported model discovery permits manual input. Provider errors preserve drafts; secrets are masked and excluded from public state. Switching connection forms clears secret fields.
 
+OpenCode uses a maintained per-plan, per-model route table in `app/swift/APIIntegration.swift`, checked against official documentation on 2026-10-06. Go and Zen may serve the same model through different formats. Unknown formats/models are excluded from discovered options and require a catalog update or explicit Custom API configuration; names alone do not determine the adapter.
 
-Global/session usage both show Agent / model usage grouped by Pi/Codex/Claude/AGY and model,
+For an empty main configuration, the final connection action also sets the Main Agent through the existing migration boundary. Entry from Chat uses Save and start chatting and restores its draft without sending. Settings explains Save and set as Main Agent. Existing main configurations are not replaced by ordinary additions. Save retains a stable draft connection identity and reconciles partially completed saves before retrying.
+
+Account authorization uses official Codex app-server and Grok ACP interfaces. The user explicitly approved native authentication endpoints and a temporary Mac-to-VM callback relay on 2026-10-06. The shared panel opens the official browser URL, waits for the official completion result and account verification, then reads model options. Callback receipt alone never establishes authentication. Cancel, failure, expiry, app shutdown and environment loss close the Mac listener. Only native bearer-authenticated requests are accepted; browser Origins and worker tokens are rejected. Callback targets are pinned to the attempt's official guest loopback URL and state. No authorization codes, tokens or passwords enter product records or logs. Codex falls back to the official device-code flow if the Mac callback port is unavailable. Grok currently requires browser loopback authorization.
+
+Grok 1.0.46 is pinned from the official npm distribution. Its initial ACP integration supports main-chat session creation/loading, model selection, streaming and cancellation. It does not claim tool-policy enforcement, MCP orchestration, background-task support, native usage reporting or checkpoint replay. Client permission requests fail closed pending a permission-review UI. Real-provider end-to-end verification remains outstanding; this machine's connection to auth.x.ai fails during TLS negotiation.
+
+The existing Runtime PTY subsystem is retained; removal of this separate subsystem was also rejected by automatic review. This is separate from the deleted product Terminal UI and from Agent shell/tool execution.
+
+Main Save reuses Runtime migration. Pending operations disable duplicate submission and explain current-turn/paused-session waits; only a confirmed active binding is displayed as effective. Existing task bindings remain pinned. New tasks following Chat use its active snapshot rather than an unapplied profile edit.
+
+Task Configuration preserves existing explicit worker defaults/routing and allows choosing Follow Chat. Advanced profile editing/copy, allowlists, profile/provider caps and allowances remain available. Task-specific Change Agent targets only that task and reuses AI connection management; completion returns to the task. Credential-independent product limits use private `execution-limits.json`, without implicitly selecting Pi or requiring a DeepSeek key.
+
+Initial setup opens ordinary AI Configuration directly and can be deferred. Status refresh never selects an Agent or makes paid model probes. Real-account/engine matrices are recorded separately in dated acceptance reports.
+
+Global/session usage both show Agent / model usage grouped by Pi/Codex/Grok and model (historical rows retain their original labels),
 including input/output/input-cache/incomplete records; missing legacy attribution shows Unknown Agent.
 Global categories follow selected ranges; details use session totals, 20/page with previous/next.
 Category pages do not change totals/trends/allowances; range/session/zone changes reset pages.

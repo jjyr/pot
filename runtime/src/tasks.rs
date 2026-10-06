@@ -87,6 +87,7 @@ fn child(root: &Service, task_id: &str) -> Result<Service> {
     let service = Service {
         terminals: root.terminals.clone(),
         codex: root.codex.clone(),
+        authorization: root.authorization.clone(),
         usage: root.usage.clone(),
         usage_scope: task_id.into(),
         inner: Arc::new(Mutex::new(Inner {
@@ -580,11 +581,7 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         .filter(|l| l.record.active.is_some())
         .collect();
     if active.len()
-        >= root
-            .pi
-            .as_ref()
-            .map(|c| c.max_parallel_tasks)
-            .unwrap_or_else(pi::default_parallel_tasks)
+        >= pi::execution_config(root.pi.clone().unwrap_or_default(), &root.data)?.max_parallel_tasks
     {
         return Ok(None);
     }

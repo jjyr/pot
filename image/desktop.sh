@@ -4,7 +4,7 @@ umask 077
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 exec >/data/desktop.log 2>&1
 # Immutable software comes from the bundled OCI image; /data holds user state.
-for name in desktop-config.sh desktop-session.sh pot-wallpaper.svg packages.lock test.html home.html driver.py broker.py index.html close-browser.py open-browser.sh pot-server agy; do
+for name in desktop-config.sh desktop-session.sh pot-wallpaper.svg packages.lock test.html home.html driver.py broker.py index.html close-browser.py open-browser.sh pot-server; do
   ln -sf "/opt/pot/$name" "/data/$name"
 done
 # Older versions unpacked noVNC into /data; preserve it, but serve image assets.

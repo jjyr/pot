@@ -18,7 +18,7 @@ macOS
 |      |                                               |
 | pot-runtime: bindings / tasks / schedules / recovery   |
 |      |-- Storage: SQLite + request/usage ledgers       |
-|      |-- Driver: Pi / Codex / Claude / AGY sessions    |
+|      |-- Driver: Pi / Codex / Grok sessions            |
 |      +-- Gateway: provider HTTP + protocol codecs     |
 |                                                      |
 | Desktop / broker <---- App native WebView bridge      |
@@ -39,7 +39,7 @@ Issue [#5](https://github.com/jjyr/pot/issues/5) separates Core/Storage/Driver/G
 | Server | Standalone program, configuration, routes, listener, and lifecycle | `server/src/main.rs`, `config.rs`, `routes.rs`, `hosting.rs` |
 | Runtime / Storage | Authoritative task state, message events, usage, recovery, and persistence | `runtime/src/lib.rs`, `bootstrap.rs`, `storage/src/` |
 | Orchestration / scheduling | Single-level delegation, queues, completion delivery, scheduled triggers | `tasks.rs`, `orchestration.rs`, `schedules.rs` |
-| Agent / Driver | Profile snapshots, epoch bindings and migration; DriverHost / SessionHandle; Pi RPC, Codex App Server, native Claude CLI and their contexts | `core/src/`, `driver/src/`, `runtime/src/agent/` |
+| Agent / Driver | Profile snapshots, epoch bindings and migration; DriverHost / SessionHandle; Pi RPC, Codex App Server, Grok ACP and their contexts | `core/src/`, `driver/src/`, `runtime/src/agent/` |
 | Gateway / tool bridge | Provider routing, request reservations, protocol codecs; shared Pi / MCP tool definitions and dispatcher | `gateway/src/`, `core/src/pot-tools.json`, `runtime/src/tool_bridge.rs`, `orchestration.rs` |
 | Protocol / desktop | Shared types; guest startup, browser, and input arbitration | `protocol/`, `image/` |
 
@@ -79,7 +79,7 @@ The VM isolates the host, but Pi and Runtime still share the guest user domain. 
 
 `runtime/src/terminal.rs` manages up to 8 in-memory PTYs, each with at most one connection and a 64 KiB replay buffer.
 Disconnect only detaches; closing a terminal or normal Runtime termination ends the session. Terminal input/output is not stored in the product database, logs, or disk scrollback; the default shell disables HISTFILE.
-Terminal and Sandbox have separate sidebar entries. Navigation and reconnect reuse the same PTY without injecting commands into a shell or busy CLI. Pot does not maintain login commands or dedicated login terminals; it only queries official login status, and users authenticate in Terminal themselves. Explicit HTTP(S) link clicks open the Mac browser; guest localhost OAuth callbacks are not forwarded automatically.
+Terminal and Sandbox have separate sidebar entries. Navigation and reconnect reuse the same PTY without injecting commands into a shell or busy CLI. Pot provides a guided, dedicated login PTY (`purpose: login`) separate from the regular shell (`purpose: shell`). It presents verified official commands for explicit user copying/execution and checks official status. Pot never injects login commands or extracts CLI credentials. Explicit HTTP(S) link clicks open the Mac browser; guest localhost OAuth callbacks are not forwarded automatically.
 
 CLI and Runtime inherit the same guest user and persistent HOME; `~/.local/bin` and `~/.npm-global/bin` are added to their shared PATH.
 `discovery.rs` checks executables and supported official status interfaces only on explicit calls. Identity, installation, compatibility, and readiness remain separate states.
@@ -89,3 +89,9 @@ Claude runs one original CLI process per turn and resumes with a fixed UUID. Str
 restrict tools by lane; summary and worker Runtime tokens cannot orchestrate.
 After a result event, Runtime still waits for background cleanup and process exit. If shutdown cannot be confirmed, it retains occupancy and blocks new turns.
 Official auth status queries only login state without reading or exporting credentials. Usage is settled from cumulative CLI turn reports.
+
+## Unified AI configuration
+
+AI Configuration shares first-time Chat setup and ordinary Settings. Agent selection/model edits remain drafts until explicit save. Connection-only profile/provider writes use `follow_main: false, follow_worker: false`; main selection uses the existing binding/migration mechanism without modifying explicit worker defaults. API metadata and model checks never return keys. Supported model-list checks are bounded GET requests with no redirects or inference calls; unsupported CLI discovery uses manual model identifiers.
+
+Product execution limits live in private `product/execution-limits.json`, separately from legacy `pi.json` credentials. New workers can follow the active main binding snapshot; existing explicit routing/defaults and task bindings remain unchanged.

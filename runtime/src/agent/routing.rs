@@ -10,6 +10,8 @@ pub struct Policy {
     #[serde(default)]
     pub worker_profile: Option<String>,
     #[serde(default)]
+    pub follow_chat: bool,
+    #[serde(default)]
     pub revision: u64,
     #[serde(default)]
     pub allowed_tool_profiles: BTreeSet<String>,
@@ -37,7 +39,17 @@ pub fn policy(root: &Service) -> Result<Policy> {
 }
 pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Json<Policy>> {
     root.authorized(&h)?;
-    Ok(Json(policy(&root).map_err(internal)?))
+    let mut effective = policy(&root).map_err(internal)?;
+    if !effective.follow_chat && effective.worker_profile.is_none() {
+        effective.worker_profile = root
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .get("agent.default.worker")
+            .map_err(internal)?;
+    }
+    Ok(Json(effective))
 }
 pub async fn configure(
     State(root): State<Service>,
@@ -123,6 +135,26 @@ pub fn resolve(
     if source == Source::Tool {
         allow_hint(root, profile)?;
     }
+    if profile.is_none() {
+        let policy = policy(root)?;
+        let inner = root.inner.lock().unwrap();
+        if policy.follow_chat
+            || (policy.worker_profile.is_none()
+                && inner.store.get("agent.default.worker")?.is_none())
+        {
+            if let Some(binding) = current(&inner.store)? {
+                let spec = binding.spec;
+                check_requirements(&spec, requirements)?;
+                let routing = TaskRouting {
+                    profile: spec.source_profile_id.clone(),
+                    revision: spec.source_profile_revision,
+                    provider: spec.provider.clone(),
+                    reason: "chat_default".into(),
+                };
+                return Ok((spec, routing));
+            }
+        }
+    }
     let (selected, reason) = match profile {
         Some(id) => (
             id.to_owned(),
@@ -133,14 +165,23 @@ pub fn resolve(
             },
         ),
         None => (
-            policy(root)?.worker_profile.unwrap_or(
-                root.inner
-                    .lock()
-                    .unwrap()
-                    .store
-                    .get("agent.default.worker")?
-                    .unwrap_or_else(|| "pi-default".into()),
-            ),
+            if policy(root)?.follow_chat {
+                current(&root.inner.lock().unwrap().store)?
+                    .ok_or_else(|| anyhow!("Chat Agent is not configured"))?
+                    .spec
+                    .source_profile_id
+            } else {
+                policy(root)?.worker_profile.unwrap_or({
+                    let inner = root.inner.lock().unwrap();
+                    inner.store.get("agent.default.worker")?.unwrap_or_else(|| {
+                        current(&inner.store)
+                            .ok()
+                            .flatten()
+                            .map(|b| b.spec.source_profile_id)
+                            .unwrap_or_else(|| "pi-default".into())
+                    })
+                })
+            },
             "worker_default",
         ),
     };
@@ -159,11 +200,9 @@ pub fn resolve(
     Ok((spec, routing))
 }
 pub fn check_requirements(spec: &ResolvedSpec, requirements: &TaskRequirements) -> Result<()> {
-    // User accepts AGY native tool permissions and prompt-only role guidance.
-    // Keep capability declarations false: this exception is not enforcement.
     let c = &spec.capabilities;
     anyhow::ensure!(
-        !requirements.tools || c.tool_policy_enforcement || spec.engine == Engine::Agy,
+        !requirements.tools || c.tool_policy_enforcement,
         "Profile cannot enforce task tool policy"
     );
     // Desktop isolation has not passed D4 acceptance. Shell access is not a declaration of that capability.
@@ -202,5 +241,35 @@ impl Policy {
                         .count()
                         < *cap
                 })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn inspection_exposes_legacy_worker_default_without_rewriting_policy() {
+        let s = crate::tests::service();
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set("agent.default.worker", "legacy-worker")
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer test-token".parse().unwrap());
+        let Json(visible) = inspect(State(s.clone()), headers.clone()).await.unwrap();
+        assert_eq!(visible.worker_profile.as_deref(), Some("legacy-worker"));
+        assert!(policy(&s).unwrap().worker_profile.is_none());
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(POLICY, &json!({"follow_chat": true}).to_string())
+            .unwrap();
+        let Json(visible) = inspect(State(s), headers).await.unwrap();
+        assert!(visible.follow_chat);
+        assert!(visible.worker_profile.is_none());
     }
 }

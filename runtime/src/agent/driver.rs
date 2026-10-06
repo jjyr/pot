@@ -36,10 +36,9 @@ pub async fn execute(
             hosts: s.codex.clone(),
         }
         .session(context(s, request, &binding)?, binding)?,
-        Engine::Claude => {
-            pot_driver::claude::ClaudeHost.session(context(s, request, &binding)?, binding)?
+        Engine::Grok => {
+            pot_driver::grok::GrokHost.session(context(s, request, &binding)?, binding)?
         }
-        Engine::Agy => pot_driver::agy::AgyHost.session(context(s, request, &binding)?, binding)?,
     };
     run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
         transcript.record(s, update)
@@ -211,13 +210,7 @@ pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRe
     if current(&s.inner.lock().unwrap().store)?.is_none() {
         return Ok(None);
     }
-    if spec.engine == Engine::Agy {
-        agy::prepare(spec).await?;
-        Ok(None)
-    } else if spec.engine == Engine::Claude {
-        claude::prepare(spec).await?;
-        Ok(None)
-    } else if spec.engine == Engine::Codex {
+    if spec.engine == Engine::Codex {
         codex::prepare(&prepare_context(s)?, &s.codex, spec).await
     } else {
         Ok(None)

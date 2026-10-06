@@ -19,7 +19,6 @@ assets = [
     "close-browser.py",
     "open-browser.sh",
     "pot-server",
-    "agy",
     "novnc.tar.gz",
     "pi-package.json",
     "pi-package-lock.json",

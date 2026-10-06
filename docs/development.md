@@ -30,7 +30,7 @@ mise exec -- cargo build --locked -p pot-server
 POT_DATA_DIR=/tmp/pot-server/product POT_WORKSPACE=/tmp/pot-server/workspace POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-`POT_PI_BIN` selects the Pi executable. Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat rejects sends while Terminal remains available. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
+`POT_PI_BIN` selects the Pi executable. Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
 
 App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
 
@@ -48,10 +48,7 @@ The final command uses host-installed Pi and a local mock model without paid cal
 
 ### Codex validation
 
-Users needing authentication run the official CLI login command in the independent Terminal (Codex supports
-`codex login --device-auth`); Pot only checks status in Settings -> Agent.
-Enter an account-supported model in Settings -> Assistant and explicitly select Codex.
-Only the guest CLI manages login state, stored in persistent engine-home.
+Application-initiated account authorization uses official Codex app-server and Grok ACP methods through native-only `/api/v1/authorization/{start,status,cancel,callback}` endpoints. Attempts are ephemeral and expire after five minutes. The Mac callback listener exists only during the login attempt; Codex offers official device-code fallback if its port is occupied. There is no dedicated login Terminal. Grok main-chat support is initial and does not yet support enforced task tools or native token accounting. See issue #7 and dated validation reports for real-account verification limits.
 
 Credential-free integration test (explicitly select an installed official Codex CLI; no paid model calls):
 
@@ -89,7 +86,7 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
 | `core/` | Immutable Agent models, execution contracts, shared tool schema |
 | `storage/` | SQLite, binding/usage/file-request ledgers, transactions |
-| `driver/` | Native Pi/Codex/Claude/AGY execution adapters |
+| `driver/` | Pi RPC, Codex App Server and Grok ACP execution adapters |
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
 | `image/` | Guest desktop, browser, broker/viewer resources |
@@ -99,19 +96,9 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 
 Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not commit credentials, user sessions, or build artifacts. Inspect live state through Runtime APIs, not host access to active guest SQLite.
 
-### Claude offline contract
+### Supported integrations
 
-Pot checks Claude status only through official interfaces; users authenticate in the normal Terminal themselves.
-Enter a model in Assistant settings and explicitly select Claude. Real Claude account testing is skipped by user decision (no account).
-Account-free development validation uses the original CLI and a local mock Anthropic service:
-
-```sh
-mise exec -- python scripts/tests/claude-runtime.py --runtime .local/poc/cargo-target/debug/pot-server --claude /absolute/path/to/claude
-.local/d1/helper-build/release/PotImageCheck .local/d1/claude-guest-check .local/d1/resources scripts/tests claude-guest.sh
-```
-
-Guest checks require the Helper signing/VM prerequisites above. Tests use an isolated temporary HOME without host credentials.
-
+Only Codex and Grok use native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Antigravity and Claude CLI adapters, binaries, discovery and tests have been removed. Removed CLI configurations are unsupported; no compatibility migration, conversion or archive is provided. Account files, messages, tasks and historical usage are not deleted.
 
 ### Terminal process cleanup (Linux guest)
 
@@ -122,23 +109,3 @@ Guest checks require the Helper signing/VM prerequisites above. Tests use an iso
 Use a new isolated result directory and the Helper signing above. Validate PTY close, normal Runtime exit, and restart;
 cover foreground sleep, separate background process groups, and HUP/TERM-resistant background shells/grandchildren without model calls.
 Processes deliberately detached with setsid are outside this contract and remain subject to VM lifecycle termination.
-
-
-### AGY Driver regression
-
-AGY integrates the original CLI. Main chat, background tasks, schedules, and summaries are enabled by user decision, without Pot orchestration tools; roles are constrained by prompts.
-Users log in through Terminal; status remains unknown. Account-free mock transport regression:
-
-```sh
-mise exec -- cargo build --locked -p pot-server
-mise exec -- python scripts/tests/agy-runtime.py --runtime .local/poc/cargo-target/debug/pot-server
-```
-
-Use the Helper signing above and a fresh offline guest directory to validate the same regression in the packaged Runtime,
-and original CLI help/headless failure with an empty HOME:
-
-```sh
-.local/d1/helper-build/release/PotImageCheck .local/d1/agy-guest-check .local/d1/resources scripts/tests agy-guest.sh
-```
-
-Mock transport does not prove original CLI model/tool behavior; an original offline failure smoke test does not establish real account or role isolation acceptance.

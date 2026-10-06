@@ -41,8 +41,7 @@ pub fn bindings(store: &Store) -> Result<Vec<Binding>> {
                 (&b.spec.engine, &b.native_ref),
                 (Engine::Pi, NativeRef::Pi { .. })
                     | (Engine::Codex, NativeRef::Codex { .. })
-                    | (Engine::Claude, NativeRef::Claude { .. })
-                    | (Engine::Agy, NativeRef::Agy { .. })
+                    | (Engine::Grok, NativeRef::Grok { .. })
             ),
             "Engine and native session identity mismatch"
         );
@@ -195,13 +194,7 @@ pub fn select_initial(
     spec.validate()?;
     let native_ref = match spec.engine {
         Engine::Codex => NativeRef::Codex { thread_id: None },
-        Engine::Claude => NativeRef::Claude {
-            session_id: crate::id(),
-            started: false,
-        },
-        Engine::Agy => NativeRef::Agy {
-            conversation_id: None,
-        },
+        Engine::Grok => NativeRef::Grok { session_id: None },
         Engine::Pi => NativeRef::Pi {
             file: data.join("pi-session.jsonl"),
             session_id: None,
@@ -239,16 +232,6 @@ pub fn assign_new(store: &mut Store, spec: ResolvedSpec) -> Result<()> {
     );
     if spec.engine == Engine::Codex {
         all[0].native_ref = NativeRef::Codex { thread_id: None };
-    } else if spec.engine == Engine::Claude {
-        all[0].native_ref = NativeRef::Claude {
-            session_id: crate::id(),
-            started: false,
-        };
-    }
-    if spec.engine == Engine::Agy {
-        all[0].native_ref = NativeRef::Agy {
-            conversation_id: None,
-        };
     }
     all[0].spec = spec;
     store.set(BINDINGS, &serde_json::to_string(&all)?)
@@ -277,48 +260,23 @@ pub fn save_codex_thread(store: &mut Store, thread: &str) -> Result<()> {
     store.set(BINDINGS, &serde_json::to_string(&all)?)
 }
 
-pub fn save_claude_session(store: &mut Store, session: &str) -> Result<()> {
+pub fn save_grok_session(store: &mut Store, session: &str) -> Result<()> {
     ensure!(
         uuid::Uuid::parse_str(session).is_ok(),
-        "Invalid Claude session identity"
-    );
-    let mut all = bindings(store)?;
-    let binding = all
-        .iter_mut()
-        .find(|b| b.state == BindingState::Active)
-        .ok_or_else(|| anyhow!("No active binding"))?;
-    match &mut binding.native_ref {
-        NativeRef::Claude {
-            session_id,
-            started,
-        } => {
-            ensure!(session_id == session, "Claude changed native identity");
-            *started = true;
-        }
-        _ => anyhow::bail!("Expected Claude binding"),
-    }
-    store.set(BINDINGS, &serde_json::to_string(&all)?)
-}
-
-pub fn save_agy_conversation(store: &mut Store, conversation: &str) -> Result<()> {
-    ensure!(
-        uuid::Uuid::parse_str(conversation).is_ok(),
-        "Invalid AGY conversation identity"
+        "Invalid Grok session identity"
     );
     let mut all = bindings(store)?;
     let binding = all
         .iter_mut()
         .find(|b| b.state == BindingState::Active)
         .ok_or_else(|| anyhow!("Active binding missing"))?;
-    let NativeRef::Agy { conversation_id } = &mut binding.native_ref else {
-        anyhow::bail!("Expected AGY binding");
+    let NativeRef::Grok { session_id } = &mut binding.native_ref else {
+        anyhow::bail!("Expected Grok binding");
     };
     ensure!(
-        conversation_id
-            .as_deref()
-            .is_none_or(|old| old == conversation),
-        "AGY changed native identity"
+        session_id.as_deref().is_none_or(|old| old == session),
+        "Grok changed native identity"
     );
-    *conversation_id = Some(conversation.into());
+    *session_id = Some(session.into());
     store.set(BINDINGS, &serde_json::to_string(&all)?)
 }

@@ -1,5 +1,3 @@
-pub(super) mod agy;
-pub(super) mod claude;
 pub(super) mod codex;
 pub(super) mod driver;
 pub mod migration;
@@ -44,7 +42,15 @@ pub fn pi_config(s: &Service) -> Result<pi::Config> {
         binding.spec.engine == Engine::Pi,
         "Agent engine needs rebind"
     );
-    let mut config = s.pi.clone().unwrap_or_default();
+    let data = if s.is_worker {
+        s.data
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow!("Invalid worker data directory"))?
+    } else {
+        &s.data
+    };
+    let mut config = pi::execution_config(s.pi.clone().unwrap_or_default(), data)?;
     config.model = binding.spec.model;
     config.max_tokens = binding.spec.params.max_output_tokens;
     Ok(config)

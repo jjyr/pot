@@ -7,6 +7,13 @@ use pot_runtime::{Service, api::*, usage};
 /// Routes preserve the Control API while centralizing server assembly.
 pub fn router(s: Service) -> Router {
     Router::new()
+        .route("/api/v1/authorization/start", post(authorization::start))
+        .route("/api/v1/authorization/status", get(authorization::status))
+        .route("/api/v1/authorization/cancel", post(authorization::cancel))
+        .route(
+            "/api/v1/authorization/callback",
+            post(authorization::callback),
+        )
         .route("/api/v1/agents/tools", get(discovery::list))
         .route("/api/v1/agents/refresh", post(discovery::refresh))
         .route(
@@ -19,6 +26,7 @@ pub fn router(s: Service) -> Router {
             "/api/v1/providers",
             get(gateway::setup::get).post(gateway::setup::save),
         )
+        .route("/api/v1/providers/check", post(gateway::setup::check))
         .route(
             "/api/pi/v1/chat/completions",
             post(tasks::gateway).layer(axum::extract::DefaultBodyLimit::max(pi::MAX_MODEL_BODY)),

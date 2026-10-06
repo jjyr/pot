@@ -85,15 +85,8 @@ fn queue(
         epoch,
         native_ref: if spec.engine == Engine::Codex {
             native.ok_or_else(|| anyhow!("Codex candidate must be opened before migration"))?
-        } else if spec.engine == Engine::Agy {
-            NativeRef::Agy {
-                conversation_id: None,
-            }
-        } else if spec.engine == Engine::Claude {
-            NativeRef::Claude {
-                session_id: id(),
-                started: false,
-            }
+        } else if spec.engine == Engine::Grok {
+            NativeRef::Grok { session_id: None }
         } else {
             NativeRef::Pi {
                 file: data.join(format!("pi-session-{epoch}-{}.jsonl", id())),
@@ -791,6 +784,43 @@ mod tests {
         conflicting.reason = "needs_rebind".into();
         assert!(queue(&mut store, &dir, &dir, &conflicting, spec, None).is_err());
         drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[tokio::test]
+    async fn following_chat_uses_active_snapshot_until_main_save_is_applied() {
+        let (dir, store, _, _) = fixture();
+        let mut s = crate::tests::service();
+        s.data = dir.clone();
+        s.workspace = dir.clone();
+        s.pi = Some(config());
+        s.inner.lock().unwrap().store = store;
+        let active = binding(&s).unwrap();
+        let mut edited = Profile::legacy(&config());
+        edited.revision = 2;
+        edited.model = "edited-only".into();
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                storage::PROFILES,
+                &serde_json::to_string(&vec![edited]).unwrap(),
+            )
+            .unwrap();
+        s.inner
+            .lock()
+            .unwrap()
+            .store
+            .set("agent.routing.v1", &json!({"follow_chat":true}).to_string())
+            .unwrap();
+        let (spec, _) = routing::resolve(
+            &s,
+            None,
+            routing::Source::User,
+            &TaskRequirements::default(),
+        )
+        .unwrap();
+        assert_eq!(spec, active.spec);
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[tokio::test]

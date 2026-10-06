@@ -277,7 +277,6 @@ impl UsageUI {
                     "pi" => "Pi",
                     "codex" => "Codex",
                     "claude" => "Claude",
-                    "agy" => "AGY",
                     _ => "Agent 未知",
                 };
                 let tooltip = format!(

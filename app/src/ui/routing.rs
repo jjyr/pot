@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
 impl Settings {
     pub(super) fn routing_form(&self, state: &Value, _cx: &mut Context<Shell>) -> Form {
@@ -14,45 +15,134 @@ impl Settings {
                     .on_click(|_, _, _| command(json!({"action":"routing-refresh"}))),
             ),
         );
-        for (i, profile) in profiles.iter().enumerate() {
-            let id = profile["id"].as_str().unwrap_or("").to_owned();
-            let worker_id = id.clone();
-            let hint_id = id.clone();
-            let allowed = state["routing"]["allowed_tool_profiles"]
-                .as_array()
-                .is_some_and(|v| v.iter().any(|p| p == &id));
-            form = form.child(Field::new().label(profile["name"].as_str().unwrap_or("").to_owned())
-                .description(format!("{} · {}", profile["engine"].as_str().unwrap_or(""),profile["model"].as_str().unwrap_or("")))
-                .child(div().flex().flex_wrap().gap_2()
-                    .child(Button::new(("profile-edit",i)).ghost().label("编辑").toggled(selected == id).disabled(busy)
-                        .on_click(move|_,_,_|command(json!({"action":"routing-edit","id":id}))))
-                    .child(Button::new(("profile-worker",i)).ghost().label("后台默认").toggled(state["routing"]["worker_profile"] == worker_id).disabled(busy)
-                        .on_click(move|_,_,_|command(json!({"action":"routing-choice","kind":"worker","id":worker_id}))))
-                    .child(Button::new(("profile-hint",i)).ghost().label(if allowed {"☑ 允许 Agent 指定"}else{"☐ 允许 Agent 指定"}).disabled(busy)
-                        .on_click(move|_,_,_|command(json!({"action":"routing-choice","kind":"hint","id":hint_id}))))));
-        }
-        if profiles.is_empty() {
-            return form.child(
-                Field::new()
-                    .label("尚无配置")
-                    .child("先在 Agent 设置中保存一个后端。"),
-            );
-        }
+        let independent = state["routing"]["worker_profile"].as_str().is_some();
+        let worker_choices = profiles.clone();
+        let worker_label = profiles
+            .iter()
+            .find(|p| p["id"] == state["routing"]["worker_profile"])
+            .map(|p| {
+                format!(
+                    "{} · {}",
+                    p["name"].as_str().unwrap_or("Agent"),
+                    p["model"].as_str().unwrap_or("")
+                )
+            })
+            .unwrap_or_else(|| "选择独立 Agent".into());
+        let details_label = profiles
+            .iter()
+            .find(|p| p["id"] == selected)
+            .and_then(|p| p["name"].as_str())
+            .unwrap_or("选择要查看的 Agent")
+            .to_owned();
         form = form.child(
             Field::new()
-                .label("后台默认")
-                .description("未明确指定 profile 的新任务使用此设置；计划自己的选择优先。")
+                .label("后台任务 Agent")
+                .description("默认沿用聊天配置；独立选择只影响新任务。已有任务保持固定。")
                 .child(
-                    Button::new("worker-follow")
-                        .ghost()
-                        .label("跟随最近的 Agent 设置")
-                        .toggled(state["routing"]["worker_profile"].is_null())
+                    Button::new("worker-follow-chat")
+                        .label(if independent {
+                            "改为沿用聊天配置"
+                        } else {
+                            "沿用聊天配置"
+                        })
+                        .toggled(!independent)
                         .disabled(busy)
                         .on_click(|_, _, _| {
                             command(json!({"action":"routing-choice","kind":"worker","id":""}))
                         }),
                 ),
         );
+        if state["routing_owner"] == "main" {
+            form = form.child(Field::new().label("独立任务配置").child(Button::new("worker-pick").label(worker_label).dropdown_caret(true).disabled(busy)
+                .dropdown_menu(move|menu,_,_| worker_choices.iter().fold(menu,|menu,p| {let id=p["id"].as_str().unwrap_or("").to_owned();
+                    menu.item(PopupMenuItem::new(p["name"].as_str().unwrap_or("Agent").to_owned()).on_click(move|_,_,_|command(json!({"action":"routing-choice","kind":"worker","id":id}))))}))));
+        }
+        form = form.child(
+            Field::new().label("配置详情").child(
+                Button::new("routing-details")
+                    .label(details_label)
+                    .dropdown_caret(true)
+                    .disabled(busy)
+                    .dropdown_menu({
+                        let profiles = profiles.clone();
+                        move |menu, _, _| {
+                            profiles.iter().fold(menu, |menu, p| {
+                                let id = p["id"].as_str().unwrap_or("").to_owned();
+                                menu.item(
+                                    PopupMenuItem::new(
+                                        p["name"].as_str().unwrap_or("Agent").to_owned(),
+                                    )
+                                    .on_click(
+                                        move |_, _, _| {
+                                            command(json!({"action":"routing-edit","id":id}))
+                                        },
+                                    ),
+                                )
+                            })
+                        }
+                    }),
+            ),
+        );
+        if profiles.is_empty() {
+            return form.child(
+                Field::new()
+                    .label("尚无配置")
+                    .child("先在 AI 配置中添加一个 Agent。"),
+            );
+        }
+        if state["routing_owner"] != "main" {
+            let id = selected.to_owned();
+            form = form.child(
+                Field::new().label("连接与登录").child(
+                    Button::new("task-ai-manage")
+                        .label("管理所选 Agent 的连接")
+                        .on_click(move |_, _, _| command(json!({"action":"ai-manage","id":id}))),
+                ),
+            );
+        }
+        form = form.child(
+            Field::new().label("高级路由").child(
+                Button::new("routing-advanced")
+                    .ghost()
+                    .label(if self.advanced {
+                        "收起高级路由"
+                    } else {
+                        "展开高级路由、权限与额度"
+                    })
+                    .on_click(_cx.listener(|this, _, _, cx| {
+                        this.settings.advanced = !this.settings.advanced;
+                        cx.notify();
+                    })),
+            ),
+        );
+        if !self.advanced && state["routing_owner"] == "main" {
+            let fields = self.fields.clone();
+            return form.child(Field::new().label("任务配置").child(Button::new("routing-save-simple").primary().label("保存任务配置").disabled(busy)
+                .on_click(move|_,_,cx|command(json!({"action":"routing-save","profile_limit":fields[19].read(cx).value(),"provider_limit":fields[20].read(cx).value()})))));
+        }
+        for (i, p) in profiles.iter().enumerate() {
+            let id = p["id"].as_str().unwrap_or("").to_owned();
+            let allowed = state["routing"]["allowed_tool_profiles"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|p| p == &id));
+            form = form.child(
+                Field::new()
+                    .label(p["name"].as_str().unwrap_or("Agent").to_owned())
+                    .child(
+                        Button::new(("routing-hint", i))
+                            .ghost()
+                            .label(if allowed {
+                                "☑ 允许 Agent 指定"
+                            } else {
+                                "☐ 允许 Agent 指定"
+                            })
+                            .disabled(busy)
+                            .on_click(move |_, _, _| {
+                                command(json!({"action":"routing-choice","kind":"hint","id":id}))
+                            }),
+                    ),
+            );
+        }
         for (index, label, description) in [
             (
                 17,
@@ -149,16 +239,14 @@ impl Settings {
             actions = actions.child(Button::new(("save-profile",i)).label(if copy {"复制为新配置"}else{"保存配置"}).disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"profile-save","copy":copy,"name":fields[17].read(cx).value(),"model":fields[18].read(cx).value()}))));
         }
-        actions = actions.child(
-            Button::new("profile-main")
-                .label(if state["routing_owner"] == "main" {
-                    "将已保存配置用于主会话"
-                } else {
-                    "将已保存配置用于此任务"
-                })
-                .disabled(busy)
-                .on_click(|_, _, _| command(json!({"action":"profile-main"}))),
-        );
+        if state["routing_owner"] != "main" {
+            actions = actions.child(
+                Button::new("profile-main")
+                    .label("保存并切换此任务的 Agent")
+                    .disabled(busy)
+                    .on_click(|_, _, _| command(json!({"action":"profile-main"}))),
+            );
+        }
         let fields = self.fields.clone();
         form.child(Field::new().label("配置操作").child(actions))
             .child(Field::new().label("任务路由").child(Button::new("save-routing").primary().label("保存默认、白名单和并发限制").disabled(busy)

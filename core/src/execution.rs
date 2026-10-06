@@ -138,6 +138,5 @@ pub trait ExecutionFeedback: Send + Sync {
     fn begin_usage(&self, ledger: &str, spec: &ResolvedSpec, epoch: u64) -> Result<()>;
     fn initialize_usage(&self, native: &str) -> Result<()>;
     fn cumulative_usage(&self, ledger: &str, native: &str, usage: &Value) -> Result<()>;
-    fn final_usage(&self, ledger: &str, engine: Engine, usage: &Value) -> Result<()>;
     fn incomplete_usage(&self, ledger: &str) -> Result<()>;
 }
