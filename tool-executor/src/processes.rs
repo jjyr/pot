@@ -58,7 +58,7 @@ impl Drop for Process {
     }
 }
 #[derive(Default)]
-pub(crate) struct Processes {
+pub struct Processes {
     sessions: HashMap<String, Process>,
 }
 
@@ -107,7 +107,7 @@ fn number(args: &Value, key: &str, default: u64, max: u64) -> Result<u64> {
     Ok(n)
 }
 impl Processes {
-    pub(crate) async fn execute(
+    pub async fn execute(
         &mut self,
         s: &ExecutionContext,
         policy: &ShellSettings,
@@ -323,7 +323,7 @@ impl Processes {
             json!({"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"truncated":truncated,"exit_code":exit,"reason":reason,"session_id":if finished {None}else{Some(id)}}),
         )
     }
-    pub(crate) async fn shutdown(&mut self) -> Result<()> {
+    pub async fn shutdown(&mut self) -> Result<()> {
         for process in self.sessions.values() {
             let _ = process.stop.send(true);
         }

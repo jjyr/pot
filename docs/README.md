@@ -8,19 +8,19 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
 | Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
-| Understand backend crate and standalone Server boundaries | Backend crate split |
-| Change APIs, Pi, task state, or recovery | [Runtime contract](../runtime/README.md) |
-| Build the Sandbox image, desktop theme, or CJK fonts | Sandbox image |
+| Understand backend crate and standalone Server boundaries | [Backend crate split](backend-crates.md) |
+| Change APIs, pot-agent, task state, or recovery | [Runtime contract](../runtime/README.md) |
+| Build the Sandbox image, desktop theme, or CJK fonts | [Sandbox image](sandbox-image.md) |
 | Change chat, tasks, settings, or Sandbox UI | [UI specification](ui-ux-design.md) |
 | Apply the approved visual, component, motion, and navigation direction | [Design language](design-language.md) (shared shell, page layouts, Chat and Pot icons implemented; acceptance limits documented) |
 | Change token accounting, periodic allowances, or budget recovery | [Token usage](token-usage.md) |
 | Change scheduled triggers, time zones, or notifications | [Scheduled tasks](scheduled-tasks.md) |
 | Review long-term product boundaries and acceptance goals | [Product design](product-design.md) |
-| Review completed tests and limitations | [Host Agents and managed Sandboxes](validation/agent-sandbox-20261006.md) |
+| Review completed tests and limitations | [Host Agents and managed Sandboxes](validation/host-pot-agent-20261006.md) |
 
 Sandbox UI acceptance: [Sandbox environment list and desktop, 2026-10-06](validation/sandbox-ui-20261006.md).
 
-Current decoupling acceptance: [Host Agents and managed Sandboxes, 2026-10-06](validation/agent-sandbox-20261006.md).
+Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](validation/host-pot-agent-20261006.md). Earlier Pi/Codex observations remain dated history.
 
 ## Research on demand
 

@@ -316,6 +316,7 @@ pub(crate) async fn run_driver_configured(
         failure: None,
     };
     let context = ExecutionContext {
+        tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
         data: directory.to_path_buf(),
         workspace,
         owner: "eval".into(),

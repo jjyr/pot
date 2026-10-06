@@ -23,9 +23,6 @@ pub fn surface(cx: &App) -> Hsla {
 pub fn navigation(cx: &App) -> Hsla {
     color(0xf4f4f4, 0x282828, cx)
 }
-pub fn success(cx: &App) -> Hsla {
-    color(0x247844, 0x78be8a, cx)
-}
 pub fn attention(cx: &App) -> Hsla {
     color(0x885b13, 0xd7af66, cx)
 }

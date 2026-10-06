@@ -13,7 +13,7 @@ pub use storage::*;
 
 /// Initialize an explicitly supplied API profile; persisted snapshots stay immutable.
 pub fn initialize(s: &Service) -> Result<()> {
-    let Some(config) = &s.execution else {
+    let Some(config) = s.execution.as_ref().filter(|c| !c.model.is_empty()) else {
         return Ok(());
     };
     let mut inner = s.inner.lock().unwrap();
@@ -22,7 +22,7 @@ pub fn initialize(s: &Service) -> Result<()> {
 }
 
 pub fn configured(s: &Service) -> bool {
-    s.execution.is_some()
+    s.execution.as_ref().is_some_and(|c| !c.model.is_empty())
         || current(&s.inner.lock().unwrap().store)
             .ok()
             .flatten()

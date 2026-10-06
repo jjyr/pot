@@ -4,13 +4,22 @@ use crate::*;
 use axum::response::Response;
 
 pub fn schemas(summary: bool, worker: bool) -> Vec<Value> {
-    let all: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).expect("bundled schemas");
+    let mut all: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).expect("bundled schemas");
+    let mut execution = pot_agent::tool_schemas(&pot_core::ShellSettings::default());
+    if !worker {
+        for tool in &mut execution {
+            if tool["name"] != "write_stdin" {
+                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string"});
+            }
+        }
+    }
+    all.extend(execution);
     all.into_iter()
         .filter(|tool| {
             (!worker
                 || tool["name"]
                     .as_str()
-                    .is_some_and(|n| n.starts_with("pot_sandbox_")))
+                    .is_some_and(|n| matches!(n, "exec_command" | "write_stdin" | "apply_patch")))
                 && (!summary
                     || matches!(
                         tool["name"].as_str(),
@@ -95,11 +104,11 @@ pub async fn mcp(
         "tools/call" => {
             let name = call["params"]["name"].as_str().unwrap_or("");
             if !schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker).iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
-            if name.starts_with("pot_sandbox_") || matches!(name,"pot_list_sandboxes" | "pot_manage_sandbox") {
+            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || matches!(name,"pot_list_sandboxes" | "pot_manage_sandbox") {
                 let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));
                 let operation = tokio::spawn(async move { sandbox::tool(&s,&name,&id,&args).await });
                 let result = operation.await.map_err(|e|internal(e.into()))?;
-                let (value,failed) = match result { Ok(v)=>{let failed=v.get("error").is_some();(v,failed)}, Err(e)=>(json!({"error":e.to_string()}),true) };
+                let (value,failed) = match result { Ok(v)=>{let v=v.get("result").cloned().unwrap_or(v);let failed=v.get("error").is_some() || v["isError"]==true;(v,failed)}, Err(e)=>(json!({"error":e.to_string()}),true) };
                 return Ok(Json(json!({"jsonrpc":"2.0","id":rpc_id,"result":{"content":[{"type":"text","text":value.to_string()}],"isError":failed}})).into_response());
             }
             let dispatch: orchestration::Call = serde_json::from_value(json!({"name":name,"call_id":format!("mcp:{rpc_id}"),"args":call["params"].get("arguments").cloned().unwrap_or_else(||json!({}))})).map_err(|e|internal(e.into()))?;
@@ -164,6 +173,50 @@ mod tests {
             response.headers()["mcp-session-id"].clone(),
         );
         h
+    }
+    #[tokio::test]
+    async fn mcp_lists_distinct_main_worker_and_summary_loadouts() {
+        for (summary, worker) in [(false, false), (false, true), (true, false)] {
+            let mut s = lane(summary);
+            s.is_worker = worker;
+            let h = init(&s).await;
+            let response = mcp(
+                State(s),
+                h,
+                Json(json!({"jsonrpc":"2.0","id":"loadout","method":"tools/list"})),
+            )
+            .await
+            .unwrap();
+            let bytes = axum::body::to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap();
+            let result: Value = serde_json::from_slice(&bytes).unwrap();
+            let tools = result["result"]["tools"].as_array().unwrap();
+            let names: std::collections::BTreeSet<_> =
+                tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+            assert_eq!(names.len(), tools.len());
+            if summary {
+                assert_eq!(names, ["pot_get_task", "pot_list_tasks"].into());
+            } else if worker {
+                assert_eq!(names, ["exec_command", "write_stdin", "apply_patch"].into());
+            } else {
+                assert!(names.contains("pot_manage_sandbox"));
+                assert!(names.contains("pot_list_sandboxes"));
+                assert!(names.contains("pot_create_task"));
+            }
+            if !summary {
+                for name in ["exec_command", "write_stdin", "apply_patch"] {
+                    let schema = tools.iter().find(|t| t["name"] == name).unwrap();
+                    assert_eq!(
+                        schema["inputSchema"]["properties"]
+                            .get("sandbox_id")
+                            .is_some(),
+                        !worker && name != "write_stdin"
+                    );
+                }
+            }
+            assert!(names.iter().all(|n| !n.starts_with("pot_sandbox_")));
+        }
     }
     #[tokio::test]
     async fn mcp_identity_expires_at_turn_boundary_and_summary_cannot_mutate() {

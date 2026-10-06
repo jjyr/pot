@@ -14,7 +14,7 @@ import Foundation
     var authorizationID = "", authorizationURL = ""
     var loginEngine = "", loginVisible = false, loginMessage = "", checkMessage = ""
     var agentStates: [[String: Any]] = []
-    var invocationExecutable = "pi", invocationArgs = "[]", codexModel = ""
+    var invocationExecutable = "codex", invocationArgs = "[]", codexModel = ""
     var profile: [String: Any] = [:]
     var savedProfiles: [[String: Any]] = []
     var routingPolicy: [String: Any] = [:]
@@ -92,7 +92,7 @@ import Foundation
          "environment_phase": environment["phase"] as? String ?? "等待启动",
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
-         "selected_engine": profile["engine"] as? String ?? "pi", "selected_model": profile["model"] as? String ?? "",
+         "selected_engine": profile["engine"] as? String ?? "pot", "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
          "codex_model": codexModel, "agents": agentStates,
          "discovering": discovering,
@@ -124,15 +124,13 @@ import Foundation
     }
 
     func saveInvocation(executable: String, arguments: String) {
-        guard let bridge, let data = arguments.data(using: .utf8),
+        guard profile["engine"] as? String == "codex", let bridge, let data = arguments.data(using: .utf8),
               let args = try? JSONSerialization.jsonObject(with: data) as? [String],
               let revision = profile["revision"] as? Int else { result = "参数必须是 JSON 字符串数组，且需先保存连接。"; return }
         var updated = profile
         updated["revision"] = revision + 1
         updated["launch_spec"] = [
-            "transport": profile["engine"] as? String == "codex" ?
-                "codex_app_server" :
-                "pi_rpc",
+            "transport": "codex_app_server",
             "executable": executable,
             "argv": args
                 .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],

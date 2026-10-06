@@ -100,13 +100,9 @@ pub fn inspect(s: &Service) -> Result<Value> {
         .iter()
         .map(|p| {
             let resolved = crate::gateway::resolve(s, p);
-            let eligible = policy.allowed_tool_profiles.contains(&p.id)
-                && p.engine != Engine::Grok
-                && resolved.is_ok();
+            let eligible = policy.allowed_tool_profiles.contains(&p.id) && resolved.is_ok();
             let unavailable = if !policy.allowed_tool_profiles.contains(&p.id) {
                 Some("Not authorized for main-agent task selection")
-            } else if p.engine == Engine::Grok {
-                Some("This integration currently supports main chat only")
             } else if resolved.is_err() {
                 Some("Connection configuration unavailable; open AI Configuration")
             } else {
@@ -217,7 +213,7 @@ mod tests {
             .await
             .is_err()
         );
-        let tool_names: Vec<_> = tool_bridge::schemas(false)
+        let tool_names: Vec<_> = tool_bridge::schemas(false, false)
             .into_iter()
             .map(|v| v["name"].as_str().unwrap().to_owned())
             .collect();
@@ -227,7 +223,7 @@ mod tests {
                 .any(|n| n == "pot_update_execution_preferences")
         );
         assert!(
-            !tool_bridge::schemas(true)
+            !tool_bridge::schemas(true, false)
                 .iter()
                 .any(|v| v["name"] == "pot_update_execution_preferences")
         );
@@ -354,16 +350,16 @@ mod tests {
         std::fs::remove_dir_all(&s.data).unwrap();
     }
     #[tokio::test]
-    async fn catalog_is_credential_free_and_excludes_grok_and_unauthorized_profiles() {
+    async fn catalog_is_credential_free_and_excludes_unauthorized_profiles() {
         let s = tasks::tests::fixture();
         initialize(&s).unwrap();
         let mut profiles = profiles(&s.inner.lock().unwrap().store).unwrap();
-        let mut grok = profiles[0].clone();
-        grok.id = "grok".into();
-        grok.name = "Grok".into();
-        grok.engine = Engine::Grok;
-        grok.auth_ref = "cli:grok".into();
-        profiles.push(grok);
+        let mut unauthorized = profiles[0].clone();
+        unauthorized.id = "unauthorized".into();
+        unauthorized.name = "Unauthorized".into();
+        unauthorized.engine = Engine::Codex;
+        unauthorized.auth_ref = "cli:codex".into();
+        profiles.push(unauthorized);
         s.inner
             .lock()
             .unwrap()
@@ -377,7 +373,7 @@ mod tests {
             State(s.clone()),
             tasks::tests::headers(),
             Json(routing::Policy {
-                allowed_tool_profiles: ["pot-default".into(), "grok".into()].into(),
+                allowed_tool_profiles: ["pot-default".into()].into(),
                 ..Default::default()
             }),
         )
@@ -391,7 +387,7 @@ mod tests {
         assert!(
             routing::resolve(
                 &s,
-                Some("grok"),
+                Some("unauthorized"),
                 routing::Source::Tool,
                 &TaskRequirements::default()
             )

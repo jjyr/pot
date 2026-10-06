@@ -556,7 +556,7 @@ pub fn sandbox(state: &Value, cx: &mut Context<Shell>) -> Div {
                     .child(item["name"].as_str().unwrap_or("Linux").to_owned()),
             )
             .child(hint(
-                &format!(
+                format!(
                     "{} · {} 个运行任务",
                     item["state"]["phase"].as_str().unwrap_or("unknown"),
                     item["running_tasks"].as_u64().unwrap_or(0)

@@ -85,8 +85,6 @@ fn queue(
         epoch,
         native_ref: if spec.engine == Engine::Codex {
             native.ok_or_else(|| anyhow!("Codex candidate must be opened before migration"))?
-        } else if spec.engine == Engine::Grok {
-            NativeRef::Grok { session_id: None }
         } else {
             NativeRef::Pot {
                 file: data.join(format!("agent-context-{epoch}-{}.json", id())),

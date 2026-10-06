@@ -1,7 +1,10 @@
 //! Pot-owned model/tool loop. Runtime remains authoritative for execution policy and storage.
 mod extensions;
 mod meter;
-mod processes;
+#[cfg(test)]
+mod processes {
+    pub use pot_tool_executor::Processes;
+}
 #[cfg(test)]
 mod tests;
 mod tools;
@@ -19,6 +22,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+pub use tools::schemas as tool_schemas;
 
 pub struct AgentHost;
 pub struct ExtendedHost {
@@ -135,7 +139,6 @@ impl SessionHandle for Session {
                     update,
                 })
             };
-            let mut processes = processes::Processes::default();
             let result = run(
                 &self.context,
                 &self.binding,
@@ -143,11 +146,14 @@ impl SessionHandle for Session {
                 resuming,
                 self.extensions.as_ref(),
                 self.services.as_deref(),
-                &mut processes,
                 &mut emit,
             )
             .await;
-            let cleanup = processes.shutdown().await;
+            let cleanup = if let Some(executor) = &self.context.tool_executor {
+                executor.finish(&self.context).await
+            } else {
+                Ok(())
+            };
             let result = cleanup.and(result);
             self.context
                 .feedback
@@ -592,7 +598,6 @@ async fn run(
     resuming: bool,
     extensions: &dyn AgentExtensions,
     services: Option<&dyn ExecutionServices>,
-    processes: &mut processes::Processes,
     emit: &mut (dyn FnMut(Update) -> Result<()> + Send),
 ) -> Result<()> {
     if s.feedback.cancelled() {
@@ -661,6 +666,13 @@ async fn run(
             })
             .collect()
     };
+    if s.role == ExecutionRole::Main {
+        for tool in &mut available {
+            if tool["name"] != "write_stdin" {
+                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string","description":"Omitted uses the current execution default Sandbox."});
+            }
+        }
+    }
     let custom = if s.role == ExecutionRole::Summary {
         vec![]
     } else {
@@ -701,7 +713,14 @@ async fn run(
             result["tools"]
                 .as_array()
                 .ok_or_else(|| anyhow!("Tool schema missing"))?
-                .clone(),
+                .iter()
+                .filter(|tool| {
+                    !matches!(
+                        tool["name"].as_str(),
+                        Some("exec_command" | "write_stdin" | "apply_patch")
+                    )
+                })
+                .cloned(),
         );
         Some(session)
     } else {
@@ -727,7 +746,7 @@ async fn run(
         prompt.clone()
     } else {
         format!(
-            "You are Pot, running in a Linux Sandbox with network access. Use exec_command to inspect files and retrieve sources; cite URLs for current facts. Use apply_patch for file edits. Report observed failures accurately. {}",
+            "You are Pot. Your execution tools run in the assigned Sandbox with network access. Use exec_command to inspect files and retrieve sources; cite URLs for current facts. Use apply_patch for file edits. Report observed failures accurately. {}",
             if s.role == ExecutionRole::Worker {
                 "Complete the assigned task. You cannot delegate."
             } else {
@@ -812,21 +831,21 @@ async fn run(
                 call.name.as_str(),
                 "exec_command" | "write_stdin" | "apply_patch"
             ) {
-                match tools::validate(&call.name, &call.arguments) {
-                    Err(e) => Err(e),
-                    Ok(()) if call.name == "apply_patch" => tools::patch(s, &call.arguments),
-                    Ok(()) => {
-                        processes
-                            .execute(
-                                s,
-                                &settings.shell,
-                                &call.name,
-                                &call.arguments,
-                                &call.id,
-                                emit,
-                            )
-                            .await
-                    }
+                if let Some(executor) = &s.tool_executor {
+                    executor
+                        .execute(
+                            s,
+                            &settings.shell,
+                            &call.name,
+                            &call.arguments,
+                            &call.id,
+                            emit,
+                        )
+                        .await
+                } else {
+                    Err(anyhow!(
+                        "Tool execution backend unavailable; no Host fallback"
+                    ))
                 }
             } else if custom_names.contains(&call.name) {
                 tokio::select! { result = extensions.execute(s, &call.name, &call.arguments) => result, _ = s.feedback.cancellation() => Err(anyhow!("cancelled")) }

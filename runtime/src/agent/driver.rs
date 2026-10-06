@@ -56,6 +56,7 @@ pub async fn execute(
         transcript.record(s, update)
     })
     .await;
+    sandbox::finish(s).await?;
     sandbox::drain(s).await?;
     result
 }

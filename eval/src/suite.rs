@@ -718,6 +718,7 @@ mod tests {
             state: Mutex::new(BTreeMap::new()),
         };
         let context = ExecutionContext {
+            tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: path.clone(),
             workspace: path.clone(),
             owner: "eval".into(),
@@ -784,6 +785,7 @@ mod tests {
             state: Mutex::new(BTreeMap::new()),
         };
         let context = ExecutionContext {
+            tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: path.clone(),
             workspace: path.clone(),
             owner: "eval".into(),

@@ -18,7 +18,7 @@ mise run open
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
-Configure the Main Agent in Chat or Settings → AI Configuration. Pi uses saved API connections; Codex uses official Host browser authorization. Node, Pi and Codex are bundled. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
+Configure the Main Agent in Chat or Settings → AI Configuration. pot-agent uses saved API connections; Codex uses official Host browser authorization. pot-agent is built into Server; Node and Codex are bundled. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
 
 ## Standalone Server (development entry point)
 
@@ -29,7 +29,7 @@ mise exec -- cargo build --locked -p pot-server
 POT_DATA_DIR=/tmp/pot-server/product POT_WORKSPACE=/tmp/pot-server/workspace POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-`POT_PI_BIN` selects the Pi executable. Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
 
 App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
 
@@ -48,9 +48,9 @@ Current real CLI/VM acceptance (build and bundle first; no paid model calls):
 mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/Contents/Helpers/PotHelper --resources .local/d1/Pot.app/Contents/Resources/runtime --output /tmp/pot-sandbox-acceptance.json
 ```
 
-Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host Pi/Codex and local mock models, validates lazy startup, worker scope, environment independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/agent-sandbox-20261006.md).
+Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host Pot/Codex and local mock models, validates lazy startup, worker scope, environment independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/host-pot-agent-20261006.md).
 
-Application account authorization uses official Host Codex App Server APIs. Pi supports API connections. The official Host Codex process handles browser callbacks directly; account credentials remain with the native CLI. Real-provider account/inference acceptance is separate from the credential-free Sandbox routing contract.
+Application account authorization uses official Host Codex App Server APIs. pot-agent supports API connections. The official Host Codex process handles browser callbacks directly; account credentials remain with the native CLI. Real-provider account/inference acceptance is separate from the credential-free Sandbox routing contract.
 
 ### Git hooks
 
@@ -72,7 +72,8 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
 | `core/` | Immutable Agent models, execution contracts, shared tool schema |
 | `storage/` | SQLite, binding/usage/file-request ledgers, transactions |
-| `driver/` | Host Pi RPC and Codex App Server adapters |
+| `agent/`, `driver/` | In-process pot-agent and Host Codex App Server |
+| `tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for eval/tests |
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
 | `image/` | Guest desktop, browser, broker/viewer resources |
@@ -84,4 +85,4 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through Pi. Direct Host tools and macOS/Windows Sandbox providers are outside this increment. Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.
+Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. Direct Host tools and macOS/Windows Sandbox providers are outside this increment. Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.

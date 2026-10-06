@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real Host Pi/Codex + two Linux VMs; loopback models, isolated data, no paid calls."""
+"""Real Host Pot/Codex + two Linux VMs; loopback models, isolated data, no paid calls."""
 
 import argparse
 import asyncio
@@ -62,10 +62,8 @@ class Model:
                         tool.get("name", tool.get("function", {}).get("name", tool.get("type", "")))
                     )
             forbidden = {
-                "exec_command",
                 "shell",
                 "shell_command",
-                "apply_patch",
                 "read_file",
                 "view_image",
                 "node_repl",
@@ -76,6 +74,12 @@ class Model:
             }
             assert not any(t.rsplit("__", 1)[-1] in forbidden for t in tools), tools
             assert not any("unmanaged" in t for t in tools), tools
+            if codex:
+                assert not any(
+                    t.rsplit("__", 1)[-1] in {"exec_command", "write_stdin", "apply_patch"}
+                    and not t.rsplit("__", 1)[0].endswith("pot")
+                    for t in tools
+                ), tools
             if "Pot task completion notification." in text:
                 pot_names = {
                     t.rsplit("__", 1)[-1] for t in tools if t.rsplit("__", 1)[-1].startswith("pot_")
@@ -85,11 +89,11 @@ class Model:
                 if codex:
                     self.codex_summary_requests += 1
             if worker:
-                expected = {"read", "write", "edit", "bash", "grep", "find", "ls"}
+                expected = {"exec_command", "write_stdin", "apply_patch"}
                 names = {
-                    t.rsplit("__", 1)[-1].removeprefix("pot_sandbox_")
+                    t.rsplit("__", 1)[-1]
                     for t in tools
-                    if not codex or t.rsplit("__", 1)[-1].startswith("pot_")
+                    if not codex or t.rsplit("__", 1)[0].endswith("pot")
                 }
                 assert names == expected, names
                 self.worker_loadouts += 1
@@ -99,6 +103,31 @@ class Model:
                 for item in current
             )
             action = actions[count] if count < len(actions) else None
+
+            if action and action["args"].get("session_id") == "$last_session":
+
+                def sessions(value):
+                    if isinstance(value, str):
+                        try:
+                            return sessions(json.loads(value))
+                        except (ValueError, TypeError):
+                            return []
+                    if isinstance(value, dict):
+                        found = (
+                            [value["session_id"]]
+                            if isinstance(value.get("session_id"), str)
+                            and value["session_id"] != "$last_session"
+                            else []
+                        )
+                        return found + [sid for child in value.values() for sid in sessions(child)]
+                    if isinstance(value, list):
+                        return [sid for child in value for sid in sessions(child)]
+                    return []
+
+                ids = sessions(current[1:])
+                assert ids, current
+                action = json.loads(json.dumps(action))
+                action["args"]["session_id"] = ids[-1]
 
             call_id = "probe-" + str(count)
             if codex:
@@ -354,8 +383,8 @@ async def run(args):
                 "providers",
                 {
                     "request_id": str(uuid.uuid4()),
-                    "profile_id": "pi-test",
-                    "name": "Pi fixture",
+                    "profile_id": "pot-test",
+                    "name": "Pot fixture",
                     "expected_revision": 0,
                     "endpoint": f"http://127.0.0.1:{port}/v1/chat/completions",
                     "model": "pot-mock",
@@ -374,26 +403,68 @@ async def run(args):
                         sandbox_id="linux-b",
                         name="Second Linux",
                     ),
-                    action("write", path="pi.txt", content="PI_DEFAULT"),
-                    action("bash", command="uname -s > os.txt; cat pi.txt"),
-                    action("read", path="pi.txt"),
-                    action("write", sandbox_id="linux-b", path="pi.txt", content="PI_SECOND"),
+                    action(
+                        "apply_patch",
+                        patch="*** Begin Patch\n*** Add File: pot.txt\n+POT_DEFAULT\n*** End Patch",
+                    ),
+                    action("exec_command", cmd="uname -s > os.txt; cat pot.txt"),
+                    action("exec_command", cmd="cat pot.txt"),
+                    action(
+                        "apply_patch",
+                        patch="*** Begin Patch\n*** Add File: pot.txt\n+POT_SECOND\n*** End Patch",
+                        sandbox_id="linux-b",
+                    ),
                 ]
             )
             default = root / "sandboxes/default/workspace/workspace"
             second = root / "sandboxes/linux-b/workspace/workspace"
-            assert (default / "pi.txt").read_text() == "PI_DEFAULT"
-            assert (second / "pi.txt").read_text() == "PI_SECOND"
+            assert (default / "pot.txt").read_text() == "POT_DEFAULT\n"
+            assert (second / "pot.txt").read_text() == "POT_SECOND\n"
             assert (default / "os.txt").read_text().strip() == "Linux"
-            assert not (root / "product/agent-workspace/pi.txt").exists()
-            report["pi_main_two_environments"] = True
+            assert not (root / "product/agent-workspace/pot.txt").exists()
+            report["pot_main_two_environments"] = True
+
+            await turn(
+                [
+                    action(
+                        "exec_command",
+                        cmd='read value; printf "%s" "$value" > session.txt',
+                        yield_time_ms=10,
+                    ),
+                    action("pot_manage_sandbox", action="select", sandbox_id="linux-b"),
+                    action(
+                        "write_stdin",
+                        session_id="$last_session",
+                        chars="BOUND\n",
+                        close_stdin=True,
+                        yield_time_ms=1000,
+                    ),
+                    action(
+                        "apply_patch",
+                        patch="*** Begin Patch\n*** Add File: selected.txt\n+SECOND\n*** End Patch",
+                    ),
+                    action("pot_manage_sandbox", action="select", sandbox_id="default"),
+                ]
+            )
+            assert (default / "session.txt").read_text() == "BOUND"
+            assert not (second / "session.txt").exists()
+            assert (second / "selected.txt").read_text() == "SECOND\n"
+            report["pot_sessions_stay_bound_across_default_change"] = True
             # Persistent worker credential and immutable assignment, including API bypass attempts.
             task = await api(
                 "tasks",
                 {
                     "request_id": str(uuid.uuid4()),
-                    "text": prompt([action("write", path="worker.txt", content="WORKER")], True),
-                    "profile": "pi-test",
+                    "text": prompt(
+                        [
+                            action(
+                                "apply_patch",
+                                patch="*** Begin Patch\n*** Add File: worker.txt\n+WORKER\n*** End Patch",
+                            )
+                        ],
+                        True,
+                    ),
+                    "profile": "pot-test",
                     "sandbox_id": "linux-b",
                 },
             )
@@ -413,7 +484,7 @@ async def run(args):
             else:
                 raise AssertionError(info)
             task_workspace = second / "tasks" / task_id
-            assert (task_workspace / "worker.txt").read_text() == "WORKER"
+            assert (task_workspace / "worker.txt").read_text() == "WORKER\n"
             worker_token = json.loads(
                 (root / "product/tasks" / task_id / "runtime.json").read_text()
             )["token"]
@@ -421,14 +492,16 @@ async def run(args):
             await reject(
                 "execution",
                 {
-                    "name": "pot_sandbox_bash",
+                    "name": "exec_command",
                     "call_id": "override",
-                    "args": {"command": "true", "sandbox_id": "default"},
+                    "args": {"cmd": "true", "sandbox_id": "default"},
                 },
                 worker_token,
             )
-            report["pi_worker_fixed_assignment"] = True
+            report["pot_worker_fixed_assignment"] = True
             await reject("sandboxes", {"action": "delete", "sandbox_id": "linux-b"})
+            await api("sandboxes", {"action": "stop", "sandbox_id": "default"})
+            await api("sandboxes", {"action": "stop", "sandbox_id": "linux-b"})
             profile = {
                 "id": "codex-test",
                 "revision": 1,
@@ -447,7 +520,7 @@ async def run(args):
                 "tool_policy": {
                     "worker_orchestration": False,
                     "summary_read_only": True,
-                    "unattended": "sandbox",
+                    "unattended": "guest_vm",
                 },
             }
             await api(
@@ -459,22 +532,28 @@ async def run(args):
                     "follow_main": True,
                 },
             )
+            await turn([])
+            assert all(
+                item["state"]["phase"] == "stopped" for item in (await api("sandboxes"))["items"]
+            )
+            report["codex_chat_without_sandbox"] = True
             await turn(
                 [
                     action("pot_list_sandboxes"),
                     action("pot_manage_sandbox", action="select", sandbox_id="default"),
-                    action("pot_sandbox_write", path="codex.txt", content="CODEX_DEFAULT"),
-                    action("pot_sandbox_read", path="codex.txt"),
                     action(
-                        "pot_sandbox_bash",
-                        sandbox_id="linux-b",
-                        command="echo CODEX_SECOND > codex.txt",
+                        "apply_patch",
+                        patch="*** Begin Patch\n*** Add File: codex.txt\n+CODEX_DEFAULT\n*** End Patch",
+                    ),
+                    action("exec_command", cmd="cat codex.txt"),
+                    action(
+                        "exec_command", cmd="echo CODEX_SECOND > codex.txt", sandbox_id="linux-b"
                     ),
                 ]
             )
             before = (await api("agent"))["bindings"][0]["native_ref"]
-            await turn([action("pot_sandbox_bash", command="echo RESUMED >> codex.txt")])
-            assert (default / "codex.txt").read_text() == "CODEX_DEFAULTRESUMED\n"
+            await turn([action("exec_command", cmd="echo RESUMED >> codex.txt")])
+            assert (default / "codex.txt").read_text() == "CODEX_DEFAULT\nRESUMED\n"
             assert (second / "codex.txt").read_text().strip() == "CODEX_SECOND"
             report["codex_main_and_resume"] = True
             task2 = await api(
@@ -484,7 +563,8 @@ async def run(args):
                     "text": prompt(
                         [
                             action(
-                                "pot_sandbox_write", path="codex-worker.txt", content="CODEX_WORKER"
+                                "apply_patch",
+                                patch="*** Begin Patch\n*** Add File: codex-worker.txt\n+CODEX_WORKER\n*** End Patch",
                             )
                         ],
                         True,
@@ -507,7 +587,9 @@ async def run(args):
                 await asyncio.sleep(0.05)
             else:
                 raise AssertionError(info)
-            assert (default / "tasks" / task2_id / "codex-worker.txt").read_text() == "CODEX_WORKER"
+            assert (
+                default / "tasks" / task2_id / "codex-worker.txt"
+            ).read_text() == "CODEX_WORKER\n"
             report["codex_worker_loadout"] = True
             # Exercise the real read-only summary before restoring main environment tools.
             for _ in range(400):
@@ -521,9 +603,9 @@ async def run(args):
                 prompt(
                     [
                         action(
-                            "pot_sandbox_bash",
-                            command="setsid sh -c 'sleep 6; echo ESCAPED > escaped.txt' >/dev/null 2>&1 & echo STARTED > started.txt; sleep 60",
-                            timeout=120,
+                            "exec_command",
+                            cmd="setsid sh -c 'sleep 6; echo ESCAPED > escaped.txt' >/dev/null 2>&1 & echo STARTED > started.txt; sleep 60",
+                            timeout_ms=120000,
                         )
                     ]
                 )
@@ -557,7 +639,7 @@ async def run(args):
             boot = (await api("snapshot"))["boot_id"]
             await ipc("backend-restart")
             await wait_endpoint(boot)
-            await turn([action("pot_sandbox_read", path="codex.txt")])
+            await turn([action("exec_command", cmd="cat codex.txt")])
             after = (await api("agent"))["bindings"][0]["native_ref"]
             assert before == after, (before, after)
             report["host_restart_native_resume"] = True
@@ -567,7 +649,13 @@ async def run(args):
                 {
                     "request_id": str(uuid.uuid4()),
                     "text": prompt(
-                        [action("write", path="worker-resumed.txt", content="FIXED")], True
+                        [
+                            action(
+                                "apply_patch",
+                                patch="*** Begin Patch\n*** Add File: worker-resumed.txt\n+FIXED\n*** End Patch",
+                            )
+                        ],
+                        True,
                     ),
                 },
             )
@@ -594,8 +682,8 @@ async def run(args):
                     "text": prompt(
                         [
                             action(
-                                "pot_sandbox_bash",
-                                command="echo RUNNING > running.txt; sleep 8; echo DONE > done.txt",
+                                "exec_command",
+                                cmd="echo RUNNING > running.txt; sleep 8; echo DONE > done.txt",
                             )
                         ],
                         True,
@@ -618,9 +706,9 @@ async def run(args):
             await reject(
                 "execution",
                 {
-                    "name": "pot_sandbox_bash",
+                    "name": "exec_command",
                     "call_id": "wrong-target",
-                    "args": {"command": "true", "sandbox_id": "default"},
+                    "args": {"cmd": "true", "sandbox_id": "default"},
                 },
                 long_token,
             )
@@ -634,7 +722,7 @@ async def run(args):
                 long_token,
             )
             await api("sandboxes", {"action": "stop", "sandbox_id": "default"})
-            await turn([action("pot_sandbox_read", sandbox_id="linux-b", path="codex.txt")])
+            await turn([action("exec_command", cmd="cat codex.txt", sandbox_id="linux-b")])
             for _ in range(400):
                 if (long_workspace / "done.txt").exists():
                     break
@@ -671,19 +759,8 @@ async def run(args):
             await turn(
                 [
                     action(
-                        "pot_sandbox_bash",
-                        command="""test ! -e /data/executor-token && test ! -r /run/pot-executor/operations.sqlite && python3 - > desktop-check.txt <<'CHECK'
-import urllib.request, urllib.error, os
-assert 'POT_EXECUTOR_TOKEN' not in os.environ
-assert urllib.request.urlopen('http://127.0.0.1:8081/home.html').status == 200
-try:
-    urllib.request.urlopen('http://127.0.0.1:8081/executor-token')
-    raise AssertionError('Credential exposed')
-except urllib.error.HTTPError as error:
-    assert error.code == 404
-print('DESKTOP_OK')
-CHECK
-""",
+                        "exec_command",
+                        cmd="test ! -e /data/executor-token && test ! -r /run/pot-executor/operations.sqlite && python3 - > desktop-check.txt <<'CHECK'\nimport urllib.request, urllib.error, os\nassert 'POT_EXECUTOR_TOKEN' not in os.environ\nassert urllib.request.urlopen('http://127.0.0.1:8081/home.html').status == 200\ntry:\n    urllib.request.urlopen('http://127.0.0.1:8081/executor-token')\n    raise AssertionError('Credential exposed')\nexcept urllib.error.HTTPError as error:\n    assert error.code == 404\nprint('DESKTOP_OK')\nCHECK\n",
                     )
                 ]
             )
@@ -709,7 +786,7 @@ CHECK
             report["model_requests"] = len(model.requests)
             report["summary_requests"] = model.summary_requests
             report["native_versions"] = {}
-            for cli in ["pi", "codex"]:
+            for cli in ["codex"]:
                 version = await asyncio.create_subprocess_exec(
                     str(resources / "host-tools/node_modules/.bin" / cli),
                     "--version",

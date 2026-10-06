@@ -67,6 +67,9 @@ async fn fixture(
     Arc<Mutex<Vec<Value>>>,
 ) {
     let mut s = tasks::tests::fixture();
+    // Model/receipt tests explicitly inject local tools in an isolated test root.
+    // Product execution uses Runtime Sandbox routing, verified separately.
+    s.test_tool_executor = Some(Arc::new(pot_tool_executor::LocalTools::default()));
     s.usage = Arc::new(Mutex::new(
         usage::Ledger::open(&s.data.join("usage-v2.sqlite")).unwrap(),
     ));

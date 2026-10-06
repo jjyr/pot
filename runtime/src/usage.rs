@@ -292,7 +292,6 @@ mod tests {
         profile.auth_ref = match engine {
             agent::Engine::Pot => "providers.json:deepseek",
             agent::Engine::Codex => "cli:codex",
-            agent::Engine::Grok => "cli:grok",
         }
         .into();
         profile.engine = engine;
@@ -305,7 +304,7 @@ mod tests {
         for (key, engine, scope, model, stamp) in [
             ("p", agent::Engine::Pot, "main", "shared", t),
             ("c", agent::Engine::Codex, "main", "shared", t),
-            ("a", agent::Engine::Grok, "task-1", "shared", t),
+            ("a", agent::Engine::Codex, "task-1", "worker-model", t),
             (
                 "older",
                 agent::Engine::Codex,
@@ -356,7 +355,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|v| v["agent"] == "grok")
+                .any(|v| v["model"] == "worker-model")
         );
         let row = main["requests"]
             .as_array()
@@ -367,12 +366,12 @@ mod tests {
         assert_eq!(row["agent"], "codex");
         assert_eq!(row["profile_id"], "pending-profile");
         assert_eq!(row["epoch"], 3);
-        let native = attributed_spec(agent::Engine::Grok, "native-model", "grok-native");
+        let native = attributed_spec(agent::Engine::Codex, "native-model", "codex-native");
         l.begin_native("native", "task-native", "turn", &native, 4)
             .unwrap();
         assert_eq!(
             l.summary(&query("task-native", 7), t).unwrap()["requests"][0]["agent"],
-            "grok"
+            "codex"
         );
     }
     #[test]

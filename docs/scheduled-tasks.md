@@ -1,6 +1,6 @@
 # Scheduled tasks
 
-Schedules are persistent definitions; each trigger creates an independent background task/Pi session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
+Schedules are persistent definitions; each trigger creates an independent background task/Agent session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
 
 ```
 Chat / tasks -> schedules
@@ -9,7 +9,7 @@ Chat / tasks -> schedules
 Runtime scheduler -> SQLite tasks.v2 (schedules + triggers + task queue)
              | Due: create one run transactionally
              ▼
-Shared task queue (default concurrency 5) -> independent Pi / working directory
+Shared task queue (default concurrency 5) -> independent Host Agent / fixed Sandbox working directory
              │ .pot-schedule-result.json
              ▼
 Validate result -> compare fingerprint -> save history
@@ -44,7 +44,7 @@ API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `reques
 
 ## Validation
 
-Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and fixed environment assignment. The current Host Pi/Codex and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/agent-sandbox-20261006.md).
+Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and fixed environment assignment. The current Host Pot/Codex and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/host-pot-agent-20261006.md).
 
 ```sh
 mise run test

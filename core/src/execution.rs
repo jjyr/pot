@@ -137,6 +137,7 @@ pub struct ExecutionContext {
     pub lane_token: String,
     pub main_prompt: String,
     pub feedback: Arc<dyn ExecutionFeedback>,
+    pub tool_executor: Option<Arc<dyn ToolExecutor>>,
 }
 /// Synchronous acknowledgements preserve persistence-before-network ordering.
 /// Runtime validates owner/epoch/turn before applying these observations.
@@ -246,4 +247,19 @@ pub trait ExecutionServices: Send + Sync {
     ) -> BoxFuture<'a, Result<(Value, Option<String>)>>;
     /// Product implementations must durably acknowledge lifecycle before returning.
     fn compaction(&self, event: Value) -> BoxFuture<'_, Result<()>>;
+}
+
+/// Environment effects are dispatched by the embedder, never implicitly executed by the Agent.
+pub trait ToolExecutor: Send + Sync {
+    fn execute<'a>(
+        &'a self,
+        context: &'a ExecutionContext,
+        policy: &'a ShellSettings,
+        name: &'a str,
+        args: &'a Value,
+        call: &'a str,
+        emit: &'a mut (dyn FnMut(Update) -> Result<()> + Send),
+    ) -> BoxFuture<'a, Result<Value>>;
+    /// Await remote session cleanup before emitting a terminal turn event.
+    fn finish<'a>(&'a self, context: &'a ExecutionContext) -> BoxFuture<'a, Result<()>>;
 }

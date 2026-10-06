@@ -96,7 +96,7 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
     Ok(p)
 }
 /// API profiles keep their own request ledger even when the legacy smoke route exists.
-pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::BudgetSettings> {
+pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<budget::BudgetSettings> {
     if let Some(budget) = &s.api_budget
         && budget.namespace != "deepseek-attempts"
     {
@@ -113,7 +113,7 @@ pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::Bud
     } else {
         s.data.clone()
     };
-    Ok(deepseek::BudgetSettings {
+    Ok(budget::BudgetSettings {
         namespace: "agent-attempts",
         data,
         limit: s.execution.as_ref().map_or(10000, |c| c.request_limit),
@@ -123,7 +123,7 @@ pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<deepseek::Bud
 
 pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedSpec> {
     let mut spec = profile.resolve()?;
-    if matches!(spec.engine, agent::Engine::Codex | agent::Engine::Grok) {
+    if matches!(spec.engine, agent::Engine::Codex) {
         return Ok(spec);
     }
     let route = provider(s, &spec)?;
@@ -134,7 +134,6 @@ pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedS
 pub fn executor_icon(s: &Service, spec: &agent::ResolvedSpec) -> String {
     match spec.engine {
         agent::Engine::Codex => "codex".into(),
-        agent::Engine::Grok => "grok".into(),
         agent::Engine::Pot => {
             let endpoint = stored_provider(s, spec)
                 .ok()
@@ -165,7 +164,7 @@ pub fn executor_icon(s: &Service, spec: &agent::ResolvedSpec) -> String {
     }
 }
 pub fn validate_spec(s: &Service, spec: &agent::ResolvedSpec) -> Result<()> {
-    if matches!(spec.engine, agent::Engine::Codex | agent::Engine::Grok) {
+    if matches!(spec.engine, agent::Engine::Codex) {
         return spec.validate();
     }
     let route = provider(s, spec)?;
@@ -367,7 +366,7 @@ pub async fn forward(
             ));
         }
         let budget = agent_budget(&s, c.max_tokens).map_err(internal)?;
-        if deepseek::reserve_in(&budget.data.join(budget.namespace), budget.limit).is_err() {
+        if budget::reserve_in(&budget.data.join(budget.namespace), budget.limit).is_err() {
             s.usage
                 .lock()
                 .unwrap()
@@ -503,7 +502,7 @@ mod integration_tests {
             max_requests_per_turn: 2,
             max_parallel_tasks: 5,
         });
-        s.api_budget = Some(deepseek::BudgetSettings {
+        s.api_budget = Some(budget::BudgetSettings {
             namespace: "agent-attempts",
             data: dir.clone(),
             limit: 10,

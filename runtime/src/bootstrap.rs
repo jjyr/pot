@@ -64,7 +64,7 @@ pub async fn initialize_with_agent_host(
     let workspace = config.workspace;
     std::fs::create_dir_all(&workspace)?;
     let execution_config = execution::execution_config(execution::Config::default(), &data)?;
-    let api_budget = Some(deepseek::BudgetSettings {
+    let api_budget = Some(budget::BudgetSettings {
         namespace: "agent-attempts",
         data: data.clone(),
         limit: execution_config.request_limit,
@@ -73,6 +73,10 @@ pub async fn initialize_with_agent_host(
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
     let s = Service {
+        #[cfg(test)]
+        test_tool_executor: None,
+        sandboxes: Arc::new(sandbox::Manager::open(&data)?),
+        sandbox_id: None,
         usage: Arc::new(Mutex::new(usage::Ledger::open(
             &data.join("usage-v2.sqlite"),
         )?)),
@@ -95,7 +99,7 @@ pub async fn initialize_with_agent_host(
         boot: id(),
         workspace,
         api_budget,
-        execution: None,
+        execution: Some(execution_config),
         agent_upstream: "https://api.deepseek.com/chat/completions".into(),
         is_worker: false,
         data,

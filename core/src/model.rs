@@ -11,7 +11,6 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub enum Engine {
     Pot,
     Codex,
-    Grok,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Capabilities {
@@ -110,7 +109,7 @@ impl Profile {
     }
     pub fn resolve(&self) -> Result<ResolvedSpec> {
         self.validate()?;
-        if matches!(self.engine, Engine::Codex | Engine::Grok) {
+        if matches!(self.engine, Engine::Codex) {
             return self.resolve_native();
         }
         self.launch_spec.clone().unwrap_or_default().validate()?;
@@ -184,18 +183,9 @@ impl Profile {
         Ok(spec)
     }
     fn resolve_native(&self) -> Result<ResolvedSpec> {
-        let grok = self.engine == Engine::Grok;
-        let expected_auth = if grok { "cli:grok" } else { "cli:codex" };
-        let default_launch = if grok {
-            LaunchSpec::grok()
-        } else {
-            LaunchSpec::codex()
-        };
-        let default_protocol = if grok {
-            ProtocolContract::grok()
-        } else {
-            ProtocolContract::codex()
-        };
+        let expected_auth = "cli:codex";
+        let default_launch = LaunchSpec::codex();
+        let default_protocol = ProtocolContract::codex();
         ensure!(
             self.auth_ref == expected_auth
                 && !self.provider.is_empty()
@@ -234,11 +224,11 @@ impl Profile {
             gateway_protocol: "native_reported".into(),
             context_window: 0,
             capabilities: Capabilities {
-                native_compaction: !grok,
-                usage_reporting: !grok,
-                tool_policy_enforcement: !grok,
-                mcp_tools: !grok,
-                subagents_disableable: !grok,
+                native_compaction: true,
+                usage_reporting: true,
+                tool_policy_enforcement: true,
+                mcp_tools: true,
+                subagents_disableable: true,
                 ..Default::default()
             },
             source_profile_id: self.id.clone(),
@@ -308,7 +298,6 @@ impl ResolvedSpec {
                 Engine::Codex =>
                     launch.transport == "codex_app_server"
                         && protocol.events == "codex_app_server_v2",
-                Engine::Grok => launch.transport == "grok_acp" && protocol.events == "grok_acp_v1",
             },
             "Engine and transport contract mismatch"
         );
@@ -328,9 +317,6 @@ pub enum NativeRef {
     },
     Codex {
         thread_id: Option<String>,
-    },
-    Grok {
-        session_id: Option<String>,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -384,14 +370,6 @@ impl Default for LaunchSpec {
     }
 }
 impl LaunchSpec {
-    pub fn grok() -> Self {
-        Self {
-            transport: "grok_acp".into(),
-            executable: "grok".into(),
-            ..Default::default()
-        }
-    }
-
     pub fn codex() -> Self {
         Self {
             transport: "codex_app_server".into(),
@@ -401,10 +379,7 @@ impl LaunchSpec {
     }
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            matches!(
-                self.transport.as_str(),
-                "pot_agent" | "codex_app_server" | "grok_acp"
-            ),
+            matches!(self.transport.as_str(), "pot_agent" | "codex_app_server"),
             "Transport has not passed driver acceptance"
         );
         ensure!(
@@ -584,13 +559,6 @@ impl Default for ProtocolContract {
     }
 }
 impl ProtocolContract {
-    pub fn grok() -> Self {
-        Self {
-            events: "grok_acp_v1".into(),
-            native_session: "grok_session".into(),
-        }
-    }
-
     pub fn codex() -> Self {
         Self {
             events: "codex_app_server_v2".into(),
@@ -600,8 +568,7 @@ impl ProtocolContract {
     pub fn validate(&self) -> Result<()> {
         ensure!(
             (self.events == "pot_agent_v1" && self.native_session == "pot_context_v1")
-                || (self.events == "codex_app_server_v2" && self.native_session == "codex_thread")
-                || (self.events == "grok_acp_v1" && self.native_session == "grok_session"),
+                || (self.events == "codex_app_server_v2" && self.native_session == "codex_thread"),
             "Unsupported protocol/session contract; restore the command or migrate explicitly"
         );
         Ok(())

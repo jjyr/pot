@@ -6,7 +6,7 @@ Updated: 2026-10-06. Implemented boundaries; dated acceptance is recorded separa
 
 Pot runs Agent loops and the persistent product control plane on the Host. Sandboxes are separately managed execution resources. The main Agent can control multiple Sandboxes; a task worker executes within exactly one assigned environment and cannot control Sandbox lifecycle or select another environment.
 
-- Pi and Codex are the supported Drivers.
+- Pot and Codex are the supported Drivers.
 - Host-side Agent execution does not mean local model inference. Model connections remain a separate configuration concern.
 - Model-selected shell, filesystem, browser and desktop operations execute in Sandboxes. Direct Host execution is out of scope, including fallback when a Sandbox is unavailable.
 - Multiple Sandbox instances are part of the target model. Start with Linux providers; macOS and Windows providers are later additions rather than prerequisites for the first slice.
@@ -55,7 +55,7 @@ Recommended initial policy:
 - Separate creating a persistent Sandbox definition from starting its execution instance. A requested start is complete only when the authenticated executor is ready.
 - Start when the main Agent explicitly requests it, or when Runtime prepares an assigned environment for authorized execution. Coalesce simultaneous start requests.
 - Pure conversation and product task/status operations do not require a Sandbox. Codex environment discovery and context loading need validation before promising startup only at the first tool call.
-- Hold leases for active operations and task turns. Desktop follows explicit environment start/stop; detached tool processes are drained at the end of each operation rather than treated as persistent jobs. Idle recovery/reclamation is Runtime-owned and does not require a worker management tool.
+- Hold leases for active operations and task turns. Desktop follows explicit environment start/stop; detached tool processes are drained at turn completion or cancellation; live pipe sessions expire with the turn. Idle recovery/reclamation is Runtime-owned and does not require a worker management tool.
 - Ordinary stop/delete requests against an occupied environment return its dependencies and a busy result. A separately explicit destructive stop must settle or mark interrupted all affected operations; never report affected tasks as successful.
 - Stopping one Sandbox leaves the Host control plane and unrelated environments available. Preserve declared workspace/artifact storage independently of disposable VM state.
 
@@ -63,11 +63,11 @@ Cancellation of a task targets its operations and waits for executor cleanup. It
 
 ## Driver integration
 
-Pi stays on the Host with Pot-controlled extensions. Replace all seven native environment tools with Sandbox-backed implementations and account for shell shortcuts and implicit context access. Main and worker loadouts differ: management tools are main-only, and worker implementations route exclusively to the persisted assignment.
+pot-agent runs in-process on Host with an injected Runtime ToolExecutor. The shared environment tools are exec_command, write_stdin and apply_patch. There is no automatic local executor. Main and worker loadouts differ: inventory and lifecycle tools are main-only; workers route exclusively to their persisted assignment. Runtime checks authorization independently of model-visible schemas. Guest operations run in a credential-free Rust runner behind the authenticated root broker. Runtime-owned sessions remain in their original Sandbox even after main changes its default, and expire on turn completion/cancellation or generation change.
 
 Codex App Server stays on the Host. Pot disables native environment tools, supplies an empty native environment list, and exposes the same Sandbox execution API through lane-scoped MCP. Inherited MCP servers, plugins/apps and native subagent tools are disabled. The implementation uses Pot's execution-only HTTP service rather than `codex exec-server`, keeping one environment protocol for both Drivers.
 
-Qualification covers native tool loadouts, real CLI execution, resume, cancellation and routing restrictions. See [acceptance](validation/agent-sandbox-20261006.md) for tested scope.
+Qualification covers native tool loadouts, real CLI execution, resume, cancellation and routing restrictions. See [acceptance](validation/host-pot-agent-20261006.md) for tested scope.
 
 ## Product surfaces
 
@@ -75,11 +75,11 @@ Chat is the persistent main-assistant entry point, independent of VM readiness. 
 
 The environment surface presents multiple Sandboxes, their state, resources, associated tasks, workspace/artifacts and optional desktop. The task surface shows its fixed execution environment beside Agent selection and execution status. VM preparation, resource queueing, execution failure and cleanup uncertainty are visible states rather than generic chat failures.
 
-The UI should use one environment vocabulary for both Drivers. Pi extension routing and Codex executor transport are implementation details.
+The UI should use one environment vocabulary for both Drivers. pot-agent backend injection and Codex MCP transport are implementation details.
 
 ## Acceptance priorities
 
-1. Host Pi and Codex sessions and the product backend work independently of Linux VM startup/shutdown.
+1. Host Pot and Codex sessions and the product backend work independently of Linux VM startup/shutdown.
 2. Main Agent can manage two Linux Sandbox instances through policy-checked tools, select a target for its own operations and assign tasks to each.
 3. Worker attempts to manage Sandboxes, select another target, access another target's credentials or invoke Host tools fail at the execution boundary, including after native-session resume.
 4. Stopping/crashing one environment does not stop chat, corrupt native sessions or interrupt tasks in another environment. Busy-stop, task cancellation and shared-environment behavior follow the distinct contracts above.

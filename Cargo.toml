@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["app", "protocol", "core", "storage", "driver", "agent", "gateway", "runtime", "server", "eval"]
+members = ["app", "protocol", "core", "storage", "driver", "agent", "tool-executor", "gateway", "runtime", "server", "eval"]
 default-members = ["app"]
 
 [workspace.package]
@@ -14,6 +14,7 @@ pot-core = { path = "core" }
 pot-storage = { path = "storage" }
 pot-driver = { path = "driver" }
 pot-agent = { path = "agent" }
+pot-tool-executor = { path = "tool-executor" }
 pot-gateway = { path = "gateway" }
 pot-runtime = { path = "runtime" }
 pot-eval = { path = "eval" }

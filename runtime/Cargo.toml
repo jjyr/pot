@@ -30,4 +30,5 @@ chrono-tz = "0.10"
 sha2 = "0.10"
 
 [dev-dependencies]
+pot-tool-executor.workspace = true
 tokio-tungstenite = "0.29"
