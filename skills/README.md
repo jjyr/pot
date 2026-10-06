@@ -1,5 +1,6 @@
 # Builtin Agent skills
 
-Bundles live in `shared/`, `main/`, or `task/`. Runtime exposes shared and the
-current role's directory to discovery. The product bundle distributes these
-files read-only. `main/skill-creator` and `main/skill-installer` are reserved and cannot be overridden.
+Each direct child bundle contains SKILL.md. Main and task agents discover the
+same builtin and user skills. Runtime maps builtins read-only into the execution
+home's `.pot/agent/skills` directory alongside user bundles and reserves builtin
+names against user/project overrides. Only main agents can modify user bundles.

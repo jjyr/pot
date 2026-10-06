@@ -102,13 +102,8 @@ class Model:
                 ensure_ascii=False,
             )
             if marker is not None:
-                if worker:
-                    assert "<name>skill-creator</name>" not in system
-                    assert "<name>skill-installer</name>" not in system
-                    assert "<name>probe-main</name>" not in system
-                else:
-                    assert "<name>skill-creator</name>" in system
-                    assert "<name>skill-installer</name>" in system
+                assert "<name>skill-creator</name>" in system
+                assert "<name>skill-installer</name>" in system
             self.requests.append({"codex": codex, "tools": tools, "worker": worker})
             for output in current:
                 if output.get("role") == "tool" or output.get("type") == "function_call_output":
@@ -458,42 +453,38 @@ async def run(args):
                         cmd=r"""python3 - <<'SKILLS'
 from pathlib import Path
 import os, errno, subprocess
-base=Path('/mnt/pot-skills')
+base=Path.home()/'.pot/agent/skills'
 for name in ['skill-creator', 'skill-installer']:
-    assert (base/'builtin/main'/name/'SKILL.md').is_file()
-    subprocess.run(['python3', str(base/'builtin/main/skill-creator/scripts/quick_validate.py'), str(base/'builtin/main'/name)], check=True)
-for path in [base/'user/shared',base/'builtin/main/skill-creator']:
-    stat=path.stat()
-    print(str(path),stat.st_uid,stat.st_gid,oct(stat.st_mode),flush=True)
-for role,name in [('shared','probe-shared'),('main','probe-main'),('task','probe-task')]:
-    bundle=base/'user'/role/name
-    bundle.mkdir(parents=True,exist_ok=True)
-    (bundle/'SKILL.md').write_text(f'---\nname: {name}\ndescription: Skills mapping acceptance\n---\nREADONLY_PAYLOAD\n')
+    assert (base/name/'SKILL.md').is_file()
+    subprocess.run(['python3', str(base/'skill-creator/scripts/quick_validate.py'), str(base/name)], check=True)
+bundle=base/'probe-user'
+bundle.mkdir(parents=True,exist_ok=True)
+(bundle/'SKILL.md').write_text('---\nname: probe-user\ndescription: Skills mapping acceptance\n---\nREADONLY_PAYLOAD\n')
 Path('skills-main.uid').write_text(str(os.getuid()))
 for name in ['skill-creator', 'skill-installer']:
     try:
-        (base/'builtin/main'/name/'SKILL.md').write_text('forged')
+        (base/name/'SKILL.md').write_text('forged')
         raise AssertionError('Builtin skill writable')
     except OSError as error:
         assert error.errno == errno.EROFS, error
 draft=Path('draft/probe-installed')
 draft.mkdir(parents=True)
 (draft/'SKILL.md').write_text('---\nname: probe-installed\ndescription: Installation acceptance\n---\nInstalled instructions\n')
-subprocess.run(['python3', str(base/'builtin/main/skill-installer/scripts/install_skill.py'), '--local', str(draft), '--dest', str(base/'user/shared')], check=True)
+subprocess.run(['python3', str(base/'skill-installer/scripts/install_skill.py'), '--local', str(draft)], check=True)
 Path('builtin-skills-readonly.txt').write_text('EROFS')
 SKILLS""",
                     )
                 ]
             )
             assert (default / "builtin-skills-readonly.txt").read_text() == "EROFS"
-            assert (root / "skills-user/shared/probe-installed/SKILL.md").is_file()
+            assert (root / "skills-user/probe-installed/SKILL.md").is_file()
             report["builtin_skills_readonly_mapping"] = True
             report["packaged_skill_helpers"] = True
             await turn(
                 [action("exec_command", cmd="id -u > skills-main.uid", sandbox_id="linux-b")]
             )
-            assert (root / "skills-user/shared/probe-shared/SKILL.md").is_file()
-            report["main_manages_host_skills"] = True
+            assert (root / "skills-user/probe-user/SKILL.md").is_file()
+            report["main_manages_user_skills"] = True
 
             await turn(
                 [
@@ -537,22 +528,25 @@ SKILLS""",
                                 cmd=r"""python3 - <<'SKILLS'
 from pathlib import Path
 import errno,os
-base=Path('/mnt/pot-skills')
-assert not (base/'user/main').exists()
-assert not (base/'builtin/main').exists()
+base=Path.home()/'.pot/agent/skills'
 assert not os.access('/run/pot-skill-sources',os.R_OK)
 assert os.getuid() != int(Path('/data/workspace/skills-main.uid').read_text())
 status=dict(line.split(':',1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
 assert int(status['NoNewPrivs']) == 1
 assert int(status['CapEff'],16) == 0
-for role,name in [('shared','probe-shared'),('task','probe-task')]:
-    path=base/'user'/role/name/'SKILL.md'
-    assert 'READONLY_PAYLOAD' in path.read_text()
+for name in ['probe-user','probe-installed','skill-creator','skill-installer']:
+    path=base/name/'SKILL.md'
+    assert path.is_file(),path
     try:
         path.write_text('forged')
-        raise AssertionError('Task modified Host skill')
+        raise AssertionError('Task modified a readonly skill')
     except OSError as error:
         assert error.errno == errno.EROFS,error
+try:
+    (base/'new-task-skill').mkdir()
+    raise AssertionError('Task created a global skill')
+except OSError as error:
+    assert error.errno == errno.EROFS,error
 Path('skills-task.txt').write_text('READONLY')
 SKILLS""",
                             ),
@@ -594,10 +588,7 @@ SKILLS""",
                 worker_token,
             )
             assert (task_workspace / "skills-task.txt").read_text() == "READONLY"
-            assert (
-                "READONLY_PAYLOAD"
-                in (root / "skills-user/shared/probe-shared/SKILL.md").read_text()
-            )
+            assert "READONLY_PAYLOAD" in (root / "skills-user/probe-user/SKILL.md").read_text()
             report["task_skills_readonly_mapping"] = True
             report["pot_worker_fixed_assignment"] = True
             await reject("sandboxes", {"action": "delete", "sandbox_id": "linux-b"})

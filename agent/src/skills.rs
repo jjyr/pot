@@ -393,21 +393,15 @@ mod discovery_tests {
     fn directory_priority_reserved_names_yaml_diagnostics_and_refresh() {
         let base =
             std::env::temp_dir().join(format!("pot-skill-discovery-{}", uuid::Uuid::new_v4()));
-        let roots: Vec<_> = [
-            "project",
-            "user-role",
-            "user-shared",
-            "builtin-role",
-            "builtin-shared",
-        ]
-        .iter()
-        .enumerate()
-        .map(|(i, name)| SkillRoot {
-            path: base.join(name),
-            location: std::path::PathBuf::from(format!("/visible/{name}")),
-            builtin: i >= 3,
-        })
-        .collect();
+        let roots: Vec<_> = ["project", "user", "builtin"]
+            .iter()
+            .enumerate()
+            .map(|(i, name)| SkillRoot {
+                path: base.join(name),
+                location: std::path::PathBuf::from(format!("/visible/{name}")),
+                builtin: i >= 2,
+            })
+            .collect();
         for root in &roots {
             std::fs::create_dir_all(root.path.join("example")).unwrap();
             std::fs::write(root.path.join("example/SKILL.md"),format!("---\nname: example\ndescription: >-\n  {} example\n  with folded YAML\n---\nSECRET BODY",root.path.display())).unwrap();
@@ -417,7 +411,7 @@ mod discovery_tests {
             reserved_names: vec!["skill-creator".into()],
             selection: None,
         };
-        for root in [&roots[0], &roots[3]] {
+        for root in [&roots[0], &roots[2]] {
             std::fs::create_dir_all(root.path.join("manager")).unwrap();
             std::fs::write(
                 root.path.join("manager/SKILL.md"),
@@ -427,7 +421,7 @@ mod discovery_tests {
         }
         std::fs::create_dir_all(roots[0].path.join("invalid")).unwrap();
         std::fs::write(roots[0].path.join("invalid/SKILL.md"), "bad frontmatter").unwrap();
-        std::os::unix::fs::symlink(&roots[3].path, roots[0].path.join("outside")).unwrap();
+        std::os::unix::fs::symlink(&roots[2].path, roots[0].path.join("outside")).unwrap();
         let catalog = discover_skills(&resources).unwrap();
         assert_eq!(catalog.skills.len(), 2);
         assert_eq!(
@@ -436,10 +430,10 @@ mod discovery_tests {
         );
         assert_eq!(
             catalog.skills[1].location,
-            "/visible/builtin-role/manager/SKILL.md"
+            "/visible/builtin/manager/SKILL.md"
         );
         assert!(catalog.skills[0].description.contains("with folded YAML"));
-        assert_eq!(catalog.diagnostics.len(), 6); // 4 shadows, reserved override, malformed file
+        assert_eq!(catalog.diagnostics.len(), 4); // 2 shadows, reserved override, malformed file
         assert!(
             !format_skills_for_prompt(&catalog.skills)
                 .unwrap()
@@ -448,7 +442,7 @@ mod discovery_tests {
         std::fs::remove_dir_all(roots[0].path.join("example")).unwrap();
         assert_eq!(
             discover_skills(&resources).unwrap().skills[0].location,
-            "/visible/user-role/example/SKILL.md"
+            "/visible/user/example/SKILL.md"
         );
         let mut filtered = resources.clone();
         filtered.selection = Some(vec!["skill-creator".into()]);

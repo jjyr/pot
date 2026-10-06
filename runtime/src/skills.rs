@@ -3,7 +3,6 @@ use super::*;
 use pot_core::{SkillResources, SkillRoot};
 
 pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
-    let role = if s.is_worker { "task" } else { "main" };
     let target = if s.is_worker {
         s.sandbox_id
             .clone()
@@ -38,21 +37,29 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
         project = parent;
         location = visible_parent;
     }
-    for (path, visible, builtin) in [
-        (&s.sandboxes.skill_user, "/mnt/pot-skills/user", false),
-        (&s.sandboxes.skill_builtin, "/mnt/pot-skills/builtin", true),
-    ] {
-        for directory in [role, "shared"] {
-            roots.push(SkillRoot {
-                path: path.join(directory),
-                location: PathBuf::from(visible).join(directory),
-                builtin,
-            });
-        }
-    }
+    let global_location = visible.join(".pot/agent/skills");
+    let builtin_root = SkillRoot {
+        path: s.sandboxes.skill_builtin.clone(),
+        location: global_location.clone(),
+        builtin: true,
+    };
+    let reserved_names = pot_agent::discover_skills(&SkillResources {
+        roots: vec![builtin_root.clone()],
+        ..Default::default()
+    })?
+    .skills
+    .into_iter()
+    .map(|skill| skill.name)
+    .collect();
+    roots.push(SkillRoot {
+        path: s.sandboxes.skill_user.clone(),
+        location: global_location,
+        builtin: false,
+    });
+    roots.push(builtin_root);
     Ok(SkillResources {
         roots,
-        reserved_names: vec!["skill-creator".into(), "skill-installer".into()],
+        reserved_names,
         selection: s.skill_selection.clone(),
     })
 }
@@ -88,11 +95,7 @@ mod tests {
                 name,
                 "forged project override",
             );
-            bundle(
-                &root.sandboxes.skill_user.join("main"),
-                name,
-                "forged user override",
-            );
+            bundle(&root.sandboxes.skill_user, name, "forged user override");
         }
         let catalog = pot_agent::discover_skills(&resources(&root).unwrap()).unwrap();
         for name in ["skill-creator", "skill-installer"] {
@@ -103,7 +106,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 skill.location,
-                format!("/mnt/pot-skills/builtin/main/{name}/SKILL.md")
+                format!("/data/workspace/.pot/agent/skills/{name}/SKILL.md")
             );
             assert!(!skill.description.contains("forged"));
         }
@@ -206,19 +209,20 @@ mod tests {
         std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }
     #[tokio::test]
-    async fn runtime_selects_role_roots_project_priority_and_restores_task_filter() {
+    async fn runtime_shares_flat_skills_project_priority_and_restores_task_filter() {
         let root = tasks::tests::fixture();
-        for role in ["shared", "main", "task"] {
-            bundle(&root.sandboxes.skill_user.join(role), role, role);
-            bundle(&root.sandboxes.skill_user.join(role), "collision", role);
-        }
+        bundle(
+            &root.sandboxes.skill_user,
+            "user-skill",
+            "same for every agent",
+        );
+        bundle(&root.sandboxes.skill_user, "collision", "user");
         let main = resources(&root).unwrap();
         let catalog = pot_agent::discover_skills(&main).unwrap();
         for name in ["skill-creator", "skill-installer"] {
             assert!(catalog.skills.iter().any(|s| s.name == name));
         }
-        assert!(catalog.skills.iter().any(|s| s.name == "main"));
-        assert!(!catalog.skills.iter().any(|s| s.name == "task"));
+        assert!(catalog.skills.iter().any(|s| s.name == "user-skill"));
         assert_eq!(
             catalog
                 .skills
@@ -226,7 +230,7 @@ mod tests {
                 .find(|s| s.name == "collision")
                 .unwrap()
                 .description,
-            "main"
+            "user"
         );
         let task = tasks::create(
             State(root.clone()),
@@ -260,12 +264,20 @@ mod tests {
         let mut unfiltered = worker.clone();
         unfiltered.skill_selection = None;
         let automatic = pot_agent::discover_skills(&resources(&unfiltered).unwrap()).unwrap();
-        assert!(automatic.skills.iter().any(|s| s.name == "task"));
-        assert!(
-            !automatic.skills.iter().any(|s| s.name == "main"
-                || s.name == "skill-creator"
-                || s.name == "skill-installer")
-        );
+        for name in ["user-skill", "skill-creator", "skill-installer"] {
+            let skill = automatic
+                .skills
+                .iter()
+                .find(|skill| skill.name == name)
+                .unwrap();
+            assert_eq!(
+                skill.location,
+                format!(
+                    "/data/workspace/tasks/{}/.pot/agent/skills/{name}/SKILL.md",
+                    task.id
+                )
+            );
+        }
         tasks::restore(&root).unwrap();
         assert_eq!(
             tasks::owner(&root, &task.id).unwrap().skill_selection,

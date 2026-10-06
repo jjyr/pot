@@ -11,18 +11,12 @@ in SKILL.md and substantial conditional detail in references, loaded only when
 needed. Add scripts for repeated or fragile operations and assets for generated
 output; omit unused directories and scaffolds.
 
-## Location and audience
+## Location
 
-Use these writable skill directories:
-
-- `/mnt/pot-skills/user/shared/<name>`: main and task agents; default audience.
-- `/mnt/pot-skills/user/main/<name>`: main agent only.
-- `/mnt/pot-skills/user/task/<name>`: task agents only.
-- `<project>/.agents/skills/<name>`: skills specific to the selected project.
-
-Follow the user's requested audience and project. Project skills take priority
-over user skills; role-specific user skills take priority over shared skills.
-Inspect an existing bundle before editing it.
+Create global skills at `~/.pot/agent/skills/<name>`, or use
+`<project>/.agents/skills/<name>` when the user requests a project-specific skill.
+Main and task agents discover the same global skills. Project skills take priority
+over user global skills. Inspect an existing bundle before editing it.
 
 ## Format
 
@@ -59,7 +53,7 @@ restating enforced permissions, and provide concrete steps only where useful.
 Use apply_patch to prepare or edit a bundle in the workspace. Validate it with:
 
 ```sh
-python3 /mnt/pot-skills/builtin/main/skill-creator/scripts/quick_validate.py /data/workspace/draft/example-skill
+python3 ~/.pot/agent/skills/skill-creator/scripts/quick_validate.py /data/workspace/draft/example-skill
 ```
 
 The validator checks YAML, metadata, unfinished placeholders, ordinary resource
@@ -70,7 +64,7 @@ with representative inputs and inspect their output when appropriate.
 For a new global skill, publish the validated bundle with the installer helper:
 
 ```sh
-python3 /mnt/pot-skills/builtin/main/skill-installer/scripts/install_skill.py --local /data/workspace/draft/example-skill --dest /mnt/pot-skills/user/shared
+python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --local /data/workspace/draft/example-skill
 ```
 
 For an update, use the same command with `--replace` after reviewing the existing
