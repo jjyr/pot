@@ -20,6 +20,40 @@ The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d
 
 Configure the Main Agent in Chat or Settings → AI Configuration. pot-agent uses saved API connections; Codex uses official Host browser authorization. pot-agent is built into Server; Node and Codex are bundled. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
 
+## Releases and Homebrew
+
+Public macOS releases contain the complete Apple Silicon app, Helper, Host runtime,
+and Sandbox image. Install through `brew install --cask jjyr/tap/pot`.
+
+Build a release locally on Apple Silicon macOS 26+:
+
+```sh
+mise run release 0.1.0
+```
+
+This uses release-mode Rust binaries, creates a fresh `.local/d1/Pot.app` with the
+requested bundle version, and writes `Pot-0.1.0-arm64.zip`, its `.sha256` file, and
+`pot.rb` to `.local/releases/`. `--output PATH` selects a different output directory.
+The Helper retains its ad-hoc signature and virtualization entitlement. The Cask
+template lives in `packaging/homebrew/pot.rb.in`; packaging fills in the version
+and ZIP checksum. Its postflight hook removes only `com.apple.quarantine` from
+the installed app, respecting Homebrew's configured app directory.
+
+The Release workflow runs for numeric `vMAJOR.MINOR.PATCH` tags. Manual dispatch
+can retry an existing tag. Before the first release, configure:
+
+- A native Apple Silicon macOS 26+ self-hosted runner with labels `macOS`, `ARM64`,
+  and `pot-release`, Xcode/Swift 6.2+, mise, and GitHub CLI. Sandbox image construction
+  requires Apple Virtualization support; use a dedicated runner checkout.
+- Repository secret `HOMEBREW_TAP_TOKEN` with contents read/write access to
+  `jjyr/homebrew-tap` to publish `Casks/pot.rb` automatically.
+
+The workflow publishes the ZIP, checksum, and generated Cask to GitHub Releases,
+then commits the Cask to the existing tap. If the tap token is absent, copy the
+release's `pot.rb` to `Casks/pot.rb` in `jjyr/homebrew-tap` and commit it manually.
+The installation command becomes available after the first release and tap update.
+Application user data is retained on uninstall.
+
 ## Standalone Server (development entry point)
 
 Build and start the backend without App/Helper. Paths belong to the Server machine. Use a separate data directory rather than opening active App/VM data.
@@ -42,6 +76,7 @@ mise run test          # Backend / protocol, no real model calls
 mise run test:app
 mise run licenses      # Enforce Rust license policy and generate dependency notices
 mise run test:licenses # Check approved, disallowed and unknown license cases
+mise run test:release   # ZIP metadata, permissions, symlinks and Cask checksum
 mise run test:i18n     # Catalogue parity, native switching and embedded web assets
 ```
 

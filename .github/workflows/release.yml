@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (e.g. v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pot-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Sandbox image construction boots an Apple VM and needs a native Mac.
+    runs-on: [self-hosted, macOS, ARM64, pot-release]
+    timeout-minutes: 120
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Validate release tag
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+          clean: true
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.6.0
+      - name: Prepare build prerequisites
+        run: |
+          mise exec -- rustup component add rustfmt clippy
+          mise exec -- rustup target add aarch64-unknown-linux-musl
+          mise run doctor
+      - name: Build release
+        # Check packaging before the full build and VM image construction.
+        run: |
+          mise run test:release
+          mise run release "$RELEASE_TAG" --output "$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          output="$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --draft
+          fi
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$output"/*.zip "$output"/*.sha256 "$output/pot.rb"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+      - name: Check out Homebrew tap
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: jjyr/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: .local/homebrew-tap
+      - name: Update Homebrew cask
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        working-directory: .local/homebrew-tap
+        run: |
+          mkdir -p Casks
+          cp "$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/pot.rb" Casks/pot.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/pot.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Pot to $RELEASE_TAG"
+            git push
+          fi
