@@ -162,7 +162,11 @@ elif cmd == "bundle":
         pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug/pot-server",
         APP / "Contents/Resources/runtime/pot-server",
     )
-    shutil.copytree(REPO / "skills", APP / "Contents/Resources/runtime/skills")
+    shutil.copytree(
+        REPO / "skills",
+        APP / "Contents/Resources/runtime/skills",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     host_tools = APP / "Contents/Resources/runtime/host-tools"
     host_tools.mkdir(exist_ok=True)
     shutil.copy2(REPO / "image/agents/package.json", host_tools / "package.json")

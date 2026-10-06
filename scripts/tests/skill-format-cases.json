@@ -1,0 +1,67 @@
+[
+  {
+    "id": "simple",
+    "text": "---\nname: example\ndescription: useful skill\n---\nInstructions\n",
+    "valid": true
+  },
+  {
+    "id": "folded-crlf-bom",
+    "text": "﻿---\r\nname: example\r\ndescription: >-\r\n  Read <PDF>\r\n  and tables\r\n---\r\nInstructions",
+    "valid": true
+  },
+  {
+    "id": "optional-standard-fields",
+    "text": "---\nname: example\ndescription: useful\nlicense: MIT\nmetadata:\n  author: test\nallowed-tools: exec_command\ndisable-model-invocation: false\n---\n",
+    "valid": true
+  },
+  {
+    "id": "empty-description",
+    "text": "---\nname: example\ndescription: ''\n---\n",
+    "valid": false
+  },
+  {
+    "id": "uppercase-name",
+    "text": "---\nname: Example\ndescription: useful\n---\n",
+    "valid": false
+  },
+  {
+    "id": "double-hyphen",
+    "text": "---\nname: exam--ple\ndescription: useful\n---\n",
+    "valid": false
+  },
+  {
+    "id": "trailing-hyphen",
+    "text": "---\nname: example-\ndescription: useful\n---\n",
+    "valid": false
+  },
+  {
+    "id": "missing-description",
+    "text": "---\nname: example\n---\n",
+    "valid": false
+  },
+  {
+    "id": "invalid-yaml",
+    "text": "---\nname: example\ndescription: [broken\n---\n",
+    "valid": false
+  },
+  {
+    "id": "invalid-flag",
+    "text": "---\nname: example\ndescription: useful\ndisable-model-invocation: sometimes\n---\n",
+    "valid": false
+  },
+  {
+    "id": "non-mapping",
+    "text": "---\n- example\n---\n",
+    "valid": false
+  },
+  {
+    "id": "missing-frontmatter",
+    "text": "Instructions only",
+    "valid": false
+  },
+  {
+    "id": "invalid-closing-delimiter",
+    "text": "---\nname: example\ndescription: useful\n---suffix\n",
+    "valid": false
+  }
+]

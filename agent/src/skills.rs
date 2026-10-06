@@ -177,7 +177,8 @@ pub fn discover_skills(resources: &pot_core::SkillResources) -> Result<SkillCata
                     .strip_prefix("---\n")
                     .ok_or_else(|| anyhow::anyhow!("Missing skill frontmatter"))?;
                 let (header, _) = rest
-                    .split_once("\n---")
+                    .split_once("\n---\n")
+                    .or_else(|| rest.strip_suffix("\n---").map(|header| (header, "")))
                     .ok_or_else(|| anyhow::anyhow!("Unclosed skill frontmatter"))?;
                 let header: Frontmatter = serde_yaml::from_str(header)?;
                 let skill = Skill {
@@ -269,6 +270,29 @@ mod discovery_tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn loader_and_authoring_validator_share_format_fixtures() {
+        let f = Fixture::new();
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../scripts/tests/skill-format-cases.json"))
+                .unwrap();
+        for case in cases {
+            f.write("example", case["text"].as_str().unwrap());
+            let catalog = discover_skills(&f.resources()).unwrap();
+            assert_eq!(
+                !catalog.skills.is_empty(),
+                case["valid"].as_bool().unwrap(),
+                "{}: {:?}",
+                case["id"],
+                catalog.diagnostics
+            );
+        }
+        f.write(
+            "example",
+            "---\nname: example\ndescription: useful\n---suffix\n",
+        );
+        assert!(discover_skills(&f.resources()).unwrap().skills.is_empty());
     }
     #[test]
     fn recursive_discovery_stops_at_bundles_and_skips_hidden_and_symlink_resources() {
@@ -390,14 +414,14 @@ mod discovery_tests {
         }
         let resources = SkillResources {
             roots: roots.clone(),
-            reserved_names: vec!["skill-manager".into()],
+            reserved_names: vec!["skill-creator".into()],
             selection: None,
         };
         for root in [&roots[0], &roots[3]] {
             std::fs::create_dir_all(root.path.join("manager")).unwrap();
             std::fs::write(
                 root.path.join("manager/SKILL.md"),
-                "---\nname: skill-manager\ndescription: Manage skills\n---\n",
+                "---\nname: skill-creator\ndescription: Manage skills\n---\n",
             )
             .unwrap();
         }
@@ -427,7 +451,7 @@ mod discovery_tests {
             "/visible/user-role/example/SKILL.md"
         );
         let mut filtered = resources.clone();
-        filtered.selection = Some(vec!["skill-manager".into()]);
+        filtered.selection = Some(vec!["skill-creator".into()]);
         assert_eq!(discover_skills(&filtered).unwrap().skills.len(), 1);
         filtered.selection = Some(vec!["missing".into()]);
         assert!(discover_skills(&filtered).is_err());
