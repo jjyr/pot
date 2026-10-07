@@ -28,7 +28,8 @@ struct Scope {
     id: String,
     target: String,
     owner: String,
-    turn: String,
+    epoch: u64,
+    parked: bool,
     generation: u64,
 }
 /// In-process Agent calls use the same Runtime authorization as MCP calls.
@@ -61,11 +62,23 @@ impl pot_core::ToolExecutor for Tools {
             Ok(value.get("result").cloned().unwrap_or(value))
         })
     }
-    fn finish<'a>(
+    fn abort<'a>(
         &'a self,
         _: &'a pot_core::ExecutionContext,
     ) -> futures::future::BoxFuture<'a, Result<()>> {
         Box::pin(finish(&self.service))
+    }
+    fn finish<'a>(
+        &'a self,
+        _: &'a pot_core::ExecutionContext,
+    ) -> futures::future::BoxFuture<'a, Result<()>> {
+        Box::pin(async {
+            if agent::cancelled(&self.service) || self.service.stopping() {
+                finish(&self.service).await
+            } else {
+                finish_turn(&self.service).await
+            }
+        })
     }
 }
 // Guest output cannot manufacture Agent lifecycle/control events. IDs are
@@ -116,6 +129,7 @@ pub struct Manager {
     committed: Mutex<Inventory>,
     leases: Mutex<BTreeMap<String, usize>>,
     scopes: Mutex<BTreeMap<String, Scope>>,
+    gates: Mutex<BTreeMap<String, Arc<tokio::sync::RwLock<()>>>>,
     sessions: Mutex<BTreeMap<String, String>>,
     lifecycle: tokio::sync::Mutex<()>,
     client: reqwest::Client,
@@ -182,6 +196,7 @@ impl Manager {
             book: Mutex::new(book),
             leases: Mutex::new(BTreeMap::new()),
             scopes: Mutex::new(BTreeMap::new()),
+            gates: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(BTreeMap::new()),
             lifecycle: tokio::sync::Mutex::new(()),
             client: reqwest::Client::builder()
@@ -219,23 +234,54 @@ impl Manager {
             &serde_json::to_value(&*self.pending.lock().unwrap())?,
         )
     }
-    fn scope(&self, target: &str, owner: &str, turn: &str, generation: u64) -> Result<Scope> {
+    fn gate(&self, owner: &str) -> Arc<tokio::sync::RwLock<()>> {
+        self.gates
+            .lock()
+            .unwrap()
+            .entry(owner.into())
+            .or_default()
+            .clone()
+    }
+    fn scope(&self, target: &str, owner: &str, epoch: u64, generation: u64) -> Result<Scope> {
         let mut scopes = self.scopes.lock().unwrap();
         if let Some(scope) = scopes
             .values()
-            .find(|v| v.owner == owner && v.turn == turn && v.target == target)
+            .find(|v| v.owner == owner && v.epoch == epoch && v.target == target)
         {
             anyhow::ensure!(
                 scope.generation == generation,
                 "Sandbox generation changed; session outcome unknown"
             );
-            return Ok(scope.clone());
+            let id = scope.id.clone();
+            if scope.parked {
+                self.pending.lock().unwrap().insert(
+                    id.clone(),
+                    Pending {
+                        target: target.into(),
+                        owner: owner.into(),
+                        active: true,
+                    },
+                );
+                if let Err(error) = self.persist_operations() {
+                    self.pending.lock().unwrap().remove(&id);
+                    return Err(error);
+                }
+                *self
+                    .leases
+                    .lock()
+                    .unwrap()
+                    .entry(target.into())
+                    .or_default() += 1;
+                scopes.get_mut(&id).unwrap().parked = false;
+            }
+            return Ok(scopes[&id].clone());
         }
         let scope = Scope {
             id: store::id(),
             target: target.into(),
             owner: owner.into(),
-            turn: turn.into(),
+            epoch,
+            parked: false,
             generation,
         };
         // Keep initialization serialized through persistence; concurrent calls
@@ -697,6 +743,8 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     }
     pot_core::environment_tools::validate(name, &validated)?;
 
+    let gate = s.sandboxes.gate(&s.usage_scope);
+    let _gate = gate.read().await;
     let receipt = format!("sandbox.operation:{turn}:{call_id}");
     if let Some(old) = s.inner.lock().unwrap().store.get(&receipt)? {
         let old: Value = serde_json::from_str(&old)?;
@@ -726,7 +774,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             .unwrap()
             .get(session)
             .cloned()
-            .ok_or_else(|| anyhow!("Session expired or belongs to another turn"))?;
+            .ok_or_else(|| anyhow!("Session expired or belongs to another agent session"))?;
         let scope = s
             .sandboxes
             .scopes
@@ -736,8 +784,8 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             .cloned()
             .ok_or_else(|| anyhow!("Session scope expired"))?;
         anyhow::ensure!(
-            scope.owner == s.usage_scope && scope.turn == turn,
-            "Session belongs to another task/turn"
+            scope.owner == s.usage_scope && scope.epoch == binding.epoch,
+            "Session belongs to another task/agent epoch"
         );
         Some(scope)
     } else {
@@ -779,7 +827,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     );
     let scope = s
         .sandboxes
-        .scope(&target, &s.usage_scope, &turn, generation)?;
+        .scope(&target, &s.usage_scope, binding.epoch, generation)?;
     let mut record =
         json!({"id":store::id(),"target":target,"name":name,"args":args,"status":"accepted"});
     s.inner
@@ -817,6 +865,13 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         "Sandbox execution request failed"
     );
     let mut result: Value = result.json().await?;
+    if name == "write_stdin"
+        && result["result"]["isError"] != true
+        && result["result"]["session_id"].is_null()
+        && let Some(session) = args["session_id"].as_str()
+    {
+        s.sandboxes.sessions.lock().unwrap().remove(session);
+    }
     if let Some(session) = result["result"]["session_id"].as_str() {
         s.sandboxes
             .sessions
@@ -869,7 +924,13 @@ async fn cancel_scope(s: &Service, scope: &Scope) -> Result<()> {
     Ok(())
 }
 fn release_scope(manager: &Manager, scope: &Scope) {
-    if manager.scopes.lock().unwrap().remove(&scope.id).is_some() {
+    if manager
+        .scopes
+        .lock()
+        .unwrap()
+        .remove(&scope.id)
+        .is_some_and(|v| !v.parked)
+    {
         *manager
             .leases
             .lock()
@@ -882,6 +943,182 @@ fn release_scope(manager: &Manager, scope: &Scope) {
         .lock()
         .unwrap()
         .retain(|_, id| id != &scope.id);
+}
+/// Normal turns retain processes and initialization caches. Empty runners are parked
+/// without an execution lease/unknown-effect receipt; guest idle expiry bounds them.
+pub async fn finish_turn(s: &Service) -> Result<()> {
+    if agent::cancelled(s) || s.stopping() {
+        return finish(s).await;
+    }
+    let scopes: Vec<_> = s
+        .sandboxes
+        .scopes
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|v| v.owner == s.usage_scope)
+        .cloned()
+        .collect();
+    for scope in scopes {
+        if let Err(error) = inspect_scope(s, &scope).await {
+            if let Some(pending) = s.sandboxes.pending.lock().unwrap().get_mut(&scope.id) {
+                pending.active = false;
+            }
+            release_scope(&s.sandboxes, &scope);
+            s.sandboxes.persist_operations()?;
+            return Err(anyhow!("Executor inspection stop unconfirmed: {error}"));
+        }
+    }
+    Ok(())
+}
+async fn inspect_scope(s: &Service, scope: &Scope) -> Result<()> {
+    let gate = s.sandboxes.gate(&scope.owner);
+    let _gate = gate.write().await;
+    if !s.sandboxes.scopes.lock().unwrap().contains_key(&scope.id) {
+        return Ok(());
+    }
+    let state = s.sandboxes.helper(&scope.target, "status").await?;
+    if matches!(state["phase"].as_str(), Some("stopped" | "failed"))
+        || state["generation"].as_u64().unwrap_or(0) != scope.generation
+    {
+        // A changed generation proves the old executor cannot retain its processes.
+        s.sandboxes.settle(&scope.id)?;
+        release_scope(&s.sandboxes, scope);
+        return Ok(());
+    }
+    anyhow::ensure!(
+        state["phase"] == "running",
+        "Executor inspection stop unconfirmed: environment transition in progress"
+    );
+    let ip = state["ip"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Executor inspect stop unconfirmed"))?;
+    let token = std::fs::read_to_string(
+        s.sandboxes
+            .root
+            .join("sandboxes")
+            .join(&scope.target)
+            .join("executor-token"),
+    )?;
+    let reply: Value = s
+        .sandboxes
+        .client
+        .post(format!("{}/inspect", s.sandboxes.executor_url(ip)))
+        .bearer_auth(token.trim())
+        .json(&json!({"id":scope.id}))
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let sessions = reply["sessions"]
+        .as_array()
+        .ok_or_else(|| anyhow!("Invalid executor session inventory; stop unconfirmed"))?;
+    anyhow::ensure!(
+        reply["active"].is_boolean()
+            && reply["ended"].is_boolean()
+            && sessions.iter().all(Value::is_string),
+        "Invalid executor session inventory; stop unconfirmed"
+    );
+    s.sandboxes.sessions.lock().unwrap().retain(|session, id| {
+        id != &scope.id || sessions.iter().any(|v| v.as_str() == Some(session))
+    });
+    if reply["ended"] == true {
+        s.sandboxes.settle(&scope.id)?;
+        release_scope(&s.sandboxes, scope);
+    } else if reply["active"] == false && !scope.parked {
+        s.sandboxes.settle(&scope.id)?;
+        let mut scopes = s.sandboxes.scopes.lock().unwrap();
+        if let Some(value) = scopes.get_mut(&scope.id)
+            && !value.parked
+        {
+            value.parked = true;
+            *s.sandboxes
+                .leases
+                .lock()
+                .unwrap()
+                .get_mut(&scope.target)
+                .unwrap() -= 1;
+        }
+    }
+    Ok(())
+}
+pub async fn refresh(s: &Service) -> Result<()> {
+    finish_turn(s).await
+}
+pub async fn reap_idle(s: &Service) -> Result<()> {
+    let scopes: Vec<_> = s
+        .sandboxes
+        .scopes
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|v| {
+            *s.sandboxes
+                .running
+                .lock()
+                .unwrap()
+                .get(&v.owner)
+                .unwrap_or(&0)
+                == 0
+        })
+        .cloned()
+        .collect();
+    for scope in scopes {
+        if let Err(error) = inspect_scope(s, &scope).await {
+            if let Some(pending) = s.sandboxes.pending.lock().unwrap().get_mut(&scope.id) {
+                pending.active = false;
+            }
+            release_scope(&s.sandboxes, &scope);
+            s.sandboxes.persist_operations()?;
+            return Err(anyhow!("Executor inspection stop unconfirmed: {error}"));
+        }
+    }
+    Ok(())
+}
+pub async fn finish_stale(s: &Service, epoch: u64) -> Result<()> {
+    let scopes: Vec<_> = s
+        .sandboxes
+        .scopes
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|v| v.owner == s.usage_scope && v.epoch != epoch)
+        .cloned()
+        .collect();
+    for scope in scopes {
+        cancel_scope(s, &scope).await?;
+    }
+    Ok(())
+}
+pub async fn shutdown(s: &Service) -> Result<()> {
+    let scopes: Vec<_> = s
+        .sandboxes
+        .scopes
+        .lock()
+        .unwrap()
+        .values()
+        .cloned()
+        .collect();
+    let mut errors = vec![];
+    for scope in scopes {
+        if let Err(error) = cancel_scope(s, &scope).await {
+            errors.push(error.to_string());
+        }
+    }
+    anyhow::ensure!(
+        errors.is_empty(),
+        "Executor shutdown stop unconfirmed: {}",
+        errors.join("; ")
+    );
+    Ok(())
+}
+pub async fn finish_idle(s: &Service) -> Result<()> {
+    let gate = s.sandboxes.gate(&s.usage_scope);
+    let _gate = gate.write().await;
+    finish(s).await?;
+    drain(s).await
 }
 pub async fn finish(s: &Service) -> Result<()> {
     let mut errors = vec![];
@@ -978,7 +1215,7 @@ pub async fn drain(s: &Service) -> Result<()> {
                     .lock()
                     .unwrap()
                     .values()
-                    .any(|v| v.owner == s.usage_scope),
+                    .any(|v| v.owner == s.usage_scope && !v.active),
                 "Sandbox execution outcome unknown; stop unconfirmed, recover environment before continuing"
             );
             return Ok(());
@@ -1189,7 +1426,8 @@ mod tests {
             id: "scope".into(),
             target: "default".into(),
             owner: "other-task".into(),
-            turn: "turn".into(),
+            epoch: 999,
+            parked: false,
             generation: 1,
         };
         s.sandboxes
@@ -1212,7 +1450,7 @@ mod tests {
                 .unwrap_err()
                 .to_string();
             assert!(
-                error.contains("another task/turn")
+                error.contains("another task/agent epoch")
                     || error.contains("cannot switch")
                     || error.contains("expired"),
                 "{error}"
@@ -1220,7 +1458,7 @@ mod tests {
         }
         let mut prior = scope.clone();
         prior.owner = s.usage_scope.clone();
-        prior.turn = "prior-turn".into();
+        prior.epoch = 999;
         s.sandboxes
             .scopes
             .lock()
@@ -1231,7 +1469,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("another task/turn")
+                .contains("another task/agent epoch")
         );
         assert!(!s.data.parent().unwrap().join("helper.sock").exists());
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
@@ -1277,7 +1515,7 @@ mod tests {
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
                     barrier.wait();
-                    manager.scope("default", "main", "turn", 1).unwrap().id
+                    manager.scope("default", "main", 1, 1).unwrap().id
                 })
             })
             .collect();
@@ -1286,7 +1524,7 @@ mod tests {
         assert_eq!(ids.len(), 1);
         assert_eq!(s.sandboxes.pending.lock().unwrap().len(), 1);
         assert_eq!(s.sandboxes.leases.lock().unwrap()["default"], 1);
-        assert!(s.sandboxes.scope("default", "main", "turn", 2).is_err());
+        assert!(s.sandboxes.scope("default", "main", 1, 2).is_err());
         assert_eq!(
             Manager::open(&s.data)
                 .unwrap()

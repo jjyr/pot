@@ -8,6 +8,8 @@ struct SandboxFixture {
     service: Service,
     http: Arc<Mutex<Vec<Value>>>,
     helper_calls: Arc<Mutex<Vec<Value>>>,
+    inspect: Arc<Mutex<std::collections::BTreeMap<String, Value>>>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
     servers: Vec<tokio::task::JoinHandle<()>>,
 }
 impl SandboxFixture {
@@ -25,11 +27,17 @@ impl SandboxFixture {
         assert!(service.test_tool_executor.is_none());
         let http = Arc::new(Mutex::new(vec![]));
         let mut servers = vec![];
+        let inspect = Arc::new(Mutex::new(
+            std::collections::BTreeMap::<String, Value>::new(),
+        ));
+        let generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
         for target in ["default", "linux-b"] {
             let captured = http.clone();
+            let inventory = inspect.clone();
             let app = Router::new().fallback(any(
             move |uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
                 let captured = captured.clone();
+                let inventory=inventory.clone();
                 async move {
                     let auth = headers.get("authorization").unwrap().to_str().unwrap();
                     assert_eq!(auth,format!("Bearer fixture-{target}"));
@@ -44,6 +52,7 @@ impl SandboxFixture {
                             }
                             json!({"result":result,"events":[serde_json::to_value(Update::ToolOutput {id:"guest-id".into(),stream:"stdout".into(),text:"guest output".into()}).unwrap()]})
                         },
+                        "/inspect" => inventory.lock().unwrap().get(target).cloned().unwrap_or_else(||json!({"sessions":[format!("live-Bearer fixture-{target}")],"active":true,"ended":false})),
                         "/finish" => json!({"settled":true}),
                         _ => panic!("Unexpected executor route: {uri}"),
                     })
@@ -80,6 +89,7 @@ impl SandboxFixture {
                 .unwrap();
         let helper_calls = Arc::new(Mutex::new(vec![]));
         let captured = helper_calls.clone();
+        let helper_generation = generation.clone();
         let helper_server = tokio::spawn(async move {
             loop {
                 let (socket, _) = listener.accept().await.unwrap();
@@ -93,8 +103,7 @@ impl SandboxFixture {
                     Some("default" | "linux-b")
                 ));
                 captured.lock().unwrap().push(call.clone());
-                let reply =
-                    json!({"result":{"phase":"running","ip":call["sandbox_id"],"generation":1}});
+                let reply = json!({"result":{"phase":"running","ip":call["sandbox_id"],"generation":helper_generation.load(std::sync::atomic::Ordering::SeqCst)}});
                 socket
                     .get_mut()
                     .write_all(format!("{reply}\n").as_bytes())
@@ -110,6 +119,8 @@ impl SandboxFixture {
             service,
             http,
             helper_calls,
+            inspect,
+            generation,
             servers,
         }
     }
@@ -276,13 +287,7 @@ async fn main_context_routes_commands_patch_and_sessions_through_sandbox() {
     );
     assert!(!context.workspace.join("effects.txt").exists());
     assert!(!s.workspace.join("effects.txt").exists());
-    context
-        .tool_executor
-        .as_ref()
-        .unwrap()
-        .finish(&context)
-        .await
-        .unwrap();
+    crate::sandbox::finish(s).await.unwrap();
     let finishes = fixture.requests("/finish");
     assert_eq!(finishes.len(), 2);
     for index in [0, 2] {
@@ -385,13 +390,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
         assert_eq!(fixture.helper_calls.lock().unwrap().len(), before);
         assert_eq!(fixture.requests("/execute").len(), 1);
     }
-    context
-        .tool_executor
-        .as_ref()
-        .unwrap()
-        .finish(&context)
-        .await
-        .unwrap();
+    crate::sandbox::finish(&worker).await.unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
 }
 
@@ -452,4 +451,267 @@ async fn runtime_injects_fresh_instructions_for_both_engines_and_roles_but_not_s
         }
     }
     assert!(fixture.helper_calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn sessions_survive_turns_keep_original_environment_and_cancel_explicitly() {
+    let fixture = SandboxFixture::new().await;
+    let s = &fixture.service;
+    let request = SandboxFixture::activate(s);
+    let binding = binding(s).unwrap();
+    let context = make_context(s, &binding, Some(&request)).unwrap();
+    let policy = &binding.spec.params.agent.shell;
+    let (open, _) = execute(
+        &context,
+        policy,
+        "exec_command",
+        json!({"cmd":"bash","tty":true,"login":false,"yield_time_ms":1}),
+        "open",
+    )
+    .await;
+    context
+        .tool_executor
+        .as_ref()
+        .unwrap()
+        .finish(&context)
+        .await
+        .unwrap();
+    assert!(fixture.requests("/finish").is_empty());
+    crate::sandbox::drain(s).await.unwrap();
+    s.turn(None);
+    let mut next = request.clone();
+    next.request_id = "second-turn".into();
+    s.save(Message {
+        id: "second-input".into(),
+        conversation_id: "main".into(),
+        role: Role::User,
+        text: "next".into(),
+        status: MessageStatus::Accepted,
+        created_at_ms: now(),
+        request_id: Some(next.request_id.clone()),
+    })
+    .unwrap();
+    s.turn(Some(TurnState {
+        user_message_id: "second-input".into(),
+        cancelling: false,
+    }));
+    crate::sandbox::management(s, &json!({"action":"select","sandbox_id":"linux-b"}))
+        .await
+        .unwrap();
+    let context = make_context(s, &binding, Some(&next)).unwrap();
+    execute(
+        &context,
+        policy,
+        "write_stdin",
+        json!({"session_id":open["session_id"],"chars":"pwd\n","rows":40,"cols":120}),
+        "input",
+    )
+    .await;
+    let calls = fixture.requests("/execute");
+    assert_eq!(calls[0]["body"]["scope"], calls[1]["body"]["scope"]);
+    assert_eq!(calls[1]["target"], "default");
+    assert_eq!(calls[1]["body"]["args"]["rows"], 40);
+    s.turn(Some(TurnState {
+        user_message_id: "second-input".into(),
+        cancelling: true,
+    }));
+    context
+        .tool_executor
+        .as_ref()
+        .unwrap()
+        .finish(&context)
+        .await
+        .unwrap();
+    assert_eq!(fixture.requests("/finish").len(), 1);
+    crate::sandbox::drain(s).await.unwrap();
+}
+
+#[tokio::test]
+async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch_invalidate() {
+    let fixture = SandboxFixture::new().await;
+    let s = &fixture.service;
+    SandboxFixture::activate(s);
+    let binding = binding(s).unwrap();
+    let empty = json!({"sessions":[],"active":false,"ended":false});
+    fixture
+        .inspect
+        .lock()
+        .unwrap()
+        .insert("default".into(), empty);
+    crate::sandbox::tool(s, "exec_command", "first", &json!({"cmd":"true"}))
+        .await
+        .unwrap();
+    let initial = fixture.requests("/execute")[0]["body"]["scope"].clone();
+    crate::sandbox::finish_turn(s).await.unwrap();
+    let inventory = crate::sandbox::tool(s, "pot_list_sandboxes", "inventory", &json!({}))
+        .await
+        .unwrap();
+    let rows = inventory["items"].as_array().unwrap();
+    assert_eq!(
+        rows.iter().find(|r| r["id"] == "default").unwrap()["active_leases"],
+        0
+    );
+    assert!(
+        !std::fs::read_to_string(s.data.join("sandbox-operations.json"))
+            .is_ok_and(|v| v.contains("default"))
+    );
+    crate::sandbox::tool(s, "exec_command", "second", &json!({"cmd":"true"}))
+        .await
+        .unwrap();
+    assert_eq!(fixture.requests("/execute")[1]["body"]["scope"], initial);
+    crate::sandbox::finish_turn(s).await.unwrap();
+    fixture
+        .generation
+        .store(2, std::sync::atomic::Ordering::SeqCst);
+    crate::sandbox::refresh(s).await.unwrap();
+    let error = crate::sandbox::tool(
+        s,
+        "write_stdin",
+        "old-generation",
+        &json!({"session_id":"live-Bearer fixture-default"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("expired"));
+    crate::sandbox::tool(s, "exec_command", "third", &json!({"cmd":"true"}))
+        .await
+        .unwrap();
+    assert_ne!(fixture.requests("/execute")[2]["body"]["scope"], initial);
+    crate::sandbox::finish_stale(s, binding.epoch + 1)
+        .await
+        .unwrap();
+    assert_eq!(fixture.requests("/finish").len(), 1);
+    crate::sandbox::drain(s).await.unwrap();
+}
+
+#[tokio::test]
+async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
+    let fixture = SandboxFixture::new().await;
+    let s = &fixture.service;
+    SandboxFixture::activate(s);
+    let open = crate::sandbox::tool(
+        s,
+        "exec_command",
+        "open",
+        &json!({"cmd":"sleep 10","yield_time_ms":1}),
+    )
+    .await
+    .unwrap();
+    fixture.inspect.lock().unwrap().insert(
+        "default".into(),
+        json!({"sessions":[],"active":false,"ended":true}),
+    );
+    crate::sandbox::reap_idle(s).await.unwrap();
+    let error = crate::sandbox::tool(
+        s,
+        "write_stdin",
+        "expired",
+        &json!({"session_id":open["result"]["session_id"]}),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("expired"));
+    fixture.inspect.lock().unwrap().clear();
+    crate::sandbox::tool(
+        s,
+        "exec_command",
+        "new",
+        &json!({"cmd":"sleep 10","yield_time_ms":1}),
+    )
+    .await
+    .unwrap();
+    let mut restarted = s.clone();
+    restarted.sandboxes = Arc::new(crate::sandbox::Manager::open(&s.data).unwrap());
+    assert!(
+        crate::sandbox::tool(
+            &restarted,
+            "write_stdin",
+            "restart",
+            &json!({"session_id":open["result"]["session_id"]})
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("expired")
+    );
+    // Durable unknown scopes prevent fresh execution after an unclean restart.
+    assert!(
+        crate::sandbox::tool(&restarted, "exec_command", "fresh", &json!({"cmd":"true"}))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unsettled")
+    );
+    crate::sandbox::finish(s).await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_session_inspection_quarantines_active_effects() {
+    let fixture = SandboxFixture::new().await;
+    let s = &fixture.service;
+    SandboxFixture::activate(s);
+    crate::sandbox::tool(
+        s,
+        "exec_command",
+        "open",
+        &json!({"cmd":"sleep 10","yield_time_ms":1}),
+    )
+    .await
+    .unwrap();
+    fixture.inspect.lock().unwrap().insert(
+        "default".into(),
+        json!({"sessions":[],"active":"false","ended":false}),
+    );
+    assert!(
+        crate::sandbox::finish_turn(s)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("stop unconfirmed")
+    );
+    assert!(crate::sandbox::drain(s).await.is_err());
+    assert!(s.sandboxes.acquire("default").await.is_err());
+}
+
+#[tokio::test]
+async fn completed_task_cancellation_closes_retained_resources_without_rewriting_result() {
+    let fixture = SandboxFixture::new().await;
+    let root = &fixture.service;
+    let task = tasks::create(
+        State(root.clone()),
+        tasks::tests::headers(),
+        Json(CreateTask {
+            request_id: "retained-task".into(),
+            text: "fixture".into(),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    let (_, worker, request) = tasks::claim(root).unwrap().unwrap();
+    crate::sandbox::tool(
+        &worker,
+        "exec_command",
+        "open",
+        &json!({"cmd":"sleep 10","yield_time_ms":1}),
+    )
+    .await
+    .unwrap();
+    crate::sandbox::finish_turn(&worker).await.unwrap();
+    tasks::tests::succeed(root, &task.id, &worker, &request);
+    let reply = tasks::cancel(
+        State(root.clone()),
+        tasks::tests::headers(),
+        axum::extract::Path(task.id.clone()),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(reply["sessions_stopped"], true);
+    assert_eq!(fixture.requests("/finish").len(), 1);
+    assert_eq!(
+        tasks::task_phase(&root.tasks.lock().unwrap(), &task.id),
+        Some(TaskPhase::Complete)
+    );
 }

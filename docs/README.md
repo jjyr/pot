@@ -15,6 +15,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand AGENTS.md discovery and injection | [Agent instructions](agent-instructions.md) |
 | Inject skills into main and task pot-agent sessions | [Agent skill injection](agent-skills.md) |
 | Change APIs, pot-agent, task state, or recovery | [Runtime contract](../runtime/README.md) |
+| Understand command shells, PTY, background sessions and initialization snapshots | [Sandbox command execution](executor.md) |
 | Build the Sandbox image, desktop theme, or CJK fonts | [Sandbox image](sandbox-image.md) |
 | Configure QR/pairing browser access and encrypted main-message push | [Mobile access](mobile-access.md) |
 | Change UI language, translations or locale matching | [Internationalization](internationalization.md) |

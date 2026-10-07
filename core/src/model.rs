@@ -621,4 +621,30 @@ mod checksum_tests {
         spec.model = "tampered".into();
         assert!(spec.validate().is_err());
     }
+    #[test]
+    fn shell_settings_round_trip_and_policy_changes_are_detected() {
+        let mut original = spec();
+        original.params.agent.shell.allow_login_shell = false;
+        original.params.agent.shell.shell_snapshot = false;
+        original.spec_hash = original.hash().unwrap();
+        let serialized = serde_json::to_value(&original).unwrap();
+        let shell = &serialized["params"]["agent"]["shell"];
+        assert_eq!(shell["allow_login_shell"], false);
+        assert_eq!(shell["shell_snapshot"], false);
+        assert_eq!(shell["session_idle_timeout_ms"], 1_800_000);
+        let mut restored: ResolvedSpec = serde_json::from_value(serialized).unwrap();
+        restored.validate().unwrap();
+        assert!(!restored.params.agent.shell.allow_login_shell);
+        assert!(!restored.params.agent.shell.shell_snapshot);
+        restored.params.agent.shell.allow_login_shell = true;
+        assert!(restored.validate().is_err());
+    }
+    #[test]
+    fn omitted_shell_settings_use_the_current_defaults() {
+        let settings: crate::ShellSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(settings, crate::ShellSettings::default());
+        assert_eq!(settings.executable, "/bin/bash");
+        assert!(settings.allow_login_shell);
+        assert!(settings.shell_snapshot);
+    }
 }

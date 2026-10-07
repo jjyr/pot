@@ -78,6 +78,7 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
+mise run test:executor # Guest receipt, idle expiry and cleanup contracts without a VM
 mise run test:ui      # Portable shared chat/page state and localization
 mise run licenses      # Enforce Rust license policy and generate dependency notices
 mise run test:licenses # Check approved, disallowed and unknown license cases

@@ -43,6 +43,9 @@ impl Default for AgentSettings {
 #[serde(default, deny_unknown_fields)]
 pub struct ShellSettings {
     pub executable: String,
+    pub allow_login_shell: bool,
+    pub shell_snapshot: bool,
+    pub session_idle_timeout_ms: u64,
     pub default_timeout_ms: u64,
     pub max_timeout_ms: u64,
     pub default_output_bytes: usize,
@@ -54,7 +57,10 @@ pub struct ShellSettings {
 impl Default for ShellSettings {
     fn default() -> Self {
         Self {
-            executable: "/bin/sh".into(),
+            executable: "/bin/bash".into(),
+            allow_login_shell: true,
+            shell_snapshot: true,
+            session_idle_timeout_ms: 1_800_000,
             default_timeout_ms: 120000,
             max_timeout_ms: 300000,
             default_output_bytes: 16384,
@@ -110,6 +116,7 @@ impl AgentSettings {
         );
         ensure!(
             shell.max_sessions > 0
+                && shell.session_idle_timeout_ms > 0
                 && shell.default_yield_ms > 0
                 && shell.default_yield_ms <= shell.max_yield_ms,
             "Invalid shell session/yield limit"

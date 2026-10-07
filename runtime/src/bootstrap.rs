@@ -52,6 +52,9 @@ impl Backend {
         if let Some(mut main) = self.main.take() {
             settle(&mut main).await;
         }
+        if let Err(error) = sandbox::shutdown(&self.state).await {
+            eprintln!("{error}");
+        }
         self.state.codex.shutdown().await;
     }
 }

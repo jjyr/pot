@@ -37,3 +37,7 @@ requests in memory; it does not connect to a daemon. See
 [standalone hosting](standalone-server.md) and [browser access](mobile-access.md).
 Physical-phone and real VM/provider distribution qualification remain separate
 from the credential-free hosting tests.
+
+## Command execution follow-up — 2026-10-07
+
+Implemented shell/login selection, pipe/PTY sessions and terminal controls, Agent-session process retention with epoch/generation authorization, idle expiry and orphan drainage, and bounded in-memory Bash/Zsh login snapshots with startup-file invalidation/fallback. Current contract: [Sandbox command execution](executor.md). Runtime/real-runner tests and broker lifecycle doubles are included; actual verification and limits are recorded in [acceptance](validation/executor-sessions-20261007.md).

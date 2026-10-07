@@ -278,6 +278,11 @@ pub trait ToolExecutor: Send + Sync {
         call: &'a str,
         emit: &'a mut (dyn FnMut(Update) -> Result<()> + Send),
     ) -> BoxFuture<'a, Result<Value>>;
-    /// Await remote session cleanup before emitting a terminal turn event.
+    /// Settle turn operations before emitting a terminal event. Normal turns may
+    /// retain managed processes scoped to the owning Agent session.
     fn finish<'a>(&'a self, context: &'a ExecutionContext) -> BoxFuture<'a, Result<()>>;
+    /// Failed turns must drain their processes rather than retaining them.
+    fn abort<'a>(&'a self, context: &'a ExecutionContext) -> BoxFuture<'a, Result<()>> {
+        self.finish(context)
+    }
 }
