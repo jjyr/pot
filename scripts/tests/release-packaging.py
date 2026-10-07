@@ -50,6 +50,20 @@ class ReleasePackaging(unittest.TestCase):
             self.assertTrue((restored / "pot-link").is_symlink())
             self.assertEqual((restored / "pot-app").stat().st_mode & 0o777, 0o755)
 
+    def test_embedded_sandbox_resources_are_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="pot-release-test-") as directory:
+            root = Path(directory)
+            app = root / "Pot.app"
+            runtime = app / "Contents/Resources/runtime"
+            runtime.mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(
+                plistlib.dumps({"CFBundleShortVersionString": "0.1.0"})
+            )
+            (runtime / "vmlinux").write_bytes(b"kernel")
+            with self.assertRaisesRegex(SystemExit, "must not embed"):
+                package(app, root / "output", "0.1.0")
+            self.assertFalse((root / "output").exists())
+
     def test_version_mismatch_produces_no_artifacts(self):
         with tempfile.TemporaryDirectory(prefix="pot-release-test-") as directory:
             root = Path(directory)

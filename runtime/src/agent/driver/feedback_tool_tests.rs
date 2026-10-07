@@ -27,6 +27,7 @@ impl SandboxFixture {
         assert!(service.test_tool_executor.is_none());
         let http = Arc::new(Mutex::new(vec![]));
         let mut servers = vec![];
+        let mut ports = std::collections::BTreeMap::new();
         let inspect = Arc::new(Mutex::new(
             std::collections::BTreeMap::<String, Value>::new(),
         ));
@@ -65,12 +66,10 @@ impl SandboxFixture {
                 axum::serve(listener, app).await.unwrap();
             });
             servers.push(http_server);
-            service
-                .sandboxes
-                .test_executor_urls
-                .lock()
-                .unwrap()
-                .insert(target.into(), url.clone());
+            ports.insert(
+                target.to_owned(),
+                url.rsplit(':').next().unwrap().parse::<u16>().unwrap(),
+            );
             let directory = service
                 .data
                 .parent()
@@ -103,7 +102,7 @@ impl SandboxFixture {
                     Some("default" | "linux-b")
                 ));
                 captured.lock().unwrap().push(call.clone());
-                let reply = json!({"result":{"phase":"running","ip":call["sandbox_id"],"generation":helper_generation.load(std::sync::atomic::Ordering::SeqCst)}});
+                let reply = json!({"result":{"phase":"running","ip":"127.0.0.1","executor_port":ports[call["sandbox_id"].as_str().unwrap()],"generation":helper_generation.load(std::sync::atomic::Ordering::SeqCst)}});
                 socket
                     .get_mut()
                     .write_all(format!("{reply}\n").as_bytes())

@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Owner-only per-instance TLS enrollment assets; creates no VM or product definition."""
+
+import argparse
+import ipaddress
+from pathlib import Path
+import secrets
+import subprocess
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--guest-ip", required=True)
+parser.add_argument("--output", type=Path, required=True)
+args = parser.parse_args()
+ip = ipaddress.IPv4Address(args.guest_ip)
+if not ip.is_private or ip.is_loopback or ip.is_link_local:
+    parser.error("Expected the VM's private IPv4 address")
+directory = args.output.resolve()
+directory.mkdir(mode=0o700, parents=True, exist_ok=False)
+
+
+def openssl(*arguments):
+    subprocess.run(
+        ["openssl", *arguments],
+        cwd=directory,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+try:
+    openssl(
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:3072",
+        "-nodes",
+        "-keyout",
+        "ca-key.pem",
+        "-out",
+        "guest-ca.pem",
+        "-days",
+        "3650",
+        "-subj",
+        "/CN=Pot VM enrollment CA",
+    )
+    openssl(
+        "req",
+        "-newkey",
+        "rsa:3072",
+        "-nodes",
+        "-keyout",
+        "guest-key.pem",
+        "-out",
+        "guest.csr",
+        "-subj",
+        "/CN=Pot VM executor",
+    )
+    (directory / "extensions.cnf").write_text(
+        f"subjectAltName=IP:{ip}\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
+    )
+    openssl(
+        "x509",
+        "-req",
+        "-in",
+        "guest.csr",
+        "-CA",
+        "guest-ca.pem",
+        "-CAkey",
+        "ca-key.pem",
+        "-CAcreateserial",
+        "-out",
+        "guest-cert.pem",
+        "-days",
+        "825",
+        "-extfile",
+        "extensions.cnf",
+    )
+    (directory / "executor-token").write_text(secrets.token_urlsafe(48) + "\n")
+finally:
+    for path in directory.iterdir():
+        path.chmod(0o600)
+    for name in ["ca-key.pem", "guest.csr", "guest-ca.srl", "extensions.cnf"]:
+        (directory / name).unlink(missing_ok=True)
+print(
+    f"Enrollment assets created at {directory}; transfer guest-key/cert/token privately into this guest only."
+)

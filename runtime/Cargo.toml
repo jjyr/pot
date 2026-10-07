@@ -7,6 +7,9 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+pot-sandbox-images.workspace = true
+pot-resource.workspace = true
+pot-sandbox.workspace = true
 pot-protocol.workspace = true
 pot-core.workspace = true
 pot-storage.workspace = true
@@ -32,5 +35,7 @@ chrono-tz = "0.10"
 sha2 = "0.11"
 
 [dev-dependencies]
+pot-sandbox-linux.workspace = true
+pot-sandbox-macos.workspace = true
 pot-tool-executor.workspace = true
 tokio-tungstenite = "0.30"

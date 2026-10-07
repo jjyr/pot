@@ -2,6 +2,7 @@ use crate::{ServerConfig, router};
 use anyhow::Result;
 use pot_protocol::{RUNTIME_ENDPOINT_FILE, RuntimeEndpoint};
 use pot_runtime::Backend;
+use std::sync::Arc;
 pub struct Server {
     backend: Backend,
     embedded: bool,
@@ -64,7 +65,14 @@ impl Server {
         } else {
             None
         };
-        let mut backend = pot_runtime::initialize(config.runtime).await?;
+        let mut backend = pot_runtime::initialize_with_providers(
+            config.runtime,
+            vec![
+                Arc::new(pot_sandbox_linux::LinuxProvider::new()?),
+                Arc::new(pot_sandbox_macos::MacOSProvider::new(macos_helper_path())),
+            ],
+        )
+        .await?;
         let endpoint = backend.endpoint(listener.local_addr()?.port());
 
         let access = if let Some(cfg) = access_config {
@@ -179,7 +187,11 @@ impl Server {
             router = router.layer(axum::middleware::from_fn(
                 |req: axum::extract::Request, next: axum::middleware::Next| async move {
                     let p = req.uri().path();
-                    if p == "/api/v1/mcp" || p == "/api/agent/compactions" || p.starts_with("/gw/")
+                    if p.starts_with("/desktop/")
+                        || p.starts_with("/desktop-assets/")
+                        || p == "/api/v1/mcp"
+                        || p == "/api/agent/compactions"
+                        || p.starts_with("/gw/")
                     {
                         next.run(req).await
                     } else {
@@ -275,4 +287,17 @@ async fn serve_public(
         handle.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
         serve.await?;
     }
+}
+
+fn macos_helper_path() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("POT_MACOS_HELPER") {
+        return path.into();
+    }
+    if let Some(resources) = std::env::var_os("POT_RUNTIME_RESOURCES") {
+        return std::path::PathBuf::from(resources).join("PotMacOSHelper");
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join("PotMacOSHelper")))
+        .unwrap_or_default()
 }

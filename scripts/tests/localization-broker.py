@@ -30,7 +30,7 @@ class Request:
         return self.body
 
 
-source = Path(__file__).resolve().parents[2] / "image/broker.py"
+source = Path(__file__).resolve().parents[2] / "sandbox-images/linux/default/broker.py"
 module = ast.parse(source.read_text())
 handlers = [
     node

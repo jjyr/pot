@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Build a versioned linux/arm64 OCI desktop image in an isolated Apple VM."""
 
-import gzip, hashlib, json, os, pathlib, shutil, subprocess
+import gzip, hashlib, json, os, pathlib, shutil, subprocess, tomllib
 
 R = pathlib.Path(__file__).resolve().parents[1]
 subprocess.run(["python3", R / "scripts/localize-web"], check=True)
 resources = R / ".local/d1/resources"
+template_path = R / "sandbox-images/linux/default/template.toml"
+template = tomllib.loads(template_path.read_text())
+assert template["schema_version"] == 1 and template["format"] == "oci"
 assets = [
     "sandbox.sh",
     "executor.py",
@@ -26,14 +29,15 @@ assets = [
 ]
 # Read source assets directly so bundle cannot accidentally reuse stale prepare output.
 for n in assets:
-    source = R / "image" / n
+    source = R / "sandbox-images/linux/default" / n
     if n == "pot-tool-executor":
         source = resources / n
     if source.is_file() and source != resources / n:
         shutil.copy2(source, resources / n)
 fingerprint = hashlib.sha256()
 for source in [
-    R / "image/build.sh",
+    template_path,
+    R / "sandbox-images/linux/default/build.sh",
     R / "helper/Sources/PotImageBuilder/main.swift",
     pathlib.Path(__file__),
 ]:
@@ -59,7 +63,7 @@ inputs.mkdir(exist_ok=True)
 (inputs / "assets").mkdir(exist_ok=True)
 for n in assets:
     shutil.copy2(resources / n, inputs / "assets" / n)
-shutil.copy2(R / "image/build.sh", inputs / "build.sh")
+shutil.copy2(R / "sandbox-images/linux/default/build.sh", inputs / "build.sh")
 helper = R / ".local/d1/helper-build/release/PotImageBuilder"
 subprocess.run(
     [
@@ -141,6 +145,7 @@ manifest["annotations"] = {
 (layout / "index.json").write_text(json.dumps({"schemaVersion": 2, "manifests": [manifest]}))
 (layout / "oci-layout").write_text('{"imageLayoutVersion":"1.0.0"}')
 metadata = {
+    "template": {**template, "version": version, "digest": manifest["digest"]},
     "reference": reference,
     "compressed_bytes": layer["size"],
     "rootfs_tar_bytes": (inputs / "rootfs.tar").stat().st_size,

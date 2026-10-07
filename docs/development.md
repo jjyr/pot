@@ -14,7 +14,7 @@ mise run bundle
 mise run open
 ```
 
-`bundle` preinstalls dependencies in a separate VM and builds the complete Sandbox OCI image. Software downloads happen only during build; App embeds the Host backend and boots an environment on demand. See Sandbox image for caches, fonts, and sizes.
+`build:sandbox-image` preinstalls guest dependencies in a separate VM and builds the Sandbox OCI image for resource publication. `bundle` packages Host binaries. End users authorize downloads of the pinned kernel, boot and OCI assets before the first environment startup. See Sandbox image for caches, fonts, and sizes.
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
@@ -122,7 +122,7 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | `tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for eval/tests |
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
-| `image/` | Guest desktop, browser, broker/viewer resources |
+| `sandbox-images/linux/default/` | Guest desktop, browser, broker/viewer resources |
 | `scripts/` | Build, bundle, icon generation |
 
 `poc/` is removed; experiment code/evidence remain in Git history. `.local/poc/` is a retained local build/download cache path without dependencies on old experiment sources.
@@ -139,3 +139,9 @@ The native Pot menu includes About Pot with version, developer, MIT, project lin
 and Rust dependency notices. Bundling enforces the cargo-about policy and embeds
 its report. See [About and license policy](licenses-and-about.md) for scope,
 reviewed MPL dependencies, and CI checks.
+
+macOS prepared-instance setup and qualification limits: [macOS Sandbox](macos-sandbox.md). Non-VM checks: `mise exec -- python scripts/tests/macos-provider.py` and `mise exec -- python scripts/tests/macos-helper.py --helper .local/d1/helper-build/release/PotMacOSHelper`.
+
+## Separate Sandbox resources
+
+Client bundling does not build or embed Linux Sandbox resources. Use `mise run build:sandbox-image`, then `mise exec -- python scripts/export-sandbox-resources --update-catalog` before client compilation. `mise run export:sandbox-resources` checks an export against the embedded catalog. Offline VM fixtures also require `mise exec -- cargo build -p pot-sandbox-images` to provide the verified importer. See [resource delivery](sandbox-resources.md) for tag publication, cache/approval behavior and pinned-instance compatibility.

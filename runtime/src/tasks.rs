@@ -80,12 +80,9 @@ fn child(
     root.sandboxes.assignment(sandbox_id)?;
     let data = root.data.join("tasks").join(task_id);
     let workspace = root
-        .data
-        .parent()
-        .unwrap()
-        .join("sandboxes")
-        .join(sandbox_id)
-        .join("workspace/workspace/tasks")
+        .sandboxes
+        .workspace(sandbox_id)
+        .join("tasks")
         .join(task_id);
     std::fs::create_dir_all(&data)?;
     std::fs::create_dir_all(&workspace)?;

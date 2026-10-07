@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-SOURCE = Path(__file__).resolve().parents[2] / "image/executor.py"
+SOURCE = Path(__file__).resolve().parents[2] / "sandbox-images/linux/default/executor.py"
 
 
 class LifecycleTests(unittest.TestCase):

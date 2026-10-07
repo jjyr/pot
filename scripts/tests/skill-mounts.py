@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-source = Path(__file__).resolve().parents[2] / "image/skill_mounts.py"
+source = Path(__file__).resolve().parents[2] / "sandbox-images/linux/default/skill_mounts.py"
 spec = importlib.util.spec_from_file_location("skill_mounts", source)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)

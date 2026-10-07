@@ -714,5 +714,21 @@
   "about.license": "MIT 许可证",
   "about.project": "GitHub 项目",
   "about.rust-licenses": "Rust 依赖许可证",
-  "menu.about-pot": "关于 Pot"
+  "menu.about-pot": "关于 Pot",
+  "ui.command-files-environment": "此环境支持命令和文件任务，暂未提供桌面访问。",
+  "resources.title": "沙盒资源",
+  "resources.awaiting-authorization": "等待下载授权",
+  "resources.downloading": "下载中",
+  "resources.verifying": "校验 SHA-256",
+  "resources.extracting": "导入资源",
+  "resources.initializing": "初始化沙盒",
+  "resources.interrupted": "已中断；继续下载剩余资源",
+  "resources.failed": "准备失败",
+  "resources.authorize": "下载并继续",
+  "resources.retry": "重试下载",
+  "resources.continue": "继续下载",
+  "resources.cancel": "取消",
+  "resources.cache": "资源缓存",
+  "resources.remove": "删除未使用资源",
+  "resources.permission": "是否从 Pot GitHub Releases 下载 {0}（{1}）？下载后将使用客户端内嵌 SHA-256 清单校验。"
 }

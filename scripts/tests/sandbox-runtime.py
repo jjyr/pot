@@ -2,6 +2,8 @@
 """Real Host Pot/Codex + two Linux VMs; loopback models, isolated data, no paid calls."""
 
 import argparse
+import base64
+import struct
 import asyncio
 import json
 import os
@@ -102,8 +104,8 @@ class Model:
                 ensure_ascii=False,
             )
             if marker is not None:
-                assert "<name>skill-creator</name>" in system
-                assert "<name>skill-installer</name>" in system
+                assert "<name>skill-creator</name>" in system, system
+                assert "<name>skill-installer</name>" in system, system
             self.requests.append({"codex": codex, "tools": tools, "worker": worker})
             for output in current:
                 if output.get("role") == "tool" or output.get("type") == "function_call_output":
@@ -281,6 +283,15 @@ async def run(args):
     helper = Path(args.helper).resolve()
     with tempfile.TemporaryDirectory(prefix="pot-sbx-", dir="/tmp") as temp:
         root = Path(temp)
+        importer = (
+            Path(__file__).resolve().parents[2]
+            / ".local/poc/cargo-target/debug/pot-resource-import"
+        )
+        assets = Path(args.resource_assets).resolve()
+        seed = await asyncio.create_subprocess_exec(
+            str(importer), str(root / "resource-cache"), str(assets)
+        )
+        assert await seed.wait() == 0, "Verified offline provisioning failed"
         native = root / "native"
         native.mkdir()
         (native / "config.toml").write_text(
@@ -883,7 +894,18 @@ SKILLS""",
             report["stop_independence_artifacts"] = True
             # Desktop is separate from Agent execution; static HTTP must never expose executor credentials.
             desktop = await api("sandboxes", {"action": "desktop", "sandbox_id": "default"})
-            ip = desktop["state"]["ip"]
+            assert desktop["state"]["phase"] == "running"
+            reader, writer = await asyncio.open_unix_connection(root / "helper.sock")
+            writer.write(
+                (
+                    json.dumps({"id": "desktop-probe", "method": "status", "sandbox_id": "default"})
+                    + "\n"
+                ).encode()
+            )
+            await writer.drain()
+            ip = json.loads(await reader.readline())["result"]["ip"]
+            writer.close()
+            await writer.wait_closed()
 
             async def desktop_ready():
                 def request():
@@ -901,6 +923,85 @@ SKILLS""",
                 await asyncio.sleep(0.1)
             else:
                 raise AssertionError("Optional desktop unavailable")
+            # Qualify the new host gateway against the real guest RFB service.
+            ticket = await api("desktop/sessions", {"sandbox_id": "default"})
+            desktop_path = ticket["path"]
+            reader, writer = await asyncio.open_connection("127.0.0.1", endpoint["port"])
+            key = base64.b64encode(os.urandom(16)).decode()
+            writer.write(
+                (
+                    f"GET {desktop_path}rfb HTTP/1.1\r\nHost: 127.0.0.1:{endpoint['port']}\r\nOrigin: http://127.0.0.1:{endpoint['port']}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                ).encode()
+            )
+            await writer.drain()
+            assert b"101 Switching Protocols" in await reader.readuntil(b"\r\n\r\n")
+            pending = bytearray()
+
+            async def rfb_read(size):
+                while len(pending) < size:
+                    head = await reader.readexactly(2)
+                    assert head[0] & 15 == 2, head
+                    length = head[1] & 127
+                    if length == 126:
+                        length = int.from_bytes(await reader.readexactly(2), "big")
+                    elif length == 127:
+                        length = int.from_bytes(await reader.readexactly(8), "big")
+                    pending.extend(await reader.readexactly(length))
+                result = bytes(pending[:size])
+                del pending[:size]
+                return result
+
+            async def rfb_send(data):
+                mask = os.urandom(4)
+                length = (
+                    bytes([len(data) | 128])
+                    if len(data) < 126
+                    else b"\xfe" + struct.pack(">H", len(data))
+                )
+                writer.write(
+                    b"\x82"
+                    + length
+                    + mask
+                    + bytes(byte ^ mask[index % 4] for index, byte in enumerate(data))
+                )
+                await writer.drain()
+
+            assert await rfb_read(12) == b"RFB 003.008\n"
+            await rfb_send(b"RFB 003.008\n")
+            count = (await rfb_read(1))[0]
+            assert 1 in await rfb_read(count)
+            await rfb_send(b"\x01")
+            assert await rfb_read(4) == b"\x00" * 4
+            await rfb_send(b"\x01")
+            init = await rfb_read(24)
+            assert int.from_bytes(init[:2], "big") > 0
+            await rfb_read(int.from_bytes(init[20:24], "big"))
+
+            def display_control(action):
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{endpoint['port']}{desktop_path}api/control",
+                    data=json.dumps({"action": action}).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Origin": f"http://127.0.0.1:{endpoint['port']}",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=15) as reply:
+                    return json.load(reply)
+
+            await asyncio.to_thread(display_control, "take")
+            await rfb_send(bytes([4, 1, 0, 0, 0, 0, 0, 65]))
+            await asyncio.to_thread(display_control, "return")
+            await api("desktop/sessions/close", {"session_id": ticket["session"]["id"]})
+            writer.close()
+            await writer.wait_closed()
+            assert (
+                next(i for i in (await api("sandboxes"))["items"] if i["id"] == "default")["state"][
+                    "phase"
+                ]
+                == "running"
+            )
+            report["managed_desktop_gateway_rfb_and_persistent_vm"] = True
             await turn(
                 [
                     action(
@@ -960,5 +1061,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--helper", required=True)
     parser.add_argument("--resources", required=True)
+    parser.add_argument("--resource-assets", default=".local/releases/resources")
     parser.add_argument("--output", default="/tmp/pot-sandbox-acceptance.json")
     asyncio.run(run(parser.parse_args()))

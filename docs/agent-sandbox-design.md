@@ -1,6 +1,6 @@
 # Local Agents and managed Sandboxes
 
-Updated: 2026-10-06. Implemented boundaries; dated acceptance is recorded separately. This is the current target specification for Agent/Sandbox placement and permissions. See the [architecture](architecture.md) for the current deployment.
+Updated: 2026-10-07. Implemented boundaries; dated acceptance is recorded separately. This is the current target specification for Agent/Sandbox placement and permissions. See the [architecture](architecture.md) for the current deployment and [Sandbox provider redesign](sandbox-providers.md) for the Linux extraction and target macOS provider contracts.
 
 ## Confirmed scope
 
@@ -9,12 +9,12 @@ Pot runs Agent loops and the persistent product control plane on the Host. Sandb
 - Pot and Codex are the supported Drivers.
 - Host-side Agent execution does not mean local model inference. Model connections remain a separate configuration concern.
 - Model-selected shell, filesystem, browser and desktop operations execute in Sandboxes. Direct Host execution is out of scope, including fallback when a Sandbox is unavailable.
-- Multiple Sandbox instances are part of the target model. Start with Linux providers; macOS and Windows providers are later additions rather than prerequisites for the first slice.
+- Multiple Sandbox instances are part of the target model. Linux is implemented. The minimum provider redesign targets Linux default/isolated tasks and macOS development; Android, iOS and Windows remain later extensions. Providers expose qualified capabilities rather than assuming every environment has a shell or POSIX workspace.
 - Host Runtime, Storage, Gateway and native Agent sessions remain available when every Sandbox is stopped. Sandbox shutdown does not delete a conversation or product task record.
 
 ## Authority and execution
 
-| Capability | Main Agent | Task worker | Runtime / provider |
+| Capability | Main Agent | Task worker | Runtime / Sandbox Manager / provider |
 |---|---|---|---|
 | List Sandbox inventory and inspect lifecycle status | Yes | No management API | Authoritative state |
 | Request create/start/stop/delete | Yes, through managed tools and policy | No | Validate, queue, execute and persist |
@@ -26,29 +26,33 @@ Pot runs Agent loops and the persistent product control plane on the Host. Sandb
 
 Workers may inspect execution metadata for their own environment, such as OS, cwd and tool availability. That does not grant Sandbox inventory, provisioning or lifecycle capabilities. A worker reports a missing dependency or unavailable environment to the main Agent/Runtime instead of creating, restarting or changing a Sandbox.
 
-This boundary must be enforced by tool loadouts, scoped credentials and Runtime routing, not only by prompts. Workers receive neither an executor/management credential nor access to Host helper sockets, hypervisor interfaces or an unrestricted execution gateway. A worker-supplied target override is rejected. Shell execution inside a Sandbox must not provide access to the management plane.
+This boundary must be enforced by tool loadouts, scoped credentials, Runtime grants and Sandbox Manager routing, not only by prompts. Workers receive neither an executor/management credential nor access to Host helper sockets, hypervisor interfaces or an unrestricted execution gateway. A worker-supplied target override is rejected. Shell execution inside a Sandbox must not provide access to the management plane.
 
 Runtime can prepare or recover the already assigned environment according to its lifecycle policy; that is infrastructure behavior, not worker lifecycle authority. Preparation must not silently create a different environment or change the task binding.
 
+The target architecture inserts a dedicated [Sandbox Manager](sandbox-providers.md#dedicated-sandbox-management-layer) between Runtime and Providers. Runtime owns product permissions and task bindings; Manager owns environment inventory, allocation, lifecycle, scopes, receipts/recovery and artifacts. Inventory/lifecycle/scopes/receipts now live behind this boundary in `pot-sandbox`; allocation catalogs and artifacts remain target work.
+
 ## Task bindings and multiple environments
 
-At creation, an explicit `sandbox_id` selects that environment. If omitted, Runtime snapshots the currently selected Sandbox; the initial selection is `default`. Creation does not allocate a new VM per task or balance tasks across existing VMs. Three tasks without an explicit target therefore share the selected Sandbox. To use three environments, the main Agent creates their definitions and assigns each task a different ID.
+Current implementation: at creation, an explicit `sandbox_id` selects that environment. If omitted, Runtime snapshots the currently selected Sandbox; the initial selection is `default`. Creation does not allocate a new VM per task or balance tasks across existing VMs. Three tasks without an explicit target therefore share the selected Sandbox. To use three environments, the main Agent creates their definitions and assigns each task a different ID.
 
 The main Agent changes the execution default through `pot_manage_sandbox` with `action: select`; the Sandbox environment sidebar only selects the displayed environment. Prefer explicit IDs when creating tasks for several environments in one batch.
 
-The assignment persists before dispatch. Changing the main selection affects only later task creation and main environment tools, never existing tasks or saved schedules. Each task uses `/data/workspace/tasks/TASK_ID` in its assigned environment. Agent profile routing and global/profile/provider concurrency limits do not choose a Sandbox. Runtime starts the bound environment when required; it does not retarget a task to another ready VM.
+The assignment persists before dispatch. Changing the main selection affects only later task creation and main environment tools, never existing tasks or saved schedules. Current Linux tasks use `/data/workspace/tasks/TASK_ID`. In the provider redesign, filesystem environments declare native workspace roots; device environments may expose only artifact and app/document scopes. Agent profile routing and global/profile/provider concurrency limits do not choose a Sandbox. Runtime starts the bound environment when required; it does not retarget a task to another ready VM.
 
 Persist the Sandbox identity separately from the Agent/profile binding. Each worker has one assigned Sandbox and workspace scope before environment execution begins. The worker cannot switch that binding across turns or after restart.
 
 A task's single-environment constraint does not require a newly created VM for every task. Reuse and shared environments remain scheduling choices, with workspace scoping and resource arbitration. Sharing a Sandbox is not automatically task-level filesystem isolation; any stronger isolation claim requires enforcement and tests.
 
-For work across Linux, macOS and Windows, the main Agent requests the environments and creates one task for each target. Each task executes only in its own assignment, and the main Agent compares the returned results. Cross-environment artifact copying is a managed control-plane operation; workers cannot use it as a route to arbitrary environments.
+Target allocation adds explicit shared/dedicated profiles: isolated Linux work receives a fresh private instance and workspace before dispatch. This is not delivered by the current default-selection behavior. See [task placement](sandbox-providers.md#task-placement-and-environment-profiles).
+
+For work across Linux and macOS, the main Agent requests the environments and creates one task for each target. Each task executes only in its own assignment, and the main Agent compares the returned results. Any cross-environment artifact copying is authorized by Runtime and performed by the Sandbox Manager; workers cannot use it as a route to arbitrary environments. Android device/build profiles and APK handoff are deferred.
 
 An unavailable environment makes the task wait or fail visibly under Runtime policy. There is no automatic Host fallback or task retargeting. Work requiring a different environment becomes a new task with an explicit assignment. Recreating a destroyed Sandbox must not appear to preserve its old working state; generation changes require reconciliation before further execution.
 
 ## Sandbox lifecycle
 
-The main Agent expresses lifecycle intent through typed product tools. Runtime owns real lifecycle, capacity, leases and operation outcomes; the Agent does not run raw hypervisor management commands.
+The main Agent expresses lifecycle intent through typed product tools. Runtime authorizes lifecycle intent; the target Sandbox Manager owns real lifecycle, capacity, leases and environment operation outcomes; the Agent does not run raw hypervisor management commands.
 
 Recommended initial policy:
 
@@ -61,9 +65,13 @@ Recommended initial policy:
 
 Cancellation of a task targets its operations and waits for executor cleanup. It does not authorize stopping an entire shared Sandbox or deleting its files. Unknown remote execution outcomes are not replayed automatically.
 
+The provider redesign permits a declared VM-stop cancellation fallback only for an exclusively held instance. macOS starts with exclusive execution ownership; the main Agent, workers and manual input must queue or explicitly hand off control. A stopped VM confirms execution ended, not that prior UI/network effects were rolled back. See [ownership and cancellation](sandbox-providers.md#ownership-gui-arbitration-and-cancellation).
+
 ## Driver integration
 
-pot-agent runs in-process on Host with an injected Runtime ToolExecutor. The shared environment tools are exec_command, write_stdin and apply_patch. There is no automatic local executor. Main and worker loadouts differ: inventory and lifecycle tools are main-only; workers route exclusively to their persisted assignment. Runtime checks authorization independently of model-visible schemas. Guest operations run in a credential-free Rust runner behind the authenticated root broker. Runtime-owned sessions remain in their original Sandbox even after main changes its default, and survive normal turns and expire on inactivity, cancellation, epoch change or generation change. See [command execution](executor.md) for shells, PTY and snapshot semantics.
+pot-agent runs in-process on Host with an injected Runtime ToolExecutor. The shared environment tools are exec_command, write_stdin and apply_patch. There is no automatic local executor. Main and worker loadouts differ: inventory and lifecycle tools are main-only; workers route exclusively to their persisted assignment. Runtime checks product authorization independently of model-visible schemas. In the target redesign, the Sandbox Manager additionally enforces scoped grants, environment leases, epoch and capabilities before provider dispatch. Guest operations run in a credential-free Rust runner behind the authenticated root broker. Runtime-owned sessions remain in their original Sandbox even after main changes its default, and survive normal turns and expire on inactivity, cancellation, epoch change or generation change. See [command execution](executor.md) for shells, PTY and snapshot semantics.
+
+That three-tool loadout describes current Linux execution. The first provider redesign preserves Linux/macOS command tools and derives both Drivers' loadouts from assignment capabilities. Device observation/input/app operations remain future capabilities; lifecycle authority remains main-only.
 
 Codex App Server stays on the Host. Pot disables native environment tools, supplies an empty native environment list, and exposes the same Sandbox execution API through lane-scoped MCP. Inherited MCP servers, plugins/apps and native subagent tools are disabled. The implementation uses Pot's execution-only HTTP service rather than `codex exec-server`, keeping one environment protocol for both Drivers.
 
@@ -89,4 +97,4 @@ The UI should use one environment vocabulary for both Drivers. pot-agent backend
 4. Stopping/crashing one environment does not stop chat, corrupt native sessions or interrupt tasks in another environment. Busy-stop, task cancellation and shared-environment behavior follow the distinct contracts above.
 5. Persistent artifacts remain accessible after Sandbox shutdown; unknown side effects are reconciled without silent replay.
 
-These tests precede adding macOS/Windows providers. Direct Host tools are outside acceptance scope.
+These existing Linux gates remain prerequisites for provider extraction. macOS has separate qualification gates in [Sandbox providers](sandbox-providers.md#implementation-map-and-delivery-gates); they are not delivered by this specification. Direct Host tools are outside acceptance scope.

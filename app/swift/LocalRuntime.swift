@@ -15,9 +15,24 @@ import WebKit
     var loaded = ""
     var displayReady = false
     var sandboxID = "default"
+    var desktopSupported = true
     var viewGeneration = 0
+    var desktopSession = ""
+    var requestedDesktops = Set<String>()
 
-    func selectSandbox(_ id: String) {
+    func closeDesktop() {
+        let session = desktopSession; desktopSession = ""
+        if !session.isEmpty {
+            Task { let client = RuntimeClient(); client.root = root; _ = try? await client.request(
+                "api/v1/desktop/sessions/close",
+                body: ["session_id": session]
+            ) }
+        }
+    }
+
+    func selectSandbox(_ id: String, desktop: Bool = true) {
+        closeDesktop()
+        desktopSupported = desktop
         viewGeneration += 1; sandboxID = id; loaded = ""; displayReady = false; web?.stopLoading(); web?.isHidden = true
         poll()
     }
@@ -110,6 +125,9 @@ import WebKit
                     )
                     let response: [String: Any] = ["result": value["state"] ?? value]
                     if target == sandboxID, generation == viewGeneration {
+                        if method == "desktop" {
+                            requestedDesktops.insert(target)
+                        }
                         render(response)
                     }; completion?(response)
                 } catch { completion?(["error": error.localizedDescription]) }
@@ -139,62 +157,60 @@ import WebKit
         if polling {
             return
         }; polling = true
-        let path = root.appendingPathComponent("helper.sock").path
         let target = sandboxID
         let generation = viewGeneration
-        DispatchQueue.global()
-            .async {
-                let response = Self.request(path: path, method: "status", sandboxID: target); DispatchQueue.main
-                    .async {
-                        self.polling = false; if target == self.sandboxID,
-                                                 generation == self.viewGeneration
-                        {
-                            self.render(response)
-                        }
-                    }
+        Task {
+            defer { polling = false }
+            let client = RuntimeClient(); client.root = root
+            if let inventory = try? await client.request("api/v1/sandboxes"),
+               let items = inventory["items"] as? [[String: Any]],
+               let item = items.first(where: { $0["id"] as? String == target }),
+               target == sandboxID, generation == viewGeneration
+            {
+                render(["result": item["state"] ?? [:]])
             }
+        }
     }
 
     func render(_ response: [String: Any]) {
         guard let state = response["result"] as? [String: Any]
         else { label.stringValue = String(describing: response["error"] ?? "IPC error"); return }
         let phase = state["phase"] as? String ?? "unknown"
-        if ["stopped", "failed", "stopping"].contains(phase) {
-            loaded = ""; displayReady = false
+        if ["stopped", "failed", "stopping", "unavailable"].contains(phase) {
+            requestedDesktops.remove(sandboxID); closeDesktop(); loaded = ""; displayReady = false
         }
         onState?(state)
         label.stringValue = L.format(
             "native.runtime-status",
             [L.phase(phase), L.message(String(describing: state["error"] ?? ""))]
         )
-        if phase == "running", let address = state["viewer"] as? String, !address.isEmpty, address != loaded, !probing,
-           let url = URL(string: address)
-        {
-            // Guest package installation is asynchronous: probe HTTP before loading.
+        if phase == "running", desktopSupported, requestedDesktops.contains(sandboxID), loaded.isEmpty, !probing {
             probing = true
+            let target = sandboxID
             let generation = viewGeneration
-            URLSession.shared.dataTask(with: URLRequest(
-                url: url,
-                cachePolicy: .reloadIgnoringLocalCacheData,
-                timeoutInterval: 3
-            )) { [weak self] _, response, _ in
-                DispatchQueue.main.async { self?.probing = false }
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
-                DispatchQueue.main
-                    .async { guard let self,
-                                   self.viewGeneration == generation,
-                                   self.loaded != address
-                        else { return }; self.displayReady = false; self.web?.isHidden = true; self
-                            .loaded = address; var components = URLComponents(
-                                url: url,
-                                resolvingAgainstBaseURL: false
-                            )!; components.queryItems = [URLQueryItem(name: "native", value: "1")]; self.web?
-                            .load(URLRequest(
-                                url: components.url!,
-                                cachePolicy: .reloadIgnoringLocalCacheData
-                            )); self.label.stringValue = "Local desktop ready"
+            Task {
+                defer { probing = false }
+                let client = RuntimeClient(); client.root = root
+                do {
+                    let result = try await client.request("api/v1/desktop/sessions", body: ["sandbox_id": target])
+                    guard let session = result["session"] as? [String: Any], let sessionID = session["id"] as? String,
+                          let path = result["path"] as? String,
+                          let data = try? Data(contentsOf: root.appendingPathComponent("product/runtime.json")),
+                          let endpoint = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let port = endpoint["port"] as? Int else { return }
+                    guard target == sandboxID, generation == viewGeneration else {
+                        _ = try? await client.request(
+                            "api/v1/desktop/sessions/close",
+                            body: ["session_id": sessionID]
+                        ); return
                     }
-            }.resume()
+                    desktopSession = sessionID
+                    let address = "http://127.0.0.1:\(port)\(path)?native=1"
+                    guard let url = URL(string: address) else { return }
+                    loaded = address; displayReady = false; web?.isHidden = true
+                    web?.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+                } catch { label.stringValue = error.localizedDescription }
+            }
         }
         if phase == "stopped" || phase == "failed" || phase == "stopping" {
             loaded = ""; onState?(state)
@@ -209,7 +225,14 @@ import WebKit
         send("stop")
     }
 
+    func reconnectDesktop() {
+        requestedDesktops.insert(sandboxID)
+        closeDesktop(); loaded = ""; displayReady = false; viewGeneration += 1; web?.stopLoading(); web?
+            .isHidden = true; poll()
+    }
+
     func cleanup() {
+        closeDesktop()
         timer?.invalidate(); timer = nil; if process.isRunning {
             process.terminate()
             process.waitUntilExit()

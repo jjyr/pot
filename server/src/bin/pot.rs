@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Server and Web UI in this process\n  status | doctor | open     Inspect/connect to the local instance\n  access qr|pair|clients|close|enable|disable|revoke ID\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients use the browser pairing page; this CLI manages the local instance.";
+const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Server and Web UI in this process\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access qr|pair|clients|close|enable|disable|revoke ID\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients use the browser pairing page; this CLI manages the local instance.";
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--version") {
@@ -37,6 +37,7 @@ fn main() -> Result<()> {
     if let Some(resources) = runtime_resources() {
         unsafe {
             std::env::set_var("POT_BUILTIN_SKILLS_DIR", resources.join("skills"));
+            std::env::set_var("POT_MACOS_HELPER", resources.join("PotMacOSHelper"));
             std::env::set_var(
                 "PATH",
                 format!(
@@ -107,6 +108,25 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
                 root.display()
             );
             Ok(())
+        }
+        "sandbox" => {
+            ensure!(
+                argument(args, 1)? == "enroll-macos" && args.len() == 4,
+                "Usage: pot sandbox enroll-macos ID BUNDLE"
+            );
+            let id = argument(args, 2)?;
+            // Check the running instance and existing immutable definition before copying.
+            let inventory = api(root, "/api/v1/sandboxes", None).await?;
+            ensure!(
+                !inventory["items"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .any(|i| i["id"] == id),
+                "Sandbox ID already exists"
+            );
+            pot_sandbox_macos::enroll(root, id, Path::new(argument(args, 3)?))?;
+            print(api(root,"/api/v1/sandboxes",Some(json!({"action":"create","sandbox_id":id,"provider":pot_sandbox_macos::PROVIDER_ID}))).await?)
         }
         "serve" => {
             let server = pot_server::Server::bind(pot_server::ServerConfig::from_env()).await?;
