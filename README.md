@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app/assets/Pot.png" width="160" height="160" alt="Pot — a smiling terracotta pot">
+</p>
+
 # Pot
 
 Pot is an open-source implementation of the Dot experience.

@@ -110,6 +110,15 @@ is available independently of enrollment, login and notification configuration.
 The manifest uses a stable origin-scoped app ID, standalone display and dedicated
 192/512 px icons. iOS also receives Apple Home Screen metadata and its touch icon.
 
+Home Screen, browser/notification and login branding use the selected terracotta
+Pot Companion. `scripts/make-icons.swift` generates both the rounded Mac icon
+(`app/assets/Pot.png` / `Pot.icns`) and an opaque, square cream-background master
+(`PotHomeScreen.png`) so mobile operating systems can apply their own masks.
+`scripts/build-mobile` produces the touch icon and 192/512 px `any maskable` icons
+from that master. Versioned icon URLs distinguish this design from previously
+installed icons without changing the manifest's stable application ID. Mobile's
+GPUI header embeds the matching Mac image. README uses the same application icon.
+
 On Android Chrome/Edge or another supporting browser, the button opens the
 browser's installation prompt when available. If it is unavailable or dismissed,
 use the browser menu's Install app / Add to Home Screen entry. Embedded QR

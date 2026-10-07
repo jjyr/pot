@@ -33,6 +33,7 @@ extern "C" {
     fn action(name: &str, value: &str);
 }
 struct Mobile {
+    brand_icon: Arc<Image>,
     data: Value,
     page: String,
     composer: Entity<TextareaState>,
@@ -383,7 +384,16 @@ impl Render for Mobile {
             .text_color(cx.theme().foreground)
             .flex()
             .flex_col()
-            .child(div().h(px(48.)).p_3().child("Pot"))
+            .child(
+                div()
+                    .h(px(48.))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(img(self.brand_icon.clone()).size(px(28.)))
+                    .child("Pot"),
+            )
             .child(
                 div().text_sm().px_4().child(
                     pot_ui::localization::Catalog::new(
@@ -517,6 +527,10 @@ pub fn run() {
             let search = cx.new(|cx| InputState::new(window, cx));
             let composer = cx.new(|cx| TextareaState::new(window, cx));
             cx.new(|cx| Mobile {
+                brand_icon: Arc::new(Image::from_bytes(
+                    ImageFormat::Png,
+                    include_bytes!("../../app/assets/Pot128.png").to_vec(),
+                )),
                 data: json!({}),
                 page: "chat".into(),
                 composer,
