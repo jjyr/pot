@@ -740,5 +740,6 @@
   "web.rotate-hint": "Regenerating the Token disconnects all browsers. Configure the new Token or scan again.",
   "web.configure-token": "Configure access Token",
   "web.change-token": "Change access Token",
-  "web.token-invalid": "Access Token is invalid. Configure the current Token."
+  "web.token-invalid": "Access Token is invalid. Configure the current Token.",
+  "language.name": "English"
 }

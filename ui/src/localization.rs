@@ -1,44 +1,55 @@
 //! Locale-explicit shared catalogs. A phone never changes the Mac preference.
 use std::{collections::HashMap, sync::OnceLock};
+include!(concat!(env!("OUT_DIR"), "/languages.rs"));
 #[derive(Clone, Copy)]
 pub struct Catalog {
-    chinese: bool,
+    locale: &'static str,
 }
-fn translations() -> &'static HashMap<String, [String; 2]> {
-    static TRANSLATIONS: OnceLock<HashMap<String, [String; 2]>> = OnceLock::new();
+fn translations() -> &'static HashMap<String, HashMap<String, String>> {
+    static TRANSLATIONS: OnceLock<HashMap<String, HashMap<String, String>>> = OnceLock::new();
     TRANSLATIONS.get_or_init(|| {
-        let en: HashMap<String, String> =
-            serde_json::from_str(include_str!("../../app/locales/en.json"))
-                .expect("English catalog");
-        let zh: HashMap<String, String> =
-            serde_json::from_str(include_str!("../../app/locales/zh-CN.json"))
-                .expect("Chinese catalog");
-        en.into_iter()
-            .map(|(key, value)| {
-                let chinese = zh.get(&key).cloned().unwrap_or_else(|| value.clone());
-                (key, [value, chinese])
-            })
-            .collect()
+        serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/catalogs.json")))
+            .expect("Translation catalogs")
     })
+}
+pub fn resolve(languages: &[&str]) -> &'static str {
+    for language in languages {
+        let normalized = language.replace('_', "-").to_lowercase();
+        if let Some((locale, _)) = LANGUAGES
+            .iter()
+            .find(|(locale, _)| locale.to_lowercase() == normalized)
+            .or_else(|| {
+                LANGUAGES.iter().find(|(locale, _)| {
+                    locale.to_lowercase().split('-').next() == normalized.split('-').next()
+                })
+            })
+        {
+            return locale;
+        }
+    }
+    "en"
 }
 impl Catalog {
     pub fn new(locale: &str) -> Self {
         Self {
-            chinese: locale == "zh-CN",
+            locale: resolve(&[locale]),
         }
     }
 
     pub fn text(&self, key: &str) -> &'static str {
-        translations()
+        translations()[self.locale]
             .get(key)
-            .map(|v| v[usize::from(self.chinese)].as_str())
+            .or_else(|| translations()["en"].get(key))
+            .map(String::as_str)
             .unwrap_or("Missing translation")
     }
 
     pub fn matches_message(&self, key: &str, value: &str) -> bool {
-        translations()
-            .get(key)
-            .is_some_and(|values| values.iter().any(|translation| translation == value))
+        translations().values().any(|values| {
+            values
+                .get(key)
+                .is_some_and(|translation| translation == value)
+        })
     }
 
     /// Translate recognized application notices only; user/model content never calls this.
@@ -52,15 +63,15 @@ impl Catalog {
                 serde_json::from_str(include_str!("../../app/localization-message-keys.json"))
                     .unwrap();
             let mut result = HashMap::new();
-            for (key, values) in translations() {
+            for key in translations()["en"].keys() {
                 if backend.contains(key)
                     || key.starts_with("client.")
                     || key.starts_with("usage-ui.")
                     || key.starts_with("schedules-ui.")
                     || key.starts_with("mobile.shell.")
                 {
-                    for value in values {
-                        result.insert(value.clone(), key.clone());
+                    for catalog in translations().values() {
+                        result.insert(catalog[key].clone(), key.clone());
                     }
                 }
             }
@@ -71,7 +82,8 @@ impl Catalog {
         }
         // Preserve the diagnostic argument of the one deferred client error template.
         let key = "client.stop-request-not-confirmed-e";
-        for template in &translations()[key] {
+        for catalog in translations().values() {
+            let template = &catalog[key];
             if let Some(prefix) = template.strip_suffix("{e}")
                 && let Some(detail) = value.strip_prefix(prefix)
             {
@@ -82,7 +94,8 @@ impl Catalog {
             "backend.task-unfinished-detail",
             "backend.task-failed-detail",
         ] {
-            for template in &translations()[key] {
+            for catalog in translations().values() {
+                let template = &catalog[key];
                 if let Some(prefix) = template.strip_suffix("{0}")
                     && let Some(detail) = value.strip_prefix(prefix)
                 {
@@ -112,11 +125,10 @@ impl Catalog {
             serde_json::from_str(include_str!("../../app/localization-plurals.json"))
                 .expect("plural catalog")
         });
-        let singular = !self.chinese
-            && plurals
-                .get(key)
-                .and_then(|index| arguments.get(*index))
-                .is_some_and(|value| value == "1");
+        let singular = plurals
+            .get(key)
+            .and_then(|index| arguments.get(*index))
+            .is_some_and(|value| value == "1");
         let selected = if singular {
             format!("{key}.one")
         } else {
@@ -202,6 +214,13 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn language_discovery_matches_exact_tags_then_supported_base() {
+        assert_eq!(resolve(&["unsupported", "ZH_hant_HK"]), "zh-CN");
+        assert_eq!(resolve(&["en-GB", "zh-CN"]), "en");
+        assert_eq!(resolve(&["zhuang", "english"]), "en");
+        assert!(LANGUAGES.contains(&("zh-CN", "简体中文")));
+    }
     #[test]
     fn page_formats_preserve_literal_arguments_and_native_decimal_precision() {
         let en = Catalog::new("en");

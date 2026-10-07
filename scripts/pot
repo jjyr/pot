@@ -78,10 +78,20 @@ if cmd == "prepare":
         "driver.py",
         "broker.py",
         "index.html",
+        "i18n.js",
+        "locales.json",
         "close-browser.py",
         "open-browser.sh",
     ]:
-        shutil.copy2(REPO / "sandbox-images/linux/default" / name, RES / name)
+        shutil.copy2(
+            (
+                REPO / ".local/web/sandbox"
+                if name in {"index.html", "i18n.js", "locales.json"}
+                else REPO / "sandbox-images/linux/default"
+            )
+            / name,
+            RES / name,
+        )
     node_name = "node-v24.21.0-darwin-arm64"
     node_archive = RES / (node_name + ".tar.gz")
     download("https://nodejs.org/dist/v24.21.0/" + node_archive.name, node_archive)

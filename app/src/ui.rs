@@ -354,11 +354,11 @@ impl Settings {
                     .child(field(crate::i18n::text("settings.language"))
                         .description(crate::i18n::text("settings.language.hint"))
                         .child(Button::new("language-picker").ghost().small()
-                            .label(if state["locale"] == "zh-CN" { "简体中文" } else { "English" })
+                            .label(pot_ui::localization::LANGUAGES.iter().find(|(locale, _)| state["locale"] == *locale).map(|(_, name)| *name).unwrap_or("English"))
                             .dropdown_menu({
                                 let locale = state["locale"].as_str().unwrap_or("en").to_owned();
                                 move |menu, _, _| {
-                                    [ ("en", "English"), ("zh-CN", "简体中文") ].into_iter().fold(menu, |menu, (value, name)| {
+                                    pot_ui::localization::LANGUAGES.iter().copied().fold(menu, |menu, (value, name)| {
                                         menu.item(gpui_kit::component::menu::PopupMenuItem::new(name)
                                             .checked(locale == value)
                                             .on_click(move |_, _, _| command(json!({"action":"language","value":value}))))

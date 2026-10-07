@@ -27,8 +27,12 @@ assets.mkdir(parents=True, exist_ok=True)
 recipe = ROOT / "sandbox-images/linux/default"
 subprocess.run(["python", ROOT / "scripts/localize-web"], check=True, cwd=ROOT)
 for path in recipe.iterdir():
-    if path.suffix in {".sh", ".py", ".html", ".svg", ".lock"}:
+    if path.suffix in {".sh", ".py", ".html", ".svg", ".lock"} and not path.name.endswith(
+        ".template.html"
+    ):
         shutil.copy2(path, assets / path.name)
+for path in (ROOT / ".local/web/sandbox").iterdir():
+    shutil.copy2(path, assets / path.name)
 if args.executor:
     executor = args.executor.resolve(strict=True)
 else:
