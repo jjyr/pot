@@ -60,7 +60,7 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
         vec!["status"],
         vec!["tasks", "list"],
         vec!["config", "get", "providers"],
-        vec!["access", "clients"],
+        vec!["access", "status"],
     ] {
         let output = command(&process.root).args(args).output().unwrap();
         assert!(
@@ -71,15 +71,15 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
         serde_json::from_slice::<Value>(&output.stdout).unwrap();
     }
     let output = command(&process.root)
-        .args(["access", "pair"])
+        .args(["access", "token"])
         .output()
         .unwrap();
     assert!(output.status.success());
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["code"].as_str().unwrap().len(), 8);
+    assert_eq!(value["token"].as_str().unwrap().len(), 43);
     assert!(
         command(&process.root)
-            .args(["access", "close"])
+            .args(["access", "regenerate-token"])
             .output()
             .unwrap()
             .status

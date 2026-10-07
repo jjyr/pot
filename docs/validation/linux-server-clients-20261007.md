@@ -39,7 +39,7 @@ required `--systemd=always`, so the Provider invokes the image's init explicitly
 
 `server/tests/multi_clients.rs` exercises production Runtime, Access, durable
 storage and real HTTP/SSE listeners with independent signing keys/cookies and a
-local mock model. It covers independent pairing, login/logout/revocation and
+local mock model. It covers the former browser authentication, login/logout/revocation and
 Server restart; concurrent same-ID deduplication, conflicting payload rejection,
 busy/retry and persistent receipts; multiple subscribers, unread subscribers,
 disconnect/reconnect, selective revocation and orderly shutdown; and cancellation
@@ -57,7 +57,7 @@ v2, existing subordinate UID/GID ranges. Installed Podman dependencies with owne
 authorization. Used isolated temporary storage and instance state; existing
 Docker/inference services were not changed.
 
-Two separate browser profiles paired as Linux Client A and Linux Client B and
+Two separate browser profiles connected as Linux Client A and Linux Client B and
 loaded the embedded GPUI Web canvas. After Server restart, both automatically
 signed in using their saved client keys. Revoking A made A unauthenticated while
 B remained authenticated. B's persisted P-256 private key reported

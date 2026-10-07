@@ -133,3 +133,19 @@ Global/session usage both show Agent / model usage grouped by Pot/Codex and mode
 including input/output/input-cache/incomplete records; missing attribution shows Unknown Agent.
 Global categories follow selected ranges; details use session totals, 20/page with previous/next.
 Category pages do not change totals/trends/allowances; range/session/zone changes reset pages.
+
+## Web access settings
+
+Settings has a dedicated Web access tab. App must connect its embedded Tailscale
+node before enabling the switch. Login/device approval and DNS/HTTPS prerequisites
+are shown inline with recovery links. Web access failures do not stop local features.
+The actual HTTPS address is clickable and configures the browser using a Token
+fragment; Copy address copies only the plain URL. Scan to connect expands a
+credential-bearing QR with a do-not-share warning. Access Token has Show/Hide,
+Copy and Regenerate controls; regeneration invalidates every browser connection.
+No separate Open browser button or per-browser authorization list is present.
+Browser More offers Change access Token and Clear local Token. Invalid Token state
+stops polling, hides protected content and presents a recoverable configuration form.
+
+Add to Home Screen is available in authenticated GPUI More; the Token configuration
+page contains only the access configuration controls.

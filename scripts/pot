@@ -100,6 +100,7 @@ if cmd == "prepare":
         shutil.copy2(REPO / "sandbox-images/linux/default/agents" / name, RES / ("agents-" + name))
 elif cmd == "build":
     call([sys.executable, REPO / "scripts/build-mobile"], cwd=REPO, env=env)
+    call([sys.executable, REPO / "scripts/build-tailscale"], cwd=REPO, env=env)
     call(
         ["cargo", "build", "--locked", "-p", "pot-app", "-p", "pot-server", "-j", "4"]
         + (["--release"] if profile == "release" else []),
@@ -169,6 +170,14 @@ elif cmd == "bundle":
             pathlib.Path(env["CARGO_TARGET_DIR"]) / profile / name,
             APP / "Contents/Resources/runtime" / name,
         )
+    shutil.copy2(
+        REPO / ".local/tailscale/libpot_tailscale.dylib",
+        APP / "Contents/MacOS/libpot_tailscale.dylib",
+    )
+    shutil.copy2(
+        REPO / ".local/tailscale/TailscaleDependencyLicenses.txt",
+        APP / "Contents/Resources/TailscaleDependencyLicenses.txt",
+    )
     shutil.copytree(REPO / "mobile/dist", APP / "Contents/Resources/runtime/mobile")
     shutil.copytree(
         REPO / "skills",
@@ -251,6 +260,7 @@ elif cmd == "bundle":
             APP / "Contents/Resources/runtime/PotMacOSHelper",
         ]
     )
+    call(["codesign", "--force", "--sign", "-", APP / "Contents/MacOS/libpot_tailscale.dylib"])
     call(["codesign", "--force", "--sign", "-", APP])
     call(["codesign", "--verify", "--deep", "--strict", APP])
     print(APP)

@@ -3,8 +3,7 @@
 Extracted independently from deferred multi-Server PR #23 onto current main.
 The changes prevent reading an unlaunched Helper's termination status, bind send
 receipts to their original conversation, and display a backend error code when
-the response has no message. No multi-Server API, pairing authority, credential
-storage or connection-management changes are included.
+the response has no message. No multi-Server API or connection-management changes are included.
 
 `mise run check`, strict workspace `mise run clippy`, and `mise run test:app`
 passed. App testing includes a Rust receipt-ownership regression and native

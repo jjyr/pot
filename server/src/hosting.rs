@@ -36,7 +36,27 @@ impl Server {
     async fn bind_mode(config: ServerConfig, embedded: bool) -> Result<Self> {
         // Bind first: listener conflicts must not initialize or recover product data.
         let listener = tokio::net::TcpListener::bind(&config.bind).await?;
-        let access_config = crate::access::AccessConfig::from_env()?;
+        let ts_hostname = std::env::var("POT_TAILSCALE_HOSTNAME").ok();
+        let use_ts = embedded || ts_hostname.is_some();
+        let access_config = if use_ts {
+            Some(crate::access::AccessConfig {
+                origin: url::Url::parse("http://localhost/")?,
+                bind: "127.0.0.1:0".parse()?,
+                certificate: Default::default(),
+                private_key: Default::default(),
+                assets: std::env::var_os("POT_ACCESS_ASSETS")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| {
+                        std::env::current_exe()
+                            .unwrap()
+                            .parent()
+                            .unwrap()
+                            .join("../Resources/runtime/mobile")
+                    }),
+            })
+        } else {
+            crate::access::AccessConfig::from_env()?
+        };
         anyhow::ensure!(
             access_config.is_none() || listener.local_addr()?.ip().is_loopback(),
             "Mobile access administration requires a loopback native listener"
@@ -95,6 +115,21 @@ impl Server {
             };
             access.notifications = Some(backend.state());
             let (listener, tls) = access_listener.unwrap();
+            if use_ts {
+                let first = !access.data.join("tailscale-enabled").exists();
+                access.tailscale = Some(crate::access::tailscale::Tailscale::new(
+                    access.data.clone(),
+                    ts_hostname.unwrap_or_else(|| "pot".into()),
+                    listener.local_addr()?.port(),
+                ));
+                if first {
+                    let mut i = access.inner.lock().unwrap();
+                    i.enabled = false;
+                    i.credentials.disabled = true;
+                    access.persist(&i)?;
+                    access.policy.send_replace(false);
+                }
+            }
             Some((access, listener, tls))
         } else {
             None
@@ -177,8 +212,32 @@ impl Server {
         let (public_stop, stop_rx) = tokio::sync::watch::channel(false);
         let (public_failed, mut failure_rx) = tokio::sync::watch::channel(false);
         let mut public_task = None;
+        let mut ts_node = None;
+        let mut ts_restore = None;
         let mut push_task = None;
         if let Some((access, listener, tls)) = self.access {
+            if let Some(ts) = access.tailscale.clone() {
+                ts_node = Some(ts.clone());
+                let a = access.clone();
+                ts_restore = Some(tokio::spawn(async move {
+                    if ts.configured() {
+                        if let Err(e) = ts.connect().await {
+                            eprintln!("Tailscale: {e}");
+                            return;
+                        }
+                        loop {
+                            if !a.inner.lock().unwrap().enabled {
+                                break;
+                            }
+                            if let Ok(origin) = ts.enable().await {
+                                *a.origin.write().unwrap() = origin;
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                        }
+                    }
+                }));
+            }
             router = router.merge(crate::access::admin_router(access.clone()));
             push_task = Some(tokio::spawn(crate::access::push::dispatch(access.clone())));
             let failure = public_failed.clone();
@@ -216,6 +275,12 @@ impl Server {
                     task.abort();
                 }
 
+                if let Some(task) = ts_restore {
+                    task.abort();
+                }
+                if let Some(ts) = ts_node {
+                    let _ = ts.stop().await;
+                }
                 backend.shutdown().await;
             })
             .await?;

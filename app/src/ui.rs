@@ -10,6 +10,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     form::Form,
     input::{Input, InputState},
+    switch::Switch,
 };
 use serde_json::{Value, json};
 use std::ffi::CString;
@@ -42,29 +43,153 @@ pub struct Settings {
     secret_revision: Option<i64>,
     draft_revision: Option<i64>,
     pub advanced: bool,
+    web_show_token: bool,
+    web_show_qr: bool,
     commands_open: bool,
     api_advanced: bool,
 }
 impl Settings {
-    fn mobile_access(&self, view: &crate::client::View, cx: &mut Context<Shell>) -> Div {
-        let mut panel = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded_lg()
-            .child(crate::i18n::text("mobile.access"));
-        if view.access.is_null() {
-            return panel.child(crate::i18n::text("mobile.configure"));
-        }
+    fn web_access(&self, view: &crate::client::View, cx: &mut Context<Shell>) -> Div {
         let state = &view.access;
-        let origin = state["origin"].as_str().unwrap_or_default();
+        let t = crate::i18n::text;
+        let mut panel = div().flex().flex_col().gap_3();
+        if state.is_null() {
+            return panel.child(t("web.loading"));
+        }
+        let ts = &state["tailscale"];
+        let running = ts["state"] == "Running";
+        panel = panel.child(t("web.description"));
+        let label = format!(
+            "Tailscale · {}",
+            ts["state"].as_str().unwrap_or("Disconnected")
+        );
+        panel = panel.child(label);
+        if let Some(name) = ts["dns_name"].as_str().filter(|v| !v.is_empty()) {
+            panel = panel.child(name.to_owned());
+        }
+        let mut controls = div().flex().flex_wrap().gap_2();
+        panel = panel.child(
+            Switch::new("web-enabled")
+                .label(t("web.title"))
+                .checked(state["enabled"] == true)
+                .disabled(view.access_pending || (!running && state["enabled"] != true))
+                .on_change(cx.listener(|this, enabled, _, _| {
+                    this.client
+                        .access_command(json!({"action":if *enabled {"enable"}else{"disable"}}))
+                })),
+        );
+        for (action, key) in [("connect", "web.connect"), ("disconnect", "web.disconnect")] {
+            controls = controls.child(
+                Button::new(action)
+                    .ghost()
+                    .label(t(key))
+                    .disabled(view.access_pending || (action == "enable" && !running))
+                    .on_click(cx.listener(move |this, _, _, _| {
+                        this.client.access_command(json!({"action":action}))
+                    })),
+            );
+        }
+        panel = panel.child(controls);
+        if let Some(url) = ts["auth_url"].as_str().filter(|v| !v.is_empty()) {
+            let url = url.to_owned();
+            panel = panel.child(
+                Button::new("ts-login")
+                    .label(t("web.login"))
+                    .on_click(move |_, _, cx| cx.open_url(&url)),
+            );
+        }
+        if let Some(error) = ts["error"].as_str().filter(|v| !v.is_empty()) {
+            panel = panel.child(error.to_owned()).child(
+                Button::new("ts-dns")
+                    .ghost()
+                    .label(t("web.dns-settings"))
+                    .on_click(|_, _, cx| cx.open_url("https://login.tailscale.com/admin/dns")),
+            );
+        }
+        let origin = state["origin"].as_str().unwrap_or_default().to_owned();
+        let token = state["token"].as_str().unwrap_or_default().to_owned();
+        let connection = format!("{origin}/#access_token={token}");
+        if origin.starts_with("https://") {
+            let url = connection.clone();
+            panel = panel.child(
+                Button::new("web-address")
+                    .ghost()
+                    .label(origin.clone())
+                    .disabled(state["enabled"] != true)
+                    .on_click(move |_, _, cx| cx.open_url(&url)),
+            );
+            panel = panel.child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("copy-address")
+                            .ghost()
+                            .label(t("web.copy-address"))
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(origin.clone()))
+                            }),
+                    )
+                    .child(
+                        Button::new("connection-qr")
+                            .ghost()
+                            .label(t("web.scan"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.settings.web_show_qr = !this.settings.web_show_qr;
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+        let token_copy = token.clone();
         panel = panel
-            .child(origin.to_owned())
-            .child(crate::i18n::text("mobile.owner-scope"));
-        if let Ok(code) = qrcode::QrCode::new(origin) {
+            .child(t("web.access-token"))
+            .child(if self.web_show_token {
+                token.clone()
+            } else {
+                "••••••••••••••••".into()
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        Button::new("show-token")
+                            .ghost()
+                            .label(t(if self.web_show_token {
+                                "web.hide"
+                            } else {
+                                "web.show"
+                            }))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.settings.web_show_token = !this.settings.web_show_token;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("copy-token")
+                            .ghost()
+                            .label(t("web.copy-token"))
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(token_copy.clone()))
+                            }),
+                    )
+                    .child(
+                        Button::new("rotate-token")
+                            .ghost()
+                            .label(t("web.regenerate"))
+                            .disabled(view.access_pending)
+                            .on_click(cx.listener(|this, _, _, _| {
+                                this.client
+                                    .access_command(json!({"action":"regenerate_token"}))
+                            })),
+                    ),
+            );
+        if self.web_show_qr
+            && origin_is_https(state)
+            && let Ok(code) = qrcode::QrCode::new(connection)
+        {
             let width = code.width();
             let colors = code.to_colors();
             let rows = (0..width + 8).map(|y| {
@@ -74,66 +199,19 @@ impl Settings {
                         && x < width + 4
                         && y < width + 4
                         && colors[(y - 4) * width + x - 4] == qrcode::Color::Dark;
-                    div().w(px(4.)).h(px(4.)).bg(if dark {
-                        gpui::rgb(0x000000)
-                    } else {
-                        gpui::rgb(0xffffff)
-                    })
+                    div()
+                        .w(px(4.))
+                        .h(px(4.))
+                        .bg(gpui::rgb(if dark { 0x000000 } else { 0xffffff }))
                 }))
             });
-            panel = panel.child(div().flex().flex_col().items_start().children(rows));
-        }
-        let mut controls = div().flex().flex_wrap().gap_2();
-        for (action, key) in [
-            (
-                if state["enabled"] == true {
-                    "disable"
-                } else {
-                    "enable"
-                },
-                if state["enabled"] == true {
-                    "mobile.disable"
-                } else {
-                    "mobile.enable"
-                },
-            ),
-            ("pair", "mobile.pair"),
-            ("close_enrollment", "mobile.close-enrollment"),
-        ] {
-            controls = controls.child(
-                Button::new(action)
-                    .ghost()
-                    .label(crate::i18n::text(key))
-                    .disabled(view.access_pending)
-                    .on_click(cx.listener(move |this, _, _, _| {
-                        this.client.access_command(json!({"action":action}))
-                    })),
-            );
-        }
-        panel = panel.child(controls).child(view.access_notice.clone());
-        for (kind, action) in [
-            ("credentials", "revoke_credential"),
-            ("sessions", "revoke_session"),
-        ] {
-            if let Some(items) = state[kind].as_array() {
-                for item in items {
-                    let id = item["id"].as_str().unwrap_or_default().to_owned();
-                    let label = item["name"].as_str().unwrap_or(&id).to_owned();
-                    panel = panel.child(
-                        div().flex().gap_2().items_center().child(label).child(
-                            Button::new(id.clone())
-                                .ghost()
-                                .label(crate::i18n::text("mobile.revoke"))
-                                .disabled(view.access_pending)
-                                .on_click(cx.listener(move |this, _, _, _| {
-                                    this.client.access_command(json!({"action":action,"id":id}))
-                                })),
-                        ),
-                    );
-                }
-            }
+            panel = panel
+                .child(div().flex().flex_col().items_start().children(rows))
+                .child(t("web.qr-warning"));
         }
         panel
+            .child(t("web.rotate-hint"))
+            .child(view.access_notice.clone())
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
@@ -159,6 +237,8 @@ impl Settings {
             secret_revision: None,
             draft_revision: None,
             advanced: false,
+            web_show_token: false,
+            web_show_qr: false,
             commands_open: false,
             api_advanced: false,
         }
@@ -265,10 +345,11 @@ impl Settings {
                 .child(Input::new(&self.fields[i]).aria_label(name))
         };
         match section {
+            5 => {
+                form = form
+                    .child(field(crate::i18n::text("web.title")).child(self.web_access(view, cx)));
+            }
             0 => {
-                form = form.child(
-                    field(crate::i18n::text("mobile.access")).child(self.mobile_access(view, cx)),
-                );
                 form = form
                     .child(field(crate::i18n::text("settings.language"))
                         .description(crate::i18n::text("settings.language.hint"))
@@ -387,6 +468,7 @@ impl Settings {
                         crate::i18n::text("ui.ai-configuration"),
                         crate::i18n::text("ui.work-environment"),
                         crate::i18n::text("ui.task-configuration"),
+                        crate::i18n::text("web.title"),
                     ]
                     .get(section as usize)
                     .copied()
@@ -399,6 +481,7 @@ impl Settings {
                             (1, crate::i18n::text("ui.ai-configuration")),
                             (4, crate::i18n::text("ui.task-configuration")),
                             (3, crate::i18n::text("ui.work-environment")),
+                            (5, crate::i18n::text("web.title")),
                         ]
                         .into_iter()
                         .map(|(i, name)| {
@@ -460,4 +543,10 @@ impl Settings {
                 ),
         )
     }
+}
+
+fn origin_is_https(state: &Value) -> bool {
+    state["origin"]
+        .as_str()
+        .is_some_and(|v| v.starts_with("https://"))
 }

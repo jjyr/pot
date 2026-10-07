@@ -127,7 +127,7 @@ locales = {
     locale: {
         key: value
         for key, value in json.loads((ROOT / f"app/locales/{locale}.json").read_text()).items()
-        if key.startswith("mobile.")
+        if key.startswith(("mobile.", "web."))
     }
     for locale in ["en", "zh-CN"]
 }

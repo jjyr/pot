@@ -21,7 +21,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand approved downloads, progress, cache and embedded hashes | [Sandbox resource delivery](sandbox-resources.md) |
 | Build the Linux Sandbox image, or review target Linux/macOS template layout | [Sandbox image](sandbox-image.md) |
 | Understand command shells, PTY, background sessions and initialization snapshots | [Sandbox command execution](executor.md) |
-| Configure QR/pairing browser access and encrypted main-message push | [Mobile access](mobile-access.md) |
+| Configure QR/Token browser access and encrypted main-message push | [Mobile access](mobile-access.md) |
 | Change UI language, translations or locale matching | [Internationalization](internationalization.md) |
 | Understand shared App/Mobile page components and platform adapters | [Shared UI](shared-ui.md) |
 | Change chat, tasks, settings, or Sandbox UI | [UI specification](ui-ux-design.md) |
@@ -35,7 +35,7 @@ Podman Web desktop acceptance: [Desktop and Client isolation, 2026-10-07](valida
 
 Linux/Podman and multiple-client acceptance: [Linux Server and clients, 2026-10-07](validation/linux-server-clients-20261007.md).
 
-Current hosting/authentication acceptance: [Standalone CLI and embedded App, 2026-10-07](validation/standalone-hosting-20261007.md).
+Web access redesign: [Token authentication and embedded Tailscale, 2026-10-08](validation/web-access-token-20261008.md).
 
 Native client reliability acceptance: [Helper failures and conversation receipts, 2026-10-07](validation/client-reliability-20261007.md).
 

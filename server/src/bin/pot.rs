@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Server and Web UI in this process\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access qr|pair|clients|close|enable|disable|revoke ID\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients use the browser pairing page; this CLI manages the local instance.";
+const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Server and Web UI in this process\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--version") {
@@ -142,9 +142,13 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
         "serve" => {
             let server = pot_server::Server::bind(pot_server::ServerConfig::from_env()).await?;
             println!(
-                "Pot instance: {}\nWeb: {}\nGenerate a code: pot --root '{}' access pair",
+                "Pot instance: {}\nWeb: {}\nAccess Token: pot --root '{}' access token",
                 root.display(),
-                std::env::var("POT_ACCESS_ORIGIN")?,
+                if std::env::var_os("POT_TAILSCALE_HOSTNAME").is_some() {
+                    "embedded Tailscale (pot access connect, then pot access enable)".into()
+                } else {
+                    std::env::var("POT_ACCESS_ORIGIN")?
+                },
                 root.display()
             );
             let _ownership = server.local_client();
@@ -182,9 +186,15 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
         }
         "open" => {
             let state = api(root, "/api/v1/access", None).await?;
-            let url = state["origin"]
+            ensure!(
+                state["enabled"] == true,
+                "Enable Web access before opening it"
+            );
+            let origin = state["origin"]
                 .as_str()
                 .context("Web access not configured")?;
+            let token = state["token"].as_str().context("Missing access Token")?;
+            let url = format!("{origin}/#access_token={token}");
             let command = if cfg!(target_os = "macos") {
                 "open"
             } else {
@@ -201,35 +211,30 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
         }
         "access" => {
             let command = argument(args, 1)?;
-            let value = match command {
-                "clients" | "status" | "qr" => api(root, "/api/v1/access", None).await?,
-                "pair" | "enable" | "disable" => {
-                    api(root, "/api/v1/access", Some(json!({"action":command}))).await?
-                }
-                "close" => {
+            let mut value = match command {
+                "status" | "qr" => api(root, "/api/v1/access", None).await?,
+                "token" | "regenerate-token" | "enable" | "disable" | "connect" | "disconnect" => {
                     api(
                         root,
                         "/api/v1/access",
-                        Some(json!({"action":"close_enrollment"})),
-                    )
-                    .await?
-                }
-                "revoke" => {
-                    api(
-                        root,
-                        "/api/v1/access",
-                        Some(json!({"action":"revoke_credential","id":argument(args,2)?})),
+                        Some(json!({"action":command.replace('-',"_")})),
                     )
                     .await?
                 }
                 _ => bail!("Unknown access command"),
             };
+            if command == "status" {
+                value.as_object_mut().unwrap().remove("token");
+            }
             if command == "qr" {
-                let url = value["origin"].as_str().context("Missing Web origin")?;
+                let origin = value["origin"].as_str().context("Missing Web origin")?;
+                let token = value["token"].as_str().context("Missing access Token")?;
+                let url = format!("{origin}/#access_token={token}");
+                println!("Connection QR contains access credentials. Do not share.");
                 println!(
                     "{}\n{}",
                     url,
-                    qrcode::QrCode::new(url)?
+                    qrcode::QrCode::new(url.as_bytes())?
                         .render::<qrcode::render::unicode::Dense1x2>()
                         .quiet_zone(true)
                         .build()
@@ -274,7 +279,8 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
                     ensure!(
                         matches!(
                             key.as_str(),
-                            "POT_ACCESS_ORIGIN"
+                            "POT_TAILSCALE_HOSTNAME"
+                                | "POT_ACCESS_ORIGIN"
                                 | "POT_ACCESS_BIND"
                                 | "POT_ACCESS_CERT"
                                 | "POT_ACCESS_KEY"

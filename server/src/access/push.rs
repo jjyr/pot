@@ -107,10 +107,10 @@ fn validate(info: &SubscriptionInfo) -> Result<()> {
     Ok(())
 }
 fn authorized(a: &Access, h: &HeaderMap, touch: bool) -> Result<String, super::routes::Failure> {
-    let id = cookie(h, SESSION_COOKIE)
-        .ok_or_else(|| super::routes::fail(StatusCode::UNAUTHORIZED, "login_required"))?;
-    a.session_key(&id, touch)
-        .ok_or_else(|| super::routes::fail(StatusCode::UNAUTHORIZED, "session_expired"))
+    let _ = touch;
+    a.authorization(h)
+        .map(|_| a.generation())
+        .ok_or_else(|| super::routes::fail(StatusCode::UNAUTHORIZED, "invalid_token"))
 }
 pub async fn subscribe(
     State(a): State<Access>,
@@ -135,7 +135,7 @@ pub async fn subscribe(
         .notification_sequence()
         .map_err(|_| super::routes::invalid())?;
     let mut i = a.inner.lock().unwrap();
-    if !i.enabled || !i.credentials.keys.contains_key(&credential) {
+    if !i.enabled || Access::token_generation(&i.credentials.token) != credential {
         return Err(super::routes::fail(
             StatusCode::UNAUTHORIZED,
             "session_expired",
@@ -332,7 +332,6 @@ pub async fn dispatch(a: Access) {
                 let eligible = {
                     let i = a.inner.lock().unwrap();
                     i.enabled
-                        && i.credentials.keys.contains_key(&sub.credential)
                         && i.credentials.subscriptions.get(&id).is_some_and(|s| {
                             s.sequence < seq && s.info.endpoint == sub.info.endpoint
                         })

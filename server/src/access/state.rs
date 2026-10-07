@@ -10,10 +10,6 @@ use url::Url;
 use uuid::Uuid;
 
 pub const SESSION_COOKIE: &str = "__Host-pot-session";
-pub const CEREMONY_COOKIE: &str = "__Host-pot-ceremony";
-const REQUEST_TTL: Duration = Duration::from_secs(300);
-const SESSION_IDLE: Duration = Duration::from_secs(1800);
-const SESSION_MAX: Duration = Duration::from_secs(43200);
 
 #[derive(Clone, Debug)]
 pub struct AccessConfig {
@@ -70,48 +66,23 @@ impl AccessConfig {
         Ok(())
     }
 }
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Credentials {
     #[serde(default)]
     pub disabled: bool,
-    pub keys: HashMap<String, Credential>,
+    pub token: String,
     #[serde(default)]
     pub subscriptions: HashMap<String, super::push::Subscription>,
 }
-#[derive(Serialize, Deserialize)]
-pub struct Credential {
-    pub name: String,
-    pub public_key: String,
-}
-pub struct Pairing {
-    pub digest: Vec<u8>,
-    pub expires: Instant,
-    pub attempts: u8,
-}
-pub struct Challenge {
-    pub expires: Instant,
-    pub message: String,
-    pub key: String,
-    pub name: String,
-    pub public_key: String,
-    pub pairing: bool,
-}
-pub struct Session {
-    pub key: String,
-    pub created: Instant,
-    pub touched: Instant,
-}
 pub struct Inner {
     pub credentials: Credentials,
-    pub pairing: Option<Pairing>,
-    pub challenges: HashMap<String, Challenge>,
-    pub sessions: HashMap<String, Session>,
     pub enabled: bool,
     pub requests: std::collections::VecDeque<Instant>,
 }
 #[derive(Clone)]
 pub struct Access {
-    pub origin: String,
+    pub origin: Arc<std::sync::RwLock<String>>,
+    pub tailscale: Option<Arc<super::tailscale::Tailscale>>,
     pub assets: PathBuf,
     pub data: PathBuf,
     pub root_token: String,
@@ -132,46 +103,40 @@ impl Access {
         runtime: axum::Router,
     ) -> Result<Self> {
         AccessConfig::validate_origin(&config.origin)?;
-        let path = data.join("access-clients.json");
+        let path = data.join("access-token.json");
         let credentials: Credentials = if path.exists() {
             serde_json::from_slice(&std::fs::read(path)?)?
         } else {
-            // Preserve a previously disabled endpoint, but never migrate old client authority.
-            let legacy = data.join("access-credentials.json");
-            let disabled = if legacy.exists() {
-                serde_json::from_slice::<serde_json::Value>(&std::fs::read(legacy)?)?["disabled"]
-                    .as_bool()
-                    .unwrap_or(false)
-            } else {
-                false
-            };
             Credentials {
-                disabled,
+                token: Self::generate_token()?,
                 ..Default::default()
             }
         };
+        ensure!(credentials.token.len() == 43, "Invalid saved access token");
         let enabled = !credentials.disabled;
-        Ok(Self {
+        let access = Self {
             notifications: None,
             push: super::push::Push::from_env()?.map(Arc::new),
             policy: tokio::sync::watch::channel(enabled).0,
             desktop_open: Arc::new(tokio::sync::Mutex::new(())),
             desktops: Arc::new(Mutex::new(HashMap::new())),
             foreground: Arc::new(Mutex::new(HashMap::new())),
-            origin: config.origin.origin().ascii_serialization(),
+            origin: Arc::new(std::sync::RwLock::new(
+                config.origin.origin().ascii_serialization(),
+            )),
+            tailscale: None,
             assets: config.assets.clone(),
             data,
             root_token,
             runtime,
             inner: Arc::new(Mutex::new(Inner {
                 credentials,
-                pairing: None,
-                challenges: HashMap::new(),
-                sessions: HashMap::new(),
                 enabled,
                 requests: std::collections::VecDeque::new(),
             })),
-        })
+        };
+        access.persist(&access.inner.lock().unwrap())?;
+        Ok(access)
     }
     pub fn rate_limit(&self) -> bool {
         let mut i = self.inner.lock().unwrap();
@@ -191,7 +156,7 @@ impl Access {
     }
     pub fn persist(&self, inner: &Inner) -> Result<()> {
         use std::{io::Write, os::unix::fs::OpenOptionsExt};
-        let path = self.data.join("access-clients.json");
+        let path = self.data.join("access-token.json");
         let temporary = path.with_extension("tmp");
         let mut f = std::fs::OpenOptions::new()
             .create(true)
@@ -205,66 +170,82 @@ impl Access {
         std::fs::File::open(&self.data)?.sync_all()?;
         Ok(())
     }
-    pub fn cleanup(inner: &mut Inner) {
-        let now = Instant::now();
-        if inner.pairing.as_ref().is_some_and(|p| p.expires <= now) {
-            inner.pairing = None;
-        }
-        inner.challenges.retain(|_, p| p.expires > now);
-        inner.sessions.retain(|_, s| {
-            now.duration_since(s.created) < SESSION_MAX
-                && now.duration_since(s.touched) < SESSION_IDLE
-        });
+    pub fn origin(&self) -> String {
+        self.origin.read().unwrap().clone()
     }
-    pub fn valid_session(&self, id: &str, touch: bool) -> bool {
-        self.session_key(id, touch).is_some()
+    pub fn generate_token() -> Result<String> {
+        use base64::Engine;
+        use ring::rand::{SecureRandom, SystemRandom};
+        let mut bytes = [0u8; 32];
+        SystemRandom::new()
+            .fill(&mut bytes)
+            .map_err(|_| anyhow::anyhow!("Token generation failed"))?;
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+    }
+    pub fn valid_token(&self, token: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.enabled
+            && token.len() == inner.credentials.token.len()
+            && token
+                .as_bytes()
+                .iter()
+                .zip(inner.credentials.token.as_bytes())
+                .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+                == 0
+    }
+    pub fn generation(&self) -> String {
+        Self::token_generation(&self.inner.lock().unwrap().credentials.token)
+    }
+    pub fn token_generation(token: &str) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(ring::digest::digest(
+            &ring::digest::SHA256,
+            token.as_bytes(),
+        ))
+    }
+    // Stateless, token-signed browser cookies support navigation/WebSockets that cannot set headers.
+    pub fn browser_cookie(&self) -> String {
+        use base64::Engine;
+        let id = Uuid::new_v4().to_string();
+        let inner = self.inner.lock().unwrap();
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, inner.credentials.token.as_bytes());
+        format!(
+            "{}.{}",
+            id,
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(ring::hmac::sign(&key, id.as_bytes()))
+        )
+    }
+    pub fn valid_session(&self, value: &str, _: bool) -> bool {
+        use base64::Engine;
+        let Some((id, mac)) = value.split_once('.') else {
+            return false;
+        };
+        if Uuid::parse_str(id).is_err() {
+            return false;
+        }
+        let Ok(mac) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(mac) else {
+            return false;
+        };
+        let inner = self.inner.lock().unwrap();
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, inner.credentials.token.as_bytes());
+        inner.enabled && ring::hmac::verify(&key, id.as_bytes(), &mac).is_ok()
     }
     pub fn session_key(&self, id: &str, touch: bool) -> Option<String> {
-        let mut inner = self.inner.lock().unwrap();
-        Self::cleanup(&mut inner);
-        if !inner.enabled {
-            return None;
-        }
-        let key = inner.sessions.get(id).map(|s| s.key.clone());
-        if !key
-            .as_ref()
-            .is_some_and(|k| inner.credentials.keys.contains_key(k))
-        {
-            return None;
-        }
-        if touch {
-            inner.sessions.get_mut(id).unwrap().touched = Instant::now();
-        }
-        key
+        self.valid_session(id, touch).then(|| self.generation())
     }
-    pub fn session(inner: &mut Inner, key: String) -> String {
-        Self::cleanup(inner);
-        // Bound memory even for repeated successful logins.
-        if inner.sessions.len() >= 128
-            && let Some(oldest) = inner
-                .sessions
-                .iter()
-                .min_by_key(|(_, s)| s.created)
-                .map(|(id, _)| id.clone())
-        {
-            inner.sessions.remove(&oldest);
+    pub fn authorization(&self, headers: &axum::http::HeaderMap) -> Option<String> {
+        if let Some(value) = headers.get("authorization") {
+            let token = value.to_str().ok()?.strip_prefix("Bearer ")?;
+            return self.valid_token(token).then(|| token.to_owned());
         }
-        let id = Uuid::new_v4().to_string();
-        let now = Instant::now();
-        inner.sessions.insert(
-            id.clone(),
-            Session {
-                key,
-                created: now,
-                touched: now,
-            },
-        );
-        id
+        cookie(headers, SESSION_COOKIE).filter(|id| self.valid_session(id, false))
     }
-    pub fn expiry() -> Instant {
-        Instant::now() + REQUEST_TTL
+    pub fn valid_authorization(&self, proof: &str) -> bool {
+        self.valid_token(proof) || self.valid_session(proof, false)
     }
 }
+
 pub fn cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
     // HTTP/2 clients may split Cookie across several header fields (RFC 9113).
     headers
@@ -283,10 +264,7 @@ mod tests {
     #[test]
     fn split_http2_cookie_headers_are_all_parsed() {
         let mut h = axum::http::HeaderMap::new();
-        h.append(
-            "cookie",
-            format!("{CEREMONY_COOKIE}=challenge").parse().unwrap(),
-        );
+        h.append("cookie", "other=ignored".to_owned().parse().unwrap());
         h.append(
             "cookie",
             format!("{SESSION_COOKIE}=session").parse().unwrap(),

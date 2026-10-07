@@ -12,19 +12,13 @@ browser. **HTTPS is recommended for remote access.**
 | Local HTTP | Browser on Host or through an SSH local tunnel | Supported |
 | Remote HTTP | Basic access with fewer browser features | Planned; not implemented |
 
-Remote HTTP needs a different enrollment/session implementation because current
-pairing uses WebCrypto. It will lack Service Worker and Web Push; PWA installation
-and system clipboard APIs may also be unavailable. Ordinary HTTP does not encrypt
-sessions or content. Tailscale encrypts its network traffic, but does not make
-remote HTTP a browser secure context.
-
 ## Deploy with an Agent
 
 Fill in the host, network and preferred mode:
 
 > Deploy Pot Server and Web UI on HOST. Clients connect through NETWORK; use MODE.
 > Follow docs/web-ui-deployment.md. Check support for my chosen mode, install and configure
-> Server, and verify browser login and desktop access. Give me the URL, pairing
+> Server, and verify browser login and desktop access. Give me the URL, Token configuration
 > instructions, and service stop/start and certificate renewal instructions.
 
 ## Install
@@ -110,25 +104,29 @@ Environment overrides saved settings. Arrange certificate renewal through
 Tailscale or the ACME client, then restart Pot to load renewed files. Pot currently
 automates neither issuance nor certificate reload.
 
-## Pair and verify
+## Connect and verify
 
-While Server is running, generate a code on Host:
-
-```sh
-pot --root /absolute/instance access pair
-```
-
-Open the configured URL and enter the code and a client name. Each code is valid
-for five minutes and one client. Verify login, reconnect and Sandbox → Start
-desktop on the intended devices. For multiple clients, verify that revoking one
-leaves the other usable:
+While Server is running:
 
 ```sh
-pot --root /absolute/instance access clients
-pot --root /absolute/instance access revoke CLIENT_ID
+pot --root /absolute/instance open
+pot --root /absolute/instance access token
+pot --root /absolute/instance access qr
 ```
 
-For background operation, use the Linux systemd or macOS LaunchAgent instructions
-in [Standalone Server](standalone-server.md). Model configuration and optional
-push setup are documented in [Standalone Server](standalone-server.md#configure-and-operate-without-app)
-and [Mobile access](mobile-access.md#main-agent-message-notifications).
+Connection QR codes contain credentials. Do not share them. Browsers save the
+Token locally and automatically connect later. Verify chat/reconnect and Sandbox
+desktop on intended devices. `pot access regenerate-token` invalidates all old
+browser connections.
+
+## Embedded Tailscale and App
+
+App Web access exclusively uses embedded Tailscale. Settings → Web access →
+Connect Tailscale → complete login/approval → Enable Web access. The address is
+clickable; Copy address produces a plain URL, Scan to connect includes the Token.
+Enable MagicDNS and HTTPS certificates in Tailscale DNS settings. Client devices
+need tailnet connectivity. No certificate files are required.
+
+CLI optionally uses the same transport through `POT_TAILSCALE_HOSTNAME`; see
+[Standalone Server](standalone-server.md#optional-embedded-tailscale). Existing
+manual HTTPS procedures above remain supported independently.

@@ -15,7 +15,8 @@ pub unsafe fn apply_settings(root: &Path, local_web: bool) -> Result<()> {
         anyhow::ensure!(
             matches!(
                 key.as_str(),
-                "POT_ACCESS_ORIGIN"
+                "POT_TAILSCALE_HOSTNAME"
+                    | "POT_ACCESS_ORIGIN"
                     | "POT_ACCESS_BIND"
                     | "POT_ACCESS_CERT"
                     | "POT_ACCESS_KEY"

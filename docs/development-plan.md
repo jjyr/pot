@@ -1,6 +1,6 @@
 # Development plan and current scope
 
-Updated: 2026-10-07.
+Updated: 2026-10-08.
 
 ## Delivered
 
@@ -12,7 +12,6 @@ Updated: 2026-10-07.
 - API gateway supports Chat, Responses, Messages and Gemini, with request/usage accounting and allowances. Native Codex reports turn usage separately.
 - GPUI/Swift provides Chat, Tasks, Usage, AI/Task/Environment settings and optional Sandbox desktop.
 - Shared `pot-ui` Chat/Tasks/Sandbox/Usage components, page transitions, allowance parsing, request/receipt/draft policy and locale-explicit catalogs are used by native App and WASM; native composer and navigation remain unchanged. See [shared UI](shared-ui.md).
-- Owner-instance mobile pilot: shared GPUI Kit WASM chat/tasks/inventory, trusted HTTPS QR, owner-generated pairing codes with client signing keys, revocable sessions and encrypted main-message Web Push. See [mobile access](mobile-access.md) and its [dated validation](validation/mobile-access-20261007.md).
 
 See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
 
@@ -45,7 +44,7 @@ Keep Rust Runtime/SQLite, shared protocol and GPUI/Swift/Helper boundaries. Pref
 
 ## Standalone and embedded hosting — 2026-10-07
 
-Owner-generated one-use pairing replaces WebAuthn. The standalone `pot` CLI
+Persistent instance Tokens authorize browser APIs. The standalone `pot` CLI
 provides OS-authorized management, a Web UI release archive and optional macOS
 service/provider packaging. App embeds the same backend and dispatches UI
 requests in memory; it does not connect to a daemon. See
@@ -70,3 +69,14 @@ than a macOS build dependency. Multiple-client regression runs in backend CI;
 see the dated Linux/client acceptance report for actual verification and limits.
 
 Podman desktop follow-up (2026-10-07): private loopback broker transport, bundled noVNC, Web Sandbox launch, login-bound tickets and revocation guards are implemented. Actual Linux rendering, mouse/keyboard, clipboard, browser launch and cgroup metrics passed; see [acceptance](validation/podman-desktop-20261007.md).
+
+## Web access redesign — 2026-10-08
+
+App Web access now requires an embedded libtailscale node with tailnet-only HTTPS,
+automatic certificate provisioning/renewal and a dedicated settings page. CLI retains
+localhost/manual HTTPS and optionally uses the same embedded transport. A persistent
+instance Token replaces browser enrollment; connection links/QR fragments configure
+browser storage automatically. Rotation invalidates every browser/stream/desktop.
+Go source and dependency graph are pinned, and linked dependency notices are packaged.
+Local Server/CLI/TLS and multi-client tests cover Token behavior. Real tailnet login,
+certificate issuance, physical phones and complete App bundle acceptance remain live gates.
