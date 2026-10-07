@@ -180,14 +180,14 @@ The confirmed design combines a pot-shaped execution indicator with a compact nu
 
 | Execution state | Pot appearance |
 | --- | --- |
-| Neither main Chat nor a background task is executing | The existing empty pot |
-| Main Chat is processing or at least one background task is executing | A pot visibly simmering, with a few simple contents/boiling curves and restrained steam |
+| Neither main Chat nor a background task is executing | The monochrome Pot Companion, with open rim, handles, eyes and smile |
+| Main Chat is processing or at least one background task is executing | The same Companion with restrained steam |
 
-Keep the small icon legible and predominantly monochrome. Depict cooking rather than detailed individual ingredients: simplify the contents to short boiling curves and, where legible, a small steam mark. The change from empty to simmering must be visible even without animation. A queued or waiting task alone does not make the pot cook. Return to the empty pot only after both main Chat and executing background work are idle.
+Keep the small icon legible and predominantly monochrome. Use the same character geometry as navigation, with negative-space facial features and steam to indicate execution. The change from idle to working must be visible even without animation. A queued or waiting task alone does not make the pot cook. Return to the idle Companion only after both main Chat and executing background work are idle.
 
-While actively cooking, boiling/steam may change gently over a slow cycle. Avoid a continuously bouncing pot, flashing whole icon or exaggerated lid movement. Stop the activity animation when idle; under Reduce Motion, show a static simmering pot. Preserve configuration/error distinctions without interpreting them as unread messages or active execution.
+While actively cooking, steam may change gently over a slow cycle. Avoid a continuously bouncing pot, flashing whole icon or exaggerated lid movement. Stop the activity animation when idle; under Reduce Motion, show a static simmering pot. Preserve configuration/error distinctions without interpreting them as unread messages or active execution.
 
-Use the selected **compact numeric badge** next to the pot: fixed count area, tabular digits, a soft accent fill and `9+` above nine unread replies. Hide the badge at zero, retaining fixed status-item width so other menu-bar items do not move. Do not also show an unread dot or a second trailing number. An empty pot can have unread messages, and a simmering pot can have none.
+Use the selected **compact numeric badge** next to the pot: fixed count area, tabular digits, a soft accent fill and `9+` above nine unread replies. Hide the badge at zero, retaining fixed status-item width so other menu-bar items do not move. Do not also show an unread dot or a second trailing number. An idle Companion can have unread messages, and a working Companion can have none.
 
 Set the exact unread count and actual execution state in the accessibility label; no hover tooltip is required for this design. Clicking opens Pot and does not itself mark all messages read. Retain the current main-chat completion/read-at-latest rules. Badge arrival may use a single 180 ms opacity/scale transition from zero to positive, without repeatedly pulsing on refresh or count changes. Validate real menu-bar backgrounds, selected-button appearance, Retina scale and VoiceOver before implementation acceptance.
 

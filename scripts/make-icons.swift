@@ -1,4 +1,4 @@
-// Editable vector master for Pot Companion's application, Home Screen and tray icons.
+// Editable vector master for Pot Companion's application and Home Screen icons.
 // Run: swift scripts/make-icons.swift
 import AppKit
 import Foundation
@@ -55,33 +55,22 @@ func companion() {
     }, width: 0.55, color: color(0x35251C))
 }
 
-func render(size: Int, template: Bool = false, homeScreen: Bool = false) -> Data {
+func render(size: Int, homeScreen: Bool = false) -> Data {
     let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
     let transform = NSAffineTransform(); transform.scale(by: CGFloat(size) / 1024); transform.concat()
-    if template {
-        // Preserve the tray's existing execution/unread semantics and template silhouette.
-        stroke({ p in
-            p.move(to: NSPoint(x: 220, y: 555)); p.line(to: NSPoint(x: 270, y: 305))
-            p.curve(to: NSPoint(x: 754, y: 305), controlPoint1: NSPoint(x: 320, y: 105),
-                    controlPoint2: NSPoint(x: 704, y: 105)); p.line(to: NSPoint(x: 804, y: 555))
-        }, width: 82, color: .black)
-        stroke({ p in p.move(to: NSPoint(x: 220, y: 705)); p.line(to: NSPoint(x: 804, y: 705)) },
-               width: 82, color: .black)
-    } else {
-        let tile = homeScreen ? NSBezierPath(rect: NSRect(x: 0, y: 0, width: 1024, height: 1024)) :
-            NSBezierPath(roundedRect: NSRect(x: 48, y: 48, width: 928, height: 928), xRadius: 210, yRadius: 210)
-        NSGradient(starting: color(0xF6E6CF), ending: color(0xFFF8ED))!.draw(in: tile, angle: 90)
-        for index in (0 ..< 20).reversed() {
-            let spread = CGFloat(index) * 2
-            color(0x72402B, alpha: 0.008).setFill()
-            NSBezierPath(ovalIn: NSRect(x: 265 - spread, y: 177 - spread / 3,
-                                        width: 494 + spread * 2, height: 58 + spread * 2 / 3)).fill()
-        }
-        companion()
+    let tile = homeScreen ? NSBezierPath(rect: NSRect(x: 0, y: 0, width: 1024, height: 1024)) :
+        NSBezierPath(roundedRect: NSRect(x: 48, y: 48, width: 928, height: 928), xRadius: 210, yRadius: 210)
+    NSGradient(starting: color(0xF6E6CF), ending: color(0xFFF8ED))!.draw(in: tile, angle: 90)
+    for index in (0 ..< 20).reversed() {
+        let spread = CGFloat(index) * 2
+        color(0x72402B, alpha: 0.008).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 265 - spread, y: 177 - spread / 3,
+                                    width: 494 + spread * 2, height: 58 + spread * 2 / 3)).fill()
     }
+    companion()
     NSGraphicsContext.restoreGraphicsState()
     return bitmap.representation(using: .png, properties: [:])!
 }
@@ -90,7 +79,6 @@ try FileManager.default.createDirectory(at: assets, withIntermediateDirectories:
 try render(size: 1024).write(to: assets.appendingPathComponent("Pot.png"))
 try render(size: 128).write(to: assets.appendingPathComponent("Pot128.png"))
 try render(size: 1024, homeScreen: true).write(to: assets.appendingPathComponent("PotHomeScreen.png"))
-try render(size: 44, template: true).write(to: assets.appendingPathComponent("PotTray.png"))
 let iconset = root.appendingPathComponent(".local/d1/Pot.iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 for size in [16, 32, 128, 256, 512] {
@@ -101,4 +89,4 @@ for size in [16, 32, 128, 256, 512] {
 let tool = Process(); tool.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 tool.arguments = ["-c", "icns", iconset.path, "-o", assets.appendingPathComponent("Pot.icns").path]
 try tool.run(); tool.waitUntilExit(); guard tool.terminationStatus == 0 else { fatalError("iconutil failed") }
-print("Generated Pot Companion application, Home Screen and tray icons")
+print("Generated Pot Companion application and Home Screen icons")
