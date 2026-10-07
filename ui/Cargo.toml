@@ -14,3 +14,6 @@ pot-protocol.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 unicode-segmentation = "1.12"
+
+[build-dependencies]
+serde_json.workspace = true

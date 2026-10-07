@@ -14,6 +14,10 @@ pub fn router(s: Service) -> Router {
         )
         .route("/desktop/{id}/", get(pot_runtime::desktop::page))
         .route(
+            "/desktop/{id}/{name}",
+            get(pot_runtime::desktop::localization_asset),
+        )
+        .route(
             "/desktop/{id}/api/status",
             get(pot_runtime::desktop::status),
         )

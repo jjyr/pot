@@ -45,7 +45,10 @@ pub(super) async fn proxy(State(a): State<Access>, mut req: Request) -> Result<R
         }
         let suffix = parts[3..].join("/");
         let allowed = match *req.method() {
-            Method::GET => matches!(suffix.as_str(), "" | "rfb" | "api/status" | "api/metrics"),
+            Method::GET => matches!(
+                suffix.as_str(),
+                "" | "rfb" | "api/status" | "api/metrics" | "i18n.js" | "locales.json"
+            ),
             Method::POST => matches!(suffix.as_str(), "api/control" | "api/browser"),
             _ => false,
         };

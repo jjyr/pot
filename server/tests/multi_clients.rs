@@ -715,6 +715,35 @@ async fn desktop_tickets_are_browser_bound_and_rotation_disconnects_every_owner(
         .headers_mut()
         .insert("Origin", "https://attacker.invalid".parse().unwrap());
     assert!(tokio_tungstenite::connect_async(cross_site).await.is_err());
+    for asset in ["i18n.js", "locales.json"] {
+        assert_eq!(
+            b.request(&host, &format!("{}{asset}", paths[0]), None)
+                .await
+                .status(),
+            403
+        );
+        let response = a
+            .request(&host, &format!("{}{asset}", paths[0]), None)
+            .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let body = response.text().await.unwrap();
+        if asset == "locales.json" {
+            let catalogs: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(catalogs["en"]["web.take-over"], "Take over");
+            assert!(catalogs["en"].get("web.configure-token").is_none());
+        } else {
+            assert!(body.contains("potLocalizationReady"));
+        }
+    }
+    let page = a
+        .request(&host, &paths[0], None)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("./i18n.js"));
+    assert!(!page.contains("potTranslations"));
     let mut sockets = vec![];
     for (client, path) in [(&a, &paths[0]), (&b, &paths[1])] {
         let mut request = format!("{}{}rfb", host.public.replace("http:", "ws:"), path)
@@ -764,6 +793,14 @@ async fn desktop_tickets_are_browser_bound_and_rotation_disconnects_every_owner(
         assert_eq!(
             browser
                 .request(&host, &format!("{path}api/status"), None)
+                .await
+                .status(),
+            401
+        );
+    }
+    for asset in ["i18n.js", "locales.json"] {
+        assert_eq!(
+            a.request(&host, &format!("{}{asset}", paths[0]), None)
                 .await
                 .status(),
             401

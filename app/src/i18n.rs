@@ -3,7 +3,7 @@
 include!(concat!(env!("OUT_DIR"), "/localized_formats.rs"));
 
 pub fn set_locale(locale: &str) -> bool {
-    let locale = if locale == "zh-CN" { "zh-CN" } else { "en" };
+    let locale = pot_ui::localization::resolve(&[locale]);
     if &*rust_i18n::locale() == locale {
         return false;
     }
@@ -16,17 +16,16 @@ pub fn is_chinese() -> bool {
 }
 
 pub fn text(key: &str) -> &'static str {
-    pot_ui::localization::Catalog::new(if is_chinese() { "zh-CN" } else { "en" }).text(key)
+    pot_ui::localization::Catalog::new(&rust_i18n::locale()).text(key)
 }
 pub fn matches_message(key: &str, value: &str) -> bool {
-    pot_ui::localization::Catalog::new(if is_chinese() { "zh-CN" } else { "en" })
-        .matches_message(key, value)
+    pot_ui::localization::Catalog::new(&rust_i18n::locale()).matches_message(key, value)
 }
 pub fn message(value: &str) -> String {
-    pot_ui::localization::Catalog::new(if is_chinese() { "zh-CN" } else { "en" }).message(value)
+    pot_ui::localization::Catalog::new(&rust_i18n::locale()).message(value)
 }
 pub fn report(value: &str) -> String {
-    pot_ui::localization::Catalog::new(if is_chinese() { "zh-CN" } else { "en" }).report(value)
+    pot_ui::localization::Catalog::new(&rust_i18n::locale()).report(value)
 }
 
 #[cfg(test)]

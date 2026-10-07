@@ -16,19 +16,23 @@ enum L {
 
     static func resolve(_ languages: [String]) -> String {
         for language in languages {
-            let base = language.replacingOccurrences(of: "_", with: "-").lowercased().split(separator: "-").first
-            if base == "zh" {
-                return "zh-CN"
+            let normalized = language.replacingOccurrences(of: "_", with: "-").lowercased()
+            let available = TranslationResources.values.keys.sorted()
+            if let exact = available.first(where: { $0.lowercased() == normalized }) {
+                return exact
             }
-            if base == "en" {
-                return "en"
+            if let compatible = available
+                .first(where: { $0.lowercased().split(separator: "-").first == normalized.split(separator: "-").first
+                })
+            {
+                return compatible
             }
         }
         return "en"
     }
 
     static func resolve(saved: String?, languages: [String]) -> String {
-        if let saved, ["en", "zh-CN"].contains(saved) {
+        if let saved, TranslationResources.values[saved] != nil {
             return saved
         }
         return resolve(languages)
@@ -42,7 +46,7 @@ enum L {
     }
 
     @discardableResult static func select(_ language: String) -> Bool {
-        guard ["en", "zh-CN"].contains(language), language != locale else { return false }
+        guard TranslationResources.values[language] != nil, language != locale else { return false }
         locale = language
         UserDefaults.standard.set(language, forKey: preferenceKey)
         return true

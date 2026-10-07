@@ -112,8 +112,34 @@ pub async fn page(
     ticket(&s, &h, &id)?;
     Ok(private_response((
         [("content-type", "text/html; charset=utf-8")],
-        include_str!("../../desktop/index.html"),
+        include_str!(concat!(env!("OUT_DIR"), "/desktop/index.html")),
     )))
+}
+/// Page resources retain the desktop ticket's authorization and cache policy.
+pub async fn localization_asset(
+    State(s): State<Service>,
+    h: HeaderMap,
+    Path((id, name)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    ticket(&s, &h, &id)?;
+    let (content_type, body) = match name.as_str() {
+        "i18n.js" => (
+            "text/javascript; charset=utf-8",
+            include_str!(concat!(env!("OUT_DIR"), "/desktop/i18n.js")),
+        ),
+        "locales.json" => (
+            "application/json; charset=utf-8",
+            include_str!(concat!(env!("OUT_DIR"), "/desktop/locales.json")),
+        ),
+        _ => {
+            return Err(error(
+                StatusCode::NOT_FOUND,
+                "desktop_asset",
+                "Unknown desktop resource",
+            ));
+        }
+    };
+    Ok(private_response(([("content-type", content_type)], body)))
 }
 pub async fn status(
     State(s): State<Service>,

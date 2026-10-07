@@ -740,5 +740,6 @@
   "web.rotate-hint": "重新生成 Token 会使所有浏览器失效，需要配置新 Token 或重新扫码。",
   "web.configure-token": "配置访问 Token",
   "web.change-token": "更换访问 Token",
-  "web.token-invalid": "访问 Token 已失效，请配置当前 Token。"
+  "web.token-invalid": "访问 Token 已失效，请配置当前 Token。",
+  "language.name": "简体中文"
 }

@@ -170,3 +170,14 @@ restart persistence/durable receipts. A local deterministic model fixture is use
 no user keys, containers or paid model endpoints are required. The suite is included
 in `mise run test` and the Linux backend CI job. Rootless Podman qualification is
 manual on an explicitly selected Linux host; no Podman integration CI was added.
+
+
+### Desktop web assets
+
+Edit `desktop/index.template.html`, `sandbox-images/linux/default/index.template.html`,
+and the shared `desktop/i18n.js`; translations belong in `app/locales/*.json`.
+Run `mise run build:web` to inspect generated assets under `.local/web/`.
+Runtime Cargo builds generate and embed their own fresh assets automatically.
+Image/prepare entry points also run the generator and copy the Sandbox output.
+Use `mise run test:i18n` to verify catalog parity, template defaults, independent
+resources, asynchronous startup and automatic third-language discovery.

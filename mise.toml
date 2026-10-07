@@ -138,6 +138,10 @@ env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/d1/swift-modules"
 description = "Run the standalone backend without App or Helper"
 run = "cargo run --locked -p pot-server --bin pot -- serve"
 
+[tasks."build:web"]
+description = "Build desktop templates and page-specific translation resources"
+run = "python scripts/localize-web"
+
 [tasks."build:mobile"]
 description = "Build the pinned nightly GPUI Web/WASM app and browser assets"
 run = "python scripts/build-mobile"

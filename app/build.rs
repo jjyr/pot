@@ -1,5 +1,8 @@
+#[path = "../localization/build.rs"]
+mod localization;
 use std::{env, path::PathBuf, process::Command};
 fn main() {
+    println!("cargo:rerun-if-changed=../localization/build.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     generate_localization(&out);
     generate_app_metadata(&out);
@@ -59,17 +62,8 @@ fn main() {
 
 fn generate_localization(out: &std::path::Path) {
     use std::{collections::BTreeMap, fs};
-    let read = |locale: &str| -> BTreeMap<String, String> {
-        serde_json::from_str(&fs::read_to_string(format!("locales/{locale}.json")).unwrap())
-            .unwrap()
-    };
-    let en = read("en");
-    let zh = read("zh-CN");
-    assert_eq!(
-        en.keys().collect::<Vec<_>>(),
-        zh.keys().collect::<Vec<_>>(),
-        "translation keys differ"
-    );
+    let catalogs = localization::catalogs(std::path::Path::new("locales"));
+    let en = &catalogs["en"];
     let formats: Vec<String> =
         serde_json::from_str(&fs::read_to_string("localization-format-keys.json").unwrap())
             .unwrap();
@@ -91,17 +85,30 @@ fn generate_localization(out: &std::path::Path) {
                 .map(|name| format!("let {name} = ${name};"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            macros.push_str(&format!("({key:?}, {pattern} $(,)?) => {{{{ {bindings} if crate::i18n::is_chinese() {{ format!({:?}, {values}) }} else if {{ let singular_count = {}.to_string(); singular_count == \"1\" }} {{ format!({:?}, {values}) }} else {{ format!({:?}, {values}) }} }}}};\n", zh[key], names[*position], en[&format!("{key}.one")], en[key]));
+            macros.push_str(&format!("({key:?}, {pattern} $(,)?) => {{{{ {bindings} let singular_count = {}.to_string(); match &*rust_i18n::locale() {{", names[*position]));
+            for (locale, values) in &catalogs {
+                macros.push_str(&format!("{locale:?} => if singular_count == \"1\" {{ format!({:?}, {values}) }} else {{ format!({:?}, {values}) }},", values[&format!("{key}.one")], values[key], values=names.join(", ")));
+            }
+            macros.push_str(&format!("_ => if singular_count == \"1\" {{ format!({:?}, {values}) }} else {{ format!({:?}, {values}) }} }} }}}};\n", en[&format!("{key}.one")], en[key]));
             continue;
         }
-        macros.push_str(&format!("({key:?}, $($args:tt)*) => {{ if crate::i18n::is_chinese() {{ format!({:?}, $($args)*) }} else {{ format!({:?}, $($args)*) }} }};\n", zh[key], en[key]));
+        macros.push_str(&format!(
+            "({key:?}, $($args:tt)*) => {{ match &*rust_i18n::locale() {{"
+        ));
+        for (locale, values) in &catalogs {
+            macros.push_str(&format!(
+                "{locale:?} => format!({:?}, $($args)*),",
+                values[key]
+            ));
+        }
+        macros.push_str(&format!("_ => format!({:?}, $($args)*) }} }};\n", en[key]));
     }
     macros.push_str("}\npub(crate) use tr;\n");
     fs::write(out.join("localized_formats.rs"), macros).unwrap();
     let mut swift = String::from(
         "enum TranslationResources {\nstatic let values: [String: [String: String]] = [\n",
     );
-    for (locale, values) in [("en", &en), ("zh-CN", &zh)] {
+    for (locale, values) in &catalogs {
         swift.push_str(&format!("{locale:?}: [\n"));
         for (key, value) in values {
             swift.push_str(&format!(

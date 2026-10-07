@@ -36,3 +36,21 @@ certificate issuance/renewal, physical phone scan, or complete signed App/CLI re
 archive was exercised. Those remain live/distribution qualification gates. Tests
 and library construction do not establish real-tailnet acceptance. No user network,
 Tailscale account, system client or production instance was changed.
+
+
+## Desktop localization follow-up
+
+Desktop source pages now use English-default templates and an external shared
+translation script. Build outputs contain only the page's translation keys in
+separate JSON resources; Runtime embeds freshly generated assets from Cargo
+OUT_DIR and image/prepare builds copy the generated Sandbox resources. Native,
+shared Rust and Mobile builds discover catalogs and language names automatically.
+
+Validation passed: 743-key catalog/placeholder checks; temporary third-language
+web asset discovery and native matching/selection/rendering; asynchronous web
+startup, early native language selection, saved preference, live DOM updates and
+literal clipboard preservation; broker locale authorization; desktop resource
+ownership/no-store and Token rotation invalidation; shared UI and App tests,
+strict Clippy, lint and Mobile WASM build. New tests use isolated temporary
+catalogs and mocked desktop providers. A live Sandbox image rebuild and noVNC
+browser session were not performed for this follow-up.

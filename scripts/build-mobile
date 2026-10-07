@@ -12,6 +12,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
+subprocess.run(["python3", ROOT / "scripts/localize-web", "--check"], check=True)
 NIGHTLY = "nightly-2026-10-06"
 VERSION = "0.2.129"
 TOOL = ROOT / ".local/mobile-tools/bin/wasm-bindgen"
@@ -129,6 +130,6 @@ locales = {
         for key, value in json.loads((ROOT / f"app/locales/{locale}.json").read_text()).items()
         if key.startswith(("mobile.", "web."))
     }
-    for locale in ["en", "zh-CN"]
+    for locale in sorted(path.stem for path in (ROOT / "app/locales").glob("*.json"))
 }
 (dist / "locales.json").write_text(json.dumps(locales, ensure_ascii=False))

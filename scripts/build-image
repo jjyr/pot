@@ -24,13 +24,19 @@ assets = [
     "driver.py",
     "broker.py",
     "index.html",
+    "i18n.js",
+    "locales.json",
     "close-browser.py",
     "open-browser.sh",
     "novnc.tar.gz",
 ]
 # Read source assets directly so bundle cannot accidentally reuse stale prepare output.
 for n in assets:
-    source = R / "sandbox-images/linux/default" / n
+    source = (
+        R / ".local/web/sandbox"
+        if n in {"index.html", "i18n.js", "locales.json"}
+        else R / "sandbox-images/linux/default"
+    ) / n
     if n == "pot-tool-executor":
         source = resources / n
     if source.is_file() and source != resources / n:

@@ -74,7 +74,7 @@ struct Shell {
 }
 impl Shell {
     fn catalog(&self) -> pot_ui::localization::Catalog {
-        pot_ui::localization::Catalog::new(if i18n::is_chinese() { "zh-CN" } else { "en" })
+        pot_ui::localization::Catalog::new(&rust_i18n::locale())
     }
     fn page_handler(&self, cx: &Context<Self>) -> pot_ui::pages::Handler {
         std::rc::Rc::new(
@@ -910,11 +910,7 @@ fn main() {
                             jumping_to_latest: false,
                             native: serde_json::Value::Null,
                             usage_ui: usage_ui::UsageUI::new(
-                                pot_ui::localization::Catalog::new(if i18n::is_chinese() {
-                                    "zh-CN"
-                                } else {
-                                    "en"
-                                }),
+                                pot_ui::localization::Catalog::new(&rust_i18n::locale()),
                                 window,
                                 cx,
                             ),

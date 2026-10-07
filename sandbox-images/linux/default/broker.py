@@ -63,6 +63,10 @@ async def auth(request, handler):
         return web.json_response({"error": str(e)}, status=503)
 
 
+VIEWER_HTML = pathlib.Path(
+    os.environ.get("POT_VIEWER_HTML", str(pathlib.Path(__file__).parent / "assets/index.html"))
+)
+SUPPORTED_LOCALES = json.loads(VIEWER_HTML.with_name("locales.json").read_text())
 locale_value = "en"
 
 
@@ -70,7 +74,7 @@ async def locale(request):
     global locale_value
     if request.method == "POST":
         value = (await request.json()).get("locale")
-        if value not in ("en", "zh-CN"):
+        if value not in SUPPORTED_LOCALES:
             raise web.HTTPBadRequest(text="invalid_locale")
         locale_value = value
     return web.json_response(
@@ -430,15 +434,10 @@ app.router.add_post("/api/control", control)
 app.router.add_post("/api/driver", write)
 app.router.add_get("/rfb", rfb)
 app.router.add_static("/novnc/", pathlib.Path("/opt/pot/novnc") if LOCAL else ROOT / "novnc")
+app.router.add_get("/", lambda r: web.FileResponse(VIEWER_HTML))
+app.router.add_get("/i18n.js", lambda r: web.FileResponse(VIEWER_HTML.with_name("i18n.js")))
 app.router.add_get(
-    "/",
-    lambda r: web.FileResponse(
-        pathlib.Path(
-            os.environ.get(
-                "POT_VIEWER_HTML", str(pathlib.Path(__file__).parent / "assets/index.html")
-            )
-        )
-    ),
+    "/locales.json", lambda r: web.FileResponse(VIEWER_HTML.with_name("locales.json"))
 )
 (ROOT / "url").write_text("http://127.0.0.1:17681/#" + TOKEN)
 os.chmod(ROOT / "url", 0o600)

@@ -8,9 +8,11 @@ const initialRoute=new URLSearchParams(location.search);
 task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','sandbox','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
 function navigate(){history.pushState({page,task,scope,query,offset},'',task?'/?task='+encodeURIComponent(task):'/?page='+page);}
 const el=id=>document.getElementById(id);
-function initialLocale(){try{const saved=localStorage.getItem('pot-locale');if(['en','zh-CN'].includes(saved))return saved;}catch{}for(const l of navigator.languages||[]){if(l.toLowerCase().startsWith('zh'))return 'zh-CN';if(l.toLowerCase().startsWith('en'))return 'en';}return 'en';}
-let language=initialLocale();
 const catalogs=await fetch('/locales.json',{cache:'no-store'}).then(r=>r.json());
+const languages=Object.keys(catalogs).sort();
+function matchLocale(value){const normalized=value.replaceAll('_','-').toLowerCase();return languages.find(l=>l.toLowerCase()===normalized)||languages.find(l=>l.toLowerCase().split('-')[0]===normalized.split('-')[0]);}
+function initialLocale(){try{const saved=localStorage.getItem('pot-locale');if(saved&&matchLocale(saved))return matchLocale(saved);}catch{}return (navigator.languages||[]).map(matchLocale).find(Boolean)||'en';}
+let language=initialLocale();
 const t=key=>catalogs[language]?.[key]||catalogs.en[key]||key;
 const installer=createInstaller(t,()=>refresh());
 const decode=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
@@ -90,7 +92,7 @@ window.potAction=async(action,value)=>{
     if(action==='search'){query=value;offset=0;}
     if(action==='next'&&nextOffset!=null)offset=nextOffset;
     if(action==='previous')offset=Math.max(0,offset-20);
-    if(action==='language'){language=language==='en'?'zh-CN':'en';try{localStorage.setItem('pot-locale',language);}catch{}if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}
+    if(action==='language'){language=languages[(languages.indexOf(language)+1)%languages.length];try{localStorage.setItem('pot-locale',language);}catch{}if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}
     if(action==='configure-token'){configureNotice();return;}
     if(action==='logout'){await api('/access/logout',{});await tokenStore(undefined,true);const reg=await navigator.serviceWorker?.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();location.reload();return;}
     if(action==='send'){

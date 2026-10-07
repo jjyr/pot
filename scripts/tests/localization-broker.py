@@ -49,6 +49,7 @@ namespace = {
     "asyncio": asyncio,
     "TOKEN": "fixture-viewer-token",
     "locale_value": "en",
+    "SUPPORTED_LOCALES": {"en": {}, "zh-CN": {}, "fr": {}},
 }
 exec(compile(ast.Module(body=handlers, type_ignores=[]), str(source), "exec"), namespace)
 
@@ -83,6 +84,8 @@ async def main():
     else:
         raise AssertionError("Unsupported locale allowed")
     assert namespace["locale_value"] == "zh-CN"
+    result, _ = await auth(Request("POST", headers=headers, body={"locale": "fr"}), locale)
+    assert result == {"locale": "fr"}
     print(
         "Broker localization: public locale-only read, authenticated same-origin writes and validation passed"
     )
