@@ -16,8 +16,8 @@ Updated: 2026-10-06. See [architecture](architecture.md) for deployment and [Age
 | `pot-app` | GPUI/native UI, protocol client and cached projections |
 | `pot-eval` | Standalone deterministic and explicitly selected live evaluation |
 
-App depends on Protocol. Server composes Runtime without App or GPUI. Runtime owns Storage, Gateway, Agent and Driver integration, and injects its Sandbox ToolExecutor into pot-agent. Core carries the backend trait without depending on Runtime. The guest executor knows neither Runtime, model providers nor Host product credentials.
+App depends on Protocol and embeds Server through its local service adapter. Server composes Runtime without App or GPUI. Runtime owns Storage, Gateway, Agent and Driver integration, and injects its Sandbox ToolExecutor into pot-agent. Core carries the backend trait without depending on Runtime. The guest executor knows neither Runtime, model providers nor Host product credentials.
 
-Helper starts Host Server independently and owns local VM lifecycle. Execution tools run in assigned guest scopes; shell code cannot access unmounted Host product state. Tasks sharing a Sandbox use the same guest account, so separate directories are organizational rather than mutual filesystem/process isolation.
+App embeds Host Server; standalone CLI hosts it independently. Helper owns local VM lifecycle and supports Sandbox-only hosting. Execution tools run in assigned guest scopes; shell code cannot access unmounted Host product state. Tasks sharing a Sandbox use the same guest account, so separate directories are organizational rather than mutual filesystem/process isolation.
 
 Model and native CLI requests run on the Server machine. Remote deployment, endpoint identity/TLS and artifact transfer remain outside current product scope. Tests/build commands are in [Development](development.md); results are recorded in [Host pot-agent acceptance](validation/host-pot-agent-20261006.md).

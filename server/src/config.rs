@@ -6,16 +6,30 @@ pub struct ServerConfig {
     pub runtime: RuntimeConfig,
     pub bind: String,
 }
+pub fn default_root() -> PathBuf {
+    if let Some(root) = std::env::var_os("POT_LOCAL_ROOT") {
+        return root.into();
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/pot")
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".local/share"))
+            .join("pot")
+    }
+}
 impl ServerConfig {
     pub fn from_env() -> Self {
         Self {
             runtime: RuntimeConfig {
-                data: PathBuf::from(
-                    std::env::var("POT_DATA_DIR").unwrap_or_else(|_| "product".into()),
-                ),
-                workspace: PathBuf::from(
-                    std::env::var("POT_WORKSPACE").unwrap_or_else(|_| "agent-workspace".into()),
-                ),
+                data: std::env::var("POT_DATA_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| default_root().join("product")),
+                workspace: std::env::var("POT_WORKSPACE")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| default_root().join("agent-workspace")),
             },
             bind: std::env::var("POT_RUNTIME_BIND")
                 .unwrap_or_else(|_| format!("127.0.0.1:{RUNTIME_PORT}")),

@@ -7,7 +7,7 @@ static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
-        Self(std::env::temp_dir().join(format!(
+        Self(std::path::PathBuf::from("/tmp").join(format!(
                 "pot-server-{}-{}-{}",
                 std::process::id(),
                 NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -260,4 +260,86 @@ async fn shutdown_settles_active_main_and_worker_model_requests_without_host_exe
         .unwrap();
     assert!(!fixture.0.join("workspace/child.pid").exists());
     model.abort();
+}
+
+#[tokio::test]
+async fn embedded_dispatch_needs_no_ui_socket_and_keeps_driver_listener_private() {
+    let fixture = Fixture::new();
+    let server = Server::embedded(fixture.config()).await.unwrap();
+    let client = server.local_client();
+    let reply = client.request(PATH_SNAPSHOT, None).await.unwrap();
+    assert!(reply.status.is_success());
+    let snapshot: Snapshot = serde_json::from_slice(&reply.body).unwrap();
+    assert_eq!(snapshot.conversation_id, "main");
+    assert!(!fixture.0.join("data/control.sock").exists());
+    assert!(Server::embedded(fixture.config()).await.is_err());
+    let endpoint = server.endpoint().unwrap();
+    let base = format!("http://{}", server.local_addr().unwrap());
+    let (stop, rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(server.serve(async {
+        let _ = rx.await;
+    }));
+    assert_eq!(
+        reqwest::Client::new()
+            .get(format!("{base}{PATH_SNAPSHOT}"))
+            .bearer_auth(&endpoint.token)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        403
+    );
+    stop.send(()).unwrap();
+    task.await.unwrap().unwrap();
+    // A retained in-process handle still owns the directory until it is dropped.
+    assert!(Server::embedded(fixture.config()).await.is_err());
+    drop(client);
+    let next = Server::embedded(fixture.config()).await.unwrap();
+    drop(next);
+}
+
+#[tokio::test]
+async fn local_socket_authorizes_without_tokens_and_refuses_browser_origin() {
+    let fixture = Fixture::new();
+    let server = Server::bind(fixture.config()).await.unwrap();
+    let (stop, rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(server.serve_local(async {
+        let _ = rx.await;
+    }));
+    let path = fixture.0.join("data/control.sock");
+    for _ in 0..100 {
+        if path.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let client = reqwest::Client::builder()
+        .unix_socket(path.clone())
+        .build()
+        .unwrap();
+    let response = client
+        .get("http://localhost/api/v1/snapshot")
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    assert_eq!(
+        client
+            .get("http://localhost/api/v1/snapshot")
+            .header("origin", "http://localhost")
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        403
+    );
+    stop.send(()).unwrap();
+    task.await.unwrap().unwrap();
+    assert!(!path.exists());
 }

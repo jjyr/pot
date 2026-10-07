@@ -27,3 +27,13 @@ macOS/Windows Sandbox providers, direct Host tools, stronger isolation between t
 ## Implementation rules
 
 Keep Rust Runtime/SQLite, shared protocol and GPUI/Swift/Helper boundaries. Prefer deterministic tests and actual pinned CLIs against local mock providers. Retired guest-Agent deployment and native engine implementations live only in Git history; do not add migration or compatibility routes. Machine notes belong in `~/Workspace/Machines`.
+
+## Standalone and embedded hosting — 2026-10-07
+
+Owner-generated one-use pairing replaces WebAuthn. The standalone `pot` CLI
+provides OS-authorized management, a Web UI release archive and optional macOS
+service/provider packaging. App embeds the same backend and dispatches UI
+requests in memory; it does not connect to a daemon. See
+[standalone hosting](standalone-server.md) and [browser access](mobile-access.md).
+Physical-phone and real VM/provider distribution qualification remain separate
+from the credential-free hosting tests.

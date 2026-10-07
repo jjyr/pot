@@ -20,12 +20,16 @@ async function api(path,value){
   if(r.status===401&&module){location.reload();throw Error('session_expired');}
   const body=await r.json();if(!r.ok)throw Error(body.code||String(r.status));return body;
 }
-function options(value){const p=value.publicKey;p.challenge=decode(p.challenge);if(p.user)p.user.id=decode(p.user.id);for(const key of ['allowCredentials','excludeCredentials'])if(p[key])for(const c of p[key])c.id=decode(c.id);return value;}
-function credential(c){
-  if(!c)throw Error('Verification cancelled');
-  const result={id:c.id,rawId:encode(c.rawId),type:c.type,extensions:c.getClientExtensionResults(),response:{clientDataJSON:encode(c.response.clientDataJSON)}};
-  for(const k of ['attestationObject','authenticatorData','signature','userHandle'])if(c.response[k])result.response[k]=encode(c.response[k]);
-  if(c.response.getTransports)result.response.transports=c.response.getTransports();return result;
+// Persist a non-exportable client key; no transcript or bearer is stored here.
+async function clientStore(value, remove=false){
+  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('pot-client',1);request.onupgradeneeded=()=>request.result.createObjectStore('keys');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+  try{return await new Promise((resolve,reject)=>{const tx=db.transaction('keys',value!==undefined||remove?'readwrite':'readonly');const store=tx.objectStore('keys');const req=remove?store.delete('current'):value!==undefined?store.put(value,'current'):store.get('current');let result;req.onsuccess=()=>result=req.result;tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}finally{db.close();}
+}
+async function proof(privateKey,challenge){return encode(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},privateKey,new TextEncoder().encode(challenge)));}
+async function restoreClient(){
+  const saved=await clientStore();if(!saved)return false;
+  const challenge=await api('/access/login/start',{client_id:saved.id});
+  await api('/access/login/finish',{signature:await proof(saved.privateKey,challenge.challenge)});return true;
 }
 async function refresh(){
   if(!module||refreshing||document.visibilityState==='hidden')return;refreshing=true;
@@ -48,7 +52,7 @@ async function refresh(){
   finally{refreshing=false;}
 }
 async function start(){
-  pushStatus=await api('/access/status');el('enroll').disabled=!pushStatus.enrollment_open;
+  pushStatus=await api('/access/status');el('enroll').disabled=false;
   if(pushStatus.authenticated&&!module){
     module=await import('/pkg/pot_mobile.js');await module.default();module.run();el('auth').remove();
     history.replaceState({page,task,scope,query,offset},'');
@@ -79,7 +83,7 @@ window.potAction=async(action,value)=>{
     if(action==='next'&&nextOffset!=null)offset=nextOffset;
     if(action==='previous')offset=Math.max(0,offset-20);
     if(action==='language'){language=language==='en'?'zh-CN':'en';try{localStorage.setItem('pot-locale',language);}catch{}if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}
-    if(action==='logout'){await api('/access/logout',{});const reg=await navigator.serviceWorker?.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();location.reload();return;}
+    if(action==='logout'){await api('/access/logout',{});await clientStore(undefined,true);const reg=await navigator.serviceWorker?.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();location.reload();return;}
     if(action==='send'){
       if(JSON.parse(module.pending_send()))throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));
       module.begin_send(task||'main',value,crypto.randomUUID());
@@ -107,12 +111,19 @@ window.potAction=async(action,value)=>{
 addEventListener('popstate',e=>{page=e.state?.page||'chat';task=e.state?.task||'';scope=e.state?.scope||'active';query=e.state?.query||'';offset=e.state?.offset||0;refresh();});
 addEventListener('visibilitychange',()=>{refresh();if(module&&pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});});
 async function attempt(fn){try{el('notice').textContent='';await fn();}catch(e){if(el('notice'))el('notice').textContent=e.message;else{notice=e.message;await refresh();}}}
-el('login').onclick=()=>attempt(async()=>{const o=options(await api('/access/login/start',{}));const c=await navigator.credentials.get(o);await api('/access/login/finish',credential(c));await start();});
-let poll;
 el('enroll').onclick=()=>attempt(async()=>{
-  clearInterval(poll);const request=await api('/access/enroll',{name:t('mobile.shell.phone')});el('notice').textContent=t('mobile.shell.compare-and-approve-this-code-on-the-host')+request.code;
-  poll=setInterval(async()=>{try{const s=await api('/access/enroll/status');if(s.approved){clearInterval(poll);el('register').hidden=false;}}catch(e){clearInterval(poll);el('notice').textContent=e.message;}},1500);
+  el('enroll').disabled=true;
+  try{
+    const keys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},false,['sign','verify']);
+    const publicKey=encode(await crypto.subtle.exportKey('raw',keys.publicKey));
+    const challenge=await api('/access/pair/start',{public_key:publicKey,name:el('client-name').value||t('mobile.shell.phone')});
+    // Save before consuming the code: an interrupted reply can recover by signing in.
+    await clientStore({id:challenge.client_id,privateKey:keys.privateKey});
+    await api('/access/pair/finish',{code:el('pair-code').value.trim(),signature:await proof(keys.privateKey,challenge.challenge)});
+    el('pair-code').value='';await start();
+  }finally{if(el('enroll'))el('enroll').disabled=false;}
 });
-el('register').onclick=()=>attempt(async()=>{const o=options(await api('/access/register/start',{}));const c=await navigator.credentials.create(o);await api('/access/register/finish',credential(c));await start();});
-el('login').textContent=t('mobile.shell.sign-in-with-passkey');el('enroll').textContent=t('mobile.shell.request-access');el('register').textContent=t('mobile.shell.create-passkey');el('scope').textContent=t('mobile.shell.owner-access-to-this-instance-and-all-its-environments');
-if(!window.PublicKeyCredential){el('login').disabled=true;el('enroll').disabled=true;el('notice').textContent=t('mobile.shell.open-this-address-in-safari-or-chrome-with-passkey-support');}else start().catch(e=>el('notice').textContent=e.message);
+el('enroll').textContent=t('mobile.shell.connect');el('scope').textContent=t('mobile.shell.owner-access-to-this-instance-and-all-its-environments');
+el('pair-code').placeholder=t('mobile.shell.pairing-code');el('client-name').placeholder=t('mobile.shell.client-name');
+el('pair-code').setAttribute('aria-label',t('mobile.shell.pairing-code'));el('client-name').setAttribute('aria-label',t('mobile.shell.client-name'));
+try{const status=await api('/access/status');if(!status.authenticated)await restoreClient();await start();}catch(e){el('notice').textContent=e.message;await start().catch(()=>{});}

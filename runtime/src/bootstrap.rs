@@ -6,11 +6,15 @@ pub struct RuntimeConfig {
     pub workspace: PathBuf,
 }
 pub struct Backend {
+    lock: Arc<std::fs::File>,
     state: Service,
     main: Option<tokio::task::JoinHandle<()>>,
     coordinator: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 impl Backend {
+    pub fn instance_lock(&self) -> Arc<std::fs::File> {
+        self.lock.clone()
+    }
     pub fn state(&self) -> Service {
         self.state.clone()
     }
@@ -61,6 +65,23 @@ pub async fn initialize_with_agent_host(
 ) -> Result<Backend> {
     let data = config.data;
     std::fs::create_dir_all(&data)?;
+    use std::os::{
+        fd::AsRawFd,
+        unix::fs::{OpenOptionsExt, PermissionsExt},
+    };
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700))?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .open(data.join("instance.lock"))?;
+    anyhow::ensure!(
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+        "This data directory is already owned by another Pot instance"
+    );
+    let lock = Arc::new(lock);
     let workspace = config.workspace;
     std::fs::create_dir_all(&workspace)?;
     let execution_config = execution::execution_config(execution::Config::default(), &data)?;
@@ -164,6 +185,7 @@ pub async fn initialize_with_agent_host(
         }
     });
     Ok(Backend {
+        lock,
         state: s,
         main: Some(main),
         coordinator: Mutex::new(None),

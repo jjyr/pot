@@ -4,12 +4,16 @@ use axum::{
     http::{Method, Request, StatusCode},
     routing::get,
 };
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use pot_server::access::{Access, AccessConfig, admin_router, public_router};
+use ring::{
+    rand::SystemRandom,
+    signature::{self, KeyPair},
+};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use tower::ServiceExt;
-use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};
-use webauthn_rs::prelude::*;
+use url::Url;
 struct Fixture {
     access: Access,
     path: std::path::PathBuf,
@@ -93,46 +97,42 @@ impl Fixture {
         self.request(true, Method::POST, "/api/v1/access", None, v, None)
             .await
     }
-    async fn enroll(&self, auth: &mut WebauthnAuthenticator<SoftPasskey>) -> String {
-        assert_eq!(
-            self.command(json!({"action":"pair"})).await.0,
-            StatusCode::OK
-        );
-        let (_, _, cookie) = self
-            .post("/access/enroll", None, json!({"name":"Phone"}))
+    async fn enroll(&self, auth: &mut ClientKey) -> String {
+        let (_, pair, _) = self.command(json!({"action":"pair"})).await;
+        let (status, challenge, cookie) = self
+            .post(
+                "/access/pair/start",
+                None,
+                json!({"name":"Phone","public_key":auth.public()}),
+            )
             .await;
-        let cookie = cookie.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        auth.id = challenge["client_id"].as_str().unwrap().into();
+        let proof = json!({"code":pair["code"],"signature":auth.sign(&challenge)});
+        let (status, _, session) = self
+            .post("/access/pair/finish", cookie.as_deref(), proof.clone())
+            .await;
+        assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            self.post("/access/register/start", Some(&cookie), json!({}))
+            self.post("/access/pair/finish", cookie.as_deref(), proof)
                 .await
                 .0,
-            StatusCode::FORBIDDEN
+            StatusCode::BAD_REQUEST
         );
-        let (_, status, _) = self
-            .request(true, Method::GET, "/api/v1/access", None, Value::Null, None)
-            .await;
-        let id = status["pending"][0]["id"].as_str().unwrap();
-        self.command(json!({"action":"approve","id":id})).await;
-        let (status, options, _) = self
-            .post("/access/register/start", Some(&cookie), json!({}))
+        session.unwrap()
+    }
+    async fn login(&self, auth: &ClientKey) -> String {
+        let (status, challenge, cookie) = self
+            .post("/access/login/start", None, json!({"client_id":auth.id}))
             .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(
-            options["publicKey"]["authenticatorSelection"]["userVerification"],
-            "required"
-        );
-        let response = auth
-            .do_registration(
-                Url::parse("https://pot.example").unwrap(),
-                serde_json::from_value(options).unwrap(),
-            )
-            .unwrap();
+        let proof = json!({"signature":auth.sign(&challenge)});
         let (status, _, session) = self
-            .post("/access/register/finish", Some(&cookie), json!(response))
+            .post("/access/login/finish", cookie.as_deref(), proof.clone())
             .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            self.post("/access/register/finish", Some(&cookie), json!(response))
+            self.post("/access/login/finish", cookie.as_deref(), proof)
                 .await
                 .0,
             StatusCode::BAD_REQUEST
@@ -145,11 +145,48 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
+struct ClientKey {
+    key: signature::EcdsaKeyPair,
+    id: String,
+}
+impl ClientKey {
+    fn new() -> Self {
+        let rng = SystemRandom::new();
+        let pkcs8 = signature::EcdsaKeyPair::generate_pkcs8(
+            &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            &rng,
+        )
+        .unwrap();
+        Self {
+            key: signature::EcdsaKeyPair::from_pkcs8(
+                &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+                pkcs8.as_ref(),
+                &rng,
+            )
+            .unwrap(),
+            id: String::new(),
+        }
+    }
+    fn public(&self) -> String {
+        URL_SAFE_NO_PAD.encode(self.key.public_key().as_ref())
+    }
+    fn sign(&self, v: &Value) -> String {
+        URL_SAFE_NO_PAD.encode(
+            self.key
+                .sign(
+                    &SystemRandom::new(),
+                    v["challenge"].as_str().unwrap().as_bytes(),
+                )
+                .unwrap()
+                .as_ref(),
+        )
+    }
+}
 #[tokio::test]
-async fn real_passkey_enrollment_login_revocation_and_persistence() {
-    let f = Fixture::new();
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(true));
-    let session = f.enroll(&mut auth).await;
+async fn pairing_key_login_restart_and_revocation() {
+    let mut f = Fixture::new();
+    let mut key = ClientKey::new();
+    let session = f.enroll(&mut key).await;
     assert_eq!(
         f.request(
             false,
@@ -163,21 +200,39 @@ async fn real_passkey_enrollment_login_revocation_and_persistence() {
         .0,
         StatusCode::OK
     );
+    let bytes = std::fs::read(f.path.join("access-clients.json")).unwrap();
+    let saved = String::from_utf8(bytes).unwrap();
+    assert!(!saved.contains("private-root-bearer"));
+    assert!(!saved.contains("__Host-pot-session"));
     assert_eq!(
-        std::fs::metadata(f.path.join("access-credentials.json"))
+        std::fs::metadata(f.path.join("access-clients.json"))
             .unwrap()
             .permissions()
             .mode()
             & 0o777,
         0o600
     );
-    let saved = std::fs::read_to_string(f.path.join("access-credentials.json")).unwrap();
-    assert!(!saved.contains("private-root-bearer"));
-    assert!(!saved.contains("__Host-pot-session"));
-    assert_eq!(
-        f.post("/access/logout", Some(&session), json!({})).await.0,
-        StatusCode::OK
+    let config = AccessConfig {
+        origin: Url::parse("https://pot.example/").unwrap(),
+        bind: "127.0.0.1:0".parse().unwrap(),
+        certificate: f.path.join("cert"),
+        private_key: f.path.join("key"),
+        assets: f.path.clone(),
+    };
+    f.access = Access::new(
+        &config,
+        f.path.clone(),
+        "private-root-bearer".into(),
+        f.access.runtime.clone(),
+    )
+    .unwrap();
+    assert!(
+        !f.access
+            .valid_session(session.split('=').nth(1).unwrap(), false)
     );
+    let session = f.login(&key).await;
+    f.command(json!({"action":"revoke_credential","id":key.id}))
+        .await;
     assert_eq!(
         f.request(
             false,
@@ -191,53 +246,151 @@ async fn real_passkey_enrollment_login_revocation_and_persistence() {
         .0,
         StatusCode::UNAUTHORIZED
     );
-    let (status, options, cookie) = f.post("/access/login/start", None, json!({})).await;
-    assert_eq!(status, StatusCode::OK);
-    let assertion = auth
-        .do_authentication(
-            Url::parse("https://pot.example").unwrap(),
-            serde_json::from_value(options).unwrap(),
-        )
-        .unwrap();
-    let (status, _, session) = f
-        .post("/access/login/finish", cookie.as_deref(), json!(assertion))
-        .await;
-    assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        f.post("/access/login/finish", cookie.as_deref(), json!(assertion))
+        f.post("/access/login/start", None, json!({"client_id":key.id}))
             .await
             .0,
-        StatusCode::BAD_REQUEST
+        StatusCode::UNAUTHORIZED
     );
-    let (_, admin, _) = f
-        .request(true, Method::GET, "/api/v1/access", None, Value::Null, None)
+}
+#[tokio::test]
+async fn guessing_exhausts_pairing_and_expiration_rejects_proofs() {
+    let f = Fixture::new();
+    let key = ClientKey::new();
+    f.command(json!({"action":"pair"})).await;
+    for _ in 0..5 {
+        let (_, challenge, cookie) = f
+            .post(
+                "/access/pair/start",
+                None,
+                json!({"public_key":key.public()}),
+            )
+            .await;
+        assert_eq!(
+            f.post(
+                "/access/pair/finish",
+                cookie.as_deref(),
+                json!({"code":"wrong","signature":key.sign(&challenge)})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert!(f.access.inner.lock().unwrap().pairing.is_none());
+    let mut key = ClientKey::new();
+    f.enroll(&mut key).await;
+    let (_, challenge, cookie) = f
+        .post("/access/login/start", None, json!({"client_id":key.id}))
         .await;
-    f.command(json!({"action":"revoke_credential","id":admin["credentials"][0]["id"]}))
-        .await;
+    for c in f.access.inner.lock().unwrap().challenges.values_mut() {
+        c.expires = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    }
     assert_eq!(
-        f.request(
-            false,
-            Method::GET,
-            "/api/v1/snapshot",
-            session.as_deref(),
-            Value::Null,
-            None
+        f.post(
+            "/access/login/finish",
+            cookie.as_deref(),
+            json!({"signature":key.sign(&challenge)})
         )
         .await
         .0,
-        StatusCode::UNAUTHORIZED
+        StatusCode::BAD_REQUEST
     );
-    assert_eq!(
-        f.post("/access/login/start", None, json!({})).await.0,
-        StatusCode::UNAUTHORIZED
-    );
+    f.command(json!({"action":"disable"})).await;
+    assert!(!*f.access.policy.borrow());
     assert!(f.access.inner.lock().unwrap().sessions.is_empty());
 }
+#[tokio::test]
+async fn stolen_client_id_and_cross_browser_challenge_cannot_authorize() {
+    let f = Fixture::new();
+    let mut owner = ClientKey::new();
+    f.enroll(&mut owner).await;
+    let attacker = ClientKey::new();
+    let (_, challenge, cookie) = f
+        .post("/access/login/start", None, json!({"client_id":owner.id}))
+        .await;
+    assert_eq!(
+        f.post(
+            "/access/login/finish",
+            cookie.as_deref(),
+            json!({"signature":attacker.sign(&challenge)})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (_, a, ca) = f
+        .post("/access/login/start", None, json!({"client_id":owner.id}))
+        .await;
+    let (_, _, cb) = f
+        .post("/access/login/start", None, json!({"client_id":owner.id}))
+        .await;
+    assert_eq!(
+        f.post(
+            "/access/login/finish",
+            cb.as_deref(),
+            json!({"signature":owner.sign(&a)})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        f.post(
+            "/access/login/finish",
+            ca.as_deref(),
+            json!({"signature":owner.sign(&a)})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+}
+#[tokio::test]
+async fn pairing_is_one_use_and_new_code_cancels_previous() {
+    let f = Fixture::new();
+    let a = ClientKey::new();
+    let (_, first, _) = f.command(json!({"action":"pair"})).await;
+    let (_, second, _) = f.command(json!({"action":"pair"})).await;
+    let (_, challenge, cookie) = f
+        .post("/access/pair/start", None, json!({"public_key":a.public()}))
+        .await;
+    assert_eq!(
+        f.post(
+            "/access/pair/finish",
+            cookie.as_deref(),
+            json!({"code":first["code"],"signature":a.sign(&challenge)})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (_, challenge, cookie) = f
+        .post("/access/pair/start", None, json!({"public_key":a.public()}))
+        .await;
+    assert_eq!(
+        f.post(
+            "/access/pair/finish",
+            cookie.as_deref(),
+            json!({"code":second["code"],"signature":a.sign(&challenge)})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.post("/access/pair/start", None, json!({"public_key":a.public()}))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+}
+
 #[tokio::test]
 async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
     let f = Fixture::new();
     assert_eq!(
-        f.post("/access/enroll", None, json!({})).await.0,
+        f.post("/access/pair/start", None, json!({})).await.0,
         StatusCode::FORBIDDEN
     );
     for origin in [
@@ -272,7 +425,7 @@ async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
         .0,
         StatusCode::FORBIDDEN
     );
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(true));
+    let mut auth = ClientKey::new();
     let session = f.enroll(&mut auth).await;
     for path in [
         "/api/v1/providers",
@@ -328,51 +481,6 @@ async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
         StatusCode::UNAUTHORIZED
     );
 }
-#[tokio::test]
-async fn enrollment_cannot_be_claimed_by_another_browser_or_replayed() {
-    let f = Fixture::new();
-    f.command(json!({"action":"pair"})).await;
-    let (_, _, first) = f
-        .post("/access/enroll", None, json!({"name":"Owner"}))
-        .await;
-    let (_, _, other) = f
-        .post("/access/enroll", None, json!({"name":"Other"}))
-        .await;
-    let (_, status, _) = f
-        .request(true, Method::GET, "/api/v1/access", None, Value::Null, None)
-        .await;
-    let id = status["pending"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|v| v["name"] == "Owner")
-        .unwrap()["id"]
-        .clone();
-    f.command(json!({"action":"approve","id":id})).await;
-    assert_eq!(
-        f.post("/access/register/start", other.as_deref(), json!({}))
-            .await
-            .0,
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        f.post("/access/register/start", first.as_deref(), json!({}))
-            .await
-            .0,
-        StatusCode::OK
-    );
-    assert_eq!(
-        f.post("/access/register/start", first.as_deref(), json!({}))
-            .await
-            .0,
-        StatusCode::BAD_REQUEST
-    );
-    f.command(json!({"action":"close_enrollment"})).await;
-    assert_eq!(
-        f.post("/access/enroll", None, json!({})).await.0,
-        StatusCode::FORBIDDEN
-    );
-}
 #[test]
 fn origin_configuration_fails_closed() {
     for value in [
@@ -393,106 +501,10 @@ fn origin_configuration_fails_closed() {
 }
 
 #[tokio::test]
-async fn expires_challenges_and_sessions_and_persists_disabled_policy() {
-    use std::time::{Duration, Instant};
-    let f = Fixture::new();
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(true));
-    let session = f.enroll(&mut auth).await;
-    let (_, options, ceremony) = f.post("/access/login/start", None, json!({})).await;
-    let assertion = auth
-        .do_authentication(
-            Url::parse("https://pot.example").unwrap(),
-            serde_json::from_value(options).unwrap(),
-        )
-        .unwrap();
-    for c in f.access.inner.lock().unwrap().challenges.values_mut() {
-        c.expires = Instant::now() - Duration::from_secs(1);
-    }
-    assert_eq!(
-        f.post(
-            "/access/login/finish",
-            ceremony.as_deref(),
-            json!(assertion)
-        )
-        .await
-        .0,
-        StatusCode::BAD_REQUEST
-    );
-    for s in f.access.inner.lock().unwrap().sessions.values_mut() {
-        s.created = Instant::now() - Duration::from_secs(43201);
-    }
-    assert_eq!(
-        f.request(
-            false,
-            Method::GET,
-            "/api/v1/snapshot",
-            Some(&session),
-            Value::Null,
-            None
-        )
-        .await
-        .0,
-        StatusCode::UNAUTHORIZED
-    );
-    f.command(json!({"action":"disable"})).await;
-    let cfg = AccessConfig {
-        origin: Url::parse("https://pot.example/").unwrap(),
-        bind: "127.0.0.1:0".parse().unwrap(),
-        certificate: f.path.join("cert"),
-        private_key: f.path.join("key"),
-        assets: f.path.clone(),
-    };
-    let restarted = Access::new(&cfg, f.path.clone(), "new-root".into(), Router::new()).unwrap();
-    assert!(!restarted.inner.lock().unwrap().enabled);
-    assert_eq!(restarted.inner.lock().unwrap().credentials.keys.len(), 1);
-    assert!(restarted.inner.lock().unwrap().sessions.is_empty());
-    assert!(!*restarted.policy.borrow());
-}
-#[tokio::test]
-async fn invalid_signature_and_client_data_never_issue_session() {
-    let f = Fixture::new();
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(true));
-    f.enroll(&mut auth).await;
-    f.access.inner.lock().unwrap().sessions.clear();
-    let (_, options, cookie) = f.post("/access/login/start", None, json!({})).await;
-    let assertion = auth
-        .do_authentication(
-            Url::parse("https://pot.example").unwrap(),
-            serde_json::from_value(options).unwrap(),
-        )
-        .unwrap();
-    let mut bad = json!(assertion);
-    bad["response"]["signature"] = json!("AAAA");
-    assert_eq!(
-        f.post("/access/login/finish", cookie.as_deref(), bad)
-            .await
-            .0,
-        StatusCode::BAD_REQUEST
-    );
-    assert!(f.access.inner.lock().unwrap().sessions.is_empty());
-    // A signature over a different WebAuthn origin must fail even with an exact HTTP Origin.
-    let (_, options, cookie) = f.post("/access/login/start", None, json!({})).await;
-    let assertion = auth
-        .do_authentication(
-            Url::parse("https://pot.example").unwrap(),
-            serde_json::from_value(options).unwrap(),
-        )
-        .unwrap();
-    let mut bad = json!(assertion);
-    bad["response"]["clientDataJSON"] = json!("AAAA");
-    assert_eq!(
-        f.post("/access/login/finish", cookie.as_deref(), bad)
-            .await
-            .0,
-        StatusCode::BAD_REQUEST
-    );
-    assert!(f.access.inner.lock().unwrap().sessions.is_empty());
-}
-#[tokio::test]
 async fn public_stream_stops_on_session_revocation() {
     use futures_util::StreamExt;
     let mut f = Fixture::new();
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(true));
+    let mut auth = ClientKey::new();
     let session = f.enroll(&mut auth).await;
     f.access.runtime=Router::new().route("/api/v1/events",get(||async{
         let stream=async_stream::stream! {loop {tokio::time::sleep(std::time::Duration::from_millis(20)).await;yield Ok::<_,std::io::Error>("data: event\n\n");}};
@@ -521,46 +533,9 @@ async fn public_stream_stops_on_session_revocation() {
 }
 
 #[tokio::test]
-async fn unsigned_client_uv_preference_cannot_weaken_server_policy() {
-    let f = Fixture::new();
-    f.command(json!({"action":"pair"})).await;
-    let (_, _, cookie) = f
-        .post("/access/enroll", None, json!({"name":"No UV"}))
-        .await;
-    let (_, state, _) = f
-        .request(true, Method::GET, "/api/v1/access", None, Value::Null, None)
-        .await;
-    f.command(json!({"action":"approve","id":state["pending"][0]["id"]}))
-        .await;
-    let (_, mut options, _) = f
-        .post("/access/register/start", cookie.as_deref(), json!({}))
-        .await;
-    options["publicKey"]["authenticatorSelection"]["userVerification"] = json!("discouraged");
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(false));
-    let response = auth
-        .do_registration(
-            Url::parse("https://pot.example").unwrap(),
-            serde_json::from_value(options).unwrap(),
-        )
-        .unwrap();
-    assert_eq!(
-        f.post(
-            "/access/register/finish",
-            cookie.as_deref(),
-            json!(response)
-        )
-        .await
-        .0,
-        StatusCode::BAD_REQUEST
-    );
-    assert!(f.access.inner.lock().unwrap().credentials.keys.is_empty());
-    assert!(f.access.inner.lock().unwrap().sessions.is_empty());
-}
-
-#[tokio::test]
 async fn push_preferences_are_installation_scoped_and_logout_removes_consent() {
     let f = Fixture::new();
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(true));
+    let mut auth = ClientKey::new();
     let session = f.enroll(&mut auth).await;
     for path in [
         "/access/push",
@@ -618,7 +593,7 @@ async fn push_preferences_are_installation_scoped_and_logout_removes_consent() {
             .is_empty()
     );
     let data: Value =
-        serde_json::from_slice(&std::fs::read(f.path.join("access-credentials.json")).unwrap())
+        serde_json::from_slice(&std::fs::read(f.path.join("access-clients.json")).unwrap())
             .unwrap();
     assert!(data["subscriptions"].as_object().unwrap().is_empty());
 }
@@ -626,7 +601,7 @@ async fn push_preferences_are_installation_scoped_and_logout_removes_consent() {
 #[tokio::test]
 async fn sandbox_inventory_does_not_expose_private_viewer_credentials() {
     let mut f = Fixture::new();
-    let mut auth = WebauthnAuthenticator::new(SoftPasskey::new(true));
+    let mut auth = ClientKey::new();
     let session = f.enroll(&mut auth).await;
     f.access.runtime=Router::new().route("/api/v1/sandboxes",get(||async{axum::Json(json!({"selected":"default","future_secret":"root-secret","items":[{"id":"default","name":"Sandbox","os":"linux","config":{"cpus":4,"private_key":"config-secret"},"state":{"phase":"running","generation":9,"ip":"192.168.64.2","viewer":"http://192.168.64.2:17681/#broker-secret","future_token":"another-secret"}}]}))}));
     let (code, body, _) = f
@@ -652,4 +627,26 @@ async fn sandbox_inventory_does_not_expose_private_viewer_credentials() {
     ] {
         assert!(!body.to_string().contains(secret));
     }
+}
+
+#[test]
+fn legacy_clients_do_not_migrate_authority_and_disabled_policy_survives() {
+    let f = Fixture::new();
+    std::fs::write(
+        f.path.join("access-credentials.json"),
+        r#"{"disabled":true,"keys":{"old":{"name":"Old phone","passkey":{}}},"subscriptions":{}}"#,
+    )
+    .unwrap();
+    let config = AccessConfig {
+        origin: Url::parse("https://pot.example/").unwrap(),
+        bind: "127.0.0.1:0".parse().unwrap(),
+        certificate: f.path.join("cert"),
+        private_key: f.path.join("key"),
+        assets: f.path.clone(),
+    };
+    let access = Access::new(&config, f.path.clone(), "new-root".into(), Router::new()).unwrap();
+    let inner = access.inner.lock().unwrap();
+    assert!(!inner.enabled);
+    assert!(inner.credentials.keys.is_empty());
+    assert!(inner.credentials.subscriptions.is_empty());
 }

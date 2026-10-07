@@ -13,7 +13,10 @@ rust-i18n = "=4.2.4"
 unicode-segmentation = "=1.13.3"
 pot-protocol.workspace = true
 serde_json.workspace = true
-ureq = { version = "3", features = ["json"] }
+pot-server = { path = "../server" }
+tokio = { version = "1", features = ["full"] }
+url = "2"
+serde.workspace = true
 uuid = { version = "1", features = ["v4"] }
 async-channel = "2"
 smol = "2"

@@ -81,7 +81,7 @@ impl Push {
     }
 }
 fn validate(info: &SubscriptionInfo) -> Result<()> {
-    let url = webauthn_rs::prelude::Url::parse(&info.endpoint)?;
+    let url = url::Url::parse(&info.endpoint)?;
     ensure!(
         url.scheme() == "https"
             && url.username().is_empty()

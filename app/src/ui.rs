@@ -112,31 +112,18 @@ impl Settings {
         }
         panel = panel.child(controls).child(view.access_notice.clone());
         for (kind, action) in [
-            ("pending", "approve"),
             ("credentials", "revoke_credential"),
             ("sessions", "revoke_session"),
         ] {
             if let Some(items) = state[kind].as_array() {
                 for item in items {
                     let id = item["id"].as_str().unwrap_or_default().to_owned();
-                    let label = if kind == "pending" {
-                        format!(
-                            "{} · {}",
-                            item["name"].as_str().unwrap_or_default(),
-                            item["code"].as_str().unwrap_or_default()
-                        )
-                    } else {
-                        item["name"].as_str().unwrap_or(&id).to_owned()
-                    };
+                    let label = item["name"].as_str().unwrap_or(&id).to_owned();
                     panel = panel.child(
                         div().flex().gap_2().items_center().child(label).child(
                             Button::new(id.clone())
                                 .ghost()
-                                .label(crate::i18n::text(if action == "approve" {
-                                    "mobile.approve"
-                                } else {
-                                    "mobile.revoke"
-                                }))
+                                .label(crate::i18n::text("mobile.revoke"))
                                 .disabled(view.access_pending)
                                 .on_click(cx.listener(move |this, _, _, _| {
                                     this.client.access_command(json!({"action":action,"id":id}))

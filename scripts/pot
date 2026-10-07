@@ -162,7 +162,7 @@ elif cmd == "bundle":
     shutil.copytree(RES / "node", APP / "Contents/Resources/runtime/node")
     for name in ["vmlinux"]:
         shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
-    for name in ["pot-server", "pot-access"]:
+    for name in ["pot-server", "pot"]:
         shutil.copy2(
             pathlib.Path(env["CARGO_TARGET_DIR"]) / "debug" / name,
             APP / "Contents/Resources/runtime" / name,

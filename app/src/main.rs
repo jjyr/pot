@@ -2,6 +2,7 @@ extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
 mod artifacts;
+mod backend;
 mod client;
 use pot_ui::design;
 mod i18n;
@@ -26,6 +27,7 @@ use std::{
 };
 
 unsafe extern "C" {
+    fn pot_bridge_startup_error(message: *const std::ffi::c_char);
     fn pot_bridge_set_wake(callback: extern "C" fn());
     fn pot_bridge_install(html: *const std::ffi::c_char);
     fn pot_bridge_hide();
@@ -764,7 +766,50 @@ fn task_phase(p: &pot_protocol::TaskPhase) -> &'static str {
         Interrupted => crate::i18n::text("main.interrupted-add-instructions-to-resume"),
     }
 }
+fn startup_error(error: &str) -> ! {
+    eprintln!("Cannot start Pot: {error}");
+    if let Ok(message) = CString::new(error) {
+        unsafe {
+            pot_bridge_startup_error(message.as_ptr());
+        }
+    }
+    std::process::exit(1)
+}
 fn main() {
+    // Configure the embedded backend before GPUI or Tokio starts any threads.
+    let root = client::root();
+    if let Err(error) = unsafe { pot_server::apply_settings(&root, true) } {
+        startup_error(&error.to_string());
+    }
+    if let Some(resources) = std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            p.parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("Resources/runtime"))
+        })
+        .filter(|p| p.is_dir())
+    {
+        unsafe {
+            std::env::set_var("POT_BUILTIN_SKILLS_DIR", resources.join("skills"));
+            if std::env::var_os("POT_ACCESS_ASSETS").is_none() {
+                std::env::set_var("POT_ACCESS_ASSETS", resources.join("mobile"));
+            }
+            std::env::set_var(
+                "PATH",
+                format!(
+                    "{}:{}:{}",
+                    resources.join("node/bin").display(),
+                    resources.join("host-tools/node_modules/.bin").display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    if let Err(error) = backend::ready() {
+        startup_error(&error);
+    }
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx: &mut App| {

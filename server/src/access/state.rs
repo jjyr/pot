@@ -6,8 +6,8 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use url::Url;
 use uuid::Uuid;
-use webauthn_rs::prelude::*;
 
 pub const SESSION_COOKIE: &str = "__Host-pot-session";
 pub const CEREMONY_COOKIE: &str = "__Host-pot-ceremony";
@@ -30,13 +30,18 @@ impl AccessConfig {
         };
         let origin = Url::parse(&origin)?;
         Self::validate_origin(&origin)?;
+        let bind: std::net::SocketAddr = std::env::var("POT_ACCESS_BIND")
+            .unwrap_or_else(|_| "127.0.0.1:17701".into())
+            .parse()?;
+        ensure!(
+            origin.scheme() == "https" || bind.ip().is_loopback(),
+            "Local HTTP must bind loopback"
+        );
         Ok(Some(Self {
             origin,
-            bind: std::env::var("POT_ACCESS_BIND")
-                .unwrap_or_else(|_| "127.0.0.1:17701".into())
-                .parse()?,
-            certificate: std::env::var("POT_ACCESS_CERT")?.into(),
-            private_key: std::env::var("POT_ACCESS_KEY")?.into(),
+            bind,
+            certificate: std::env::var("POT_ACCESS_CERT").unwrap_or_default().into(),
+            private_key: std::env::var("POT_ACCESS_KEY").unwrap_or_default().into(),
             assets: std::env::var_os("POT_ACCESS_ASSETS")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| {
@@ -50,8 +55,9 @@ impl AccessConfig {
     }
     pub fn validate_origin(origin: &Url) -> Result<()> {
         ensure!(
-            origin.scheme() == "https" && origin.domain().is_some(),
-            "Access requires a stable HTTPS domain"
+            (origin.scheme() == "https" && origin.domain().is_some())
+                || (origin.scheme() == "http" && origin.host_str() == Some("localhost")),
+            "Remote access requires a stable HTTPS domain; HTTP is allowed only on localhost"
         );
         ensure!(
             origin.username().is_empty()
@@ -75,24 +81,20 @@ pub struct Credentials {
 #[derive(Serialize, Deserialize)]
 pub struct Credential {
     pub name: String,
-    pub passkey: Passkey,
+    pub public_key: String,
 }
-pub struct Enrollment {
-    pub code: String,
+pub struct Pairing {
+    pub digest: Vec<u8>,
     pub expires: Instant,
-    pub approved: bool,
-    pub name: String,
-}
-pub enum Ceremony {
-    Register {
-        state: PasskeyRegistration,
-        name: String,
-    },
-    Login(PasskeyAuthentication),
+    pub attempts: u8,
 }
 pub struct Challenge {
     pub expires: Instant,
-    pub ceremony: Ceremony,
+    pub message: String,
+    pub key: String,
+    pub name: String,
+    pub public_key: String,
+    pub pairing: bool,
 }
 pub struct Session {
     pub key: String,
@@ -101,8 +103,7 @@ pub struct Session {
 }
 pub struct Inner {
     pub credentials: Credentials,
-    pub enrollment_until: Option<Instant>,
-    pub pending: HashMap<String, Enrollment>,
+    pub pairing: Option<Pairing>,
     pub challenges: HashMap<String, Challenge>,
     pub sessions: HashMap<String, Session>,
     pub enabled: bool,
@@ -110,7 +111,6 @@ pub struct Inner {
 }
 #[derive(Clone)]
 pub struct Access {
-    pub webauthn: Arc<Webauthn>,
     pub origin: String,
     pub assets: PathBuf,
     pub data: PathBuf,
@@ -130,14 +130,23 @@ impl Access {
         runtime: axum::Router,
     ) -> Result<Self> {
         AccessConfig::validate_origin(&config.origin)?;
-        let webauthn = WebauthnBuilder::new(config.origin.domain().unwrap(), &config.origin)?
-            .rp_name("Pot")
-            .build()?;
-        let path = data.join("access-credentials.json");
+        let path = data.join("access-clients.json");
         let credentials: Credentials = if path.exists() {
             serde_json::from_slice(&std::fs::read(path)?)?
         } else {
-            Credentials::default()
+            // Preserve a previously disabled endpoint, but never migrate old client authority.
+            let legacy = data.join("access-credentials.json");
+            let disabled = if legacy.exists() {
+                serde_json::from_slice::<serde_json::Value>(&std::fs::read(legacy)?)?["disabled"]
+                    .as_bool()
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            Credentials {
+                disabled,
+                ..Default::default()
+            }
         };
         let enabled = !credentials.disabled;
         Ok(Self {
@@ -145,7 +154,6 @@ impl Access {
             push: super::push::Push::from_env()?.map(Arc::new),
             policy: tokio::sync::watch::channel(enabled).0,
             foreground: Arc::new(Mutex::new(HashMap::new())),
-            webauthn: Arc::new(webauthn),
             origin: config.origin.origin().ascii_serialization(),
             assets: config.assets.clone(),
             data,
@@ -153,8 +161,7 @@ impl Access {
             runtime,
             inner: Arc::new(Mutex::new(Inner {
                 credentials,
-                enrollment_until: None,
-                pending: HashMap::new(),
+                pairing: None,
                 challenges: HashMap::new(),
                 sessions: HashMap::new(),
                 enabled,
@@ -180,7 +187,7 @@ impl Access {
     }
     pub fn persist(&self, inner: &Inner) -> Result<()> {
         use std::{io::Write, os::unix::fs::OpenOptionsExt};
-        let path = self.data.join("access-credentials.json");
+        let path = self.data.join("access-clients.json");
         let temporary = path.with_extension("tmp");
         let mut f = std::fs::OpenOptions::new()
             .create(true)
@@ -196,7 +203,9 @@ impl Access {
     }
     pub fn cleanup(inner: &mut Inner) {
         let now = Instant::now();
-        inner.pending.retain(|_, p| p.expires > now);
+        if inner.pairing.as_ref().is_some_and(|p| p.expires <= now) {
+            inner.pairing = None;
+        }
         inner.challenges.retain(|_, p| p.expires > now);
         inner.sessions.retain(|_, s| {
             now.duration_since(s.created) < SESSION_MAX

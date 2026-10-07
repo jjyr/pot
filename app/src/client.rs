@@ -12,7 +12,7 @@ use std::{
 };
 
 /// Preserve server diagnostics; localize the fallback for invalid or empty error bodies.
-fn rejection_detail(body: &mut ureq::Body, fallback_key: &str) -> String {
+fn rejection_detail(body: &mut crate::backend::Body, fallback_key: &str) -> String {
     body.read_json::<ApiError>()
         .map(|error| error.message)
         .unwrap_or_else(|_| crate::i18n::text(fallback_key).into())
@@ -235,21 +235,8 @@ pub fn root() -> PathBuf {
             PathBuf::from(std::env::var_os("HOME").unwrap()).join("Library/Application Support/pot")
         })
 }
-fn endpoint() -> Result<(String, String), String> {
-    let root = root();
-    let bytes = std::fs::read(root.join("product/runtime.json"))
-        .map_err(|_| crate::i18n::text("client.preparing-runtime").to_string())?;
-    let endpoint: RuntimeEndpoint = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    if endpoint.api_version != API_VERSION {
-        return Err(crate::i18n::text("client.incompatible-runtime-protocol-version").into());
-    }
-    Ok((
-        format!("http://127.0.0.1:{}", endpoint.port),
-        endpoint.token,
-    ))
-}
 fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String> {
-    let (url, token) = endpoint()?;
+    crate::backend::ready()?;
     let (selected, query) = {
         let v = view.lock().unwrap();
         (v.selected.clone(), v.task_query.clone())
@@ -263,19 +250,17 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             v.runs_offset,
         )
     };
-    let auth = format!("Bearer {token}");
-    let agent = ureq::Agent::config_builder()
+    let agent = crate::backend::Requests::config_builder()
         .timeout_global(Some(Duration::from_secs(3)))
         .build()
         .new_agent();
     let task_page: TaskPage = agent
-        .get(&format!("{url}{PATH_TASKS}/query"))
+        .get(&format!("{PATH_TASKS}/query"))
         .query("scope", &query.scope)
         .query("q", &query.q)
         .query("offset", query.offset.to_string())
         .query("limit", query.limit.to_string())
         .query("selected", &selected)
-        .header("Authorization", &auth)
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
@@ -284,10 +269,9 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     // Independent of the visible task filter and page. Only executing lanes
     // count as activity; queued and budget/user waits do not.
     let executing: TaskPage = agent
-        .get(&format!("{url}{PATH_TASKS}/query"))
+        .get(&format!("{PATH_TASKS}/query"))
         .query("phase", "running")
         .query("limit", "3")
-        .header("Authorization", &auth)
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
@@ -297,8 +281,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     let mut finished = 0;
     for task in &executing.items {
         let progress = agent
-            .get(&format!("{url}{PATH_TASKS}/{}", task.id))
-            .header("Authorization", &auth)
+            .get(&format!("{PATH_TASKS}/{}", task.id))
             .call()
             .ok()
             .and_then(|mut r| r.body_mut().read_json::<Snapshot>().ok());
@@ -321,11 +304,10 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     let schedules: Option<SchedulePage> = if sq.0 {
         Some(
             agent
-                .get(&format!("{url}/api/v1/schedules"))
+                .get("/api/v1/schedules")
                 .query("selected", &sq.1)
                 .query("offset", sq.2.to_string())
                 .query("runs_offset", sq.3.to_string())
-                .header("Authorization", &auth)
                 .call()
                 .map_err(|e| e.to_string())?
                 .body_mut()
@@ -346,12 +328,11 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     if let Some(q) = uq {
         let result = (|| -> Result<Value, String> {
             agent
-                .get(&format!("{url}/api/v1/usage/summary"))
+                .get("/api/v1/usage/summary")
                 .query("scope", &q.0)
                 .query("days", q.1.to_string())
                 .query("offset", q.2.to_string())
                 .query("timezone", &q.3)
-                .header("Authorization", &auth)
                 .call()
                 .map_err(|e| e.to_string())?
                 .body_mut()
@@ -372,16 +353,14 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         }
     }
     let access = agent
-        .get(&format!("{url}/api/v1/access"))
-        .header("Authorization", &auth)
+        .get("/api/v1/access")
         .call()
         .ok()
         .and_then(|mut r| r.body_mut().read_json::<Value>().ok())
         .unwrap_or(Value::Null);
     view.lock().unwrap().access = access;
     let main: Snapshot = agent
-        .get(&format!("{url}{PATH_SNAPSHOT}"))
-        .header("Authorization", &auth)
+        .get(PATH_SNAPSHOT)
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
@@ -396,8 +375,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         main.clone()
     } else {
         agent
-            .get(&format!("{url}{path}"))
-            .header("Authorization", &auth)
+            .get(&path)
             .call()
             .map_err(|e| e.to_string())?
             .body_mut()
@@ -463,28 +441,24 @@ impl Client {
         let v = view.clone();
         let active = running.clone();
         std::thread::spawn(move || {
-            let agent = ureq::Agent::config_builder()
+            let agent = crate::backend::Requests::config_builder()
                 .timeout_global(Some(Duration::from_secs(3)))
                 .build()
                 .new_agent();
             while let Ok(req) = rx.recv() {
                 while active.load(Ordering::Relaxed) {
-                    let (url, token) = match endpoint() {
-                        Ok(v) => v,
-                        Err(e) => {
-                            v.lock().unwrap().command_error = e;
-                            std::thread::sleep(Duration::from_millis(500));
-                            continue;
-                        }
-                    };
+                    if let Err(error) = crate::backend::ready() {
+                        v.lock().unwrap().command_error = error;
+                        std::thread::sleep(Duration::from_millis(500));
+                        continue;
+                    }
                     let path = match req.conversation_id.as_str() {
                         "main" => PATH_MESSAGES.to_string(),
                         "new" => PATH_TASKS.to_string(),
                         id => format!("{PATH_TASKS}/{id}/messages"),
                     };
                     match agent
-                        .post(&format!("{url}{path}"))
-                        .header("Authorization", &format!("Bearer {token}"))
+                        .post(&path)
                         .config()
                         .http_status_as_error(false)
                         .build()
@@ -577,13 +551,12 @@ impl Client {
         let view = self.view.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
-                let (url, token) = endpoint()?;
-                ureq::Agent::config_builder()
+                crate::backend::ready()?;
+                crate::backend::Requests::config_builder()
                     .timeout_global(Some(Duration::from_secs(3)))
                     .build()
                     .new_agent()
-                    .post(&format!("{url}{}",if selected.is_empty(){PATH_CANCEL.to_string()}else{format!("{PATH_TASKS}/{selected}/cancel")}))
-                    .header("Authorization", &format!("Bearer {token}"))
+                    .post(&if selected.is_empty(){PATH_CANCEL.to_string()}else{format!("{PATH_TASKS}/{selected}/cancel")})
                     .send_json(json!({"request_id":uuid::Uuid::new_v4().to_string(),"user_message_id":message_id}))
                     .map_err(|e| e.to_string())?;
                 Ok(())
@@ -612,13 +585,12 @@ impl Client {
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
-                let (url, token) = endpoint()?;
-                let mut response = ureq::Agent::config_builder()
+                crate::backend::ready()?;
+                let mut response = crate::backend::Requests::config_builder()
                     .timeout_global(Some(Duration::from_secs(5)))
                     .build()
                     .new_agent()
-                    .post(&format!("{url}/api/v1/usage/{path}"))
-                    .header("Authorization", &format!("Bearer {token}"))
+                    .post(&format!("/api/v1/usage/{path}"))
                     .config()
                     .http_status_as_error(false)
                     .build()
@@ -667,16 +639,15 @@ impl Client {
         let active = self.running.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
-            let agent = ureq::Agent::config_builder()
+            let agent = crate::backend::Requests::config_builder()
                 .timeout_global(Some(Duration::from_secs(5)))
                 .build()
                 .new_agent();
             while active.load(Ordering::Relaxed) {
                 let result = (|| -> Result<Value, String> {
-                    let (url, token) = endpoint()?;
+                    crate::backend::ready()?;
                     match agent
-                        .post(&format!("{url}/api/v1/schedules"))
-                        .header("Authorization", &format!("Bearer {token}"))
+                        .post("/api/v1/schedules")
                         .config()
                         .http_status_as_error(false)
                         .build()
@@ -734,22 +705,25 @@ impl Client {
         view.access_pending = true;
         let v = self.view.clone();
         std::thread::spawn(move || {
-            let result = (|| -> Result<(), String> {
-                let (url, token) = endpoint()?;
-                let agent = ureq::Agent::config_builder()
+            let result = (|| -> Result<String, String> {
+                crate::backend::ready()?;
+                let agent = crate::backend::Requests::config_builder()
                     .timeout_global(Some(Duration::from_secs(5)))
                     .build()
                     .new_agent();
-                agent
-                    .post(&format!("{url}/api/v1/access"))
-                    .header("Authorization", format!("Bearer {token}"))
+                let mut reply = agent
+                    .post("/api/v1/access")
                     .send_json(body)
                     .map_err(|e| e.to_string())?;
-                Ok(())
+                let result: Value = reply.body_mut().read_json().map_err(|e| e.to_string())?;
+                Ok(result["code"]
+                    .as_str()
+                    .map(|code| format!("{code} (5 min)"))
+                    .unwrap_or_default())
             })();
             let mut view = v.lock().unwrap();
             view.access_pending = false;
-            view.access_notice = result.err().unwrap_or_default();
+            view.access_notice = result.unwrap_or_else(|e| e);
             drop(view);
             crate::wake_ui();
         });
@@ -816,12 +790,12 @@ mod tests {
             "client.schedule-operation-rejected",
         ] {
             for data in ["", "<html>Bad gateway</html>", "{}"] {
-                let mut body = ureq::Body::builder().data(data);
+                let mut body = crate::backend::Body::builder().data(data);
                 let detail = rejection_detail(&mut body, key);
                 assert_eq!(detail, crate::i18n::text(key));
                 assert_eq!(crate::i18n::message(&detail), crate::i18n::text(key),);
             }
-            let mut body = ureq::Body::builder()
+            let mut body = crate::backend::Body::builder()
                 .data(r#"{"code":"provider_rejected","message":"Provider diagnostic 中文 {0}"}"#);
             let detail = rejection_detail(&mut body, key);
             assert_eq!(detail, "Provider diagnostic 中文 {0}");

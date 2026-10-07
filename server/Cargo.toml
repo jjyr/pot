@@ -14,7 +14,9 @@ anyhow = "1"
 serde_json.workspace = true
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
-webauthn-rs = "0.5"
+libc = "0.2"
+url = "2"
+ring = "0.17"
 # Bundle crypto instead of requiring a Homebrew OpenSSL installation.
 openssl = { version = "0.10", features = ["vendored"] }
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
@@ -32,9 +34,10 @@ base64 = "0.22"
 [dev-dependencies]
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
-libc = "0.2"
-webauthn-authenticator-rs = { version = "0.5", default-features = false, features = ["softpasskey"] }
 
 ece = "2"
 
 rcgen = "0.14"
+
+[features]
+embedded-web = []

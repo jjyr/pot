@@ -797,7 +797,8 @@ var bridge: PotBridge?
             .invalidate(); animation = nil; if let keyMonitor
         {
             NSEvent.removeMonitor(keyMonitor)
-        }; keyMonitor = nil; termination?.cancel(); termination = nil; localRuntime?.cleanup(); web.stopLoading(); web
+        }; keyMonitor = nil; termination?.cancel(); termination = nil; backendShutdown(); localRuntime?.cleanup(); web
+            .stopLoading(); web
             .configuration.userContentController.removeScriptMessageHandler(forName: "potDesktop"); NSStatusBar.system
             .removeStatusItem(status)
     }

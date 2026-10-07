@@ -9,7 +9,9 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 endpoint = root / "product/runtime.json"
-if json.loads(endpoint.read_text()).get("boot_id") != "ui-fixture":
+if not (
+    (root / ".ui-fixture").is_file() and (root / ".ui-fixture").read_text() == "pot-ui-fixture"
+) and (not endpoint.exists() or json.loads(endpoint.read_text()).get("boot_id") != "ui-fixture"):
     raise SystemExit("UI Helper requires a fixture-owned root")
 path = root / "helper.sock"
 if path.exists():

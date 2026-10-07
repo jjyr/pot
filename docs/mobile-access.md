@@ -14,8 +14,7 @@ interface is an explicit deployment choice.
 ```sh
 mise run build:mobile
 mise exec -- cargo build --locked -p pot-server --bins
-POT_DATA_DIR=/path/to/isolated/product \
-POT_WORKSPACE=/path/to/workspace \
+POT_LOCAL_ROOT=/path/to/isolated/instance \
 POT_RUNTIME_BIND=127.0.0.1:17700 \
 POT_ACCESS_ORIGIN=https://pot.example.com \
 POT_ACCESS_BIND=127.0.0.1:17701 \
@@ -33,7 +32,7 @@ public port opening or cloud tunnel is performed automatically.
 If a TCP relay is needed, it must forward TLS bytes unchanged to this listener.
 Do not terminate HTTPS at a CDN, reverse proxy, tunnel provider or other untrusted
 service. Browser code and application traffic authenticate the same trusted Pot
-origin. Session cookies, passkeys and certificates do not make a TLS-terminating
+origin. Session cookies, client keys and certificates do not make a TLS-terminating
 intermediary an end-to-end encrypted relay.
 
 `build:mobile` uses native Rust 1.98.1 and a separate pinned
@@ -51,35 +50,36 @@ Standalone Server may use the explicit absolute asset path.
 The GUI does not provision certificates. QR, pending approvals and revocation
 use background native requests; no network call blocks the GPUI rendering thread.
 
-Headless owners use local or SSH CLI administration:
+Owners use `pot access pair` in standalone mode, or Settings → General → Mobile
+access → Generate pairing code in App mode. The code is generated on the owner
+side, expires after five minutes, and can authorize only one client. Opening a
+new pairing invalidates the previous code. Five incorrect guesses close it.
+Codes are kept hashed in memory, never in a QR, URL, server log or persistent
+credential file. The QR contains only the instance address. `pot access close`
+closes pairing; `clients` lists clients; `revoke ID` removes client authorization
+and subscriptions. App uses these same backend commands in process.
 
-```sh
-POT_DATA_DIR=/path/to/product mise exec -- cargo run --locked -p pot-server --bin pot-access -- qr
-POT_DATA_DIR=/path/to/product mise exec -- cargo run --locked -p pot-server --bin pot-access -- pair
-POT_DATA_DIR=/path/to/product mise exec -- cargo run --locked -p pot-server --bin pot-access -- status
-POT_DATA_DIR=/path/to/product mise exec -- cargo run --locked -p pot-server --bin pot-access -- approve REQUEST_ID
-```
+On the browser, enter the owner-generated code and a client name. WebCrypto
+creates a non-exportable P-256 private key and persists it in IndexedDB before
+consuming the code. Enrollment requires both the code and a signature over a
+fresh, origin/purpose/client-bound challenge. Returning clients sign another
+one-use challenge automatically; no fingerprint prompt or WebAuthn is involved.
+Clearing browser storage or logout removes the local key and requires re-pairing.
+Server revocation invalidates both sessions and future signed logins. A leaked
+client ID or public key cannot sign in. Browser script compromise can still use
+an origin's key; non-exportability is not protection from a compromised client.
 
-`pair` opens enrollment for five minutes. Scan the stable QR, request access,
-and compare the code on the phone with the exact pending owner-side record.
-Approve that record, then create the passkey on the phone. Approval is bound to
-the requesting browser's HttpOnly ceremony cookie. The code is a comparison aid,
-not a login credential. The QR contains only the public URL and never expires
-as an invitation secret.
+Public keys and push subscriptions persist in `access-clients.json` with mode
+0600 and atomic writes. Sessions/challenges remain in memory: 30-minute idle,
+12-hour absolute, five-minute challenge expiry. Restart requires a new signed
+login, performed automatically by an authorized browser. Status/push heartbeats
+do not renew idle sessions; hidden windows stop transcript polling. `disable`
+closes the accepting socket, persists disabled policy and invalidates sessions,
+challenges and pairing; `enable` does not restore old sessions.
 
-CLI also supports `close_enrollment`, `revoke_session ID`,
-`revoke_credential ID`, `revoke_subscription ID`, `disable`, and `enable`. Disable persists, closes the
-HTTPS accepting socket and invalidates sessions/challenges/pending enrollment.
-Re-enabling does not restore previous sessions. The trusted loopback management
-route remains available. Existing streams are checked at least once per second
-and before chunks are delivered.
-
-Passkeys persist in `access-credentials.json` with mode 0600 and atomic writes.
-Sessions and challenges exist only in memory: 30-minute idle, 12-hour absolute,
-5-minute ceremony expiry. Server restart requires login with the existing
-passkey. Status checks and push heartbeats do not renew idle sessions; hidden
-browser windows stop transcript polling. Synced passkeys prove the credential
-holder, not one physical handset. User verification is mandatory.
+Old WebAuthn credentials/subscriptions are not migrated into client authority;
+old clients must pair again. An old disabled policy is retained. The old private
+file is left intact, but its keys are not accepted.
 
 Owner access includes the main chat and all instance environments. It is not a
 single-Sandbox grant: the main Agent can indirectly operate other environments.
@@ -120,12 +120,11 @@ Open as Web App when that option is shown. Launch the Pot icon to use a standalo
 window. The app detects standalone mode and browser installation events rather
 than treating acceptance of a prompt as completed installation.
 
-A browser-trusted HTTPS certificate is required for deployment. A Service Worker
+A browser-trusted HTTPS certificate is required for remote deployment. A Service Worker
 registers even when VAPID/push is not configured, but uses network-only fetches:
 there is no offline transcript or credential cache. Installation does not grant
 access, change session expiry or request notification permission. A newly installed
-Home Screen app may require Passkey login again; an authorized synchronized
-Passkey still works. Notifications remain a separate explicit opt-in.
+Home Screen app may use a separate storage context and require its own pairing. Notifications remain a separate explicit opt-in.
 
 ## Main Agent message notifications
 
@@ -174,7 +173,7 @@ Exactly-once OS delivery is not promised.
 
 ## Verification and remaining gates
 
-See [2026-10-07 acceptance report](validation/mobile-access-20261007.md).
+See the [current hosting/pairing report](validation/standalone-hosting-20261007.md) and the earlier [mobile acceptance report](validation/mobile-access-20261007.md).
 The desktop broker, RFB credentials and takeover remain unreachable. No
 restricted-Sandbox authority, production relay, complete App bundle boot,
 physical iOS/Android touch/IME/performance and mobile

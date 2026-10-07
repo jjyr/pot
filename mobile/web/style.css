@@ -4,3 +4,5 @@ button[hidden]{display:none}
 
 dialog{max-width:min(420px,calc(100vw - 64px));border:1px solid #ddd;border-radius:16px;padding:24px;color:inherit;background:inherit}dialog::backdrop{background:#0008}dialog p{line-height:1.6}
 @media(prefers-color-scheme:dark){dialog{background:#202020;border-color:#414141}}
+
+#auth input{display:block;box-sizing:border-box;width:100%;min-height:44px;margin:8px 0;padding:10px 12px;border:1px solid #888;border-radius:10px;background:inherit;color:inherit;font:inherit}

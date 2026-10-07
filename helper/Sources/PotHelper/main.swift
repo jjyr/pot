@@ -313,7 +313,9 @@ actor Sandboxes {
         environment["PATH"] = resources.appendingPathComponent("node/bin")
             .path + ":" + hostTools + ":/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
         backend.environment = environment
-        do { try backend.run() } catch { event("backend.failed") }
+        if !CommandLine.arguments.contains("--sandbox-only") {
+            do { try backend.run() } catch { event("backend.failed") }
+        }
         return backend
     }
 

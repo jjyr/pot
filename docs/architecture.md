@@ -5,7 +5,7 @@ Updated: 2026-10-06. See [Local Agents and managed Sandboxes](agent-sandbox-desi
 ```mermaid
 flowchart TB
     App[macOS App: chat, tasks, settings, environments] --> Server[Host Server / Runtime / Storage / Gateway]
-    Helper[Host Helper] --> Server
+    Server --> Helper[Sandbox Helper]
     Server --> Pot[Host pot-agent in-process]
     Server --> Codex[Host Codex App Server]
     Pot --> Tools[Injected Runtime execution backend]
@@ -29,7 +29,7 @@ flowchart TB
 | Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite and native session bindings | `gateway/src/`, `storage/src/` |
 | Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `image/executor.py`, `tool-executor/src/`, `image/sandbox.sh` |
 
-The Helper starts the Host backend without booting a VM. The App discovers `root/product/runtime.json` on loopback. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects management and target overrides.
+The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` remains for authenticated Codex/model integration, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects management and target overrides.
 
 pot-agent receives a Runtime ToolExecutor with no Host fallback. One shared schema and argument validator covers the three environment tools. The guest runner retains process sessions inside a root-owned per-turn cgroup; Runtime binds opaque session IDs to owner, turn, Sandbox and VM generation. Codex has native shell, patch, image, code execution, apps, plugins, subagent and inherited MCP capabilities disabled; its environment list is empty and Pot MCP supplies Sandbox operations. Both Agents use a private Host working directory. Host tool execution has no fallback.
 
