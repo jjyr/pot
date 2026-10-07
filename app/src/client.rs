@@ -71,6 +71,7 @@ pub struct View {
     pub pending: bool,
     sending: pot_ui::state::SendState,
     pub accepted_text: Option<String>,
+    pub accepted_conversation: Option<String>,
     pub selected: String,
     pub tasks: Vec<TaskInfo>,
     pub running_tasks: Vec<RunningTask>,
@@ -199,6 +200,7 @@ impl View {
         self.pending = false;
         self.sending.accept(&req.request_id);
         self.accepted_text = Some(pot_ui::state::Receipt::from_request(req).text);
+        self.accepted_conversation = Some(req.conversation_id.clone());
         if let Some(s) = self
             .snapshot
             .as_mut()
@@ -490,6 +492,7 @@ impl Client {
                                     state.pending = false;
                                     state.sending.accept(&req.request_id);
                                     state.accepted_text = Some(req.text.clone());
+                                    state.accepted_conversation = Some(req.conversation_id.clone());
                                 } else {
                                     match serde_json::from_value::<SendMessageAccepted>(result) {
                                         Ok(result) => {
@@ -782,6 +785,28 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn delayed_send_receipt_keeps_its_original_conversation() {
+        let mut state = View {
+            selected: "task-b".into(),
+            ..Default::default()
+        };
+        state.accepted(
+            &SendMessage {
+                request_id: "sent-in-a".into(),
+                conversation_id: "task-a".into(),
+                text: "same text".into(),
+            },
+            SendMessageAccepted {
+                message_id: "accepted".into(),
+                duplicate: false,
+            },
+        );
+        assert_eq!(state.accepted_conversation.as_deref(), Some("task-a"));
+        assert_eq!(state.accepted_text.as_deref(), Some("same text"));
+        assert_eq!(state.selected, "task-b");
+    }
+
     #[test]
     fn http_rejection_preserves_diagnostics_and_localizes_invalid_bodies() {
         for key in [

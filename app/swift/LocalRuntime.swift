@@ -151,7 +151,7 @@ import WebKit
     func poll() {
         guard process.isRunning
         else {
-            label.stringValue = "Helper exited (\(process.terminationStatus)); reopen App to recover"; timer?
+            label.stringValue = HelperStatus.failure(process); timer?
                 .invalidate(); return
         }
         if polling {

@@ -987,10 +987,15 @@ var bridge: PotBridge?
         running = value["running"] as? Bool ?? false
         selectedRunning = value["selected_running"] as? Bool ?? false
         if let accepted = value["accepted"] as? String,
-           accepted == composer
-           .string
+           let conversation = value["accepted_conversation"] as? String
         {
-            composer.string = ""; drafts[selected] = ""; textDidChange(Notification(name: NSText.didChangeNotification))
+            var text = composer.string
+            if DraftReceipt.apply(accepted: accepted, conversation: conversation, selected: selected,
+                                  text: &text, drafts: &drafts)
+            {
+                composer.string = text
+                textDidChange(Notification(name: NSText.didChangeNotification))
+            }
         }
         backMenuItem?.isEnabled = value["can_back"] as? Bool ?? false
         forwardMenuItem?.isEnabled = value["can_forward"] as? Bool ?? false
@@ -1019,12 +1024,6 @@ var bridge: PotBridge?
         sendButton.toolTip = selectedRunning && composer.string.isEmpty ? L.text("bridge.stop-task-41") : L
             .text("bridge.send-enter-new-line-shift-enter")
         sendButton.isEnabled = selectedRunning || ready
-        if let accepted = value["accepted"] as? String,
-           accepted == composer
-           .string
-        {
-            composer.string = ""; textDidChange(Notification(name: NSText.didChangeNotification))
-        }
         if value["has_snapshot"] as? Bool == true, let messages = value["messages"] as? [[String: Any]] {
             let completed = Set(messages.filter { ($0["role"] as? String) == "assistant" && [
                 "complete",

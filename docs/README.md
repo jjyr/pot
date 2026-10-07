@@ -32,6 +32,8 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 
 Current hosting/authentication acceptance: [Standalone CLI and embedded App, 2026-10-07](validation/standalone-hosting-20261007.md).
 
+Native client reliability acceptance: [Helper failures and conversation receipts, 2026-10-07](validation/client-reliability-20261007.md).
+
 Provider/executor merge acceptance: [Cross-turn sessions and executor v2 image, 2026-10-07](validation/sandbox-merge-20261007.md).
 
 First resource Release: [0.0.1 publication, 2026-10-07](validation/sandbox-resource-release-20261007.md).
