@@ -230,7 +230,10 @@ impl Shell {
             }
             v.usage_query = query;
         }
-        let accepted = self.client.view.lock().unwrap().accepted_text.take();
+        let (accepted, accepted_conversation) = {
+            let mut view = self.client.view.lock().unwrap();
+            (view.accepted_text.take(), view.accepted_conversation.take())
+        };
         let view = self.client.view.lock().unwrap().clone();
         let dark = unsafe { pot_bridge_dark() };
         cx.set_reduce_motion(unsafe { pot_bridge_reduce_motion() });
@@ -296,7 +299,7 @@ impl Shell {
             "engine":snapshot.map(|s|s.engine.engine.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
             "used":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.used),
             "limit":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.limit),
-            "accepted":accepted,"at_bottom":at_bottom,
+            "accepted":accepted,"accepted_conversation":accepted_conversation,"at_bottom":at_bottom,
             "messages":view.main_snapshot.as_ref().map(|s|s.messages.as_slice()).unwrap_or(&[]).iter().map(|m|serde_json::json!({"id":m.id,"role":m.role,"status":m.status})).collect::<Vec<_>>()
         });
         if let Ok(json) = CString::new(state.to_string()) {

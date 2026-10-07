@@ -66,7 +66,16 @@ python -m venv .local/skill-tests
 """
 
 [tasks."test:app"]
+depends = ["test:app-safety"]
 run = "cargo test --locked -p pot-app -j 4"
+
+[tasks."test:app-safety"]
+description = "Verify native Helper failure and conversation draft receipt handling"
+run = """
+mkdir -p .local/client-safety
+xcrun swiftc -module-cache-path .local/client-safety/modules app/swift/ClientSafety.swift app/swift/tests/ClientSafetyTests.swift -o .local/client-safety/tests
+.local/client-safety/tests
+"""
 
 [tasks."test:i18n"]
 description = "Verify translation coverage, native language preferences and web localization"

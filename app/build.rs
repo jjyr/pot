@@ -20,6 +20,7 @@ fn main() {
         .arg("swift/Bridge.swift")
         .arg("swift/RuntimeClient.swift")
         .arg("swift/LocalRuntime.swift")
+        .arg("swift/ClientSafety.swift")
         .arg("swift/SettingsPanel.swift")
         .arg("swift/AIConfiguration.swift")
         .arg("swift/APIIntegration.swift")
@@ -46,6 +47,7 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=swift/RuntimeClient.swift");
     println!("cargo:rerun-if-changed=swift/LocalRuntime.swift");
+    println!("cargo:rerun-if-changed=swift/ClientSafety.swift");
     println!("cargo:rerun-if-changed=swift/SettingsPanel.swift");
     println!("cargo:rerun-if-changed=swift/AIConfiguration.swift");
     println!("cargo:rerun-if-changed=swift/APIIntegration.swift");

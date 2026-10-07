@@ -102,6 +102,7 @@ pub unsafe extern "C" fn pot_backend_request(
         if reply.status.0 >= 400 {
             return Err(value["message"]
                 .as_str()
+                .or(value["code"].as_str())
                 .unwrap_or("Backend request rejected")
                 .into());
         }
