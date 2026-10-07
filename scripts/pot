@@ -72,7 +72,6 @@ if cmd == "prepare":
         "pot-wallpaper.svg",
         "packages.lock",
         "test.html",
-        "home.html",
         "driver.py",
         "broker.py",
         "index.html",

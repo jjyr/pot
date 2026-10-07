@@ -852,7 +852,7 @@ SKILLS""",
                 [
                     action(
                         "exec_command",
-                        cmd="test ! -e /data/executor-token && test ! -r /run/pot-executor/operations.sqlite && python3 - > desktop-check.txt <<'CHECK'\nimport urllib.request, urllib.error, os\nassert 'POT_EXECUTOR_TOKEN' not in os.environ\nassert urllib.request.urlopen('http://127.0.0.1:8081/home.html').status == 200\ntry:\n    urllib.request.urlopen('http://127.0.0.1:8081/executor-token')\n    raise AssertionError('Credential exposed')\nexcept urllib.error.HTTPError as error:\n    assert error.code == 404\nprint('DESKTOP_OK')\nCHECK\n",
+                        cmd="test ! -e /data/executor-token && test ! -r /run/pot-executor/operations.sqlite && python3 - > desktop-check.txt <<'CHECK'\nimport urllib.request, urllib.error, os, pathlib\nfor process in pathlib.Path('/proc').iterdir():\n    if process.name.isdigit():\n        try:\n            assert process.joinpath('comm').read_text().strip() not in ('chrome', 'chromium'), 'Browser auto-launched'\n        except FileNotFoundError:\n            pass\nassert 'POT_EXECUTOR_TOKEN' not in os.environ\nassert urllib.request.urlopen('http://127.0.0.1:8081/index.html').status == 200\ntry:\n    urllib.request.urlopen('http://127.0.0.1:8081/executor-token')\n    raise AssertionError('Credential exposed')\nexcept urllib.error.HTTPError as error:\n    assert error.code == 404\nprint('DESKTOP_OK')\nCHECK\n",
                     )
                 ]
             )

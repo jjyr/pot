@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => potSetLocale(potInitialLocal
 
 def main():
     block = generated()
-    for name in ["index.html", "home.html"]:
+    for name in ["index.html"]:
         path = ROOT / "image" / name
         source = path.read_text()
         if START in source:
