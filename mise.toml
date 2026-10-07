@@ -121,7 +121,7 @@ run = "python scripts/tests/release-packaging.py"
 
 [tasks."check:swift"]
 description = "Compile Helper executables without starting a VM"
-run = "swift build -c release --package-path helper --disable-sandbox --scratch-path .local/d1/helper-build --force-resolved-versions -j 4"
+run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path helper --disable-sandbox --scratch-path .local/d1/helper-build --force-resolved-versions -j 4"
 env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/d1/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/d1/clang-modules" }
 
 [tasks.server]
