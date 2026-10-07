@@ -1,12 +1,7 @@
 //! Real HTTP clients and production Runtime/Access; no model credentials or containers.
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use pot_runtime::{Backend, RuntimeConfig};
 use pot_server::access::{Access, AccessConfig, admin_router, public_router};
 use reqwest::{Client, Response};
-use ring::{
-    rand::SystemRandom,
-    signature::{self, KeyPair},
-};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -138,7 +133,7 @@ impl Host {
     async fn stop(mut self) {
         self.backend.shutdown().await;
         // Revoke ephemeral sessions before draining open public streams.
-        self.access.inner.lock().unwrap().sessions.clear();
+        self.access.inner.lock().unwrap().enabled = false;
         for stop in self.stops.drain(..) {
             let _ = stop.send(());
         }
@@ -152,27 +147,14 @@ impl Host {
 }
 struct Browser {
     http: Client,
-    key: signature::EcdsaKeyPair,
-    id: String,
+    token: String,
     session: String,
 }
 impl Browser {
     fn new() -> Self {
-        let rng = SystemRandom::new();
-        let bytes = signature::EcdsaKeyPair::generate_pkcs8(
-            &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-            &rng,
-        )
-        .unwrap();
         Self {
             http: Client::builder().no_proxy().build().unwrap(),
-            key: signature::EcdsaKeyPair::from_pkcs8(
-                &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-                bytes.as_ref(),
-                &rng,
-            )
-            .unwrap(),
-            id: String::new(),
+            token: String::new(),
             session: String::new(),
         }
     }
@@ -188,64 +170,26 @@ impl Browser {
         };
         req.header("cookie", &self.session).send().await.unwrap()
     }
-    async fn ceremony(&self, h: &Host, path: &str, cookie: &str, body: Value) -> Response {
-        self.http
-            .post(format!("{}{path}", h.public))
+    async fn configure(&mut self, h: &Host) {
+        self.token = h.command(json!({"action":"token"})).await["token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        self.login(h).await;
+    }
+    async fn login(&mut self, h: &Host) {
+        let response = self
+            .http
+            .post(format!("{}/access/token", h.public))
             .header("origin", "https://pot.test")
-            .header("cookie", cookie)
-            .json(&body)
+            .bearer_auth(&self.token)
+            .json(&json!({}))
             .send()
             .await
             .unwrap()
-    }
-    fn proof(&self, challenge: &Value) -> String {
-        URL_SAFE_NO_PAD.encode(
-            self.key
-                .sign(
-                    &SystemRandom::new(),
-                    challenge["challenge"].as_str().unwrap().as_bytes(),
-                )
-                .unwrap()
-                .as_ref(),
-        )
-    }
-    async fn pair(&mut self, h: &Host) {
-        let pair = h.command(json!({"action":"pair"})).await;
-        let start=self.ceremony(h,"/access/pair/start","",json!({"name":"Independent browser","public_key":URL_SAFE_NO_PAD.encode(self.key.public_key().as_ref())})).await.error_for_status().unwrap();
-        let cookie = cookie(&start);
-        let challenge: Value = start.json().await.unwrap();
-        self.id = challenge["client_id"].as_str().unwrap().into();
-        let finish = self
-            .ceremony(
-                h,
-                "/access/pair/finish",
-                &cookie,
-                json!({"code":pair["code"],"signature":self.proof(&challenge)}),
-            )
-            .await
             .error_for_status()
             .unwrap();
-        self.session = cookie_of(&finish);
-    }
-    async fn login(&mut self, h: &Host) {
-        let start = self
-            .ceremony(h, "/access/login/start", "", json!({"client_id":self.id}))
-            .await
-            .error_for_status()
-            .unwrap();
-        let cookie = cookie(&start);
-        let challenge: Value = start.json().await.unwrap();
-        let finish = self
-            .ceremony(
-                h,
-                "/access/login/finish",
-                &cookie,
-                json!({"signature":self.proof(&challenge)}),
-            )
-            .await
-            .error_for_status()
-            .unwrap();
-        self.session = cookie_of(&finish);
+        self.session = cookie_of(&response);
     }
     async fn snapshot(&self, h: &Host) -> Value {
         self.request(h, "/api/v1/snapshot", None)
@@ -266,9 +210,7 @@ fn cookie_of(response: &Response) -> String {
         .unwrap()
         .into()
 }
-fn cookie(response: &Response) -> String {
-    cookie_of(response)
-}
+
 struct Root(PathBuf);
 impl Root {
     fn new() -> Self {
@@ -300,82 +242,23 @@ async fn contains(stream: &mut Response, needle: &str) {
 }
 
 #[tokio::test]
-async fn independent_clients_revoke_logout_and_restart_without_cross_invalidations() {
+async fn token_survives_restart_and_rotation_invalidates_all_clients() {
     let root = Root::new();
     let h = Host::start(&root.0).await;
     let mut a = Browser::new();
     let mut b = Browser::new();
-    a.pair(&h).await;
-    b.pair(&h).await;
-    assert_ne!(a.id, b.id);
+    a.configure(&h).await;
+    b.configure(&h).await;
+    assert_eq!(a.token, b.token);
     assert_ne!(a.session, b.session);
-    let (sa, sb) = tokio::join!(a.snapshot(&h), b.snapshot(&h));
-    assert_eq!(sa, sb);
-    let old_a = a.session.clone();
-    a.login(&h).await;
-    assert_ne!(old_a, a.session);
-    assert!(
-        b.request(&h, "/api/v1/snapshot", None)
-            .await
-            .status()
-            .is_success()
-    );
-    assert!(
-        a.request(&h, "/access/logout", Some(json!({})))
-            .await
-            .status()
-            .is_success()
-    );
-    assert_eq!(
-        a.request(&h, "/api/v1/snapshot", None)
-            .await
-            .status()
-            .as_u16(),
-        401
-    );
-    assert!(
-        b.request(&h, "/api/v1/snapshot", None)
-            .await
-            .status()
-            .is_success()
-    );
-    a.login(&h).await;
-    let old_a = a.session.clone();
-    let old_b = b.session.clone();
+    assert_eq!(a.snapshot(&h).await, b.snapshot(&h).await);
     h.stop().await;
     let h = Host::start(&root.0).await;
-    assert_eq!(
+    assert!(
         a.request(&h, "/api/v1/snapshot", None)
             .await
             .status()
-            .as_u16(),
-        401
-    );
-    assert_eq!(
-        b.request(&h, "/api/v1/snapshot", None)
-            .await
-            .status()
-            .as_u16(),
-        401
-    );
-    tokio::join!(a.login(&h), b.login(&h));
-    assert_ne!(old_a, a.session);
-    assert_ne!(old_b, b.session);
-    h.command(json!({"action":"revoke_credential","id":a.id}))
-        .await;
-    assert_eq!(
-        a.request(&h, "/api/v1/snapshot", None)
-            .await
-            .status()
-            .as_u16(),
-        401
-    );
-    assert_eq!(
-        a.ceremony(&h, "/access/login/start", "", json!({"client_id":a.id}))
-            .await
-            .status()
-            .as_u16(),
-        401
+            .is_success()
     );
     assert!(
         b.request(&h, "/api/v1/snapshot", None)
@@ -383,14 +266,20 @@ async fn independent_clients_revoke_logout_and_restart_without_cross_invalidatio
             .status()
             .is_success()
     );
+    h.command(json!({"action":"regenerate_token"})).await;
     for browser in [&a, &b] {
-        let status = browser
-            .request(&h, "/api/v1/providers", None)
+        assert_eq!(
+            browser.request(&h, "/api/v1/snapshot", None).await.status(),
+            401
+        );
+    }
+    a.configure(&h).await;
+    assert!(
+        a.request(&h, "/api/v1/snapshot", None)
             .await
             .status()
-            .as_u16();
-        assert_eq!(status, if browser.id == a.id { 401 } else { 403 });
-    }
+            .is_success()
+    );
     h.stop().await;
 }
 
@@ -400,8 +289,8 @@ async fn concurrent_writes_deduplicate_globally_and_all_clients_observe_durable_
     let h = Host::start(&root.0).await;
     let mut a = Browser::new();
     let mut b = Browser::new();
-    a.pair(&h).await;
-    b.pair(&h).await;
+    a.configure(&h).await;
+    b.configure(&h).await;
     let request = json!({"request_id":"same-write","conversation_id":"main","text":"exactly-once"});
     let (ra, rb) = tokio::join!(
         a.request(&h, "/api/v1/messages", Some(request.clone())),
@@ -496,13 +385,13 @@ async fn concurrent_writes_deduplicate_globally_and_all_clients_observe_durable_
 }
 
 #[tokio::test]
-async fn simultaneous_streams_disconnect_reconnect_and_selective_revocation() {
+async fn simultaneous_streams_disconnect_reconnect_and_token_rotation() {
     let root = Root::new();
     let h = Host::start(&root.0).await;
     let mut a = Browser::new();
     let mut b = Browser::new();
-    a.pair(&h).await;
-    b.pair(&h).await;
+    a.configure(&h).await;
+    b.configure(&h).await;
     let mut sa = a
         .request(&h, "/api/v1/events?after=0", None)
         .await
@@ -546,13 +435,18 @@ async fn simultaneous_streams_disconnect_reconnect_and_selective_revocation() {
         .unwrap();
     contains(&mut sb, "broadcast-one").await;
     idle(&b, &h).await;
-    h.command(json!({"action":"revoke_credential","id":a.id}))
-        .await;
+    h.command(json!({"action":"regenerate_token"})).await;
     tokio::time::timeout(Duration::from_secs(5), async {
         while sa.chunk().await.unwrap().is_some() {}
     })
     .await
     .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while sb.chunk().await.unwrap().is_some() {}
+    })
+    .await
+    .unwrap();
+    b.configure(&h).await;
     assert!(
         b.request(
             &h,
@@ -565,13 +459,7 @@ async fn simultaneous_streams_disconnect_reconnect_and_selective_revocation() {
         .status()
         .is_success()
     );
-    contains(&mut sb, "broadcast-two").await;
     h.stop().await;
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while sb.chunk().await.unwrap().is_some() {}
-    })
-    .await
-    .unwrap();
 }
 
 async fn idle(browser: &Browser, host: &Host) {
@@ -593,8 +481,8 @@ async fn another_client_cancels_main_and_tasks_and_both_observe_the_same_outcome
     let h = Host::start(&root.0).await;
     let mut a = Browser::new();
     let mut b = Browser::new();
-    a.pair(&h).await;
-    b.pair(&h).await;
+    a.configure(&h).await;
+    b.configure(&h).await;
     let receipt:Value=a.request(&h,"/api/v1/messages",Some(json!({"request_id":"cancel-main","conversation_id":"main","text":"cancel this turn"}))).await.error_for_status().unwrap().json().await.unwrap();
     assert_eq!(
         b.request(
@@ -763,15 +651,15 @@ impl pot_sandbox::Provider for Display {
     }
 }
 #[tokio::test]
-async fn desktop_tickets_are_login_bound_and_revocation_disconnects_only_the_owner() {
+async fn desktop_tickets_are_browser_bound_and_rotation_disconnects_every_owner() {
     use futures::StreamExt;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     let root = Root::new();
     let host = Host::start_with(&root.0, std::sync::Arc::new(Display)).await;
     let mut a = Browser::new();
     let mut b = Browser::new();
-    a.pair(&host).await;
-    b.pair(&host).await;
+    a.configure(&host).await;
+    b.configure(&host).await;
     std::fs::create_dir_all(root.0.join("desktop-assets/core")).unwrap();
     std::fs::write(
         root.0.join("desktop-assets/core/rfb.js"),
@@ -865,48 +753,23 @@ async fn desktop_tickets_are_login_bound_and_revocation_disconnects_only_the_own
         .status(),
         409
     );
-    host.command(json!({"action":"revoke_credential","id":a.id}))
-        .await;
-    let disconnected = tokio::time::timeout(Duration::from_secs(3), sockets[0].next())
-        .await
-        .unwrap();
-    assert!(
-        disconnected.is_none() || disconnected.is_some_and(|r| r.is_err() || r.unwrap().is_close())
-    );
-    assert_eq!(
-        a.request(&host, &format!("{}api/status", paths[0]), None)
+    host.command(json!({"action":"regenerate_token"})).await;
+    for socket in &mut sockets {
+        let result = tokio::time::timeout(Duration::from_secs(3), socket.next())
             .await
-            .status(),
-        401
-    );
-    assert_eq!(
-        b.request(&host, &format!("{}api/status", paths[1]), None)
-            .await
-            .status(),
-        200
-    );
-    assert_eq!(
-        b.request(
-            &host,
-            &format!("{}api/control", paths[1]),
-            Some(json!({"action":"take"}))
-        )
-        .await
-        .status(),
-        200
-    );
-    // Same saved key with a new login must not recover the previous login's ticket.
-    b.request(&host, "/access/logout", Some(json!({})))
-        .await
-        .error_for_status()
-        .unwrap();
-    let disconnected = tokio::time::timeout(Duration::from_secs(3), sockets[1].next())
-        .await
-        .unwrap();
-    assert!(
-        disconnected.is_none() || disconnected.is_some_and(|r| r.is_err() || r.unwrap().is_close())
-    );
-    b.login(&host).await;
+            .unwrap();
+        assert!(result.is_none() || result.is_some_and(|r| r.is_err() || r.unwrap().is_close()));
+    }
+    for (browser, path) in [(&a, &paths[0]), (&b, &paths[1])] {
+        assert_eq!(
+            browser
+                .request(&host, &format!("{path}api/status"), None)
+                .await
+                .status(),
+            401
+        );
+    }
+    b.configure(&host).await;
     assert_eq!(
         b.request(&host, &format!("{}api/status", paths[1]), None)
             .await

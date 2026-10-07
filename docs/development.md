@@ -69,7 +69,7 @@ App embeds Server and uses in-memory dispatch for both Rust and Swift clients. H
 
 ## Mobile browser pilot
 
-See [Mobile access](mobile-access.md) for the optional owner-controlled HTTPS listener, QR/pairing administration and `mise run build:mobile`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
+See [Mobile access](mobile-access.md) for the optional owner-controlled HTTPS listener, QR/Token administration and `mise run build:mobile`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
 
 ## Validation
 
@@ -163,10 +163,10 @@ Client bundling does not build or embed Linux Sandbox resources. Use `mise run b
 ### Multiple browser clients
 
 `mise run test:clients` runs real loopback HTTP listeners with production Runtime,
-Access, storage and SSE routes. Independent P-256 keys and cookies exercise pairing,
-login/logout, simultaneous request-ID retries, conflicting reuse, busy-turn retry,
-owner/browser state consistency, streams/reconnects, selective revocation and
-restart login/persistent receipts. A local deterministic model fixture is used;
+Access, storage and SSE routes. Independent browser identities and shared Tokens exercise configuration,
+Token rotation/local clearing, simultaneous request-ID retries, conflicting reuse, busy-turn retry,
+owner/browser state consistency, streams/reconnects, global Token rotation and
+restart persistence/durable receipts. A local deterministic model fixture is used;
 no user keys, containers or paid model endpoints are required. The suite is included
 in `mise run test` and the Linux backend CI job. Rootless Podman qualification is
 manual on an explicitly selected Linux host; no Podman integration CI was added.

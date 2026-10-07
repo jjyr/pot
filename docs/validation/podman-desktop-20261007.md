@@ -46,7 +46,7 @@ available. Disk quotas remain unsupported.
 - Owner-authorized Arch Linux/x86_64 verification used system Podman 6.1.3,
   existing cgroup v2/systemd delegation, pasta and isolated temporary storage.
   The final shared Dockerfile image built with cached package installation.
-- An independently paired browser loaded the real XFCE/Xvnc desktop over the
+- An independently authenticated browser loaded the real XFCE/Xvnc desktop over the
   public Server gateway. It started in viewing mode, took control, opened a
   terminal using mouse input and entered a keyboard command. Container file
   `desktop-input.txt` contained `desktop-keyboard-ok`.

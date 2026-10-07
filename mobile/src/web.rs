@@ -380,6 +380,12 @@ impl Render for Mobile {
                         .on_click(|_, _, _| action("language", "")),
                 )
                 .child(
+                    Button::new("configure-token")
+                        .h(px(44.))
+                        .label(self.label("web.change-token"))
+                        .on_click(|_, _, _| action("configure-token", "")),
+                )
+                .child(
                     Button::new("logout")
                         .h(px(44.))
                         .label(self.label("mobile.sign-out"))

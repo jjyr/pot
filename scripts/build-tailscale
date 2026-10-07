@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Build the pinned libtailscale source and Pot HTTPS adapter as a shared library."""
+
+from pathlib import Path
+import os
+import json
+import subprocess
+import sys
+
+root = Path(__file__).resolve().parents[1]
+out = root / ".local/tailscale"
+out.mkdir(parents=True, exist_ok=True)
+name = "libpot_tailscale.dylib" if sys.platform == "darwin" else "libpot_tailscale.so"
+env = dict(os.environ, CGO_ENABLED="1", GOTOOLCHAIN="local")
+subprocess.run(
+    [
+        "go",
+        "build",
+        "-mod=readonly",
+        "-trimpath",
+        "-buildmode=c-shared",
+        "-o",
+        str(out / name),
+        ".",
+    ],
+    cwd=root / "tailscale",
+    env=env,
+    check=True,
+)
+# Include notices for the actual linked Go modules, not only the top-level library.
+listed = subprocess.run(
+    ["go", "list", "-mod=readonly", "-deps", "-json", "."],
+    cwd=root / "tailscale",
+    env=env,
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout
+decoder = json.JSONDecoder()
+modules = {}
+while listed.strip():
+    package, end = decoder.raw_decode(listed.lstrip())
+    listed = listed.lstrip()[end:]
+    module = package.get("Module")
+    if module and module.get("Dir"):
+        modules[module["Path"]] = module
+notices = [
+    "Embedded Tailscale source: https://github.com/tailscale/libtailscale/tree/59d4bb82744915815178e0f0776d60026a397ee7\n"
+]
+for module in sorted(modules.values(), key=lambda value: value["Path"]):
+    directory = Path(module["Dir"])
+    licenses = sorted(
+        path
+        for path in directory.iterdir()
+        if path.is_file() and path.name.upper().startswith(("LICENSE", "COPYING", "NOTICE"))
+    )
+    if not licenses:
+        raise RuntimeError(f"Missing license notice: {module['Path']}")
+    notices.append(f"\n{module['Path']} {module.get('Version', '')}\n")
+    notices.extend(path.read_text(errors="replace") for path in licenses)
+goroot = subprocess.check_output(["go", "env", "GOROOT"], env=env, text=True).strip()
+notices.append("\nGo runtime\n" + (Path(goroot) / "LICENSE").read_text())
+(out / "TailscaleDependencyLicenses.txt").write_text("\n".join(notices))
+print(out / name)

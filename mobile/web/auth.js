@@ -1,7 +1,9 @@
 import {createInstaller, isInstalled} from '/install.js';
 let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
 let scope='active', query='', offset=0, nextOffset=null, usageDays=7, usageOffset=0, pushStatus;
-let pageData={}, connectionNotice=false;
+let pageData={}, connectionNotice=false, accessToken='', authenticated=false;
+const incomingToken=new URLSearchParams(location.hash.slice(1)).get('access_token');
+if(incomingToken!==null)history.replaceState(history.state,'',location.pathname+location.search);
 const initialRoute=new URLSearchParams(location.search);
 task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','sandbox','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
 function navigate(){history.pushState({page,task,scope,query,offset},'',task?'/?task='+encodeURIComponent(task):'/?page='+page);}
@@ -10,29 +12,27 @@ function initialLocale(){try{const saved=localStorage.getItem('pot-locale');if([
 let language=initialLocale();
 const catalogs=await fetch('/locales.json',{cache:'no-store'}).then(r=>r.json());
 const t=key=>catalogs[language]?.[key]||catalogs.en[key]||key;
-const installer=createInstaller(t,()=>{el('install')&&(el('install').textContent=t(isInstalled()?'mobile.installed':'mobile.install'));refresh();});
-el('install').textContent=t(isInstalled()?'mobile.installed':'mobile.install');
-el('install').onclick=()=>installer.open();
+const installer=createInstaller(t,()=>refresh());
 const decode=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
-const encode=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+async function tokenStore(value, remove=false){
+  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('pot-access',1);request.onupgradeneeded=()=>request.result.createObjectStore('tokens');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+  try{return await new Promise((resolve,reject)=>{const tx=db.transaction('tokens',value!==undefined||remove?'readwrite':'readonly');const store=tx.objectStore('tokens');const req=remove?store.delete('current'):value!==undefined?store.put(value,'current'):store.get('current');let result;req.onsuccess=()=>result=req.result;tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}finally{db.close();}
+}
+function configureNotice(message=''){
+  authenticated=false;el('auth').hidden=false;el('notice').textContent=message;
+  if(module)module.update_view(JSON.stringify({...pageData,connected:false,notice:message}));
+}
 async function api(path,value){
-  const r=await fetch(path,{credentials:'same-origin',cache:'no-store',...(value===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)})});
-  if(r.status===401&&module){location.reload();throw Error('session_expired');}
+  const r=await fetch(path,{credentials:'same-origin',cache:'no-store',headers:{...(value===undefined?{}:{'Content-Type':'application/json'}),...(accessToken?{Authorization:'Bearer '+accessToken}:{})},...(value===undefined?{}:{method:'POST',body:JSON.stringify(value)})});
+  if(r.status===401){configureNotice(t('web.token-invalid'));throw Error(t('web.token-invalid'));}
   const body=await r.json();if(!r.ok)throw Error(body.code||String(r.status));return body;
 }
-// Persist a non-exportable client key; no transcript or bearer is stored here.
-async function clientStore(value, remove=false){
-  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('pot-client',1);request.onupgradeneeded=()=>request.result.createObjectStore('keys');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
-  try{return await new Promise((resolve,reject)=>{const tx=db.transaction('keys',value!==undefined||remove?'readwrite':'readonly');const store=tx.objectStore('keys');const req=remove?store.delete('current'):value!==undefined?store.put(value,'current'):store.get('current');let result;req.onsuccess=()=>result=req.result;tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}finally{db.close();}
-}
-async function proof(privateKey,challenge){return encode(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},privateKey,new TextEncoder().encode(challenge)));}
-async function restoreClient(){
-  const saved=await clientStore();if(!saved)return false;
-  const challenge=await api('/access/login/start',{client_id:saved.id});
-  await api('/access/login/finish',{signature:await proof(saved.privateKey,challenge.challenge)});return true;
+async function configure(token){
+  accessToken=token.trim();if(!/^[A-Za-z0-9_-]{43}$/.test(accessToken))throw Error(t('web.token-invalid'));
+  await api('/access/token',{});await tokenStore(accessToken);el('access-token').value='';await start();
 }
 async function refresh(){
-  if(!module||refreshing||document.visibilityState==='hidden')return;refreshing=true;
+  if(!module||!authenticated||refreshing||document.visibilityState==='hidden')return;refreshing=true;
   const route=task, requestedPage=page, requestedQuery=`${scope}:${query}:${offset}:${usageDays}:${usageOffset}`;
   try{
     const current=await api(route?`/api/v1/tasks/${encodeURIComponent(route)}`:'/api/v1/snapshot');
@@ -52,12 +52,12 @@ async function refresh(){
   finally{refreshing=false;}
 }
 async function start(){
-  pushStatus=await api('/access/status');el('enroll').disabled=false;
+  pushStatus=await api('/access/status');authenticated=pushStatus.authenticated;el('configure-token').disabled=false;if(authenticated)el('auth').hidden=true;
   if(pushStatus.authenticated&&!module){
-    module=await import('/pkg/pot_mobile.js');await module.default();module.run();el('auth').remove();
+    module=await import('/pkg/pot_mobile.js');await module.default();module.run();
     history.replaceState({page,task,scope,query,offset},'');
     await refresh();setInterval(refresh,1500);
-    setInterval(()=>{if(pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});},10000);
+    setInterval(()=>{if(authenticated&&pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});},10000);
   }
 }
 async function sendPending(){
@@ -91,7 +91,8 @@ window.potAction=async(action,value)=>{
     if(action==='next'&&nextOffset!=null)offset=nextOffset;
     if(action==='previous')offset=Math.max(0,offset-20);
     if(action==='language'){language=language==='en'?'zh-CN':'en';try{localStorage.setItem('pot-locale',language);}catch{}if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}
-    if(action==='logout'){await api('/access/logout',{});await clientStore(undefined,true);const reg=await navigator.serviceWorker?.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();location.reload();return;}
+    if(action==='configure-token'){configureNotice();return;}
+    if(action==='logout'){await api('/access/logout',{});await tokenStore(undefined,true);const reg=await navigator.serviceWorker?.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();location.reload();return;}
     if(action==='send'){
       if(JSON.parse(module.pending_send()))throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));
       module.begin_send(task||'main',value,crypto.randomUUID());
@@ -119,19 +120,21 @@ window.potAction=async(action,value)=>{
 addEventListener('popstate',e=>{page=e.state?.page||'chat';task=e.state?.task||'';scope=e.state?.scope||'active';query=e.state?.query||'';offset=e.state?.offset||0;refresh();});
 addEventListener('visibilitychange',()=>{refresh();if(module&&pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});});
 async function attempt(fn){try{el('notice').textContent='';await fn();}catch(e){if(el('notice'))el('notice').textContent=e.message;else{notice=e.message;await refresh();}}}
-el('enroll').onclick=()=>attempt(async()=>{
-  el('enroll').disabled=true;
-  try{
-    const keys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},false,['sign','verify']);
-    const publicKey=encode(await crypto.subtle.exportKey('raw',keys.publicKey));
-    const challenge=await api('/access/pair/start',{public_key:publicKey,name:el('client-name').value||t('mobile.shell.phone')});
-    // Save before consuming the code: an interrupted reply can recover by signing in.
-    await clientStore({id:challenge.client_id,privateKey:keys.privateKey});
-    await api('/access/pair/finish',{code:el('pair-code').value.trim(),signature:await proof(keys.privateKey,challenge.challenge)});
-    el('pair-code').value='';await start();
-  }finally{if(el('enroll'))el('enroll').disabled=false;}
+el('configure-token').onclick=()=>attempt(async()=>{
+  el('configure-token').disabled=true;
+  try{await configure(el('access-token').value);await refresh();}finally{el('configure-token').disabled=false;}
 });
-el('enroll').textContent=t('mobile.shell.connect');el('scope').textContent=t('mobile.shell.owner-access-to-this-instance-and-all-its-environments');
-el('pair-code').placeholder=t('mobile.shell.pairing-code');el('client-name').placeholder=t('mobile.shell.client-name');
-el('pair-code').setAttribute('aria-label',t('mobile.shell.pairing-code'));el('client-name').setAttribute('aria-label',t('mobile.shell.client-name'));
-try{const status=await api('/access/status');if(!status.authenticated)await restoreClient();await start();}catch(e){el('notice').textContent=e.message;await start().catch(()=>{});}
+el('access-token').onkeydown=event=>{if(event.key==='Enter')el('configure-token').click();};
+el('configure-token').textContent=t('web.configure-token');el('scope').textContent=t('mobile.shell.owner-access-to-this-instance-and-all-its-environments');
+el('access-token').placeholder=t('web.access-token');el('access-token').setAttribute('aria-label',t('web.access-token'));
+try{
+  if(incomingToken!==null)await configure(incomingToken);
+  else {accessToken=await tokenStore()||'';if(accessToken)await configure(accessToken);}
+}catch(e){configureNotice(e.message);}
+
+addEventListener('hashchange',()=>{
+  const token=new URLSearchParams(location.hash.slice(1)).get('access_token');
+  if(token===null)return;
+  history.replaceState(history.state,'',location.pathname+location.search);
+  attempt(async()=>{await configure(token);await refresh();});
+});

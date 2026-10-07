@@ -1,104 +1,52 @@
-# Mobile access
+# Browser access
 
-For Agent-assisted Web UI deployment and HTTPS/HTTP access-mode selection, see
-the [Web UI deployment guide](web-ui-deployment.md). Remote HTTP basic mode is planned; current
-remote browser access requires HTTPS.
+App: Settings → Web access → Connect Tailscale → finish login/device approval →
+Enable Web access. Enable MagicDNS and HTTPS certificates in Tailscale DNS settings.
+Pot joins as an independent userspace node, provisions HTTPS and renews certificates.
+Other devices need tailnet connectivity and ACL permission. No system Tailscale
+installation, certificate paths, port forwarding or Funnel is needed on the App host.
 
-Issue [#8](https://github.com/jjyr/pot/issues/8), baseline `origin/main` f2d092d,
-2026-10-07. This implementation is an owner-instance pilot. Paired owner clients
-can view and control qualified Sandbox desktops through the scoped gateway.
-Physical-device qualification and public deployment remain acceptance work.
+CLI retains localhost HTTP and owner-terminated HTTPS, and optionally embeds
+Tailscale. See [Web deployment](web-ui-deployment.md) and [Standalone Server](standalone-server.md).
+Native Runtime and guest brokers stay private.
 
-## Start the owner endpoint
+## Access Token
 
-Remote access is absent unless explicitly configured. The native Runtime must
-remain on loopback. The mobile listener defaults to loopback too; opening another
-interface is an explicit deployment choice.
+Each instance automatically generates a persistent random 256-bit Token. Click
+App's access address or choose Scan to connect. Both use `#access_token=...` to
+configure the browser automatically. Copy address copies the plain URL. Connection
+links, QR codes and their screenshots contain full access credentials: do not share.
 
-```sh
-mise run build:mobile
-mise exec -- cargo build --locked -p pot-server --bins
-POT_LOCAL_ROOT=/path/to/isolated/instance \
-POT_RUNTIME_BIND=127.0.0.1:17700 \
-POT_ACCESS_ORIGIN=https://pot.example.com \
-POT_ACCESS_BIND=127.0.0.1:17701 \
-POT_ACCESS_CERT=/path/to/owner-fullchain.pem \
-POT_ACCESS_KEY=/path/to/owner-private.key \
-POT_ACCESS_ASSETS=/absolute/path/to/mobile/dist \
-mise run server
-```
+The browser removes the fragment immediately, verifies and saves the Token in
+origin-scoped IndexedDB, and sends Authorization headers on API requests. Returning
+browsers automatically connect. The static UI is available without authentication;
+protected data and operations require the Token. Token-derived HttpOnly, Secure,
+SameSite=Strict signed cookies support desktop navigation and WebSockets. Cookies
+contain a random browser identity and HMAC, not the Token. Browser storage compromise
+can expose this bearer credential; clearing browser storage requires configuration again.
 
-Use a stable domain and a browser-trusted certificate whose private key is held
-by the owner endpoint. TLS and VAPID keys must have mode 0600. Certificate renewal
-currently requires restarting Server. No certificate provisioning, DNS changes,
-public port opening or cloud tunnel is performed automatically.
+App offers Show, Copy and Regenerate Token. CLI uses `pot access token`,
+`pot access regenerate-token`, `pot access qr` and `pot open`. Regeneration invalidates
+all old Tokens/cookies, ends protected streams/desktops and clears push subscriptions.
+Browser More offers Change access Token and Clear local Token. There is no per-browser
+permission list. Clearing a browser Token does not revoke the shared instance Token.
 
-If a TCP relay is needed, it must forward TLS bytes unchanged to this listener.
-Do not terminate HTTPS at a CDN, reverse proxy, tunnel provider or other untrusted
-service. Browser code and application traffic authenticate the same trusted Pot
-origin. Session cookies, client keys and certificates do not make a TLS-terminating
-intermediary an end-to-end encrypted relay.
+The instance stores Token/policy in `product/access-token.json`, mode 0600 and atomic
+replacement. Only local owner administration can retrieve or regenerate it. Old
+client authorization files are ignored. Token persists across restart and disabling
+Web access. Changing domain or installing a separate Home Screen app may require
+configuration in that origin/storage context. Same-origin checks, public API allowlists,
+private inventory projection and bounded requests remain enforced.
 
-`build:mobile` uses native Rust 1.98.1 and a separate pinned
-`nightly-2026-10-06` WASM toolchain because GPUI's wasm_thread dependency needs
-an unstable WASM atomic intrinsic. It installs the matching wasm-bindgen CLI
-0.2.129 under `.local/mobile-tools`, builds release WASM and precompresses it.
-Generated assets are ignored by Git. It does not upgrade the native toolchain.
+Desktop tickets are bound to their creating browser cookie and expire after one
+hour. Token regeneration or disabling Web access terminates their live display
+streams and releases input. Desktop assets ship with the Web release; private
+broker URLs, tokens and addresses are never exposed by inventory.
 
-## Connect and revoke
-
-GUI: Settings → General → Mobile access. Configure the Server first; when
-launching an App-owned Server, provision its HTTPS environment. `scripts/pot build` builds the mobile assets and
-`bundle` copies them beside the bundled Server; Server discovers that directory.
-Standalone Server may use the explicit absolute asset path.
-The GUI does not provision certificates. QR, pending approvals and revocation
-use background native requests; no network call blocks the GPUI rendering thread.
-
-Owners use `pot access pair` in standalone mode, or Settings → General → Mobile
-access → Generate pairing code in App mode. The eight-character hexadecimal code is generated on the owner
-side, expires after five minutes, and can authorize only one client. Opening a
-new pairing invalidates the previous code. Five incorrect guesses close it.
-Codes are kept hashed in memory, never in a QR, URL, server log or persistent
-credential file. The QR contains only the instance address. `pot access close`
-closes pairing; `clients` lists clients; `revoke ID` removes client authorization
-and subscriptions. App uses these same backend commands in process.
-
-On the browser, enter the owner-generated code and a client name. WebCrypto
-creates a non-exportable P-256 private key and persists it in IndexedDB before
-consuming the code. Enrollment requires both the code and a signature over a
-fresh, origin/purpose/client-bound challenge. Returning clients sign another
-one-use challenge automatically; no fingerprint prompt or WebAuthn is involved.
-Clearing browser storage or logout removes the local key and requires re-pairing.
-Server revocation invalidates both sessions and future signed logins. A leaked
-client ID or public key cannot sign in. Browser script compromise can still use
-an origin's key; non-exportability is not protection from a compromised client.
-
-Public keys and push subscriptions persist in `access-clients.json` with mode
-0600 and atomic writes. Sessions/challenges remain in memory: 30-minute idle,
-12-hour absolute, five-minute challenge expiry. Restart requires a new signed
-login, performed automatically by an authorized browser. Status/push heartbeats
-do not renew idle sessions; hidden windows stop transcript polling. `disable`
-closes the accepting socket, persists disabled policy and invalidates sessions,
-challenges and pairing; `enable` does not restore old sessions.
-
-Old WebAuthn credentials/subscriptions are not migrated into client authority;
-old clients must pair again. An old disabled policy is retained. The old private
-file is left intact, but its keys are not accepted.
-
-Owner access includes the main chat and all instance environments. It is not a
-single-Sandbox grant: the main Agent can indirectly operate other environments.
-The public proxy exposes only chat/task input and cancellation plus read-only
-snapshots, task queries, Sandbox inventory, usage and schedules. It injects the
-native bearer internally. Provider settings, authorization endpoints, Terminal,
-execution configuration, orchestration and raw Guest desktop broker routes are denied.
-Desktop session creation and scoped viewing/control are available to paired owners.
-Each ticket is bound to its creating login session and expires after one hour;
-other clients cannot use it. Logout, expiry, revocation and endpoint disable
-terminate that login's active display streams and release input. Re-login does
-not restore prior tickets. Desktop assets ship with the embedded Web release.
-Inventory exposes only display phase/generation and numeric hardware fields;
-Helper viewer URLs, tokens and private network addresses are filtered. Agent
-management-tool display replies use the same restricted state projection.
+App shutdown closes its embedded node. Restart restores previously enabled access;
+login/certificate failures do not stop local chat/tasks. Disconnecting Tailscale closes
+Web access but preserves node state for reconnection. HTTPS is available only on the
+tailnet; no public Funnel endpoint is configured.
 
 The browser runs GPUI Kit 0.7.1 WASM. The authentication shell and same-origin
 transport adapter are JS. GPUI reuses `pot-ui` Chat/Tasks/Sandbox/Usage components, Markdown, page/chat state,
@@ -115,8 +63,8 @@ No transcript, credential or session is stored in localStorage or an offline cac
 
 ## Add Pot to the Home Screen
 
-Both the login page and mobile More provide **Add to Home Screen**. Installation
-is available independently of enrollment, login and notification configuration.
+After configuring the access Token, browser **More** provides **Add to Home Screen**.
+The Token configuration page has no installation action. Installation does not request notification permission.
 The manifest uses a stable origin-scoped app ID, standalone display and dedicated
 192/512 px icons. iOS also receives Apple Home Screen metadata and its touch icon.
 
@@ -142,8 +90,8 @@ than treating acceptance of a prompt as completed installation.
 A browser-trusted HTTPS certificate is required for remote deployment. A Service Worker
 registers even when VAPID/push is not configured, but uses network-only fetches:
 there is no offline transcript or credential cache. Installation does not grant
-access, change session expiry or request notification permission. A newly installed
-Home Screen app may use a separate storage context and require its own pairing. Notifications remain a separate explicit opt-in.
+access, change authorization or request notification permission. A newly installed
+Home Screen app may use a separate storage context and require its own Token configuration. Notifications remain a separate explicit opt-in.
 
 ## Main Agent message notifications
 
@@ -169,7 +117,7 @@ uniqueness prevents replay/update duplicates. Worker databases, task lifecycle
 events, System report wrappers, failed/cancelled partial replies and synthetic
 tool-only display wrappers are not sources.
 
-Subscriptions are bound to an authorized credential and a browser installation.
+Subscriptions are bound to the current Token generation and a browser installation.
 Consent starts at the current outbox sequence rather than notifying old history.
 Each delivery encrypts the original-text excerpt using RFC 8291 aes128gcm and
 signs VAPID authorization. Push providers receive ciphertext plus routing/timing
@@ -183,21 +131,16 @@ Live language changes update only the current installation's notification locale
 that browser's push; other browsers and the Mac unread state are independent.
 Notification clicks open main chat after authentication, carrying a message ID
 in the link; locating/scrolling to that exact message remains unfinished. Logout unsubscribes the
-current installation; credential revocation removes its subscriptions. Session
+current installation; Token regeneration removes all subscriptions. Session
 expiry alone does not revoke consent. Seven consecutive delivery failures pause
 an installation until explicit re-consent. Delivery older than 24 hours is skipped.
 An already accepted push cannot be recalled. A crash after provider acceptance
 can resend it; stable notification tags replace the same message on that device.
 Exactly-once OS delivery is not promised.
 
-## Verification and remaining gates
+## Verification
 
-See the [current hosting/pairing report](validation/standalone-hosting-20261007.md) and the earlier [mobile acceptance report](validation/mobile-access-20261007.md).
-See [Podman desktop acceptance](validation/podman-desktop-20261007.md) for real
-Linux Web viewing/input and multi-client boundary verification. Guest broker
-addresses and RFB credentials remain private. No
-restricted-Sandbox authority, production relay, complete App bundle boot,
-physical iOS/Android touch/IME/performance and mobile
-screen-reader parity or real
-push-provider delivery is declared accepted by these tests. The pilot preserves
-those physical-device and deployment gates.
+Server access, CLI, multi-client and TLS suites exercise Token authentication,
+persistence, rotation, concurrent receipts and desktop isolation. Physical phone
+interaction, real tailnet enrollment/certificate issuance and push-provider delivery
+require live qualification; builds/local fixtures alone do not establish them.

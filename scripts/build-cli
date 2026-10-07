@@ -16,6 +16,7 @@ if bool(args.runtime_resources) != bool(args.helper):
 
 root = Path(__file__).resolve().parents[1]
 subprocess.run(["mise", "run", "build:mobile"], cwd=root, check=True)
+subprocess.run(["mise", "run", "build:tailscale"], cwd=root, check=True)
 subprocess.run(
     [
         "mise",
@@ -43,6 +44,12 @@ dest.mkdir(parents=True, exist_ok=True)
 archive = dest / f"pot-{os.uname().sysname.lower()}-{os.uname().machine}.tar.gz"
 with tarfile.open(archive, "w:gz") as tar:
     tar.add(target / "release/pot", arcname="bin/pot")
+    library = "libpot_tailscale.dylib" if os.uname().sysname == "Darwin" else "libpot_tailscale.so"
+    tar.add(root / ".local/tailscale" / library, arcname=f"lib/pot/{library}")
+    tar.add(
+        root / ".local/tailscale/TailscaleDependencyLicenses.txt",
+        arcname="lib/pot/TailscaleDependencyLicenses.txt",
+    )
     tar.add(root / "docs/standalone-server.md", arcname="README.md")
     tar.add(root / "skills", arcname="lib/pot/skills")
     if args.runtime_resources:

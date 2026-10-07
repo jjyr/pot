@@ -21,7 +21,7 @@ The full phone entry point remains pending successful certificate issuance.
 
 ## Manual checks
 
-1. Pair Safari with a fresh one-use code. Record iOS version, browser and keyboard.
+1. Open Safari and configure browser access. Record iOS version, browser and keyboard.
 2. In the main chat draft, compose `你好，Pot！abc 123 😀`, replace a Chinese word,
    delete characters, insert a newline, and switch conversations and back. Leave
    the draft unsent: this isolated instance has no configured model credentials.
@@ -38,7 +38,7 @@ The full phone entry point remains pending successful certificate issuance.
    Safari/desktop exposes a usable paste action.
 6. Rotate the phone, return control, close and reopen the desktop tab. Verify
    layout, connection and control state. Optionally repeat as a Home Screen app;
-   its independent storage context may need a new pairing code.
+   its independent storage context may need a new browser access configuration.
 
 Report each check as pass/fail with expected and actual behavior. Main chat IME,
 clipboard composition and direct remote keyboard input are separate outcomes.
@@ -49,8 +49,8 @@ Physical touch, IME, clipboard delivery and Home Screen acceptance remain pendin
 Tailscale certificate issuance subsequently succeeded. The tailnet-only HTTPS
 listener returned HTTP 200 with TLS verification successful, using explicit DNS
 resolution on the development client. The guest test form was restored after
-Server restart. Pairing codes now contain eight hexadecimal characters; the
-access, CLI and multi-client tests passed (17 tests).
+Server restart. The then-current access, CLI and multi-client tests passed (17 tests);
+those results predate the Token authentication redesign.
 
 At the owner's request, the temporary Server was stopped before manual test
 results were supplied. The browser listener and control socket were gone and no

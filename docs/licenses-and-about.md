@@ -67,3 +67,12 @@ prove legal compatibility of every combination or audit all distributed files.
 Swift packages, bundled Node/npm, Sandbox OS packages, fonts, icons, and other
 non-Cargo assets require separate inventories. The About link and report label
 explicitly identify the current coverage as Rust dependencies.
+
+## Embedded Tailscale notices
+
+`tailscale/` vendors libtailscale at a fixed commit (BSD-3-Clause), with a pinned
+Go version/module graph. `scripts/build-tailscale` collects license/notice files
+for the actual linked modules and the Go runtime, failing when a module has no
+notice. App and CLI archives include `TailscaleDependencyLicenses.txt`. This
+inventory is separate from the Cargo-only report. Pot's adapter does not modify
+the vendored upstream files; its source is in `tailscale/pot.go`.

@@ -590,7 +590,7 @@ impl Client {
             let result = (|| -> Result<(), String> {
                 crate::backend::ready()?;
                 let mut response = crate::backend::Requests::config_builder()
-                    .timeout_global(Some(Duration::from_secs(5)))
+                    .timeout_global(Some(Duration::from_secs(90)))
                     .build()
                     .new_agent()
                     .post(&format!("/api/v1/usage/{path}"))
@@ -643,7 +643,7 @@ impl Client {
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let agent = crate::backend::Requests::config_builder()
-                .timeout_global(Some(Duration::from_secs(5)))
+                .timeout_global(Some(Duration::from_secs(90)))
                 .build()
                 .new_agent();
             while active.load(Ordering::Relaxed) {
@@ -711,7 +711,7 @@ impl Client {
             let result = (|| -> Result<String, String> {
                 crate::backend::ready()?;
                 let agent = crate::backend::Requests::config_builder()
-                    .timeout_global(Some(Duration::from_secs(5)))
+                    .timeout_global(Some(Duration::from_secs(90)))
                     .build()
                     .new_agent();
                 let mut reply = agent
@@ -719,10 +719,8 @@ impl Client {
                     .send_json(body)
                     .map_err(|e| e.to_string())?;
                 let result: Value = reply.body_mut().read_json().map_err(|e| e.to_string())?;
-                Ok(result["code"]
-                    .as_str()
-                    .map(|code| format!("{code} (5 min)"))
-                    .unwrap_or_default())
+                let _ = result;
+                Ok(String::new())
             })();
             let mut view = v.lock().unwrap();
             view.access_pending = false;

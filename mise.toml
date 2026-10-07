@@ -1,4 +1,5 @@
 [tools]
+go = "1.25.5"
 rust = "1.98.1"
 python = "3.12.13"
 zig = "0.15.2"
@@ -167,3 +168,7 @@ run = "python scripts/build-container-image"
 [tasks."test:clients"]
 description = "Verify independent browser clients, concurrency, streams and reconnects"
 run = "cargo test --locked -p pot-server --test multi_clients -j 4"
+
+[tasks."build:tailscale"]
+description = "Build embedded libtailscale and automatic tailnet HTTPS"
+run = "python scripts/build-tailscale"

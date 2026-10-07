@@ -1,8 +1,7 @@
 # Standalone CLI and embedded App
 
 For Agent-assisted Web UI deployment and HTTPS/HTTP access-mode selection, see
-the [Web UI deployment guide](web-ui-deployment.md). Remote HTTP basic mode is planned; current
-remote browser access requires HTTPS.
+the [Web UI deployment guide](web-ui-deployment.md). Remote browser access requires HTTPS.
 
 Pot has one backend with two hosts: `pot serve` runs it independently; the macOS
 App owns it inside its own process. App requests, including the Swift settings
@@ -24,9 +23,10 @@ pot serve
 ```
 
 `pot serve` runs in the foreground and serves local Web UI at
-`http://localhost:17701`. Run `pot access pair` in another terminal and enter the
-printed one-use code in the browser. `pot open` opens the instance URL; `pot
-access qr` prints only that URL as a QR. Localhost HTTP is a local secure-context
+`http://localhost:17701`. Run `pot open` for automatic browser configuration,
+or `pot access token` to configure the browser manually. `pot access qr` prints
+a connection QR containing the Token; do not share it.
+Localhost HTTP is a local secure-context
 convenience, not remote encryption: remote access requires owner-terminated
 HTTPS. HTTP listeners cannot bind outside loopback.
 
@@ -115,13 +115,25 @@ App owns its own backend lifecycle and never starts this service.
 
 ## Authorization
 
-See [Browser access](mobile-access.md). Owner-generated pairing codes replace
-WebAuthn. The browser stores an origin-scoped non-exportable P-256 signing key
-in IndexedDB. Server persists public keys, names and subscriptions in
-`access-clients.json`; short sessions and challenges remain in memory. Existing
-old authentication records are not granted new authority. Re-pair old clients;
-previously disabled access remains disabled. Old files are retained for history,
-not read as credentials.
+See [Browser access](mobile-access.md). One persistent random Token authorizes
+all browsers. Browsers save it locally and send it on API requests. The owner CLI
+can show/regenerate it. Regeneration invalidates all browsers and active streams/desktops.
+There is no individual browser authorization list.
+
+## Optional embedded Tailscale
+
+Release archives include libtailscale. Save `{"POT_TAILSCALE_HOSTNAME":"pot-server"}`
+with `pot config server FILE`, then restart. Without that setting, existing
+localhost and manual HTTPS modes retain their behavior. Run `pot access connect`,
+inspect `pot access status` for the login URL/device approval state, complete login,
+and run `pot access enable`. Enable MagicDNS and HTTPS certificates in the tailnet
+DNS settings. The actual node DNS name is served on HTTPS port 443. Certificate
+issuance/renewal is automatic; access is tailnet-only, without Funnel.
+`pot access disconnect` closes access and retains the node identity.
+
+Source builds use `mise run build:tailscale`. Binary-only installations still support
+localhost/manual HTTPS. `scripts/install-cli --tailscale-library FILE` adds the
+built `.local/tailscale/libpot_tailscale.dylib` (Linux: `.so`).
 
 ## Linux host and Podman
 
@@ -191,6 +203,6 @@ WantedBy=default.target
 Use `systemctl --user daemon-reload` and `systemctl --user enable --now pot`.
 `pot service` still manages macOS LaunchAgents only. Do not add service restrictions
 that disable user namespaces or mount/cgroup operations needed by rootless Podman.
-Pair browser clients with `pot access pair`. For access from another machine,
+Configure browsers with `pot access token` or scan `pot access qr`. For access from another machine,
 use the documented owner-terminated HTTPS endpoint or an SSH local tunnel to
 localhost; raw remote HTTP is refused. Model configuration remains owner CLI-only.

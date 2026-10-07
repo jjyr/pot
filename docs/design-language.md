@@ -172,7 +172,7 @@ Use 7 / 30 / 90 days / year, compact totals, one trend region and readable Agent
 
 Keep the desktop usable and full-width. The toolbar shows navigation/title, textual connection state, Take over / Hand back, environment information, reconnect, settings and More. At minimum width, move low-priority actions into More.
 
-Connection and control ownership reflect actual acknowledgment; viewing or navigating does not reclaim control. Show connected/observing, human control, starting, disconnected/retry and unavailable states. Environment information uses a compact resource panel. Mobile pairing/access remains separate under [#8](https://github.com/jjyr/pot/issues/8).
+Connection and control ownership reflect actual acknowledgment; viewing or navigating does not reclaim control. Show connected/observing, human control, starting, disconnected/retry and unavailable states. Environment information uses a compact resource panel. Web access remains separate under [#8](https://github.com/jjyr/pot/issues/8).
 
 ### Menu-bar Pot activity and unread indicator
 
