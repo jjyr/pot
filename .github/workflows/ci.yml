@@ -13,6 +13,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Install only each job's explicit tool subset; mise run/exec otherwise installs
+# every tool in mise.toml, including the unrelated cargo-zigbuild source build.
+env:
+  MISE_AUTO_INSTALL: 'false'
+  CARGO_INCREMENTAL: '0'
+
 jobs:
   licenses:
     name: Rust dependency licenses
@@ -26,8 +32,25 @@ jobs:
         with:
           version: 2026.6.0
           install_args: rust python github:EmbarkStudios/cargo-about
+      - name: Restore license sources
+        id: license-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: license-sources-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: license-sources-v1-${{ runner.os }}-
       - run: mise run licenses
       - run: mise run test:licenses
+      - name: Save license sources
+        if: github.ref == 'refs/heads/main' && steps.license-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.license-cache.outputs.cache-primary-key }}
 
   backend:
     name: Linux backend and deterministic eval
@@ -42,20 +65,36 @@ jobs:
           version: 2026.6.0
           install_args: rust python
       - run: mise exec -- rustup component add clippy
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - name: Identify Rust compiler
+        id: rust-version
+        run: echo "hash=$(mise exec -- rustc -vV | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Restore Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             .local/poc/cargo-target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'Cargo.lock') }}-${{ github.sha }}
+          key: rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
-            rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'Cargo.lock') }}-
+            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
+            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-
       - run: mise run clippy:backend
       - run: mise run test
       - run: mise run test:ui
       - run: mise run test:executor
       - run: mise run test:eval
+      # PRs read main's cache but do not fill the quota with multi-GB snapshots.
+      - name: Save Rust build cache
+        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .local/poc/cargo-target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   macos:
     name: macOS formatting, App and Swift Helper
@@ -75,18 +114,36 @@ jobs:
           xcodebuild -version
           swift --version
           mise exec -- rustup component add rustfmt clippy
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - name: Identify Rust compiler
+        id: rust-version
+        run: echo "hash=$(mise exec -- rustc -vV | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Restore Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             .local/poc/cargo-target
+          key: rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
+            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-
+      - name: Identify Xcode toolchain
+        id: xcode-version
+        run: echo "hash=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Restore Swift build cache
+        id: swift-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
             .local/d1/helper-build
             .local/d1/swift-modules
             .local/d1/clang-modules
-          key: build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'Cargo.lock', 'helper/Package.resolved', 'helper/Package.swift') }}-${{ github.sha }}
+          key: swift-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode-version.outputs.hash }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift') }}-${{ github.sha }}
           restore-keys: |
-            build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'Cargo.lock', 'helper/Package.resolved', 'helper/Package.swift') }}-
+            swift-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode-version.outputs.hash }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift') }}-
+            swift-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode-version.outputs.hash }}-
       - run: mise run check
       - run: mise run clippy
       - run: mise run test
@@ -96,3 +153,22 @@ jobs:
       - run: mise run test:executor
       - run: mise run test:skills
       - run: mise run test:skill-authoring
+      # PRs read main's cache but do not fill the quota with multi-GB snapshots.
+      - name: Save Rust build cache
+        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .local/poc/cargo-target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - name: Save Swift build cache
+        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .local/d1/helper-build
+            .local/d1/swift-modules
+            .local/d1/clang-modules
+          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
