@@ -1,6 +1,7 @@
 import {createInstaller, isInstalled} from '/install.js';
 let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
-let scope='active', query='', offset=0, nextOffset=null, pushStatus;
+let scope='active', query='', offset=0, nextOffset=null, usageDays=7, usageOffset=0, pushStatus;
+let pageData={}, connectionNotice=false;
 const initialRoute=new URLSearchParams(location.search);
 task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','sandbox','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
 function navigate(){history.pushState({page,task,scope,query,offset},'',task?'/?task='+encodeURIComponent(task):'/?page='+page);}
@@ -28,7 +29,7 @@ function credential(c){
 }
 async function refresh(){
   if(!module||refreshing||document.visibilityState==='hidden')return;refreshing=true;
-  const route=task, requestedPage=page, requestedQuery=`${scope}:${query}:${offset}`;
+  const route=task, requestedPage=page, requestedQuery=`${scope}:${query}:${offset}:${usageDays}:${usageOffset}`;
   try{
     const current=await api(route?`/api/v1/tasks/${encodeURIComponent(route)}`:'/api/v1/snapshot');
     if(route!==task||requestedPage!==page)return;
@@ -36,13 +37,14 @@ async function refresh(){
     const receipt=JSON.parse(module.reconcile_send(JSON.stringify(current)));
     if(receipt){accepted=receipt;notice=t('mobile.shell.received');}
     const data={connected:true,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches,page,conversation:task||'main',locale:language,notice,snapshot,accepted,installed:isInstalled(),dark:matchMedia('(prefers-color-scheme: dark)').matches};
-    if(page==='tasks'){const result=await api(`/api/v1/tasks/query?scope=${scope}&q=${encodeURIComponent(query)}&offset=${offset}&limit=20`);data.tasks=result.items||[];nextOffset=result.next_offset;data.scope=scope;}
-    if(page==='sandbox'){const result=await api('/api/v1/sandboxes');data.sandboxes=result.items||result.sandboxes||[];}
-    if(page==='usage'){data.usage=await api('/api/v1/usage/summary?days=7&offset=0&timezone='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone));}
+    if(page==='tasks'){const result=await api(`/api/v1/tasks/query?scope=${scope}&q=${encodeURIComponent(query)}&offset=${offset}&limit=20`);data.task_page=result;data.task_query={scope,q:query,offset,limit:20,selected:''};nextOffset=result.next_offset;}
+    if(page==='sandbox'){const result=await api('/api/v1/sandboxes');data.sandbox_inventory=result;}
+    if(page==='usage'){data.usage=await api('/api/v1/usage/summary?days='+usageDays+'&offset='+usageOffset+'&timezone='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone));}
     if(page==='schedules'){data.schedules=await api('/api/v1/schedules');}
-    if(route!==task||requestedPage!==page||requestedQuery!==`${scope}:${query}:${offset}`)return;
-    module.update_view(JSON.stringify(data));
-  }catch(e){notice=t('mobile.shell.connection-unavailable')+e.message;module.update_view(JSON.stringify({connected:false,page,conversation:task||'main',locale:language,notice,snapshot,accepted}));}
+    if(route!==task||requestedPage!==page||requestedQuery!==`${scope}:${query}:${offset}:${usageDays}:${usageOffset}`)return;
+    if(connectionNotice){notice='';connectionNotice=false;data.notice='';}
+    pageData=data;module.update_view(JSON.stringify(data));
+  }catch(e){connectionNotice=true;notice=t('mobile.shell.connection-unavailable')+e.message;module.update_view(JSON.stringify({...pageData,connected:false,page,conversation:task||'main',locale:language,notice,page_error:e.message,snapshot,accepted}));}
   finally{refreshing=false;}
 }
 async function start(){
@@ -71,6 +73,8 @@ window.potAction=async(action,value)=>{
     if(action==='page'){page=value;task='';navigate();}
     if(action==='task'){task=value;page='task';navigate();}
     if(action==='filter'){scope=value;offset=0;}
+    if(action==='task-query'){const q=JSON.parse(value);scope=q.scope;query=q.q;offset=q.offset;}
+    if(action==='usage-query'){const q=JSON.parse(value);usageDays=q.days;usageOffset=q.offset;}
     if(action==='search'){query=value;offset=0;}
     if(action==='next'&&nextOffset!=null)offset=nextOffset;
     if(action==='previous')offset=Math.max(0,offset-20);

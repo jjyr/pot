@@ -1,13 +1,27 @@
 use gpui_kit::component::{
     ActiveTheme, Disableable,
     button::{Button, ButtonVariants},
-    input::{Input, InputState, Textarea, TextareaState},
+    input::{InputState, Textarea, TextareaState},
 };
 use gpui_kit::{prelude::*, *};
 use serde_json::{Value, json};
 use std::{borrow::Cow, cell::RefCell, collections::HashSet, rc::Rc, sync::Arc};
 use wasm_bindgen::prelude::*;
-gpui_kit::assets::icon_assets!(MobileAssets, [Copy, Check, ExternalLink]);
+gpui_kit::assets::icon_assets!(
+    MobileAssets,
+    [
+        Copy,
+        Check,
+        ExternalLink,
+        Inbox,
+        Globe,
+        Settings,
+        Ellipsis,
+        RefreshCw,
+        Info,
+        ChartPie
+    ]
+);
 thread_local! {
     static SEND: RefCell<pot_ui::state::SendState> = RefCell::new(pot_ui::state::SendState::default());
     static VIEW: RefCell<Option<Entity<Mobile>>> = const { RefCell::new(None) };
@@ -26,9 +40,65 @@ struct Mobile {
     expanded: HashSet<String>,
     conversation: String,
     accepted: String,
+    tasks_scroll: ScrollHandle,
+    usage_ui: pot_ui::usage::UsageUI,
+    sandbox_selection: String,
+    locale: String,
     search: Entity<InputState>,
 }
 impl Mobile {
+    fn catalog(&self) -> pot_ui::localization::Catalog {
+        pot_ui::localization::Catalog::new(self.data["locale"].as_str().unwrap_or("en"))
+    }
+    fn page_handler(&self, cx: &Context<Self>) -> pot_ui::pages::Handler {
+        Rc::new(
+            cx.listener(|this, event: &pot_ui::pages::PageAction, window, cx| {
+                let Some(event) = this.usage_ui.apply(event, this.catalog(), cx) else {
+                    action(
+                        "usage-query",
+                        &json!({"days":this.usage_ui.days,"offset":this.usage_ui.group_offset})
+                            .to_string(),
+                    );
+                    cx.notify();
+                    return;
+                };
+                match event.kind {
+                    "task-filter" | "task-clear-search" | "task-previous" | "task-next" => {
+                        let query = serde_json::from_value::<pot_protocol::TaskQuery>(
+                            this.data["task_query"].clone(),
+                        )
+                        .unwrap_or_default();
+                        let page = serde_json::from_value::<pot_protocol::TaskPage>(
+                            this.data["task_page"].clone(),
+                        )
+                        .unwrap_or_default();
+                        if let Some(query) =
+                            pot_ui::page_state::task_query(&event.kind, &event.value, &query, &page)
+                        {
+                            if event.kind == "task-clear-search" {
+                                this.search.update(cx, |f, cx| f.set_value("", window, cx));
+                            }
+                            action("task-query", &serde_json::to_string(&query).unwrap());
+                        }
+                    }
+                    "task-open" => action("task", event.value.as_str().unwrap_or("")),
+                    "sandbox-select" => {
+                        this.sandbox_selection = event.value.as_str().unwrap_or("").into()
+                    }
+                    "refresh" => action("refresh", ""),
+                    "usage-page" => {
+                        if event.value == 4 {
+                            action("page", "usage");
+                        }
+                    }
+                    // Browser owner pilot retains its existing read-only Sandbox/usage policy.
+                    _ => {}
+                }
+                cx.notify();
+            }),
+        )
+    }
+
     fn label(&self, key: &str) -> String {
         pot_ui::localization::Catalog::new(self.data["locale"].as_str().unwrap_or("en"))
             .text(key)
@@ -77,6 +147,15 @@ impl Render for Mobile {
                 composer.update(cx, |input, cx| input.set_value("", window, cx));
             }
             self.accepted = receipt.id;
+        }
+        let locale = self.data["locale"].as_str().unwrap_or("en").to_owned();
+        if locale != self.locale {
+            let catalog = self.catalog();
+            self.search.update(cx, |input, cx| {
+                input.set_placeholder(catalog.text("main.search-task-title-or-id-47"), window, cx)
+            });
+            self.usage_ui.localize(catalog, window, cx);
+            self.locale = locale;
         }
         cx.set_reduce_motion(self.data["reduce_motion"] == true);
         cx.set_global(crate::design::Viewport(window.viewport_size().width));
@@ -146,105 +225,80 @@ impl Render for Mobile {
                 }
             }
         } else if self.page == "tasks" {
-            let mut filters = div().flex().flex_wrap().gap_2();
-            for (scope, key) in [
-                ("active", "mobile.active"),
-                ("attention", "mobile.attention"),
-                ("archived", "mobile.archived"),
-                ("all", "mobile.all"),
-            ] {
-                filters = filters.child(
-                    Button::new(scope)
-                        .h(px(44.))
-                        .ghost()
-                        .label(self.label(key))
-                        .on_click(move |_, _, _| action("filter", scope)),
-                );
-            }
-            content = content
-                .child(filters)
-                .child(Input::new(&self.search).aria_label(self.label("mobile.search")))
-                .child(
-                    Button::new("search")
-                        .h(px(44.))
-                        .label(self.label("mobile.search"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            action("search", &this.search.read(cx).value())
-                        })),
-                );
-
-            if let Some(tasks) = self.data["tasks"].as_array() {
-                for t in tasks {
-                    let id = t["id"].as_str().unwrap_or_default().to_owned();
-                    let title = t["title"].as_str().unwrap_or_default().to_owned();
-                    content = content.child(
-                        Button::new(id.clone())
-                            .h(px(44.))
-                            .w_full()
-                            .ghost()
-                            .label(title)
-                            .on_click(move |_, _, _| action("task", &id)),
-                    );
-                }
-            }
-            content = content.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("previous")
-                            .h(px(44.))
-                            .ghost()
-                            .label(self.label("mobile.previous"))
-                            .on_click(|_, _, _| action("previous", "")),
-                    )
-                    .child(
-                        Button::new("next")
-                            .h(px(44.))
-                            .ghost()
-                            .label(self.label("mobile.next"))
-                            .on_click(|_, _, _| action("next", "")),
-                    ),
+            let page =
+                serde_json::from_value::<pot_protocol::TaskPage>(self.data["task_page"].clone())
+                    .unwrap_or_default();
+            let query =
+                serde_json::from_value::<pot_protocol::TaskQuery>(self.data["task_query"].clone())
+                    .unwrap_or_default();
+            let navigation = div().flex().gap_2().child(
+                Button::new("task-search-submit")
+                    .ghost()
+                    .h(px(44.))
+                    .label(self.label("mobile.search"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        action("search", &this.search.read(cx).value())
+                    })),
             );
+            content = content.p_0().gap_0().child(pot_ui::tasks::render(
+                pot_ui::tasks::TasksView {
+                    search: &self.search,
+                    scroll: &self.tasks_scroll,
+                    navigation,
+                    tasks: &page.items,
+                    task_page: &page,
+                    task_query: &query,
+                    tasks_loading: false,
+                    connected: self.data["connected"] == true,
+                    error: self.data["page_error"].as_str().unwrap_or(""),
+                    parallel: None,
+                },
+                pot_ui::pages::Layout {
+                    native: false,
+                    compact: true,
+                },
+                self.catalog(),
+                self.page_handler(cx),
+                window,
+                cx,
+            ));
         } else if self.page == "sandbox" {
-            content = content.child(
-                self.label("mobile.viewing-an-environment-does-not-change-the-execution-default"),
-            );
-            if let Some(items) = self.data["sandboxes"].as_array() {
-                for item in items {
-                    content = content.child(
-                        div()
-                            .p_3()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .rounded_lg()
-                            .child(format!(
-                                "{} · {}",
-                                item["name"].as_str().unwrap_or_default(),
-                                item["state"]["phase"].as_str().unwrap_or_default()
-                            )),
-                    );
-                }
-            }
-            content =
-                content.child(self.label("mobile.desktop-access-awaits-permission-qualification"));
+            let inventory = &self.data["sandbox_inventory"];
+            let selected =
+                pot_ui::page_state::sandbox_selection(inventory, &self.sandbox_selection);
+            let state = pot_ui::page_state::sandbox_view(inventory, &selected);
+            content = content.p_0().gap_0().child(pot_ui::sandbox::render(
+                &state,
+                pot_ui::pages::Layout {
+                    native: false,
+                    compact: true,
+                },
+                false,
+                self.catalog(),
+                self.page_handler(cx),
+                cx,
+            ));
         } else if self.page == "usage" {
-            let totals = &self.data["usage"]["total"];
-            for (field, key) in [
-                ("requests", "mobile.requests"),
-                ("input", "mobile.input-tokens"),
-                ("output", "mobile.output-tokens"),
-                ("unknown", "mobile.unknown-usage"),
-            ] {
-                content = content.child(div().p_3().child(format!(
-                        "{}: {}",
-                        self.label(key),
-                        totals[field]
-                            .as_u64()
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into())
-                    )));
-            }
+            let handler = self.page_handler(cx);
+            content = content.p_0().gap_0().child(self.usage_ui.render(
+                pot_ui::usage::UsageView {
+                    page: 4,
+                    usage: &self.data["usage"],
+                    usage_error: self.data["page_error"].as_str().unwrap_or(""),
+                    usage_notice: "",
+                    usage_pending: false,
+                    selected_title: None,
+                    controls: false,
+                },
+                pot_ui::pages::Layout {
+                    native: false,
+                    compact: true,
+                },
+                self.catalog(),
+                handler,
+                window,
+                cx,
+            ));
         } else if self.page == "schedules" {
             if let Some(items) = self.data["schedules"]["items"].as_array() {
                 for item in items {
@@ -462,7 +516,7 @@ pub fn run() {
         let (_, content) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
             let search = cx.new(|cx| InputState::new(window, cx));
             let composer = cx.new(|cx| TextareaState::new(window, cx));
-            cx.new(|_| Mobile {
+            cx.new(|cx| Mobile {
                 data: json!({}),
                 page: "chat".into(),
                 composer,
@@ -471,6 +525,14 @@ pub fn run() {
                 expanded: HashSet::new(),
                 conversation: "main".into(),
                 accepted: String::new(),
+                tasks_scroll: ScrollHandle::new(),
+                usage_ui: pot_ui::usage::UsageUI::new(
+                    pot_ui::localization::Catalog::new("en"),
+                    window,
+                    cx,
+                ),
+                sandbox_selection: String::new(),
+                locale: String::new(),
             })
         })
         .expect("mobile window");

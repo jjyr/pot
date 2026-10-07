@@ -15,10 +15,9 @@ mod usage_ui;
 
 use gpui::{div, prelude::*, px, rgb, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, IconName, Sizable, Theme, ThemeMode,
+    ActiveTheme, Icon, IconName, Sizable, Theme, ThemeMode,
     button::{Button, ButtonVariants},
-    input::{Input, InputState},
-    list::ListItem,
+    input::InputState,
 };
 use pot_protocol::Role;
 use std::{
@@ -72,6 +71,63 @@ struct Shell {
     usage_ui: usage_ui::UsageUI,
 }
 impl Shell {
+    fn catalog(&self) -> pot_ui::localization::Catalog {
+        pot_ui::localization::Catalog::new(if i18n::is_chinese() { "zh-CN" } else { "en" })
+    }
+    fn page_handler(&self, cx: &Context<Self>) -> pot_ui::pages::Handler {
+        std::rc::Rc::new(
+            cx.listener(|this, event: &pot_ui::pages::PageAction, window, cx| {
+                let Some(event) = this.usage_ui.apply(event, this.catalog(), cx) else {
+                    cx.notify();
+                    return;
+                };
+                match event.kind {
+                    "native" => ui::command(event.value),
+                    "sandbox-select" => {
+                        ui::command(serde_json::json!({"action":"sandbox-view","id":event.value}))
+                    }
+                    "refresh" => this.client.refresh(),
+                    "task-filter" | "task-clear-search" | "task-previous" | "task-next" => {
+                        let v = this.client.view.lock().unwrap().clone();
+                        let Some(q) = pot_ui::page_state::task_query(
+                            event.kind,
+                            &event.value,
+                            &v.task_query,
+                            &v.task_page,
+                        ) else {
+                            return;
+                        };
+                        if event.kind == "task-clear-search" {
+                            this.task_search
+                                .update(cx, |f, cx| f.set_value("", window, cx));
+                        }
+                        this.client.filter_tasks(q.scope, q.q, q.offset);
+                    }
+                    "task-open" => {
+                        this.show_tasks = false;
+                        this.client
+                            .select(event.value.as_str().unwrap_or("").into());
+                        this.first = true;
+                    }
+                    "usage-page" => {
+                        ui::command(serde_json::json!({"action":"page","value":event.value}))
+                    }
+                    "usage-policy" => this.client.usage_action("policy", event.value),
+                    "usage-resume" => this.client.usage_action("resume", event.value),
+                    "usage-cancel" => {
+                        if this.client.view.lock().unwrap().selected.is_empty() {
+                            this.client.usage_action("cancel", serde_json::json!({}));
+                        } else {
+                            this.client.cancel();
+                        }
+                    }
+                    _ => {}
+                }
+                cx.notify();
+            }),
+        )
+    }
+
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
         let old_tasks = self.show_tasks;
         {
@@ -280,20 +336,40 @@ impl Shell {
                     cx,
                 )
             });
-            self.usage_ui.localize(window, cx);
+            self.usage_ui.localize(self.catalog(), window, cx);
         }
         self.settings.sync(&self.native["settings"], window, cx);
         match self.native["page"].as_u64() {
             Some(4..=6) => {
+                let handler = self.page_handler(cx);
                 return self.usage_ui.render(
-                    &view,
-                    self.native["page"].as_u64().unwrap(),
+                    pot_ui::usage::UsageView {
+                        page: self.native["page"].as_u64().unwrap(),
+                        usage: &view.usage,
+                        usage_error: &view.usage_error,
+                        usage_notice: &view.usage_notice,
+                        usage_pending: view.usage_pending,
+                        controls: true,
+                        selected_title: view.selected_task.as_ref().map(|t| t.title.as_str()),
+                    },
+                    pot_ui::pages::Layout::NATIVE,
+                    self.catalog(),
+                    handler,
                     window,
                     cx,
                 );
             }
             Some(2) => return self.settings.render(&self.native["settings"], &view, cx),
-            Some(1) => return ui::sandbox(&self.native, cx),
+            Some(1) => {
+                return pot_ui::sandbox::render(
+                    &self.native,
+                    pot_ui::pages::Layout::NATIVE,
+                    true,
+                    self.catalog(),
+                    self.page_handler(cx),
+                    cx,
+                );
+            }
             _ => {}
         }
         let active_engine = self.native["settings"]["active_spec"]["engine"]
@@ -376,304 +452,26 @@ impl Shell {
             return self.schedules_ui.render(&view, cx);
         }
         if self.show_tasks {
-            return ui::page(cx).child(
-                ui::content()
-                    .child(schedules_ui::navigation(false, cx))
-                    .child(ui::hint(
-                        crate::i18n::tr!("main.describe-a-goal-to-the-main-agent",
-                            self.native["settings"]["parallel"].as_str().unwrap_or("5")
-                        ),
-                        cx,
-                    ))
-                    .child(
-                        ui::segments(cx).children(
-                            [
-                                ("active", crate::i18n::text("main.ongoing"), view.task_page.counts.active),
-                                ("attention", crate::i18n::text("main.needs-attention"), view.task_page.counts.attention),
-                                ("archived", crate::i18n::text("main.archived"), view.task_page.counts.archived),
-                            ]
-                            .into_iter()
-                            .map(|(scope, label, count)| {
-                                Button::new(SharedString::from(format!("task-scope-{scope}")))
-                                    .ghost()
-                                    .small()
-                                    .toggled(view.task_query.scope == scope)
-                                    .label(format!("{label} {count}"))
-                                    .when(view.task_query.scope == scope, |b| {
-                                        b.bg(cx.theme().secondary)
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        let q =
-                                            this.client.view.lock().unwrap().task_query.q.clone();
-                                        this.client.filter_tasks(scope.into(), q, 0);
-                                        cx.notify();
-                                    }))
-                            }),
-                        ),
-                    )
-                    .child(
-                        Input::new(&self.task_search)
-                            .small()
-                            .aria_label(crate::i18n::text("main.search-task-title-or-id")),
-                    )
-                    .when(
-                        !view.error.is_empty() && view.main_snapshot.is_some(),
-                        |el| {
-                            el.child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(ui::notice(
-                                        crate::i18n::text("main.unable-to-refresh-tasks-showing-the-last"),
-                                        true,
-                                        cx,
-                                    ))
-                                    .child(ui::retry(cx)),
-                            )
-                        },
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "task-list-{}-{}-{}",
-                                view.task_query.scope, view.task_query.q, view.task_query.offset
-                            )))
-                            .track_scroll(&self.tasks_scroll)
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .rounded(px(10.))
-                            .when(!view.tasks.is_empty(), |el| {
-                                el.border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(design::surface(cx))
-                            })
-                            .when(view.tasks.is_empty(), |el| {
-                                el.child(ui::empty(
-                                    IconName::Inbox,
-                                    if !view.error.is_empty() && view.main_snapshot.is_some() {
-                                        crate::i18n::text("main.unable-to-load-tasks-check-the-local")
-                                    } else if view.tasks_loading || view.main_snapshot.is_none() {
-                                        crate::i18n::text("main.connecting-to-local-backend-and-loading-tasks")
-                                    } else if !view.task_query.q.is_empty() {
-                                        crate::i18n::text("main.no-matching-tasks-in-this-group-switch")
-                                    } else {
-                                        match view.task_query.scope.as_str() {
-                                            "archived" => {
-                                                crate::i18n::text("main.no-archived-tasks-yet-completed-or-cancelled")
-                                            }
-                                            "attention" => {
-                                                crate::i18n::text("main.no-tasks-need-attention-failed-or-interrupted")
-                                            }
-                                            _ => crate::i18n::text("main.no-ongoing-tasks-describe-a-goal-in"),
-                                        }
-                                    },
-                                    cx,
-                                ))
-                                .when(
-                                    !view.task_query.q.is_empty(),
-                                    |el| {
-                                        el.child(
-                                            Button::new("clear-task-search")
-                                                .ghost()
-                                                .small()
-                                                .label(crate::i18n::text("main.clear-search"))
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.task_search.update(cx, |f, cx| {
-                                                        f.set_value("", window, cx)
-                                                    });
-                                                    let scope = this
-                                                        .client
-                                                        .view
-                                                        .lock()
-                                                        .unwrap()
-                                                        .task_query
-                                                        .scope
-                                                        .clone();
-                                                    this.client.filter_tasks(
-                                                        scope,
-                                                        String::new(),
-                                                        0,
-                                                    );
-                                                    cx.notify();
-                                                })),
-                                        )
-                                    },
-                                )
-                            })
-                            .children(view.tasks.iter().map(|task| {
-                                let id = task.id.clone();
-                                let active = matches!(
-                                    task.phase,
-                                    pot_protocol::TaskPhase::Running
-                                        | pot_protocol::TaskPhase::Queued
-                                        | pot_protocol::TaskPhase::Waiting
-                                );
-                                ListItem::new(SharedString::from(format!("task-{id}")))
-                                    .accessibility_label(task.title.clone())
-                                    .flex_col()
-                                    .items_start()
-                                    .gap_2()
-                                    .p_4()
-                                    .h(px(80.))
-                                    .rounded(px(0.))
-                                    .bg(design::surface(cx))
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .cursor_pointer()
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .flex()
-                                            .items_center()
-                                            .gap_3()
-                                            .child(
-                                                ui::brand_icon(&task.executor_icon).size(px(16.)),
-                                            )
-                                            .child(
-                                                div()
-                                                    .id(SharedString::from(format!(
-                                                        "task-title-{id}"
-                                                    )))
-                                                    .tooltip({
-                                                        let title = task.title.clone();
-                                                        move |window, cx| {
-                                                            ui::title_tooltip(
-                                                                title.clone(),
-                                                                window,
-                                                                cx,
-                                                            )
-                                                        }
-                                                    })
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .whitespace_nowrap()
-                                                    .overflow_hidden()
-                                                    .text_size(px(15.))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child(ui::single_line_title(
-                                                        &task.title,
-                                                        15.,
-                                                        (window.viewport_size().width
-                                                            - px(ui::SIDEBAR))
-                                                        .min(px(ui::PAGE_WIDTH))
-                                                            - px(130.),
-                                                        window,
-                                                        cx,
-                                                    )),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child("›"),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .text_size(px(12.))
-                                                    .text_color(if active {
-                                                        cx.theme().primary
-                                                    } else if task.phase.scope() == "attention" {
-                                                        design::attention(cx)
-                                                    } else {
-                                                        cx.theme().muted_foreground
-                                                    })
-                                                    .child(task_phase(&task.phase))
-                                                    .child(format!(
-                                                        " · Sandbox: {}",
-                                                        task.sandbox_id
-                                                    )),
-                                            )
-                                            .when(task.pending > 0, |el| {
-                                                el.child(
-                                                    div()
-                                                        .text_size(px(12.))
-                                                        .text_color(cx.theme().muted_foreground)
-                                                        .child(crate::i18n::tr!("main.pending-instructions",
-                                                            task.pending
-                                                        )),
-                                                )
-                                            }),
-                                    )
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.show_tasks = false;
-                                        this.client.select(id.clone());
-                                        this.first = true;
-                                        cx.notify();
-                                    }))
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(ui::hint(
-                                if view.tasks_loading {
-                                    crate::i18n::text("client.loading").into()
-                                } else {
-                                    crate::i18n::tr!("main.items-page",
-                                        view.task_page.total,
-                                        view.task_query.offset / view.task_query.limit + 1
-                                    )
-                                },
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("tasks-previous")
-                                            .ghost()
-                                            .label(crate::i18n::text("schedules-ui.previous"))
-                                            .disabled(
-                                                view.tasks_loading || view.task_query.offset == 0,
-                                            )
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let q = this
-                                                    .client
-                                                    .view
-                                                    .lock()
-                                                    .unwrap()
-                                                    .task_query
-                                                    .clone();
-                                                this.client.filter_tasks(
-                                                    q.scope,
-                                                    q.q,
-                                                    q.offset.saturating_sub(q.limit),
-                                                );
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("tasks-next")
-                                            .ghost()
-                                            .label(crate::i18n::text("schedules-ui.next-52"))
-                                            .disabled(
-                                                view.tasks_loading
-                                                    || view.task_page.next_offset.is_none(),
-                                            )
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let v = this.client.view.lock().unwrap().clone();
-                                                if let Some(offset) = v.task_page.next_offset {
-                                                    this.client.filter_tasks(
-                                                        v.task_query.scope,
-                                                        v.task_query.q,
-                                                        offset,
-                                                    );
-                                                    cx.notify();
-                                                }
-                                            })),
-                                    ),
-                            ),
-                    ),
+            let handler = self.page_handler(cx);
+            let navigation = schedules_ui::navigation(false, cx);
+            return pot_ui::tasks::render(
+                pot_ui::tasks::TasksView {
+                    search: &self.task_search,
+                    scroll: &self.tasks_scroll,
+                    navigation,
+                    tasks: &view.tasks,
+                    task_page: &view.task_page,
+                    task_query: &view.task_query,
+                    tasks_loading: view.tasks_loading,
+                    connected: view.main_snapshot.is_some(),
+                    error: &view.error,
+                    parallel: Some(self.native["settings"]["parallel"].as_str().unwrap_or("5")),
+                },
+                pot_ui::pages::Layout::NATIVE,
+                self.catalog(),
+                handler,
+                window,
+                cx,
             );
         }
         let latest_assistant = messages.iter().rposition(|m| m.role == Role::Assistant);
@@ -1048,7 +846,15 @@ fn main() {
                             last_at_bottom: true,
                             jumping_to_latest: false,
                             native: serde_json::Value::Null,
-                            usage_ui: usage_ui::UsageUI::new(window, cx),
+                            usage_ui: usage_ui::UsageUI::new(
+                                pot_ui::localization::Catalog::new(if i18n::is_chinese() {
+                                    "zh-CN"
+                                } else {
+                                    "en"
+                                }),
+                                window,
+                                cx,
+                            ),
                             settings: ui::Settings::new(window, cx),
                             schedule_tab: false,
                             schedules_ui: schedules_ui::SchedulesUI::new(window, cx),

@@ -11,7 +11,7 @@ Updated: 2026-10-07.
 - Tasks support independent sessions, bounded concurrency, persistent guidance, cancellation, summaries and archive/search. Schedules save their environment assignment and resolve Agent profiles per occurrence.
 - API gateway supports Chat, Responses, Messages and Gemini, with request/usage accounting and allowances. Native Codex reports turn usage separately.
 - GPUI/Swift provides Chat, Tasks, Usage, AI/Task/Environment settings and optional Sandbox desktop.
-- Shared `pot-ui` chat rendering, request/receipt/draft policy and locale-explicit catalogs are used by native App and WASM; native composer and navigation remain unchanged. See [shared UI](shared-ui.md).
+- Shared `pot-ui` Chat/Tasks/Sandbox/Usage components, page transitions, allowance parsing, request/receipt/draft policy and locale-explicit catalogs are used by native App and WASM; native composer and navigation remain unchanged. See [shared UI](shared-ui.md).
 - Owner-instance mobile pilot: shared GPUI Kit WASM chat/tasks/inventory, trusted HTTPS QR, owner-approved Passkey enrollment, revocable sessions and encrypted main-message Web Push. See [mobile access](mobile-access.md) and its [dated validation](validation/mobile-access-20261007.md).
 
 See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).

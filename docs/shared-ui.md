@@ -1,21 +1,25 @@
 # Shared native and browser UI
 
-The `pot-ui` crate holds transport-independent chat behavior and GPUI presentation.
-Native App and Mobile call the same message renderer rather than maintaining two
-message trees. This is the first migration phase, centered on chat; whole-page
-navigation, Tasks/Sandbox/Usage pages and native settings remain platform shells.
+The `pot-ui` crate holds transport-independent page behavior and GPUI presentation.
+Native App and Mobile call the same Chat, Tasks, Sandbox and Usage components.
+Navigation chrome, native settings, Schedules, the Swift composer, desktop viewer
+and browser authentication remain platform adapters.
 
 ## Boundaries
 
 | Shared module | Responsibility |
 | --- | --- |
 | `state` | Pending request identity, same-ID retry, authoritative snapshot reconciliation, conversation-bound receipts, editor draft ownership and send eligibility |
+| `pages` | Shared geometry, typography, cards, grouped choices, tooltips, icons and action dispatch |
+| `tasks` / `page_state` | Task rows, status, search, filters, empty/error states, counts and authoritative pagination; viewing a Sandbox does not alter its execution default |
+| `sandbox` | Environment list/selection, phase/default labels and capability-controlled desktop actions |
+| `usage` / `usage_state` | Statistics, charts, grouping, pagination, quotas, tool output, allowance editing and exact K/M input parsing |
 | `chat` | User/assistant styling, Markdown, tool folding/status, copy actions, task-report links and message lifecycle labels |
 | `markdown` | Stable text IDs, parsing/selection, code/link styling and HTTP(S) link dispatch |
 | `design` | Existing Pot theme tokens and compact-viewport policy |
 | `localization` | Locale-explicit shared catalogs and generated-wrapper translation; canonical user/model text remains literal |
 
-GPUI presentation is an opt-in `presentation` feature. State/localization stay
+GPUI presentation is an opt-in `presentation` feature. Page transitions, allowance parsing and localization stay
 portable and require no GPUI, Swift, network client or browser API, including in
 Linux backend CI. Native and WASM clients enable presentation for their targets.
 The shared layer receives protocol data and dispatches actions; it never fetches
@@ -45,4 +49,11 @@ Its reduced-motion preference is passed to GPUI. Embedded chat icons avoid an
 external CDN dependency. Physical phone/IME/accessibility qualification remains
 separate from emulated viewport observations.
 
-See [2026-10-07 validation](validation/shared-ui-20261007.md).
+Browser Sandbox and Usage remain read-only under the existing Server allowlist.
+Sharing their components does not grant desktop control or allowance editing.
+Shared locale formatting uses the existing plural catalog and decimal precision,
+while leaving parameter contents literal. Allowance saves read the current
+editor at click time, avoiding a stale value captured during rendering.
+
+See [chat validation](validation/shared-ui-20261007.md) and
+[page migration validation](validation/shared-pages-20261007.md).

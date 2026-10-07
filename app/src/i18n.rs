@@ -25,9 +25,6 @@ pub fn matches_message(key: &str, value: &str) -> bool {
 pub fn message(value: &str) -> String {
     pot_ui::localization::Catalog::new(if is_chinese() { "zh-CN" } else { "en" }).message(value)
 }
-pub fn phase(value: &str) -> &'static str {
-    pot_ui::localization::Catalog::new(if is_chinese() { "zh-CN" } else { "en" }).phase(value)
-}
 pub fn report(value: &str) -> String {
     pot_ui::localization::Catalog::new(if is_chinese() { "zh-CN" } else { "en" }).report(value)
 }

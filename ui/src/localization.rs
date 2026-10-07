@@ -105,9 +105,32 @@ impl Catalog {
     }
 
     /// Format numbered parameters in one pass, leaving parameter contents untouched.
+    pub fn format(&self, key: &str, arguments: &[String]) -> String {
+        static PLURALS: OnceLock<HashMap<String, usize>> = OnceLock::new();
+        let plurals = PLURALS.get_or_init(|| {
+            serde_json::from_str(include_str!("../../app/localization-plurals.json"))
+                .expect("plural catalog")
+        });
+        let singular = !self.chinese
+            && plurals
+                .get(key)
+                .and_then(|index| arguments.get(*index))
+                .is_some_and(|value| value == "1");
+        let selected = if singular {
+            format!("{key}.one")
+        } else {
+            key.to_owned()
+        };
+        self.interpolate(
+            &selected,
+            &arguments.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+    }
+
     fn interpolate(&self, key: &str, arguments: &[&str]) -> String {
         let mut template = self.text(key);
         let mut result = String::new();
+        let mut sequential = 0;
         while let Some(start) = template.find('{') {
             result.push_str(&template[..start]);
             let Some(end) = template[start..].find('}').map(|end| start + end) else {
@@ -115,12 +138,23 @@ impl Catalog {
                 return result;
             };
             let parameter = &template[start + 1..end];
-            if let Some(value) = parameter
-                .parse::<usize>()
-                .ok()
-                .and_then(|index| arguments.get(index))
-            {
-                result.push_str(value);
+            let (index, specification) = parameter.split_once(':').unwrap_or((parameter, ""));
+            let index = if index.is_empty() {
+                let index = sequential;
+                sequential += 1;
+                Some(index)
+            } else {
+                index.parse::<usize>().ok()
+            };
+            if let Some(value) = index.and_then(|index| arguments.get(index)) {
+                if specification == ".1" {
+                    match value.parse::<f64>() {
+                        Ok(number) => result.push_str(&format!("{number:.1}")),
+                        Err(_) => result.push_str(value),
+                    }
+                } else {
+                    result.push_str(value);
+                }
             } else {
                 result.push_str(&template[start..=end]);
             }
@@ -167,6 +201,44 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn page_formats_preserve_literal_arguments_and_native_decimal_precision() {
+        let en = Catalog::new("en");
+        let zh = Catalog::new("zh-CN");
+        assert_eq!(
+            en.format("ui.select-sandbox", &["literal {} 中文".into()]),
+            "Select Sandbox: literal {} 中文"
+        );
+        assert_eq!(
+            en.format("ui.running-tasks", &["Running".into(), "2".into()]),
+            "Running · 2 running tasks"
+        );
+        assert_eq!(
+            en.format(
+                "usage-ui.failed-1-seconds-unfinished",
+                &["read".into(), "1".into(), "1.234".into(), "0".into()]
+            ),
+            "read · 1 failed · 1.2 seconds · 0 unfinished"
+        );
+        assert_eq!(
+            en.format(
+                "usage-ui.incomplete-records-totals-may-be-incomplete",
+                &["1".into()]
+            ),
+            " · 1 incomplete record; totals may be incomplete"
+        );
+        assert_eq!(
+            en.format(
+                "usage-ui.incomplete-records-totals-may-be-incomplete",
+                &["2".into()]
+            ),
+            " · 2 incomplete records; totals may be incomplete"
+        );
+        assert!(
+            !zh.format("main.items-page", &["2".into(), "1".into()])
+                .contains("{}")
+        );
+    }
     #[test]
     fn independent_locales_preserve_literal_model_content_and_report_parameters() {
         let en = Catalog::new("en");

@@ -24,6 +24,7 @@ for key in en:
 for path in [*(ROOT / "app/src").rglob("*.rs"), *(ROOT / "ui/src").rglob("*.rs")]:
     source = path.read_text()
     keys = re.findall(r'(?:i18n::text|i18n::tr!)\(\s*"([^"]+)"', source)
+    keys += re.findall(r'(?:catalog\.(?:text|format)\(|tr!\(\s*catalog,)\s*"([^"]+)"', source)
     keys += re.findall(r'rejection_detail\([^,]+,\s*"([^"]+)"', source)
     for key in keys:
         assert key in en, f"Missing Rust translation: {key}"

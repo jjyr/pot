@@ -44,7 +44,7 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
-mise run test:ui      # Portable shared chat state/localization
+mise run test:ui      # Portable shared chat/page state and localization
 mise run test:i18n     # Catalogue parity, native switching and embedded web assets
 ```
 
@@ -73,7 +73,7 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | Directory | Responsibility |
 |---|---|
 | `app/` | Native GPUI shell, Swift bridge, configuration |
-| `ui/` | Shared chat state, GPUI message renderer, Markdown, tokens and localization |
+| `ui/` | Shared Chat/Tasks/Sandbox/Usage components, page/chat state, Markdown, tokens and localization |
 | `mobile/` | WASM/browser shell, authenticated transport, PWA and push |
 | `helper/` | Swift Containerization, VM lifecycle |
 | `server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |

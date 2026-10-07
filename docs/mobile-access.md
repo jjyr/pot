@@ -92,10 +92,14 @@ Helper viewer URLs, tokens and private network addresses are filtered. Agent
 management-tool display replies use the same restricted state projection.
 
 The browser runs GPUI Kit 0.7.1 WASM. The authentication shell and same-origin
-transport adapter are JS. GPUI reuses `pot-ui` message/Markdown components, chat request/receipt state,
+transport adapter are JS. GPUI reuses `pot-ui` Chat/Tasks/Sandbox/Usage components, Markdown, page/chat state,
 native design tokens and EN/zh-CN catalogs,
 with touch navigation, per-conversation in-memory drafts, task filtering, browser
-history and read-only overview screens. Input retries preserve the original
+history and read-only Sandbox/Usage screens. Tasks share rows, phase labels,
+search/filter counts, empty states and server-authoritative pagination. Usage
+shares date ranges, statistics, model grouping and charts. Browser allowance
+editing and desktop actions remain disabled under the existing route allowlist.
+See the [shared-page validation](validation/shared-pages-20261007.md). Input retries preserve the original
 request UUID; an ambiguous write is never replayed with a new UUID automatically.
 No transcript, credential or session is stored in localStorage or an offline cache.
 
