@@ -35,7 +35,7 @@ for path in (ROOT / "app/swift").glob("*.swift"):
         assert key in en, f"Missing native translation: {key}"
 subprocess.run(["python3", ROOT / "scripts/localize-web", "--check"], check=True)
 for name in ["index.html"]:
-    text = (ROOT / "image" / name).read_text()
+    text = (ROOT / "sandbox-images/linux/default" / name).read_text()
     keys = re.findall(r'(?:data-pot-(?:i18n|title|aria-label)="|potT\(")([^"]+)', text)
     assert all(key in en for key in keys), f"Missing web translation: {name}"
 with tempfile.TemporaryDirectory(prefix="pot-localization-") as directory:
@@ -69,7 +69,12 @@ with tempfile.TemporaryDirectory(prefix="pot-localization-") as directory:
     )
     subprocess.run([temp / "test"], check=True)
 subprocess.run(
-    ["node", ROOT / "scripts/tests/localization-web.js", ROOT / "image/index.html"], check=True
+    [
+        "node",
+        ROOT / "scripts/tests/localization-web.js",
+        ROOT / "sandbox-images/linux/default/index.html",
+    ],
+    check=True,
 )
 subprocess.run(["python3", ROOT / "scripts/tests/localization-broker.py"], check=True)
 print(f"{len(en)} translation keys checked; native and embedded web localization passed")

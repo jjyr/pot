@@ -22,7 +22,15 @@ Mobile physical iOS/Android input, accessibility, startup performance, productio
 
 Real-provider login/inference must be requalified after the Host deployment changes. Full native appearance, IME, weak-network and sleep/wake matrices are not established by mock-model tests. Public release requires cold-install validation and distribution signing/notarization.
 
-macOS/Windows Sandbox providers, direct Host tools, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
+macOS/Android/iOS/Windows Sandbox providers, direct Host tools, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
+
+## Sandbox redesign — 2026-10-07
+
+The first-phase targets are Linux for default and isolated tasks and macOS for native application development. Android, iOS/vphone and Windows are deferred. [Sandbox providers](sandbox-providers.md) defines Manager/Provider contracts, crate boundaries and allocation profiles. The Manager and Linux Provider extraction is implemented, with source image descriptions under `sandbox-images/linux/default/`. macOS and broader allocation/catalog/artifact contracts remain pending.
+
+First extract `pot-sandbox` between Runtime and separate Linux/macOS Provider crates, registered by App/Server assembly. Move environment lifecycle/scopes/receipts behind its facade while retaining product permissions and task bindings in Runtime. Qualify Linux migration, then one prepared macOS VM with signed Swift helper, authenticated guest broker, Xcode build/test and durable artifacts. macOS initially has exclusive ownership and verified cleanup or VM-stop fallback. Installation/clone/desktop improvements follow a working prepared-guest slice. See [concrete macOS research](research/macos-provider.md#minimum-delivery-plan-after-scope-reduction).
+
+[Android research](research/android-provider.md) and [vphone research](research/vphone-provider.md) remain deferred background; neither requires a first-phase crate or tooling installation. VM installation and performance/isolation measurements have not been performed.
 
 ## Implementation rules
 

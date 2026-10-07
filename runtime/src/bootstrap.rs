@@ -63,6 +63,19 @@ pub async fn initialize_with_agent_host(
     config: RuntimeConfig,
     agent_host: Arc<dyn pot_core::DriverHost>,
 ) -> Result<Backend> {
+    initialize_with_providers_and_agent(config, agent_host, vec![]).await
+}
+pub async fn initialize_with_providers(
+    config: RuntimeConfig,
+    providers: Vec<Arc<dyn pot_sandbox::Provider>>,
+) -> Result<Backend> {
+    initialize_with_providers_and_agent(config, Arc::new(pot_agent::AgentHost), providers).await
+}
+async fn initialize_with_providers_and_agent(
+    config: RuntimeConfig,
+    agent_host: Arc<dyn pot_core::DriverHost>,
+    providers: Vec<Arc<dyn pot_sandbox::Provider>>,
+) -> Result<Backend> {
     let data = config.data;
     std::fs::create_dir_all(&data)?;
     use std::os::{
@@ -97,7 +110,7 @@ pub async fn initialize_with_agent_host(
         skill_selection: None,
         #[cfg(test)]
         test_tool_executor: None,
-        sandboxes: Arc::new(sandbox::Manager::open(&data)?),
+        sandboxes: Arc::new(sandbox::Manager::with_providers(&data, providers)?),
         sandbox_id: None,
         usage: Arc::new(Mutex::new(usage::Ledger::open(
             &data.join("usage-v2.sqlite"),

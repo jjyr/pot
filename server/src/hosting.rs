@@ -2,6 +2,7 @@ use crate::{ServerConfig, router};
 use anyhow::Result;
 use pot_protocol::{RUNTIME_ENDPOINT_FILE, RuntimeEndpoint};
 use pot_runtime::Backend;
+use std::sync::Arc;
 pub struct Server {
     backend: Backend,
     embedded: bool,
@@ -64,7 +65,11 @@ impl Server {
         } else {
             None
         };
-        let mut backend = pot_runtime::initialize(config.runtime).await?;
+        let mut backend = pot_runtime::initialize_with_providers(
+            config.runtime,
+            vec![Arc::new(pot_sandbox_linux::LinuxProvider::new()?)],
+        )
+        .await?;
         let endpoint = backend.endpoint(listener.local_addr()?.port());
 
         let access = if let Some(cfg) = access_config {

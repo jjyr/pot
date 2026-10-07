@@ -6099,6 +6099,8 @@ dependencies = [
  "pot-driver",
  "pot-gateway",
  "pot-protocol",
+ "pot-sandbox",
+ "pot-sandbox-linux",
  "pot-storage",
  "pot-tool-executor",
  "reqwest",
@@ -6108,6 +6110,35 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "tokio-tungstenite 0.30.0",
+ "uuid",
+]
+
+[[package]]
+name = "pot-sandbox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "pot-core",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+ "uuid",
+]
+
+[[package]]
+name = "pot-sandbox-linux"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "pot-sandbox",
+ "reqwest",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -6127,6 +6158,8 @@ dependencies = [
  "openssl",
  "pot-protocol",
  "pot-runtime",
+ "pot-sandbox",
+ "pot-sandbox-linux",
  "qrcode",
  "rcgen",
  "reqwest",

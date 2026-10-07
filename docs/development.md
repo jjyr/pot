@@ -121,7 +121,7 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 | `tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for eval/tests |
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
-| `image/` | Guest desktop, browser, broker/viewer resources |
+| `sandbox-images/linux/default/` | Guest desktop, browser, broker/viewer resources |
 | `scripts/` | Build, bundle, icon generation |
 
 `poc/` is removed; experiment code/evidence remain in Git history. `.local/poc/` is a retained local build/download cache path without dependencies on old experiment sources.

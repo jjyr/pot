@@ -28,7 +28,9 @@ use axum::{
 };
 use pot_protocol::*;
 mod bootstrap;
-pub use bootstrap::{Backend, RuntimeConfig, initialize, initialize_with_agent_host};
+pub use bootstrap::{
+    Backend, RuntimeConfig, initialize, initialize_with_agent_host, initialize_with_providers,
+};
 pub mod api {
     pub use crate::usage as accounting;
     pub use crate::{Service, cancel, events_handler, send, snapshot, usage};

@@ -10,7 +10,9 @@ Updated: 2026-10-06. See [architecture](architecture.md) for deployment and [Age
 | `pot-tool-executor` | Shared patch and pipe-session implementation; credential-free guest binary. Local execution is explicitly injected only in eval and isolated tests |
 | `pot-storage` | Host product SQLite, bindings, request/usage ledgers and durable transactions |
 | `pot-gateway` | Provider transport and Chat/Responses/Messages/Gemini codecs |
-| `pot-runtime` | Tool authorization/routing, Sandbox inventory/lifecycle, tasks/schedules, execution preferences, accounting and recovery |
+| `pot-runtime` | Product tool authorization/routing, tasks/schedules, execution preferences, accounting and recovery |
+| `pot-sandbox` | Inventory, lifecycle/readiness, leases, execution scopes, receipts and recovery; no concrete Provider dependencies |
+| `pot-sandbox-linux` | Apple Containerization helper IPC and Linux guest transport |
 | `pot-server` | Standalone startup, HTTP/SSE/MCP/PTY routing and shutdown |
 | `pot-protocol` | Frontend/backend DTOs and API constants |
 | `pot-app` | GPUI/native UI, protocol client and cached projections |
@@ -21,3 +23,7 @@ App depends on Protocol and embeds Server through its local service adapter. Ser
 App embeds Host Server; standalone CLI hosts it independently. Helper owns local VM lifecycle and supports Sandbox-only hosting. Execution tools run in assigned guest scopes; shell code cannot access unmounted Host product state. Tasks sharing a Sandbox use the same guest account, so separate directories are organizational rather than mutual filesystem/process isolation.
 
 Model and native CLI requests run on the Server machine. Remote deployment, endpoint identity/TLS and artifact transfer remain outside current product scope. Tests/build commands are in [Development](development.md); results are recorded in [Host pot-agent acceptance](validation/host-pot-agent-20261006.md).
+
+## Sandbox extraction
+
+The [Sandbox Manager and Provider crate design](sandbox-providers.md#provider-crates-and-explicit-registration) moves environment inventory/lifecycle, scopes, receipts/recovery, artifacts and display arbitration into `pot-sandbox`. Runtime retains product permissions, task/schedule bindings and tool schema integration. Separate `pot-sandbox-linux` and `pot-sandbox-macos` crates implement its contracts; Server's shared backend assembly registers enabled Providers and injects the Manager. `pot-sandbox` depends on neither concrete Providers nor Runtime. The inventory/lifecycle/scope/receipt extraction and Linux Provider are delivered. Template catalogs, artifact services and macOS remain pending.

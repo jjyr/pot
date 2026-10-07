@@ -23,3 +23,9 @@ The neutral desktop wallpaper uses a subdued terracotta Pot Companion watermark 
 Desktop startup shows the desktop and panel directly, without launching Chromium or a welcome webpage. Browser launches on demand from the panel/context menu or the viewer's Open browser action, initially at `about:blank`, using the persistent profile and loopback-only debugging port. Desktop shutdown still waits for any manually opened browser to exit. Rebuild/rebundle the Sandbox image to apply this startup change to newly booted environments.
 
 UTF-8 locale with Noto Sans, SC/TC/JP/KR Noto CJK glyphs, and emoji fallback covers simplified/traditional Chinese, Japanese, and Korean. Font rendering is not input-method support; CJK IMEs are not preinstalled and complete Unicode coverage is not promised.
+
+## Linux/macOS template layout
+
+The [image/template design](sandbox-providers.md#imagetemplate-descriptions-and-storage) separates source recipes, installed templates and writable instances. Maintained recipes live (macOS pending) under `sandbox-images/linux/default/` and `sandbox-images/macos/xcode/`; common descriptor/catalog types belong to `pot-sandbox`, and each Provider validates its own recipe and image format. Linux uses OCI content; macOS uses a complete stopped VM bundle prepared from IPSW plus Xcode/bootstrap provisioning. A Dockerfile is not required by the current Linux OCI builder.
+
+Linux recipes have moved from `image/` to `sandbox-images/linux/default/`. `scripts/build-image` reads `template.toml`, fingerprints it with the recipe, and emits resolved version/digest metadata. `.local/d1/` caches and bundled resources retain their existing role. Actual OCI layers, IPSWs and VM disks do not go into Git. Templates have pinned content identity and no credentials; project instances keep separate writable state.

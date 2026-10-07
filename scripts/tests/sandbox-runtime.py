@@ -102,8 +102,8 @@ class Model:
                 ensure_ascii=False,
             )
             if marker is not None:
-                assert "<name>skill-creator</name>" in system
-                assert "<name>skill-installer</name>" in system
+                assert "<name>skill-creator</name>" in system, system
+                assert "<name>skill-installer</name>" in system, system
             self.requests.append({"codex": codex, "tools": tools, "worker": worker})
             for output in current:
                 if output.get("role") == "tool" or output.get("type") == "function_call_output":
@@ -830,7 +830,18 @@ SKILLS""",
             report["stop_independence_artifacts"] = True
             # Desktop is separate from Agent execution; static HTTP must never expose executor credentials.
             desktop = await api("sandboxes", {"action": "desktop", "sandbox_id": "default"})
-            ip = desktop["state"]["ip"]
+            assert desktop["state"]["phase"] == "running"
+            reader, writer = await asyncio.open_unix_connection(root / "helper.sock")
+            writer.write(
+                (
+                    json.dumps({"id": "desktop-probe", "method": "status", "sandbox_id": "default"})
+                    + "\n"
+                ).encode()
+            )
+            await writer.drain()
+            ip = json.loads(await reader.readline())["result"]["ip"]
+            writer.close()
+            await writer.wait_closed()
 
             async def desktop_ready():
                 def request():

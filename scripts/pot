@@ -78,7 +78,7 @@ if cmd == "prepare":
         "close-browser.py",
         "open-browser.sh",
     ]:
-        shutil.copy2(REPO / "image" / name, RES / name)
+        shutil.copy2(REPO / "sandbox-images/linux/default" / name, RES / name)
     node_name = "node-v24.21.0-darwin-arm64"
     node_archive = RES / (node_name + ".tar.gz")
     download("https://nodejs.org/dist/v24.21.0/" + node_archive.name, node_archive)
@@ -94,7 +94,7 @@ if cmd == "prepare":
         call(["tar", "xzf", node_archive, "-C", RES])
         (RES / node_name).rename(RES / "node")
     for name in ["package.json", "package-lock.json"]:
-        shutil.copy2(REPO / "image/agents" / name, RES / ("agents-" + name))
+        shutil.copy2(REPO / "sandbox-images/linux/default/agents" / name, RES / ("agents-" + name))
 elif cmd == "build":
     call([sys.executable, REPO / "scripts/build-mobile"], cwd=REPO, env=env)
     call(
@@ -189,8 +189,13 @@ elif cmd == "bundle":
     )
     host_tools = APP / "Contents/Resources/runtime/host-tools"
     host_tools.mkdir(exist_ok=True)
-    shutil.copy2(REPO / "image/agents/package.json", host_tools / "package.json")
-    shutil.copy2(REPO / "image/agents/package-lock.json", host_tools / "package-lock.json")
+    shutil.copy2(
+        REPO / "sandbox-images/linux/default/agents/package.json", host_tools / "package.json"
+    )
+    shutil.copy2(
+        REPO / "sandbox-images/linux/default/agents/package-lock.json",
+        host_tools / "package-lock.json",
+    )
     call(
         [
             RES / "node/bin/node",

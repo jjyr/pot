@@ -62,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => potSetLocale(potInitialLocal
 def main():
     block = generated()
     for name in ["index.html"]:
-        path = ROOT / "image" / name
+        path = ROOT / "sandbox-images/linux/default" / name
         source = path.read_text()
         if START in source:
             result = re.sub(
