@@ -114,7 +114,8 @@ pub(crate) fn attach(command: &mut Command) -> io::Result<(Terminal, Terminal, T
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &mut size,
+            // Darwin takes a mutable pointer; Linux takes a const pointer.
+            &raw mut size,
         )
     } < 0
     {
