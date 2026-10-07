@@ -11,13 +11,14 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
         s.sandboxes.assignment("")?
     };
     let base = s.sandboxes.workspace(&target);
+    let guest_base = PathBuf::from(s.sandboxes.guest_workspace(&target)?);
     let (cwd, visible) = if s.is_worker {
         (
             base.join("tasks").join(&s.usage_scope),
-            PathBuf::from("/data/workspace/tasks").join(&s.usage_scope),
+            guest_base.join("tasks").join(&s.usage_scope),
         )
     } else {
-        (base.clone(), PathBuf::from("/data/workspace"))
+        (base.clone(), guest_base)
     };
     let mut roots = vec![];
     let mut project = cwd.as_path();

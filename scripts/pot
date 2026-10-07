@@ -61,6 +61,8 @@ if cmd == "prepare":
     download("https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz", novnc_archive)
     verify(novnc_archive, "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6")
     shutil.copy2(novnc_archive, RES / "novnc.tar.gz")
+    (RES / "novnc").mkdir(exist_ok=True)
+    call(["tar", "xzf", novnc_archive, "--strip-components=1", "-C", RES / "novnc"])
     call(["python3", REPO / "scripts/localize-web"])
     for name in [
         "sandbox.sh",
@@ -143,39 +145,24 @@ elif cmd == "bundle":
         tmp = dest.with_suffix(".new")
         shutil.copy2(src, tmp)
         tmp.replace(dest)
-    call(
-        [
-            "cargo",
-            "zigbuild",
-            "--locked",
-            "--release",
-            "--target",
-            "aarch64-unknown-linux-musl",
-            "-p",
-            "pot-tool-executor",
-            "-j",
-            "4",
-        ],
-        cwd=REPO,
-        env=env,
-    )
-    shutil.copy2(
-        pathlib.Path(env["CARGO_TARGET_DIR"])
-        / "aarch64-unknown-linux-musl/release/pot-tool-executor",
-        RES / "pot-tool-executor",
-    )
-    call([REPO / "scripts/build-image"])
     shutil.rmtree(APP / "Contents/Resources/runtime")
     (APP / "Contents/Resources/runtime").mkdir()
-    for name in ["sandbox-image", "init-image"]:
-        dest = APP / "Contents/Resources/runtime" / name
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(RES / name, dest)
-    shutil.copy2(RES / "sandbox-image.json", APP / "Contents/Resources/runtime/sandbox-image.json")
+    shutil.copy2(
+        ROOT / "helper-build/release/PotMacOSHelper",
+        APP / "Contents/Resources/runtime/PotMacOSHelper",
+    )
+    call(["cargo", "build", "--locked", "--release", "-p", "pot-tool-executor", "-j", "4"], env=env)
+    shutil.copytree(
+        REPO / "sandbox-images/macos/xcode",
+        APP / "Contents/Resources/runtime/macos-bootstrap",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copy2(
+        pathlib.Path(env["CARGO_TARGET_DIR"]) / "release/pot-tool-executor",
+        APP / "Contents/Resources/runtime/macos-bootstrap/pot-tool-executor",
+    )
     shutil.copytree(RES / "node", APP / "Contents/Resources/runtime/node")
-    for name in ["vmlinux"]:
-        shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
+    shutil.copytree(RES / "novnc", APP / "Contents/Resources/runtime/novnc")
     for name in ["pot-server", "pot"]:
         shutil.copy2(
             pathlib.Path(env["CARGO_TARGET_DIR"]) / profile / name,
@@ -250,6 +237,17 @@ elif cmd == "bundle":
             "--entitlements",
             REPO / "helper/virtualization.entitlements",
             APP / "Contents/Helpers/PotHelper",
+        ]
+    )
+    call(
+        [
+            "codesign",
+            "--force",
+            "--sign",
+            "-",
+            "--entitlements",
+            REPO / "helper/virtualization.entitlements",
+            APP / "Contents/Resources/runtime/PotMacOSHelper",
         ]
     )
     call(["codesign", "--force", "--sign", "-", APP])

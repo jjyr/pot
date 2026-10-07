@@ -84,36 +84,36 @@ actor Runtime {
     }
 
     func prepare() async throws {
-        guard FileManager.default.isReadableFile(atPath: resources.appendingPathComponent("vmlinux").path)
-        else { throw NSError(
-            domain: "pot",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Missing bundled kernel"]
-        ) }
         if manager == nil {
             let metadata = try JSONSerialization
-                .jsonObject(with: Data(contentsOf: resources
-                        .appendingPathComponent("sandbox-image.json"))) as? [String: Any]
-            guard let reference = metadata?["reference"] as? String else { throw NSError(
-                domain: "pot",
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Bundled Sandbox image missing; run scripts/pot bundle"]
-            ) }
+                .jsonObject(with: Data(contentsOf: root
+                        .appendingPathComponent("prepared-resources.json"))) as? [String: Any]
+            guard let reference = metadata?["image_reference"] as? String,
+                  let initReference = metadata?["boot_reference"] as? String,
+                  let kernelPath = metadata?["kernel"] as? String,
+                  let bootPath = metadata?["boot"] as? String,
+                  let imagePath = metadata?["image"] as? String
+            else {
+                throw NSError(
+                    domain: "pot",
+                    code: 5,
+                    userInfo: [NSLocalizedDescriptionKey: "Sandbox resources require owner preparation"]
+                )
+            }
             imageReference = reference
             let store = try ImageStore(path: root.appendingPathComponent("store"))
-            let initReference = "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df"
             if await (try? store.get(reference: initReference)) ==
                 nil
             {
-                _ = try await store.load(from: resources.appendingPathComponent("init-image"))
+                _ = try await store.load(from: URL(fileURLWithPath: bootPath))
             }
             if await (try? store.get(reference: imageReference)) ==
                 nil
             {
-                _ = try await store.load(from: resources.appendingPathComponent("sandbox-image"))
+                _ = try await store.load(from: URL(fileURLWithPath: imagePath))
             }
             manager = try await ContainerManager(
-                kernel: Kernel(path: resources.appendingPathComponent("vmlinux"), platform: .linuxArm),
+                kernel: Kernel(path: URL(fileURLWithPath: kernelPath), platform: .linuxArm),
                 initfsReference: initReference,
                 imageStore: store,
                 network: VmnetNetwork()
@@ -308,6 +308,8 @@ actor Sandboxes {
         environment["POT_DATA_DIR"] = root.appendingPathComponent("product").path
         environment["POT_WORKSPACE"] = root.appendingPathComponent("agent-workspace").path
         environment["POT_BUILTIN_SKILLS_DIR"] = resources.appendingPathComponent("skills").path
+        environment["POT_RUNTIME_RESOURCES"] = resources.path
+        environment["POT_MACOS_HELPER"] = resources.appendingPathComponent("PotMacOSHelper").path
         environment["POT_RUNTIME_BIND"] = "127.0.0.1:0"
         let hostTools = resources.appendingPathComponent("host-tools/node_modules/.bin").path
         environment["PATH"] = resources.appendingPathComponent("node/bin")

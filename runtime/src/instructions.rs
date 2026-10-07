@@ -203,7 +203,7 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
     };
     let filesystem = WorkspaceFileSystem {
         source: s.sandboxes.workspace(&target),
-        mount: "/data/workspace".into(),
+        mount: s.sandboxes.guest_workspace(&target)?.into(),
     };
     let cwd = if s.is_worker {
         filesystem.mount.join("tasks").join(&s.usage_scope)
@@ -454,6 +454,60 @@ mod tests {
         assert!(child.contains("FIRST") && child.contains("TASK") && child.contains("GLOBAL"));
         assert!(!child.contains("SECOND"));
         assert!(child.contains(&format!("/data/workspace/tasks/{}", task.id)));
+        assert!(!root.data.parent().unwrap().join("helper.sock").exists());
+        fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
+    #[tokio::test]
+    async fn macos_worker_instructions_skills_and_artifacts_use_provider_paths() {
+        let mut root = tasks::tests::fixture();
+        root.sandboxes = Arc::new(
+            sandbox::Manager::with_providers(
+                &root.data,
+                vec![
+                    Arc::new(pot_sandbox_linux::LinuxProvider::new().unwrap()),
+                    Arc::new(pot_sandbox_macos::MacOSProvider::new(
+                        root.data.join("absent-helper"),
+                    )),
+                ],
+            )
+            .unwrap(),
+        );
+        sandbox::management(&root,&json!({"action":"create","sandbox_id":"mac-dev","provider":pot_sandbox_macos::PROVIDER_ID})).await.unwrap();
+        sandbox::management(&root, &json!({"action":"select","sandbox_id":"mac-dev"}))
+            .await
+            .unwrap();
+        let base = root.sandboxes.workspace("mac-dev");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("AGENTS.md"), "MAC_PROJECT").unwrap();
+        fs::write(base.join(".git"), "gitdir").unwrap();
+        let task = tasks::create(
+            State(root.clone()),
+            tasks::tests::headers(),
+            Json(CreateTask {
+                request_id: "mac-paths".into(),
+                text: "Mac build".into(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let worker = tasks::owner(&root, &task.id).unwrap();
+        assert_eq!(worker.workspace, base.join("tasks").join(&task.id));
+        fs::write(worker.workspace.join("AGENTS.md"), "MAC_TASK").unwrap();
+        let text = load(&worker).unwrap().text;
+        assert!(text.contains("MAC_PROJECT") && text.contains("MAC_TASK"));
+        assert!(text.contains(&format!(
+            "/Volumes/PotWorkspace/workspace/tasks/{}",
+            task.id
+        )));
+        let resources = crate::skills::resources(&worker).unwrap();
+        assert!(
+            resources
+                .roots
+                .iter()
+                .all(|r| r.location.starts_with("/Volumes/PotWorkspace/workspace"))
+        );
         assert!(!root.data.parent().unwrap().join("helper.sock").exists());
         fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }

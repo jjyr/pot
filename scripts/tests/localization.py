@@ -34,8 +34,8 @@ for path in (ROOT / "app/swift").glob("*.swift"):
             continue
         assert key in en, f"Missing native translation: {key}"
 subprocess.run(["python3", ROOT / "scripts/localize-web", "--check"], check=True)
-for name in ["index.html"]:
-    text = (ROOT / "sandbox-images/linux/default" / name).read_text()
+for name in ["sandbox-images/linux/default/index.html", "desktop/index.html"]:
+    text = (ROOT / name).read_text()
     keys = re.findall(r'(?:data-pot-(?:i18n|title|aria-label)="|potT\(")([^"]+)', text)
     assert all(key in en for key in keys), f"Missing web translation: {name}"
 with tempfile.TemporaryDirectory(prefix="pot-localization-") as directory:

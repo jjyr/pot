@@ -11,20 +11,35 @@ use std::{
     time::Duration,
 };
 struct Fake {
+    desktop: AtomicBool,
+    generation: AtomicUsize,
     running: AtomicBool,
+    exclusive: AtomicBool,
+    session_only: AtomicBool,
     fail_cleanup: AtomicBool,
     dispatches: AtomicUsize,
 }
 impl Fake {
     fn new() -> Self {
         Self {
+            desktop: AtomicBool::new(false),
+            generation: AtomicUsize::new(1),
             running: AtomicBool::new(false),
+            exclusive: AtomicBool::new(false),
+            session_only: AtomicBool::new(false),
             fail_cleanup: AtomicBool::new(false),
             dispatches: AtomicUsize::new(0),
         }
     }
 }
 impl Provider for Fake {
+    fn scope_cleanup_policy(&self) -> ScopeCleanupPolicy {
+        if self.session_only.load(Ordering::SeqCst) {
+            ScopeCleanupPolicy::SessionClosure
+        } else {
+            ScopeCleanupPolicy::ProcessContainment
+        }
+    }
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor {
             id: LINUX_PROVIDER.into(),
@@ -32,10 +47,32 @@ impl Provider for Fake {
             capabilities: Capabilities {
                 shell: true,
                 files: true,
-                desktop: false,
-                shared_execution: true,
+                desktop: self.desktop.load(Ordering::SeqCst),
+                shared_execution: !self.exclusive.load(Ordering::SeqCst),
             },
         }
+    }
+    fn desktop_capabilities(&self) -> DesktopCapabilities {
+        let available = self.desktop.load(Ordering::SeqCst);
+        DesktopCapabilities {
+            viewing: available,
+            input: available,
+            clipboard: false,
+            browser: false,
+            protocol: available.then_some(DesktopProtocol::Rfb38),
+        }
+    }
+    fn prepare_desktop<'a>(&'a self, _: &'a ProviderContext) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            anyhow::ensure!(self.desktop.load(Ordering::SeqCst), "Unsupported desktop");
+            Ok(())
+        })
+    }
+    fn open_desktop<'a>(&'a self, _: &'a ProviderContext) -> BoxFuture<'a, Result<DesktopStream>> {
+        Box::pin(async {
+            let (stream, _) = tokio::io::duplex(1024);
+            Ok(Box::pin(stream) as DesktopStream)
+        })
     }
     fn workspace(&self, root: &Path, id: &str) -> PathBuf {
         root.join("sandboxes").join(id).join("workspace/workspace")
@@ -60,7 +97,7 @@ impl Provider for Fake {
                 _ => bail!("unsupported"),
             };
             Ok(
-                json!({"phase":if self.running.load(Ordering::SeqCst){"running"}else{"stopped"},"generation":1}),
+                json!({"phase":if self.running.load(Ordering::SeqCst){"running"}else{"stopped"},"generation":self.generation.load(Ordering::SeqCst)}),
             )
         })
     }
@@ -82,7 +119,7 @@ impl Provider for Fake {
                 if self.fail_cleanup.load(Ordering::SeqCst) {
                     bail!("disconnected")
                 };
-                Ok(json!({"settled":true}))
+                Ok(json!({"settled":!self.session_only.load(Ordering::SeqCst),"scope_closed":true}))
             }
         })
     }
@@ -293,4 +330,150 @@ async fn concurrent_duplicate_calls_dispatch_once_and_restart_advances_epoch() {
     let _reopened = Manager::open(&dir.path().join("product"), vec![provider]).unwrap();
     let after: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert!(after["default"][0].as_u64().unwrap() > before["default"][0].as_u64().unwrap());
+}
+
+#[tokio::test]
+async fn exclusive_provider_rejects_another_owner_until_confirmed_closure() {
+    let (_directory, manager, provider) = fixture();
+    provider.exclusive.store(true, Ordering::SeqCst);
+    let args = json!({"cmd":"true"});
+    manager
+        .execute(
+            &grant("first", false),
+            "exec_command",
+            "one",
+            &args,
+            &|| false,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .execute(
+                &grant("second", false),
+                "exec_command",
+                "two",
+                &args,
+                &|| false,
+                None
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("exclusive")
+    );
+    assert_eq!(provider.dispatches.load(Ordering::SeqCst), 1);
+    manager.finish("first").await.unwrap();
+    manager
+        .execute(
+            &grant("second", false),
+            "exec_command",
+            "two",
+            &args,
+            &|| false,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(provider.dispatches.load(Ordering::SeqCst), 2);
+    manager.finish("second").await.unwrap();
+}
+
+#[test]
+fn session_closure_is_not_process_containment() {
+    let response = json!({"scope_closed":true,"settled":false,"process_containment":false});
+    assert!(ScopeCleanupPolicy::SessionClosure.confirmed(&response));
+    assert!(!ScopeCleanupPolicy::ProcessContainment.confirmed(&response));
+    assert!(!ScopeCleanupPolicy::SessionClosure.confirmed(&json!({"settled":true})));
+}
+
+#[tokio::test]
+async fn persistent_scope_closure_releases_ownership_without_stopping_vm() {
+    let (_dir, manager, provider) = fixture();
+    provider.exclusive.store(true, Ordering::SeqCst);
+    provider.session_only.store(true, Ordering::SeqCst);
+    manager
+        .execute(
+            &grant("main", false),
+            "exec_command",
+            "call",
+            &json!({"cmd":"true"}),
+            &|| false,
+            None,
+        )
+        .await
+        .unwrap();
+    manager.finish("main").await.unwrap();
+    assert!(provider.running.load(Ordering::SeqCst));
+    assert!(manager.acquire("default").await.is_ok());
+}
+
+#[tokio::test]
+async fn desktop_tickets_are_exclusive_expiring_and_do_not_stop_vm() {
+    let (_dir, m, p) = fixture();
+    // This fake is command-only: absent adapter must reject display authority.
+    assert!(m.open_desktop("default").await.is_err());
+    assert!(!p.running.load(Ordering::SeqCst));
+    assert!(m.desktop_has_control("invented").is_err());
+}
+
+#[tokio::test]
+async fn desktop_ownership_release_expiry_and_vm_generation() {
+    let (_dir, m, p) = fixture();
+    p.desktop.store(true, Ordering::SeqCst);
+    let a = m.open_desktop("default").await.unwrap();
+    let b = m.open_desktop("default").await.unwrap();
+    assert!(!m.desktop_has_control(&a.id).unwrap());
+    assert!(m.desktop_control(&a.id, true).await.is_err());
+    let _first = m.desktop_stream(&a.id).await.unwrap();
+    let _second = m.desktop_stream(&b.id).await.unwrap();
+    assert!(m.desktop_stream(&a.id).await.is_err());
+    m.desktop_control(&a.id, true).await.unwrap();
+    assert!(m.desktop_control(&b.id, true).await.is_err());
+    let release = {
+        let m = m.clone();
+        let id = a.id.clone();
+        tokio::spawn(async move { m.desktop_control(&id, false).await })
+    };
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(m.desktop_control(&b.id, true).await.is_err());
+    m.desktop_released(&a.id, m.desktop_revision(&a.id).unwrap());
+    release.await.unwrap().unwrap();
+    m.desktop_control(&b.id, true).await.unwrap();
+    m.close_desktop(&b.id);
+    assert!(p.running.load(Ordering::SeqCst));
+    p.generation.store(2, Ordering::SeqCst);
+    assert!(m.desktop_validate(&a.id).await.is_err());
+    m.viewers.lock().unwrap().get_mut(&a.id).unwrap().expires = std::time::Instant::now();
+    assert!(m.desktop_session(&a.id).is_err());
+    let c = m.open_desktop("default").await.unwrap();
+    m.management(
+        &json!({"action":"stop","sandbox_id":"default"}),
+        false,
+        &|| false,
+        &|_, f| f(),
+    )
+    .await
+    .unwrap();
+    assert!(m.desktop_session(&c.id).is_err());
+    assert!(!p.running.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn disconnected_viewer_does_not_confirm_input_return() {
+    let (_dir, m, p) = fixture();
+    p.desktop.store(true, Ordering::SeqCst);
+    let a = m.open_desktop("default").await.unwrap();
+    let _stream = m.desktop_stream(&a.id).await.unwrap();
+    m.desktop_control(&a.id, true).await.unwrap();
+    let release = {
+        let m = m.clone();
+        let id = a.id.clone();
+        tokio::spawn(async move { m.desktop_control(&id, false).await })
+    };
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    m.desktop_disconnected(&a.id);
+    assert!(release.await.unwrap().is_err());
+    assert!(p.running.load(Ordering::SeqCst));
 }

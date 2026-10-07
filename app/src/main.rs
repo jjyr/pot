@@ -361,7 +361,19 @@ impl Shell {
                     cx,
                 );
             }
-            Some(2) => return self.settings.render(&self.native["settings"], &view, cx),
+            Some(2) => {
+                return self
+                    .settings
+                    .render(&self.native["settings"], &view, cx)
+                    .child(
+                        Button::new("settings-resource-cache")
+                            .ghost()
+                            .label(crate::i18n::text("resources.cache"))
+                            .on_click(|_, _, _| {
+                                ui::command(serde_json::json!({"action":"resource-cache"}))
+                            }),
+                    );
+            }
             Some(1) => {
                 return pot_ui::sandbox::render(
                     &self.native,
@@ -589,6 +601,7 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap_5()
+                    .child(pot_ui::resources::cards(&self.native["resource_requests"],self.catalog(),self.page_handler(cx),cx))
                     .when(messages.is_empty(), |el| {
                         el.child(
                             div()
@@ -791,7 +804,9 @@ fn main() {
         .filter(|p| p.is_dir())
     {
         unsafe {
+            std::env::set_var("POT_RUNTIME_RESOURCES", &resources);
             std::env::set_var("POT_BUILTIN_SKILLS_DIR", resources.join("skills"));
+            std::env::set_var("POT_MACOS_HELPER", resources.join("PotMacOSHelper"));
             if std::env::var_os("POT_ACCESS_ASSETS").is_none() {
                 std::env::set_var("POT_ACCESS_ASSETS", resources.join("mobile"));
             }

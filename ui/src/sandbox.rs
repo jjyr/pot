@@ -26,6 +26,7 @@ pub fn render(
     let name = current
         .and_then(|item| item["name"].as_str())
         .unwrap_or("Sandbox");
+    let desktop_supported = current.is_none_or(|item| item["capabilities"]["desktop"] != false);
     let phase = state["phase"].as_str().unwrap_or("unknown");
     let connected = phase == "running" && state["viewer"]["connected"] == true;
     let human = state["viewer"]["human"] == true;
@@ -53,13 +54,23 @@ pub fn render(
                 div()
                     .font_weight(FontWeight::MEDIUM)
                     .overflow_hidden()
-                    .child(item["name"].as_str().unwrap_or("Linux").to_owned()),
+                    .child(item["name"].as_str().unwrap_or("Sandbox").to_owned()),
             )
             .child(hint(
                 tr!(
                     catalog,
                     "ui.running-tasks",
-                    catalog.phase(item["state"]["phase"].as_str().unwrap_or("unknown")),
+                    if item["resource_request"]["phase"]
+                        .as_str()
+                        .is_some_and(|phase| !matches!(phase, "ready" | "cancelled"))
+                    {
+                        catalog.text(&format!(
+                            "resources.{}",
+                            item["resource_request"]["phase"].as_str().unwrap_or("")
+                        ))
+                    } else {
+                        catalog.phase(item["state"]["phase"].as_str().unwrap_or("unknown"))
+                    },
                     item["running_tasks"].as_u64().unwrap_or(0)
                 ),
                 cx,
@@ -80,7 +91,7 @@ pub fn render(
             .accessibility_label(tr!(
                 catalog,
                 "ui.select-sandbox",
-                item["name"].as_str().unwrap_or("Linux")
+                item["name"].as_str().unwrap_or("Sandbox")
             ))
             .child(row)
             .on_click(pages::on(&handler, "sandbox-select", json!(target)));
@@ -125,6 +136,17 @@ pub fn render(
                 ),
         )
         .child(list)
+        .child(
+            Button::new("resource-cache")
+                .ghost()
+                .small()
+                .label(catalog.text("resources.cache"))
+                .on_click(pages::on(
+                    &handler,
+                    "native",
+                    json!({"action":"resource-cache"}),
+                )),
+        )
         .when(
             state["sandbox_error"]
                 .as_str()
@@ -138,7 +160,20 @@ pub fn render(
                 )
             },
         );
+    let resource_cards = crate::resources::cards(
+        &json!(
+            current
+                .and_then(|item| item.get("resource_request"))
+                .filter(|v| v.is_object())
+                .into_iter()
+                .collect::<Vec<_>>()
+        ),
+        catalog,
+        handler.clone(),
+        cx,
+    );
     let desktop = div()
+        .child(resource_cards)
         .flex_1()
         .min_w_0()
         .h_full()
@@ -248,10 +283,16 @@ pub fn render(
                     .justify_center()
                     .gap_4()
                     .child(hint(
-                        if !controls {
+                        if !desktop_supported {
+                            catalog.text("ui.command-files-environment")
+                        } else if !controls {
                             catalog.text("mobile.desktop-access-awaits-permission-qualification")
                         } else if phase == "running" {
-                            catalog.text("ui.connecting-to-desktop")
+                            catalog.text(if pending {
+                                "ui.connecting-to-desktop"
+                            } else {
+                                "ui.desktop-disconnected"
+                            })
                         } else {
                             catalog.text("ui.this-environment-is-stopped-start-the-desktop")
                         },
@@ -263,6 +304,7 @@ pub fn render(
                             .label(catalog.text("ui.start-desktop"))
                             .disabled(
                                 !controls
+                                    || !desktop_supported
                                     || pending
                                     || !matches!(phase, "running" | "stopped" | "failed"),
                             )

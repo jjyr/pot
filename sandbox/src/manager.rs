@@ -1,3 +1,4 @@
+mod desktop;
 type DeleteGuard<'a> = dyn Fn(&str, &dyn Fn() -> Result<()>) -> Result<()> + Send + Sync + 'a;
 use crate::{Provider, ProviderContext, private_json};
 use anyhow::{Result, anyhow, bail};
@@ -65,6 +66,8 @@ impl Drop for Execution {
     }
 }
 pub struct Manager {
+    desktop_io: tokio::sync::Mutex<()>,
+    pub(crate) viewers: Mutex<BTreeMap<String, crate::desktop::Viewer>>,
     root: PathBuf,
     data: PathBuf,
     pending: Mutex<BTreeMap<String, Pending>>,
@@ -133,6 +136,8 @@ impl Manager {
         }
         private_json(&generation_path, &serde_json::to_value(&generations)?)?;
         Ok(Self {
+            desktop_io: tokio::sync::Mutex::new(()),
+            viewers: Mutex::new(BTreeMap::new()),
             root,
             data: data.to_path_buf(),
             running: Mutex::new(BTreeMap::new()),
@@ -169,6 +174,10 @@ impl Manager {
             root: self.root.clone(),
             sandbox_id: target.into(),
         }
+    }
+    pub fn bind_resources(&self, target: &str, resources: &crate::PreparedResources) -> Result<()> {
+        self.provider(target)?
+            .bind_resources(&self.context(target), resources)
     }
     pub fn workspace(&self, target: &str) -> PathBuf {
         self.provider(target)
@@ -210,6 +219,12 @@ impl Manager {
                 "Sandbox generation changed; session outcome unknown"
             );
             return Ok(scope.clone());
+        }
+        if !self.describe(target)?.capabilities.shared_execution {
+            anyhow::ensure!(
+                !scopes.values().any(|scope| scope.target == target),
+                "Sandbox requires exclusive execution ownership"
+            );
         }
         let scope = Scope {
             id: id(),
@@ -254,6 +269,9 @@ impl Manager {
     pub async fn acquire(self: &Arc<Self>, id: &str) -> Result<Lease> {
         let _lock = self.lifecycle.lock().await;
         self.lease(id)
+    }
+    pub fn guest_workspace(&self, target: &str) -> Result<String> {
+        Ok(self.provider(target)?.guest_workspace().into())
     }
     pub fn assignment(&self, requested: &str) -> Result<String> {
         let book = self.book.lock().unwrap();
@@ -358,8 +376,8 @@ impl Manager {
         bail!("Sandbox executor did not become ready")
     }
 }
-// Agent-facing state is not a desktop login interface. Native App discovers
-// viewer credentials through its private Helper channel, never these tool/API replies.
+// Agent-facing state carries no display credentials. Owner-authorized desktop
+// tickets are issued separately from tool and inventory replies.
 fn display_state(state: &Value) -> Value {
     json!({"phase":state["phase"].as_str().unwrap_or("unknown"),"generation":state["generation"].as_u64(),
         "cpus":state["cpus"].as_u64(),"memory_gib":state["memory_gib"].as_u64(),"disk_gib":state["disk_gib"].as_u64()})
@@ -388,9 +406,13 @@ impl Manager {
             )
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .unwrap_or(json!({"cpus":4,"memory_gib":8,"disk_gib":32}));
+            .unwrap_or_else(|| {
+                self.provider(&item.id)
+                    .map(|p| p.default_config())
+                    .unwrap_or(Value::Null)
+            });
             let descriptor = self.describe(&item.id).ok();
-            rows.push(json!({"config":config,"id":item.id,"name":item.name,"provider":item.provider,"os":descriptor.as_ref().map(|d|d.os.as_str()),"capabilities":descriptor.map(|d|d.capabilities),"active_leases":active,"unsettled_operations":self.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":display_state(&state)}));
+            rows.push(json!({"config":config,"id":item.id,"name":item.name,"provider":item.provider,"os":descriptor.as_ref().map(|d|d.os.as_str()),"capabilities":descriptor.map(|d|d.capabilities),"desktop_capabilities":self.provider(&item.id).map(|p|p.desktop_capabilities()).ok(),"scope_cleanup_policy":self.provider(&item.id).map(|p|p.scope_cleanup_policy()).ok(),"active_leases":active,"unsettled_operations":self.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":display_state(&state)}));
         }
         json!({"selected":selected,"items":rows})
     }
@@ -412,13 +434,18 @@ impl Manager {
                 self.describe(&id)?.capabilities.desktop,
                 "Desktop capability unavailable"
             );
-            self.request(&id, "desktop", &json!({}), Duration::from_secs(30))
+            self.provider(&id)?
+                .prepare_desktop(&self.context(&id))
                 .await?;
             return Ok(
                 json!({"sandbox_id":id,"state":display_state(&self.helper(&id,"status").await?)}),
             );
         }
         let action = args["action"].as_str().unwrap_or("");
+        anyhow::ensure!(
+            args.get("provider").is_none() || action == "create",
+            "Provider is immutable; specify it only when creating a Sandbox"
+        );
         if action == "start" {
             let id = self.assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
             let _lease = self.acquire(&id).await?;
@@ -491,7 +518,8 @@ impl Manager {
             let c = config["cpus"].as_u64().unwrap_or(0);
             let m = config["memory_gib"].as_u64().unwrap_or(0);
             let d = config["disk_gib"].as_u64().unwrap_or(0);
-            self.provider(&id)?.validate_config(config)?;
+            self.provider(&id)?
+                .validate_instance_config(&self.context(&id), config)?;
             anyhow::ensure!(
                 *self.leases.lock().unwrap().get(&id).unwrap_or(&0) == 0
                     && !self
@@ -532,11 +560,16 @@ impl Manager {
                 .map(|(op, _)| op.clone())
                 .collect();
             for op in &pending {
-                if state["phase"] != "stopped" && state["phase"] != "failed" {
+                if state["phase"] != "stopped" {
                     let result = self
                         .request(&id, "cancel", &json!({"id":op}), Duration::from_secs(15))
                         .await?;
-                    anyhow::ensure!(result["settled"] == true, "Executor cleanup unconfirmed");
+                    anyhow::ensure!(
+                        self.provider(&id)?
+                            .scope_cleanup_policy()
+                            .confirmed(&result),
+                        "Executor cleanup unconfirmed"
+                    );
                 }
                 self.settle(op)?;
             }
@@ -571,6 +604,10 @@ impl Manager {
         }
         if action == "delete" {
             anyhow::ensure!(id != "default", "The default Sandbox cannot be deleted");
+        }
+        let _desktop_guard = self.desktop_serialization().await;
+        if action != "start" {
+            self.revoke_desktops(&id);
         }
         let state = self
             .helper(&id, if action == "delete" { "stop" } else { action })
@@ -764,7 +801,7 @@ impl Manager {
 impl Manager {
     async fn cancel_scope(&self, scope: &Scope) -> Result<()> {
         let state = self.helper(&scope.target, "status").await?;
-        if state["phase"] != "stopped" && state["phase"] != "failed" {
+        if state["phase"] != "stopped" {
             let response = self
                 .request(
                     &scope.target,
@@ -774,7 +811,9 @@ impl Manager {
                 )
                 .await?;
             anyhow::ensure!(
-                response["settled"] == true,
+                self.provider(&scope.target)?
+                    .scope_cleanup_policy()
+                    .confirmed(&response),
                 "Executor cleanup stop unconfirmed"
             );
         }
@@ -855,5 +894,23 @@ impl Manager {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         bail!("Sandbox operation cleanup timed out; stop unconfirmed")
+    }
+}
+
+impl Manager {
+    pub async fn shutdown(&self) -> Result<()> {
+        self.viewers.lock().unwrap().clear();
+        let mut errors = Vec::new();
+        for provider in self.providers.values() {
+            if let Err(error) = provider.shutdown(&self.root).await {
+                errors.push(error.to_string());
+            }
+        }
+        anyhow::ensure!(
+            errors.is_empty(),
+            "Sandbox shutdown unconfirmed: {}",
+            errors.join("; ")
+        );
+        Ok(())
     }
 }

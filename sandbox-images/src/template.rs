@@ -47,7 +47,7 @@ mod tests {
     use super::*;
     #[test]
     fn source_description_is_not_an_oci_manifest_and_cannot_escape_recipe_root() {
-        let source = include_str!("../../sandbox-images/linux/default/template.toml");
+        let source = include_str!("../linux/default/template.toml");
         let descriptor = TemplateDescriptor::parse(source).unwrap();
         assert_eq!(descriptor.format, ImageFormat::Oci);
         assert!(descriptor.digest.is_none());

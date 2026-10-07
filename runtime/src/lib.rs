@@ -9,6 +9,7 @@ pub mod gateway;
 mod instructions;
 pub mod orchestration;
 pub mod sandbox;
+pub mod sandbox_resources;
 pub mod schedules;
 mod skills;
 mod store;
@@ -31,6 +32,7 @@ mod bootstrap;
 pub use bootstrap::{
     Backend, RuntimeConfig, initialize, initialize_with_agent_host, initialize_with_providers,
 };
+pub mod desktop;
 pub mod api {
     pub use crate::usage as accounting;
     pub use crate::{Service, cancel, events_handler, send, snapshot, usage};

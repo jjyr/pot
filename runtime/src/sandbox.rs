@@ -61,6 +61,7 @@ pub struct Manager {
     pub(crate) global_instructions: Mutex<crate::instructions::GlobalInstructions>,
     pub(crate) skill_user: PathBuf,
     pub(crate) skill_builtin: PathBuf,
+    pub(crate) resources: Option<Arc<crate::sandbox_resources::Hub>>,
     environment: Arc<pot_sandbox::Manager>,
 }
 impl std::ops::Deref for Manager {
@@ -72,10 +73,25 @@ impl std::ops::Deref for Manager {
 impl Manager {
     #[cfg(test)]
     pub fn open(data: &std::path::Path) -> Result<Self> {
-        Self::with_providers(
+        let mut manager = Self::with_providers(
             data,
             vec![Arc::new(pot_sandbox_linux::LinuxProvider::new()?)],
-        )
+        )?;
+        manager.resources = None; // Legacy execution fixtures inject no resource preparation service.
+        Ok(manager)
+    }
+    pub async fn prepare(
+        &self,
+        id: &str,
+        owner: &str,
+        turn: Option<&str>,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<()> {
+        if let Some(hub) = &self.resources {
+            hub.wait(&self.environment, id, owner, turn, cancelled)
+                .await?;
+        }
+        Ok(())
     }
     pub fn with_providers(
         data: &std::path::Path,
@@ -104,6 +120,7 @@ impl Manager {
             skill_user,
             skill_builtin,
             environment: Arc::new(pot_sandbox::Manager::open(data, providers)?),
+            resources: Some(crate::sandbox_resources::Hub::open(data)?),
         })
     }
 }
@@ -126,8 +143,20 @@ async fn inventory(s: &Service) -> Value {
             );
             row["tasks"] = json!(assigned);
             row["referenced"] = json!(tasks::uses_sandbox(s, &id));
+            row["resource_request"] = s
+                .sandboxes
+                .resources
+                .as_ref()
+                .map(|hub| hub.pending(&id))
+                .unwrap_or(Value::Null);
         }
     }
+    value["resource_requests"] = s
+        .sandboxes
+        .resources
+        .as_ref()
+        .map(|hub| hub.requests())
+        .unwrap_or(json!([]));
     value
 }
 pub async fn manage(
@@ -151,7 +180,21 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
             "Sandbox is assigned to a persisted task or schedule"
         );
     }
-    s.sandboxes
+    let action = args["action"].as_str().unwrap_or("");
+    if matches!(action, "start" | "desktop") {
+        let id = s
+            .sandboxes
+            .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
+        if let Some(hub) = &s.sandboxes.resources
+            && let Some(key) = hub.inspect(&s.sandboxes, &id, &s.usage_scope, None).await?
+        {
+            return Ok(
+                json!({"sandbox_id":id,"resource_request_id":key,"phase":"awaiting-resources"}),
+            );
+        }
+    }
+    let mut result = s
+        .sandboxes
         .environment
         .management(
             args,
@@ -159,7 +202,22 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
             &|| agent::cancelled(s) || s.stopping(),
             &|id, delete| tasks::guard_sandbox_delete(s, id, delete),
         )
-        .await
+        .await?;
+    if action == "create" {
+        let id = result["sandbox_id"].as_str().unwrap_or("").to_owned();
+        if let Some(hub) = &s.sandboxes.resources
+            && let Some(key) = hub.inspect(&s.sandboxes, &id, &s.usage_scope, None).await?
+        {
+            result["resource_request_id"] = json!(key);
+            result["phase"] = json!("awaiting-resources");
+        }
+    }
+    if action == "delete"
+        && let Some(hub) = &s.sandboxes.resources
+    {
+        hub.forget(args["sandbox_id"].as_str().unwrap_or(""))?;
+    }
+    Ok(result)
 }
 pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Result<Value> {
     anyhow::ensure!(
@@ -188,7 +246,29 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         return Ok(inventory(s).await);
     }
     if name == "pot_manage_sandbox" {
-        return management(s, args).await;
+        let result = management(s, args).await?;
+        if matches!(
+            args["action"].as_str(),
+            Some("create" | "start" | "desktop")
+        ) {
+            let id = s
+                .sandboxes
+                .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
+            s.sandboxes
+                .prepare(&id, &s.usage_scope, Some(&turn), &|| {
+                    !turn_alive(s, &turn) || s.stopping()
+                })
+                .await?;
+            if args["action"] != "create" {
+                return management(s, args).await;
+            }
+        }
+        let mut result = result;
+        result["phase"] = json!("stopped");
+        result
+            .as_object_mut()
+            .map(|v| v.remove("resource_request_id"));
+        return Ok(result);
     }
     anyhow::ensure!(
         ["exec_command", "write_stdin", "apply_patch"].contains(&name),
@@ -211,6 +291,27 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     }
     pot_core::environment_tools::validate(name, &validated)?;
 
+    // Pipe sessions already belong to a prepared scope; their Manager validation
+    // must run without consulting the current selection or asking for downloads.
+    if name != "write_stdin" {
+        let requested = args["sandbox_id"].as_str().unwrap_or("");
+        if s.is_worker {
+            anyhow::ensure!(
+                requested.is_empty() || Some(requested) == s.sandbox_id.as_deref(),
+                "Workers cannot switch Sandboxes"
+            );
+        }
+        let id = s.sandboxes.assignment(if s.is_worker {
+            s.sandbox_id.as_deref().unwrap_or("")
+        } else {
+            requested
+        })?;
+        s.sandboxes
+            .prepare(&id, &s.usage_scope, Some(&turn), &|| {
+                !turn_alive(s, &turn) || s.stopping()
+            })
+            .await?;
+    }
     let legacy_key = format!("sandbox.operation:{turn}:{call_id}");
     let legacy = s
         .inner

@@ -149,6 +149,8 @@ var bridge: PotBridge?
     var lastIconState = ""
     var observations: [NSObjectProtocol] = []
     let runtime = RuntimeClient()
+    var resourceRequests: [[String: Any]] = []
+    var resourceContinuations: [String: () -> Void] = [:]
     var sandboxItems: [[String: Any]] = []
     var sandboxDefault = "default"
     var sandboxBusy = false
@@ -607,7 +609,11 @@ var bridge: PotBridge?
             if ["connect", "browser", "clipboardOpen"]
                 .contains(id)
             {
-                item.isEnabled = connected && (id == "connect" || viewer["human"] as? Bool == true)
+                item
+                    .isEnabled = id == "connect" ? (localPhase == "running") :
+                    (connected && viewer["human"] as? Bool == true &&
+                        (current?["desktop_capabilities"] as? [String: Any])?[id == "browser" ? "browser" :
+                            "clipboard"] as? Bool == true)
             }
             if id == "select" {
                 item.isEnabled = target != sandboxDefault
@@ -634,6 +640,10 @@ var bridge: PotBridge?
         guard let info = item.representedObject as? [String: String], let action = info["action"],
               let target = info["target"] else { return }
         switch action {
+        case "connect":
+            if target == localRuntime?.sandboxID {
+                localRuntime?.reconnectDesktop()
+            }
         case "workspace": openSandboxWorkspace(target)
         case "tasks":
             let tasks = (sandboxItems.first { $0["id"] as? String == target })?["tasks"] as? [[String: Any]] ?? []
@@ -675,15 +685,107 @@ var bridge: PotBridge?
         sandboxBusy = true; sandboxError = ""; bridgeWake?()
         Task {
             do {
-                _ = try await runtime.request("api/v1/sandboxes", body: args)
+                let result = try await runtime.request("api/v1/sandboxes", body: args)
+                if let key = result["resource_request_id"] as? String {
+                    await refreshResourceRequests()
+                    resourceContinuations[key] = { [weak self] in
+                        if args["action"] as? String != "create" {
+                            self?.manageSandbox(args, completion: completion)
+                        } else {
+                            completion?()
+                        }
+                    }
+                    confirmResourceDownload(key)
+                } else {
+                    completion?()
+                }
                 if args["action"] as? String == "delete",
                    args["sandbox_id"] as? String == localRuntime?.sandboxID
                 {
                     chooseSandbox("default")
                 }
-                completion?()
             } catch { sandboxError = error.localizedDescription }
             sandboxBusy = false; refreshSandboxes(); localRuntime?.poll(); bridgeWake?()
+        }
+    }
+
+    func refreshResourceRequests() async {
+        if let value = try? await runtime.request("api/v1/sandbox-resources") {
+            resourceRequests = value["requests"] as? [[String: Any]] ?? []
+            finishResourceRequests(); bridgeWake?()
+        }
+    }
+
+    func finishResourceRequests() {
+        for request in resourceRequests {
+            guard let key = request["id"] as? String else { continue }
+            if request["phase"] as? String == "ready" {
+                resourceContinuations.removeValue(forKey: key)?()
+            }
+            if request["phase"] as? String == "cancelled" {
+                resourceContinuations.removeValue(forKey: key)
+            }
+        }
+    }
+
+    func confirmResourceDownload(_ key: String) {
+        guard let request = resourceRequests.first(where: { $0["id"] as? String == key }) else { return }
+        let bytes = (request["missing_bytes"] as? NSNumber)?.int64Value ?? 0
+        let alert = NSAlert(); alert.messageText = L.text("resources.title")
+        alert.informativeText = L.format(
+            "resources.permission",
+            [
+                String(request["bundle_id"] as? String ?? ""),
+                ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file),
+            ]
+        )
+        alert.addButton(withTitle: L.text("resources.authorize")); alert
+            .addButton(withTitle: L.text("resources.cancel"))
+        alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
+            self?.resourceCommand(key, reply == .alertFirstButtonReturn ? "authorize" : "cancel")
+        }}
+    }
+
+    func resourceCommand(_ key: String, _ operation: String) {
+        Task {
+            do { _ = try await runtime.request(
+                "api/v1/sandbox-resources",
+                body: ["action": operation, "request_id": key]
+            ) } catch { sandboxError = error.localizedDescription }
+            await refreshResourceRequests(); refreshSandboxes(); bridgeWake?()
+        }
+    }
+
+    func showResourceCache() {
+        Task {
+            do {
+                let value = try await runtime.request("api/v1/sandbox-resources")
+                let rows = (value["cache"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
+                let alert = NSAlert(); alert.messageText = L.text("resources.cache")
+                alert.informativeText = rows.map { row in
+                    let refs = row["references"] as? [String] ?? []
+                    let bytes = (row["disk_bytes"] as? NSNumber)?.int64Value ?? 0
+                    return "\(row["id"] as? String ?? "") · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) · \(refs.joined(separator: ", "))"
+                }.joined(separator: "\n")
+                let candidates = rows
+                    .filter { ($0["present"] as? Bool == true) && (($0["references"] as? [String])?.isEmpty == true) }
+                let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 28))
+                picker.addItems(withTitles: candidates.map { $0["id"] as? String ?? "" })
+                if !candidates
+                    .isEmpty
+                {
+                    alert.accessoryView = picker; alert.addButton(withTitle: L.text("resources.remove"))
+                }
+                alert.addButton(withTitle: L.text("ai.close"))
+                alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
+                    guard !candidates.isEmpty, reply == .alertFirstButtonReturn, let self else { return }
+                    let id = candidates[picker.indexOfSelectedItem]["id"] as? String ?? ""
+                    Task { do { _ = try await self.runtime.request(
+                        "api/v1/sandbox-resources",
+                        body: ["action": "prune", "resource_id": id]
+                    ) } catch { self.sandboxError = error.localizedDescription } }
+                }}
+            } catch { sandboxError = error.localizedDescription }
         }
     }
 
@@ -757,6 +859,11 @@ var bridge: PotBridge?
                 let value = try await runtime.request("api/v1/sandboxes")
                 sandboxItems = value["items"] as? [[String: Any]] ?? []
                 sandboxDefault = value["selected"] as? String ?? "default"
+                resourceRequests = value["resource_requests"] as? [[String: Any]] ?? []
+                finishResourceRequests()
+                if let current = selectedSandbox(), let capabilities = current["capabilities"] as? [String: Any] {
+                    localRuntime?.desktopSupported = capabilities["desktop"] as? Bool == true
+                }
                 bridgeWake?()
             } catch { sandboxError = error.localizedDescription; bridgeWake?() }
         }
@@ -765,11 +872,13 @@ var bridge: PotBridge?
     func chooseSandbox(_ id: String) {
         guard let localRuntime, id != localRuntime.sandboxID else { return }
         viewer = [:]; localPhase = "unknown"; desktopAttempt = nil; sandboxError = ""
-        localRuntime.selectSandbox(id); bridgeWake?()
+        let item = sandboxItems.first { $0["id"] as? String == id }
+        let capabilities = item?["capabilities"] as? [String: Any]
+        localRuntime.selectSandbox(id, desktop: capabilities?["desktop"] as? Bool == true); bridgeWake?()
     }
 
     @objc func startSandbox() {
-        guard let localRuntime, !sandboxBusy else { return }
+        guard let localRuntime, localRuntime.desktopSupported, !sandboxBusy else { return }
         let target = localRuntime.sandboxID
         let generation = localRuntime.viewGeneration
         desktopAttempt = target
@@ -777,6 +886,16 @@ var bridge: PotBridge?
         localRuntime.send("desktop") { [weak self] response in
             guard let self else { return }
             self.sandboxBusy = false
+            if let result = response["result"] as? [String: Any], let key = result["resource_request_id"] as? String {
+                Task {
+                    await self.refreshResourceRequests()
+                    self
+                        .resourceContinuations[key] = { [weak self] in
+                            self?.desktopAttempt = nil; self?.startSandbox()
+                        }
+                    self.confirmResourceDownload(key)
+                }
+            }
             if let error = response["error"] as? String {
                 self.sandboxError = error
             }
@@ -825,10 +944,10 @@ var bridge: PotBridge?
         }
         settings.environment = state; settings.refreshStatus()
         runtime.root = localRuntime?.root; runtime.ip = "127.0.0.1"
+        if Date().timeIntervalSince(sandboxRefreshAt) > 1 {
+            refreshSandboxes()
+        }
         if page == 1 {
-            if Date().timeIntervalSince(sandboxRefreshAt) > 3 {
-                refreshSandboxes()
-            }
             if localPhase == "running", desktopAttempt != localRuntime?.sandboxID, !sandboxBusy {
                 startSandbox()
             }
@@ -840,7 +959,7 @@ var bridge: PotBridge?
         webDark = nil; layout(); localizeWeb()
         if let address = localRuntime?.loaded, !address.isEmpty,
            let expected = URL(string: address), web.url?.host == expected.host,
-           web.url?.port == expected.port, web.url?.fragment == expected.fragment
+           web.url?.port == expected.port, web.url?.path == expected.path, web.url?.fragment == expected.fragment
         {
             localRuntime?.displayReady = true
             web.isHidden = page != 1
@@ -850,7 +969,7 @@ var bridge: PotBridge?
     func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, let loaded = localRuntime?.loaded, let expected = URL(string: loaded),
               let actual = message.frameInfo.request.url, actual.host == expected.host, actual.port == expected.port,
-              actual.scheme == expected.scheme, actual.fragment == expected.fragment,
+              actual.scheme == expected.scheme, actual.path == expected.path, actual.fragment == expected.fragment,
               let body = message.body as? [String: Any],
               let action = body["action"] as? String else { return }
         switch action {
@@ -1051,6 +1170,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
             "viewer": bridge.viewer,
             "phase": bridge.localPhase,
             "sandboxes": bridge.sandboxItems,
+            "resource_requests": bridge.resourceRequests,
             "sandbox_view": bridge.localRuntime?.sandboxID ?? "default",
             "sandbox_default": bridge.sandboxDefault,
             "sandbox_busy": bridge.sandboxBusy,
@@ -1071,6 +1191,11 @@ private var bridgeWake: (@convention(c) () -> Void)?
               let action = v["action"] as? String else { return }
         let settings = bridge.settings
         switch action {
+        case "resource-command": bridge.resourceCommand(
+                v["request_id"] as? String ?? "",
+                v["operation"] as? String ?? ""
+            )
+        case "resource-cache": bridge.showResourceCache()
         case "provider-period": settings.providerPeriod = v["period"] as? String ?? "none"
         case "provider-auto": settings.providerAutoResume.toggle()
         case "provider-save": settings.saveProviderAllowance(tokens: v["tokens"] as? String ?? "")

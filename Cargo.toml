@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["app", "protocol", "core", "storage", "driver", "agent", "tool-executor", "gateway", "runtime", "server", "eval", "mobile", "ui", "sandbox", "sandbox-providers/linux"]
+members = ["resource", "sandbox-images", "app", "protocol", "core", "storage", "driver", "agent", "tool-executor", "gateway", "runtime", "server", "eval", "mobile", "ui", "sandbox", "sandbox-providers/linux", "sandbox-providers/macos"]
 default-members = ["app"]
 
 [workspace.package]
@@ -11,8 +11,11 @@ authors = ["JJy <jjyruby@gmail.com>"]
 repository = "https://github.com/jjyr/pot"
 
 [workspace.dependencies]
+pot-resource = { path = "resource" }
+pot-sandbox-images = { path = "sandbox-images" }
 pot-sandbox = { path = "sandbox" }
 pot-sandbox-linux = { path = "sandbox-providers/linux" }
+pot-sandbox-macos = { path = "sandbox-providers/macos" }
 pot-ui = { path = "ui" }
 pot-protocol = { path = "protocol" }
 pot-core = { path = "core" }

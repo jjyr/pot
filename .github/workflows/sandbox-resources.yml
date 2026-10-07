@@ -1,0 +1,42 @@
+name: Sandbox resources
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Resource tag already committed in the embedded catalog
+        required: true
+        default: sandbox-resources-v0.0.1
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: pot-sandbox-resources
+  cancel-in-progress: false
+jobs:
+  resources:
+    runs-on: [self-hosted, macOS, ARM64, pot-release]
+    timeout-minutes: 120
+    env:
+      RESOURCE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+        with:
+          version: 2026.6.0
+      - name: Build and verify separate resource assets
+        run: |
+          mise run prepare
+          mise run check:swift
+          mise run build:sandbox-image
+          mise exec -- python scripts/export-sandbox-resources --tag "$RESOURCE_TAG" --output "$RUNNER_TEMP/pot-sandbox-resources"
+      - name: Publish immutable resources
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Never replace an existing resource release or silently change client hashes.
+          gh release create "$RESOURCE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --draft --latest=false --title "$RESOURCE_TAG" --notes "SHA-256 pinned Linux Sandbox resources." \
+            "$RUNNER_TEMP/pot-sandbox-resources"/*
+          gh release edit "$RESOURCE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false

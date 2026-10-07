@@ -138,3 +138,9 @@ The native Pot menu includes About Pot with version, developer, MIT, project lin
 and Rust dependency notices. Bundling enforces the cargo-about policy and embeds
 its report. See [About and license policy](licenses-and-about.md) for scope,
 reviewed MPL dependencies, and CI checks.
+
+macOS prepared-instance setup and qualification limits: [macOS Sandbox](macos-sandbox.md). Non-VM checks: `mise exec -- python scripts/tests/macos-provider.py` and `mise exec -- python scripts/tests/macos-helper.py --helper .local/d1/helper-build/release/PotMacOSHelper`.
+
+## Separate Sandbox resources
+
+Client bundling does not build or embed Linux Sandbox resources. Use `mise run build:sandbox-image`, then `mise exec -- python scripts/export-sandbox-resources --update-catalog` before client compilation. `mise run export:sandbox-resources` checks an export against the embedded catalog. Offline VM fixtures also require `mise exec -- cargo build -p pot-sandbox-images` to provide the verified importer. See [resource delivery](sandbox-resources.md) for tag publication, cache/approval behavior and pinned-instance compatibility.

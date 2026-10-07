@@ -7,6 +7,9 @@ enum L {
     static var locale: String = initialLocale()
 
     static func phase(_ phase: String) -> String {
+        if phase == "unavailable" {
+            return text("web.unavailable")
+        }
         let key = ["starting", "running", "stopping", "stopped", "failed"].contains(phase) ? phase : "unknown"
         return text("sandbox.phase." + key)
     }

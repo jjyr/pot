@@ -433,6 +433,9 @@ async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
         "/api/v1/terminals",
         "/api/v1/access",
         "/api/v1/execution",
+        "/api/v1/sandbox-resources",
+        "/api/v1/desktop/sessions",
+        "/api/v1/desktop/sessions/close",
     ] {
         assert_eq!(
             f.request(false, Method::GET, path, Some(&session), Value::Null, None)

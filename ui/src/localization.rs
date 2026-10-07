@@ -100,6 +100,7 @@ impl Catalog {
             "stopping" => self.text("sandbox.phase.stopping"),
             "stopped" => self.text("sandbox.phase.stopped"),
             "failed" => self.text("sandbox.phase.failed"),
+            "unavailable" => self.text("web.unavailable"),
             _ => self.text("sandbox.phase.unknown"),
         }
     }

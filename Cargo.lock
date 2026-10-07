@@ -2240,6 +2240,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6084,6 +6094,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pot-resource"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "futures",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "pot-runtime"
 version = "0.1.0"
 dependencies = [
@@ -6099,8 +6127,11 @@ dependencies = [
  "pot-driver",
  "pot-gateway",
  "pot-protocol",
+ "pot-resource",
  "pot-sandbox",
+ "pot-sandbox-images",
  "pot-sandbox-linux",
+ "pot-sandbox-macos",
  "pot-storage",
  "pot-tool-executor",
  "reqwest",
@@ -6125,8 +6156,19 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tokio",
- "toml 0.8.23",
  "uuid",
+]
+
+[[package]]
+name = "pot-sandbox-images"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pot-resource",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -6137,7 +6179,25 @@ dependencies = [
  "futures",
  "pot-sandbox",
  "reqwest",
+ "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "uuid",
+]
+
+[[package]]
+name = "pot-sandbox-macos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "pot-sandbox",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
 ]
@@ -6160,6 +6220,7 @@ dependencies = [
  "pot-runtime",
  "pot-sandbox",
  "pot-sandbox-linux",
+ "pot-sandbox-macos",
  "qrcode",
  "rcgen",
  "reqwest",
@@ -8159,6 +8220,17 @@ dependencies = [
  "core-foundation-sys",
  "libc",
  "objc",
+]
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
 ]
 
 [[package]]
@@ -10191,6 +10263,16 @@ dependencies = [
  "rusticata-macros",
  "thiserror 2.0.21",
  "time",
+]
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix",
 ]
 
 [[package]]

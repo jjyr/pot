@@ -1,12 +1,12 @@
 # Sandbox provider redesign
 
-Updated: 2026-10-07. Target design for the first-phase Linux and macOS environments. **Linux architecture extraction implemented; macOS pending.** Current code provides Linux on macOS; [architecture](architecture.md) describes delivered behavior. This page defines provider contracts; [Agent/Sandbox design](agent-sandbox-design.md) defines authority and task placement. Android, iOS and Windows remain future extensions, not prerequisites.
+Updated: 2026-10-07. Target design for the first-phase Linux and macOS environments. **Linux extraction and prepared-instance macOS integration implemented; macOS VM qualification pending.** Current qualified behavior provides Linux on macOS; [architecture](architecture.md) describes delivered behavior. This page defines provider contracts; [Agent/Sandbox design](agent-sandbox-design.md) defines authority and task placement. Android, iOS and Windows remain future extensions, not prerequisites.
 
 ## Delivered extraction and remaining design
 
-`pot-sandbox` owns inventory, selection, lifecycle/readiness, leases, owner/turn/epoch scopes, session binding, private JSON receipts and unknown-outcome recovery. `pot-sandbox-linux` owns helper IPC and authenticated guest HTTP. Server explicitly registers it; production Runtime has no concrete Provider dependency. Legacy definitions default to the Linux Provider; old product receipts are imported once without replaying unknown operations. Durable Manager epochs advance on reopen or observed Helper generation change.
+`pot-sandbox` owns inventory, selection, lifecycle/readiness, leases, owner/turn/epoch scopes, session binding, private JSON receipts and unknown-outcome recovery. `pot-sandbox-linux` owns helper IPC and authenticated guest HTTP. `pot-sandbox-macos` implements owner-enrolled VZ instances, pinned TLS transport and exclusive session closure in a persistent VM; see [enrollment and limits](macos-sandbox.md). Server explicitly registers it; production Runtime has no concrete Provider dependency. Legacy definitions default to the Linux Provider; old product receipts are imported once without replaying unknown operations. Durable Manager epochs advance on reopen or observed Helper generation change.
 
-Storage currently uses atomic private JSON under `product/`, not the proposed injected SQLite store. Source `TemplateDescriptor` parsing and Linux build metadata are delivered; installed template catalogs, allocation reservations, artifact transfer, event subscriptions and display arbitration below remain design targets. Provider calls currently use a bounded lifecycle protocol plus the existing validated guest JSON protocol. This page distinguishes that delivered slice from the broader target.
+Storage currently uses atomic private JSON under `product/`, not the proposed injected SQLite store. Source `TemplateDescriptor` parsing and Linux build metadata are delivered; installed template catalogs, allocation reservations, artifact transfer, event subscriptions and general display/automation adapters below remain design targets. Ticket-scoped RFB display arbitration is delivered as described at the end of this page. Provider calls currently use a bounded lifecycle protocol plus the existing validated guest JSON protocol. This page distinguishes that delivered slice from the broader target.
 
 ## Scope and architectural decision
 
@@ -117,7 +117,7 @@ Use Manager contract checks with a fake Provider and run the same relevant confo
 
 Keep image definitions separate from Provider Rust implementation. Put maintained source recipes under a top-level `sandbox-images/` tree; Providers consume descriptors and implement build/import/prepare mechanics, while Manager maintains the installed template catalog. The Linux inputs have moved to `sandbox-images/linux/default/`; `scripts/build-image` consumes the descriptor and fingerprints it with the recipe inputs.
 
-Source layout (Linux created; macOS planned):
+Source layout (both created; macOS is a bootstrap recipe, not a ready VM):
 
 ```text
 sandbox-images/
@@ -230,7 +230,7 @@ A display may have several observers but only one input controller. Human takeov
 Cancellation must separately report `dispatch_stopped`, `inflight_settled`, `scope_cleanup_confirmed` and effect outcome. Releasing a lease or closing a socket is not proof of cancellation. Already launched applications and submitted actions may have persistent effects; do not infer rollback from a clean process stop.
 
 - Linux retains scoped cgroup cleanup and shared-VM cancellation.
-- macOS requires verified native containment. Until then an exclusive-owner provider may terminate its dedicated VM to confirm no scope work continues, including normal scope closure when complete cleanup cannot be proved; this fallback must be declared in its cancellation policy and never affect another owner.
+- macOS uses an explicit session-closure policy for persistent development VMs: expire/terminate managed command sessions while keeping the VM and application/background state running. This is not native process containment. Failed closure quarantines ownership; explicit stop remains available for owner recovery.
 
 
 Normal end-of-turn cleanup confirms the automation queue is drained and releases control; command processes follow their stricter scope policy. A detached automation service is not implicitly supported. Unconfirmed cleanup quarantines the environment and blocks a new controller until explicit recovery establishes settlement or VM termination. No automatic command, tap, install or submit replay after unknown outcomes.
@@ -302,3 +302,15 @@ Linux dedicated allocation can be qualified alongside A without blocking the one
 
 
 Acceptance must include task/turn/epoch mismatches; worker lifecycle/target/RPC denial; Host endpoint/secret access attempts; concurrent owner queueing; mixed-platform task bindings; process or gesture timeout; provider crash/disconnect; restart/restore without replay; artifact retention; screen coordinate rotation; takeover; stopped/no-provider chat; App and standalone lifecycle. Record actual cold install/startup/memory/disk results separately. This document changes design only and establishes no runtime support or measured isolation claim.
+
+## Delivered desktop sessions (2026-10-07)
+
+`pot-sandbox` now owns typed `DesktopCapabilities` (viewing, input, clipboard, protocol and optional browser launch), opaque one-hour `DesktopSession` tickets, boot-epoch checks, exclusive control, revocation and a bounded RFB 3.8/None input gate. `Provider::prepare_desktop` and `open_desktop` supply readiness and a private byte stream. Provider-specific endpoints and credentials stay inside their crates. Closing a viewer does not close an execution scope or stop/reset a VM. Viewer tickets are ephemeral and do not survive backend restart.
+
+Owner-authorized `POST /api/v1/desktop/sessions` creates a ticket. Server exposes `/desktop/<ticket>/` with authenticated-by-ticket WebSocket/status/control routes; native App obtains tickets through in-process authorization. The ticket grants access only to that desktop and expires after one hour. It is itself a secret, although it contains no Guest address/password or Runtime bearer credential. Responses disable caching and referrers; browser requests require same Origin. Worker credentials and mobile public routes cannot create/access desktops. The existing noVNC page uses pinned Host assets rather than loading Guest credentials into WKWebView.
+
+Input is gated on the Server, independently of noVNC's `viewOnly` flag. Control changes are serialized against forwarded input. Partial packets spanning a control change disconnect; unknown RFB extensions fail closed. The gateway releases tracked keys/buttons before confirming normal control return; competing viewers wait for that release. This confirms writes to the private transport, not a universal remote OS input fence. Guest-local automation/background processes are outside this viewer arbitration. Server shutdown, explicit stop/delete, expiry, ticket revocation and observed boot changes invalidate access. A broken transport cannot establish successful remote key release.
+
+Linux adapts the existing authenticated Guest WebSocket broker, retains browser launch/metrics/clipboard, and keeps its Guest-side gate as an additional boundary. macOS tunnels only Guest `127.0.0.1:5900` through the pinned-TLS executor after explicit owner opt-in; clipboard and browser launch are disabled. Native VZ display windows are separate from this path. See [macOS setup](macos-sandbox.md#optional-novnc-desktop) for the required VNC service and unqualified scope.
+
+Resource delivery now follows [the implemented resource contract](sandbox-resources.md): Runtime owns download permission and prepares paths; `pot-sandbox` remains independent of catalog/download implementation. Large Linux resources and macOS media are not embedded in the product.

@@ -714,5 +714,21 @@
   "about.license": "MIT License",
   "about.project": "Project on GitHub",
   "about.rust-licenses": "Rust dependency licenses",
-  "menu.about-pot": "About Pot"
+  "menu.about-pot": "About Pot",
+  "ui.command-files-environment": "This environment supports command and file tasks. Desktop access is not available yet.",
+  "resources.title": "Sandbox resources",
+  "resources.awaiting-authorization": "Download permission required",
+  "resources.downloading": "Downloading",
+  "resources.verifying": "Verifying SHA-256",
+  "resources.extracting": "Importing resources",
+  "resources.initializing": "Initializing Sandbox",
+  "resources.interrupted": "Interrupted; continue to download remaining resources",
+  "resources.failed": "Preparation failed",
+  "resources.authorize": "Download and continue",
+  "resources.retry": "Retry download",
+  "resources.continue": "Continue download",
+  "resources.cancel": "Cancel",
+  "resources.cache": "Resource cache",
+  "resources.remove": "Remove unused resource",
+  "resources.permission": "Download {0} from Pot GitHub Releases ({1})? Files are verified against the embedded SHA-256 catalog."
 }

@@ -19,6 +19,10 @@ def package(app, output, version):
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     if info.get("CFBundleShortVersionString") != version:
         raise SystemExit("Bundle version does not match release version")
+    runtime = app / "Contents/Resources/runtime"
+    for name in ["vmlinux", "init-image", "sandbox-image", "sandbox-image.json"]:
+        if (runtime / name).exists():
+            raise SystemExit("Release must not embed Sandbox resources: " + name)
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"Pot-{version}-arm64.zip"
     archive.unlink(missing_ok=True)
