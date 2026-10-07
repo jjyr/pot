@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix="pot-macos-test-") as temporary:
     try:
         rejected("/health")
         rejected("/health", token="wrong")
-        assert request("/health", token=broker.TOKEN)["protocol"] == "pot-macos-executor-v2"
+        assert request("/health", token=broker.TOKEN)["protocol"] == "pot-macos-executor-v3"
         rejected("/desktop-stream")
         rejected("/desktop-ready", token="wrong")
         connection = LocalGuestConnection(

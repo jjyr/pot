@@ -56,10 +56,13 @@ impl Manifest {
         ensure!(
             m.schema_version == 1
                 && m.provider == PROVIDER_ID
-                && m.bootstrap == "pot-macos-executor-v2"
                 && !m.guest_build.is_empty()
                 && !m.xcode_version.is_empty(),
             "Incompatible macOS bundle"
+        );
+        ensure!(
+            m.bootstrap == "pot-macos-executor-v3",
+            "Update the macOS guest bootstrap to pot-macos-executor-v3 and re-enroll the prepared VM"
         );
         ensure!(
             m.guest_ip.is_private(),
@@ -333,7 +336,7 @@ impl Provider for MacOSProvider {
                 bytes.extend_from_slice(&chunk);
             }
             let value: Value = serde_json::from_slice(&bytes)?;
-            Ok(value["ready"] == true && value["protocol"] == "pot-macos-executor-v2")
+            Ok(value["ready"] == true && value["protocol"] == "pot-macos-executor-v3")
         })
     }
     fn request<'a>(

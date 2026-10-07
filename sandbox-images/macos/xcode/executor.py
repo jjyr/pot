@@ -301,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/desktop-stream":
             self.desktop_stream()
         elif self.path == "/health":
-            self.respond(200, {"ready": True, "protocol": "pot-macos-executor-v2"})
+            self.respond(200, {"ready": True, "protocol": "pot-macos-executor-v3"})
         else:
             self.respond(404, {})
 

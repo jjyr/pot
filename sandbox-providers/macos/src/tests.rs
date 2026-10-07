@@ -18,13 +18,26 @@ fn fixture() -> tempfile::TempDir {
         )
         .unwrap();
     }
-    pot_sandbox::private_json(&dir.path().join("manifest.json"),&json!({"schema_version":1,"provider":PROVIDER_ID,"guest_build":"test","xcode_version":"test","bootstrap":"pot-macos-executor-v2","guest_ip":"192.168.64.3","mac_address":"02:00:00:00:00:01"})).unwrap();
+    pot_sandbox::private_json(&dir.path().join("manifest.json"),&json!({"schema_version":1,"provider":PROVIDER_ID,"guest_build":"test","xcode_version":"test","bootstrap":"pot-macos-executor-v3","guest_ip":"192.168.64.3","mac_address":"02:00:00:00:00:01"})).unwrap();
     dir
 }
 #[test]
 fn enrollment_requires_complete_private_platform_and_never_overwrites() {
     let source = fixture();
     assert!(Manifest::load(source.path()).is_ok());
+    let manifest_path = source.path().join("manifest.json");
+    let original: Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    let mut old = original.clone();
+    old["bootstrap"] = json!("pot-macos-executor-v2");
+    pot_sandbox::private_json(&manifest_path, &old).unwrap();
+    assert!(
+        Manifest::load(source.path())
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("Update the macOS guest bootstrap")
+    );
+    pot_sandbox::private_json(&manifest_path, &original).unwrap();
     let root = tempfile::tempdir().unwrap();
     enroll(root.path(), "mac-dev", source.path()).unwrap();
     assert!(enroll(root.path(), "mac-dev", source.path()).is_err());

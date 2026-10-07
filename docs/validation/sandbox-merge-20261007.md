@@ -1,6 +1,6 @@
 # Sandbox Provider / executor merge acceptance — 2026-10-07
 
-Merged main `2d72194484674562b1a585f17d95fe645f5a4f72` into PR #22. The Provider/resource split and persistent macOS implementation coexist with main's PTY, cross-turn sessions and shell snapshots. Runtime supplies the Agent epoch; `pot-sandbox` owns scope gates, inspection, parking, idle reconciliation and closure. Providers transport authenticated inspection; macOS retains its explicit session-closure policy.
+Merged main `2d72194484674562b1a585f17d95fe645f5a4f72` into PR #22. The Provider/resource split and persistent macOS implementation coexist with main's PTY, cross-turn sessions and shell snapshots. Runtime supplies the Agent epoch; `pot-sandbox` owns scope gates, inspection, parking, idle reconciliation and closure. Providers transport authenticated inspection; macOS retains its explicit session-closure policy. macOS bootstrap is now `pot-macos-executor-v3`; older manifests are rejected before execution and require reprovisioning with the current bootstrap.
 
 ## Verification
 
