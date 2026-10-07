@@ -250,9 +250,15 @@ fn pipe_input_survives_invalid_resize_and_completed_output_can_be_read_later() {
     assert_eq!(result["stdout"], "hello");
     let open = r.call(
         "exec_command",
-        json!({"cmd":"sleep 0.05; printf delayed","login":false,"yield_time_ms":1}),
+        json!({"cmd":"while ! test -e release; do sleep 0.01; done; printf delayed","login":false,"yield_time_ms":1}),
     );
-    std::thread::sleep(Duration::from_millis(100));
+    assert!(open["session_id"].is_string(), "{open}");
+    std::fs::write(r.root.join("release"), "").unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while r.call("inspect", json!({}))["active"] == true {
+        assert!(std::time::Instant::now() < deadline, "process did not exit");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert_eq!(r.exec("true")["exit_code"], 0);
     let result = r.call("write_stdin", json!({"session_id":open["session_id"]}));
     assert_eq!(result["stdout"], "delayed");
