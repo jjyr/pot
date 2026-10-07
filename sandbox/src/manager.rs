@@ -26,7 +26,6 @@ pub struct AccessGrant {
 pub struct Sandbox {
     pub id: String,
     pub name: String,
-    #[serde(default = "crate::provider::default_provider")]
     pub provider: String,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -82,6 +81,7 @@ pub struct Manager {
     sessions: Mutex<BTreeMap<String, String>>,
     lifecycle: tokio::sync::Mutex<()>,
     providers: BTreeMap<String, Arc<dyn Provider>>,
+    default_provider: String,
     call_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     instance_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     generations: Mutex<BTreeMap<String, (u64, Option<u64>)>>,
@@ -100,6 +100,10 @@ impl Drop for Lease {
 }
 impl Manager {
     pub fn open(data: &std::path::Path, providers: Vec<Arc<dyn Provider>>) -> Result<Self> {
+        let default_provider = providers
+            .first()
+            .map(|p| p.descriptor().id)
+            .unwrap_or_else(crate::provider::default_provider);
         let mut registered = BTreeMap::new();
         for provider in providers {
             let name = provider.descriptor().id;
@@ -117,7 +121,7 @@ impl Manager {
             let item = Sandbox {
                 id: "default".into(),
                 name: "Linux".into(),
-                provider: crate::LINUX_PROVIDER.into(),
+                provider: default_provider.clone(),
             };
             Inventory {
                 selected: item.id.clone(),
@@ -157,6 +161,7 @@ impl Manager {
             sessions: Mutex::new(BTreeMap::new()),
             lifecycle: tokio::sync::Mutex::new(()),
             providers: registered,
+            default_provider,
             call_locks: Mutex::new(BTreeMap::new()),
             instance_locks: Mutex::new(BTreeMap::new()),
             generations: Mutex::new(generations),
@@ -447,7 +452,7 @@ impl Manager {
                     .unwrap_or(Value::Null)
             });
             let descriptor = self.describe(&item.id).ok();
-            rows.push(json!({"config":config,"id":item.id,"name":item.name,"provider":item.provider,"os":descriptor.as_ref().map(|d|d.os.as_str()),"capabilities":descriptor.map(|d|d.capabilities),"desktop_capabilities":self.provider(&item.id).map(|p|p.desktop_capabilities()).ok(),"scope_cleanup_policy":self.provider(&item.id).map(|p|p.scope_cleanup_policy()).ok(),"active_leases":active,"unsettled_operations":self.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":display_state(&state)}));
+            rows.push(json!({"config":config,"id":item.id,"name":item.name,"provider":item.provider,"os":descriptor.as_ref().map(|d|d.os.as_str()),"host_os":descriptor.as_ref().map(|d|d.host_os.as_str()),"engine":descriptor.as_ref().map(|d|d.engine.as_str()),"capabilities":descriptor.map(|d|d.capabilities),"desktop_capabilities":self.provider(&item.id).map(|p|p.desktop_capabilities()).ok(),"scope_cleanup_policy":self.provider(&item.id).map(|p|p.scope_cleanup_policy()).ok(),"active_leases":active,"unsettled_operations":self.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":display_state(&state)}));
         }
         json!({"selected":selected,"items":rows})
     }
@@ -505,7 +510,7 @@ impl Manager {
                 !name.is_empty() && name.chars().count() <= 80,
                 "Name must contain 1–80 characters"
             );
-            let provider_id = args["provider"].as_str().unwrap_or(crate::LINUX_PROVIDER);
+            let provider_id = args["provider"].as_str().unwrap_or(&self.default_provider);
             anyhow::ensure!(
                 self.providers.contains_key(provider_id),
                 "Sandbox Provider unavailable"
@@ -530,7 +535,7 @@ impl Manager {
                             name: name.into(),
                             provider: args["provider"]
                                 .as_str()
-                                .unwrap_or(crate::LINUX_PROVIDER)
+                                .unwrap_or(&self.default_provider)
                                 .into(),
                         },
                     );

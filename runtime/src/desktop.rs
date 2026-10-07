@@ -9,6 +9,9 @@ use axum::{
 };
 use futures::SinkExt;
 use std::time::Duration;
+/// Attached only by the authenticated browser boundary, never by HTTP headers.
+#[derive(Clone)]
+pub struct DesktopAccessGuard(pub std::sync::Arc<dyn Fn() -> bool + Send + Sync>);
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub async fn open(
@@ -176,6 +179,7 @@ pub async fn connect(
     h: HeaderMap,
     Path(id): Path<String>,
     ws: WebSocketUpgrade,
+    guard: Option<axum::Extension<DesktopAccessGuard>>,
 ) -> ApiResult<Response> {
     ticket(&s, &h, &id)?;
     let upstream = s.sandboxes.desktop_stream(&id).await.map_err(|_| {
@@ -191,13 +195,14 @@ pub async fn connect(
         .on_failed_upgrade(move |_| failed_service.sandboxes.desktop_disconnected(&failed_id))
         .protocols(["binary"])
         .max_message_size(4 * 1024 * 1024)
-        .on_upgrade(move |socket| relay(s, id, socket, upstream)))
+        .on_upgrade(move |socket| relay(s, id, socket, upstream, guard.map(|g| g.0))))
 }
 async fn relay(
     s: Service,
     id: String,
     mut socket: WebSocket,
     mut upstream: pot_sandbox::DesktopStream,
+    access: Option<DesktopAccessGuard>,
 ) {
     let mut gate = pot_sandbox::RfbGate::default();
     let mut revision = s.sandboxes.desktop_revision(&id).unwrap_or(0);
@@ -206,7 +211,7 @@ async fn relay(
     loop {
         tokio::select! {
             _ = poll.tick() => {
-                if s.stopping() || s.sandboxes.desktop_validate(&id).await.is_err() { break; }
+                if access.as_ref().is_some_and(|g| !(g.0)()) || s.stopping() || s.sandboxes.desktop_validate(&id).await.is_err() { break; }
                 let _guard = s.sandboxes.desktop_serialization().await;
                 let Ok(current) = s.sandboxes.desktop_revision(&id) else { break; };
                 if current != revision {
@@ -220,6 +225,7 @@ async fn relay(
                 match data { Ok(n) if n>0 => { if !matches!(tokio::time::timeout(Duration::from_secs(5),socket.send(WsMessage::Binary(buf[..n].to_vec().into()))).await,Ok(Ok(()))) { break; } }, _=>break }
             }
             message = socket.recv() => {
+                if access.as_ref().is_some_and(|g| !(g.0)()) { break; }
                 let data = match message { Some(Ok(WsMessage::Binary(data)))=>data, Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_)))=>continue, _=>break };
                 let _guard = s.sandboxes.desktop_serialization().await;
                 let Ok(current) = s.sandboxes.desktop_revision(&id) else { break; };
@@ -304,8 +310,10 @@ mod tests {
     impl Provider for Display {
         fn descriptor(&self) -> ProviderDescriptor {
             ProviderDescriptor {
-                id: pot_sandbox::LINUX_PROVIDER.into(),
+                id: "test.display".into(),
                 os: "test-display".into(),
+                host_os: "test".into(),
+                engine: "test".into(),
                 capabilities: Capabilities {
                     shell: true,
                     files: true,

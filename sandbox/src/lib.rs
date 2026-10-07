@@ -9,8 +9,8 @@ mod provider;
 pub use files::private_json;
 pub use manager::{AccessGrant, Lease, Manager};
 pub use provider::{
-    Capabilities, LINUX_PROVIDER, PreparedResources, Provider, ProviderContext, ProviderDescriptor,
-    ScopeCleanupPolicy,
+    Capabilities, LINUX_PODMAN_PROVIDER, MACOS_APPLE_CONTAINER_PROVIDER, PreparedResources,
+    Provider, ProviderContext, ProviderDescriptor, ScopeCleanupPolicy,
 };
 
 #[cfg(test)]

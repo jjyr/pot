@@ -3,6 +3,8 @@
 
 from pathlib import Path
 import json
+import hashlib
+import tarfile
 import gzip
 import os
 import shutil
@@ -62,21 +64,41 @@ dist = ROOT / "mobile/dist"
 dist.mkdir(parents=True, exist_ok=True)
 for asset in (ROOT / "mobile/web").iterdir():
     shutil.copy2(asset, dist / asset.name)
-# Opaque cream background: let the OS apply its own Home Screen mask.
-shutil.copy2(ROOT / "app/assets/PotHomeScreen.png", dist / "icon.png")
-for size in [192, 512]:
+# Ship the pinned viewer JS with standalone Web releases too.
+archive = ROOT / ".local/container-image/novnc-1.7.0.tar.gz"
+archive.parent.mkdir(parents=True, exist_ok=True)
+if not archive.exists():
     subprocess.run(
         [
-            "sips",
-            "-z",
-            str(size),
-            str(size),
-            ROOT / "app/assets/PotHomeScreen.png",
-            "--out",
-            dist / f"icon-{size}.png",
+            "curl",
+            "--fail",
+            "--location",
+            "--retry",
+            "2",
+            "https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz",
+            "-o",
+            archive,
         ],
         check=True,
     )
+if (
+    hashlib.sha256(archive.read_bytes()).hexdigest()
+    != "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6"
+):
+    raise SystemExit("noVNC checksum mismatch")
+viewer = dist / "desktop-assets"
+shutil.rmtree(viewer, ignore_errors=True)
+with tarfile.open(archive) as tar:
+    for member in tar.getmembers():
+        relative = Path(*Path(member.name).parts[1:])
+        if member.isfile() and relative.suffix == ".js" and ".." not in relative.parts:
+            dest = viewer / relative
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(tar.extractfile(member).read())
+# Opaque cream background: let the OS apply its own Home Screen mask.
+shutil.copy2(ROOT / "app/assets/PotHomeScreen.png", dist / "icon.png")
+for size in [192, 512]:
+    shutil.copy2(ROOT / f"app/assets/PotHomeScreen-{size}.png", dist / f"icon-{size}.png")
 shutil.copy2(ROOT / "mobile/fonts/IBMPlexSans-Regular.ttf", dist / "font.ttf")
 shutil.copy2(ROOT / "mobile/fonts/OFL.txt", dist / "OFL.txt")
 target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))

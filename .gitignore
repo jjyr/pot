@@ -3,6 +3,7 @@
 .local/
 .cache/
 .playwright-cli/
+output/playwright/
 *.local
 
 # Rust, Swift, and build output (keep dependency lockfiles)

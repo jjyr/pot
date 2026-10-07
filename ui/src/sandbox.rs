@@ -27,6 +27,7 @@ pub fn render(
         .and_then(|item| item["name"].as_str())
         .unwrap_or("Sandbox");
     let desktop_supported = current.is_none_or(|item| item["capabilities"]["desktop"] != false);
+    let desktop_access = controls || state["desktop_access"] == true;
     let phase = state["phase"].as_str().unwrap_or("unknown");
     let connected = phase == "running" && state["viewer"]["connected"] == true;
     let human = state["viewer"]["human"] == true;
@@ -285,7 +286,7 @@ pub fn render(
                     .child(hint(
                         if !desktop_supported {
                             catalog.text("ui.command-files-environment")
-                        } else if !controls {
+                        } else if !desktop_access {
                             catalog.text("mobile.desktop-access-awaits-permission-qualification")
                         } else if phase == "running" {
                             catalog.text(if pending {
@@ -303,7 +304,7 @@ pub fn render(
                             .primary()
                             .label(catalog.text("ui.start-desktop"))
                             .disabled(
-                                !controls
+                                !desktop_access
                                     || !desktop_supported
                                     || pending
                                     || !matches!(phase, "running" | "stopped" | "failed"),

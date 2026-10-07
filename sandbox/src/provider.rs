@@ -7,9 +7,15 @@ use std::{
     time::Duration,
 };
 
-pub const LINUX_PROVIDER: &str = "linux.apple-containerization";
+pub const MACOS_APPLE_CONTAINER_PROVIDER: &str = "macos.apple-containerization";
+pub const LINUX_PODMAN_PROVIDER: &str = "linux.podman";
 pub fn default_provider() -> String {
-    LINUX_PROVIDER.into()
+    if cfg!(target_os = "linux") {
+        LINUX_PODMAN_PROVIDER
+    } else {
+        MACOS_APPLE_CONTAINER_PROVIDER
+    }
+    .into()
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Capabilities {
@@ -22,6 +28,8 @@ pub struct Capabilities {
 pub struct ProviderDescriptor {
     pub id: String,
     pub os: String,
+    pub host_os: String,
+    pub engine: String,
     pub capabilities: Capabilities,
 }
 /// Trusted resolved input; constructed by Manager, never deserialized from tools.

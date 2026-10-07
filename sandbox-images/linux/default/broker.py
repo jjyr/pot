@@ -121,6 +121,40 @@ async def metrics(request):
         if (ROOT / "environment.json").exists()
         else {}
     )
+    if os.environ.get("POT_CONTAINER") == "podman":
+        # /proc reports host-wide resources in containers; use the private cgroup.
+        group = pathlib.Path("/sys/fs/cgroup")
+        limit = (group / "memory.max").read_text().strip()
+        quota, period = (group / "cpu.max").read_text().split()
+        cpus = int(quota) / int(period) if quota != "max" else None
+        usage = dict(line.split() for line in (group / "cpu.stat").read_text().splitlines())
+        now = time.monotonic()
+        used = int(usage["usage_usec"])
+        percent = None
+        previous = getattr(metrics, "container_cpu", None)
+        if previous and cpus and now > previous[0]:
+            percent = round(100 * (used - previous[1]) / ((now - previous[0]) * 1e6 * cpus), 1)
+        metrics.container_cpu = (now, used)
+        started = int(pathlib.Path("/proc/1/stat").read_text().rsplit(")", 1)[1].split()[19])
+        return web.json_response(
+            dict(
+                metadata,
+                cpus=cpus,
+                cpu_percent=percent,
+                memory_used=int((group / "memory.current").read_text()),
+                memory_total=int(limit) if limit != "max" else None,
+                disk_used=None,
+                disk_total=None,
+                workspace_bytes=storage_cache["bytes"],
+                uptime_seconds=max(
+                    0,
+                    int(
+                        float(pathlib.Path("/proc/uptime").read_text().split()[0])
+                        - started / os.sysconf("SC_CLK_TCK")
+                    ),
+                ),
+            )
+        )
     return web.json_response(
         dict(
             metadata,

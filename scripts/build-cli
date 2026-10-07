@@ -44,6 +44,7 @@ archive = dest / f"pot-{os.uname().sysname.lower()}-{os.uname().machine}.tar.gz"
 with tarfile.open(archive, "w:gz") as tar:
     tar.add(target / "release/pot", arcname="bin/pot")
     tar.add(root / "docs/standalone-server.md", arcname="README.md")
+    tar.add(root / "skills", arcname="lib/pot/skills")
     if args.runtime_resources:
         tar.add(args.runtime_resources.resolve(strict=True), arcname="lib/pot/runtime")
         tar.add(args.helper.resolve(strict=True), arcname="lib/pot/PotHelper")

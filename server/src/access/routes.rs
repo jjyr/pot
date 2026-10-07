@@ -50,6 +50,12 @@ pub fn public_router(access: Access) -> Router {
         .route("/access/push/remove", post(super::push::unsubscribe))
         .route("/access/push/preferences", post(super::push::preferences))
         .route("/access/push/heartbeat", post(super::push::heartbeat))
+        .route("/api/v1/desktop/sessions", post(super::desktop::proxy))
+        .route(
+            "/desktop/{*path}",
+            get(super::desktop::proxy).post(super::desktop::proxy),
+        )
+        .route("/desktop-assets/{*path}", get(super::desktop::asset))
         .route("/api/{*path}", get(proxy).post(proxy))
         .fallback(assets)
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
@@ -81,6 +87,7 @@ async fn boundary(State(a): State<Access>, req: Request, next: Next) -> Response
     if req.method() == Method::POST && req.uri().path().starts_with("/access/") && !a.rate_limit() {
         return fail(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
     }
+    let desktop_page = req.uri().path().starts_with("/desktop/") && req.uri().path().ends_with('/');
     let mut r = next.run(req).await;
     for (k, v) in [
         ("cache-control", "no-store"),
@@ -96,13 +103,16 @@ async fn boundary(State(a): State<Access>, req: Request, next: Next) -> Response
     ] {
         r.headers_mut().insert(k, HeaderValue::from_static(v));
     }
+    if desktop_page {
+        r.headers_mut().insert("content-security-policy", HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"));
+    }
     r
 }
 async fn status(State(a): State<Access>, h: HeaderMap) -> Json<Value> {
     let authenticated = cookie(&h, SESSION_COOKIE).is_some_and(|s| a.valid_session(&s, false));
     let i = a.inner.lock().unwrap();
     Json(
-        json!({"authenticated":authenticated,"enrollment_open":i.pairing.as_ref().is_some_and(|e|e.expires>Instant::now()),"scope":"owner_instance","desktop_available":false,"push_available":a.push.is_some() && a.notifications.is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":true,"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
+        json!({"authenticated":authenticated,"enrollment_open":i.pairing.as_ref().is_some_and(|e|e.expires>Instant::now()),"scope":"owner_instance","desktop_available":true,"push_available":a.push.is_some() && a.notifications.is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":true,"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
     )
 }
 async fn pair_start(State(a): State<Access>, Json(body): Json<Value>) -> Result<Response, Failure> {
@@ -330,6 +340,9 @@ async fn proxy(State(a): State<Access>, mut req: Request) -> Result<Response, Fa
         "authorization",
         HeaderValue::from_str(&format!("Bearer {}", a.root_token)).unwrap(),
     );
+    // The outer wildcard match must not contaminate Runtime Path extractors.
+    // Runtime establishes its own route extensions during this fresh dispatch.
+    req.extensions_mut().clear();
     let r = a
         .runtime
         .clone()
@@ -364,9 +377,10 @@ async fn proxy(State(a): State<Access>, mut req: Request) -> Result<Response, Fa
 }
 fn public_inventory(value: &Value) -> Value {
     let items=value["items"].as_array().map(|items|items.iter().map(|item|{
-        json!({"id":item["id"],"name":item["name"],"os":item["os"],
+        json!({"id":item["id"],"name":item["name"],"os":item["os"],"host_os":item["host_os"],"engine":item["engine"],"provider":item["provider"],
             "running_tasks":item["running_tasks"].as_u64(),"active_leases":item["active_leases"].as_u64(),
             "state":{"phase":item["state"]["phase"].as_str().unwrap_or("unknown"),"generation":item["state"]["generation"].as_u64()},
+            "capabilities":item["capabilities"],"desktop_capabilities":item["desktop_capabilities"],
             "config":{"cpus":item["config"]["cpus"].as_u64(),"memory_gib":item["config"]["memory_gib"].as_u64(),"disk_gib":item["config"]["disk_gib"].as_u64()}})
     }).collect::<Vec<_>>()).unwrap_or_default();
     json!({"selected":value["selected"],"items":items})
@@ -453,7 +467,7 @@ async fn admin_command(
             if !i.enabled {
                 return Err(fail(StatusCode::FORBIDDEN, "access_disabled"));
             }
-            let code = Uuid::new_v4().simple().to_string()[..12].to_uppercase();
+            let code = Uuid::new_v4().simple().to_string()[..8].to_uppercase();
             i.pairing = Some(Pairing {
                 digest: digest::digest(&digest::SHA256, code.as_bytes())
                     .as_ref()
@@ -462,7 +476,7 @@ async fn admin_command(
                 attempts: 0,
             });
             return Ok(Json(
-                json!({"code":format!("{}-{}-{}",&code[..4],&code[4..8],&code[8..]),"expires_in":300,"origin":a.origin}),
+                json!({"code":code,"expires_in":300,"origin":a.origin}),
             ));
         }
         Some("close_enrollment") => {

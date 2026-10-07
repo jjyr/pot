@@ -1,7 +1,9 @@
 //! Apple Containerization lifecycle and authenticated Linux guest transport.
 use anyhow::{Result, ensure};
 use futures::future::BoxFuture;
-use pot_sandbox::{Capabilities, LINUX_PROVIDER, Provider, ProviderContext, ProviderDescriptor};
+use pot_sandbox::{
+    Capabilities, MACOS_APPLE_CONTAINER_PROVIDER, Provider, ProviderContext, ProviderDescriptor,
+};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -9,10 +11,10 @@ use std::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
-pub struct LinuxProvider {
+pub struct MacOSAppleContainerProvider {
     client: reqwest::Client,
 }
-impl LinuxProvider {
+impl MacOSAppleContainerProvider {
     pub fn new() -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::builder()
@@ -41,7 +43,7 @@ impl LinuxProvider {
         Ok((format!("http://{address}"), token.trim().into()))
     }
 }
-impl Provider for LinuxProvider {
+impl Provider for MacOSAppleContainerProvider {
     fn bind_resources(
         &self,
         context: &ProviderContext,
@@ -62,8 +64,10 @@ impl Provider for LinuxProvider {
     }
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor {
-            id: LINUX_PROVIDER.into(),
+            id: MACOS_APPLE_CONTAINER_PROVIDER.into(),
             os: "linux".into(),
+            host_os: "macos".into(),
+            engine: "apple-containerization".into(),
             capabilities: Capabilities {
                 shell: true,
                 files: true,
@@ -360,7 +364,9 @@ mod tests {
         });
         tokio::time::timeout(
             Duration::from_secs(3),
-            LinuxProvider::new().unwrap().prepare_desktop(&context),
+            MacOSAppleContainerProvider::new()
+                .unwrap()
+                .prepare_desktop(&context),
         )
         .await
         .unwrap()

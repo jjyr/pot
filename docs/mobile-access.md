@@ -1,9 +1,13 @@
 # Mobile access
 
+For Agent-assisted Web UI deployment and HTTPS/HTTP access-mode selection, see
+the [Web UI deployment guide](web-ui-deployment.md). Remote HTTP basic mode is planned; current
+remote browser access requires HTTPS.
+
 Issue [#8](https://github.com/jjyr/pot/issues/8), baseline `origin/main` f2d092d,
-2026-10-07. This implementation is an owner-instance pilot. Desktop viewing and
-control, physical-device qualification and public deployment remain acceptance
-work, not enabled capabilities.
+2026-10-07. This implementation is an owner-instance pilot. Paired owner clients
+can view and control qualified Sandbox desktops through the scoped gateway.
+Physical-device qualification and public deployment remain acceptance work.
 
 ## Start the owner endpoint
 
@@ -51,7 +55,7 @@ The GUI does not provision certificates. QR, pending approvals and revocation
 use background native requests; no network call blocks the GPUI rendering thread.
 
 Owners use `pot access pair` in standalone mode, or Settings → General → Mobile
-access → Generate pairing code in App mode. The code is generated on the owner
+access → Generate pairing code in App mode. The eight-character hexadecimal code is generated on the owner
 side, expires after five minutes, and can authorize only one client. Opening a
 new pairing invalidates the previous code. Five incorrect guesses close it.
 Codes are kept hashed in memory, never in a QR, URL, server log or persistent
@@ -86,7 +90,12 @@ single-Sandbox grant: the main Agent can indirectly operate other environments.
 The public proxy exposes only chat/task input and cancellation plus read-only
 snapshots, task queries, Sandbox inventory, usage and schedules. It injects the
 native bearer internally. Provider settings, authorization endpoints, Terminal,
-execution configuration, orchestration and desktop broker routes are denied.
+execution configuration, orchestration and raw Guest desktop broker routes are denied.
+Desktop session creation and scoped viewing/control are available to paired owners.
+Each ticket is bound to its creating login session and expires after one hour;
+other clients cannot use it. Logout, expiry, revocation and endpoint disable
+terminate that login's active display streams and release input. Re-login does
+not restore prior tickets. Desktop assets ship with the embedded Web release.
 Inventory exposes only display phase/generation and numeric hardware fields;
 Helper viewer URLs, tokens and private network addresses are filtered. Agent
 management-tool display replies use the same restricted state projection.
@@ -95,10 +104,11 @@ The browser runs GPUI Kit 0.7.1 WASM. The authentication shell and same-origin
 transport adapter are JS. GPUI reuses `pot-ui` Chat/Tasks/Sandbox/Usage components, Markdown, page/chat state,
 native design tokens and EN/zh-CN catalogs,
 with touch navigation, per-conversation in-memory drafts, task filtering, browser
-history and read-only Sandbox/Usage screens. Tasks share rows, phase labels,
+history, a Sandbox desktop launch button and read-only Usage screens. Tasks share rows, phase labels,
 search/filter counts, empty states and server-authoritative pagination. Usage
 shares date ranges, statistics, model grouping and charts. Browser allowance
-editing and desktop actions remain disabled under the existing route allowlist.
+editing and environment administration remain disabled. The desktop opens in a
+separate same-origin tab with view-only mode until explicit takeover.
 See the [shared-page validation](validation/shared-pages-20261007.md). Input retries preserve the original
 request UUID; an ambiguous write is never replayed with a new UUID automatically.
 No transcript, credential or session is stored in localStorage or an offline cache.
@@ -183,9 +193,11 @@ Exactly-once OS delivery is not promised.
 ## Verification and remaining gates
 
 See the [current hosting/pairing report](validation/standalone-hosting-20261007.md) and the earlier [mobile acceptance report](validation/mobile-access-20261007.md).
-The desktop broker, RFB credentials and takeover remain unreachable. No
+See [Podman desktop acceptance](validation/podman-desktop-20261007.md) for real
+Linux Web viewing/input and multi-client boundary verification. Guest broker
+addresses and RFB credentials remain private. No
 restricted-Sandbox authority, production relay, complete App bundle boot,
 physical iOS/Android touch/IME/performance and mobile
 screen-reader parity or real
 push-provider delivery is declared accepted by these tests. The pilot preserves
-those gates instead of exposing unqualified desktop control.
+those physical-device and deployment gates.

@@ -49,6 +49,17 @@ fn main() -> Result<()> {
             );
         }
     }
+    if std::env::var_os("POT_BUILTIN_SKILLS_DIR").is_none()
+        && let Some(skills) = std::env::current_exe()?
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("lib/pot/skills"))
+            .filter(|p| p.is_dir())
+    {
+        unsafe {
+            std::env::set_var("POT_BUILTIN_SKILLS_DIR", skills);
+        }
+    }
     tokio::runtime::Runtime::new()?.block_on(run(&root, &args))
 }
 fn argument(args: &[String], index: usize) -> Result<&str> {
@@ -125,8 +136,8 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
                     .any(|i| i["id"] == id),
                 "Sandbox ID already exists"
             );
-            pot_sandbox_macos::enroll(root, id, Path::new(argument(args, 3)?))?;
-            print(api(root,"/api/v1/sandboxes",Some(json!({"action":"create","sandbox_id":id,"provider":pot_sandbox_macos::PROVIDER_ID}))).await?)
+            pot_sandbox_macos_apple_vm::enroll(root, id, Path::new(argument(args, 3)?))?;
+            print(api(root,"/api/v1/sandboxes",Some(json!({"action":"create","sandbox_id":id,"provider":pot_sandbox_macos_apple_vm::PROVIDER_ID}))).await?)
         }
         "serve" => {
             let server = pot_server::Server::bind(pot_server::ServerConfig::from_env()).await?;

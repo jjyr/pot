@@ -79,6 +79,10 @@ try FileManager.default.createDirectory(at: assets, withIntermediateDirectories:
 try render(size: 1024).write(to: assets.appendingPathComponent("Pot.png"))
 try render(size: 128).write(to: assets.appendingPathComponent("Pot128.png"))
 try render(size: 1024, homeScreen: true).write(to: assets.appendingPathComponent("PotHomeScreen.png"))
+for size in [192, 512] {
+    try render(size: size, homeScreen: true).write(to: assets.appendingPathComponent("PotHomeScreen-\(size).png"))
+}
+
 let iconset = root.appendingPathComponent(".local/d1/Pot.iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 for size in [16, 32, 128, 256, 512] {

@@ -9,13 +9,15 @@ repository.workspace = true
 
 [dependencies]
 pot-sandbox.workspace = true
-pot-sandbox-linux.workspace = true
-pot-sandbox-macos.workspace = true
+pot-sandbox-linux-podman.workspace = true
+pot-sandbox-macos-apple-container.workspace = true
+pot-sandbox-macos-apple-vm.workspace = true
 pot-runtime.workspace = true
 pot-protocol.workspace = true
 anyhow = "1"
 serde_json.workspace = true
 tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["server"] }
 axum = { version = "0.8", features = ["ws"] }
 libc = "0.2"
 url = "2"
@@ -35,6 +37,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 web-push = { version = "0.11", default-features = false }
 base64 = "0.22"
 [dev-dependencies]
+tokio-tungstenite = "0.30"
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
 

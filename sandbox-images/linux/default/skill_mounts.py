@@ -71,4 +71,18 @@ def skill_namespace(role, home):
     for source, target, readonly in mounts:
         mount(source, target, flags=0x1000)
         if readonly:
-            mount(None, target, flags=0x1021)  # MS_BIND | MS_REMOUNT | MS_RDONLY
+            # A rootless user namespace locks inherited mount restrictions.
+            # A readonly remount must retain them instead of clearing them.
+            inherited = os.statvfs(target).f_flag
+            flags = 0x1021  # MS_BIND | MS_REMOUNT | MS_RDONLY
+            for stat_flag, mount_flag in [
+                (2, 2),
+                (4, 4),
+                (8, 8),  # NOSUID, NODEV, NOEXEC
+                (1024, 1024),
+                (2048, 2048),
+                (4096, 0x200000),  # atime policy
+            ]:
+                if inherited & stat_flag:
+                    flags |= mount_flag
+            mount(None, target, flags=flags)

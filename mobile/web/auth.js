@@ -73,6 +73,14 @@ window.potAction=async(action,value)=>{
   if(write&&sending)return;
   if(write)sending=true;
   try{
+    if(action==='desktop'){
+      const viewer=window.open('about:blank','_blank');
+      if(viewer)viewer.opener=null;
+      try {const result=await api('/api/v1/desktop/sessions',{sandbox_id:value});
+        if(!result.path)throw Error(result.phase||'desktop_unavailable');
+        if(viewer)viewer.location.replace(result.path);else location.assign(result.path);
+      }catch(error){viewer?.close();throw error;}
+    }
     if(action==='install')await installer.open();
     if(action==='page'){page=value;task='';navigate();}
     if(action==='task'){task=value;page='task';navigate();}

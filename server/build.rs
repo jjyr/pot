@@ -13,7 +13,7 @@ fn main() {
         .parent()
         .unwrap()
         .join("mobile/dist");
-    let names = [
+    let mut names = [
         "index.html",
         "locales.json",
         "OFL.txt",
@@ -30,11 +30,31 @@ fn main() {
         "pkg/pot_mobile.js.gz",
         "pkg/pot_mobile_bg.wasm.gz",
         "font.ttf",
-    ];
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<Vec<_>>();
+    fn viewer_assets(root: &std::path::Path, dir: &std::path::Path, names: &mut Vec<String>) {
+        for entry in fs::read_dir(dir).expect("Run mise run build:mobile to package noVNC") {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                viewer_assets(root, &path, names);
+            } else if path.extension().is_some_and(|ext| ext == "js") {
+                names.push(
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                );
+            }
+        }
+    }
+    viewer_assets(&root, &root.join("desktop-assets"), &mut names);
     let mut source =
         String::from("pub fn embedded_asset(name:&str)->Option<&'static [u8]>{match name {\n");
     for name in names {
-        let path = root.join(name);
+        let path = root.join(&name);
         assert!(
             path.is_file(),
             "Run mise run build:mobile before building embedded-web"

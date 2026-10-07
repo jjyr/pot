@@ -81,7 +81,9 @@ impl Manager {
     pub fn open(data: &std::path::Path) -> Result<Self> {
         let mut manager = Self::with_providers(
             data,
-            vec![Arc::new(pot_sandbox_linux::LinuxProvider::new()?)],
+            vec![Arc::new(
+                pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new()?,
+            )],
         )?;
         manager.resources = None; // Legacy execution fixtures inject no resource preparation service.
         Ok(manager)

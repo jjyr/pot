@@ -49,8 +49,9 @@ Its reduced-motion preference is passed to GPUI. Embedded chat icons avoid an
 external CDN dependency. Physical phone/IME/accessibility qualification remains
 separate from emulated viewport observations.
 
-Browser Sandbox and Usage remain read-only under the existing Server allowlist.
-Sharing their components does not grant desktop control or allowance editing.
+Browser Sandbox has a desktop launch action; the scoped viewer opens in a separate
+tab. Environment administration and Usage editing remain owner CLI-only.
+Desktop authority comes from login-bound Server tickets, not shared components.
 Shared locale formatting uses the existing plural catalog and decimal precision,
 while leaving parameter contents literal. Allowance saves read the current
 editor at click time, avoiding a stale value captured during rendering.

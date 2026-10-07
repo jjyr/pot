@@ -92,7 +92,14 @@ impl Mobile {
                             action("page", "usage");
                         }
                     }
-                    // Browser owner pilot retains its existing read-only Sandbox/usage policy.
+                    "native" if event.value["action"] == "start" => {
+                        let selected = pot_ui::page_state::sandbox_selection(
+                            &this.data["sandbox_inventory"],
+                            &this.sandbox_selection,
+                        );
+                        action("desktop", &selected);
+                    }
+                    // Environment management remains owner CLI-only.
                     _ => {}
                 }
                 cx.notify();
@@ -267,7 +274,8 @@ impl Render for Mobile {
             let inventory = &self.data["sandbox_inventory"];
             let selected =
                 pot_ui::page_state::sandbox_selection(inventory, &self.sandbox_selection);
-            let state = pot_ui::page_state::sandbox_view(inventory, &selected);
+            let mut state = pot_ui::page_state::sandbox_view(inventory, &selected);
+            state["desktop_access"] = serde_json::json!(true);
             content = content.p_0().gap_0().child(pot_ui::sandbox::render(
                 &state,
                 pot_ui::pages::Layout {

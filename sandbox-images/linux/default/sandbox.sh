@@ -1,11 +1,18 @@
 #!/bin/sh
 set -eu
 umask 077
-mkdir -p /data/workspace /data/logs
+mkdir -p /data/workspace /data/logs /run/pot-skill-sources
 chown potdesktop /data/workspace
 if [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
   mkdir -p /sys/fs/cgroup
   mount -t cgroup2 none /sys/fs/cgroup
+fi
+# Containers receive only their delegated, private cgroup subtree. Never mount
+# the host hierarchy or fall back to process-group-only cancellation.
+if [ "${POT_CONTAINER:-}" = podman ]; then
+  mkdir /sys/fs/cgroup/pot-readiness
+  test -w /sys/fs/cgroup/pot-readiness/cgroup.kill
+  rmdir /sys/fs/cgroup/pot-readiness
 fi
 # PTY sessions need devpts before the credential-free runner drops privileges.
 if [ ! -e /dev/pts/ptmx ]; then

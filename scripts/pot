@@ -66,6 +66,7 @@ if cmd == "prepare":
     call(["python3", REPO / "scripts/localize-web"])
     for name in [
         "sandbox.sh",
+        "install.sh",
         "executor.py",
         "skill_mounts.py",
         "desktop.sh",

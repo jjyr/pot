@@ -84,11 +84,11 @@ impl Manifest {
         Ok(m)
     }
 }
-pub struct MacOSProvider {
+pub struct MacOSAppleVMProvider {
     helper: PathBuf,
     children: tokio::sync::Mutex<HashMap<PathBuf, tokio::process::Child>>,
 }
-impl MacOSProvider {
+impl MacOSAppleVMProvider {
     /// Trusted composition configuration; helper path is never a model tool argument.
     pub fn new(helper: PathBuf) -> Self {
         Self {
@@ -164,7 +164,7 @@ impl MacOSProvider {
         ))
     }
 }
-impl Provider for MacOSProvider {
+impl Provider for MacOSAppleVMProvider {
     fn scope_cleanup_policy(&self) -> pot_sandbox::ScopeCleanupPolicy {
         pot_sandbox::ScopeCleanupPolicy::SessionClosure
     }
@@ -172,6 +172,8 @@ impl Provider for MacOSProvider {
         ProviderDescriptor {
             id: PROVIDER_ID.into(),
             os: "macos".into(),
+            host_os: "macos".into(),
+            engine: "apple-virtualization".into(),
             capabilities: Capabilities {
                 shell: true,
                 files: true,
