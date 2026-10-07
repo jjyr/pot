@@ -1,5 +1,8 @@
 amends "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Config.pkl"
 
+// Four independent CI groups; Cargo tasks share one sequential group.
+jobs = 4
+
 hooks {
   ["pre-commit"] {
     fix = false
@@ -16,13 +19,22 @@ hooks {
   ["pre-push"] {
     fix = false
     steps {
-      ["helper"] {
-        glob = List("helper/**", "mise.toml", "hk.pkl")
-        check = "mise run check:swift"
-      }
       ["rust"] {
-        glob = List("**/*.rs", "**/*.swift", "**/Cargo.toml", "Cargo.toml", "Cargo.lock", "mise.toml", "hk.pkl")
-        check = "mise run check:rust && mise run clippy && mise run test"
+        check = new Script {
+          macos = "mise run check:rust && mise run clippy:backend && mise run clippy && mise run test && mise run test:ui && mise run test:app && mise run test:eval"
+          linux = "mise run clippy:backend && mise run test && mise run test:ui && mise run test:eval"
+        }
+      }
+      ["macos"] {
+        check = new Script {
+          macos = "mise run lint && mise run check:swift"
+        }
+      }
+      ["scripts"] {
+        check = "mise run test:release && mise run test:executor && mise run test:skills && mise run test:skill-authoring"
+      }
+      ["licenses"] {
+        check = "mise run licenses && mise run test:licenses"
       }
     }
   }

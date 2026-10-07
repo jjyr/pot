@@ -101,10 +101,10 @@ Application account authorization uses official Host Codex App Server APIs. pot-
 `mise run setup` installs repository-local hk pre-commit/pre-push hooks without changing global hooks. Run it once per clone. Git hooks load tools through mise without shell activation; mise itself must be on PATH.
 
 - pre-commit: checks formatting/scripts for changed files; Rust formatting covers the workspace, and rule/check-entry changes trigger all lightweight checks. Also checks staged whitespace.
-- pre-push: relevant Rust/Swift changes trigger `check:rust` and core tests; Helper changes additionally trigger `check:swift`.
+- pre-push: every push runs CI checks in four parallel groups: Rust, macOS formatting/Swift, script tests, and licenses. Cargo tasks run sequentially; shared CI tasks run once. Linux runs portable backend checks and skips macOS-only checks.
 - Hooks only check; they neither fix nor stage. Source checks read the working tree, so partially staged content must also be formatted. Image/VM/paid model tests are excluded. A new machine may compile slowly; later runs reuse caches.
 
-Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.
+Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk run pre-push --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.
 
 ## Code entry points
 
