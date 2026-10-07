@@ -12,7 +12,7 @@ var bridge: PotBridge?
     }
 }
 
-@MainActor final class RailButton: NSButton {
+@MainActor class RailButton: NSButton {
     var selected = false {
         didSet {
             if oldValue != selected {
@@ -22,7 +22,7 @@ var bridge: PotBridge?
     }
 
     private var lastBackground: CGColor?
-    private var hovered = false
+    fileprivate var hovered = false
     private var tracking: NSTrackingArea?
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -143,6 +143,7 @@ var bridge: PotBridge?
     var failed = false
     var unread = 0
     var unreadTracker = UnreadTracker()
+    var companionCompleted: Set<String>?
     var savedSeen: [String]?
     var tick: Double = 0
     var lastIconState = ""
@@ -185,11 +186,13 @@ var bridge: PotBridge?
             (4, "chart.bar.xaxis", L.text("navigation.usage")),
             (2, "gearshape", L.text("ui.settings")),
         ] {
-            let button = RailButton(
+            let button = index == 0 ? CompanionButton() : RailButton(
                 image: NSImage(systemSymbolName: symbol, accessibilityDescription: title)!,
                 target: self,
                 action: #selector(navigate(_:))
             )
+            button.target = self; button.action = #selector(navigate(_:))
+            button.title = ""
             button.tag = index; button.toolTip = title; button.setAccessibilityLabel(title)
             button.isBordered = false; button.imageScaling = .scaleProportionallyDown
             button.wantsLayer = true; button.layer?.cornerRadius = 10
@@ -910,6 +913,13 @@ var bridge: PotBridge?
                 "cancelled",
             ].contains($0["status"] as? String ?? "") }.compactMap { $0["id"] as? String })
             let previous = unreadTracker.seen
+            let successful = Set(messages.filter { $0["role"] as? String == "assistant" &&
+                    $0["status"] as? String == "complete"
+            }.compactMap { $0["id"] as? String })
+            if let known = companionCompleted, !successful.subtracting(known).isEmpty {
+                (navigation.first as? CompanionButton)?.celebrate()
+            }
+            companionCompleted = successful
             let failedIDs = Set(messages.filter { $0["status"] as? String == "failed" }
                 .compactMap { $0["id"] as? String })
             if !failedIDs.subtracting(previous).isEmpty {
@@ -943,6 +953,7 @@ var bridge: PotBridge?
     }
 
     func updateIcon() {
+        (navigation.first as? CompanionButton)?.update(cooking: running)
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let waiting = (snapshot["needs_auth"] as? Bool ?? false)
         let highlighted = status.button?.cell?.isHighlighted ?? false
@@ -951,8 +962,6 @@ var bridge: PotBridge?
         lastIconState = signature
         tick += 0.1
         let phase = running && !reduce ? (sin(tick * .pi * 2 / 2.7) + 1) / 2 : 0.5
-        let icon = potIcon(cooking: running, phase: phase, waiting: waiting)
-        navigation.first?.image = icon
         status.button?.image = trayIcon(
             cooking: running,
             phase: phase,
@@ -1159,4 +1168,119 @@ private var bridgeWake: (@convention(c) () -> Void)?
 
 @_cdecl("pot_bridge_reduce_motion") public func reduceMotion() -> Bool {
     MainActor.assumeIsolated { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+}
+
+/// Animate only the character, leaving the navigation hit area and highlight stable.
+@MainActor final class CompanionButton: RailButton {
+    private var cooking = false
+    private var visible = false
+    private var reduced = false
+    private var intro = -Double.infinity
+    private var pressed = -Double.infinity
+    private var completed = -Double.infinity
+    private var hoverChanged = -Double.infinity
+    private var hoverFrom: CGFloat = 0
+    private var hoverTo: CGFloat = 0
+    private var steamChanged = -Double.infinity
+    private var steamFrom: CGFloat = 0
+    private var steamTo: CGFloat = 0
+    private var frames: Timer?
+
+    private func blend(_ from: CGFloat, _ to: CGFloat, since start: Double, at now: Double) -> CGFloat {
+        let t = CGFloat(min(1, max(0, (now - start) / 0.18)))
+        return from + (to - from) * t * t * (3 - 2 * t)
+    }
+
+    func update(cooking next: Bool) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let onScreen = window?.isVisible == true && window?.occlusionState.contains(.visible) == true
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if onScreen && !visible {
+            intro = now
+        }
+        if next != cooking {
+            steamFrom = blend(steamFrom, steamTo, since: steamChanged, at: now)
+            steamTo = next ? 1 : 0; steamChanged = now
+            cooking = next
+            needsDisplay = true
+        }
+        if reduce != reduced || onScreen != visible {
+            needsDisplay = true
+        }
+        visible = onScreen; reduced = reduce
+        if reduced {
+            intro = -.infinity; pressed = -.infinity; completed = -.infinity
+            hoverFrom = hoverTo; steamFrom = steamTo
+        }
+        scheduleFrames()
+    }
+
+    private func scheduleFrames() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let moving = cooking || now - intro < 0.36 || now - pressed < 0.28 ||
+            now - completed < 0.85 || now - hoverChanged < 0.18 || now - steamChanged < 0.18
+        guard visible, !reduced, moving else {
+            frames?.invalidate(); frames = nil
+            return
+        }
+        guard frames == nil else { return }
+        let timer = Timer(timeInterval: 1 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.update(cooking: self.cooking)
+                self.needsDisplay = true
+            }
+        }
+        frames = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func animateHover() {
+        let now = ProcessInfo.processInfo.systemUptime
+        hoverFrom = blend(hoverFrom, hoverTo, since: hoverChanged, at: now)
+        hoverTo = hovered ? 1 : 0; hoverChanged = now
+        update(cooking: cooking); needsDisplay = true
+    }
+
+    func celebrate() {
+        guard window?.isVisible == true, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        completed = ProcessInfo.processInfo.systemUptime
+        update(cooking: cooking); needsDisplay = true
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event); animateHover()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event); animateHover()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        pressed = ProcessInfo.processInfo.systemUptime
+        update(cooking: cooking); needsDisplay = true
+        super.mouseDown(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let now = ProcessInfo.processInfo.systemUptime
+        let hover = reduced ? hoverTo : blend(hoverFrom, hoverTo, since: hoverChanged, at: now)
+        let steam = reduced ? steamTo : blend(steamFrom, steamTo, since: steamChanged, at: now)
+        let entry = reduced ? 1 : min(1, max(0, (now - intro) / 0.36))
+        let pressAge = now - pressed
+        let compression = !reduced && pressAge >= 0 && pressAge < 0.28 ? sin(pressAge / 0.28 * .pi) * 0.05 : 0
+        let blinkAge = now - intro
+        let blink = !reduced && blinkAge > 0.13 && blinkAge < 0.29 ?
+            1 - sin((blinkAge - 0.13) / 0.16 * .pi) * 0.95 : 1
+        let happy = !reduced && now - completed < 0.85 ? sin((now - completed) / 0.85 * .pi) : 0
+        let size = CGFloat(28 * (1 - compression))
+        let rect = NSRect(x: (bounds.width - size) / 2,
+                          y: (bounds.height - size) / 2 - (reduced ? 0 : hover * 0.7) + CGFloat(1 - entry) * 2,
+                          width: size, height: size)
+        companionIcon(blink: CGFloat(blink), smile: hover * 0.4 + CGFloat(happy) * 0.6,
+                      steam: steam, phase: now.truncatingRemainder(dividingBy: 3) / 3)
+            .draw(in: rect, from: .zero, operation: .sourceOver, fraction: CGFloat(0.8 + 0.2 * entry),
+                  respectFlipped: true, hints: nil)
+    }
 }

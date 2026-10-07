@@ -62,7 +62,8 @@ dist = ROOT / "mobile/dist"
 dist.mkdir(parents=True, exist_ok=True)
 for asset in (ROOT / "mobile/web").iterdir():
     shutil.copy2(asset, dist / asset.name)
-shutil.copy2(ROOT / "app/assets/Pot.png", dist / "icon.png")
+# Opaque cream background: let the OS apply its own Home Screen mask.
+shutil.copy2(ROOT / "app/assets/PotHomeScreen.png", dist / "icon.png")
 for size in [192, 512]:
     subprocess.run(
         [
@@ -70,7 +71,7 @@ for size in [192, 512]:
             "-z",
             str(size),
             str(size),
-            ROOT / "app/assets/Pot.png",
+            ROOT / "app/assets/PotHomeScreen.png",
             "--out",
             dist / f"icon-{size}.png",
         ],
