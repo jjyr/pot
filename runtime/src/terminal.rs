@@ -627,6 +627,27 @@ mod websocket_tests {
         assert!(connect_async(foreign).await.is_err());
         let (mut socket, _) = connect_async(request()).await.unwrap();
         assert!(connect_async(request()).await.is_err());
+        // Wait for interactive shell initialization before resizing. Otherwise
+        // readline startup can restore the initial dimensions after our ioctl.
+        socket
+            .send(ClientMessage::Binary(
+                b"printf 'TERMINAL_%s\\n' ready\n".to_vec().into(),
+            ))
+            .await
+            .unwrap();
+        let mut startup = Vec::new();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(Ok(message)) = socket.next().await {
+                if let ClientMessage::Binary(bytes) = message {
+                    startup.extend(bytes);
+                }
+                if String::from_utf8_lossy(&startup).contains("TERMINAL_ready") {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|e| panic!("shell startup: {e}; output: {startup:?}"));
         socket
             .send(ClientMessage::Text("{\"cols\":91,\"rows\":32}".into()))
             .await
@@ -652,7 +673,7 @@ mod websocket_tests {
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|e| panic!("terminal resize/output: {e}; output: {all:?}"));
         socket.close(None).await.unwrap();
         drop(socket);
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
