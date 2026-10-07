@@ -71,6 +71,7 @@ pub struct View {
     pub pending: bool,
     sending: pot_ui::state::SendState,
     pub accepted_text: Option<String>,
+    pub accepted_conversation: Option<String>,
     pub selected: String,
     pub tasks: Vec<TaskInfo>,
     pub running_tasks: Vec<RunningTask>,
@@ -199,6 +200,7 @@ impl View {
         self.pending = false;
         self.sending.accept(&req.request_id);
         self.accepted_text = Some(pot_ui::state::Receipt::from_request(req).text);
+        self.accepted_conversation = Some(req.conversation_id.clone());
         if let Some(s) = self
             .snapshot
             .as_mut()
@@ -218,9 +220,12 @@ impl View {
     }
 }
 pub struct Client {
+    pub target: crate::connections::Target,
     pub view: Arc<Mutex<View>>,
-    tx: mpsc::Sender<SendMessage>,
+    tx: mpsc::Sender<(crate::connections::Target, SendMessage)>,
+    poll_target: Arc<Mutex<crate::connections::Target>>,
     running: Arc<AtomicBool>,
+    visible: Arc<AtomicBool>,
     refresh: mpsc::SyncSender<()>,
 }
 impl Drop for Client {
@@ -235,8 +240,11 @@ pub fn root() -> PathBuf {
             PathBuf::from(std::env::var_os("HOME").unwrap()).join("Library/Application Support/pot")
         })
 }
-fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String> {
-    crate::backend::ready()?;
+fn receive(
+    view: &Arc<Mutex<View>>,
+    _running: &AtomicBool,
+    target: &crate::connections::Target,
+) -> Result<(), String> {
     let (selected, query) = {
         let v = view.lock().unwrap();
         (v.selected.clone(), v.task_query.clone())
@@ -250,7 +258,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             v.runs_offset,
         )
     };
-    let agent = crate::backend::Requests::config_builder()
+    let agent = crate::backend::Requests::config_builder(target.clone())
         .timeout_global(Some(Duration::from_secs(3)))
         .build()
         .new_agent();
@@ -413,7 +421,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     Ok(())
 }
 impl Client {
-    pub fn start() -> Self {
+    pub fn start(target: crate::connections::Target) -> Self {
         let view = Arc::new(Mutex::new(View {
             error: crate::i18n::text("client.connecting-to-environment").into(),
             task_query: TaskQuery {
@@ -424,34 +432,40 @@ impl Client {
             ..Default::default()
         }));
         let running = Arc::new(AtomicBool::new(true));
-        let (tx, rx) = mpsc::channel::<SendMessage>();
+        let visible = Arc::new(AtomicBool::new(true));
+        let poll_visible = visible.clone();
+        let (tx, rx) = mpsc::channel::<(crate::connections::Target, SendMessage)>();
         let (refresh, refresh_rx) = mpsc::sync_channel(1);
         let v = view.clone();
         let active = running.clone();
+        let poll_target = Arc::new(Mutex::new(target.clone()));
+        let reader_target = poll_target.clone();
         std::thread::spawn(move || {
             while active.load(Ordering::Relaxed) {
-                if let Err(e) = receive(&v, &active) {
+                let target = reader_target.lock().unwrap().clone();
+                if let Err(e) = receive(&v, &active, &target) {
                     v.lock().unwrap().error = e;
                 }
                 crate::wake_ui();
-                let _ = refresh_rx.recv_timeout(Duration::from_millis(500));
+                let _ = refresh_rx.recv_timeout(Duration::from_millis(
+                    if poll_visible.load(Ordering::Relaxed) {
+                        500
+                    } else {
+                        5000
+                    },
+                ));
             }
         });
         // Writes never block behind the long-lived SSE response.
         let v = view.clone();
         let active = running.clone();
         std::thread::spawn(move || {
-            let agent = crate::backend::Requests::config_builder()
-                .timeout_global(Some(Duration::from_secs(3)))
-                .build()
-                .new_agent();
-            while let Ok(req) = rx.recv() {
+            while let Ok((send_target, req)) = rx.recv() {
+                let agent = crate::backend::Requests::config_builder(send_target)
+                    .timeout_global(Some(Duration::from_secs(3)))
+                    .build()
+                    .new_agent();
                 while active.load(Ordering::Relaxed) {
-                    if let Err(error) = crate::backend::ready() {
-                        v.lock().unwrap().command_error = error;
-                        std::thread::sleep(Duration::from_millis(500));
-                        continue;
-                    }
                     let path = match req.conversation_id.as_str() {
                         "main" => PATH_MESSAGES.to_string(),
                         "new" => PATH_TASKS.to_string(),
@@ -490,6 +504,7 @@ impl Client {
                                     state.pending = false;
                                     state.sending.accept(&req.request_id);
                                     state.accepted_text = Some(req.text.clone());
+                                    state.accepted_conversation = Some(req.conversation_id.clone());
                                 } else {
                                     match serde_json::from_value::<SendMessageAccepted>(result) {
                                         Ok(result) => {
@@ -526,11 +541,26 @@ impl Client {
             }
         });
         Self {
+            visible,
+            poll_target,
+            target,
             view,
             tx,
             running,
             refresh,
         }
+    }
+    pub fn set_visible(&self, visible: bool) {
+        self.visible.store(visible, Ordering::Relaxed);
+        if !visible {
+            let mut view = self.view.lock().unwrap();
+            view.usage_query = None;
+            view.schedules_visible = false;
+        }
+    }
+    pub fn retarget(&mut self, target: crate::connections::Target) {
+        *self.poll_target.lock().unwrap() = target.clone();
+        self.target = target;
     }
     pub fn cancel(&self) {
         let selected = self.view.lock().unwrap().selected.clone();
@@ -549,10 +579,10 @@ impl Client {
             }
         };
         let view = self.view.clone();
+        let target = self.target.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
-                crate::backend::ready()?;
-                crate::backend::Requests::config_builder()
+                crate::backend::Requests::config_builder(target.clone())
                     .timeout_global(Some(Duration::from_secs(3)))
                     .build()
                     .new_agent()
@@ -583,10 +613,10 @@ impl Client {
         }
         let view = self.view.clone();
         let refresh = self.refresh.clone();
+        let target = self.target.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
-                crate::backend::ready()?;
-                let mut response = crate::backend::Requests::config_builder()
+                let mut response = crate::backend::Requests::config_builder(target.clone())
                     .timeout_global(Some(Duration::from_secs(5)))
                     .build()
                     .new_agent()
@@ -638,14 +668,14 @@ impl Client {
         let view = self.view.clone();
         let active = self.running.clone();
         let refresh = self.refresh.clone();
+        let target = self.target.clone();
         std::thread::spawn(move || {
-            let agent = crate::backend::Requests::config_builder()
+            let agent = crate::backend::Requests::config_builder(target.clone())
                 .timeout_global(Some(Duration::from_secs(5)))
                 .build()
                 .new_agent();
             while active.load(Ordering::Relaxed) {
-                let result = (|| -> Result<Value, String> {
-                    crate::backend::ready()?;
+                let result: Result<Value, String> = {
                     match agent
                         .post("/api/v1/schedules")
                         .config()
@@ -665,7 +695,7 @@ impl Client {
                         Ok(mut r) => r.body_mut().read_json().map_err(|e| e.to_string()),
                         Err(e) => Err(e.to_string()),
                     }
-                })();
+                };
                 match result {
                     Ok(reply) => {
                         let mut v = view.lock().unwrap();
@@ -704,10 +734,10 @@ impl Client {
         }
         view.access_pending = true;
         let v = self.view.clone();
+        let target = self.target.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<String, String> {
-                crate::backend::ready()?;
-                let agent = crate::backend::Requests::config_builder()
+                let agent = crate::backend::Requests::config_builder(target.clone())
                     .timeout_global(Some(Duration::from_secs(5)))
                     .build()
                     .new_agent();
@@ -769,7 +799,11 @@ impl Client {
         };
         state.pending = true;
         state.command_error.clear();
-        if self.tx.send(request.clone()).is_err() {
+        if self
+            .tx
+            .send((self.target.clone(), request.clone()))
+            .is_err()
+        {
             state.pending = false;
             state.sending.reject(&request.request_id);
             state.command_error =

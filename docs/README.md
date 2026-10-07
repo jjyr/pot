@@ -20,6 +20,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand approved downloads, progress, cache and embedded hashes | [Sandbox resource delivery](sandbox-resources.md) |
 | Build the Linux Sandbox image, or review target Linux/macOS template layout | [Sandbox image](sandbox-image.md) |
 | Understand command shells, PTY, background sessions and initialization snapshots | [Sandbox command execution](executor.md) |
+| Connect the native App to multiple Servers | [Multi-Server client](multi-server-client.md) |
 | Configure QR/pairing browser access and encrypted main-message push | [Mobile access](mobile-access.md) |
 | Change UI language, translations or locale matching | [Internationalization](internationalization.md) |
 | Understand shared App/Mobile page components and platform adapters | [Shared UI](shared-ui.md) |
@@ -31,6 +32,8 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Review completed tests and limitations | [Host Agents and managed Sandboxes](validation/host-pot-agent-20261006.md) |
 
 Current hosting/authentication acceptance: [Standalone CLI and embedded App, 2026-10-07](validation/standalone-hosting-20261007.md).
+
+Native multi-Server acceptance: [Connection isolation and native UI, 2026-10-07](validation/multi-server-client-20261007.md).
 
 Provider/executor merge acceptance: [Cross-turn sessions and executor v2 image, 2026-10-07](validation/sandbox-merge-20261007.md).
 

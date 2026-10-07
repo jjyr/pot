@@ -41,6 +41,16 @@ History is window-local. Chat, task lists/details, schedule details, overall/con
 
 Native conversation drafts and entity-backed unsaved forms remain intact during navigation. History does not send messages, save settings, execute tasks or reclaim desktop control. Returning to Settings changes its section without reopening or resetting an in-progress AI connection panel. Embedded WebView focus and active marked-text composition retain their shortcut handling. Task scroll restoration uses the visible task ID plus inset to tolerate reordering. Missing task destinations show an inline recovery action.
 
+## Multi-Server navigation
+
+The shared toolbar starts with a Server picker containing existing connections
+only. Settings → Servers owns adding, editing, re-pairing and removal. Success
+returns to the list with an explicit Switch action. Each Server restores its own
+page/history, filters, scroll and drafts. Disconnected targets stay selected and
+show connection errors; message submission waits for recovery. General language
+and appearance are App preferences; AI/task/environment settings belong to the
+selected Server. See [Multi-Server client](multi-server-client.md).
+
 ## Pages and interactions
 
 - **Chat**: Pot icon opens chat; no central avatar. Blue user/neutral assistant bubbles. Small action bar below messages: Copy left, linked View task right, both with tooltips. Latest assistant actions show when idle; historical/user actions show on hover. Reserve height to avoid movement. Latest messages shares native input width/centering, sits above it, is fully clickable, and hides immediately on click. Preserve native IME/edit shortcuts. Opened conversations show cache before background refresh.

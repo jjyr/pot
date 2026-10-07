@@ -53,3 +53,13 @@ Desktop adapter update (2026-10-07): `pot-sandbox` manages expiring viewer ticke
 ## Command execution follow-up — 2026-10-07
 
 Implemented shell/login selection, pipe/PTY sessions and terminal controls, Agent-session process retention with epoch/generation authorization, idle expiry and orphan drainage, and bounded in-memory Bash/Zsh login snapshots with startup-file invalidation/fallback. Current contract: [Sandbox command execution](executor.md). Runtime/real-runner tests and broker lifecycle doubles are included; actual verification and limits are recorded in [acceptance](validation/executor-sessions-20261007.md).
+
+## Multi-Server native client — 2026-10-07
+
+Implemented Settings → Servers connection management, toolbar switching,
+Keychain-backed signed authentication and independent per-Server page/draft
+state. Paired clients receive owner access without permission tiers. Remote
+Sandbox display uses the existing gateway. Execution settings persist on the
+selected Server; remote application requires host restart. Browser multi-origin
+management, Server federation and artifact transfer are deferred. See the
+[current contract](multi-server-client.md).

@@ -16,13 +16,13 @@ import Foundation
 
     func reloadAI() async throws {
         guard let bridge else { return }
-        let state = try await bridge.runtime.request("api/v1/agent")
+        let state = try await runtime.request("api/v1/agent")
         savedProfiles = state["profiles"] as? [[String: Any]] ?? []
         let bindings = state["bindings"] as? [[String: Any]] ?? []
         activeSpec = bindings
             .first { $0["pot_owner"] as? String == "main" && $0["state"] as? String == "active"
             }?["spec"] as? [String: Any] ?? [:]
-        let providerState = try await bridge.runtime.request("api/v1/providers")
+        let providerState = try await runtime.request("api/v1/providers")
         connections = providerState["connections"] as? [[String: Any]] ?? []
         if !draftInitialized {
             draftProfile = activeSpec["source_profile_id"] as? String ?? ""
@@ -140,7 +140,7 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                let response = try await bridge.runtime.request("api/v1/providers/check", body: [
+                let response = try await runtime.request("api/v1/providers/check", body: [
                     "endpoint": connectionEndpoint(endpoint), "api_key": key,
                     "protocol": apiProtocol, "profile_id": profile["id"] as? String ?? "",
                 ])
@@ -200,7 +200,7 @@ import Foundation
                             "unattended": "sandbox",
                         ]
                     }
-                    _ = try await bridge.runtime.request(
+                    _ = try await runtime.request(
                         "api/v1/agent",
                         body: [
                             "profile": value,
@@ -211,7 +211,7 @@ import Foundation
                         ]
                     )
                 } else {
-                    _ = try await bridge.runtime.request(
+                    _ = try await runtime.request(
                         "api/v1/providers",
                         body: [
                             "profile_id": target,
@@ -231,7 +231,7 @@ import Foundation
                 profile = savedProfiles.first { $0["id"] as? String == target } ?? [:]
                 if firstMain {
                     while true {
-                        let state = try await bridge.runtime.request("api/v1/agent")
+                        let state = try await runtime.request("api/v1/agent")
                         if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
                             break
                         }
@@ -246,7 +246,9 @@ import Foundation
                 }
                 aiScreen = "main"; secretRevision += 1
                 if firstMain, returnToChat {
-                    bridge.selectPage(0); returnToChat = false
+                    if bridge.runtime.serverID == runtime.serverID {
+                        bridge.selectPage(0)
+                    }; returnToChat = false
                 }
                 if routingOwner != "main" {
                     routingProfile = target; editRoutingProfile(target); section = 4
@@ -277,7 +279,9 @@ import Foundation
            activeSpec["source_profile_revision"] as? Int == selected["revision"] as? Int
         {
             result = L.text("aiconfiguration.current-configuration-is-active"); aiScreen = "main"; if returnToChat {
-                bridge.selectPage(0); returnToChat = false
+                if bridge.runtime.serverID == runtime.serverID {
+                    bridge.selectPage(0)
+                }; returnToChat = false
             }; return
         }
         let expected = selected["revision"] as? Int ?? 0
@@ -286,7 +290,7 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                _ = try await bridge.runtime.request(
+                _ = try await runtime.request(
                     "api/v1/agent",
                     body: [
                         "profile": selected,
@@ -297,7 +301,7 @@ import Foundation
                     ]
                 )
                 while true {
-                    let state = try await bridge.runtime.request("api/v1/agent")
+                    let state = try await runtime.request("api/v1/agent")
                     if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
                         break
                     }
@@ -313,7 +317,9 @@ import Foundation
                 draftModel = model; aiScreen = "main"; revision += 1; result = L
                     .text("aiconfiguration.main-agent-is-active-existing-background-tasks")
                 if returnToChat {
-                    bridge.selectPage(0); returnToChat = false
+                    if bridge.runtime.serverID == runtime.serverID {
+                        bridge.selectPage(0)
+                    }; returnToChat = false
                 }
             } catch {
                 result = error.localizedDescription.contains("migration is pending") ? L

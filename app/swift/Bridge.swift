@@ -112,7 +112,11 @@ var bridge: PotBridge?
     let composerScroll = NSScrollView()
     let placeholder = PlaceholderLabel(labelWithString: L.text("bridge.message-pot"))
     let sendButton = NSButton()
-    let settings = SettingsPanel()
+    var settings = SettingsPanel()
+    var serverSettings: [String: SettingsPanel] = [:]
+    var serverDrafts: [String: [String: String]] = [:]
+    var serverSelections: [String: String] = [:]
+    var serverUnread: [String: UnreadTracker] = [:]
     var navigation: [NSButton] = []
     var page = 0
     var composerDark: Bool?
@@ -148,7 +152,7 @@ var bridge: PotBridge?
     var tick: Double = 0
     var lastIconState = ""
     var observations: [NSObjectProtocol] = []
-    let runtime = RuntimeClient()
+    var runtime = RuntimeClient()
     var resourceRequests: [[String: Any]] = []
     var resourceContinuations: [String: () -> Void] = [:]
     var sandboxItems: [[String: Any]] = []
@@ -162,7 +166,7 @@ var bridge: PotBridge?
     var localPhase = "starting"
     var isApplying = false
     var seenKey: String {
-        "seen-assistant:" + (localRuntime?.root.path ?? "default")
+        "seen-assistant:" + (localRuntime?.root.path ?? "default") + ":" + runtime.serverID
     }
 
     init(host: NSWindow, html _: String) {
@@ -203,6 +207,7 @@ var bridge: PotBridge?
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
+        settings.runtime = runtime
         rootView.addSubview(composerBox); composerBox.wantsLayer = true; composerBox.layer?
             .cornerRadius = 16; composerBox.layer?.borderWidth = 1
         composer.isRichText = false; composer.font = .systemFont(ofSize: 15); composer.drawsBackground = false; composer
@@ -264,7 +269,7 @@ var bridge: PotBridge?
                     case "w": self.hideWindow(); return nil
                     case "d": self.selectPage(self.page == 1 ? 0 : 1); return nil
                     case ",": self.selectPage(2); return nil
-                    case ".": self.events.append(["action": "cancel"]); return nil
+                    case ".": self.events.append(["action": "cancel", "server_id": self.runtime.serverID]); return nil
                     default: break
                     }
                 }
@@ -524,7 +529,7 @@ var bridge: PotBridge?
            composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
            .isEmpty
         {
-            events.append(["action": "cancel"]); return
+            events.append(["action": "cancel", "server_id": runtime.serverID]); return
         }
         guard ready,!isApplying,!composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard composer.string.utf8.count <= 65536
@@ -533,7 +538,36 @@ var bridge: PotBridge?
                 .text("bridge.shorten-the-message-to-less-than-64"); alert
                 .beginSheetModal(for: host); return
         }
-        events.append(["action": "send", "text": composer.string])
+        events.append(["action": "send", "text": composer.string, "server_id": runtime.serverID])
+    }
+
+    func switchServer(_ id: String, page nextPage: Int) {
+        guard id != runtime.serverID else { return }
+        drafts[selected] = composer.string
+        serverDrafts[runtime.serverID] = drafts
+        serverSelections[runtime.serverID] = selected
+        serverSettings[runtime.serverID] = settings
+        serverUnread[runtime.serverID] = unreadTracker
+        runtime = RuntimeClient(serverID: id)
+        if let saved = serverSettings[id] {
+            settings = saved
+        } else {
+            settings = SettingsPanel(); settings.runtime = runtime; settings.bridge = self
+        }
+        drafts = serverDrafts[id] ?? [:]; selected = serverSelections[id] ?? ""
+        composer.string = drafts[selected] ?? ""
+        unreadTracker = serverUnread[id] ?? UnreadTracker()
+        companionCompleted = nil; savedSeen = nil; unread = 0
+        snapshot = [:]; lastUIState = [:]; viewer = [:]; sandboxItems = []; sandboxDefault = "default"
+        sandboxError = ""; sandboxBusy = false; sandboxRefreshing = false; sandboxRefreshAt = .distantPast
+        resourceRequests = []; resourceContinuations = [:]; desktopAttempt = nil
+        localPhase = "unknown"; ready = false; selectedRunning = false
+        localRuntime?.switchServer(runtime)
+        if serverSettings[id] == nil {
+            settings.load()
+        }
+        textDidChange(Notification(name: NSText.didChangeNotification))
+        selectPage(nextPage)
     }
 
     func selectPage(_ value: Int) {
@@ -683,9 +717,11 @@ var bridge: PotBridge?
     func manageSandbox(_ args: [String: Any], completion: (() -> Void)? = nil) {
         guard !sandboxBusy else { return }
         sandboxBusy = true; sandboxError = ""; bridgeWake?()
-        Task {
+        let runtime = runtime
+        Task { [runtime] in
             do {
                 let result = try await runtime.request("api/v1/sandboxes", body: args)
+                guard self.runtime.serverID == runtime.serverID else { return }
                 if let key = result["resource_request_id"] as? String {
                     await refreshResourceRequests()
                     resourceContinuations[key] = { [weak self] in
@@ -705,12 +741,15 @@ var bridge: PotBridge?
                     chooseSandbox("default")
                 }
             } catch { sandboxError = error.localizedDescription }
+            guard self.runtime.serverID == runtime.serverID else { return }
             sandboxBusy = false; refreshSandboxes(); localRuntime?.poll(); bridgeWake?()
         }
     }
 
     func refreshResourceRequests() async {
+        let runtime = runtime
         if let value = try? await runtime.request("api/v1/sandbox-resources") {
+            guard self.runtime.serverID == runtime.serverID else { return }
             resourceRequests = value["requests"] as? [[String: Any]] ?? []
             finishResourceRequests(); bridgeWake?()
         }
@@ -729,6 +768,7 @@ var bridge: PotBridge?
     }
 
     func confirmResourceDownload(_ key: String) {
+        let runtime = runtime
         guard let request = resourceRequests.first(where: { $0["id"] as? String == key }) else { return }
         let bytes = (request["missing_bytes"] as? NSNumber)?.int64Value ?? 0
         let alert = NSAlert(); alert.messageText = L.text("resources.title")
@@ -742,24 +782,28 @@ var bridge: PotBridge?
         alert.addButton(withTitle: L.text("resources.authorize")); alert
             .addButton(withTitle: L.text("resources.cancel"))
         alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
-            self?.resourceCommand(key, reply == .alertFirstButtonReturn ? "authorize" : "cancel")
+            self?.resourceCommand(key, reply == .alertFirstButtonReturn ? "authorize" : "cancel", target: runtime)
         }}
     }
 
-    func resourceCommand(_ key: String, _ operation: String) {
-        Task {
+    func resourceCommand(_ key: String, _ operation: String, target: RuntimeClient? = nil) {
+        let runtime = target ?? runtime
+        Task { [runtime] in
             do { _ = try await runtime.request(
                 "api/v1/sandbox-resources",
                 body: ["action": operation, "request_id": key]
             ) } catch { sandboxError = error.localizedDescription }
+            guard self.runtime.serverID == runtime.serverID else { return }
             await refreshResourceRequests(); refreshSandboxes(); bridgeWake?()
         }
     }
 
     func showResourceCache() {
-        Task {
+        let runtime = runtime
+        Task { [runtime] in
             do {
                 let value = try await runtime.request("api/v1/sandbox-resources")
+                guard self.runtime.serverID == runtime.serverID else { return }
                 let rows = (value["cache"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
                 let alert = NSAlert(); alert.messageText = L.text("resources.cache")
                 alert.informativeText = rows.map { row in
@@ -780,7 +824,8 @@ var bridge: PotBridge?
                 alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
                     guard !candidates.isEmpty, reply == .alertFirstButtonReturn, let self else { return }
                     let id = candidates[picker.indexOfSelectedItem]["id"] as? String ?? ""
-                    Task { do { _ = try await self.runtime.request(
+                    let runtime = runtime
+                    Task { [runtime] in do { _ = try await runtime.request(
                         "api/v1/sandbox-resources",
                         body: ["action": "prune", "resource_id": id]
                     ) } catch { self.sandboxError = error.localizedDescription } }
@@ -790,6 +835,7 @@ var bridge: PotBridge?
     }
 
     func editSandbox(create: Bool) {
+        let runtime = runtime
         guard !sandboxBusy, let target = localRuntime?.sandboxID else { return }
         let current = selectedSandbox()
         let alert = NSAlert(); alert.messageText = create ? L.text("bridge.new-linux-sandbox") : L
@@ -816,7 +862,7 @@ var bridge: PotBridge?
         alert.addButton(withTitle: create ? L.text("bridge.create") : L.text("usage-ui.save")); alert
             .addButton(withTitle: L.text("schedules-ui.cancel"))
         alert.beginSheetModal(for: host) { [weak self] reply in MainActor.assumeIsolated {
-            guard reply == .alertFirstButtonReturn, let self else { return }
+            guard reply == .alertFirstButtonReturn, let self, self.runtime.serverID == runtime.serverID else { return }
             if create {
                 let id = "linux-" + UUID().uuidString.lowercased().prefix(8)
                 self
@@ -853,10 +899,18 @@ var bridge: PotBridge?
     func refreshSandboxes() {
         guard !sandboxRefreshing else { return }
         sandboxRefreshing = true; sandboxRefreshAt = Date()
-        Task {
-            defer { sandboxRefreshing = false }
+        let runtime = runtime
+        let generation = localRuntime?.viewGeneration
+        Task { [runtime] in
+            defer {
+                if self.runtime.serverID == runtime.serverID, generation == localRuntime?.viewGeneration {
+                    sandboxRefreshing = false
+                }
+            }
             do {
                 let value = try await runtime.request("api/v1/sandboxes")
+                guard self.runtime.serverID == runtime.serverID,
+                      generation == localRuntime?.viewGeneration else { return }
                 sandboxItems = value["items"] as? [[String: Any]] ?? []
                 sandboxDefault = value["selected"] as? String ?? "default"
                 resourceRequests = value["resource_requests"] as? [[String: Any]] ?? []
@@ -865,7 +919,13 @@ var bridge: PotBridge?
                     localRuntime?.desktopSupported = capabilities["desktop"] as? Bool == true
                 }
                 bridgeWake?()
-            } catch { sandboxError = error.localizedDescription; bridgeWake?() }
+            } catch {
+                if self.runtime.serverID == runtime
+                    .serverID
+                {
+                    sandboxError = error.localizedDescription; bridgeWake?()
+                }
+            }
         }
     }
 
@@ -883,12 +943,16 @@ var bridge: PotBridge?
         let generation = localRuntime.viewGeneration
         desktopAttempt = target
         sandboxBusy = true; sandboxError = ""; bridgeWake?()
+        let runtime = runtime
         localRuntime.send("desktop") { [weak self] response in
-            guard let self else { return }
+            guard let self, self.runtime.serverID == runtime.serverID,
+                  generation == localRuntime.viewGeneration else { return }
             self.sandboxBusy = false
             if let result = response["result"] as? [String: Any], let key = result["resource_request_id"] as? String {
-                Task {
+                Task { [runtime] in
                     await self.refreshResourceRequests()
+                    guard self.runtime.serverID == runtime.serverID,
+                          generation == localRuntime.viewGeneration else { return }
                     self
                         .resourceContinuations[key] = { [weak self] in
                             self?.desktopAttempt = nil; self?.startSandbox()
@@ -908,12 +972,24 @@ var bridge: PotBridge?
     }
 
     func openSandboxWorkspace(_ target: String) {
+        if runtime.serverID != "local" {
+            let alert = NSAlert(); alert.messageText = L.text("bridge.open-workspace")
+            alert.informativeText = L.text("servers.remote-files")
+            alert.addButton(withTitle: L.text("ai.close")); alert.beginSheetModal(for: host)
+            return
+        }
         if let root = localRuntime?.root {
             let path = root.appendingPathComponent("sandboxes/" + target + "/workspace/workspace")
             do {
                 try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true); NSWorkspace.shared
                     .open(path)
-            } catch { sandboxError = error.localizedDescription; bridgeWake?() }
+            } catch {
+                if self.runtime.serverID == runtime
+                    .serverID
+                {
+                    sandboxError = error.localizedDescription; bridgeWake?()
+                }
+            }
         }
     }
 
@@ -982,16 +1058,11 @@ var bridge: PotBridge?
     }
 
     func update(_ value: [String: Any]) {
+        guard value["server_id"] as? String == runtime.serverID else { return }
         lastUIState = value
         snapshot = value
         running = value["running"] as? Bool ?? false
         selectedRunning = value["selected_running"] as? Bool ?? false
-        if let accepted = value["accepted"] as? String,
-           accepted == composer
-           .string
-        {
-            composer.string = ""; drafts[selected] = ""; textDidChange(Notification(name: NSText.didChangeNotification))
-        }
         backMenuItem?.isEnabled = value["can_back"] as? Bool ?? false
         forwardMenuItem?.isEnabled = value["can_forward"] as? Bool ?? false
         let next = value["selected"] as? String ?? ""
@@ -1020,10 +1091,15 @@ var bridge: PotBridge?
             .text("bridge.send-enter-new-line-shift-enter")
         sendButton.isEnabled = selectedRunning || ready
         if let accepted = value["accepted"] as? String,
-           accepted == composer
-           .string
+           let conversation = value["accepted_conversation"] as? String
         {
-            composer.string = ""; textDidChange(Notification(name: NSText.didChangeNotification))
+            let key = conversation == "main" ? "" : conversation
+            if drafts[key] == accepted {
+                drafts[key] = ""
+            }
+            if selected == key, composer.string == accepted {
+                composer.string = ""; textDidChange(Notification(name: NSText.didChangeNotification))
+            }
         }
         if value["has_snapshot"] as? Bool == true, let messages = value["messages"] as? [[String: Any]] {
             let completed = Set(messages.filter { ($0["role"] as? String) == "assistant" && [
@@ -1165,6 +1241,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         guard let bridge else { return 0 }
         let state: [String: Any] = [
             "page": bridge.page,
+            "server_id": bridge.runtime.serverID,
             "timezone": TimeZone.current.identifier,
             "settings": bridge.settings.publicState,
             "viewer": bridge.viewer,
@@ -1191,6 +1268,10 @@ private var bridgeWake: (@convention(c) () -> Void)?
               let action = v["action"] as? String else { return }
         let settings = bridge.settings
         switch action {
+        case "server-select":
+            bridge.events.append(["action": "server-switch", "id": v["id"] as? String ?? "local"])
+        case "server-activate":
+            bridge.switchServer(v["id"] as? String ?? "local", page: v["page"] as? Int ?? 0)
         case "resource-command": bridge.resourceCommand(
                 v["request_id"] as? String ?? "",
                 v["operation"] as? String ?? ""

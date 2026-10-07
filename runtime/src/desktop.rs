@@ -290,6 +290,16 @@ pub async fn asset(Path(path): Path<String>) -> ApiResult<Response> {
         .into_response())
 }
 
+impl Service {
+    pub async fn close_access_desktop(&self, id: &str) {
+        let _guard = self.sandboxes.desktop_serialization().await;
+        self.sandboxes.close_desktop(id);
+    }
+    pub fn access_desktop_exists(&self, id: &str) -> bool {
+        self.sandboxes.desktop_session(id).is_ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

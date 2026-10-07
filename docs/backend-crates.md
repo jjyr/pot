@@ -25,7 +25,7 @@ App depends on Protocol and embeds Server through its local service adapter. Ser
 
 App embeds Host Server; standalone CLI hosts it independently. Helper owns local VM lifecycle and supports Sandbox-only hosting. Execution tools run in assigned guest scopes; shell code cannot access unmounted Host product state. Tasks sharing a Sandbox use the same guest account, so separate directories are organizational rather than mutual filesystem/process isolation.
 
-Model and native CLI requests run on the Server machine. Remote deployment, endpoint identity/TLS and artifact transfer remain outside current product scope. Tests/build commands are in [Development](development.md); results are recorded in [Host pot-agent acceptance](validation/host-pot-agent-20261006.md).
+Model and native CLI requests run on the Server machine. Native App remote connections support persistent instance identity and signed pairing over owner-configured HTTPS. Endpoint deployment/TLS provisioning and artifact transfer remain outside current product scope; see [Multi-Server client](multi-server-client.md). Tests/build commands are in [Development](development.md); results are recorded in [Host pot-agent acceptance](validation/host-pot-agent-20261006.md).
 
 ## Sandbox extraction
 

@@ -55,17 +55,18 @@ fn client() -> Result<pot_server::LocalClient, String> {
 pub fn ready() -> Result<(), String> {
     client().map(|_| ())
 }
-fn request(path: &str, body: Option<Value>, timeout: Duration) -> Result<Response, String> {
+pub fn local_request(
+    path: &str,
+    body: Option<Value>,
+    timeout: Duration,
+) -> Result<(u16, Vec<u8>), String> {
     let client = client()?;
     runtime().block_on(async {
         let reply = tokio::time::timeout(timeout, client.request(path, body))
             .await
             .map_err(|_| "Backend request timed out".to_string())?
             .map_err(|e| e.to_string())?;
-        Ok(Response {
-            status: Status(reply.status.as_u16()),
-            body: Body(reply.body),
-        })
+        Ok((reply.status.as_u16(), reply.body))
     })
 }
 fn shutdown() {
@@ -77,6 +78,7 @@ fn shutdown() {
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pot_backend_request(
+    target: *const c_char,
     path: *const c_char,
     body: *const c_char,
 ) -> *mut c_char {
@@ -88,20 +90,27 @@ pub unsafe extern "C" fn pot_backend_request(
         let text = unsafe { CStr::from_ptr(body) }
             .to_str()
             .map_err(|e| e.to_string())?;
-        let body = if text.is_empty() {
+        let body: Option<Value> = if text.is_empty() {
             None
         } else {
             Some(serde_json::from_str(text).map_err(|e| e.to_string())?)
         };
-        let reply = request(
-            &format!("/{}", path.trim_start_matches('/')),
-            body,
-            Duration::from_secs(120),
-        )?;
-        let value: Value = serde_json::from_slice(&reply.body.0).map_err(|e| e.to_string())?;
-        if reply.status.0 >= 400 {
+        let target = unsafe { CStr::from_ptr(target) }
+            .to_str()
+            .map_err(|e| e.to_string())?;
+        let target = crate::connections::target(target)?;
+        let path = format!("/{}", path.trim_start_matches('/'));
+        if path == "/client/desktop"
+            && let crate::connections::Target::Remote(remote) = &target
+        {
+            return remote.desktop(body.as_ref().and_then(|b| b["path"].as_str()).unwrap_or(""));
+        }
+        let (status, bytes) = target.request(&path, body, Duration::from_secs(120))?;
+        let value: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        if status >= 400 {
             return Err(value["message"]
                 .as_str()
+                .or(value["code"].as_str())
                 .unwrap_or("Backend request rejected")
                 .into());
         }
@@ -130,13 +139,15 @@ pub extern "C" fn pot_backend_restart() {
     shutdown();
 }
 
-// Request construction is shared with the old cached client, but has no network transport.
+// Builders capture the target transport before any background request starts.
 pub struct Requests {
+    target: crate::connections::Target,
     timeout: Duration,
 }
 impl Requests {
-    pub fn config_builder() -> Self {
+    pub fn config_builder(target: crate::connections::Target) -> Self {
         Self {
+            target,
             timeout: Duration::from_secs(120),
         }
     }
@@ -153,20 +164,22 @@ impl Requests {
         self
     }
     pub fn get(&self, url: &str) -> Builder {
-        Builder::new(url, self.timeout)
+        Builder::new(url, self.timeout, self.target.clone())
     }
     pub fn post(&self, url: &str) -> Builder {
-        Builder::new(url, self.timeout)
+        Builder::new(url, self.timeout, self.target.clone())
     }
 }
 pub struct Builder {
+    target: crate::connections::Target,
     url: url::Url,
     status_error: bool,
     timeout: Duration,
 }
 impl Builder {
-    fn new(path: &str, timeout: Duration) -> Self {
+    fn new(path: &str, timeout: Duration, target: crate::connections::Target) -> Self {
         Self {
+            target,
             url: url::Url::parse(&format!("http://embedded{path}")).expect("local API path"),
             timeout,
             status_error: true,
@@ -195,7 +208,11 @@ impl Builder {
                 .map(|q| format!("?{q}"))
                 .unwrap_or_default()
         );
-        let response = request(&path, body, self.timeout)?;
+        let (status, bytes) = self.target.request(&path, body, self.timeout)?;
+        let response = Response {
+            status: Status(status),
+            body: Body(bytes),
+        };
         if self.status_error && response.status.0 >= 400 {
             return Err(serde_json::from_slice::<Value>(&response.body.0)
                 .ok()

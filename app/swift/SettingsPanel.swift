@@ -4,6 +4,7 @@ import Foundation
 /// Configuration service only. GPUI Kit owns the settings interface.
 @MainActor final class SettingsPanel: NSObject {
     weak var bridge: PotBridge?
+    var runtime = RuntimeClient()
     var aiScreen = "main", draftProfile = "", draftModel = "", connectionKind = "", connectionName = "",
         connectionModel = ""
     var secretRevision = 0, draftRevision = 0
@@ -110,7 +111,7 @@ import Foundation
         Task {
             defer { discovering = false }
             do {
-                let facts = try await bridge.runtime.request("api/v1/agents/refresh", body: [:])
+                let facts = try await runtime.request("api/v1/agents/refresh", body: [:])
                 agentStates = facts["agents"] as? [[String: Any]] ?? []
                 if connectionKind == "codex",
                    let agent = agentStates.first(where: { $0["id"] as? String == connectionKind })
@@ -144,7 +145,7 @@ import Foundation
         ]
         Task {
             do {
-                _ = try await bridge.runtime.request(
+                _ = try await runtime.request(
                     "api/v1/agent",
                     body: [
                         "profile": updated,
@@ -164,12 +165,14 @@ import Foundation
 
     func load() {
         key = ""; limit = "10000"; tokens = "8192"; perTurn = "100"; parallel = "5"
-        if let data = try? Data(contentsOf: root.appendingPathComponent("product/execution-limits.json")),
-           let limits = try? JSONSerialization.jsonObject(with: data) as? [String: Int]
-        {
-            limit = String(limits["request_limit"] ?? 10000); tokens = String(limits["max_tokens"] ?? 8192)
-            perTurn = String(limits["max_requests_per_turn"] ?? 100); parallel =
-                String(limits["max_parallel_tasks"] ?? 5)
+        Task {
+            if let limits = try? await runtime.request("api/v1/config/execution") {
+                limit = String(limits["request_limit"] as? Int ?? 10000)
+                tokens = String(limits["max_tokens"] as? Int ?? 8192)
+                perTurn = String(limits["max_requests_per_turn"] as? Int ?? 100)
+                parallel = String(limits["max_parallel_tasks"] as? Int ?? 5)
+                revision += 1
+            }
         }
         revision += 1
     }
@@ -187,36 +190,18 @@ import Foundation
         ),
             let n = parsed(parallel, 1 ... 1000)
         else { result = L.text("settingspanel.check-the-request-limit-output-tokens-accept"); return }
-        apply(
-            ["request_limit": l, "max_tokens": t, "max_requests_per_turn": p, "max_parallel_tasks": n],
-            to: root.appendingPathComponent("product/execution-limits.json")
-        )
-    }
-
-    func apply(_ value: [String: Any], to path: URL) {
-        guard let bridge, !bridge.running,
-              !bridge.isApplying
-        else { result = L.text("settingspanel.tasks-are-still-running-finish-them-before"); return }
-        do {
-            try FileManager.default.createDirectory(
-                at: path.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let temp = path.deletingLastPathComponent().appendingPathComponent(".config-" + UUID().uuidString)
-            defer { try? FileManager.default.removeItem(at: temp) }
-            let data = try JSONSerialization.data(withJSONObject: value, options: .sortedKeys)
-            guard FileManager.default.createFile(
-                atPath: temp.path,
-                contents: data,
-                attributes: [.posixPermissions: 0o600]
-            ) else { throw NSError(domain: "Pot", code: 1) }
-            let handle = try FileHandle(forWritingTo: temp); try handle.synchronize(); try handle.close()
-            guard rename(temp.path, path.path) == 0 else { throw NSError(domain: "Pot", code: 2) }
-            load(); result = L.text("settingspanel.configuration-saved")
-            if path.path.contains("/product/") {
-                Task { await Task.detached { backendRestart() }.value }
-            }
-        } catch { result = L.text("settingspanel.save-failed-previous-configuration-kept") }
+        let values: [String: Any] = ["request_limit": l, "max_tokens": t,
+                                     "max_requests_per_turn": p, "max_parallel_tasks": n]
+        Task {
+            do {
+                _ = try await runtime.request("api/v1/config/execution", body: values)
+                result = L.text("servers.limits-saved")
+                if runtime.serverID == "local" {
+                    await Task.detached { backendRestart() }.value
+                }
+                load()
+            } catch { result = error.localizedDescription }
+        }
     }
 
     func refreshRouting() {
@@ -225,10 +210,10 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                let state = try await bridge.runtime.request("api/v1/agent")
+                let state = try await runtime.request("api/v1/agent")
                 savedProfiles = state["profiles"] as? [[String: Any]] ?? []
-                routingPolicy = try await bridge.runtime.request("api/v1/agent/routing")
-                providerAllowances = try await bridge.runtime
+                routingPolicy = try await runtime.request("api/v1/agent/routing")
+                providerAllowances = try await runtime
                     .request("api/v1/usage/providers")["providers"] as? [[String: Any]] ?? []
                 if !savedProfiles.contains(where: { $0["id"] as? String == routingProfile }) {
                     routingProfile = savedProfiles.first?["id"] as? String ?? ""
@@ -302,7 +287,7 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                routingPolicy = try await bridge.runtime.request("api/v1/agent/routing", body: update)
+                routingPolicy = try await runtime.request("api/v1/agent/routing", body: update)
                 result = L.text("settingspanel.routing-saved-new-tasks-use-the-new")
             } catch { result = L.format(
                 "settingspanel.routing-not-saved-0-refresh-and-retry",
@@ -324,7 +309,7 @@ import Foundation
         routingBusy = true
         Task {
             do {
-                _ = try await bridge.runtime.request("api/v1/agent", body: [
+                _ = try await runtime.request("api/v1/agent", body: [
                     "profile": selected, "expected_revision": expected,
                     "request_id": UUID().uuidString, "follow_main": false,
                     "follow_worker": false,
@@ -346,12 +331,12 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                _ = try await bridge.runtime.request("api/v1/agent/migrate", body: [
+                _ = try await runtime.request("api/v1/agent/migrate", body: [
                     "request_id": UUID().uuidString, "target_profile": target,
                     "owner": owner, "reason": "settings_changed",
                 ])
                 while true {
-                    let response = try await bridge.runtime.request("api/v1/agent?owner=" + owner)
+                    let response = try await runtime.request("api/v1/agent?owner=" + owner)
                     if response["pending_migration"] is NSNull || response["pending_migration"] == nil {
                         break
                     }
@@ -359,7 +344,9 @@ import Foundation
                     try await Task.sleep(nanoseconds: 750_000_000)
                 }
                 result = L.text("settingspanel.this-task-s-agent-changed-other-tasks")
-                bridge.selectPage(3)
+                if bridge.runtime.serverID == runtime.serverID {
+                    bridge.selectPage(3)
+                }
             } catch { result = L.text("settingspanel.task-agent-unchanged-check-the-connection-finish") }
         }
     }
@@ -385,7 +372,7 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                providerAllowance = try await bridge.runtime.request("api/v1/usage/providers", body: update)
+                providerAllowance = try await runtime.request("api/v1/usage/providers", body: update)
                 providerAllowance["enforcement"] = "pre_request"
                 providerAllowances.removeAll { $0["provider"] as? String == provider }
                 providerAllowances.append(providerAllowance)

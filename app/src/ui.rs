@@ -250,6 +250,7 @@ impl Settings {
         &self,
         state: &Value,
         view: &crate::client::View,
+        servers: Option<Div>,
         cx: &mut Context<Shell>,
     ) -> Div {
         let section = state["section"].as_u64().unwrap_or(0);
@@ -306,6 +307,7 @@ impl Settings {
                         crate::i18n::text("ui.back-forward-d-sandbox-settings-shift-enter"),
                     ));
             }
+            5 => {}
             4 => {
                 form = self
                     .routing_form(state, cx)
@@ -387,6 +389,7 @@ impl Settings {
                         crate::i18n::text("ui.ai-configuration"),
                         crate::i18n::text("ui.work-environment"),
                         crate::i18n::text("ui.task-configuration"),
+                        crate::i18n::text("servers.title"),
                     ]
                     .get(section as usize)
                     .copied()
@@ -396,6 +399,7 @@ impl Settings {
                     segments(cx).children(
                         [
                             (0, crate::i18n::text("ui.general")),
+                            (5, crate::i18n::text("servers.title")),
                             (1, crate::i18n::text("ui.ai-configuration")),
                             (4, crate::i18n::text("ui.task-configuration")),
                             (3, crate::i18n::text("ui.work-environment")),
@@ -416,6 +420,7 @@ impl Settings {
                 )
                 .child(hint(
                     match section {
+                        5 => crate::i18n::text("servers.hint"),
                         0 => crate::i18n::text("ui.make-pot-work-the-way-you-prefer"),
                         1 => crate::i18n::text("ui.connect-an-agent-and-choose-the-model"),
                         4 => crate::i18n::text("ui.new-tasks-follow-the-chat-configuration-by"),
@@ -437,7 +442,7 @@ impl Settings {
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
-                        .child(card(cx).child(form))
+                        .child(servers.unwrap_or_else(|| card(cx).child(form)))
                         .child(div().mt_3().when(
                             !state["result"].as_str().unwrap_or("").is_empty(),
                             |el| {

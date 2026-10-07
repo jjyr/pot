@@ -3,7 +3,8 @@ import Foundation
 
 extension SettingsPanel {
     func startAuthorization(_ engine: String) {
-        guard !loginVisible, let runtime = bridge?.runtime else { return }
+        guard !loginVisible else { return }
+        let runtime = runtime
         loginEngine = engine; loginVisible = true; loginMessage = L
             .text("authorization.opening-official-authorization"); result = ""
         let generation = UUID().uuidString
@@ -14,7 +15,7 @@ extension SettingsPanel {
             do {
                 let response = try await runtime.request(
                     "api/v1/authorization/start",
-                    body: ["engine": engine, "attempt_id": generation]
+                    body: ["engine": engine, "attempt_id": generation, "device": runtime.serverID != "local"]
                 )
                 attempt = response["attempt_id"] as? String ?? ""
                 guard self.authorizationID == generation, !Task.isCancelled else {
@@ -82,7 +83,8 @@ extension SettingsPanel {
         authorizationTask?.cancel(); authorizationTask = nil
         loginVisible = false; loginMessage = L.text("authorization.authorization-cancelled")
         result = loginMessage
-        if !attempt.isEmpty, let runtime = bridge?.runtime {
+        if !attempt.isEmpty {
+            let runtime = runtime
             Task { _ = try? await runtime.request("api/v1/authorization/cancel", body: ["attempt_id": attempt]) }
         }
     }

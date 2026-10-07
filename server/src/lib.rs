@@ -12,3 +12,5 @@ pub use local::{LocalClient, LocalReply};
 
 mod settings;
 pub use settings::apply_settings;
+
+pub use pot_runtime::execution::private_json as save_private_json;

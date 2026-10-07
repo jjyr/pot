@@ -1,9 +1,9 @@
 # Mobile access
 
 Issue [#8](https://github.com/jjyr/pot/issues/8), baseline `origin/main` f2d092d,
-2026-10-07. This implementation is an owner-instance pilot. Desktop viewing and
-control, physical-device qualification and public deployment remain acceptance
-work, not enabled capabilities.
+2026-10-07. This implementation is an owner-instance pilot. The native multi-Server App uses the same signed pairing endpoint; see
+[Multi-Server client](multi-server-client.md). Physical-device qualification and
+public deployment remain separate acceptance work.
 
 ## Start the owner endpoint
 
@@ -83,13 +83,15 @@ file is left intact, but its keys are not accepted.
 
 Owner access includes the main chat and all instance environments. It is not a
 single-Sandbox grant: the main Agent can indirectly operate other environments.
-The public proxy exposes only chat/task input and cancellation plus read-only
-snapshots, task queries, Sandbox inventory, usage and schedules. It injects the
-native bearer internally. Provider settings, authorization endpoints, Terminal,
-execution configuration, orchestration and desktop broker routes are denied.
-Inventory exposes only display phase/generation and numeric hardware fields;
-Helper viewer URLs, tokens and private network addresses are filtered. Agent
-management-tool display replies use the same restricted state projection.
+The authenticated proxy grants instance owner access to the Runtime API, including
+provider settings, task/environment management and desktop-session creation.
+There are no roles or route permission tiers. Exact Origin checks and signed
+pairing/session authentication remain enforced. Client bearer/cookie headers
+are stripped before internal dispatch; the Runtime bearer remains on Server.
+Server exposes a persistent instance ID and protocol version in `/access/status`;
+new pairing/login challenges also bind the instance ID. Existing enrolled
+clients sign the new challenge text without re-pairing.
+
 
 The browser runs GPUI Kit 0.7.1 WASM. The authentication shell and same-origin
 transport adapter are JS. GPUI reuses `pot-ui` Chat/Tasks/Sandbox/Usage components, Markdown, page/chat state,
@@ -98,7 +100,8 @@ with touch navigation, per-conversation in-memory drafts, task filtering, browse
 history and read-only Sandbox/Usage screens. Tasks share rows, phase labels,
 search/filter counts, empty states and server-authoritative pagination. Usage
 shares date ranges, statistics, model grouping and charts. Browser allowance
-editing and desktop actions remain disabled under the existing route allowlist.
+editing and desktop controls remain absent from the current browser interface;
+the API now grants paired clients owner access.
 See the [shared-page validation](validation/shared-pages-20261007.md). Input retries preserve the original
 request UUID; an ambiguous write is never replayed with a new UUID automatically.
 No transcript, credential or session is stored in localStorage or an offline cache.
@@ -183,7 +186,7 @@ Exactly-once OS delivery is not promised.
 ## Verification and remaining gates
 
 See the [current hosting/pairing report](validation/standalone-hosting-20261007.md) and the earlier [mobile acceptance report](validation/mobile-access-20261007.md).
-The desktop broker, RFB credentials and takeover remain unreachable. No
+Desktop sessions now use the authenticated gateway; see [multi-Server access](multi-server-client.md). No
 restricted-Sandbox authority, production relay, complete App bundle boot,
 physical iOS/Android touch/IME/performance and mobile
 screen-reader parity or real

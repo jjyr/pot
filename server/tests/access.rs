@@ -387,7 +387,7 @@ async fn pairing_is_one_use_and_new_code_cancels_previous() {
 }
 
 #[tokio::test]
-async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
+async fn browser_boundary_rejects_csrf_and_requires_pairing_for_owner_routes() {
     let f = Fixture::new();
     assert_eq!(
         f.post("/access/pair/start", None, json!({})).await.0,
@@ -427,24 +427,33 @@ async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
     );
     let mut auth = ClientKey::new();
     let session = f.enroll(&mut auth).await;
+    // Pairing is owner authority: requests reach the Runtime, which has no matching
+    // fixture routes here. They are no longer rejected by an access allowlist.
     for path in [
         "/api/v1/providers",
         "/api/v1/authorization/status",
-        "/api/v1/terminals",
-        "/api/v1/access",
-        "/api/v1/execution",
         "/api/v1/sandbox-resources",
-        "/api/v1/desktop/sessions",
-        "/api/v1/desktop/sessions/close",
     ] {
         assert_eq!(
             f.request(false, Method::GET, path, Some(&session), Value::Null, None)
                 .await
                 .0,
-            StatusCode::FORBIDDEN,
-            "{path}"
+            StatusCode::NOT_FOUND
         );
     }
+    assert_eq!(
+        f.request(
+            false,
+            Method::GET,
+            "/api/v1/access",
+            Some(&session),
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
     assert_eq!(
         f.post(
             "/api/v1/sandboxes",
@@ -453,7 +462,7 @@ async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
         )
         .await
         .0,
-        StatusCode::FORBIDDEN
+        StatusCode::NOT_FOUND
     );
     f.command(json!({"action":"disable"})).await;
     assert_eq!(
@@ -602,7 +611,7 @@ async fn push_preferences_are_installation_scoped_and_logout_removes_consent() {
 }
 
 #[tokio::test]
-async fn sandbox_inventory_does_not_expose_private_viewer_credentials() {
+async fn paired_owner_receives_the_same_inventory_as_local_owner() {
     let mut f = Fixture::new();
     let mut auth = ClientKey::new();
     let session = f.enroll(&mut auth).await;
@@ -620,21 +629,16 @@ async fn sandbox_inventory_does_not_expose_private_viewer_credentials() {
     assert_eq!(code, StatusCode::OK);
     assert_eq!(body["items"][0]["state"]["phase"], "running");
     assert_eq!(body["items"][0]["state"]["generation"], 9);
-    for secret in [
-        "root-secret",
-        "config-secret",
-        "broker-secret",
-        "another-secret",
-        "192.168.64.2",
-        "viewer",
-    ] {
-        assert!(!body.to_string().contains(secret));
-    }
+    assert_eq!(body["items"][0]["config"]["private_key"], "config-secret");
+    assert_eq!(body["items"][0]["state"]["ip"], "192.168.64.2");
+    assert!(!body.to_string().contains("private-root-bearer"));
 }
 
 #[test]
 fn legacy_clients_do_not_migrate_authority_and_disabled_policy_survives() {
     let f = Fixture::new();
+    // Simulate a pre-pairing installation, before the new identity record exists.
+    std::fs::remove_file(f.path.join("access-clients.json")).unwrap();
     std::fs::write(
         f.path.join("access-credentials.json"),
         r#"{"disabled":true,"keys":{"old":{"name":"Old phone","passkey":{}}},"subscriptions":{}}"#,
@@ -652,4 +656,82 @@ fn legacy_clients_do_not_migrate_authority_and_disabled_policy_survives() {
     assert!(!inner.enabled);
     assert!(inner.credentials.keys.is_empty());
     assert!(inner.credentials.subscriptions.is_empty());
+}
+
+#[tokio::test]
+async fn identity_is_persistent_and_management_uses_session_not_client_bearer() {
+    let mut f = Fixture::new();
+    let (_, first, _) = f
+        .request(
+            false,
+            Method::GET,
+            "/access/status",
+            None,
+            Value::Null,
+            None,
+        )
+        .await;
+    assert_eq!(first["api_version"], pot_protocol::API_VERSION);
+    assert!(!first["server_id"].as_str().unwrap().is_empty());
+    let mut auth = ClientKey::new();
+    let session = f.enroll(&mut auth).await;
+    f.access.runtime = Router::new().route(
+        "/api/v1/providers",
+        get(|h: axum::http::HeaderMap| async move {
+            assert_eq!(h["authorization"], "Bearer private-root-bearer");
+            assert!(!h.contains_key("origin"));
+            assert!(!h.contains_key("cookie"));
+            axum::Json(json!({"providers":[],"owner":true}))
+        }),
+    );
+    assert_eq!(
+        f.request(
+            false,
+            Method::GET,
+            "/api/v1/providers",
+            None,
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, body, _) = f
+        .request(
+            false,
+            Method::GET,
+            "/api/v1/providers",
+            Some(&session),
+            Value::Null,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["owner"], true);
+    let config = AccessConfig {
+        origin: Url::parse("https://pot.example/").unwrap(),
+        bind: "127.0.0.1:0".parse().unwrap(),
+        certificate: f.path.join("cert"),
+        private_key: f.path.join("key"),
+        assets: f.path.clone(),
+    };
+    f.access = Access::new(
+        &config,
+        f.path.clone(),
+        "private-root-bearer".into(),
+        f.access.runtime.clone(),
+    )
+    .unwrap();
+    let (_, after, _) = f
+        .request(
+            false,
+            Method::GET,
+            "/access/status",
+            None,
+            Value::Null,
+            None,
+        )
+        .await;
+    assert_eq!(first["server_id"], after["server_id"]);
 }

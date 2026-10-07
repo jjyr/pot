@@ -27,7 +27,7 @@ impl Default for Config {
     }
 }
 /// Product execution limits do not imply a legacy DeepSeek connection.
-#[derive(Deserialize)]
+#[derive(serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExecutionLimits {
     request_limit: u64,
@@ -101,4 +101,46 @@ pub async fn gateway(
 #[cfg(test)]
 pub async fn run(s: &Service, req: SendMessage) -> Result<()> {
     agent::run(s, req).await
+}
+
+/// Owner settings persist on the Server machine; new hosting applies them on restart.
+pub async fn limits_get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
+    s.authorized(&h)?;
+    let config =
+        execution_config(s.execution.clone().unwrap_or_default(), &s.data).map_err(internal)?;
+    Ok(Json(
+        json!({"request_limit":config.request_limit,"max_tokens":config.max_tokens,
+        "max_requests_per_turn":config.max_requests_per_turn,"max_parallel_tasks":config.max_parallel_tasks}),
+    ))
+}
+pub async fn limits_save(
+    State(s): State<Service>,
+    h: HeaderMap,
+    Json(v): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    s.authorized(&h)?;
+    let limits: ExecutionLimits = serde_json::from_value(v).map_err(|_| {
+        error(
+            StatusCode::BAD_REQUEST,
+            "limits",
+            "Invalid execution limits",
+        )
+    })?;
+    if limits.request_limit > 1_000_000
+        || !(1..=9_007_199_254_740_991).contains(&limits.max_tokens)
+        || !(1..=1000).contains(&limits.max_requests_per_turn)
+        || !(1..=1000).contains(&limits.max_parallel_tasks)
+    {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "limits",
+            "Invalid execution limits",
+        ));
+    }
+    private_json(
+        &s.data.join("execution-limits.json"),
+        &serde_json::to_value(&limits).map_err(|e| internal(e.into()))?,
+    )
+    .map_err(internal)?;
+    Ok(Json(json!({"saved":true,"restart_required":true})))
 }

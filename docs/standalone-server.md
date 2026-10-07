@@ -2,8 +2,9 @@
 
 Pot has one backend with two hosts: `pot serve` runs it independently; the macOS
 App owns it inside its own process. App requests, including the Swift settings
-adapter, dispatch in memory. App does not connect to a daemon or management
-socket. Closing App shuts down its backend before the Sandbox Helper.
+adapter, dispatch in memory. Its local requests do not use a daemon or management socket. Additional
+remote instances connect through the signed access endpoint; see
+[Multi-Server client](multi-server-client.md). Closing App shuts down its backend before the Sandbox Helper.
 
 ## Install and run
 
@@ -62,9 +63,9 @@ Configuration files use the existing Runtime API request schemas; see
 [Runtime contract](../runtime/README.md). Secrets stay in private files, not
 command arguments. `chat` prints the accepted message receipt, not an invented
 model result; query snapshots/tasks for subsequent output. `pot api PATH
-[JSON_FILE]` supports existing local queries and mutations. Browser route
-permissions remain restricted; changing authentication does not enable remote
-provider administration, Terminal or desktop control.
+[JSON_FILE]` supports existing local queries and mutations. Pairing grants instance owner access, including remote provider/environment
+management and desktop-session APIs. The browser interface remains smaller
+than the native App; there are no permission tiers.
 
 `pot config server /secure/listener-settings.json` saves supported `POT_ACCESS_*`
 settings in `server.json` for both hosts. Environment overrides this file.

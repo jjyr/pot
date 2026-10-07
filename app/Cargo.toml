@@ -22,5 +22,13 @@ async-channel = "2"
 smol = "2"
 qrcode = { version = "0.14", default-features = false }
 
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
+ring = "0.17"
+base64 = "0.22"
+
 [build-dependencies]
 serde_json.workspace = true
+
+[dev-dependencies]
+axum = "0.8"
+tower = { version = "0.5", features = ["util"] }

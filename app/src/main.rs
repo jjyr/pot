@@ -4,6 +4,8 @@ rust_i18n::i18n!("locales", fallback = "en");
 mod artifacts;
 mod backend;
 mod client;
+mod connections;
+mod servers_ui;
 use pot_ui::design;
 mod i18n;
 
@@ -47,6 +49,7 @@ extern "C" fn wake_ui() {
     }
 }
 struct Shell {
+    servers: servers_ui::Servers,
     client: client::Client,
     scroll: ScrollHandle,
     tasks_scroll: ScrollHandle,
@@ -131,6 +134,7 @@ impl Shell {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let servers_changed = self.servers.poll(self.client.target.id());
         let old_tasks = self.show_tasks;
         {
             let mut v = self.client.view.lock().unwrap();
@@ -151,7 +155,16 @@ impl Shell {
             let event: serde_json::Value =
                 serde_json::from_slice(unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes())
                     .unwrap_or_default();
+            if event["server_id"]
+                .as_str()
+                .is_some_and(|id| id != self.client.target.id())
+            {
+                continue;
+            }
             match event["action"].as_str() {
+                Some("server-switch") => {
+                    self.servers.pending_switch = event["id"].as_str().map(str::to_owned)
+                }
                 Some("send") => {
                     if let Some(text) = event["text"].as_str() {
                         self.client.send(text.into());
@@ -230,7 +243,10 @@ impl Shell {
             }
             v.usage_query = query;
         }
-        let accepted = self.client.view.lock().unwrap().accepted_text.take();
+        let (accepted, accepted_conversation) = {
+            let mut v = self.client.view.lock().unwrap();
+            (v.accepted_text.take(), v.accepted_conversation.take())
+        };
         let view = self.client.view.lock().unwrap().clone();
         let dark = unsafe { pot_bridge_dark() };
         cx.set_reduce_motion(unsafe { pot_bridge_reduce_motion() });
@@ -250,7 +266,9 @@ impl Shell {
         if removal_finished || cx.reduce_motion() {
             self.summary_removal = None;
         }
-        let mut changed = summary_changed
+        let mut changed = servers_changed
+            || self.servers.pending_switch.is_some()
+            || summary_changed
             || removal_finished
             || native_changed
             || self.last_view.as_ref() != Some(&view)
@@ -296,7 +314,8 @@ impl Shell {
             "engine":snapshot.map(|s|s.engine.engine.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
             "used":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.used),
             "limit":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.limit),
-            "accepted":accepted,"at_bottom":at_bottom,
+            "accepted":accepted,"accepted_conversation":accepted_conversation,"at_bottom":at_bottom,
+            "server_id":self.client.target.id(),
             "messages":view.main_snapshot.as_ref().map(|s|s.messages.as_slice()).unwrap_or(&[]).iter().map(|m|serde_json::json!({"id":m.id,"role":m.role,"status":m.status})).collect::<Vec<_>>()
         });
         if let Ok(json) = CString::new(state.to_string()) {
@@ -362,9 +381,11 @@ impl Shell {
                 );
             }
             Some(2) => {
+                let servers =
+                    (self.native["settings"]["section"] == 5).then(|| self.servers_page(cx));
                 return self
                     .settings
-                    .render(&self.native["settings"], &view, cx)
+                    .render(&self.native["settings"], &view, servers, cx)
                     .child(
                         Button::new("settings-resource-cache")
                             .ghost()
@@ -614,7 +635,7 @@ impl Shell {
                     .children(messages.iter().enumerate().map(|(index, m)| {
                         let latest_reply =
                             !running && index + 1 == messages.len() && m.role == Role::Assistant;
-                        let artifact = artifacts::from_message(
+                        let artifact = (self.client.target.id() == connections::LOCAL).then(||artifacts::from_message(
                             m,
                             &if view.selected.is_empty() {
                                 client::root().join("workspace/workspace")
@@ -623,7 +644,7 @@ impl Shell {
                                     .join("workspace/workspace/tasks")
                                     .join(&view.selected)
                             },
-                        );
+                        )).flatten();
                         let source = pot_ui::chat::display_source(m, crate::i18n::report, crate::i18n::message);
                         let artifact = artifact.map(|path| {
                             let label = crate::i18n::tr!("main.show-in-finder", path.file_name().unwrap_or_default().to_string_lossy());
@@ -723,6 +744,9 @@ impl Shell {
 }
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(id) = self.servers.pending_switch.take() {
+            self.switch_server(&id, window, cx);
+        }
         if let Some(forward) = self.pending_history.take() {
             self.travel(forward, window, cx);
         }
@@ -887,7 +911,8 @@ fn main() {
                         })
                         .detach();
                         Shell {
-                            client: client::Client::start(),
+                            client: client::Client::start(connections::Target::Local),
+                            servers: servers_ui::Servers::new(window, cx),
                             scroll: ScrollHandle::new(),
                             tasks_scroll: ScrollHandle::new(),
                             history: navigation::History::default(),

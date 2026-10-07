@@ -251,6 +251,7 @@ impl Shell {
             .flex()
             .items_center()
             .gap_3()
+            .child(self.server_picker(cx))
             .child(
                 div()
                     .flex()

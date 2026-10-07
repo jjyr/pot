@@ -649,6 +649,7 @@ impl Settings {
                     segments(cx).children(
                         [
                             (0, crate::i18n::text("ui.general")),
+                            (5, crate::i18n::text("servers.title")),
                             (1, crate::i18n::text("ui.ai-configuration")),
                             (4, crate::i18n::text("ui.task-configuration")),
                             (3, crate::i18n::text("ui.work-environment")),

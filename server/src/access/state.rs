@@ -73,6 +73,8 @@ impl AccessConfig {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Credentials {
     #[serde(default)]
+    pub server_id: String,
+    #[serde(default)]
     pub disabled: bool,
     pub keys: HashMap<String, Credential>,
     #[serde(default)]
@@ -131,7 +133,7 @@ impl Access {
     ) -> Result<Self> {
         AccessConfig::validate_origin(&config.origin)?;
         let path = data.join("access-clients.json");
-        let credentials: Credentials = if path.exists() {
+        let mut credentials: Credentials = if path.exists() {
             serde_json::from_slice(&std::fs::read(path)?)?
         } else {
             // Preserve a previously disabled endpoint, but never migrate old client authority.
@@ -148,6 +150,13 @@ impl Access {
                 ..Default::default()
             }
         };
+        if credentials.server_id.is_empty() {
+            credentials.server_id = Uuid::new_v4().to_string();
+            pot_runtime::execution::private_json(
+                &data.join("access-clients.json"),
+                &serde_json::to_value(&credentials)?,
+            )?;
+        }
         let enabled = !credentials.disabled;
         Ok(Self {
             notifications: None,

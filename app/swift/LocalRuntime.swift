@@ -6,6 +6,8 @@ import WebKit
 /// App-owned user process; bundle-relative executable/resources, private Unix IPC.
 @MainActor final class LocalRuntime {
     let process = Process()
+    var client = RuntimeClient()
+    var selections: [String: String] = [:]
     let root: URL
     weak var web: WKWebView?
     let label = NSTextField(wrappingLabelWithString: L.text("native.runtime-starting"))
@@ -23,7 +25,8 @@ import WebKit
     func closeDesktop() {
         let session = desktopSession; desktopSession = ""
         if !session.isEmpty {
-            Task { let client = RuntimeClient(); client.root = root; _ = try? await client.request(
+            let client = client
+            Task { _ = try? await client.request(
                 "api/v1/desktop/sessions/close",
                 body: ["session_id": session]
             ) }
@@ -116,8 +119,8 @@ import WebKit
         let target = sandboxID
         let generation = viewGeneration
         if ["start", "stop", "desktop"].contains(method) {
+            let client = client
             Task {
-                let client = RuntimeClient(); client.root = root
                 do {
                     let value = try await client.request(
                         "api/v1/sandboxes",
@@ -149,19 +152,23 @@ import WebKit
     }
 
     func poll() {
-        guard process.isRunning
-        else {
-            label.stringValue = "Helper exited (\(process.terminationStatus)); reopen App to recover"; timer?
-                .invalidate(); return
+        // A missing optional Helper must not prevent local chat or Server switching.
+        // Process.terminationStatus raises an Objective-C exception before launch.
+        if client.serverID == "local", process.processIdentifier != 0, !process.isRunning {
+            label.stringValue = "Helper exited (\(process.terminationStatus)); reopen App to recover"
         }
         if polling {
             return
         }; polling = true
         let target = sandboxID
         let generation = viewGeneration
+        let client = client
         Task {
-            defer { polling = false }
-            let client = RuntimeClient(); client.root = root
+            defer {
+                if generation == viewGeneration {
+                    polling = false
+                }
+            }
             if let inventory = try? await client.request("api/v1/sandboxes"),
                let items = inventory["items"] as? [[String: Any]],
                let item = items.first(where: { $0["id"] as? String == target }),
@@ -188,16 +195,17 @@ import WebKit
             probing = true
             let target = sandboxID
             let generation = viewGeneration
+            let client = client
             Task {
-                defer { probing = false }
-                let client = RuntimeClient(); client.root = root
+                defer {
+                    if generation == viewGeneration {
+                        probing = false
+                    }
+                }
                 do {
                     let result = try await client.request("api/v1/desktop/sessions", body: ["sandbox_id": target])
                     guard let session = result["session"] as? [String: Any], let sessionID = session["id"] as? String,
-                          let path = result["path"] as? String,
-                          let data = try? Data(contentsOf: root.appendingPathComponent("product/runtime.json")),
-                          let endpoint = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let port = endpoint["port"] as? Int else { return }
+                          let path = result["path"] as? String else { return }
                     guard target == sandboxID, generation == viewGeneration else {
                         _ = try? await client.request(
                             "api/v1/desktop/sessions/close",
@@ -205,8 +213,33 @@ import WebKit
                         ); return
                     }
                     desktopSession = sessionID
-                    let address = "http://127.0.0.1:\(port)\(path)?native=1"
-                    guard let url = URL(string: address) else { return }
+                    let address: String
+                    if client.serverID == "local" {
+                        guard let data = try? Data(contentsOf: root.appendingPathComponent("product/runtime.json")),
+                              let endpoint = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let port = endpoint["port"] as? Int else { return }
+                        address = "http://127.0.0.1:\(port)\(path)?native=1"
+                    } else {
+                        let info = try await client.request("client/desktop", body: ["path": path])
+                        guard let url = info["url"] as? String, let origin = info["origin"] as? String,
+                              let host = URL(string: origin)?.host else { return }
+                        address = url
+                        for field in (info["cookie"] as? String ?? "").components(separatedBy: "; ") {
+                            let pieces = field.split(separator: "=", maxSplits: 1).map(String.init)
+                            if pieces.count == 2, let cookie = HTTPCookie(properties: [
+                                .domain: host, .path: "/", .name: pieces[0], .value: pieces[1],
+                                .secure: origin.hasPrefix("https:") ? "TRUE" : "FALSE",
+                            ]) {
+                                await web?.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+                            }
+                        }
+                    }
+                    guard target == sandboxID, generation == viewGeneration, let url = URL(string: address) else {
+                        _ = try? await client.request(
+                            "api/v1/desktop/sessions/close",
+                            body: ["session_id": sessionID]
+                        ); return
+                    }
                     loaded = address; displayReady = false; web?.isHidden = true
                     web?.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
                 } catch { label.stringValue = error.localizedDescription }
@@ -229,6 +262,17 @@ import WebKit
         requestedDesktops.insert(sandboxID)
         closeDesktop(); loaded = ""; displayReady = false; viewGeneration += 1; web?.stopLoading(); web?
             .isHidden = true; poll()
+    }
+
+    func switchServer(_ runtime: RuntimeClient) {
+        selections[client.serverID] = sandboxID
+        closeDesktop()
+        client = runtime
+        viewGeneration += 1
+        sandboxID = selections[runtime.serverID] ?? "default"
+        loaded = ""; displayReady = false; polling = false; probing = false
+        requestedDesktops = []; web?.stopLoading(); web?.isHidden = true
+        poll()
     }
 
     func cleanup() {

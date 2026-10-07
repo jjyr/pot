@@ -51,6 +51,8 @@ pub fn public_router(access: Access) -> Router {
         .route("/access/push/preferences", post(super::push::preferences))
         .route("/access/push/heartbeat", post(super::push::heartbeat))
         .route("/api/{*path}", get(proxy).post(proxy))
+        .route("/desktop/{*path}", get(proxy).post(proxy))
+        .route("/desktop-assets/{*path}", get(proxy))
         .fallback(assets)
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn_with_state(access.clone(), boundary))
@@ -81,6 +83,7 @@ async fn boundary(State(a): State<Access>, req: Request, next: Next) -> Response
     if req.method() == Method::POST && req.uri().path().starts_with("/access/") && !a.rate_limit() {
         return fail(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
     }
+    let desktop = req.uri().path().starts_with("/desktop/");
     let mut r = next.run(req).await;
     for (k, v) in [
         ("cache-control", "no-store"),
@@ -94,6 +97,9 @@ async fn boundary(State(a): State<Access>, req: Request, next: Next) -> Response
         ),
         ("strict-transport-security", "max-age=31536000"),
     ] {
+        if k == "content-security-policy" && desktop {
+            continue;
+        }
         r.headers_mut().insert(k, HeaderValue::from_static(v));
     }
     r
@@ -102,7 +108,7 @@ async fn status(State(a): State<Access>, h: HeaderMap) -> Json<Value> {
     let authenticated = cookie(&h, SESSION_COOKIE).is_some_and(|s| a.valid_session(&s, false));
     let i = a.inner.lock().unwrap();
     Json(
-        json!({"authenticated":authenticated,"enrollment_open":i.pairing.as_ref().is_some_and(|e|e.expires>Instant::now()),"scope":"owner_instance","desktop_available":false,"push_available":a.push.is_some() && a.notifications.is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":true,"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
+        json!({"authenticated":authenticated,"enrollment_open":i.pairing.as_ref().is_some_and(|e|e.expires>Instant::now()),"scope":"owner_instance","desktop_available":true,"server_id":i.credentials.server_id,"api_version":pot_protocol::API_VERSION,"push_available":a.push.is_some() && a.notifications.is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":true,"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
     )
 }
 async fn pair_start(State(a): State<Access>, Json(body): Json<Value>) -> Result<Response, Failure> {
@@ -143,11 +149,12 @@ fn challenge(
     }
     let id = Uuid::new_v4().to_string();
     let message = format!(
-        "Pot client authorization\n{}\n{}\n{}\n{}",
+        "Pot client authorization\n{}\n{}\n{}\n{}\n{}",
         a.origin,
         if pairing { "pair" } else { "login" },
         key,
-        id
+        id,
+        i.credentials.server_id
     );
     i.challenges.insert(
         id.clone(),
@@ -161,7 +168,7 @@ fn challenge(
         },
     );
     Ok(response(
-        json!({"challenge":message,"client_id":key}),
+        json!({"challenge":message,"client_id":key,"server_id":i.credentials.server_id}),
         Some((CEREMONY_COOKIE, id, 300)),
     ))
 }
@@ -285,44 +292,13 @@ async fn logout(State(a): State<Access>, h: HeaderMap) -> Response {
         Some((SESSION_COOKIE, String::new(), 0)),
     )
 }
-fn allowed(method: &Method, path: &str) -> bool {
-    if *method == Method::GET
-        && matches!(
-            path,
-            "/api/v1/snapshot"
-                | "/api/v1/events"
-                | "/api/v1/tasks"
-                | "/api/v1/tasks/query"
-                | "/api/v1/sandboxes"
-                | "/api/v1/usage"
-                | "/api/v1/usage/summary"
-                | "/api/v1/schedules"
-        )
-    {
-        return true;
-    }
-    if *method == Method::POST && matches!(path, "/api/v1/messages" | "/api/v1/turn/cancel") {
-        return true;
-    }
-    let parts = path.split('/').collect::<Vec<_>>();
-    if parts.len() >= 5 && parts[..4] == ["", "api", "v1", "tasks"] && !parts[4].is_empty() {
-        return (*method == Method::GET && parts.len() == 5)
-            || (*method == Method::POST
-                && parts.len() == 6
-                && matches!(parts[5], "messages" | "cancel"));
-    }
-    false
-}
 async fn proxy(State(a): State<Access>, mut req: Request) -> Result<Response, Failure> {
     let session = cookie(req.headers(), SESSION_COOKIE)
         .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "login_required"))?;
     if !a.valid_session(&session, true) {
         return Err(fail(StatusCode::UNAUTHORIZED, "session_expired"));
     }
-    if !allowed(req.method(), req.uri().path()) {
-        return Err(fail(StatusCode::FORBIDDEN, "route_not_allowed"));
-    }
-    let inventory = req.uri().path() == "/api/v1/sandboxes";
+    let desktop_open = req.uri().path() == "/api/v1/desktop/sessions";
     // Never forward client-provided authorization, cookies or native-only route access.
     req.headers_mut().remove("cookie");
     req.headers_mut().remove("origin");
@@ -330,22 +306,43 @@ async fn proxy(State(a): State<Access>, mut req: Request) -> Result<Response, Fa
         "authorization",
         HeaderValue::from_str(&format!("Bearer {}", a.root_token)).unwrap(),
     );
-    let r = a
-        .runtime
-        .clone()
+    let runtime = a.runtime.clone().merge(admin_router(a.clone()));
+    let r = runtime
         .oneshot(req)
         .await
         .map_err(|_| fail(StatusCode::BAD_GATEWAY, "runtime_unavailable"))?;
-    if inventory && r.status().is_success() {
+    if desktop_open && r.status().is_success() {
         let bytes = axum::body::to_bytes(r.into_body(), 1024 * 1024)
             .await
-            .map_err(|_| fail(StatusCode::BAD_GATEWAY, "invalid_inventory"))?;
+            .map_err(|_| fail(StatusCode::BAD_GATEWAY, "invalid_desktop"))?;
         let value: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| fail(StatusCode::BAD_GATEWAY, "invalid_inventory"))?;
-        if !a.valid_session(&session, false) {
-            return Err(fail(StatusCode::UNAUTHORIZED, "session_expired"));
+            .map_err(|_| fail(StatusCode::BAD_GATEWAY, "invalid_desktop"))?;
+        if let Some(id) = value["session"]["id"].as_str() {
+            let id = id.to_owned();
+            let access = a.clone();
+            let session = session.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    if !access.valid_session(&session, false) {
+                        if let Some(service) = &access.notifications {
+                            service.close_access_desktop(&id).await;
+                        }
+                        break;
+                    }
+                    if let Some(service) = &access.notifications
+                        && !service.access_desktop_exists(&id)
+                    {
+                        break;
+                    }
+                }
+            });
         }
-        return Ok(Json(public_inventory(&value)).into_response());
+        return Ok(Json(value).into_response());
+    }
+    // Upgraded sockets own their transport and are closed by desktop ticket revocation.
+    if r.status() == StatusCode::SWITCHING_PROTOCOLS {
+        return Ok(r);
     }
     let (parts, body) = r.into_parts();
     // Validate revocation during streams, not just at their opening.
@@ -361,15 +358,6 @@ async fn proxy(State(a): State<Access>, mut req: Request) -> Result<Response, Fa
         }
     };
     Ok(Response::from_parts(parts, Body::from_stream(guarded)))
-}
-fn public_inventory(value: &Value) -> Value {
-    let items=value["items"].as_array().map(|items|items.iter().map(|item|{
-        json!({"id":item["id"],"name":item["name"],"os":item["os"],
-            "running_tasks":item["running_tasks"].as_u64(),"active_leases":item["active_leases"].as_u64(),
-            "state":{"phase":item["state"]["phase"].as_str().unwrap_or("unknown"),"generation":item["state"]["generation"].as_u64()},
-            "config":{"cpus":item["config"]["cpus"].as_u64(),"memory_gib":item["config"]["memory_gib"].as_u64(),"disk_gib":item["config"]["disk_gib"].as_u64()}})
-    }).collect::<Vec<_>>()).unwrap_or_default();
-    json!({"selected":value["selected"],"items":items})
 }
 include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 async fn assets(State(a): State<Access>, req: Request) -> Response {
@@ -537,25 +525,4 @@ async fn admin_command(
         _ => return Err(invalid()),
     }
     Ok(Json(json!({"ok":true})))
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn allowlist_excludes_management_and_terminal() {
-        assert!(allowed(&Method::POST, "/api/v1/messages"));
-        assert!(allowed(&Method::GET, "/api/v1/tasks/id"));
-        for p in [
-            "/api/v1/execution",
-            "/api/v1/terminals",
-            "/api/v1/providers",
-            "/api/v1/access",
-            "/api/v1/authorization/start",
-            "/api/v1/sandboxes",
-        ] {
-            assert!(!allowed(&Method::POST, p), "{p}");
-        }
-        assert!(!allowed(&Method::GET, "/api/v1/terminals"));
-        assert!(!allowed(&Method::POST, "/api/v1/tasks/id/steer"));
-    }
 }

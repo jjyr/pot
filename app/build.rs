@@ -19,6 +19,7 @@ fn main() {
         .arg("swift/Localization.swift")
         .arg("swift/Bridge.swift")
         .arg("swift/RuntimeClient.swift")
+        .arg("swift/Keychain.swift")
         .arg("swift/LocalRuntime.swift")
         .arg("swift/SettingsPanel.swift")
         .arg("swift/AIConfiguration.swift")
@@ -34,7 +35,7 @@ fn main() {
     assert!(status.success(), "Swift bridge compilation failed");
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=static=pot_native");
-    for framework in ["AppKit", "WebKit", "Foundation"] {
+    for framework in ["AppKit", "WebKit", "Foundation", "Security"] {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
     println!("cargo:rustc-link-search=native=/usr/lib/swift");
@@ -45,6 +46,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../Cargo.toml");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=swift/RuntimeClient.swift");
+    println!("cargo:rerun-if-changed=swift/Keychain.swift");
     println!("cargo:rerun-if-changed=swift/LocalRuntime.swift");
     println!("cargo:rerun-if-changed=swift/SettingsPanel.swift");
     println!("cargo:rerun-if-changed=swift/AIConfiguration.swift");
