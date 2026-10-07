@@ -33,10 +33,16 @@ GPL/AGPL/LGPL-only and unknown licenses fail; dual licensing can satisfy the
 policy through an approved alternative. The fail flag also rejects unresolved
 license evidence. Do not lower the detection threshold or ignore errors to pass.
 
-Two unchanged crates have explicit, narrowly scoped MPL-2.0 acceptance:
+Three unchanged crates have explicit, narrowly scoped MPL-2.0 acceptance:
 
 - `cbindgen` 0.28.0: build-time binding generator.
 - `option-ext` 0.2.0: dependency of `dirs-sys`, used by directory discovery.
+- `ece` 2.4.2: runtime dependency of `web-push` 0.11.0 for RFC 8291 message
+  encryption. Reviewed during the mobile/standalone branch integration: the
+  locked registry crate declares MPL-2.0 and includes its license; Pot links it
+  without modifying its covered source. Preserve its MPL notice and the
+  versioned source download link in the generated dependency report. This is a
+  crate-specific exception, not approval of other MPL dependencies.
 
 MPL imposes obligations on its covered files rather than requiring Pot's own
 source to switch to MPL. Preserve license notices and access to the corresponding
@@ -54,7 +60,7 @@ The generated HTML is at `.local/licenses/rust-dependencies.html`; it is rebuilt
 from Cargo.lock rather than checked into Git. HTML escapes dependency metadata
 and license text, uses no remote scripts, and includes project/source links.
 
-Initial cargo-about testing rejected the two MPL crates; the scoped policy then
+Initial cargo-about testing rejected cbindgen and option-ext; the scoped policy then
 generated the report successfully without SPDX overrides or broad copyleft
 acceptance. This checks declared terms against an explicit policy; it does not
 prove legal compatibility of every combination or audit all distributed files.

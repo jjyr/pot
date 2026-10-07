@@ -10,7 +10,11 @@ ignore-dev-dependencies = true
 # MPL is accepted only for these unchanged crates, not globally. Preserve the
 # license notices and versioned source download links in the generated report.
 # cbindgen: build-time binding generator; option-ext: runtime via dirs-sys.
+# ece 2.4.2: unchanged RFC 8291 encryption dependency of web-push.
 [cbindgen]
 accepted = ["MPL-2.0"]
 [option-ext]
+accepted = ["MPL-2.0"]
+
+[ece]
 accepted = ["MPL-2.0"]

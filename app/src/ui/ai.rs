@@ -1,28 +1,5 @@
 use super::*;
-use gpui_kit::component::Icon;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
-
-pub(crate) fn brand_icon(kind: &str) -> Icon {
-    let icon = match kind {
-        "codex" | "openai" => Icon::empty().data(include_bytes!("../../assets/agents/openai.svg")),
-        "anthropic" => Icon::empty().data(include_bytes!("../../assets/agents/claude.svg")),
-        "gemini" => Icon::empty().data(include_bytes!("../../assets/agents/gemini.svg")),
-        "deepseek" => Icon::empty().data(include_bytes!("../../assets/agents/deepseek.svg")),
-        "opencode-go" | "opencode-zen" => {
-            Icon::empty().data(include_bytes!("../../assets/agents/opencode.svg"))
-        }
-        _ => Icon::new(IconName::Globe),
-    };
-    icon.text_color(gpui::rgb(match kind {
-        "codex" | "openai" => 0x159B7D,
-        "anthropic" => 0xD97757,
-        "gemini" => 0x4285F4,
-        "deepseek" => 0x4D6BFE,
-        "opencode-go" => 0x0E9B9B,
-        "opencode-zen" => 0x8B5CF6,
-        _ => 0x6379A8,
-    }))
-}
 
 fn brand_name(kind: &str) -> &'static str {
     match kind {

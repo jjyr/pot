@@ -97,6 +97,7 @@ if cmd == "prepare":
     for name in ["package.json", "package-lock.json"]:
         shutil.copy2(REPO / "image/agents" / name, RES / ("agents-" + name))
 elif cmd == "build":
+    call([sys.executable, REPO / "scripts/build-mobile"], cwd=REPO, env=env)
     call(
         ["cargo", "build", "--locked", "-p", "pot-app", "-p", "pot-server", "-j", "4"]
         + (["--release"] if profile == "release" else []),
@@ -175,10 +176,12 @@ elif cmd == "bundle":
     shutil.copytree(RES / "node", APP / "Contents/Resources/runtime/node")
     for name in ["vmlinux"]:
         shutil.copy2(RES / name, APP / "Contents/Resources/runtime" / name)
-    shutil.copy2(
-        pathlib.Path(env["CARGO_TARGET_DIR"]) / profile / "pot-server",
-        APP / "Contents/Resources/runtime/pot-server",
-    )
+    for name in ["pot-server", "pot"]:
+        shutil.copy2(
+            pathlib.Path(env["CARGO_TARGET_DIR"]) / profile / name,
+            APP / "Contents/Resources/runtime" / name,
+        )
+    shutil.copytree(REPO / "mobile/dist", APP / "Contents/Resources/runtime/mobile")
     shutil.copytree(
         REPO / "skills",
         APP / "Contents/Resources/runtime/skills",

@@ -53,6 +53,7 @@ jobs:
             rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'Cargo.lock') }}-
       - run: mise run clippy:backend
       - run: mise run test
+      - run: mise run test:ui
       - run: mise run test:eval
 
   macos:
@@ -88,6 +89,7 @@ jobs:
       - run: mise run check
       - run: mise run clippy
       - run: mise run test
+      - run: mise run test:ui
       - run: mise run test:app
       - run: mise run test:release
       - run: mise run test:skills

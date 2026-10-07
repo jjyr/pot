@@ -1,46 +1,43 @@
+import AppKit
 import Foundation
 
-/// Native Runtime requests, independent of any renderer.
+@_silgen_name("pot_backend_request") private func backendRequest(
+    _ path: UnsafePointer<CChar>,
+    _ body: UnsafePointer<CChar>
+) -> UnsafeMutablePointer<CChar>
+@_silgen_name("pot_backend_free") private func backendFree(_ value: UnsafeMutablePointer<CChar>)
+@_silgen_name("pot_backend_shutdown") func backendShutdown()
+@_silgen_name("pot_backend_restart") func backendRestart()
+
+/// Native adapters dispatch directly into the App-owned Rust backend, off the UI thread.
 @MainActor final class RuntimeClient {
     var root: URL?
     var ip = ""
-    private func credentials() throws -> (URL, String, String) {
-        guard let root else { throw URLError(.notConnectedToInternet) }
-        let data = try Data(contentsOf: root.appendingPathComponent("product/runtime.json"))
-        guard let endpoint = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let port = endpoint["port"] as? Int, let token = endpoint["token"] as? String,
-              let boot = endpoint["boot_id"] as? String,
-              let url = URL(string: "http://127.0.0.1:\(port)") else { throw URLError(.badServerResponse) }
-        return (url, token, boot)
-    }
-
     func request(_ path: String, body: [String: Any]? = nil) async throws -> [String: Any] {
-        let (base, token, _) = try credentials()
-        let pieces = path.split(separator: "?", maxSplits: 1)
-        var parts = URLComponents(url: base.appendingPathComponent(String(pieces[0])), resolvingAgainstBaseURL: false)!
-        if pieces.count > 1 {
-            parts.percentEncodedQuery = String(pieces[1])
-        }
-        var request = URLRequest(url: parts.url!)
-        request.httpMethod = body == nil ? "GET" : "POST"; request
-            .timeoutInterval = path == "api/v1/authorization/start" ? 70 :
-            (path == "api/v1/sandboxes" && body != nil ? 120 : 20)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let body {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
+        let text = try body.map { try String(data: JSONSerialization.data(withJSONObject: $0), encoding: .utf8)! } ?? ""
+        let data = await Task.detached {
+            path.withCString { path in text.withCString { body in
+                let result = backendRequest(path, body)
+                defer { backendFree(result) }
+                return Data(String(cString: result).utf8)
+            } }
+        }.value
+        let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        if let error = reply["error"] as? String {
             throw NSError(
                 domain: "PotRuntime",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: String(L
-                        .message(value["message"] as? String ?? L.text("runtimeclient.runtime-request-failed"))
-                        .prefix(1024))]
+                userInfo: [NSLocalizedDescriptionKey: String(L.message(error).prefix(1024))]
             )
         }
-        return value
+        return reply["value"] as? [String: Any] ?? [:]
+    }
+}
+
+@_cdecl("pot_bridge_startup_error") public func startupError(_ message: UnsafePointer<CChar>) {
+    MainActor.assumeIsolated {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let alert = NSAlert(); alert.alertStyle = .critical; alert.messageText = "Pot"
+        alert.informativeText = L.message(String(cString: message)); alert.runModal()
     }
 }

@@ -370,6 +370,12 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     s.authorized(&h)?;
     Ok(Json(inventory(&s).await))
 }
+// Agent-facing state is not a desktop login interface. Native App discovers
+// viewer credentials through its private Helper channel, never these tool/API replies.
+fn display_state(state: &Value) -> Value {
+    json!({"phase":state["phase"].as_str().unwrap_or("unknown"),"generation":state["generation"].as_u64(),
+        "cpus":state["cpus"].as_u64(),"memory_gib":state["memory_gib"].as_u64(),"disk_gib":state["disk_gib"].as_u64()})
+}
 async fn inventory(s: &Service) -> Value {
     let (items, selected) = {
         let book = s.sandboxes.book.lock().unwrap();
@@ -407,7 +413,7 @@ async fn inventory(s: &Service) -> Value {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .unwrap_or(json!({"cpus":4,"memory_gib":8,"disk_gib":32}));
-        rows.push(json!({"running_tasks":assigned.iter().filter(|task| task.phase == TaskPhase::Running).count(),"tasks":assigned,"config":config,"referenced":tasks::uses_sandbox(s,&item.id),"id":item.id,"name":item.name,"os":"linux","active_leases":active,"unsettled_operations":s.sandboxes.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":state}));
+        rows.push(json!({"running_tasks":assigned.iter().filter(|task| task.phase == TaskPhase::Running).count(),"tasks":assigned,"config":config,"referenced":tasks::uses_sandbox(s,&item.id),"id":item.id,"name":item.name,"os":"linux","active_leases":active,"unsettled_operations":s.sandboxes.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":display_state(&state)}));
     }
     json!({"selected":selected,"items":rows})
 }
@@ -437,7 +443,9 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
             .send()
             .await?
             .error_for_status()?;
-        return Ok(json!({"sandbox_id":id,"state":s.sandboxes.helper(&id,"status").await?}));
+        return Ok(
+            json!({"sandbox_id":id,"state":display_state(&s.sandboxes.helper(&id,"status").await?)}),
+        );
     }
     let action = args["action"].as_str().unwrap_or("");
     if action == "start" {
@@ -446,7 +454,9 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
         let _lease = s.sandboxes.acquire(&id).await?;
         s.sandboxes.ready(&id, s).await?;
-        return Ok(json!({"sandbox_id":id,"state":s.sandboxes.helper(&id,"status").await?}));
+        return Ok(
+            json!({"sandbox_id":id,"state":display_state(&s.sandboxes.helper(&id,"status").await?)}),
+        );
     }
     let _lock = s.sandboxes.lifecycle.lock().await;
     if action == "create" {
@@ -634,7 +644,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
             s.sandboxes.persist(&s.data)
         })?;
     }
-    Ok(json!({"sandbox_id":id,"state":state}))
+    Ok(json!({"sandbox_id":id,"state":display_state(&state)}))
 }
 
 pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Result<Value> {

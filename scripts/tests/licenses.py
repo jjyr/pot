@@ -59,6 +59,11 @@ class LicensePolicy(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("failed to satisfy license requirements", result.stderr)
 
+    def test_unreviewed_mpl_is_rejected(self):
+        result = self.scan("MPL-2.0")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("failed to satisfy license requirements", result.stderr)
+
     def test_unknown_license_is_rejected(self):
         result = self.scan("LicenseRef-PotUnknown")
         self.assertNotEqual(result.returncode, 0)

@@ -87,6 +87,17 @@ pub struct Service {
     authorization: Arc<tokio::sync::Mutex<authorization::Hub>>,
 }
 impl Service {
+    /// Trusted in-process notification adapter. Only the owner main Store is eligible.
+    pub fn notification_sequence(&self) -> Result<i64> {
+        self.inner.lock().unwrap().store.notification_sequence()
+    }
+    pub fn notifications(&self, after: i64) -> Result<Vec<(i64, Message)>> {
+        if self.is_worker {
+            return Ok(Vec::new());
+        }
+        self.inner.lock().unwrap().store.notifications(after)
+    }
+
     fn stopping(&self) -> bool {
         *self.stop.borrow()
     }
@@ -146,6 +157,16 @@ impl Service {
                 kind: EventKind::Budget { budget },
             });
         }
+        Ok(())
+    }
+    fn save_non_notifying(&self, message: Message) -> Result<()> {
+        let event = self
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .save_non_notifying(message)?;
+        let _ = self.events.send(event);
         Ok(())
     }
     fn save(&self, message: Message) -> Result<()> {

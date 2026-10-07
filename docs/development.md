@@ -14,7 +14,7 @@ mise run bundle
 mise run open
 ```
 
-`bundle` preinstalls dependencies in a separate VM and builds the complete Sandbox OCI image. Software downloads happen only during build; Helper starts the Host backend immediately and boots an environment on demand. See Sandbox image for caches, fonts, and sizes.
+`bundle` preinstalls dependencies in a separate VM and builds the complete Sandbox OCI image. Software downloads happen only during build; App embeds the Host backend and boots an environment on demand. See Sandbox image for caches, fonts, and sizes.
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
@@ -60,12 +60,16 @@ Build and start the backend without App/Helper. Paths belong to the Server machi
 
 ```sh
 mise exec -- cargo build --locked -p pot-server
-POT_DATA_DIR=/tmp/pot-server/product POT_WORKSPACE=/tmp/pot-server/workspace POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
+POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
 Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
 
-App retains local Helper/VM discovery without remote endpoint settings. Cross-machine deployment still needs TLS, identity, and artifact transfer; this change establishes only independent backend execution boundaries.
+App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](standalone-server.md) for CLI installation, local OS authority and packaging.
+
+## Mobile browser pilot
+
+See [Mobile access](mobile-access.md) for the optional owner-controlled HTTPS listener, QR/pairing administration and `mise run build:mobile`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
 
 ## Validation
 
@@ -74,6 +78,7 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
+mise run test:ui      # Portable shared chat/page state and localization
 mise run licenses      # Enforce Rust license policy and generate dependency notices
 mise run test:licenses # Check approved, disallowed and unknown license cases
 mise run test:release   # ZIP metadata, permissions, symlinks and Cask checksum
@@ -104,7 +109,9 @@ Manual hook check: `mise exec -- hk run pre-commit --all`. Use `mise run check` 
 
 | Directory | Responsibility |
 |---|---|
-| `app/` | GPUI UI, Swift native bridge, configuration |
+| `app/` | Native GPUI shell, Swift bridge, configuration |
+| `ui/` | Shared Chat/Tasks/Sandbox/Usage components, page/chat state, Markdown, tokens and localization |
+| `mobile/` | WASM/browser shell, authenticated transport, PWA and push |
 | `helper/` | Swift Containerization, VM lifecycle |
 | `server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
 | `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |

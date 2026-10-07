@@ -214,7 +214,7 @@ import Foundation
             guard rename(temp.path, path.path) == 0 else { throw NSError(domain: "Pot", code: 2) }
             load(); result = L.text("settingspanel.configuration-saved")
             if path.path.contains("/product/") {
-                bridge.localRuntime?.send("backend-restart")
+                Task { await Task.detached { backendRestart() }.value }
             }
         } catch { result = L.text("settingspanel.save-failed-previous-configuration-kept") }
     }

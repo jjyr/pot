@@ -2,10 +2,11 @@ extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
 mod artifacts;
+mod backend;
 mod client;
-mod design;
+use pot_ui::design;
 mod i18n;
-mod markdown;
+
 mod navigation;
 mod schedules_ui;
 #[cfg(test)]
@@ -15,19 +16,18 @@ mod usage_ui;
 
 use gpui::{div, prelude::*, px, rgb, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, IconName, Sizable, Theme, ThemeMode,
+    ActiveTheme, Icon, IconName, Sizable, Theme, ThemeMode,
     button::{Button, ButtonVariants},
-    clipboard::Clipboard,
-    input::{Input, InputState},
-    list::ListItem,
+    input::InputState,
 };
-use pot_protocol::{MessageStatus, Role};
+use pot_protocol::Role;
 use std::{
     collections::HashSet,
     ffi::{CStr, CString},
 };
 
 unsafe extern "C" {
+    fn pot_bridge_startup_error(message: *const std::ffi::c_char);
     fn pot_bridge_set_wake(callback: extern "C" fn());
     fn pot_bridge_install(html: *const std::ffi::c_char);
     fn pot_bridge_hide();
@@ -73,6 +73,63 @@ struct Shell {
     usage_ui: usage_ui::UsageUI,
 }
 impl Shell {
+    fn catalog(&self) -> pot_ui::localization::Catalog {
+        pot_ui::localization::Catalog::new(if i18n::is_chinese() { "zh-CN" } else { "en" })
+    }
+    fn page_handler(&self, cx: &Context<Self>) -> pot_ui::pages::Handler {
+        std::rc::Rc::new(
+            cx.listener(|this, event: &pot_ui::pages::PageAction, window, cx| {
+                let Some(event) = this.usage_ui.apply(event, this.catalog(), cx) else {
+                    cx.notify();
+                    return;
+                };
+                match event.kind {
+                    "native" => ui::command(event.value),
+                    "sandbox-select" => {
+                        ui::command(serde_json::json!({"action":"sandbox-view","id":event.value}))
+                    }
+                    "refresh" => this.client.refresh(),
+                    "task-filter" | "task-clear-search" | "task-previous" | "task-next" => {
+                        let v = this.client.view.lock().unwrap().clone();
+                        let Some(q) = pot_ui::page_state::task_query(
+                            event.kind,
+                            &event.value,
+                            &v.task_query,
+                            &v.task_page,
+                        ) else {
+                            return;
+                        };
+                        if event.kind == "task-clear-search" {
+                            this.task_search
+                                .update(cx, |f, cx| f.set_value("", window, cx));
+                        }
+                        this.client.filter_tasks(q.scope, q.q, q.offset);
+                    }
+                    "task-open" => {
+                        this.show_tasks = false;
+                        this.client
+                            .select(event.value.as_str().unwrap_or("").into());
+                        this.first = true;
+                    }
+                    "usage-page" => {
+                        ui::command(serde_json::json!({"action":"page","value":event.value}))
+                    }
+                    "usage-policy" => this.client.usage_action("policy", event.value),
+                    "usage-resume" => this.client.usage_action("resume", event.value),
+                    "usage-cancel" => {
+                        if this.client.view.lock().unwrap().selected.is_empty() {
+                            this.client.usage_action("cancel", serde_json::json!({}));
+                        } else {
+                            this.client.cancel();
+                        }
+                    }
+                    _ => {}
+                }
+                cx.notify();
+            }),
+        )
+    }
+
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
         let old_tasks = self.show_tasks;
         {
@@ -281,20 +338,40 @@ impl Shell {
                     cx,
                 )
             });
-            self.usage_ui.localize(window, cx);
+            self.usage_ui.localize(self.catalog(), window, cx);
         }
         self.settings.sync(&self.native["settings"], window, cx);
         match self.native["page"].as_u64() {
             Some(4..=6) => {
+                let handler = self.page_handler(cx);
                 return self.usage_ui.render(
-                    &view,
-                    self.native["page"].as_u64().unwrap(),
+                    pot_ui::usage::UsageView {
+                        page: self.native["page"].as_u64().unwrap(),
+                        usage: &view.usage,
+                        usage_error: &view.usage_error,
+                        usage_notice: &view.usage_notice,
+                        usage_pending: view.usage_pending,
+                        controls: true,
+                        selected_title: view.selected_task.as_ref().map(|t| t.title.as_str()),
+                    },
+                    pot_ui::pages::Layout::NATIVE,
+                    self.catalog(),
+                    handler,
                     window,
                     cx,
                 );
             }
-            Some(2) => return self.settings.render(&self.native["settings"], cx),
-            Some(1) => return ui::sandbox(&self.native, cx),
+            Some(2) => return self.settings.render(&self.native["settings"], &view, cx),
+            Some(1) => {
+                return pot_ui::sandbox::render(
+                    &self.native,
+                    pot_ui::pages::Layout::NATIVE,
+                    true,
+                    self.catalog(),
+                    self.page_handler(cx),
+                    cx,
+                );
+            }
             _ => {}
         }
         let active_engine = self.native["settings"]["active_spec"]["engine"]
@@ -377,304 +454,26 @@ impl Shell {
             return self.schedules_ui.render(&view, cx);
         }
         if self.show_tasks {
-            return ui::page(cx).child(
-                ui::content()
-                    .child(schedules_ui::navigation(false, cx))
-                    .child(ui::hint(
-                        crate::i18n::tr!("main.describe-a-goal-to-the-main-agent",
-                            self.native["settings"]["parallel"].as_str().unwrap_or("5")
-                        ),
-                        cx,
-                    ))
-                    .child(
-                        ui::segments(cx).children(
-                            [
-                                ("active", crate::i18n::text("main.ongoing"), view.task_page.counts.active),
-                                ("attention", crate::i18n::text("main.needs-attention"), view.task_page.counts.attention),
-                                ("archived", crate::i18n::text("main.archived"), view.task_page.counts.archived),
-                            ]
-                            .into_iter()
-                            .map(|(scope, label, count)| {
-                                Button::new(SharedString::from(format!("task-scope-{scope}")))
-                                    .ghost()
-                                    .small()
-                                    .toggled(view.task_query.scope == scope)
-                                    .label(format!("{label} {count}"))
-                                    .when(view.task_query.scope == scope, |b| {
-                                        b.bg(cx.theme().secondary)
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        let q =
-                                            this.client.view.lock().unwrap().task_query.q.clone();
-                                        this.client.filter_tasks(scope.into(), q, 0);
-                                        cx.notify();
-                                    }))
-                            }),
-                        ),
-                    )
-                    .child(
-                        Input::new(&self.task_search)
-                            .small()
-                            .aria_label(crate::i18n::text("main.search-task-title-or-id")),
-                    )
-                    .when(
-                        !view.error.is_empty() && view.main_snapshot.is_some(),
-                        |el| {
-                            el.child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(ui::notice(
-                                        crate::i18n::text("main.unable-to-refresh-tasks-showing-the-last"),
-                                        true,
-                                        cx,
-                                    ))
-                                    .child(ui::retry(cx)),
-                            )
-                        },
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "task-list-{}-{}-{}",
-                                view.task_query.scope, view.task_query.q, view.task_query.offset
-                            )))
-                            .track_scroll(&self.tasks_scroll)
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .rounded(px(10.))
-                            .when(!view.tasks.is_empty(), |el| {
-                                el.border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(design::surface(cx))
-                            })
-                            .when(view.tasks.is_empty(), |el| {
-                                el.child(ui::empty(
-                                    IconName::Inbox,
-                                    if !view.error.is_empty() && view.main_snapshot.is_some() {
-                                        crate::i18n::text("main.unable-to-load-tasks-check-the-local")
-                                    } else if view.tasks_loading || view.main_snapshot.is_none() {
-                                        crate::i18n::text("main.connecting-to-local-backend-and-loading-tasks")
-                                    } else if !view.task_query.q.is_empty() {
-                                        crate::i18n::text("main.no-matching-tasks-in-this-group-switch")
-                                    } else {
-                                        match view.task_query.scope.as_str() {
-                                            "archived" => {
-                                                crate::i18n::text("main.no-archived-tasks-yet-completed-or-cancelled")
-                                            }
-                                            "attention" => {
-                                                crate::i18n::text("main.no-tasks-need-attention-failed-or-interrupted")
-                                            }
-                                            _ => crate::i18n::text("main.no-ongoing-tasks-describe-a-goal-in"),
-                                        }
-                                    },
-                                    cx,
-                                ))
-                                .when(
-                                    !view.task_query.q.is_empty(),
-                                    |el| {
-                                        el.child(
-                                            Button::new("clear-task-search")
-                                                .ghost()
-                                                .small()
-                                                .label(crate::i18n::text("main.clear-search"))
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.task_search.update(cx, |f, cx| {
-                                                        f.set_value("", window, cx)
-                                                    });
-                                                    let scope = this
-                                                        .client
-                                                        .view
-                                                        .lock()
-                                                        .unwrap()
-                                                        .task_query
-                                                        .scope
-                                                        .clone();
-                                                    this.client.filter_tasks(
-                                                        scope,
-                                                        String::new(),
-                                                        0,
-                                                    );
-                                                    cx.notify();
-                                                })),
-                                        )
-                                    },
-                                )
-                            })
-                            .children(view.tasks.iter().map(|task| {
-                                let id = task.id.clone();
-                                let active = matches!(
-                                    task.phase,
-                                    pot_protocol::TaskPhase::Running
-                                        | pot_protocol::TaskPhase::Queued
-                                        | pot_protocol::TaskPhase::Waiting
-                                );
-                                ListItem::new(SharedString::from(format!("task-{id}")))
-                                    .accessibility_label(task.title.clone())
-                                    .flex_col()
-                                    .items_start()
-                                    .gap_2()
-                                    .p_4()
-                                    .h(px(80.))
-                                    .rounded(px(0.))
-                                    .bg(design::surface(cx))
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .cursor_pointer()
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .flex()
-                                            .items_center()
-                                            .gap_3()
-                                            .child(
-                                                ui::brand_icon(&task.executor_icon).size(px(16.)),
-                                            )
-                                            .child(
-                                                div()
-                                                    .id(SharedString::from(format!(
-                                                        "task-title-{id}"
-                                                    )))
-                                                    .tooltip({
-                                                        let title = task.title.clone();
-                                                        move |window, cx| {
-                                                            ui::title_tooltip(
-                                                                title.clone(),
-                                                                window,
-                                                                cx,
-                                                            )
-                                                        }
-                                                    })
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .whitespace_nowrap()
-                                                    .overflow_hidden()
-                                                    .text_size(px(15.))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child(ui::single_line_title(
-                                                        &task.title,
-                                                        15.,
-                                                        (window.viewport_size().width
-                                                            - px(ui::SIDEBAR))
-                                                        .min(px(ui::PAGE_WIDTH))
-                                                            - px(130.),
-                                                        window,
-                                                        cx,
-                                                    )),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child("›"),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .text_size(px(12.))
-                                                    .text_color(if active {
-                                                        cx.theme().primary
-                                                    } else if task.phase.scope() == "attention" {
-                                                        design::attention(cx)
-                                                    } else {
-                                                        cx.theme().muted_foreground
-                                                    })
-                                                    .child(task_phase(&task.phase))
-                                                    .child(format!(
-                                                        " · Sandbox: {}",
-                                                        task.sandbox_id
-                                                    )),
-                                            )
-                                            .when(task.pending > 0, |el| {
-                                                el.child(
-                                                    div()
-                                                        .text_size(px(12.))
-                                                        .text_color(cx.theme().muted_foreground)
-                                                        .child(crate::i18n::tr!("main.pending-instructions",
-                                                            task.pending
-                                                        )),
-                                                )
-                                            }),
-                                    )
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.show_tasks = false;
-                                        this.client.select(id.clone());
-                                        this.first = true;
-                                        cx.notify();
-                                    }))
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(ui::hint(
-                                if view.tasks_loading {
-                                    crate::i18n::text("client.loading").into()
-                                } else {
-                                    crate::i18n::tr!("main.items-page",
-                                        view.task_page.total,
-                                        view.task_query.offset / view.task_query.limit + 1
-                                    )
-                                },
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("tasks-previous")
-                                            .ghost()
-                                            .label(crate::i18n::text("schedules-ui.previous"))
-                                            .disabled(
-                                                view.tasks_loading || view.task_query.offset == 0,
-                                            )
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let q = this
-                                                    .client
-                                                    .view
-                                                    .lock()
-                                                    .unwrap()
-                                                    .task_query
-                                                    .clone();
-                                                this.client.filter_tasks(
-                                                    q.scope,
-                                                    q.q,
-                                                    q.offset.saturating_sub(q.limit),
-                                                );
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("tasks-next")
-                                            .ghost()
-                                            .label(crate::i18n::text("schedules-ui.next-52"))
-                                            .disabled(
-                                                view.tasks_loading
-                                                    || view.task_page.next_offset.is_none(),
-                                            )
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let v = this.client.view.lock().unwrap().clone();
-                                                if let Some(offset) = v.task_page.next_offset {
-                                                    this.client.filter_tasks(
-                                                        v.task_query.scope,
-                                                        v.task_query.q,
-                                                        offset,
-                                                    );
-                                                    cx.notify();
-                                                }
-                                            })),
-                                    ),
-                            ),
-                    ),
+            let handler = self.page_handler(cx);
+            let navigation = schedules_ui::navigation(false, cx);
+            return pot_ui::tasks::render(
+                pot_ui::tasks::TasksView {
+                    search: &self.task_search,
+                    scroll: &self.tasks_scroll,
+                    navigation,
+                    tasks: &view.tasks,
+                    task_page: &view.task_page,
+                    task_query: &view.task_query,
+                    tasks_loading: view.tasks_loading,
+                    connected: view.main_snapshot.is_some(),
+                    error: &view.error,
+                    parallel: Some(self.native["settings"]["parallel"].as_str().unwrap_or("5")),
+                },
+                pot_ui::pages::Layout::NATIVE,
+                self.catalog(),
+                handler,
+                window,
+                cx,
             );
         }
         let latest_assistant = messages.iter().rposition(|m| m.role == Role::Assistant);
@@ -812,188 +611,24 @@ impl Shell {
                                     .join(&view.selected)
                             },
                         );
-                        let user = m.role == Role::User;
-                        let tool = m.role == Role::Tool;
-                        let expanded = self.expanded.contains(&m.id);
-                        let id = m.id.clone();
-                        let label = if tool {
-                            format!(
-                                "{} {} · {}",
-                                if expanded { "⌄" } else { "›" },
-                                m.text.lines().next().unwrap_or(crate::i18n::text("client.tool")),
-                                match m.status {
-                                    MessageStatus::Streaming | MessageStatus::Accepted => crate::i18n::text("schedules-ui.running"),
-                                    MessageStatus::Failed => crate::i18n::text("schedules-ui.failed"),
-                                    MessageStatus::Cancelled => crate::i18n::text("main.stopped"),
-                                    _ => crate::i18n::text("main.done"),
-                                }
-                            )
-                        } else {
-                            String::new()
-                        };
-                        div()
-                            .w_full()
-                            .max_w(px(760.))
-                            .mx_auto()
-                            .flex()
-                            .flex_col()
-                            .group(SharedString::from(format!("message-{}", m.id)))
-                            .when(user, |el| el.items_end())
-                            .when(!user, |el| el.items_start())
-                            .child(
-                                div()
-                                    .id(SharedString::from(m.id.clone()))
-                                    .relative()
-                                    .max_w(px(if user { 620. } else { 720. }))
-                                    .min_w_0()
-                                    .when(user, |el| el.px_4().py_3().rounded(px(18.)).bg(rgb(if dark { 0x243a52 } else { 0xe7f2ff })))
-                                    .when(tool, |el| el.px_3().py_2().rounded(px(10.)).bg(rgb(bubble)))
-                                    .text_color(rgb(if user { if dark { 0xe3efff } else { 0x25435f } } else { ink }))
-                                    .when(tool, |el| {
-                                        el.child(
-                                            Button::new(SharedString::from(format!(
-                                                "tool-{}",
-                                                m.id
-                                            )))
-                                            .ghost()
-                                            .cursor_pointer()
-                                            .text_size(px(13.))
-                                            .label(label)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                if !this.expanded.remove(&id) {
-                                                    this.expanded.insert(id.clone());
-                                                }
-                                                cx.notify();
-                                            })),
-                                        )
-                                    })
-                                    .when(!tool || expanded, |el| {
-                                        let source: std::borrow::Cow<'_, str> = if m.id.starts_with("task-report-") {
-                                            crate::i18n::report(m.text
-                                                .rsplit_once("\n任务编号：")
-                                                .or_else(|| m.text.rsplit_once("\nTask ID:"))
-                                                .map(|(text, _)| text)
-                                                .unwrap_or(&m.text)).into()
-                                        } else if m.role == Role::System || m.request_id.as_deref().is_some_and(|id| id.starts_with("pot-result:")) {
-                                            crate::i18n::message(&m.text).into()
-                                        } else {
-                                            m.text.as_str().into()
-                                        };
-                                        el.child(markdown::render(&m.id, &source, user, dark, cx))
-                                    })
-                                    .when_some(artifact, |el, path| {
-                                        let label = crate::i18n::tr!("main.show-in-finder",
-                                            path.file_name().unwrap_or_default().to_string_lossy()
-                                        );
-                                        el.child(
-                                            div()
-                                                .id("artifact")
-                                                .mt_2()
-                                                .text_size(px(12.))
-                                                .cursor_pointer()
-                                                .text_color(rgb(0x079fee))
-                                                .child(label)
-                                                .on_click(move |_, _, _| {
-                                                    let _ = std::process::Command::new("open")
-                                                        .arg("-R")
-                                                        .arg(&path)
-                                                        .spawn();
-                                                }),
-                                        )
-                                    })
-                                    .when(
-                                        matches!(
-                                            m.status,
-                                            MessageStatus::Failed | MessageStatus::Cancelled
-                                        ),
-                                        |el| {
-                                            el.child(
-                                                div()
-                                                    .mt_2()
-                                                    .text_size(px(12.))
-                                                    .text_color(rgb(if user {
-                                                        0xffffff
-                                                    } else if m.status == MessageStatus::Failed {
-                                                        0xc96a40
-                                                    } else {
-                                                        muted
-                                                    }))
-                                                    .child(
-                                                        if m.status == MessageStatus::Cancelled {
-                                                            crate::i18n::text("main.stopped")
-                                                        } else {
-                                                            crate::i18n::text("main.unfinished-see-the-reason-above")
-                                                        },
-                                                    ),
-                                            )
-                                        },
-                                    )
-                                    .when(user && m.status == MessageStatus::Streaming, |el| {
-                                        el.child(div().text_size(px(11.)).child(crate::i18n::text("main.applied-running")))
-                                    })
-                                    .when(user && m.status == MessageStatus::Accepted, |el| {
-                                        el.child(
-                                            div()
-                                                .text_size(px(11.))
-                                                .child(crate::i18n::text("main.received-will-apply-next-turn")),
-                                        )
-                                    }),
-                            )
-                            .when(!tool, |el| {
-                                el.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .mt_1()
-                                        .text_color(rgb(muted))
-                                        // Reserve the row so hovering never moves messages.
-                                        .when(!latest_reply, |row| {
-                                            row.invisible().group_hover(
-                                                SharedString::from(format!("message-{}", m.id)),
-                                                |style| style.visible(),
-                                            )
-                                        })
-                                        .child(
-                                            Clipboard::new(SharedString::from(format!(
-                                                "copy-{}",
-                                                m.id
-                                            )))
-                                            .value(m.text.clone())
-                                            .tooltip(crate::i18n::text("main.copy-message"))
-                                            .small(),
-                                        )
-                                        .when_some(
-                                            m.id.starts_with("task-report-")
-                                                .then(|| {
-                                                    m.text
-                                                        .rsplit_once("任务编号：").or_else(|| m.text.rsplit_once("Task ID:"))
-                                                        .map(|(_, id)| id.trim().to_string())
-                                                })
-                                                .flatten()
-                                                .filter(|id| !id.is_empty()),
-                                            |row, task| {
-                                                row.child(
-                                                    Button::new(SharedString::from(format!(
-                                                        "open-{}",
-                                                        m.id
-                                                    )))
-                                                    .ghost()
-                                                    .small()
-                                                    .icon(IconName::ExternalLink)
-                                                    .tooltip(crate::i18n::text("main.view-task"))
-                                                    .accessibility_label(crate::i18n::text("main.view-task"))
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.client.select(task.clone());
-                                                        this.show_tasks = false;
-                                                        this.first = true;
-                                                        cx.notify();
-                                                    })),
-                                                )
-                                            },
-                                        ),
-                                )
-                            })
+                        let source = pot_ui::chat::display_source(m, crate::i18n::report, crate::i18n::message);
+                        let artifact = artifact.map(|path| {
+                            let label = crate::i18n::tr!("main.show-in-finder", path.file_name().unwrap_or_default().to_string_lossy());
+                            div().id("artifact").mt_2().text_size(px(12.)).cursor_pointer().text_color(rgb(0x079fee)).child(label)
+                                .on_click(move |_, _, _| { let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn(); }).into_any_element()
+                        });
+                        let labels = pot_ui::chat::Labels::new(|key| crate::i18n::text(key).into());
+                        let handler: pot_ui::chat::ChatHandler = std::rc::Rc::new(cx.listener(|this, action: &pot_ui::chat::ChatAction, _, cx| {
+                            match action {
+                                pot_ui::chat::ChatAction::ToggleTool(id) => { if !this.expanded.remove(id) { this.expanded.insert(id.clone()); } }
+                                pot_ui::chat::ChatAction::OpenTask(id) => { this.client.select(id.clone()); this.show_tasks=false; this.first=true; }
+                            }
+                            cx.notify();
+                        }));
+                        pot_ui::chat::message(pot_ui::chat::MessageView {
+                            message: m, source: &source, labels: &labels, artifact,
+                            options: pot_ui::chat::MessageOptions { dark, expanded:self.expanded.contains(&m.id), latest_reply, touch:false, available_width:f32::from(window.viewport_size().width) },
+                        }, handler, cx)
                             .when(view.selected.is_empty() && latest_assistant == Some(index) && (!view.running_tasks.is_empty() || self.summary_removal.is_some()), |el| {
                                 el.child(div().mt_2().w_full().max_w(px(600.)).flex().flex_col().gap_1().text_size(px(12.)).text_color(rgb(muted))
                                     .children(view.running_tasks.iter().map(|task| {
@@ -1131,7 +766,50 @@ fn task_phase(p: &pot_protocol::TaskPhase) -> &'static str {
         Interrupted => crate::i18n::text("main.interrupted-add-instructions-to-resume"),
     }
 }
+fn startup_error(error: &str) -> ! {
+    eprintln!("Cannot start Pot: {error}");
+    if let Ok(message) = CString::new(error) {
+        unsafe {
+            pot_bridge_startup_error(message.as_ptr());
+        }
+    }
+    std::process::exit(1)
+}
 fn main() {
+    // Configure the embedded backend before GPUI or Tokio starts any threads.
+    let root = client::root();
+    if let Err(error) = unsafe { pot_server::apply_settings(&root, true) } {
+        startup_error(&error.to_string());
+    }
+    if let Some(resources) = std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            p.parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("Resources/runtime"))
+        })
+        .filter(|p| p.is_dir())
+    {
+        unsafe {
+            std::env::set_var("POT_BUILTIN_SKILLS_DIR", resources.join("skills"));
+            if std::env::var_os("POT_ACCESS_ASSETS").is_none() {
+                std::env::set_var("POT_ACCESS_ASSETS", resources.join("mobile"));
+            }
+            std::env::set_var(
+                "PATH",
+                format!(
+                    "{}:{}:{}",
+                    resources.join("node/bin").display(),
+                    resources.join("host-tools/node_modules/.bin").display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    if let Err(error) = backend::ready() {
+        startup_error(&error);
+    }
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx: &mut App| {
@@ -1213,7 +891,15 @@ fn main() {
                             last_at_bottom: true,
                             jumping_to_latest: false,
                             native: serde_json::Value::Null,
-                            usage_ui: usage_ui::UsageUI::new(window, cx),
+                            usage_ui: usage_ui::UsageUI::new(
+                                pot_ui::localization::Catalog::new(if i18n::is_chinese() {
+                                    "zh-CN"
+                                } else {
+                                    "en"
+                                }),
+                                window,
+                                cx,
+                            ),
                             settings: ui::Settings::new(window, cx),
                             schedule_tab: false,
                             schedules_ui: schedules_ui::SchedulesUI::new(window, cx),

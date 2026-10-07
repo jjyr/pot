@@ -1,5 +1,6 @@
 [package]
 name = "pot-server"
+default-run = "pot-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,9 +14,30 @@ anyhow = "1"
 serde_json.workspace = true
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
+libc = "0.2"
+url = "2"
+ring = "0.17"
+# Bundle crypto instead of requiring a Homebrew OpenSSL installation.
+openssl = { version = "0.10", features = ["vendored"] }
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+serde = { workspace = true, features = ["derive"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+async-stream = "0.3"
+futures-util = "0.3"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tower = { version = "0.5", features = ["util"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
-[dev-dependencies]
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "stream", "rustls"] }
+web-push = { version = "0.11", default-features = false }
+base64 = "0.22"
+[dev-dependencies]
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
-libc = "0.2"
+
+ece = "2"
+
+rcgen = "0.14"
+
+[features]
+embedded-web = []

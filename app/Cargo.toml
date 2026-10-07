@@ -7,15 +7,20 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+pot-ui = { workspace = true, features = ["presentation"] }
 gpui-kit = "=0.7.1"
 rust-i18n = "=4.2.4"
 unicode-segmentation = "=1.13.3"
 pot-protocol.workspace = true
 serde_json.workspace = true
-ureq = { version = "3", features = ["json"] }
+pot-server = { path = "../server" }
+tokio = { version = "1", features = ["full"] }
+url = "2"
+serde.workspace = true
 uuid = { version = "1", features = ["v4"] }
 async-channel = "2"
 smol = "2"
+qrcode = { version = "0.14", default-features = false }
 
 [build-dependencies]
 serde_json.workspace = true

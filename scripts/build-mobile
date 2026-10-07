@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Build the pinned GPUI WASM client; run through mise for the native toolchain."""
+
+from pathlib import Path
+import json
+import gzip
+import os
+import shutil
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[1]
+os.chdir(ROOT)
+NIGHTLY = "nightly-2026-10-06"
+VERSION = "0.2.129"
+TOOL = ROOT / ".local/mobile-tools/bin/wasm-bindgen"
+subprocess.run(
+    [
+        "rustup",
+        "toolchain",
+        "install",
+        NIGHTLY,
+        "--profile",
+        "minimal",
+        "--target",
+        "wasm32-unknown-unknown",
+    ],
+    check=True,
+)
+if not TOOL.exists() or VERSION not in subprocess.check_output([TOOL, "--version"], text=True):
+    subprocess.run(
+        [
+            "cargo",
+            "install",
+            "wasm-bindgen-cli",
+            "--version",
+            VERSION,
+            "--locked",
+            "--root",
+            ".local/mobile-tools",
+            "-j",
+            "4",
+        ],
+        check=True,
+    )
+subprocess.run(
+    [
+        "cargo",
+        "+" + NIGHTLY,
+        "build",
+        "--release",
+        "--locked",
+        "-p",
+        "pot-mobile",
+        "--target",
+        "wasm32-unknown-unknown",
+        "-j",
+        "4",
+    ],
+    check=True,
+)
+dist = ROOT / "mobile/dist"
+dist.mkdir(parents=True, exist_ok=True)
+for asset in (ROOT / "mobile/web").iterdir():
+    shutil.copy2(asset, dist / asset.name)
+shutil.copy2(ROOT / "app/assets/Pot.png", dist / "icon.png")
+for size in [192, 512]:
+    subprocess.run(
+        [
+            "sips",
+            "-z",
+            str(size),
+            str(size),
+            ROOT / "app/assets/Pot.png",
+            "--out",
+            dist / f"icon-{size}.png",
+        ],
+        check=True,
+    )
+shutil.copy2(ROOT / "mobile/fonts/IBMPlexSans-Regular.ttf", dist / "font.ttf")
+shutil.copy2(ROOT / "mobile/fonts/OFL.txt", dist / "OFL.txt")
+target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+subprocess.run(
+    [
+        TOOL,
+        target / "wasm32-unknown-unknown/release/pot_mobile.wasm",
+        "--target",
+        "web",
+        "--out-dir",
+        dist / "pkg",
+        "--out-name",
+        "pot_mobile",
+    ],
+    check=True,
+)
+print(f"Mobile assets: {dist}")
+
+for name in ["pkg/pot_mobile_bg.wasm", "pkg/pot_mobile.js"]:
+    path = dist / name
+    path.with_suffix(path.suffix + ".gz").write_bytes(
+        gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)
+    )
+
+locales = {
+    locale: {
+        key: value
+        for key, value in json.loads((ROOT / f"app/locales/{locale}.json").read_text()).items()
+        if key.startswith("mobile.")
+    }
+    for locale in ["en", "zh-CN"]
+}
+(dist / "locales.json").write_text(json.dumps(locales, ensure_ascii=False))

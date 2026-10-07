@@ -49,6 +49,7 @@ import WebKit
             process.arguments = [
                 root.path,
                 Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/runtime").path,
+                "--sandbox-only",
             ]
             let log = root.appendingPathComponent("helper.log"); FileManager.default.createFile(
                 atPath: log.path,
@@ -211,6 +212,7 @@ import WebKit
     func cleanup() {
         timer?.invalidate(); timer = nil; if process.isRunning {
             process.terminate()
+            process.waitUntilExit()
         }
     }
 }
