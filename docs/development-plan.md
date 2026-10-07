@@ -12,13 +12,20 @@ Updated: 2026-10-07.
 - API gateway supports Chat, Responses, Messages and Gemini, with request/usage accounting and allowances. Native Codex reports turn usage separately.
 - GPUI/Swift provides Chat, Tasks, Usage, AI/Task/Environment settings and optional Sandbox desktop.
 - Shared `pot-ui` Chat/Tasks/Sandbox/Usage components, page transitions, allowance parsing, request/receipt/draft policy and locale-explicit catalogs are used by native App and WASM; native composer and navigation remain unchanged. See [shared UI](shared-ui.md).
-- Owner-instance mobile pilot: shared GPUI Kit WASM chat/tasks/inventory, trusted HTTPS QR, owner-approved Passkey enrollment, revocable sessions and encrypted main-message Web Push. See [mobile access](mobile-access.md) and its [dated validation](validation/mobile-access-20261007.md).
+- Owner-instance mobile pilot: shared GPUI Kit WASM chat/tasks/inventory, trusted HTTPS QR, owner-generated pairing codes with client signing keys, revocable sessions and encrypted main-message Web Push. See [mobile access](mobile-access.md) and its [dated validation](validation/mobile-access-20261007.md).
 
 See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
 
 ## Remaining validation and scope
 
-Mobile physical iOS/Android input, accessibility, startup performance, production relay deployment, actual vendor push delivery and complete App bundle boot remain unqualified. Mobile desktop viewing/control is blocked pending separate isolation acceptance; notification links open main chat but do not yet scroll to the matching message.
+Remote HTTP basic access is an agreed deployment direction, not delivered. It
+requires enrollment/session support without browser WebCrypto, remote listener
+policy, WASM compatibility verification, capability-based UI and multi-client
+qualification. Service Worker/Web Push remain unavailable on insecure origins.
+See [Web UI deployment](web-ui-deployment.md) for the recommended HTTPS procedures and
+retained HTTP options.
+
+Mobile physical iOS/Android input, accessibility, startup performance, production relay deployment, actual vendor push delivery and complete App bundle boot remain unqualified. Paired owner browser desktop viewing/control is implemented with login-bound tickets; physical mobile input remains unqualified; notification links open main chat but do not yet scroll to the matching message.
 
 Real-provider login/inference must be requalified after the Host deployment changes. Full native appearance, IME, weak-network and sleep/wake matrices are not established by mock-model tests. Public release requires cold-install validation and distribution signing/notarization.
 
@@ -53,3 +60,13 @@ Desktop adapter update (2026-10-07): `pot-sandbox` manages expiring viewer ticke
 ## Command execution follow-up — 2026-10-07
 
 Implemented shell/login selection, pipe/PTY sessions and terminal controls, Agent-session process retention with epoch/generation authorization, idle expiry and orphan drainage, and bounded in-memory Bash/Zsh login snapshots with startup-file invalidation/fallback. Current contract: [Sandbox command execution](executor.md). Runtime/real-runner tests and broker lifecycle doubles are included; actual verification and limits are recorded in [acceptance](validation/executor-sessions-20261007.md).
+
+## Linux standalone host and multiple clients (2026-10-07)
+
+Provider naming separates host OS/engine from guest OS. Linux adds a rootless
+Podman Provider and shared Dockerfile build recipe; macOS retains its Apple
+Containerization and VM engines. Standalone Web icons are generated assets rather
+than a macOS build dependency. Multiple-client regression runs in backend CI;
+see the dated Linux/client acceptance report for actual verification and limits.
+
+Podman desktop follow-up (2026-10-07): private loopback broker transport, bundled noVNC, Web Sandbox launch, login-bound tickets and revocation guards are implemented. Actual Linux rendering, mouse/keyboard, clipboard, browser launch and cgroup metrics passed; see [acceptance](validation/podman-desktop-20261007.md).

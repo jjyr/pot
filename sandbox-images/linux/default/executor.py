@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pwd
 import signal
+import secrets
 import sqlite3
 import subprocess
 import threading
@@ -28,6 +29,7 @@ LOCK = threading.RLock()
 RUNNERS = {}
 CANCELLED = set()
 DESKTOP = None
+DESKTOP_TOKEN = secrets.token_urlsafe(32)
 DB = sqlite3.connect(PRIVATE / "operations.sqlite", check_same_thread=False)
 DB.execute("CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, input TEXT, result TEXT)")
 DB.execute(
@@ -334,9 +336,11 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK:
                     if DESKTOP is None or DESKTOP.poll() is not None:
                         DESKTOP = subprocess.Popen(
-                            ["/bin/sh", "/opt/pot/desktop.sh"], start_new_session=True
+                            ["/bin/sh", "/opt/pot/desktop.sh"],
+                            start_new_session=True,
+                            env={**os.environ, "POT_BROKER_TOKEN": DESKTOP_TOKEN},
                         )
-                self.respond(200, {"starting": True})
+                self.respond(200, {"starting": True, "token": DESKTOP_TOKEN})
             elif self.path in ("/cancel", "/finish"):
                 self.respond(200, cancel(request["id"]))
             else:

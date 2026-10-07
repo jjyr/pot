@@ -2,7 +2,7 @@
 
 Updated: 2026-10-07. Prepared-instance implementation, awaiting real macOS/Xcode VM qualification. Linux remains the default. Android/iOS are deferred.
 
-Server registers `pot-sandbox-macos` alongside Linux; Runtime calls `pot-sandbox` without production dependencies on either Provider. `PotMacOSHelper` is a separately signed Swift executable using public Virtualization.framework. Registration does not boot or download anything. Missing optional files show an unavailable macOS definition while leaving chat and Linux available.
+Server registers `pot-sandbox-macos-apple-vm` alongside Linux; Runtime calls `pot-sandbox` without production dependencies on either Provider. `PotMacOSHelper` is a separately signed Swift executable using public Virtualization.framework. Registration does not boot or download anything. Missing optional files show an unavailable macOS definition while leaving chat and Linux available.
 
 The `pot-macos-executor-v3` bootstrap adds authenticated session inspection. Previously enrolled v2 guests must install the current bootstrap and update their manifest before use; the Provider rejects an older manifest before execution.
 

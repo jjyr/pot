@@ -1,10 +1,10 @@
 # Sandbox provider redesign
 
-Updated: 2026-10-07. Target design for the first-phase Linux and macOS environments. **Linux extraction and prepared-instance macOS integration implemented; macOS VM qualification pending.** Current qualified behavior provides Linux on macOS; [architecture](architecture.md) describes delivered behavior. This page defines provider contracts; [Agent/Sandbox design](agent-sandbox-design.md) defines authority and task placement. Android, iOS and Windows remain future extensions, not prerequisites.
+Updated: 2026-10-07. Target design for the first-phase Linux and macOS environments. **Linux runs through Apple Containerization on macOS and rootless Podman on Linux; prepared-instance macOS VM qualification remains pending.** See [Linux Server acceptance](validation/linux-server-clients-20261007.md) for the Linux host verification and limits; [architecture](architecture.md) describes delivered behavior. This page defines provider contracts; [Agent/Sandbox design](agent-sandbox-design.md) defines authority and task placement. Android, iOS and Windows remain future extensions, not prerequisites.
 
 ## Delivered extraction and remaining design
 
-`pot-sandbox` owns inventory, selection, lifecycle/readiness, leases, owner/turn/epoch scopes, session binding, private JSON receipts and unknown-outcome recovery. `pot-sandbox-linux` owns helper IPC and authenticated guest HTTP. `pot-sandbox-macos` implements owner-enrolled VZ instances, pinned TLS transport and exclusive session closure in a persistent VM; see [enrollment and limits](macos-sandbox.md). Server explicitly registers it; production Runtime has no concrete Provider dependency. Legacy definitions default to the Linux Provider; old product receipts are imported once without replaying unknown operations. Durable Manager epochs advance on reopen or observed Helper generation change.
+`pot-sandbox` owns inventory, selection, lifecycle/readiness, leases, owner/turn/epoch scopes, session binding, private JSON receipts and unknown-outcome recovery. `pot-sandbox-macos-apple-container` owns helper IPC and authenticated guest HTTP. `pot-sandbox-macos-apple-vm` implements owner-enrolled VZ instances, pinned TLS transport and exclusive session closure in a persistent VM; see [enrollment and limits](macos-sandbox.md). Server explicitly registers it; production Runtime has no concrete Provider dependency. Legacy definitions default to the Linux Provider; old product receipts are imported once without replaying unknown operations. Durable Manager epochs advance on reopen or observed Helper generation change.
 
 Storage currently uses atomic private JSON under `product/`, not the proposed injected SQLite store. Source `TemplateDescriptor` parsing and Linux build metadata are delivered; installed template catalogs, allocation reservations, artifact transfer, event subscriptions and general display/automation adapters below remain design targets. Ticket-scoped RFB display arbitration is delivered as described at the end of this page. Provider calls currently use a bounded lifecycle protocol plus the existing validated guest JSON protocol. This page distinguishes that delivered slice from the broader target.
 
@@ -14,10 +14,11 @@ A Sandbox is a managed execution environment with identity, persistent state, li
 
 | Required environment | Initial provider | Execution model |
 |---|---|---|
-| Linux | `linux.apple-containerization` | Existing guest broker and command/file tools; optional desktop |
+| Linux on Linux | `linux.podman` | Rootless container, private broker, command/file tools and optional desktop |
+| Linux on macOS | `macos.apple-containerization` | Existing guest broker and command/file tools; optional desktop |
 | macOS | `macos.apple-virtualization` | Native VM, protected guest broker, command/file tools and macOS display |
 
-Both first target an Apple silicon Mac host. Linux handles default and isolated work; macOS handles native application development. Supporting a standalone Linux backend does not imply a Linux-host VM provider. Android and iOS are deferred: [Android research](research/android-provider.md) and [vphone research](research/vphone-provider.md) remain background, not first-phase dependencies.
+The Apple engines target an Apple silicon Mac host; Podman targets Linux. Linux handles default and isolated work; macOS handles native application development. Supporting a standalone Linux backend does not imply a Linux-host VM provider. Android and iOS are deferred: [Android research](research/android-provider.md) and [vphone research](research/vphone-provider.md) remain background, not first-phase dependencies.
 
 ```mermaid
 flowchart TB
@@ -87,11 +88,11 @@ Each concrete Provider is a separate workspace crate implementing the public con
 | Crate / directory | Responsibility | Dependencies |
 |---|---|---|
 | `pot-sandbox` / `sandbox/` | Manager, registry, provider/capability traits, domain types, store interface, policy enforcement and recovery | General infrastructure; no concrete Providers or Runtime |
-| `pot-sandbox-linux` / `sandbox-providers/linux/` | Existing Apple Containerization helper/client and Linux guest adapters | `pot-sandbox`; platform/helper dependencies |
-| `pot-sandbox-macos` / `sandbox-providers/macos/` | Public Virtualization.framework helper/client and native guest adapters | `pot-sandbox`; platform/helper dependencies |
+| `pot-sandbox-macos-apple-container` / `sandbox-providers/macos-apple-container/` | Existing Apple Containerization helper/client and Linux guest adapters | `pot-sandbox`; platform/helper dependencies |
+| `pot-sandbox-macos-apple-vm` / `sandbox-providers/macos-apple-vm/` | Public Virtualization.framework helper/client and native guest adapters | `pot-sandbox`; platform/helper dependencies |
 | Existing App/Server composition root | Construct enabled Providers, register them, inject Manager into Runtime | `pot-sandbox`, selected Provider crates and Runtime |
 
-Crate names group the initial OS integrations; the stable registry ID identifies the actual engine (`linux.apple-containerization`, `macos.apple-virtualization`). A future Linux engine can use its own crate and ID without changing existing definitions. Do not turn OS names into routing switches in Runtime or Manager.
+Crate names group the initial OS integrations; the stable registry ID identifies the actual engine (`macos.apple-containerization`, `macos.apple-virtualization`). A future Linux engine can use its own crate and ID without changing existing definitions. Do not turn OS names into routing switches in Runtime or Manager.
 
 Registration is explicit at backend construction, conceptually:
 
@@ -180,7 +181,7 @@ Persist these concepts separately:
 
 VM boot/recreate/restore increments an epoch in Host durable state before new dispatch. Guest daemon replacement changes its sub-session identity too. Provider identity and firmware are immutable for a definition once tasks/schedules reference it; changing provider creates another definition. Names and stopped resource settings may change without retargeting tasks.
 
-Keep the current `sandbox_id` API meaning. Migrate old `{id,name}` entries to `linux.apple-containerization`; preserve task/schedule assignments, retired IDs, artifacts and unsettled receipts. Runtime must not pretend a recreated guest retains old app/disk state.
+Keep the current `sandbox_id` API meaning. Migrate old `{id,name}` entries to `macos.apple-containerization`; preserve task/schedule assignments, retired IDs, artifacts and unsettled receipts. Runtime must not pretend a recreated guest retains old app/disk state.
 
 ## Capabilities and tool exposure
 
@@ -281,11 +282,11 @@ Retain the same device capabilities for a later `ios.vphone-research` provider, 
 
 Environment creation offers Linux and macOS with provider availability, actual resource fields, provisioning progress and persistence policy. macOS settings identify the prepared VM and Xcode/toolchain profile. Unsupported controls disappear or reject input; no ineffective CPU/disk settings are saved as active.
 
-Environment pages share inventory/status/tasks/artifacts, then render a typed desktop or device screen panel with correct orientation/input. Screen readiness and execution readiness are separate. App-native access uses existing in-process authorization; standalone CLI uses its existing owner channel. This redesign does not enable desktop/input/provider administration in the mobile browser routes currently blocked by [mobile access](mobile-access.md). Remote display requires a separately authorized scoped gateway, not raw provider endpoints.
+Environment pages share inventory/status/tasks/artifacts, then render a typed desktop or device screen panel with correct orientation/input. Screen readiness and execution readiness are separate. App-native access uses existing in-process authorization; standalone CLI uses its existing owner channel. Paired owner browser clients can use the scoped display gateway described in [mobile access](mobile-access.md); provider administration remains CLI-only. Remote display requires a separately authorized scoped gateway, not raw provider endpoints.
 
 ## Implementation map and delivery gates
 
-Implement a Rust `pot-sandbox` crate with `manager`, `inventory`, `allocation`, `lifecycle`, `scope`, `dispatch`, `recovery`, `artifact`, `display`, `store` and `provider` contract/registry modules. Keep domain contracts there, with concrete clients in separate `pot-sandbox-linux` and `pot-sandbox-macos` crates; expose only the facade and safe descriptors to Runtime. Runtime's `sandbox.rs` becomes a thin product-facing bridge for grants, immutable task bindings and events. Move environment leases/epochs/receipts/recovery out of Runtime rather than wrapping the existing large module unchanged. Keep task scheduling/Driver tool registration in Runtime/core. Reuse the existing database through a Manager storage adapter and explicit migration; avoid duplicate caches owning authoritative state.
+Implement a Rust `pot-sandbox` crate with `manager`, `inventory`, `allocation`, `lifecycle`, `scope`, `dispatch`, `recovery`, `artifact`, `display`, `store` and `provider` contract/registry modules. Keep domain contracts there, with concrete clients in separate `pot-sandbox-macos-apple-container` and `pot-sandbox-macos-apple-vm` crates; expose only the facade and safe descriptors to Runtime. Runtime's `sandbox.rs` becomes a thin product-facing bridge for grants, immutable task bindings and events. Move environment leases/epochs/receipts/recovery out of Runtime rather than wrapping the existing large module unchanged. Keep task scheduling/Driver tool registration in Runtime/core. Reuse the existing database through a Manager storage adapter and explicit migration; avoid duplicate caches owning authoritative state.
 
 App/Server composition explicitly registers the enabled Provider crates and injects the resulting Manager into Runtime. Split Swift helper code into Linux and public macOS engine adapters. No dynamically loaded provider plugins are required. The Manager is created once per backend instance and shut down explicitly: drain/reconcile scopes, persist unknown results, then apply declared VM retention policy. Manager failure does not disable chat; environment tools become unavailable until recovery.
 
@@ -307,7 +308,7 @@ Acceptance must include task/turn/epoch mismatches; worker lifecycle/target/RPC 
 
 `pot-sandbox` now owns typed `DesktopCapabilities` (viewing, input, clipboard, protocol and optional browser launch), opaque one-hour `DesktopSession` tickets, boot-epoch checks, exclusive control, revocation and a bounded RFB 3.8/None input gate. `Provider::prepare_desktop` and `open_desktop` supply readiness and a private byte stream. Provider-specific endpoints and credentials stay inside their crates. Closing a viewer does not close an execution scope or stop/reset a VM. Viewer tickets are ephemeral and do not survive backend restart.
 
-Owner-authorized `POST /api/v1/desktop/sessions` creates a ticket. Server exposes `/desktop/<ticket>/` with authenticated-by-ticket WebSocket/status/control routes; native App obtains tickets through in-process authorization. The ticket grants access only to that desktop and expires after one hour. It is itself a secret, although it contains no Guest address/password or Runtime bearer credential. Responses disable caching and referrers; browser requests require same Origin. Worker credentials and mobile public routes cannot create/access desktops. The existing noVNC page uses pinned Host assets rather than loading Guest credentials into WKWebView.
+Owner-authorized `POST /api/v1/desktop/sessions` creates a ticket. Server exposes `/desktop/<ticket>/` with authenticated-by-ticket WebSocket/status/control routes; native App obtains tickets through in-process authorization. The ticket grants access only to that desktop and expires after one hour. It is itself a secret, although it contains no Guest address/password or Runtime bearer credential. Responses disable caching and referrers; browser requests require same Origin. Worker credentials cannot create/access desktops. Browser tickets are additionally bound to the login session that created them; another Client or a new login cannot reuse them. Active streams check login validity and release input on logout, revocation, expiry or endpoint disable. The existing noVNC page uses pinned Host assets rather than loading Guest credentials into WKWebView.
 
 Input is gated on the Server, independently of noVNC's `viewOnly` flag. Control changes are serialized against forwarded input. Partial packets spanning a control change disconnect; unknown RFB extensions fail closed. The gateway releases tracked keys/buttons before confirming normal control return; competing viewers wait for that release. This confirms writes to the private transport, not a universal remote OS input fence. Guest-local automation/background processes are outside this viewer arbitration. Server shutdown, explicit stop/delete, expiry, ticket revocation and observed boot changes invalidate access. A broken transport cannot establish successful remote key release.
 

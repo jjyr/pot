@@ -120,6 +120,8 @@ pub struct Access {
     pub notifications: Option<pot_runtime::Service>,
     pub push: Option<Arc<super::push::Push>>,
     pub policy: tokio::sync::watch::Sender<bool>,
+    pub desktop_open: Arc<tokio::sync::Mutex<()>>,
+    pub desktops: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     pub foreground: Arc<Mutex<HashMap<String, Instant>>>,
 }
 impl Access {
@@ -153,6 +155,8 @@ impl Access {
             notifications: None,
             push: super::push::Push::from_env()?.map(Arc::new),
             policy: tokio::sync::watch::channel(enabled).0,
+            desktop_open: Arc::new(tokio::sync::Mutex::new(())),
+            desktops: Arc::new(Mutex::new(HashMap::new())),
             foreground: Arc::new(Mutex::new(HashMap::new())),
             origin: config.origin.origin().ascii_serialization(),
             assets: config.assets.clone(),

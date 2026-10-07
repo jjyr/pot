@@ -159,3 +159,14 @@ macOS prepared-instance setup and qualification limits: [macOS Sandbox](macos-sa
 ## Separate Sandbox resources
 
 Client bundling does not build or embed Linux Sandbox resources. Use `mise run build:sandbox-image`, then `mise exec -- python scripts/export-sandbox-resources --update-catalog` before client compilation. `mise run export:sandbox-resources` checks an export against the embedded catalog. Offline VM fixtures also require `mise exec -- cargo build -p pot-sandbox-images` to provide the verified importer. See [resource delivery](sandbox-resources.md) for tag publication, cache/approval behavior and pinned-instance compatibility.
+
+### Multiple browser clients
+
+`mise run test:clients` runs real loopback HTTP listeners with production Runtime,
+Access, storage and SSE routes. Independent P-256 keys and cookies exercise pairing,
+login/logout, simultaneous request-ID retries, conflicting reuse, busy-turn retry,
+owner/browser state consistency, streams/reconnects, selective revocation and
+restart login/persistent receipts. A local deterministic model fixture is used;
+no user keys, containers or paid model endpoints are required. The suite is included
+in `mise run test` and the Linux backend CI job. Rootless Podman qualification is
+manual on an explicitly selected Linux host; no Podman integration CI was added.

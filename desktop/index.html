@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => potSetLocale(potInitialLocal
 <script type="module">
 import RFB from '/desktop-assets/core/rfb.js';
 const base=location.pathname,$=id=>document.getElementById(id);let rfb,state,controlDown=false,connected=false,connecting=true,refreshing=false;
-function publish(){window.webkit?.messageHandlers.potDesktop.postMessage({action:'viewer-state',connected,connecting,human:state?.owner==='human',info:!$('details').hidden})}
+function publish(){window.webkit?.messageHandlers?.potDesktop?.postMessage({action:'viewer-state',connected,connecting,human:state?.owner==='human',info:!$('details').hidden})}
 if(new URLSearchParams(location.search).has('native')){document.body.classList.add('native');document.querySelector('header').hidden=true;}
 function connection(kind,label){const dot=$('connection');dot.dataset.state=kind;dot.title=label;dot.setAttribute('aria-label',label);publish()}
 function error(message=''){$('error').hidden=!message;$('error').textContent=message}
@@ -74,10 +74,12 @@ $('more').onclick=()=>{$('menu').hidden=!$('menu').hidden;$('more').setAttribute
 $('info').onclick=()=>{$('details').hidden=!$('details').hidden;$('info').setAttribute('aria-expanded',!$('details').hidden);if(!$('details').hidden)metrics();publish()};
 $('scale').onchange=()=>{if(rfb)rfb.scaleViewport=$('scale').value==='fit'};
 $('clipboardOpen').onclick=()=>{$('menu').hidden=true;$('clipboardDialog').showModal()};$('closeClipboard').onclick=()=>$('clipboardDialog').close();$('paste').onclick=()=>{if(state?.owner==='human'){rfb?.clipboardPasteFrom($('clipboard').value);$('clipboardDialog').close()}};
-for(const id of ['workspace','manage','stop','restart'])$(id).onclick=()=>{window.webkit?.messageHandlers.potDesktop.postMessage({action:id});$('menu').hidden=true};
+if(!window.webkit?.messageHandlers?.potDesktop)for(const id of ['workspace','manage','stop','restart'])$(id).hidden=true;
+for(const id of ['workspace','manage','stop','restart'])$(id).onclick=()=>{window.webkit?.messageHandlers?.potDesktop?.postMessage({action:id});$('menu').hidden=true};
 document.addEventListener('keydown',e=>{if(e.key==='Escape')$('menu').hidden=true});
 const gib=n=>potNumber(n/1024**3,2)+' GiB';
 async function metrics(){try{const m=await api('metrics');$('image').textContent=m.image||potT('web.unavailable');$('imageSize').textContent=m.image_bytes==null?'—':potNumber(m.image_bytes/1024**2,1)+' MiB';$('cpu').textContent=m.cpu_percent==null?'—':m.cpu_percent+'% / '+m.cpus+' vCPU';$('memory').textContent=m.memory_total==null?'—':gib(m.memory_used)+' / '+gib(m.memory_total);$('disk').textContent=m.disk_total==null?'—':gib(m.disk_used)+' / '+gib(m.disk_total);$('workspaceSize').textContent=m.workspace_bytes==null?'—':potNumber(m.workspace_bytes/1024**2,2)+' MiB';$('uptime').textContent=m.uptime_seconds==null?'—':potNumber(Math.floor(m.uptime_seconds/60))+' min';$('environmentName').textContent=m.sandbox_id+' · '+m.os;}catch(e){$('environment').textContent=potT('web.metrics-unavailable')}}
 window.addEventListener('pot-locale',()=>{refresh();});
+window.addEventListener('pagehide',()=>{rfb?.disconnect();navigator.sendBeacon(base+'api/control',new Blob([JSON.stringify({action:'close'})],{type:'application/json'}));});
 setInterval(refresh,1500);setInterval(()=>{if(!$('details').hidden)metrics();publish()},2500);connect();
 </script></body></html>

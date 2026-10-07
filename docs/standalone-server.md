@@ -1,5 +1,9 @@
 # Standalone CLI and embedded App
 
+For Agent-assisted Web UI deployment and HTTPS/HTTP access-mode selection, see
+the [Web UI deployment guide](web-ui-deployment.md). Remote HTTP basic mode is planned; current
+remote browser access requires HTTPS.
+
 Pot has one backend with two hosts: `pot serve` runs it independently; the macOS
 App owns it inside its own process. App requests, including the Swift settings
 adapter, dispatch in memory. App does not connect to a daemon or management
@@ -64,7 +68,8 @@ command arguments. `chat` prints the accepted message receipt, not an invented
 model result; query snapshots/tasks for subsequent output. `pot api PATH
 [JSON_FILE]` supports existing local queries and mutations. Browser route
 permissions remain restricted; changing authentication does not enable remote
-provider administration, Terminal or desktop control.
+provider administration or Terminal access. Paired owner clients can open a
+qualified Sandbox desktop through login-bound viewer tickets.
 
 `pot config server /secure/listener-settings.json` saves supported `POT_ACCESS_*`
 settings in `server.json` for both hosts. Environment overrides this file.
@@ -97,8 +102,8 @@ with the corresponding `scripts/install-cli` options. The release provider
 resources must be built and qualified separately; a binary-only release does
 not claim VM execution. `POT_RUNTIME_RESOURCES` and `POT_HELPER` are development
 overrides. Codex requires its native runtime; pot-agent is built into Server.
-There is no direct Host execution fallback. Linux provider and Windows support
-are not delivered by the CLI packaging work.
+There is no direct Host execution fallback. Linux uses the Podman Provider
+described below; Windows support is not delivered.
 
 ## Background service
 
@@ -117,3 +122,75 @@ in IndexedDB. Server persists public keys, names and subscriptions in
 old authentication records are not granted new authority. Re-pair old clients;
 previously disabled access remains disabled. Old files are retained for history,
 not read as credentials.
+
+## Linux host and Podman
+
+Linux Server registers `linux.podman` (`LinuxPodmanProvider`). macOS registers
+`macos.apple-containerization` (`MacOSAppleContainerProvider`, Linux guest) and
+`macos.apple-virtualization` (`MacOSAppleVMProvider`, macOS guest). Provider
+names identify the **host** OS and engine; `os` identifies the guest. No legacy
+Provider IDs are accepted. Existing definitions must be edited while Server is
+stopped; changing the Apple Containerization ID does not change task IDs or data.
+
+Linux execution requires rootless Podman, cgroup v2 with systemd delegation,
+subordinate UID/GID ranges, and pasta (passt). Pot invokes the local Podman CLI;
+no Podman API socket/service is used. Host execution is never a fallback.
+
+```sh
+mise run build:container-image
+mise run build:cli
+pot init
+pot serve
+```
+
+The image build compiles a target musl executor and uses the shared Dockerfile.
+Use `scripts/build-container-image --arch amd64|arm64 --tag IMAGE` through mise
+for another target/tag. Cross-platform image RUN steps require an appropriate
+native builder or configured emulation. `POT_PODMAN_IMAGE` selects an already
+installed image (default `localhost/pot-sandbox:0.1.0`); first preparation pins
+its local immutable image ID per environment. Starting an environment never
+pulls an image or follows a changed tag. Install/build images as the same user
+running Server. Updating an environment's pinned image requires a new Sandbox.
+
+The root broker runs as root **inside the user namespace**, with SYS_ADMIN for
+private skill mounts; execution children drop privileges and set no_new_privs.
+Only that environment's `/data` workspace, global user skills and read-only
+builtin skills are mounted. Host product state and Podman sockets are not mounted.
+The executor port is published only on loopback with a private per-boot token;
+pasta disables gateway-to-host mapping, and `--no-hosts` prevents Podman from
+adding a host-loopback alias. Container cgroups expose only
+the private delegated subtree; writable containment is checked before readiness.
+Stopping or orderly Server shutdown removes containers, preserving workspace.
+The image's pinned tini init reaps orphan descendants after cgroup cancellation.
+Unexpected restarts change the observed boot generation and invalidate sessions;
+commands with unknown outcomes are not replayed. Podman desktop viewing, exclusive
+input takeover, clipboard, browser launch and cgroup metrics use the private
+broker behind the Server gateway. Its port is published only on loopback, and
+no broker credentials reach the browser. The Web Sandbox page opens a separate
+viewer tab; closing it releases its ticket and keeps the container running.
+CPU/memory limits are enforced; disk quotas are unavailable and
+`disk_gib` must be `0` (unlimited), rather than claiming a working quota.
+
+For a user service, save a unit such as this under
+`~/.config/systemd/user/pot.service`, replacing both absolute paths:
+
+```ini
+[Unit]
+Description=Pot Server
+After=network-online.target
+
+[Service]
+ExecStart=/absolute/prefix/bin/pot --root /absolute/instance serve
+Restart=on-failure
+Delegate=yes
+
+[Install]
+WantedBy=default.target
+```
+
+Use `systemctl --user daemon-reload` and `systemctl --user enable --now pot`.
+`pot service` still manages macOS LaunchAgents only. Do not add service restrictions
+that disable user namespaces or mount/cgroup operations needed by rootless Podman.
+Pair browser clients with `pot access pair`. For access from another machine,
+use the documented owner-terminated HTTPS endpoint or an SSH local tunnel to
+localhost; raw remote HTTP is refused. Model configuration remains owner CLI-only.

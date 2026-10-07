@@ -1,5 +1,5 @@
 [package]
-name = "pot-sandbox-macos"
+name = "pot-sandbox-macos-apple-vm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

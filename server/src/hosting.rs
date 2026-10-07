@@ -65,14 +65,19 @@ impl Server {
         } else {
             None
         };
-        let mut backend = pot_runtime::initialize_with_providers(
-            config.runtime,
+        let providers: Vec<Arc<dyn pot_sandbox::Provider>> = if cfg!(target_os = "linux") {
+            vec![Arc::new(
+                pot_sandbox_linux_podman::LinuxPodmanProvider::new()?,
+            )]
+        } else {
             vec![
-                Arc::new(pot_sandbox_linux::LinuxProvider::new()?),
-                Arc::new(pot_sandbox_macos::MacOSProvider::new(macos_helper_path())),
-            ],
-        )
-        .await?;
+                Arc::new(pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new()?),
+                Arc::new(pot_sandbox_macos_apple_vm::MacOSAppleVMProvider::new(
+                    macos_helper_path(),
+                )),
+            ]
+        };
+        let mut backend = pot_runtime::initialize_with_providers(config.runtime, providers).await?;
         let endpoint = backend.endpoint(listener.local_addr()?.port());
 
         let access = if let Some(cfg) = access_config {

@@ -464,15 +464,18 @@ mod tests {
             sandbox::Manager::with_providers(
                 &root.data,
                 vec![
-                    Arc::new(pot_sandbox_linux::LinuxProvider::new().unwrap()),
-                    Arc::new(pot_sandbox_macos::MacOSProvider::new(
+                    Arc::new(
+                        pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new()
+                            .unwrap(),
+                    ),
+                    Arc::new(pot_sandbox_macos_apple_vm::MacOSAppleVMProvider::new(
                         root.data.join("absent-helper"),
                     )),
                 ],
             )
             .unwrap(),
         );
-        sandbox::management(&root,&json!({"action":"create","sandbox_id":"mac-dev","provider":pot_sandbox_macos::PROVIDER_ID})).await.unwrap();
+        sandbox::management(&root,&json!({"action":"create","sandbox_id":"mac-dev","provider":pot_sandbox_macos_apple_vm::PROVIDER_ID})).await.unwrap();
         sandbox::management(&root, &json!({"action":"select","sandbox_id":"mac-dev"}))
             .await
             .unwrap();

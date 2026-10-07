@@ -118,7 +118,9 @@ impl Hub {
         owner: &str,
         turn: Option<&str>,
     ) -> Result<Option<String>> {
-        if manager.describe(id)?.os != "linux" || self.bound.lock().unwrap().contains(id) {
+        if manager.describe(id)?.id != pot_sandbox::MACOS_APPLE_CONTAINER_PROVIDER
+            || self.bound.lock().unwrap().contains(id)
+        {
             return Ok(None);
         }
         let bundle = self.pin(id)?;
@@ -425,7 +427,9 @@ mod tests {
         s.sandboxes = Arc::new(
             sandbox::Manager::with_providers(
                 &s.data,
-                vec![Arc::new(pot_sandbox_linux::LinuxProvider::new().unwrap())],
+                vec![Arc::new(
+                    pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new().unwrap(),
+                )],
             )
             .unwrap(),
         );

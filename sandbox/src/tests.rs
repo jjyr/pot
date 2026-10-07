@@ -42,8 +42,10 @@ impl Provider for Fake {
     }
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor {
-            id: LINUX_PROVIDER.into(),
+            id: MACOS_APPLE_CONTAINER_PROVIDER.into(),
             os: "linux".into(),
+            host_os: "macos".into(),
+            engine: "apple-containerization".into(),
             capabilities: Capabilities {
                 shell: true,
                 files: true,
@@ -308,9 +310,12 @@ async fn provider_registration_migration_and_failed_inventory_write_are_safe() {
     );
     assert!(m.assignment("unsaved").is_err());
     std::fs::remove_dir(dir.path().join("product/sandboxes.json")).unwrap();
-    private_json(&dir.path().join("product/sandboxes.json"),&json!({"selected":"default","items":{"default":{"id":"default","name":"Linux"}},"retired":[]})).unwrap();
+    private_json(&dir.path().join("product/sandboxes.json"),&json!({"selected":"default","items":{"default":{"id":"default","name":"Linux","provider":MACOS_APPLE_CONTAINER_PROVIDER}},"retired":[]})).unwrap();
     let migrated = Manager::open(&dir.path().join("product"), vec![p]).unwrap();
-    assert_eq!(migrated.describe("default").unwrap().id, LINUX_PROVIDER);
+    assert_eq!(
+        migrated.describe("default").unwrap().id,
+        MACOS_APPLE_CONTAINER_PROVIDER
+    );
 }
 
 #[tokio::test]

@@ -99,6 +99,12 @@ impl Fixture {
     }
     async fn enroll(&self, auth: &mut ClientKey) -> String {
         let (_, pair, _) = self.command(json!({"action":"pair"})).await;
+        let code = pair["code"].as_str().unwrap();
+        assert_eq!(code.len(), 8);
+        assert!(
+            code.bytes()
+                .all(|c| c.is_ascii_digit() || (b'A'..=b'F').contains(&c))
+        );
         let (status, challenge, cookie) = self
             .post(
                 "/access/pair/start",
@@ -108,7 +114,7 @@ impl Fixture {
             .await;
         assert_eq!(status, StatusCode::OK);
         auth.id = challenge["client_id"].as_str().unwrap().into();
-        let proof = json!({"code":pair["code"],"signature":auth.sign(&challenge)});
+        let proof = json!({"code":code.to_lowercase(),"signature":auth.sign(&challenge)});
         let (status, _, session) = self
             .post("/access/pair/finish", cookie.as_deref(), proof.clone())
             .await;
@@ -427,6 +433,19 @@ async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
     );
     let mut auth = ClientKey::new();
     let session = f.enroll(&mut auth).await;
+    assert_eq!(
+        f.request(
+            false,
+            Method::GET,
+            "/api/v1/desktop/sessions",
+            Some(&session),
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::METHOD_NOT_ALLOWED
+    );
     for path in [
         "/api/v1/providers",
         "/api/v1/authorization/status",
@@ -434,7 +453,6 @@ async fn browser_boundary_rejects_csrf_root_bearer_and_private_routes() {
         "/api/v1/access",
         "/api/v1/execution",
         "/api/v1/sandbox-resources",
-        "/api/v1/desktop/sessions",
         "/api/v1/desktop/sessions/close",
     ] {
         assert_eq!(

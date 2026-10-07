@@ -5,6 +5,7 @@ import importlib.util
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -31,10 +32,19 @@ class SkillMounts(unittest.TestCase):
         self.libc.unshare.return_value = self.libc.mount.return_value = 0
         source_patch = patch.object(module, "SKILL_SOURCES", self.sources)
         libc_patch = patch.object(module.ctypes, "CDLL", return_value=self.libc)
+        stat_patch = patch.object(module.os, "statvfs", return_value=SimpleNamespace(f_flag=0))
         source_patch.start()
         libc_patch.start()
+        stat_patch.start()
         self.addCleanup(source_patch.stop)
         self.addCleanup(libc_patch.stop)
+        self.addCleanup(stat_patch.stop)
+
+    def test_readonly_remount_preserves_locked_container_flags(self):
+        module.os.statvfs.return_value.f_flag = 2 | 4 | 8 | 4096
+        module.skill_namespace("task", self.home)
+        remounts = [c.args[3] for c in self.libc.mount.call_args_list if c.args[3] & 0x20]
+        self.assertEqual(remounts, [0x1021 | 2 | 4 | 8 | 0x200000] * 3)
 
     def test_same_bundles_for_main_and_task_with_different_user_permissions(self):
         main = module.skill_mounts("main", self.home)

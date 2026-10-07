@@ -59,7 +59,7 @@ fn enrollment_requires_complete_private_platform_and_never_overwrites() {
 #[tokio::test]
 async fn missing_optional_helper_does_not_start_or_fake_execution_cleanup() {
     let root = tempfile::tempdir().unwrap();
-    let provider = MacOSProvider::new(root.path().join("absent"));
+    let provider = MacOSAppleVMProvider::new(root.path().join("absent"));
     let context = ProviderContext {
         root: root.path().into(),
         sandbox_id: "mac".into(),
@@ -78,7 +78,7 @@ async fn missing_optional_helper_does_not_start_or_fake_execution_cleanup() {
             .await
             .is_err()
     );
-    let directory = MacOSProvider::directory(&context);
+    let directory = MacOSAppleVMProvider::directory(&context);
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(directory.join("macos-helper.sock"), "stale").unwrap();
     assert!(
@@ -110,7 +110,7 @@ async fn helper_response_must_match_protocol_and_request_identity() {
             .await
             .unwrap();
     });
-    assert!(MacOSProvider::rpc(&path, "stop").await.is_err());
+    assert!(MacOSAppleVMProvider::rpc(&path, "stop").await.is_err());
     task.await.unwrap();
 }
 
@@ -135,7 +135,7 @@ while True:
  c.sendall((json.dumps({'version':1,'id':request['id'],'result':{'phase':phase,'generation':1}})+'\n').encode()); c.close()
 "#).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let provider = MacOSProvider::new(script);
+    let provider = MacOSAppleVMProvider::new(script);
     let context = ProviderContext {
         root: root.path().into(),
         sandbox_id: "mac".into(),
@@ -149,16 +149,20 @@ while True:
         provider.lifecycle(&context, "start").await.unwrap()["phase"],
         "running"
     );
-    assert!(!MacOSProvider::directory(&context).join("stops").exists());
+    assert!(
+        !MacOSAppleVMProvider::directory(&context)
+            .join("stops")
+            .exists()
+    );
     assert!(matches!(
         provider.scope_cleanup_policy(),
         pot_sandbox::ScopeCleanupPolicy::SessionClosure
     ));
-    assert!(Manifest::load(&MacOSProvider::directory(&context).join("macos")).is_ok());
+    assert!(Manifest::load(&MacOSAppleVMProvider::directory(&context).join("macos")).is_ok());
     provider.lifecycle(&context, "start").await.unwrap();
     provider.shutdown(root.path()).await.unwrap();
     assert!(
-        !MacOSProvider::directory(&context)
+        !MacOSAppleVMProvider::directory(&context)
             .join("macos-helper.sock")
             .exists()
     );

@@ -4,6 +4,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 
 | Goal | Read |
 |---|---|
+| Deploy the Web UI with an Agent; choose HTTPS or HTTP access | [Web UI deployment guide](web-ui-deployment.md) |
 | Install standalone CLI or understand embedded App hosting | [Standalone Server](standalone-server.md) |
 | Start, build, or test | [Development guide](development.md) |
 | Review About information and dependency license checks | [About and license policy](licenses-and-about.md) |
@@ -29,6 +30,10 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Change scheduled triggers, time zones, or notifications | [Scheduled tasks](scheduled-tasks.md) |
 | Review long-term product boundaries and acceptance goals | [Product design](product-design.md) |
 | Review completed tests and limitations | [Host Agents and managed Sandboxes](validation/host-pot-agent-20261006.md) |
+
+Podman Web desktop acceptance: [Desktop and Client isolation, 2026-10-07](validation/podman-desktop-20261007.md).
+
+Linux/Podman and multiple-client acceptance: [Linux Server and clients, 2026-10-07](validation/linux-server-clients-20261007.md).
 
 Current hosting/authentication acceptance: [Standalone CLI and embedded App, 2026-10-07](validation/standalone-hosting-20261007.md).
 

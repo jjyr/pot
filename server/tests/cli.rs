@@ -76,7 +76,7 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
         .unwrap();
     assert!(output.status.success());
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["code"].as_str().unwrap().len(), 14);
+    assert_eq!(value["code"].as_str().unwrap().len(), 8);
     assert!(
         command(&process.root)
             .args(["access", "close"])

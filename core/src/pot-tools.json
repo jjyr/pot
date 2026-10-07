@@ -448,7 +448,8 @@
         "provider": {
           "type": "string",
           "enum": [
-            "linux.apple-containerization",
+            "macos.apple-containerization",
+            "linux.podman",
             "macos.apple-virtualization"
           ],
           "description": "Engine for create only; defaults to Linux. macOS requires an owner-enrolled prepared VM."

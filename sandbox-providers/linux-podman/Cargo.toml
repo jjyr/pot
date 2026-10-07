@@ -1,5 +1,5 @@
 [package]
-name = "pot-sandbox-linux"
+name = "pot-sandbox-linux-podman"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["resource", "sandbox-images", "app", "protocol", "core", "storage", "driver", "agent", "tool-executor", "gateway", "runtime", "server", "eval", "mobile", "ui", "sandbox", "sandbox-providers/linux", "sandbox-providers/macos"]
+members = ["resource", "sandbox-images", "app", "protocol", "core", "storage", "driver", "agent", "tool-executor", "gateway", "runtime", "server", "eval", "mobile", "ui", "sandbox", "sandbox-providers/macos-apple-container", "sandbox-providers/macos-apple-vm", "sandbox-providers/linux-podman"]
 default-members = ["app"]
 
 [workspace.package]
@@ -14,8 +14,9 @@ repository = "https://github.com/jjyr/pot"
 pot-resource = { path = "resource" }
 pot-sandbox-images = { path = "sandbox-images" }
 pot-sandbox = { path = "sandbox" }
-pot-sandbox-linux = { path = "sandbox-providers/linux" }
-pot-sandbox-macos = { path = "sandbox-providers/macos" }
+pot-sandbox-linux-podman = { path = "sandbox-providers/linux-podman" }
+pot-sandbox-macos-apple-container = { path = "sandbox-providers/macos-apple-container" }
+pot-sandbox-macos-apple-vm = { path = "sandbox-providers/macos-apple-vm" }
 pot-ui = { path = "ui" }
 pot-protocol = { path = "protocol" }
 pot-core = { path = "core" }
