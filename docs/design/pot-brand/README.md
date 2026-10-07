@@ -38,6 +38,15 @@ After the rebase onto `origin/main` fa3483b:
 - Touch/Home Screen PNGs decode at 1024/192/512 px with fully opaque background corners; the touch icon exactly matches its master. The generated Mac ICNS decodes successfully.
 - Physical iOS/Android installation and existing installed-icon refresh were not tested.
 
+Brand cleanup on 2026-10-07:
+
+- The menu bar now renders the shared Companion geometry in monochrome, with negative-space facial features. Cooking steam, waiting expression, errors and unread badges retain their state semantics.
+- The Sandbox wallpaper uses the same character as a subdued terracotta watermark.
+- The unused old `PotTray.png` and its generator were removed. Packaging deletes an obsolete copy from existing bundles.
+- Native tray checks passed and light/dark renderings were inspected. The wallpaper was rendered with macOS Quick Look; the editable icon generator still reproduces the existing application/Home Screen assets.
+
+- App tests: 16 passed. Full App/Helper/Mobile build and Sandbox image rebundle passed; bundle signing verification passed. Packaged ICNS, mobile touch icon and Sandbox wallpaper match their sources; the App executable UUID matches the new build. The unused tray asset and welcome page are absent. A new interactive Sandbox session was not exercised.
+
 ## Generation prompt
 
 Use case: logo-brand. Create a polished landscape concept board for "pot", a personal AI assistant Mac app performing background work. Warm almost-white background, generous whitespace. Display a flat symbol with lowercase pot wordmark, a macOS rounded-square app icon, and miniature idle/working menu-bar symbols. Title: "D / POT COMPANION". Design a warm little pot assistant with rounded terracotta body, tiny side handles, open rim, two dark dot eyes and a small smile; no limbs, chef hat or utensils. App icon: cream rounded square with a gently dimensional terracotta ceramic pot and soft warm light. Menu-bar version: simplified black pot with two negative-space eyes, adding small steam curves while working. Palette: terracotta #CB704E, cream #FFF5E9, charcoal #303030. Maintain the same character across applications. Exact additional text: "pot", "LOGO", "APP ICON", "MENU BAR", "IDLE", "WORKING". No marketing copy or watermarks.

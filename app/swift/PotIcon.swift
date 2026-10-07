@@ -4,38 +4,13 @@ import AppKit
                         color: NSColor = .labelColor) -> NSImage
 {
     let image = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { _ in
-        color.setStroke()
-        let bowl = NSBezierPath(); bowl.move(to: NSPoint(x: 4, y: 12)); bowl.line(to: NSPoint(x: 5, y: 6)); bowl.curve(
-            to: NSPoint(x: 17, y: 6), controlPoint1: NSPoint(x: 6, y: 1), controlPoint2: NSPoint(x: 16, y: 1)
-        ); bowl.line(to: NSPoint(x: 18, y: 12)); bowl.lineWidth = 1.8; bowl.lineCapStyle = .round; bowl.stroke()
-        let lid = NSBezierPath()
-        lid.move(to: NSPoint(x: 4, y: 15 + (waiting ? 1 : 0)))
-        lid.line(to: NSPoint(x: 18, y: 15 - (waiting ? 1 : 0)))
-        lid.lineWidth = 1.8; lid.lineCapStyle = .round; lid.stroke()
-        if cooking {
-            let contents = NSBezierPath()
-            contents.move(to: NSPoint(x: 7, y: 9))
-            contents.curve(
-                to: NSPoint(x: 15, y: 9),
-                controlPoint1: NSPoint(x: 9, y: 11 + phase),
-                controlPoint2: NSPoint(x: 12, y: 7)
-            )
-            contents.lineWidth = 1.3; contents.lineCapStyle = .round; contents.stroke()
-            color.withAlphaComponent(0.65 + 0.35 * phase).setStroke()
-            for x in [8.0, 14.0] {
-                let steam = NSBezierPath(); steam.move(to: NSPoint(x: x, y: 17))
-                steam.curve(
-                    to: NSPoint(x: x + 0.5, y: 21),
-                    controlPoint1: NSPoint(x: x - 1, y: 18.5),
-                    controlPoint2: NSPoint(x: x + 1.5, y: 19.5)
-                )
-                steam.lineWidth = 1.1; steam.lineCapStyle = .round; steam.stroke()
-            }
-        } else if waiting {
-            color.setFill(); NSBezierPath(ovalIn: NSRect(x: 10, y: 11, width: 2, height: 2)).fill()
-        }
+        companionIcon(blink: waiting ? 0.15 : 1, smile: waiting ? -0.5 : 0,
+                      steam: cooking ? 1 : 0, phase: phase, monochrome: color)
+            .draw(in: NSRect(x: 0, y: 0, width: 22, height: 22))
         return true
-    }; image.isTemplate = true; return image
+    }
+    image.isTemplate = true
+    return image
 }
 
 @MainActor func trayIcon(cooking: Bool, phase: Double, waiting: Bool, failed: Bool, unread: Int,
@@ -74,13 +49,13 @@ import AppKit
     return image
 }
 
-/// The selected Pot Companion character, drawn independently of the monochrome tray.
+/// Shared Pot Companion geometry for colored navigation and monochrome menu-bar rendering.
 @MainActor func companionIcon(blink: CGFloat = 1, smile: CGFloat = 0,
-                              steam: CGFloat = 0, phase: Double = 0.5) -> NSImage
+                              steam: CGFloat = 0, phase: Double = 0.5, monochrome: NSColor? = nil) -> NSImage
 {
     let image = NSImage(size: NSSize(width: 32, height: 32), flipped: false) { _ in
-        let clay = NSColor(srgbRed: 0.80, green: 0.44, blue: 0.31, alpha: 1)
-        let ink = NSColor(srgbRed: 0.20, green: 0.15, blue: 0.13, alpha: 1)
+        let clay = monochrome ?? NSColor(srgbRed: 0.80, green: 0.44, blue: 0.31, alpha: 1)
+        let ink = monochrome == nil ? NSColor(srgbRed: 0.20, green: 0.15, blue: 0.13, alpha: 1) : NSColor.clear
         clay.setStroke()
         for x in [3.0, 24.0] {
             let handle = NSBezierPath(ovalIn: NSRect(x: x, y: 11, width: 5, height: 7))
@@ -96,11 +71,20 @@ import AppKit
                    controlPoint2: NSPoint(x: 27, y: 12))
         body.close()
         clay.setFill(); body.fill()
-        NSColor(srgbRed: 0.66, green: 0.32, blue: 0.21, alpha: 1).setFill()
+        NSGraphicsContext.saveGraphicsState()
+        if monochrome != nil {
+            NSGraphicsContext.current?.compositingOperation = .copy
+        }
+        (monochrome == nil ? NSColor(srgbRed: 0.66, green: 0.32, blue: 0.21, alpha: 1) : .clear).setFill()
         NSBezierPath(ovalIn: NSRect(x: 6, y: 18, width: 20, height: 6)).fill()
-        NSColor(srgbRed: 0.96, green: 0.72, blue: 0.53, alpha: 1).setStroke()
+        NSGraphicsContext.restoreGraphicsState()
+        (monochrome ?? NSColor(srgbRed: 0.96, green: 0.72, blue: 0.53, alpha: 1)).setStroke()
         let rim = NSBezierPath(ovalIn: NSRect(x: 6, y: 18, width: 20, height: 6))
         rim.lineWidth = 1.2; rim.stroke()
+        NSGraphicsContext.saveGraphicsState()
+        if monochrome != nil {
+            NSGraphicsContext.current?.compositingOperation = .copy
+        }
         ink.setFill()
         for x in [11.0, 21.0] {
             let height = max(0.5, 2.6 * blink)
@@ -111,6 +95,7 @@ import AppKit
         mouth.curve(to: NSPoint(x: 18, y: 9.3), controlPoint1: NSPoint(x: 15, y: 7.7 - smile),
                     controlPoint2: NSPoint(x: 17, y: 7.7 - smile))
         mouth.lineWidth = 1.1; mouth.lineCapStyle = .round; mouth.stroke()
+        NSGraphicsContext.restoreGraphicsState()
         if steam > 0 {
             clay.withAlphaComponent(steam * 0.7).setStroke()
             for (index, x) in [12.0, 20.0].enumerated() {
@@ -124,6 +109,6 @@ import AppKit
         }
         return true
     }
-    image.isTemplate = false
+    image.isTemplate = monochrome != nil
     return image
 }

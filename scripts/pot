@@ -128,7 +128,8 @@ elif cmd == "bundle":
     call(["mise", "run", "licenses"], cwd=REPO)
     for sub in ["MacOS", "Helpers", "Resources/runtime"]:
         (APP / "Contents" / sub).mkdir(parents=True, exist_ok=True)
-    # Remove obsolete xterm resources from an existing development bundle.
+    # Remove obsolete assets from an existing development bundle.
+    (APP / "Contents/Resources/PotTray.png").unlink(missing_ok=True)
     obsolete_terminal = APP / "Contents/Resources/terminal"
     if obsolete_terminal.exists():
         shutil.rmtree(obsolete_terminal)
@@ -205,7 +206,7 @@ elif cmd == "bundle":
             "--no-fund",
         ]
     )
-    for name in ["Pot.icns", "PotTray.png"]:
+    for name in ["Pot.icns"]:
         shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)
     shutil.copy2(REPO / "LICENSE", APP / "Contents/Resources/LICENSE.txt")
     shutil.copy2(
