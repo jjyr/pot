@@ -69,7 +69,10 @@ impl Hub {
             .entry(id.into())
             .or_insert_with(|| self.images.catalog.default_linux_bundle.clone())
             .clone();
-        self.images.catalog.bundle(&bundle)?;
+        anyhow::ensure!(
+            self.images.catalog.bundle(&bundle)?.bootstrap_version == "pot-executor-v2",
+            "Sandbox image uses the legacy executor. Create a new Sandbox to use the current image; the existing workspace and pinned image are preserved"
+        );
         self.save(&book)?;
         Ok(bundle)
     }
@@ -427,6 +430,39 @@ mod tests {
             .unwrap(),
         );
         s
+    }
+    #[tokio::test]
+    async fn legacy_bundle_is_preserved_and_rejected_before_download_or_dispatch() {
+        let s = fixture();
+        let hub = s.sandboxes.resources.as_ref().unwrap();
+        let legacy = hub
+            .images
+            .catalog
+            .bundles
+            .iter()
+            .find(|(_, b)| b.bootstrap_version == "pot-executor-v1")
+            .unwrap()
+            .0
+            .clone();
+        hub.book
+            .lock()
+            .unwrap()
+            .pins
+            .insert("default".into(), legacy.clone());
+        hub.save(&hub.book.lock().unwrap()).unwrap();
+        let error = hub
+            .inspect(&s.sandboxes, "default", "main", None)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("legacy executor"));
+        assert_eq!(hub.book.lock().unwrap().pins["default"], legacy);
+        assert!(hub.jobs.lock().unwrap().is_empty());
+        assert!(hub.book.lock().unwrap().requests.is_empty());
+        assert!(!s.data.parent().unwrap().join("helper.sock").exists());
+        assert_eq!(
+            Hub::open(&s.data).unwrap().book.lock().unwrap().pins["default"],
+            legacy
+        );
     }
     #[tokio::test]
     async fn create_and_agent_supplied_consent_never_start_a_download() {

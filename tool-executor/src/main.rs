@@ -69,23 +69,27 @@ async fn main() -> Result<()> {
         };
         let name = request["operation"].as_str().unwrap_or("");
         let args = &request["args"];
-        let result = match tools::validate(name, args) {
-            Err(e) => Err(e),
-            Ok(()) if name == "apply_patch" => tools::patch(&context, args),
-            Ok(()) => {
-                processes
-                    .execute(
-                        &context,
-                        &policy,
-                        name,
-                        args,
-                        request["id"].as_str().unwrap_or(""),
-                        &mut |event| {
-                            println!("{}", json!({"event":event}));
-                            Ok(())
-                        },
-                    )
-                    .await
+        let result = if name == "inspect" {
+            Ok(processes.inspect())
+        } else {
+            match tools::validate(name, args) {
+                Err(e) => Err(e),
+                Ok(()) if name == "apply_patch" => tools::patch(&context, args),
+                Ok(()) => {
+                    processes
+                        .execute(
+                            &context,
+                            &policy,
+                            name,
+                            args,
+                            request["id"].as_str().unwrap_or(""),
+                            &mut |event| {
+                                println!("{}", json!({"event":event}));
+                                Ok(())
+                            },
+                        )
+                        .await
+                }
             }
         };
         println!(

@@ -31,11 +31,17 @@ impl pot_core::ToolExecutor for Tools {
             Ok(value.get("result").cloned().unwrap_or(value))
         })
     }
-    fn finish<'a>(
+    fn abort<'a>(
         &'a self,
         _: &'a pot_core::ExecutionContext,
     ) -> futures::future::BoxFuture<'a, Result<()>> {
         Box::pin(finish(&self.service))
+    }
+    fn finish<'a>(
+        &'a self,
+        _: &'a pot_core::ExecutionContext,
+    ) -> futures::future::BoxFuture<'a, Result<()>> {
+        Box::pin(finish_turn(&self.service))
     }
 }
 // Guest output cannot manufacture Agent lifecycle/control events. IDs are
@@ -324,6 +330,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     let grant = pot_sandbox::AccessGrant {
         owner: s.usage_scope.clone(),
         turn: turn.clone(),
+        epoch: binding.epoch,
         target: s.sandbox_id.clone().unwrap_or_default(),
         worker: s.is_worker,
         policy: binding.spec.params.agent.shell.clone(),
@@ -339,6 +346,31 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             legacy,
         )
         .await
+}
+pub async fn finish_turn(s: &Service) -> Result<()> {
+    if agent::cancelled(s) || s.stopping() {
+        finish(s).await
+    } else {
+        s.sandboxes.environment.finish_turn(&s.usage_scope).await
+    }
+}
+pub async fn refresh(s: &Service) -> Result<()> {
+    finish_turn(s).await
+}
+pub async fn reap_idle(s: &Service) -> Result<()> {
+    s.sandboxes.environment.reap_idle().await
+}
+pub async fn finish_stale(s: &Service, epoch: u64) -> Result<()> {
+    s.sandboxes
+        .environment
+        .finish_stale(&s.usage_scope, epoch)
+        .await
+}
+pub async fn shutdown(s: &Service) -> Result<()> {
+    s.sandboxes.environment.shutdown().await
+}
+pub async fn finish_idle(s: &Service) -> Result<()> {
+    s.sandboxes.environment.finish_idle(&s.usage_scope).await
 }
 pub async fn finish(s: &Service) -> Result<()> {
     s.sandboxes.environment.finish(&s.usage_scope).await

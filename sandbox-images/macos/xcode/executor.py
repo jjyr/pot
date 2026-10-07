@@ -12,6 +12,7 @@ import sqlite3
 import ssl
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PRIVATE = Path("/var/db/pot-executor")
@@ -59,6 +60,8 @@ def terminate(process):
 class Runner:
     def __init__(self, scope, cwd, policy, role):
         self.lock = threading.Lock()
+        self.busy = False
+        self.last_used = time.monotonic()
         self.cwd, self.policy, self.role = cwd, policy, role
         temporary = Path("/var/tmp/pot-scopes") / scope
         temporary.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -136,14 +139,39 @@ def execute(request):
             raise ValueError("Scope configuration changed")
         DB.execute("INSERT INTO operations VALUES (?,?,NULL)", (op, encoded))
         DB.commit()
+        runner.busy = True
     try:
         result = runner.execute({**request, "cwd": str(cwd)})
     except Exception as error:
         result = {"result": {"isError": True, "error": str(error)[:1024]}, "events": []}
+    finally:
+        runner.busy = False
+        runner.last_used = time.monotonic()
     with LOCK:
         DB.execute("UPDATE operations SET result=? WHERE id=?", (json.dumps(result), op))
         DB.commit()
     return result
+
+
+def inspect(scope):
+    if not valid_id(scope):
+        raise ValueError("Invalid scope")
+    with LOCK:
+        runner = RUNNERS.get(scope)
+    if runner is None or runner.process.poll() is not None:
+        return {"sessions": [], "active": False, "ended": True}
+    reply = runner.execute(
+        {
+            "id": scope,
+            "operation": "inspect",
+            "args": {},
+            "cwd": str(runner.cwd),
+            "policy": runner.policy,
+        }
+    )
+    if reply["result"].get("isError"):
+        raise RuntimeError(reply["result"]["error"])
+    return reply["result"]
 
 
 def cancel(scope):
@@ -161,6 +189,24 @@ def cancel(scope):
         "cleanup": "session-closure",
         "process_containment": False,
     }
+
+
+def expire_idle():
+    # Expire inactive runners too, bounding memory used by initialization snapshots.
+    while True:
+        time.sleep(1)
+        with LOCK:
+            for scope, runner in list(RUNNERS.items()):
+                if (
+                    not runner.busy
+                    and time.monotonic() - runner.last_used
+                    > runner.policy.get("session_idle_timeout_ms", 1800000) / 1000
+                ):
+                    try:
+                        cancel(scope)
+                    except Exception:
+                        # Retain failed cleanup for subsequent retry and Host reconciliation.
+                        pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -270,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             request = json.loads(self.rfile.read(length))
             if self.path == "/execute":
                 self.respond(200, execute(request))
+            elif self.path == "/inspect":
+                self.respond(200, inspect(request["id"]))
             elif self.path in ("/finish", "/cancel"):
                 self.respond(200, cancel(request["id"]))
             else:
@@ -343,6 +391,7 @@ def main():
     tls.minimum_version = ssl.TLSVersion.TLSv1_2
     tls.load_cert_chain(PRIVATE / "guest-cert.pem", PRIVATE / "guest-key.pem")
     server.socket = tls.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=expire_idle, daemon=True).start()
     server.serve_forever()
 
 

@@ -49,3 +49,7 @@ from the credential-free hosting tests.
 Desktop adapter update (2026-10-07): `pot-sandbox` manages expiring viewer tickets and exclusive input; Server supplies a scoped WebSocket/noVNC gateway. App uses that route for Linux and optional owner-configured macOS RFB. Linux browser/metrics/clipboard are retained. macOS has authenticated TLS tunneling and readiness tests, but no real Guest VNC/Xcode qualification. Viewer closure preserves the VM. See [desktop acceptance](validation/sandbox-desktop-20261007.md).
 
 2026-10-07: Separate `pot-resource` / `pot-sandbox-images`, embedded SHA-256 bundles, Runtime-owned download permission/progress, native cache UI, and unbundled Linux resources implemented. Exact Release assets still require publication; macOS media is owner-provided. See [delivery contract](sandbox-resources.md) and its dated validation report.
+
+## Command execution follow-up — 2026-10-07
+
+Implemented shell/login selection, pipe/PTY sessions and terminal controls, Agent-session process retention with epoch/generation authorization, idle expiry and orphan drainage, and bounded in-memory Bash/Zsh login snapshots with startup-file invalidation/fallback. Current contract: [Sandbox command execution](executor.md). Runtime/real-runner tests and broker lifecycle doubles are included; actual verification and limits are recorded in [acceptance](validation/executor-sessions-20261007.md).

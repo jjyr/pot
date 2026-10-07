@@ -17,6 +17,7 @@ fn id() -> String {
 pub struct AccessGrant {
     pub owner: String,
     pub turn: String,
+    pub epoch: u64,
     pub target: String,
     pub worker: bool,
     pub policy: pot_core::ShellSettings,
@@ -47,7 +48,8 @@ struct Scope {
     id: String,
     target: String,
     owner: String,
-    turn: String,
+    epoch: u64,
+    parked: bool,
     generation: u64,
 }
 struct Execution {
@@ -76,6 +78,7 @@ pub struct Manager {
     committed: Mutex<Inventory>,
     leases: Mutex<BTreeMap<String, usize>>,
     scopes: Mutex<BTreeMap<String, Scope>>,
+    gates: Mutex<BTreeMap<String, Arc<tokio::sync::RwLock<()>>>>,
     sessions: Mutex<BTreeMap<String, String>>,
     lifecycle: tokio::sync::Mutex<()>,
     providers: BTreeMap<String, Arc<dyn Provider>>,
@@ -150,6 +153,7 @@ impl Manager {
             book: Mutex::new(book),
             leases: Mutex::new(BTreeMap::new()),
             scopes: Mutex::new(BTreeMap::new()),
+            gates: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(BTreeMap::new()),
             lifecycle: tokio::sync::Mutex::new(()),
             providers: registered,
@@ -208,17 +212,47 @@ impl Manager {
             &serde_json::to_value(&*self.pending.lock().unwrap())?,
         )
     }
-    fn scope(&self, target: &str, owner: &str, turn: &str, generation: u64) -> Result<Scope> {
+    fn gate(&self, owner: &str) -> Arc<tokio::sync::RwLock<()>> {
+        self.gates
+            .lock()
+            .unwrap()
+            .entry(owner.into())
+            .or_default()
+            .clone()
+    }
+    fn scope(&self, target: &str, owner: &str, epoch: u64, generation: u64) -> Result<Scope> {
         let mut scopes = self.scopes.lock().unwrap();
         if let Some(scope) = scopes
             .values()
-            .find(|v| v.owner == owner && v.turn == turn && v.target == target)
+            .find(|v| v.owner == owner && v.epoch == epoch && v.target == target)
         {
             anyhow::ensure!(
                 scope.generation == generation,
                 "Sandbox generation changed; session outcome unknown"
             );
-            return Ok(scope.clone());
+            let id = scope.id.clone();
+            if scope.parked {
+                self.pending.lock().unwrap().insert(
+                    id.clone(),
+                    Pending {
+                        target: target.into(),
+                        owner: owner.into(),
+                        active: true,
+                    },
+                );
+                if let Err(error) = self.persist_operations() {
+                    self.pending.lock().unwrap().remove(&id);
+                    return Err(error);
+                }
+                *self
+                    .leases
+                    .lock()
+                    .unwrap()
+                    .entry(target.into())
+                    .or_default() += 1;
+                scopes.get_mut(&id).unwrap().parked = false;
+            }
+            return Ok(scopes[&id].clone());
         }
         if !self.describe(target)?.capabilities.shared_execution {
             anyhow::ensure!(
@@ -230,7 +264,8 @@ impl Manager {
             id: id(),
             target: target.into(),
             owner: owner.into(),
-            turn: turn.into(),
+            epoch,
+            parked: false,
             generation,
         };
         // Keep initialization serialized through persistence; concurrent calls
@@ -654,6 +689,8 @@ impl Manager {
             object.remove("sandbox_id");
         }
         pot_core::environment_tools::validate(name, &validated)?;
+        let gate = self.gate(&grant.owner);
+        let _gate = gate.read().await;
         let turn = &grant.turn;
         use sha2::{Digest, Sha256};
         let key: String =
@@ -700,7 +737,7 @@ impl Manager {
                 .unwrap()
                 .get(session)
                 .cloned()
-                .ok_or_else(|| anyhow!("Session expired or belongs to another turn"))?;
+                .ok_or_else(|| anyhow!("Session expired or belongs to another task/agent epoch"))?;
             let scope = self
                 .scopes
                 .lock()
@@ -709,8 +746,8 @@ impl Manager {
                 .cloned()
                 .ok_or_else(|| anyhow!("Session scope expired"))?;
             anyhow::ensure!(
-                scope.owner == grant.owner && scope.turn == *turn,
-                "Session belongs to another task/turn"
+                scope.owner == grant.owner && scope.epoch == grant.epoch,
+                "Session belongs to another task/agent epoch"
             );
             Some(scope)
         } else {
@@ -751,7 +788,7 @@ impl Manager {
             !cancelled(),
             "Execution turn ended during Sandbox preparation"
         );
-        let scope = self.scope(&target, &grant.owner, turn, generation)?;
+        let scope = self.scope(&target, &grant.owner, grant.epoch, generation)?;
         let mut record =
             json!({"id":id(),"target":target,"name":name,"args":args,"status":"accepted"});
         private_json(&receipt, &record)?;
@@ -791,6 +828,12 @@ impl Manager {
                 .unwrap()
                 .insert(session.to_owned(), scope.id.clone());
         }
+        if name == "write_stdin" && result["result"].get("session_id").is_none() {
+            self.sessions
+                .lock()
+                .unwrap()
+                .remove(args["session_id"].as_str().unwrap());
+        }
         result["result"]["sandbox_id"] = json!(target);
         record["status"] = json!("complete");
         record["result"] = result.clone();
@@ -801,7 +844,7 @@ impl Manager {
 impl Manager {
     async fn cancel_scope(&self, scope: &Scope) -> Result<()> {
         let state = self.helper(&scope.target, "status").await?;
-        if state["phase"] != "stopped" {
+        if state["phase"] != "stopped" && state["phase"] != "failed" {
             let response = self
                 .request(
                     &scope.target,
@@ -823,7 +866,13 @@ impl Manager {
     }
 }
 fn release_scope(manager: &Manager, scope: &Scope) {
-    if manager.scopes.lock().unwrap().remove(&scope.id).is_some() {
+    if manager
+        .scopes
+        .lock()
+        .unwrap()
+        .remove(&scope.id)
+        .is_some_and(|v| !v.parked)
+    {
         *manager
             .leases
             .lock()
@@ -886,7 +935,7 @@ impl Manager {
                         .lock()
                         .unwrap()
                         .values()
-                        .any(|v| v.owner == owner),
+                        .any(|v| v.owner == owner && !v.active),
                     "Sandbox execution outcome unknown; stop unconfirmed, recover environment before continuing"
                 );
                 return Ok(());
@@ -900,7 +949,13 @@ impl Manager {
 impl Manager {
     pub async fn shutdown(&self) -> Result<()> {
         self.viewers.lock().unwrap().clear();
+        let scopes: Vec<_> = self.scopes.lock().unwrap().values().cloned().collect();
         let mut errors = Vec::new();
+        for scope in scopes {
+            if let Err(error) = self.cancel_scope(&scope).await {
+                errors.push(error.to_string());
+            }
+        }
         for provider in self.providers.values() {
             if let Err(error) = provider.shutdown(&self.root).await {
                 errors.push(error.to_string());
@@ -912,5 +967,124 @@ impl Manager {
             errors.join("; ")
         );
         Ok(())
+    }
+}
+
+impl Manager {
+    pub async fn finish_turn(&self, owner: &str) -> Result<()> {
+        let scopes: Vec<_> = self
+            .scopes
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|v| v.owner == owner)
+            .cloned()
+            .collect();
+        for scope in scopes {
+            if let Err(error) = self.inspect_scope(&scope).await {
+                if let Some(pending) = self.pending.lock().unwrap().get_mut(&scope.id) {
+                    pending.active = false;
+                }
+                release_scope(self, &scope);
+                self.persist_operations()?;
+                return Err(anyhow!("Executor inspection stop unconfirmed: {error}"));
+            }
+        }
+        Ok(())
+    }
+    async fn inspect_scope(&self, scope: &Scope) -> Result<()> {
+        let gate = self.gate(&scope.owner);
+        let _gate = gate.write().await;
+        if !self.scopes.lock().unwrap().contains_key(&scope.id) {
+            return Ok(());
+        }
+        let state = self.helper(&scope.target, "status").await?;
+        if matches!(state["phase"].as_str(), Some("stopped" | "failed"))
+            || state["generation"].as_u64().unwrap_or(0) != scope.generation
+        {
+            // A changed generation proves the old executor cannot retain its processes.
+            self.settle(&scope.id)?;
+            release_scope(self, scope);
+            return Ok(());
+        }
+        anyhow::ensure!(
+            state["phase"] == "running",
+            "Executor inspection stop unconfirmed: environment transition in progress"
+        );
+        let reply = self
+            .request(
+                &scope.target,
+                "inspect",
+                &json!({"id":scope.id}),
+                Duration::from_secs(15),
+            )
+            .await?;
+        let sessions = reply["sessions"]
+            .as_array()
+            .ok_or_else(|| anyhow!("Invalid executor session inventory; stop unconfirmed"))?;
+        anyhow::ensure!(
+            reply["active"].is_boolean()
+                && reply["ended"].is_boolean()
+                && sessions.iter().all(Value::is_string),
+            "Invalid executor session inventory; stop unconfirmed"
+        );
+        self.sessions.lock().unwrap().retain(|session, id| {
+            id != &scope.id || sessions.iter().any(|v| v.as_str() == Some(session))
+        });
+        if reply["ended"] == true {
+            self.settle(&scope.id)?;
+            release_scope(self, scope);
+        } else if reply["active"] == false && !scope.parked {
+            self.settle(&scope.id)?;
+            let mut scopes = self.scopes.lock().unwrap();
+            if let Some(value) = scopes.get_mut(&scope.id)
+                && !value.parked
+            {
+                value.parked = true;
+                *self.leases.lock().unwrap().get_mut(&scope.target).unwrap() -= 1;
+            }
+        }
+        Ok(())
+    }
+    pub async fn reap_idle(&self) -> Result<()> {
+        let scopes: Vec<_> = self
+            .scopes
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|v| *self.running.lock().unwrap().get(&v.owner).unwrap_or(&0) == 0)
+            .cloned()
+            .collect();
+        for scope in scopes {
+            if let Err(error) = self.inspect_scope(&scope).await {
+                if let Some(pending) = self.pending.lock().unwrap().get_mut(&scope.id) {
+                    pending.active = false;
+                }
+                release_scope(self, &scope);
+                self.persist_operations()?;
+                return Err(anyhow!("Executor inspection stop unconfirmed: {error}"));
+            }
+        }
+        Ok(())
+    }
+    pub async fn finish_stale(&self, owner: &str, epoch: u64) -> Result<()> {
+        let scopes: Vec<_> = self
+            .scopes
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|v| v.owner == owner && v.epoch != epoch)
+            .cloned()
+            .collect();
+        for scope in scopes {
+            self.cancel_scope(&scope).await?;
+        }
+        Ok(())
+    }
+    pub async fn finish_idle(&self, owner: &str) -> Result<()> {
+        let gate = self.gate(owner);
+        let _gate = gate.write().await;
+        self.finish(owner).await?;
+        self.drain(owner).await
     }
 }

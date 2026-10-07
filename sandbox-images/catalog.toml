@@ -1,6 +1,6 @@
 # Embedded trust root. Update only before building clients.
 schema_version = 1
-default_linux_bundle = "linux-arm64-c83a5caebe3b9895"
+default_linux_bundle = "linux-arm64-a8a713299829b6e8"
 
 [resources.kernel-fb2cfb79eb1ae194]
 release_tag = "sandbox-resources-v0.0.1"
@@ -26,6 +26,22 @@ size_bytes = 457403044
 unpacked_bytes = 460258959
 format = "oci-tar-gzip"
 
+[resources.boot-84ff38f4c43b3aae]
+release_tag = "sandbox-resources-v0.1.0"
+filename = "linux-arm64-boot-84ff38f4c43b3aae.tar.gz"
+sha256 = "84ff38f4c43b3aae39fdbf833daaf48e5266213270b0fa000b51872ebd5cfb07"
+size_bytes = 68582373
+unpacked_bytes = 69255307
+format = "oci-tar-gzip"
+
+[resources.image-d2872eedc59d938d]
+release_tag = "sandbox-resources-v0.1.0"
+filename = "linux-arm64-image-d2872eedc59d938d.tar.gz"
+sha256 = "d2872eedc59d938db7a9273ff6df206b4afaca694edd871ea99cca400dc79063"
+size_bytes = 457472781
+unpacked_bytes = 460331518
+format = "oci-tar-gzip"
+
 [bundles.linux-arm64-c83a5caebe3b9895]
 kernel = "kernel-fb2cfb79eb1ae194"
 boot = "boot-37408b7c74d619f6"
@@ -33,5 +49,15 @@ image = "image-c83a5caebe3b9895"
 image_reference = "pot.local/sandbox:026f1eea024aed72883e"
 boot_reference = "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df"
 bootstrap_version = "pot-executor-v1"
+os = "linux"
+architecture = "arm64"
+
+[bundles.linux-arm64-a8a713299829b6e8]
+kernel = "kernel-fb2cfb79eb1ae194"
+boot = "boot-84ff38f4c43b3aae"
+image = "image-d2872eedc59d938d"
+image_reference = "pot.local/sandbox:e191d651a1fef59d4e8e"
+boot_reference = "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df"
+bootstrap_version = "pot-executor-v2"
 os = "linux"
 architecture = "arm64"

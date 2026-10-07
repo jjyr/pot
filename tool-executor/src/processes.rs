@@ -1,4 +1,4 @@
-//! Turn-scoped pipe sessions. Process handles are never serialized or resumed after restart.
+//! Agent-session processes. Handles are in memory and cannot survive executor restart.
 use anyhow::{Result, anyhow, ensure};
 use pot_core::{ExecutionContext, ShellSettings, Update};
 use serde_json::{Value, json};
@@ -9,11 +9,20 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    process::{ChildStdin, Command},
     sync::{Notify, watch},
     task::{JoinHandle, JoinSet},
     time::Instant,
 };
+
+type Reader = Box<dyn tokio::io::AsyncRead + Unpin + Send>;
+type Writer = Box<dyn tokio::io::AsyncWrite + Unpin + Send>;
+type Spawned = (
+    tokio::process::Child,
+    Option<Writer>,
+    Option<crate::terminal::Terminal>,
+    Reader,
+    Option<Reader>,
+);
 
 struct Group {
     pid: u32,
@@ -45,7 +54,10 @@ struct Output {
     reason: Option<String>,
 }
 struct Process {
-    input: Option<ChildStdin>,
+    input: Option<Writer>,
+    terminal: Option<crate::terminal::Terminal>,
+    pid: u32,
+    touch: watch::Sender<Instant>,
     output: Arc<Mutex<Output>>,
     changed: Arc<Notify>,
     stop: watch::Sender<bool>,
@@ -61,6 +73,7 @@ impl Drop for Process {
 #[derive(Default)]
 pub struct Processes {
     sessions: HashMap<String, Process>,
+    snapshots: crate::snapshot::Snapshots,
 }
 
 async fn drain<R: tokio::io::AsyncRead + Unpin>(
@@ -117,6 +130,10 @@ impl Processes {
         call: &str,
         emit: &mut (dyn FnMut(Update) -> Result<()> + Send),
     ) -> Result<Value> {
+        pot_core::environment_tools::validate(name, args)?;
+        if name == "exec_command" && self.sessions.len() >= policy.max_sessions {
+            self.reap().await?;
+        }
         let cap = number(
             args,
             "max_output_chars",
@@ -147,33 +164,72 @@ impl Processes {
                 .as_str()
                 .map(|p| s.workspace.join(p))
                 .unwrap_or_else(|| s.workspace.clone());
-            let timeout = number(
-                args,
-                "timeout_ms",
-                policy.default_timeout_ms,
-                policy.max_timeout_ms,
-            )?;
-            let mut child = Command::new(&policy.executable)
-                .args(["-c", cmd])
-                .current_dir(cwd)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .process_group(0)
-                .kill_on_drop(true)
-                .spawn()?;
+            let timeout = if !yielding || args.get("timeout_ms").is_some() {
+                Some(number(
+                    args,
+                    "timeout_ms",
+                    policy.default_timeout_ms,
+                    policy.max_timeout_ms,
+                )?)
+            } else {
+                None
+            };
+            let shell = args["shell"].as_str().unwrap_or(&policy.executable);
+            ensure!(
+                std::path::Path::new(shell).is_absolute()
+                    && matches!(
+                        std::path::Path::new(shell)
+                            .file_name()
+                            .and_then(|p| p.to_str()),
+                        Some("sh" | "bash" | "zsh")
+                    ),
+                "Unsupported shell; use an absolute sh/bash/zsh path"
+            );
+            let login = args["login"].as_bool().unwrap_or(policy.allow_login_shell);
+            ensure!(
+                !login || policy.allow_login_shell,
+                "Login shell disabled by execution policy"
+            );
+            let tty = args["tty"].as_bool().unwrap_or(false);
+            let mut command = self
+                .snapshots
+                .command(shell, &cwd, &s.workspace, cmd, login, policy.shell_snapshot)
+                .await;
+            command.kill_on_drop(true);
+            let (mut child, input, terminal, stdout, stderr): Spawned = if tty {
+                let (read, write, control) = crate::terminal::attach(&mut command)?;
+                let child = command.spawn()?;
+                (
+                    child,
+                    Some(Box::new(write)),
+                    Some(control),
+                    Box::new(read),
+                    None,
+                )
+            } else {
+                let mut child = command
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .process_group(0)
+                    .spawn()?;
+                let input = child.stdin.take().map(|p| Box::new(p) as Writer);
+                let stdout = Box::new(child.stdout.take().unwrap()) as Reader;
+                let stderr = Some(Box::new(child.stderr.take().unwrap()) as Reader);
+                (child, input, None, stdout, stderr)
+            };
+            let pid = child.id().ok_or_else(|| anyhow!("Missing process PID"))?;
             let mut group = Group {
-                pid: child.id().ok_or_else(|| anyhow!("Missing process PID"))?,
+                pid,
                 cleaned: false,
             };
-            let input = child.stdin.take();
             let output = Arc::new(Mutex::new(Output::default()));
             let changed = Arc::new(Notify::new());
             let (stop, mut stopped) = watch::channel(false);
             let out = output.clone();
             let notify = changed.clone();
-            let stdout = child.stdout.take().unwrap();
-            let stderr = child.stderr.take().unwrap();
+            let (touch, mut touched) = watch::channel(Instant::now());
+            let idle_timeout = policy.session_idle_timeout_ms;
             let buffer_cap = policy.max_output_bytes;
             let task = tokio::spawn(async move {
                 // Own the readers so every error/abort path cancels them too.
@@ -185,10 +241,29 @@ impl Processes {
                     false,
                     buffer_cap,
                 ));
-                readers.spawn(drain(stderr, out.clone(), notify.clone(), true, buffer_cap));
+                if let Some(stderr) = stderr {
+                    readers.spawn(drain(stderr, out.clone(), notify.clone(), true, buffer_cap));
+                }
+                let idle = async {
+                    loop {
+                        let deadline = *touched.borrow() + Duration::from_millis(idle_timeout);
+                        tokio::select! {
+                            _ = tokio::time::sleep_until(deadline) => break,
+                            changed = touched.changed() => if changed.is_err() { break; },
+                        }
+                    }
+                };
+                let timeout = async {
+                    if let Some(timeout) = timeout {
+                        tokio::time::sleep(Duration::from_millis(timeout)).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                };
                 let (status, reason) = tokio::select! {
                     exit = child.wait() => (Some(exit?), None),
-                    _ = tokio::time::sleep(Duration::from_millis(timeout)) => (None, Some("timeout")),
+                    _ = timeout => (None, Some("timeout")),
+                    _ = idle => (None, Some("idle_timeout")),
                     _ = stopped.wait_for(|v| *v) => (None, Some("cancelled")),
                 };
                 group.kill();
@@ -227,6 +302,9 @@ impl Processes {
                 id.clone(),
                 Process {
                     input,
+                    terminal,
+                    pid,
+                    touch,
                     output,
                     changed,
                     stop,
@@ -240,27 +318,62 @@ impl Processes {
                 .ok_or_else(|| anyhow!("session_id must be a string"))?
                 .to_owned()
         };
-        let process = self.sessions.get_mut(&id).ok_or_else(|| {
-            anyhow!("Process session missing; sessions are scoped to the active turn")
-        })?;
-        if let Some(chars) = args.get("chars") {
-            let chars = chars
-                .as_str()
-                .ok_or_else(|| anyhow!("chars must be a string"))?;
-            ensure!(chars.len() <= 1024 * 1024, "Input too large");
-            if !chars.is_empty() {
-                let input = process
-                    .input
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("Process stdin is closed"))?;
-                tokio::select! {
-                    result = tokio::time::timeout(Duration::from_millis(policy.max_yield_ms), input.write_all(chars.as_bytes())) => { result.map_err(|_| anyhow!("Process stdin write timed out"))??; },
-                    _ = s.feedback.cancellation() => { let _ = process.stop.send(true); },
+        let process = self
+            .sessions
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("Process session expired or missing in this agent session"))?;
+        process.touch.send_replace(Instant::now());
+        if !process.task.is_finished() {
+            if args["terminate"] == true {
+                let _ = process.stop.send(true);
+            }
+            if args["interrupt"] == true || args["chars"].as_str() == Some("\u{3}") {
+                if let Some(terminal) = &process.terminal {
+                    terminal.interrupt()?;
+                } else {
+                    let result = unsafe { libc::kill(-(process.pid as i32), libc::SIGINT) };
+                    ensure!(
+                        result == 0
+                            || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH),
+                        "Process interrupt failed"
+                    );
                 }
             }
-        }
-        if args.get("close_stdin").is_some_and(|v| v == true) || !yielding {
-            process.input.take();
+            if args.get("rows").is_some() || args.get("cols").is_some() {
+                let terminal = process
+                    .terminal
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Resize requires a PTY"))?;
+                terminal.resize(
+                    args["rows"].as_u64().map(|n| n as u16),
+                    args["cols"].as_u64().map(|n| n as u16),
+                )?;
+            }
+            if let Some(chars) = args.get("chars") {
+                let chars = chars
+                    .as_str()
+                    .ok_or_else(|| anyhow!("chars must be a string"))?;
+                ensure!(chars.len() <= 1024 * 1024, "Input too large");
+                if !chars.is_empty() && chars != "\u{3}" {
+                    let input = process
+                        .input
+                        .as_mut()
+                        .ok_or_else(|| anyhow!("Process stdin is closed"))?;
+                    tokio::select! {
+                        result = tokio::time::timeout(Duration::from_millis(policy.max_yield_ms), input.write_all(chars.as_bytes())) => { result.map_err(|_| anyhow!("Process stdin write timed out"))??; },
+                        _ = s.feedback.cancellation() => { let _ = process.stop.send(true); },
+                    }
+                }
+            }
+            if args.get("close_stdin").is_some_and(|v| v == true) || !yielding {
+                if process.terminal.is_some() {
+                    if let Some(input) = process.input.as_mut() {
+                        input.write_all(b"\x04").await?;
+                    }
+                } else {
+                    process.input.take();
+                }
+            }
         }
         let deadline = Instant::now() + Duration::from_millis(wait);
         let mut stdout = vec![];
@@ -332,6 +445,22 @@ impl Processes {
         Ok(
             json!({"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"truncated":truncated,"exit_code":exit,"reason":reason,"session_id":if finished {None}else{Some(id)}}),
         )
+    }
+    pub async fn reap(&mut self) -> Result<()> {
+        let ended: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|(_, p)| p.task.is_finished())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ended {
+            let mut process = self.sessions.remove(&id).unwrap();
+            (&mut process.task).await??;
+        }
+        Ok(())
+    }
+    pub fn inspect(&self) -> Value {
+        json!({"sessions":self.sessions.keys().collect::<Vec<_>>(),"active":self.sessions.values().any(|p|!p.task.is_finished()),"ended":false})
     }
     pub async fn shutdown(&mut self) -> Result<()> {
         for process in self.sessions.values() {

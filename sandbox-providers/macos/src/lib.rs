@@ -345,7 +345,7 @@ impl Provider for MacOSProvider {
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             ensure!(
-                ["execute", "finish", "cancel"].contains(&route),
+                ["execute", "finish", "cancel", "inspect"].contains(&route),
                 "Unsupported macOS guest capability"
             );
             let (client, url, token) = self.transport(context).await?;

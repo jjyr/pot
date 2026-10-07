@@ -5,5 +5,5 @@ os = "linux"
 architecture = "arm64"
 format = "oci"
 providers = ["linux.apple-containerization"]
-bootstrap = "pot-executor-v1"
+bootstrap = "pot-executor-v2"
 recipe = "build.sh"

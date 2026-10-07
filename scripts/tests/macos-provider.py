@@ -11,6 +11,7 @@ import ssl
 import subprocess
 import tempfile
 import threading
+from types import SimpleNamespace
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,9 +27,11 @@ class Runner:
 
     def __init__(self, _, cwd, policy, role):
         self.cwd, self.policy, self.role = cwd, policy, role
-        self.process = object()
+        self.process = SimpleNamespace(poll=lambda: None)
 
     def execute(self, request):
+        if request["operation"] == "inspect":
+            return {"result": {"sessions": ["live"], "active": True, "ended": False}, "events": []}
         Runner.dispatches += 1
         return {"result": {"stdout": request["args"]["cmd"]}, "events": []}
 
@@ -193,6 +196,8 @@ with tempfile.TemporaryDirectory(prefix="pot-macos-test-") as temporary:
         }
         assert request("/execute", body, broker.TOKEN) == request("/execute", body, broker.TOKEN)
         assert Runner.dispatches == 1
+        rejected("/inspect", {"id": "scope"})
+        assert request("/inspect", {"id": "scope"}, broker.TOKEN)["sessions"] == ["live"]
         rejected("/execute", {**body, "args": {"cmd": "changed"}}, broker.TOKEN)
         rejected("/execute", {**body, "id": "two", "scope": "foreign"}, broker.TOKEN)
         for bad in (str(directory), str(broker.WORK / "../escape")):
@@ -200,6 +205,7 @@ with tempfile.TemporaryDirectory(prefix="pot-macos-test-") as temporary:
         closure = request("/finish", {"id": "scope"}, broker.TOKEN)
         assert closure["scope_closed"] is True and closure["settled"] is False
         assert closure["process_containment"] is False
+        assert request("/inspect", {"id": "scope"}, broker.TOKEN)["ended"] is True
         rejected("/execute", {**body, "id": "late"}, broker.TOKEN)
         broker.DB.execute(
             "INSERT INTO operations VALUES (?,?,NULL)",

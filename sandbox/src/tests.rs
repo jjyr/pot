@@ -135,6 +135,7 @@ fn grant(owner: &str, worker: bool) -> AccessGrant {
     AccessGrant {
         owner: owner.into(),
         turn: "turn".into(),
+        epoch: 1,
         target: "default".into(),
         worker,
         policy: Default::default(),
@@ -186,7 +187,7 @@ async fn receipts_are_manager_owned_deduplicated_and_unknown_legacy_calls_never_
     m.finish("main").await.unwrap();
 }
 #[tokio::test]
-async fn sessions_are_fixed_to_owner_turn_and_target() {
+async fn sessions_are_fixed_to_owner_epoch_and_target() {
     let (_dir, m, _) = fixture();
     m.execute(
         &grant("main", false),
@@ -209,7 +210,7 @@ async fn sessions_are_fixed_to_owner_turn_and_target() {
         )
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("another task/turn"));
+    assert!(err.to_string().contains("another task/agent epoch"));
     let err = m
         .execute(
             &grant("worker", true),

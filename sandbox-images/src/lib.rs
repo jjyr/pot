@@ -42,7 +42,10 @@ impl Catalog {
             ensure!(
                 b.os == "linux"
                     && b.architecture == "arm64"
-                    && b.bootstrap_version == "pot-executor-v1",
+                    && matches!(
+                        b.bootstrap_version.as_str(),
+                        "pot-executor-v1" | "pot-executor-v2"
+                    ),
                 "Unsupported bundle"
             );
             ensure!(

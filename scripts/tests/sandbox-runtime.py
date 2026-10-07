@@ -148,7 +148,7 @@ class Model:
                         return [sid for child in value for sid in sessions(child)]
                     return []
 
-                ids = sessions(current[1:])
+                ids = sessions(current[1:]) or sessions(inputs)
                 assert ids, current
                 action = json.loads(json.dumps(action))
                 action["args"]["session_id"] = ids[-1]
@@ -384,6 +384,57 @@ async def run(args):
         async def turn(actions):
             return await finish(await submit(prompt(actions)))
 
+        async def exercise_shell_sessions(prefix):
+            await turn(
+                [
+                    action(
+                        "exec_command",
+                        login=False,
+                        cmd=f"printf '%s\\n' 'printf x >> \"$HOME/{prefix}-captures\"' 'export POT_BASELINE=BASELINE' 'pot_baseline() {{ printf FUNCTION; }}' > .bash_profile",
+                    )
+                ]
+            )
+            for _ in range(2):
+                await turn(
+                    [
+                        action(
+                            "exec_command",
+                            cmd=f"printf '%s:' \"$POT_BASELINE\" > {prefix}-baseline; pot_baseline >> {prefix}-baseline",
+                        )
+                    ]
+                )
+            assert (default / f"{prefix}-baseline").read_text() == "BASELINE:FUNCTION"
+            assert (default / f"{prefix}-captures").read_text() == "x"
+            await turn(
+                [
+                    action(
+                        "exec_command",
+                        cmd='while IFS= read -r line; do eval "$line"; done',
+                        tty=True,
+                        login=False,
+                        yield_time_ms=10,
+                    )
+                ]
+            )
+            await turn(
+                [
+                    action("pot_manage_sandbox", action="select", sandbox_id="linux-b"),
+                    action(
+                        "write_stdin",
+                        session_id="$last_session",
+                        rows=35,
+                        cols=110,
+                        chars=f"stty size > {prefix}-terminal; printf BOUND >> {prefix}-terminal; exit\n",
+                        yield_time_ms=1000,
+                    ),
+                    action("pot_manage_sandbox", action="select", sandbox_id="default"),
+                    action("exec_command", login=False, cmd="rm .bash_profile"),
+                ]
+            )
+            assert (default / f"{prefix}-terminal").read_text() == "35 110\nBOUND"
+            assert not (second / f"{prefix}-terminal").exists()
+            report[f"{prefix}_pty_cross_turn_and_snapshot"] = True
+
         async def reject(path, body, token=None):
             try:
                 await api(path, body, token)
@@ -523,6 +574,7 @@ SKILLS""",
             assert not (second / "session.txt").exists()
             assert (second / "selected.txt").read_text() == "SECOND\n"
             report["pot_sessions_stay_bound_across_default_change"] = True
+            await exercise_shell_sessions("pot")
             # Persistent worker credential and immutable assignment, including API bypass attempts.
             task = await api(
                 "tasks",
@@ -659,6 +711,7 @@ SKILLS""",
             assert (default / "codex.txt").read_text() == "CODEX_DEFAULT\nRESUMED\n"
             assert (second / "codex.txt").read_text().strip() == "CODEX_SECOND"
             report["codex_main_and_resume"] = True
+            await exercise_shell_sessions("codex")
             task2 = await api(
                 "tasks",
                 {

@@ -78,7 +78,7 @@ def export(source, output, tag, update):
             image=ids[2],
             image_reference=metadata["reference"],
             boot_reference="ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",
-            bootstrap_version="pot-executor-v1",
+            bootstrap_version="pot-executor-v2",
             os="linux",
             architecture="arm64",
         )
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--source", type=pathlib.Path, default=REPO / ".local/d1/resources")
     p.add_argument("--output", type=pathlib.Path, default=REPO / ".local/releases/resources")
-    p.add_argument("--tag", default="sandbox-resources-v0.0.1")
+    p.add_argument("--tag", default="sandbox-resources-v0.1.0")
     p.add_argument("--update-catalog", action="store_true")
     args = p.parse_args()
     export(args.source, args.output, args.tag, args.update_catalog)

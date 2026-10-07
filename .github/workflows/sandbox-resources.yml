@@ -5,7 +5,7 @@ on:
       tag:
         description: Resource tag already committed in the embedded catalog
         required: true
-        default: sandbox-resources-v0.0.1
+        default: sandbox-resources-v0.1.0
         type: string
 permissions:
   contents: write

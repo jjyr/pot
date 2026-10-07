@@ -152,7 +152,11 @@ impl SessionHandle for Session {
             )
             .await;
             let cleanup = if let Some(executor) = &self.context.tool_executor {
-                executor.finish(&self.context).await
+                if result.is_err() {
+                    executor.abort(&self.context).await
+                } else {
+                    executor.finish(&self.context).await
+                }
             } else {
                 Ok(())
             };

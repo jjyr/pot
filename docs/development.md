@@ -14,7 +14,7 @@ mise run bundle
 mise run open
 ```
 
-`bundle` preinstalls dependencies in a separate VM and builds the complete Sandbox OCI image. Software downloads happen only during build; App embeds the Host backend and boots an environment on demand. See Sandbox image for caches, fonts, and sizes.
+`build:sandbox-image` preinstalls guest dependencies in a separate VM and builds the Sandbox OCI image for resource publication. `bundle` packages Host binaries. End users authorize downloads of the pinned kernel, boot and OCI assets before the first environment startup. See Sandbox image for caches, fonts, and sizes.
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
@@ -78,6 +78,7 @@ mise run fmt           # Explicit formatting fixes
 mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
+mise run test:executor # Guest receipt, idle expiry and cleanup contracts without a VM
 mise run test:ui      # Portable shared chat/page state and localization
 mise run licenses      # Enforce Rust license policy and generate dependency notices
 mise run test:licenses # Check approved, disallowed and unknown license cases

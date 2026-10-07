@@ -283,7 +283,7 @@ impl Provider for LinuxProvider {
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             ensure!(
-                ["execute", "finish", "cancel", "desktop"].contains(&route),
+                ["execute", "finish", "cancel", "inspect", "desktop"].contains(&route),
                 "Unsupported guest route"
             );
             let (url, token) = self.endpoint(context).await?;
