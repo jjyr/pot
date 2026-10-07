@@ -2,6 +2,7 @@ use std::{env, path::PathBuf, process::Command};
 fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     generate_localization(&out);
+    generate_app_metadata(&out);
     let status = Command::new("xcrun")
         .args([
             "swiftc",
@@ -13,6 +14,8 @@ fn main() {
         ])
         .arg(out.join("swift-modules"))
         .arg(out.join("Translations.swift"))
+        .arg(out.join("AppMetadata.swift"))
+        .arg("swift/About.swift")
         .arg("swift/Localization.swift")
         .arg("swift/Bridge.swift")
         .arg("swift/RuntimeClient.swift")
@@ -37,6 +40,10 @@ fn main() {
     println!("cargo:rustc-link-search=native=/usr/lib/swift");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     println!("cargo:rerun-if-changed=swift/Bridge.swift");
+    println!("cargo:rerun-if-changed=swift/About.swift");
+    println!("cargo:rerun-if-changed=../LICENSE");
+    println!("cargo:rerun-if-changed=../Cargo.toml");
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=swift/RuntimeClient.swift");
     println!("cargo:rerun-if-changed=swift/LocalRuntime.swift");
     println!("cargo:rerun-if-changed=swift/SettingsPanel.swift");
@@ -113,4 +120,33 @@ fn generate_localization(out: &std::path::Path) {
     ] {
         println!("cargo:rerun-if-changed={path}");
     }
+}
+
+fn generate_app_metadata(out: &std::path::Path) {
+    let authors = env::var("CARGO_PKG_AUTHORS").unwrap();
+    let developer = authors
+        .split(':')
+        .map(|author| author.split('<').next().unwrap().trim())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let license = std::fs::read_to_string("../LICENSE").unwrap();
+    let copyright = license
+        .lines()
+        .find(|line| line.starts_with("Copyright"))
+        .unwrap()
+        .replace("(c)", "©");
+    let mut swift = String::from("enum AppMetadata {\n");
+    for (name, value) in [
+        ("version", env::var("CARGO_PKG_VERSION").unwrap()),
+        ("developer", developer),
+        ("repository", env::var("CARGO_PKG_REPOSITORY").unwrap()),
+        ("copyright", copyright),
+    ] {
+        swift.push_str(&format!(
+            "static let {name} = {}\n",
+            serde_json::to_string(&value).unwrap()
+        ));
+    }
+    swift.push_str("}\n");
+    std::fs::write(out.join("AppMetadata.swift"), swift).unwrap();
 }

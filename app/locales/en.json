@@ -709,5 +709,10 @@
   "mobile.install-close": "Got it",
   "mobile.shell.connect": "Connect",
   "mobile.shell.pairing-code": "Pairing code from Pot App or CLI",
-  "mobile.shell.client-name": "Client name"
+  "mobile.shell.client-name": "Client name",
+  "about.developer": "Developed by {0}",
+  "about.license": "MIT License",
+  "about.project": "Project on GitHub",
+  "about.rust-licenses": "Rust dependency licenses",
+  "menu.about-pot": "About Pot"
 }

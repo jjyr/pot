@@ -709,5 +709,10 @@
   "mobile.install-close": "知道了",
   "mobile.shell.connect": "连接",
   "mobile.shell.pairing-code": "输入 Pot App 或 CLI 生成的配对码",
-  "mobile.shell.client-name": "客户端名称"
+  "mobile.shell.client-name": "客户端名称",
+  "about.developer": "开发者：{0}",
+  "about.license": "MIT 许可证",
+  "about.project": "GitHub 项目",
+  "about.rust-licenses": "Rust 依赖许可证",
+  "menu.about-pot": "关于 Pot"
 }

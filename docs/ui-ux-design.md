@@ -4,6 +4,14 @@ Updated: 2026-10-07. Current MVP UI specification; see [Development plan](develo
 
 For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Shared page colors, layouts, the contextual toolbar and navigation history, Chat, the composer and Pot activity/unread icons now follow that direction. The upstream browser-authorization/provider integration and Terminal removal are retained; the new AI panels share these visual tokens and responsive forms.
 
+## About
+
+The first item in the native Pot menu is About Pot (关于 Pot). Use AppKit’s standard
+About panel with version, developer, copyright, MIT license and project link.
+The bundled Rust dependency license report is available through its own link.
+This panel does not add a sidebar destination. Menu and credit labels follow
+the application language.
+
 ## Shared layout
 
 Tasks, settings, and Sandbox use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared layout lives in `app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.

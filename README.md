@@ -4,6 +4,14 @@ Pot is an open-source implementation of the Dot experience.
 
 Pot runs local Pot/Codex Agents with separately managed Linux sandboxes. Pot manages environments and background tasks—you simply tell it what to do and provide guidance along the way.
 
+## Install
+
+Requires Apple Silicon and macOS 26 or later.
+
+```sh
+brew install --cask jjyr/tap/pot
+```
+
 ## Features
 
 - **A personal AI assistant** — give instructions, ask questions, and follow up through chat.

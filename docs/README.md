@@ -6,6 +6,8 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 |---|---|
 | Install standalone CLI or understand embedded App hosting | [Standalone Server](standalone-server.md) |
 | Start, build, or test | [Development guide](development.md) |
+| Review About information and dependency license checks | [About and license policy](licenses-and-about.md) |
+| Publish a macOS release or update the Homebrew cask | [Releases and Homebrew](development.md#releases-and-homebrew) |
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
 | Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
