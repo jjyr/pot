@@ -1,5 +1,7 @@
 //! Explicit local execution backend, used inside Sandbox runners and isolated eval fixtures.
 mod processes;
+mod snapshot;
+mod terminal;
 pub mod tools;
 use anyhow::Result;
 use futures::future::BoxFuture;

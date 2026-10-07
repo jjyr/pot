@@ -109,6 +109,8 @@ class Runner:
     def __init__(self, scope, cwd, policy, role):
         self.lock = threading.Lock()
         self.cwd, self.policy, self.role = cwd, policy, role
+        self.last_used = time.monotonic()
+        self.busy = False
         group = Path("/sys/fs/cgroup") / ("pot-" + scope)
         if not USER or not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
             raise RuntimeError("Root-owned cgroup v2 containment required")
@@ -150,6 +152,8 @@ class Runner:
         with self.lock:
             if self.process.poll() is not None:
                 raise RuntimeError("Execution scope ended; sessions cannot be resumed")
+            if request["operation"] != "inspect":
+                self.last_used = time.monotonic()
             self.process.stdin.write((json.dumps(request) + "\n").encode())
             self.process.stdin.flush()
             events = []
@@ -214,14 +218,76 @@ def execute(request):
             raise ValueError("Scope configuration changed")
         DB.execute("INSERT INTO operations VALUES (?,?,NULL)", (op_id, encoded))
         DB.commit()
+        runner.busy = True
     try:
         result = runner.execute({**request, "cwd": str(cwd)})
     except Exception as error:
         result = {"result": {"isError": True, "error": str(error)[:1024]}, "events": []}
+    finally:
+        runner.busy = False
+        runner.last_used = time.monotonic()
     with LOCK:
         DB.execute("UPDATE operations SET result=? WHERE id=?", (json.dumps(result), op_id))
         DB.commit()
     return result
+
+
+def inspect(scope):
+    if not valid_id(scope):
+        raise ValueError("Invalid execution scope")
+    with LOCK:
+        runner = RUNNERS.get(scope)
+    if runner is None:
+        return {"sessions": [], "active": False, "ended": True}
+    reply = runner.execute(
+        {
+            "id": scope,
+            "operation": "inspect",
+            "args": {},
+            "cwd": str(runner.cwd),
+            "policy": runner.policy,
+        }
+    )
+    if reply["result"].get("isError"):
+        raise RuntimeError(reply["result"]["error"])
+    if reply["result"].get("active") is False:
+        # No managed process remains. Drain orphaned/setsid descendants before
+        # allowing Host to release the execution lease, retaining only the runner.
+        group = runner.process.sandbox_cgroup
+        deadline = time.monotonic() + 5
+        while True:
+            pids = {int(pid) for pid in (group / "cgroup.procs").read_text().split()} - {
+                runner.process.pid
+            }
+            if not pids:
+                break
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if time.monotonic() > deadline:
+                raise RuntimeError("Idle scope descendant cleanup stop unconfirmed")
+            time.sleep(0.025)
+    return reply["result"]
+
+
+def expire_idle():
+    # Expire inactive runners too, bounding memory used by initialization snapshots.
+    while True:
+        time.sleep(1)
+        with LOCK:
+            for scope, runner in list(RUNNERS.items()):
+                if (
+                    not runner.busy
+                    and time.monotonic() - runner.last_used
+                    > runner.policy.get("session_idle_timeout_ms", 1800000) / 1000
+                ):
+                    try:
+                        cancel(scope)
+                    except Exception:
+                        # Retain failed cleanup for subsequent retry and Host reconciliation.
+                        pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -262,6 +328,8 @@ class Handler(BaseHTTPRequestHandler):
             request = json.loads(self.rfile.read(length))
             if self.path == "/execute":
                 self.respond(200, execute(request))
+            elif self.path == "/inspect":
+                self.respond(200, inspect(request["id"]))
             elif self.path == "/desktop":
                 with LOCK:
                     if DESKTOP is None or DESKTOP.poll() is not None:
@@ -294,6 +362,7 @@ def shutdown(*_):
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
+    threading.Thread(target=expire_idle, daemon=True).start()
     ThreadingHTTPServer(
         (
             os.environ.get("POT_EXECUTOR_BIND", "0.0.0.0"),

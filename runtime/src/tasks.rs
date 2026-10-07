@@ -601,41 +601,59 @@ pub async fn cancel(
     Path(task_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     root.authorized(&h)?;
-    let mut hub = root.tasks.lock().unwrap();
-    let lane = hub.lanes.get_mut(&task_id).ok_or_else(missing)?;
-    if lane.record.active.is_none() && lane.record.queue.is_empty() {
-        return Ok(Json(json!({"stopping":false})));
+    let idle_service = {
+        let hub = root.tasks.lock().unwrap();
+        let lane = hub.lanes.get(&task_id).ok_or_else(missing)?;
+        (lane.record.active.is_none() && lane.record.queue.is_empty()).then(|| lane.service.clone())
+    };
+    if let Some(service) = idle_service {
+        // A completed task can still own background sessions. Preserve its result
+        // while explicitly closing those resources instead of silently doing nothing.
+        sandbox::finish_idle(&service).await.map_err(internal)?;
+        return Ok(Json(json!({"stopping":false,"sessions_stopped":true})));
     }
-    for j in &lane.record.queue {
-        let mut m = user(j);
-        m.status = MessageStatus::Cancelled;
-        lane.service.save(m).map_err(internal)?;
-    }
-    lane.record.info.updated_at_ms = now();
-    lane.record.queue.clear();
-    lane.service
-        .inner
-        .lock()
-        .unwrap()
-        .store
-        .set("execution.paused", "")
-        .map_err(internal)?;
-    lane.service
-        .usage
-        .lock()
-        .unwrap()
-        .clear_wait(&task_id)
-        .map_err(internal)?;
-    if lane.record.active.is_some() {
-        let mut inner = lane.service.inner.lock().unwrap();
-        if let Some(t) = inner.turn.as_mut() {
-            t.cancelling = true;
+    let cleanup = {
+        let mut hub = root.tasks.lock().unwrap();
+        let lane = hub.lanes.get_mut(&task_id).ok_or_else(missing)?;
+        if lane.record.active.is_none() && lane.record.queue.is_empty() {
+            return Ok(Json(json!({"stopping":false})));
         }
-        lane.service.cancel_notify.notify_one();
-    } else {
-        lane.record.info.phase = TaskPhase::Cancelled;
+        for j in &lane.record.queue {
+            let mut m = user(j);
+            m.status = MessageStatus::Cancelled;
+            lane.service.save(m).map_err(internal)?;
+        }
+        lane.record.info.updated_at_ms = now();
+        lane.record.queue.clear();
+        lane.service
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set("execution.paused", "")
+            .map_err(internal)?;
+        lane.service
+            .usage
+            .lock()
+            .unwrap()
+            .clear_wait(&task_id)
+            .map_err(internal)?;
+        if lane.record.active.is_some() {
+            let mut inner = lane.service.inner.lock().unwrap();
+            if let Some(t) = inner.turn.as_mut() {
+                t.cancelling = true;
+            }
+            lane.service.cancel_notify.notify_one();
+        } else {
+            lane.record.info.phase = TaskPhase::Cancelled;
+        }
+        let cleanup = lane.record.active.is_none().then(|| lane.service.clone());
+        persist(&root, &hub).map_err(internal)?;
+        cleanup
+    };
+    if let Some(service) = cleanup {
+        sandbox::finish_idle(&service).await.map_err(internal)?;
     }
-    persist(&root, &hub).map_err(internal)?;
     Ok(Json(json!({"stopping":true})))
 }
 
@@ -942,11 +960,32 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut workers = tokio::task::JoinSet::new();
         let mut ticks = 0u8;
+        let mut executor_reaper: Option<tokio::task::JoinHandle<()>> = None;
+        let mut next_executor_reap =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             if root.stopping() {
                 break;
             }
             while workers.try_join_next().is_some() {}
+            if tokio::time::Instant::now() >= next_executor_reap {
+                if executor_reaper
+                    .as_ref()
+                    .is_none_or(|task| task.is_finished())
+                {
+                    if let Some(task) = executor_reaper.take() {
+                        let _ = task.await;
+                    }
+                    let service = root.clone();
+                    executor_reaper = Some(tokio::spawn(async move {
+                        if let Err(error) = sandbox::reap_idle(&service).await {
+                            eprintln!("{error}");
+                        }
+                    }));
+                }
+                next_executor_reap =
+                    tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            }
             if ticks == 0
                 && let Err(e) = schedules::tick(&root, now())
             {
@@ -976,6 +1015,10 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
                 Err(e) => eprintln!("task dispatch: {e}"),
             }
             tokio::select! { _ = root.stop_requested() => {}, _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {} }
+        }
+        if let Some(task) = executor_reaper {
+            task.abort();
+            let _ = task.await;
         }
         while workers.join_next().await.is_some() {}
     })

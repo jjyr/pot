@@ -25,6 +25,8 @@ pub async fn execute(
         None
     };
     let binding = binding(s)?;
+    sandbox::finish_stale(s, binding.epoch).await?;
+    sandbox::refresh(s).await?;
     if let Err(e) = crate::gateway::validate_spec(s, &binding.spec) {
         s.inner
             .lock()
@@ -56,7 +58,11 @@ pub async fn execute(
         transcript.record(s, update)
     })
     .await;
-    sandbox::finish(s).await?;
+    if result.is_err() || super::cancelled(s) || s.stopping() {
+        sandbox::finish(s).await?;
+    } else {
+        sandbox::finish_turn(s).await?;
+    }
     sandbox::drain(s).await?;
     result
 }
