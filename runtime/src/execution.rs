@@ -12,7 +12,7 @@ pub struct Config {
     pub max_parallel_tasks: usize,
 }
 pub fn default_parallel_tasks() -> usize {
-    5
+    8
 }
 impl Default for Config {
     fn default() -> Self {
@@ -22,7 +22,7 @@ impl Default for Config {
             request_limit: 10000,
             max_tokens: 8192,
             max_requests_per_turn: 100,
-            max_parallel_tasks: 5,
+            max_parallel_tasks: default_parallel_tasks(),
         }
     }
 }
@@ -43,7 +43,7 @@ pub fn execution_config(mut base: Config, data: &std::path::Path) -> Result<Conf
             limits.request_limit <= 1_000_000
                 && (1..=9_007_199_254_740_991).contains(&limits.max_tokens)
                 && (1..=1000).contains(&limits.max_requests_per_turn)
-                && (1..=1000).contains(&limits.max_parallel_tasks),
+                && limits.max_parallel_tasks > 0,
             "Invalid execution limits"
         );
         base.request_limit = limits.request_limit;
@@ -101,4 +101,42 @@ pub async fn gateway(
 #[cfg(test)]
 pub async fn run(s: &Service, req: SendMessage) -> Result<()> {
     agent::run(s, req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concurrency_accepts_the_full_positive_usize_range() {
+        let data =
+            std::env::temp_dir().join(format!("pot-execution-limits-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&data).unwrap();
+        assert_eq!(
+            execution_config(Config::default(), &data)
+                .unwrap()
+                .max_parallel_tasks,
+            8
+        );
+        for parallel in [1, 1001, usize::MAX, 0] {
+            std::fs::write(
+                data.join("execution-limits.json"),
+                serde_json::to_vec(&json!({
+                    "request_limit": 10000,
+                    "max_tokens": 8192,
+                    "max_requests_per_turn": 100,
+                    "max_parallel_tasks": parallel,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let config = execution_config(Config::default(), &data);
+            if parallel == 0 {
+                assert!(config.is_err());
+            } else {
+                assert_eq!(config.unwrap().max_parallel_tasks, parallel);
+            }
+        }
+        std::fs::remove_dir_all(data).unwrap();
+    }
 }

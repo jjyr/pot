@@ -54,7 +54,7 @@ Multiple tasks sharing a VM are cooperative users of the same guest account. Wor
 
 ## Tasks, profiles and usage
 
-Background concurrency defaults to 5, with profile/provider limits, FIFO runnable queues, independent main chat and serial turns within each lane. Follow-ups persist; workers cannot recursively delegate. Completion reports are durable and summarized by a read-only main turn. Schedules own time zones, occurrence deduplication, missed-run policy and overlap prevention.
+Background concurrency defaults to 8, with profile/provider limits, FIFO runnable queues, independent main chat and serial turns within each lane. Follow-ups persist; workers cannot recursively delegate. Completion reports are durable and summarized by a read-only main turn. Schedules own time zones, occurrence deduplication, missed-run policy and overlap prevention.
 
 `agent.bindings.v1` holds resolved immutable Agent specifications, checksums, epochs and native refs. Profile changes use durable migration; existing tasks keep their bindings. Model requests reserve allowance before networking, including tool continuations and failures. pot-agent uses a gateway token rather than provider secrets; Codex retains its native Host authorization home. Product execution limits remain separate from credentials.
 
