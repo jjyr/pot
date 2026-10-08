@@ -74,6 +74,24 @@ Runtime resolves the environment, checks permission, and sends the pinned bundle
 
 Tools may include optional `approval_display` metadata with localized `summary` text and `labels` keyed by argument name (each uses locale-to-text maps with an English fallback). Pot shows these plain-text labels with actual arguments; tools without metadata use raw JSON. Metadata is pinned with the bundle, validated on import, and excluded from model tool schemas. Changing display text requires re-import/rebind.
 
+Add it beside `name`, `description` and `inputSchema` in a manifest tool:
+
+```json
+"approval_display": {
+  "summary": {"en": "Allow browser use?", "zh-CN": "是否允许使用浏览器？"},
+  "labels": {
+    "code": {"en": "Operation code", "zh-CN": "操作代码"},
+    "session_id": {"en": "Session", "zh-CN": "会话"},
+    "reset": {"en": "End session", "zh-CN": "结束会话"}
+  }
+}
+```
+
+English text is required; labels must reference declared arguments. Unlabeled
+arguments retain their field names and all actual values remain visible. This is
+static plain text, without JavaScript callbacks, interpolation or inferred page
+actions. Runtime checks the display against the bound package before approval.
+
 Host needs Node and an installed Chrome/Chromium; the App supplies Node. Standard Linux and macOS browser paths are discovered automatically, or set `POT_BROWSER_EXECUTABLE`. Host uses temporary profiles, process-group cleanup and Chrome's native sandbox. Plugin children receive a restricted environment without inherited model credentials. Host approval authorizes code execution with the user's OS privileges; the JS context is not an isolation boundary.
 
 Linux Sandbox execution uses the unprivileged Guest scope/cgroup and `--no-sandbox` inside the managed boundary. It requires a qualified image with Node/Chromium. Both paths use inherited CDP pipes, temporary files and idle expiry. Browser sessions are separate from existing user profiles and noVNC, without manual takeover or persistent logins.

@@ -35,7 +35,7 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
                     serde_json::to_string_pretty(&request["args"]).unwrap_or_default()
                 }),
             ));
-        if let Some(scope) = request.get("suggested_scope").filter(|v| !v.is_null()) {
+        if let Some(scope) = request.get("proposed_grant").filter(|v| !v.is_null()) {
             card = card
                 .child(pages::hint(catalog.text("permissions.scope"), cx))
                 .child(
@@ -45,7 +45,7 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
                         .child(serde_json::to_string_pretty(scope).unwrap_or_default()),
                 );
         }
-        if request.get("suggested_scope").is_none_or(Value::is_null) {
+        if request.get("proposed_grant").is_none_or(Value::is_null) {
             card = card.child(pages::hint(catalog.text("permissions.exact-grant"), cx));
         }
         if request["tool"] == "exec_command" && request["environment"] == "host" {

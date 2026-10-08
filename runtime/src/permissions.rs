@@ -631,7 +631,7 @@ pub(crate) async fn request(s: &Service, epoch: u64, turn: &str, value: Value) -
         "Invalid permission request"
     );
     anyhow::ensure!(
-        request.suggested_scope.as_ref().is_none_or(|suggested| {
+        request.proposed_grant.as_ref().is_none_or(|suggested| {
             request
                 .operation_scope()
                 .is_ok_and(|actual| suggested.covers(&actual))
@@ -820,7 +820,7 @@ mod tests {
             call_id: "call".into(),
             tool: "exec_command".into(),
             args: json!({"cmd":"true","workdir":"/","timeout_ms":60000,"shell":"/bin/bash","login":true,"tty":false}),
-            suggested_scope: None,
+            proposed_grant: None,
             display: None,
         }
     }
@@ -835,10 +835,10 @@ mod tests {
             let hub = Hub::memory();
             let mut request = operation();
             if explicit {
-                request.suggested_scope = Some(request.operation_scope().unwrap());
+                request.proposed_grant = Some(request.operation_scope().unwrap());
             }
             let serialized = serde_json::to_value(&request).unwrap();
-            assert_eq!(serialized.get("suggested_scope").is_some(), explicit);
+            assert_eq!(serialized.get("proposed_grant").is_some(), explicit);
             let key = hub.enqueue(request.clone()).unwrap();
             hub.decide(&key, "allow_persistent", None).unwrap();
             hub.decide(&key, "allow_persistent", None).unwrap();

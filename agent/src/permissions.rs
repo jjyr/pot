@@ -226,7 +226,7 @@ pub struct Request {
     pub tool: String,
     pub args: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub suggested_scope: Option<Scope>,
+    pub proposed_grant: Option<Scope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<pot_core::plugins::ApprovalDisplay>,
 }
@@ -235,7 +235,7 @@ impl Request {
         scope(&self.tool, &self.args)
     }
     pub fn grant_scope(&self) -> Result<Scope> {
-        self.suggested_scope
+        self.proposed_grant
             .clone()
             .map_or_else(|| self.operation_scope(), Ok)
     }
@@ -383,7 +383,7 @@ pub async fn authorize(
         call_id: call_id.into(),
         tool: tool.into(),
         args: operation_args(args),
-        suggested_scope: None,
+        proposed_grant: None,
         display,
     };
     let grants: Vec<Grant> = serde_json::from_value(grants)?;
