@@ -76,7 +76,7 @@ Product-owned Threads: [Direct execution and context continuity, 2026-10-09](val
 - Deferred Android: [SDK Emulator provider research](research/android-provider.md).
 - Deferred virtual iPhone: [vphone provider research](research/vphone-provider.md).
 - Future memory: [Identity and memory](research/identity-memory.md).
-- Driver sessions: [Coordination comparison](research/session-coordination.md), [Hermes](research/hermes-sessions.md), [OpenClaw](research/openclaw-sessions.md).
+- Session research: [Coordination comparison](research/session-coordination.md), [Hermes](research/hermes-sessions.md), [OpenClaw](research/openclaw-sessions.md).
 
 ## Maintenance rules
 

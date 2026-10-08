@@ -19,6 +19,7 @@ No old conversation, configuration or usage compatibility is provided.
 - Sixteen source/target API protocol combinations preserve tool history and
   execute an external effect exactly once. Route-specific replay stays stored;
   portable calls/results are sent to a different provider/model/protocol.
+- Missing/corrupt configured Thread contexts fail visibly instead of starting empty.
 - Configuration changes wait for running or paused work, survive restart, commit
   once, preserve pending calls/receipts and do not create handoff files.
 - Duplicate saves/selections, pending conflicts and stale execution updates are
