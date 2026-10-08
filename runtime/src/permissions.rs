@@ -324,9 +324,63 @@ impl Hub {
         }
         executors
             .entry(owner.into())
-            .or_insert_with(|| (epoch, Arc::new(Default::default())))
+            .or_insert_with(|| (epoch, Arc::new(pot_tool_executor::LocalTools::host())))
             .1
             .clone()
+    }
+    async fn host_plugin_session(&self, owner: &str, epoch: u64, session: &str) -> bool {
+        let executor = self
+            .executors
+            .lock()
+            .unwrap()
+            .get(owner)
+            .filter(|(bound, _)| *bound == epoch)
+            .map(|(_, e)| e.clone());
+        match executor {
+            Some(e) => e.has_plugin_session(session).await,
+            None => false,
+        }
+    }
+    pub async fn reap_host_plugins(&self) -> Result<()> {
+        let executors: Vec<_> = self
+            .executors
+            .lock()
+            .unwrap()
+            .values()
+            .map(|(_, e)| e.clone())
+            .collect();
+        for executor in executors {
+            executor.reap_plugins().await?;
+        }
+        Ok(())
+    }
+    pub async fn finish_stale_host(&self, owner: &str, epoch: u64) -> Result<()> {
+        let executor = {
+            let mut executors = self.executors.lock().unwrap();
+            if executors
+                .get(owner)
+                .is_some_and(|(bound, _)| *bound != epoch)
+            {
+                executors.remove(owner).map(|(_, e)| e)
+            } else {
+                None
+            }
+        };
+        if let Some(executor) = executor {
+            executor.shutdown().await?;
+        }
+        Ok(())
+    }
+    pub async fn shutdown_host(&self) -> Result<()> {
+        let executors = std::mem::take(&mut *self.executors.lock().unwrap());
+        let mut errors = vec![];
+        for (_, (_, executor)) in executors {
+            if let Err(error) = executor.shutdown().await {
+                errors.push(error.to_string());
+            }
+        }
+        anyhow::ensure!(errors.is_empty(), "{}", errors.join("; "));
+        Ok(())
     }
     pub async fn finish_host(&self, s: &Service) -> Result<()> {
         let executor = self
@@ -399,7 +453,12 @@ fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
     };
     Ok(json!({"cwd":cwd,"role":if owner == "main" {"main"} else {"task"}}))
 }
-fn execution_environment(s: &Service, epoch: u64, plugin: bool, args: &Value) -> Result<String> {
+async fn execution_environment(
+    s: &Service,
+    epoch: u64,
+    plugin: bool,
+    args: &Value,
+) -> Result<String> {
     let requested = args["environment"].as_str().map(str::to_owned).or_else(|| {
         args["sandbox_id"]
             .as_str()
@@ -409,45 +468,46 @@ fn execution_environment(s: &Service, epoch: u64, plugin: bool, args: &Value) ->
         args.get("environment").is_none_or(Value::is_string),
         "Invalid environment"
     );
-    let session_target = if plugin {
-        args["session_id"]
-            .as_str()
-            .map(|id| s.sandboxes.session_target(&s.usage_scope, epoch, id))
-            .transpose()?
-    } else {
-        None
-    };
-    let selected = if requested.is_none() && session_target.is_none() && plugin && !s.is_worker {
-        Some(s.sandboxes.assignment("")?)
+    let session_environment = if plugin {
+        if let Some(session) = args["session_id"].as_str() {
+            if s.permissions
+                .host_plugin_session(&s.usage_scope, epoch, session)
+                .await
+            {
+                Some("host".to_owned())
+            } else {
+                Some(format!(
+                    "sandbox:{}",
+                    s.sandboxes.session_target(&s.usage_scope, epoch, session)?
+                ))
+            }
+        } else {
+            None
+        }
     } else {
         None
     };
     let environment = requested.unwrap_or_else(|| {
-        if let Some(target) = &session_target {
-            format!("sandbox:{target}")
-        } else if plugin && !s.is_worker {
-            format!("sandbox:{}", selected.as_deref().unwrap())
-        } else if s.is_worker {
-            format!("sandbox:{}", s.sandbox_id.as_deref().unwrap_or("default"))
-        } else {
-            "host".into()
-        }
+        session_environment.clone().unwrap_or_else(|| {
+            if s.is_worker {
+                format!("sandbox:{}", s.sandbox_id.as_deref().unwrap_or("default"))
+            } else {
+                "host".into()
+            }
+        })
     });
-    if plugin {
-        anyhow::ensure!(environment != "host", "Plugins require a Linux Sandbox");
-        if let Some(target) = &session_target {
-            anyhow::ensure!(
-                environment == format!("sandbox:{target}"),
-                "Session operation cannot switch Sandbox"
-            );
-        }
+    if let Some(original) = &session_environment {
+        anyhow::ensure!(
+            &environment == original,
+            "Session operation cannot switch execution environment"
+        );
     }
     Ok(environment)
 }
 pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<Value> {
     let binding = agent::binding(s)?;
     let plugin = binding.spec.params.agent.plugin_for_tool(name)?;
-    let environment = execution_environment(s, binding.epoch, plugin.is_some(), &args)?;
+    let environment = execution_environment(s, binding.epoch, plugin.is_some(), &args).await?;
     let object = args
         .as_object_mut()
         .ok_or_else(|| anyhow!("Arguments must be an object"))?;
@@ -461,12 +521,19 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
     if environment == "host" {
         let workspace = s.data.join("agent-workspace");
         std::fs::create_dir_all(&workspace)?;
-        pot_tool_executor::tools::normalize(
-            name,
-            &mut args,
-            &workspace,
-            &binding.spec.params.agent.shell,
-        )?;
+        if let Some(plugin) = &plugin {
+            anyhow::ensure!(
+                plugin.manifest.execution == "environment",
+                "This plugin supports Sandbox execution only"
+            );
+        } else {
+            pot_tool_executor::tools::normalize(
+                name,
+                &mut args,
+                &workspace,
+                &binding.spec.params.agent.shell,
+            )?;
+        }
     } else {
         let target = environment
             .strip_prefix("sandbox:")
@@ -749,41 +816,51 @@ mod tests {
         path
     }
     #[tokio::test]
-    async fn plugins_use_sandbox_defaults_and_reject_host_or_lost_sessions_before_preparation() {
+    async fn plugin_environment_defaults_and_session_ownership_match_execution_tools() {
         let s = tasks::tests::fixture();
         assert_eq!(
-            execution_environment(&s, 1, false, &json!({})).unwrap(),
+            execution_environment(&s, 1, false, &json!({}))
+                .await
+                .unwrap(),
             "host"
         );
         assert_eq!(
-            execution_environment(&s, 1, true, &json!({})).unwrap(),
-            "sandbox:default"
-        );
-        crate::sandbox::management(
-            &s,
-            &json!({"action":"create","sandbox_id":"second","name":"Second"}),
-        )
-        .await
-        .unwrap();
-        crate::sandbox::management(&s, &json!({"action":"select","sandbox_id":"second"}))
-            .await
-            .unwrap();
-        assert_eq!(
-            execution_environment(&s, 1, true, &json!({})).unwrap(),
-            "sandbox:second"
+            execution_environment(&s, 1, true, &json!({}))
+                .await
+                .unwrap(),
+            "host"
         );
         assert_eq!(
-            execution_environment(&s, 1, true, &json!({"sandbox_id":"default"})).unwrap(),
+            execution_environment(&s, 1, true, &json!({"sandbox_id":"default"}))
+                .await
+                .unwrap(),
             "sandbox:default"
         );
-        assert!(execution_environment(&s, 1, true, &json!({"environment":"host"})).is_err());
-        assert!(execution_environment(&s, 1, true, &json!({"session_id":"lost"})).is_err());
+        assert_eq!(
+            execution_environment(&s, 1, true, &json!({"environment":"sandbox:default"}))
+                .await
+                .unwrap(),
+            "sandbox:default"
+        );
+        assert!(
+            execution_environment(&s, 1, true, &json!({"session_id":"lost"}))
+                .await
+                .is_err()
+        );
         let mut worker = s.clone();
         worker.is_worker = true;
         worker.sandbox_id = Some("default".into());
         assert_eq!(
-            execution_environment(&worker, 1, true, &json!({})).unwrap(),
+            execution_environment(&worker, 1, true, &json!({}))
+                .await
+                .unwrap(),
             "sandbox:default"
+        );
+        assert_eq!(
+            execution_environment(&worker, 1, true, &json!({"environment":"host"}))
+                .await
+                .unwrap(),
+            "host"
         );
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }

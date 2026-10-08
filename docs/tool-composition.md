@@ -9,7 +9,7 @@ user agreement; see the repository `AGENTS.md`. Codex integration is deferred.
 | Capability | Tools | Roles |
 |---|---|---|
 | Execution | `exec_command`, `write_stdin`, `apply_patch` | Main, Worker |
-| Computer use | `cua_repl` | Main, Worker; Linux Sandbox only |
+| Computer use | `cua_repl` | Main, Worker; Host or Linux Sandbox |
 | Composition | `exec`, `wait` | Main, Worker |
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |

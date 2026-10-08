@@ -1,4 +1,5 @@
 // Browser backend owned by the computer-use plugin.
+import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -30,10 +31,17 @@ async function close() {
   pending.clear(); nodes.clear(); session = undefined; ownerSession = undefined;
   if (profile) { await rm(profile, { recursive: true, force: true }); profile = undefined; }
 }
-async function open() {
+async function open(environment) {
   profile = await mkdtemp(join(tmpdir(), 'pot-browser-'));
-  chrome = spawn(process.env.POT_BROWSER_EXECUTABLE || '/usr/bin/chromium', [
-    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
+  const executable = process.env.POT_BROWSER_EXECUTABLE || [
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  ].find(path => existsSync(path));
+  if (!executable) throw new Error('Chromium/Chrome unavailable in this execution environment; install it or configure POT_BROWSER_EXECUTABLE');
+  chrome = spawn(executable, [
+    '--headless=new', ...(environment === 'host' ? [] : ['--no-sandbox']), '--disable-dev-shm-usage', '--no-first-run',
     '--disable-background-networking', '--disable-sync', '--remote-debugging-pipe',
     `--user-data-dir=${profile}`, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
@@ -85,7 +93,7 @@ async function operation(args) {
   const action = args.action;
   if (action === 'open') {
     if (ownerSession) throw new Error('Browser already open; use its session_id or close it');
-    await open();
+    await open(args.environment);
   } else if (!ownerSession || args.session_id !== ownerSession) throw new Error('Browser session expired or foreign');
   if (action === 'close') { await close(); return { closed: true }; }
   if (action === 'navigate' || (action === 'open' && args.url)) {

@@ -95,7 +95,9 @@ impl PluginBundle {
     pub fn validate(&self) -> Result<()> {
         let m = &self.manifest;
         ensure!(
-            m.schema_version == 1 && m.runtime == "node" && m.execution == "sandbox",
+            m.schema_version == 1
+                && m.runtime == "node"
+                && matches!(m.execution.as_str(), "sandbox" | "environment"),
             "Unsupported plugin contract"
         );
         ensure!(

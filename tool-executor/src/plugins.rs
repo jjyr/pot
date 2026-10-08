@@ -1,4 +1,4 @@
-//! Generic persistent Node plugin runners in the existing credential-free Guest cgroup.
+//! Persistent Node plugin runners. Host uses process groups; Guest also has cgroup containment.
 use anyhow::{Result, anyhow, ensure};
 use pot_core::plugins::{PluginBundle, validate_call};
 use serde_json::{Value, json};
@@ -9,30 +9,60 @@ use tokio::{
 };
 struct Instance {
     child: Child,
-    input: ChildStdin,
+    input: Option<ChildStdin>,
     output: BufReader<ChildStdout>,
     directory: PathBuf,
     digest: String,
     mode: String,
+    environment: &'static str,
+    group: i32,
+    touched: tokio::time::Instant,
+    idle_ms: u64,
 }
 impl Instance {
-    async fn start(bundle: &PluginBundle, mode: &str) -> Result<Self> {
+    async fn start(
+        bundle: &PluginBundle,
+        mode: &str,
+        environment: &'static str,
+        idle_ms: u64,
+    ) -> Result<Self> {
         let directory = std::env::temp_dir().join(format!("pot-plugin-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&directory)?;
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(&directory)?;
         let build = || -> Result<Child> {
             for (name, code) in &bundle.files {
                 let path = directory.join(name);
                 std::fs::create_dir_all(path.parent().unwrap())?;
                 std::fs::write(path, code)?;
             }
-            Ok(Command::new("node")
+            let mut command = Command::new("node");
+            command
                 .args(["--input-type=module", "-e", include_str!("plugin-host.mjs")])
                 .arg(directory.join(&bundle.manifest.entrypoint))
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::null())
-                .kill_on_drop(true)
-                .spawn()?)
+                .kill_on_drop(true);
+            if environment == "host" {
+                command.env_clear();
+                for key in [
+                    "PATH",
+                    "HOME",
+                    "TMPDIR",
+                    "TEMP",
+                    "TMP",
+                    "LANG",
+                    "LC_ALL",
+                    "POT_BROWSER_EXECUTABLE",
+                ] {
+                    if let Some(value) = std::env::var_os(key) {
+                        command.env(key, value);
+                    }
+                }
+            }
+            command.env("TMPDIR", &directory);
+            command.process_group(0);
+            Ok(command.spawn()?)
         };
         let mut child = match build() {
             Ok(child) => child,
@@ -43,26 +73,32 @@ impl Instance {
         };
         let input = child.stdin.take().unwrap();
         let output = BufReader::new(child.stdout.take().unwrap());
+        let group = child.id().unwrap() as i32;
         Ok(Self {
             child,
-            input,
+            input: Some(input),
             output,
             directory,
             digest: bundle.digest.clone(),
             mode: mode.into(),
+            environment,
+            group,
+            touched: tokio::time::Instant::now(),
+            idle_ms,
         })
     }
     async fn exchange(&mut self, args: &Value) -> Result<Value> {
-        self.input
+        self.touched = tokio::time::Instant::now();
+        self.input.as_mut().unwrap()
             .write_all(
                 format!(
                     "{}\n",
-                    json!({"tool":args["tool"],"input":args["input"],"mode":args["mode"]})
+                    json!({"tool":args["tool"],"input":args["input"],"mode":args["mode"],"environment":self.environment})
                 )
                 .as_bytes(),
             )
             .await?;
-        self.input.flush().await?;
+        self.input.as_mut().unwrap().flush().await?;
         use tokio::io::AsyncReadExt;
         let mut line = Vec::new();
         (&mut self.output)
@@ -95,7 +131,7 @@ impl Instance {
         Ok(value)
     }
     async fn shutdown(mut self) -> Result<()> {
-        drop(self.input);
+        self.input.take();
         if tokio::time::timeout(std::time::Duration::from_secs(5), self.child.wait())
             .await
             .is_err()
@@ -103,20 +139,77 @@ impl Instance {
             self.child.kill().await?;
             self.child.wait().await?;
         }
-        std::fs::remove_dir_all(self.directory)?;
-        Ok(())
+        // Dispose may leave descendants, or time out. Confirm the group has gone.
+        for _ in 0..100 {
+            if unsafe { libc::kill(-self.group, libc::SIGKILL) } == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            {
+                self.group = 0;
+                std::fs::remove_dir_all(&self.directory)?;
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        anyhow::bail!("Plugin cleanup stop unconfirmed")
     }
 }
-#[derive(Default)]
+impl Drop for Instance {
+    fn drop(&mut self) {
+        if self.group > 0 {
+            unsafe {
+                libc::kill(-self.group, libc::SIGKILL);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
 pub struct Plugins {
     instances: BTreeMap<String, Instance>,
+    environment: &'static str,
+}
+impl Default for Plugins {
+    fn default() -> Self {
+        Self {
+            instances: BTreeMap::new(),
+            environment: "sandbox",
+        }
+    }
 }
 impl Plugins {
+    pub fn host() -> Self {
+        Self {
+            environment: "host",
+            ..Self::default()
+        }
+    }
+    pub async fn reap_idle(&mut self) -> Result<()> {
+        let expired: Vec<_> = self
+            .instances
+            .iter()
+            .filter(|(_, instance)| {
+                instance.touched.elapsed().as_millis() >= u128::from(instance.idle_ms)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            self.instances.remove(&id).unwrap().shutdown().await?;
+        }
+        Ok(())
+    }
     pub fn sessions(&self) -> Vec<String> {
         self.instances.keys().cloned().collect()
     }
     pub async fn execute(&mut self, args: &Value) -> Result<Value> {
+        self.execute_with_idle(args, 1_800_000).await
+    }
+    pub async fn execute_with_idle(&mut self, args: &Value, idle_ms: u64) -> Result<Value> {
         let bundle = validate_call(args)?;
+        ensure!(
+            self.environment != "host" || bundle.manifest.execution == "environment",
+            "This plugin supports Sandbox execution only"
+        );
+        self.reap_idle().await?;
         let session = if let Some(session) = args["session_id"].as_str() {
             let instance = self
                 .instances
@@ -132,7 +225,13 @@ impl Plugins {
             let session = uuid::Uuid::new_v4().to_string();
             self.instances.insert(
                 session.clone(),
-                Instance::start(&bundle, args["mode"].as_str().unwrap()).await?,
+                Instance::start(
+                    &bundle,
+                    args["mode"].as_str().unwrap(),
+                    self.environment,
+                    idle_ms,
+                )
+                .await?,
             );
             session
         };
@@ -273,5 +372,59 @@ mod tests {
             .unwrap();
         assert_eq!(second["content"][0]["text"], "2");
         plugins.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+    #[tokio::test]
+    async fn host_sessions_expire_and_sandbox_only_packages_cannot_start() {
+        let mut runner = Plugins::host();
+        let bundle = PluginBundle::builtin("computer-use").unwrap();
+        let first = runner
+            .execute_with_idle(
+                &pot_core::plugins::call(
+                    bundle.clone(),
+                    "cua_repl",
+                    json!({"code":"nodeRepl.write('host')"}),
+                    false,
+                )
+                .unwrap(),
+                1,
+            )
+            .await
+            .unwrap();
+        assert!(
+            first["content"]
+                .to_string()
+                .contains("headless Chromium in Host")
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        runner.reap_idle().await.unwrap();
+        assert!(runner.sessions().is_empty());
+        let mut legacy = bundle;
+        legacy.manifest.execution = "sandbox".into();
+        legacy.digest = legacy.hash().unwrap();
+        assert!(
+            runner
+                .execute(&pot_core::plugins::call(legacy, "cua_repl", json!({}), false).unwrap())
+                .await
+                .is_err()
+        );
+        assert!(runner.sessions().is_empty());
+    }
+    #[tokio::test]
+    async fn host_shutdown_kills_node_descendants_and_removes_private_temp_files() {
+        let mut runner = Plugins::host();
+        let bundle = PluginBundle::builtin("computer-use").unwrap();
+        let first = runner.execute(&pot_core::plugins::call(bundle,"cua_repl",json!({"code":"const cp = await import('node:child_process'); const child = cp.spawn('sleep', ['60'], {stdio:'ignore'}); nodeRepl.write(child.pid); nodeRepl.write((await import('node:os')).tmpdir());"}),false).unwrap()).await.unwrap();
+        let blocks = first["content"].as_array().unwrap();
+        let pid: i32 = blocks[1]["text"].as_str().unwrap().parse().unwrap();
+        let directory = PathBuf::from(blocks[2]["text"].as_str().unwrap());
+        assert!(directory.exists());
+        runner.shutdown().await.unwrap();
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert!(!directory.exists());
     }
 }

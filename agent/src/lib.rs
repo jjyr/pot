@@ -685,7 +685,7 @@ async fn run(
         let mut plugins = settings.plugin_tools()?;
         if s.role == ExecutionRole::Main {
             for tool in &mut plugins {
-                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string","description":"Sandbox target. Omitted uses the selected Sandbox; existing sessions retain their original target."});
+                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string","description":"Explicit Sandbox target; use environment for Host or Sandbox selection. Existing sessions retain their original target."});
             }
         }
         available.extend(plugins);
@@ -734,10 +734,10 @@ async fn run(
     }
     if s.feedback.permission_grants()?.is_some() {
         for tool in &mut available {
-            if tool["name"]
-                .as_str()
-                .is_some_and(permissions::is_execution_tool)
-            {
+            if tool["name"].as_str().is_some_and(|name| {
+                permissions::is_execution_tool(name)
+                    || settings.plugin_for_tool(name).is_ok_and(|p| p.is_some())
+            }) {
                 tool["inputSchema"]["properties"]["environment"] = json!({"type":"string","description":"Execution target: host or sandbox:ID. Omitted uses this Agent's environment. Permissions are checked in that environment."});
             }
         }
@@ -1062,13 +1062,14 @@ impl Dispatcher<'_> {
                 if s.feedback.permission_grants()?.is_some()
                     && call.arguments.get("environment").is_none()
                 {
-                    ensure!(!plugin, "Plugin execution requires a prepared Sandbox");
-                    pot_tool_executor::tools::normalize(
-                        &call.name,
-                        &mut call.arguments,
-                        &s.workspace,
-                        &settings.shell,
-                    )?;
+                    if !plugin {
+                        pot_tool_executor::tools::normalize(
+                            &call.name,
+                            &mut call.arguments,
+                            &s.workspace,
+                            &settings.shell,
+                        )?;
+                    }
                     call.arguments["environment"] = json!("host");
                 }
                 Ok(())

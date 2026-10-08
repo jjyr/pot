@@ -38,7 +38,7 @@ The App embeds the Host backend and dispatches local UI requests in memory. Stan
 pot-agent owns [permission policy](permissions.md) and bounded
 [tool composition](tool-composition.md); Runtime supplies owner services and
 execution routing. Main defaults to Host and Workers to their assigned Sandbox.
-Codex retains its scoped Sandbox MCP loadout. Pinned plugins use the same tool admission path and a generic Guest Node runner; [computer use](computer-use.md) remains Sandbox-only. No Sandbox failure causes Host fallback.
+Codex retains its scoped Sandbox MCP loadout. Pinned plugins use the same tool admission path and environment-specific Node runners; [computer use](computer-use.md) follows Host/Sandbox permissions. No Sandbox failure causes Host fallback.
 
 Model inference location is independent: Agent processes are local, model APIs can be remote or an explicitly configured loopback endpoint.
 

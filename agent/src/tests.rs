@@ -2117,7 +2117,7 @@ async fn composition_reuses_parent_receipts_and_routes_product_calls_across_prot
     }
 }
 
-struct CountPluginExecutor(Arc<std::sync::atomic::AtomicUsize>);
+struct CountPluginExecutor(Arc<std::sync::atomic::AtomicUsize>, &'static str);
 impl ToolExecutor for CountPluginExecutor {
     fn execute<'a>(
         &'a self,
@@ -2130,7 +2130,7 @@ impl ToolExecutor for CountPluginExecutor {
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             assert_eq!(name, "cua_repl");
-            assert_eq!(args["environment"], "sandbox:default");
+            assert_eq!(args["environment"], self.1);
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(json!({"status":"observed"}))
         })
@@ -2147,13 +2147,20 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
             for approved in [false, true] {
                 let mut f = Fixture::new("openai_chat");
                 f.context.role = role;
+                f.context.backend_url = "http://fixture".into();
                 f.services.rpc_tools = Some(vec![]);
                 f.binding.spec.params.agent.builtin_tools = vec!["exec".into(), "wait".into()];
                 *f.feedback.grants.lock().unwrap() = Some(json!([]));
-                *f.feedback.prepared_environment.lock().unwrap() = Some("sandbox:default".into());
+                let environment = if role == ExecutionRole::Main {
+                    "host"
+                } else {
+                    "sandbox:default"
+                };
+                *f.feedback.prepared_environment.lock().unwrap() = Some(environment.into());
                 *f.feedback.permission_decision.lock().unwrap() = Some(approved);
                 let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-                f.context.tool_executor = Some(Arc::new(CountPluginExecutor(count.clone())));
+                f.context.tool_executor =
+                    Some(Arc::new(CountPluginExecutor(count.clone(), environment)));
                 let (name, arguments) = if composed {
                     (
                         "exec",
@@ -2177,7 +2184,7 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
                 let requests = f.feedback.permission_requests.lock().unwrap();
                 assert_eq!(requests.len(), 1);
                 assert_eq!(requests[0]["tool"], "cua_repl");
-                assert_eq!(requests[0]["environment"], "sandbox:default");
+                assert_eq!(requests[0]["environment"], environment);
                 assert_eq!(
                     requests[0]["call_id"],
                     if composed { "plugin:js:1" } else { "plugin" }
@@ -2226,4 +2233,29 @@ async fn plugin_exact_grants_allow_only_the_approved_code_and_summary_cannot_exe
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn sandbox_allow_policy_executes_computer_use_without_owner_prompt() {
+    let mut f = Fixture::new("openai_chat");
+    *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"allow"},"grants":[]}));
+    *f.feedback.prepared_environment.lock().unwrap() = Some("sandbox:default".into());
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    f.context.tool_executor = Some(Arc::new(CountPluginExecutor(
+        count.clone(),
+        "sandbox:default",
+    )));
+    f.services.queue(wire(
+        "openai_chat",
+        "",
+        &[model::ToolCall {
+            id: "sandbox-plugin".into(),
+            name: "cua_repl".into(),
+            arguments: json!({"code":"nodeRepl.write(1)"}),
+        }],
+    ));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn(false).await.unwrap();
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
 }
