@@ -8,6 +8,36 @@ fn localized(value: &Value, catalog: Catalog) -> Option<&str> {
         .or_else(|| value["en"].as_str())
 }
 
+pub fn source(request: &Value, catalog: Catalog) -> String {
+    match request.get("plugin").filter(|p| p.is_object()) {
+        Some(plugin) => format!(
+            "{}: {} · {}: {}",
+            catalog.text("permissions.plugin"),
+            plugin["id"].as_str().unwrap_or(""),
+            catalog.text("permissions.version"),
+            plugin["version"].as_str().unwrap_or("").escape_default()
+        ),
+        None => catalog
+            .text(
+                if matches!(
+                    request["tool"].as_str(),
+                    Some(
+                        "exec_command"
+                            | "write_stdin"
+                            | "apply_patch"
+                            | "set_sandbox_mappings"
+                            | "manage_sandbox"
+                    )
+                ) {
+                    "permissions.builtin-tool"
+                } else {
+                    "permissions.unknown-source"
+                },
+            )
+            .into(),
+    }
+}
+
 pub fn description(request: &Value, catalog: Catalog) -> Option<String> {
     let tool = request["tool"].as_str()?;
     let builtin = match tool {
@@ -134,5 +164,19 @@ mod tests {
                 .unwrap()
                 .contains("移除所有目录映射")
         );
+    }
+    #[test]
+    fn plugin_source_is_independent_of_display_text_and_fallback() {
+        let zh = Catalog::new("zh-CN");
+        let mut request = json!({"tool":"external_tool","plugin":{"id":"external-plugin","version":"1.0.0","digest":"hash"},"args":{},"display":{"summary":{"en":"Built-in tool","zh-CN":"内置工具"}}});
+        assert_eq!(source(&request, zh), "插件: external-plugin · 版本: 1.0.0");
+        request.as_object_mut().unwrap().remove("display");
+        assert_eq!(source(&request, zh), "插件: external-plugin · 版本: 1.0.0");
+        request["plugin"]["version"] = json!("1.0\nBuilt-in tool");
+        assert!(!source(&request, zh).contains('\n'));
+        request.as_object_mut().unwrap().remove("plugin");
+        assert_eq!(source(&request, zh), "工具来源未提供");
+        request["tool"] = json!("exec_command");
+        assert_eq!(source(&request, zh), "内置工具");
     }
 }

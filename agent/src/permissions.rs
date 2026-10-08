@@ -229,6 +229,8 @@ pub struct Request {
     pub proposed_grant: Option<Scope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<pot_core::plugins::ApprovalDisplay>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<pot_core::plugins::PluginIdentity>,
 }
 impl Request {
     pub fn operation_scope(&self) -> Result<Scope> {
@@ -367,11 +369,9 @@ pub async fn authorize(
         return Ok(());
     }
     let operation_scope = scope(tool, args)?;
-    let display = binding
-        .spec
-        .params
-        .agent
-        .plugin_for_tool(tool)?
+    let plugin = binding.spec.params.agent.plugin_for_tool(tool)?;
+    let display = plugin
+        .as_ref()
         .map(|plugin| plugin.approval_display(tool))
         .transpose()?
         .flatten();
@@ -385,6 +385,7 @@ pub async fn authorize(
         args: operation_args(args),
         proposed_grant: None,
         display,
+        plugin: plugin.map(|plugin| plugin.identity()),
     };
     let grants: Vec<Grant> = serde_json::from_value(grants)?;
     if grants

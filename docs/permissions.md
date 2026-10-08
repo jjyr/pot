@@ -44,6 +44,10 @@ Approval cards identify the Agent, environment and operation. Built-in execution
 tools use localized questions and labeled arguments. Plugins may provide declarative
 `approval_display` text; without it, cards show raw arguments. Display text does not
 change execution or authorization, and plugin code never runs to prepare a prompt.
+Cards always show the tool name and a separate source row: built-in tool or the
+bound plugin ID/version, regardless of custom display text. Runtime verifies plugin
+identity (including bundle digest) against the Agent binding; package IDs are not
+publisher authentication.
 The request's outer `environment` identifies the target; `args` excludes this routing field.
 Actions are **Always allow**, **Allow once**, **Deny** (永久允许、允许一次、拒绝).
 `proposed_grant` is optional and normally omitted. Always allow derives the exact
@@ -61,6 +65,7 @@ Requests separate the execution target, actual operation and presentation:
   "turn": "turn-id",
   "call_id": "call-id",
   "tool": "cua_repl",
+  "plugin": {"id": "computer-use", "version": "0.4.0", "digest": "bundle-sha256"},
   "args": {"code": "let tab = await cua.open('https://example.com');"},
   "display": {
     "summary": {"en": "Allow browser use?", "zh-CN": "是否允许使用浏览器？"},
