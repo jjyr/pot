@@ -415,6 +415,8 @@ async fn provider_registration_migration_and_failed_inventory_write_are_safe() {
     std::fs::remove_dir(dir.path().join("product/sandboxes.json")).unwrap();
     private_json(&dir.path().join("product/sandboxes.json"),&json!({"selected":"default","items":{"default":{"id":"default","name":"Linux","provider":MACOS_APPLE_CONTAINER_PROVIDER}},"retired":[]})).unwrap();
     let migrated = Manager::open(&dir.path().join("product"), vec![p]).unwrap();
+    assert_eq!(migrated.display_name("default").unwrap(), "Linux");
+    assert!(migrated.display_name("missing").is_err());
     assert_eq!(
         migrated.describe("default").unwrap().id,
         MACOS_APPLE_CONTAINER_PROVIDER

@@ -22,16 +22,7 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
         let mut card = pages::card(cx)
             .child(pages::title(catalog.text("permissions.request")))
             .child(pages::hint(
-                format!(
-                    "{} · {} · {}",
-                    request["owner"].as_str().unwrap_or(""),
-                    request["environment"].as_str().unwrap_or("host"),
-                    request["tool"].as_str().unwrap_or("")
-                ),
-                cx,
-            ))
-            .child(pages::hint(
-                crate::permission_display::source(request, catalog),
+                crate::permission_display::heading(record, catalog),
                 cx,
             ))
             .child(div().text_sm().whitespace_normal().child(

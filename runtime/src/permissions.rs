@@ -710,12 +710,19 @@ pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Jso
     let mut requests = vec![];
     let mut grants = vec![];
     for (environment, hub) in root.permissions.all() {
+        let environment_name = environment
+            .strip_prefix("sandbox:")
+            .map(|target| {
+                root.sandboxes
+                    .display_name(target)
+                    .unwrap_or_else(|_| target.into())
+            })
+            .unwrap_or_else(|| "Host".into());
         let book = hub.book.lock().unwrap();
         requests.extend(
-            book.requests
-                .iter()
-                .filter(|p| p.phase == "pending")
-                .map(|p| json!({"id":p.id,"request":p.request})),
+            book.requests.iter().filter(|p| p.phase == "pending").map(
+                |p| json!({"id":p.id,"request":p.request,"environment_name":environment_name}),
+            ),
         );
         grants.extend(book.grants.iter().map(|g| {
             let mut value = json!(g);

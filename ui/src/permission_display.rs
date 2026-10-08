@@ -10,13 +10,7 @@ fn localized(value: &Value, catalog: Catalog) -> Option<&str> {
 
 pub fn source(request: &Value, catalog: Catalog) -> String {
     match request.get("plugin").filter(|p| p.is_object()) {
-        Some(plugin) => format!(
-            "{}: {} · {}: {}",
-            catalog.text("permissions.plugin"),
-            plugin["id"].as_str().unwrap_or(""),
-            catalog.text("permissions.version"),
-            plugin["version"].as_str().unwrap_or("").escape_default()
-        ),
+        Some(plugin) => plugin["id"].as_str().unwrap_or("").into(),
         None => catalog
             .text(
                 if matches!(
@@ -38,7 +32,26 @@ pub fn source(request: &Value, catalog: Catalog) -> String {
     }
 }
 
+pub fn heading(record: &Value, catalog: Catalog) -> String {
+    let environment = record["environment_name"].as_str().unwrap_or_else(|| {
+        if record["request"]["environment"] == "host" {
+            "Host"
+        } else {
+            "Sandbox"
+        }
+    });
+    format!(
+        "{} · {}: {}",
+        source(&record["request"], catalog),
+        catalog.text("permissions.environment"),
+        environment
+    )
+}
+
 pub fn description(request: &Value, catalog: Catalog) -> Option<String> {
+    if let Some(summary) = localized(&request["display"]["summary"], catalog) {
+        return Some(summary.to_owned());
+    }
     let tool = request["tool"].as_str()?;
     let builtin = match tool {
         "exec_command" => Some("permissions.run-command"),
@@ -129,7 +142,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
-    fn descriptions_preserve_arguments_and_use_plugin_localization_or_raw_fallback() {
+    fn summaries_hide_plugin_arguments_and_missing_text_uses_raw_fallback() {
         let zh = Catalog::new("zh-CN");
         let shell = json!({"tool":"exec_command","args":{"cmd":"echo '$HOME'","workdir":"/tmp","tty":false}});
         let text = description(&shell, zh).unwrap();
@@ -139,10 +152,7 @@ mod tests {
         let mut plugin = json!({"tool":"external_tool","args":{"code":"await tab.click()"}});
         assert!(description(&plugin, zh).is_none());
         plugin["display"] = json!({"summary":{"en":"Allow browser use?","zh-CN":"是否允许使用浏览器？"},"labels":{"code":{"en":"JavaScript","zh-CN":"执行代码"}}});
-        assert_eq!(
-            description(&plugin, zh).unwrap(),
-            "是否允许使用浏览器？\n\n执行代码:\nawait tab.click()"
-        );
+        assert_eq!(description(&plugin, zh).unwrap(), "是否允许使用浏览器？");
         plugin["display"]["summary"]
             .as_object_mut()
             .unwrap()
@@ -169,9 +179,11 @@ mod tests {
     fn plugin_source_is_independent_of_display_text_and_fallback() {
         let zh = Catalog::new("zh-CN");
         let mut request = json!({"tool":"external_tool","plugin":{"id":"external-plugin","version":"1.0.0","digest":"hash"},"args":{},"display":{"summary":{"en":"Built-in tool","zh-CN":"内置工具"}}});
-        assert_eq!(source(&request, zh), "插件: external-plugin · 版本: 1.0.0");
+        assert_eq!(source(&request, zh), "external-plugin");
+        let record = json!({"environment_name":"开发沙盒","request":request});
+        assert_eq!(heading(&record, zh), "external-plugin · 环境: 开发沙盒");
         request.as_object_mut().unwrap().remove("display");
-        assert_eq!(source(&request, zh), "插件: external-plugin · 版本: 1.0.0");
+        assert_eq!(source(&request, zh), "external-plugin");
         request["plugin"]["version"] = json!("1.0\nBuilt-in tool");
         assert!(!source(&request, zh).contains('\n'));
         request.as_object_mut().unwrap().remove("plugin");

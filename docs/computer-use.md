@@ -87,8 +87,9 @@ Add it beside `name`, `description` and `inputSchema` in a manifest tool:
 }
 ```
 
-English text is required; labels must reference declared arguments. Unlabeled
-arguments retain their field names and all actual values remain visible. This is
+English text is required; labels must reference declared arguments. Approval cards
+show only the localized summary when supplied, and raw arguments otherwise. Actual
+arguments remain in the request for authorization. This is
 static plain text, without JavaScript callbacks, interpolation or inferred page
 actions. Runtime checks the display against the bound package before approval.
 

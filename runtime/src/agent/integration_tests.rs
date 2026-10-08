@@ -1115,6 +1115,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                         serde_json::to_value(plugin.identity()).unwrap()
                     );
                     assert_eq!(card["request"]["environment"], "host");
+                    assert_eq!(card["environment_name"], "Host");
                     assert!(card["request"]["args"].get("environment").is_none());
                     assert!(card["request"].get("proposed_grant").is_none());
                     assert_eq!(

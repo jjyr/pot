@@ -751,7 +751,7 @@
   "web.https-hint": "HTTPS requires MagicDNS and HTTPS Certificates in Tailscale DNS settings.",
   "tailscale.title": "Tailscale",
   "tailscale.description": "Connect Pot to your private Tailscale network. Web UI access is configured separately.",
-  "permissions.request": "Agent requests permission",
+  "permissions.request": "Request approval",
   "permissions.scope": "Permission scope (only for this Agent)",
   "permissions.allow_once": "Allow once",
   "permissions.allow_persistent": "Always allow",
@@ -789,5 +789,6 @@
   "permissions.plugin": "Plugin",
   "permissions.version": "Version",
   "permissions.builtin-tool": "Built-in tool",
-  "permissions.unknown-source": "Tool source not provided"
+  "permissions.unknown-source": "Tool source not provided",
+  "permissions.environment": "Environment"
 }
