@@ -44,8 +44,10 @@ Approval cards identify the Agent, environment and operation. Built-in execution
 tools use localized questions and labeled arguments. Plugins may provide declarative
 `approval_display` text; without it, cards show raw arguments. Display text does not
 change execution or authorization, and plugin code never runs to prepare a prompt.
-Cards always show the tool name and a separate source row: built-in tool or the
-bound plugin ID/version, regardless of custom display text. Runtime verifies plugin
+Cards show the bound plugin ID (or built-in tool label) and the environment's display
+name. Internal tool names, routing IDs and versions stay out of the card. A supplied
+summary replaces code/argument display; missing summaries fall back to raw arguments.
+Runtime verifies plugin
 identity (including bundle digest) against the Agent binding; package IDs are not
 publisher authentication.
 The request's outer `environment` identifies the target; `args` excludes this routing field.

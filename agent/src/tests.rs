@@ -2239,25 +2239,30 @@ async fn plugin_exact_grants_allow_only_the_approved_code_and_summary_cannot_exe
 
 #[tokio::test]
 async fn sandbox_allow_policy_executes_computer_use_without_owner_prompt() {
-    let mut f = Fixture::new("openai_chat");
-    *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"allow"},"grants":[]}));
-    *f.feedback.prepared_environment.lock().unwrap() = Some("sandbox:default".into());
-    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    f.context.tool_executor = Some(Arc::new(CountPluginExecutor(
-        count.clone(),
-        "sandbox:default",
-    )));
-    f.services.queue(wire(
-        "openai_chat",
-        "",
-        &[model::ToolCall {
-            id: "sandbox-plugin".into(),
-            name: "cua_repl".into(),
-            arguments: json!({"code":"nodeRepl.write(1)"}),
-        }],
-    ));
-    f.services.queue(wire("openai_chat", "done", &[]));
-    f.turn(false).await.unwrap();
-    assert_eq!(count.load(Ordering::SeqCst), 1);
-    assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    for role in [ExecutionRole::Main, ExecutionRole::Worker] {
+        let mut f = Fixture::new("openai_chat");
+        f.context.role = role;
+        f.services.rpc_tools = Some(vec![]);
+        *f.feedback.grants.lock().unwrap() =
+            Some(json!({"policy":{"default":"allow"},"grants":[]}));
+        *f.feedback.prepared_environment.lock().unwrap() = Some("sandbox:default".into());
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        f.context.tool_executor = Some(Arc::new(CountPluginExecutor(
+            count.clone(),
+            "sandbox:default",
+        )));
+        f.services.queue(wire(
+            "openai_chat",
+            "",
+            &[model::ToolCall {
+                id: "sandbox-plugin".into(),
+                name: "cua_repl".into(),
+                arguments: json!({"code":"nodeRepl.write(1)"}),
+            }],
+        ));
+        f.services.queue(wire("openai_chat", "done", &[]));
+        f.turn(false).await.unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    }
 }

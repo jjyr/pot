@@ -423,6 +423,15 @@ fn display_state(state: &Value) -> Value {
         "cpus":state["cpus"].as_u64(),"memory_gib":state["memory_gib"].as_u64(),"disk_gib":state["disk_gib"].as_u64()})
 }
 impl Manager {
+    pub fn display_name(&self, target: &str) -> Result<String> {
+        self.book
+            .lock()
+            .unwrap()
+            .items
+            .get(target)
+            .map(|item| item.name.clone())
+            .ok_or_else(|| anyhow!("Unknown Sandbox"))
+    }
     pub async fn inventory(&self) -> Value {
         let (items, selected) = {
             let book = self.book.lock().unwrap();
