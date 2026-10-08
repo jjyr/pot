@@ -98,6 +98,9 @@ Application account authorization uses official Host Codex App Server APIs. pot-
 
 ### CI cache behavior
 
+CI runs on pushes to `main` and release tags matching `v*.*.*`. Opening or updating
+a pull request does not trigger CI.
+
 CI installs only each job's declared mise tools and disables implicit installation
 with `MISE_AUTO_INSTALL=false`. Rust caches are separated by OS, architecture and
 actual compiler identity, prefer the current lockfile, and fall back to the same
@@ -105,7 +108,7 @@ compiler when dependencies change. Cargo still validates fingerprints and the
 locked dependency graph. Swift caches are independent and include Xcode identity;
 Rust dependency or task changes do not invalidate the Helper build cache.
 CI disables Rust incremental compilation to reduce snapshot size. Successful
-`main` jobs save build caches; PR jobs only restore them to avoid filling repository
+`main` jobs save build caches; release-tag jobs only restore them to avoid filling repository
 cache storage with branch-specific multi-gigabyte snapshots. The license job caches
 Cargo sources separately and always reruns the policy checks. Cache schema or
 compiler changes require an initial cold build. All existing checks remain enabled.

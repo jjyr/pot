@@ -70,4 +70,4 @@ Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](va
 
 ## Maintenance rules
 
-Maintain documentation in English. Keep one current specification per topic, progress in the development plan, and commands in the relevant entry-point document. Acceptance reports record the date, method, results, and untested scope; append later changes without rewriting old observations as new conclusions. Keep superseded recommendations in Git history or label them historical. Machine information belongs in `~/Workspace/Machines`.
+Maintain documentation in English. Keep documentation consistent with the overall architecture; implementation details are determined by the code and do not require corresponding documentation updates. Keep one architecture overview per topic, progress in the development plan, and commands in the relevant entry-point document. Acceptance reports record the date, method, results, and untested scope; append later changes without rewriting old observations as new conclusions. Keep superseded recommendations in Git history or label them historical.
