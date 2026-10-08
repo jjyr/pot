@@ -254,14 +254,16 @@ pub fn resolve_path(path: &str) -> Result<PathBuf> {
 pub fn scope(tool: &str, args: &Value) -> Result<Scope> {
     Ok(Scope::Exact {
         tool: tool.into(),
-        args: {
-            let mut value = args.clone();
-            if let Some(object) = value.as_object_mut() {
-                object.remove("environment");
-            }
-            value
-        },
+        args: operation_args(args),
     })
+}
+
+fn operation_args(args: &Value) -> Value {
+    let mut value = args.clone();
+    if let Some(object) = value.as_object_mut() {
+        object.remove("environment");
+    }
+    value
 }
 
 impl Scope {
@@ -358,7 +360,7 @@ pub async fn authorize(
         turn: turn.request_id.clone(),
         call_id: call_id.into(),
         tool: tool.into(),
-        args: args.clone(),
+        args: operation_args(args),
         suggested_scope: scope(tool, args)?,
     };
     let grants: Vec<Grant> = serde_json::from_value(grants)?;

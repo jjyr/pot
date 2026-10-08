@@ -41,6 +41,7 @@ See [Agent tools](tool-composition.md) for tool visibility and composition, and
 ## Owner decisions
 
 Approval cards identify the Agent, environment, tool, full arguments and scope.
+The request's outer `environment` identifies the target; `args` excludes this routing field.
 Actions are **Always allow**, **Allow once**, **Deny** (永久允许、允许一次、拒绝).
 Always allow saves the displayed scope; there is no extra directory-grant action.
 Only authenticated owners can approve or revoke grants; Agents cannot self-approve.

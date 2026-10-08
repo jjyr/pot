@@ -1710,6 +1710,7 @@ async fn host_write_waits_for_owner_and_denial_has_no_effect() {
         let request = f.feedback.permission_requests.lock().unwrap()[0].clone();
         assert_eq!(request["owner"], "unit");
         assert_eq!(request["environment"], "host");
+        assert!(request["args"].get("environment").is_none());
         assert_eq!(
             request["args"]["cmd"],
             "printf 'approved content' > owner-file.txt"
