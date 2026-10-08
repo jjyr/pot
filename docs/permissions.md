@@ -46,10 +46,34 @@ tools use localized questions and labeled arguments. Plugins may provide declara
 change execution or authorization, and plugin code never runs to prepare a prompt.
 The request's outer `environment` identifies the target; `args` excludes this routing field.
 Actions are **Always allow**, **Allow once**, **Deny** (永久允许、允许一次、拒绝).
-`suggested_scope` is optional and normally omitted. Always allow derives the exact
+`proposed_grant` is optional and normally omitted. Always allow derives the exact
 scope from the reviewed tool and arguments unless an explicit scope is supplied;
 there is no extra directory-grant action.
 Only authenticated owners can approve or revoke grants; Agents cannot self-approve.
+
+Requests separate the execution target, actual operation and presentation:
+
+```json
+{
+  "owner": "main",
+  "environment": "host",
+  "epoch": 3,
+  "turn": "turn-id",
+  "call_id": "call-id",
+  "tool": "cua_repl",
+  "args": {"code": "let tab = await cua.open('https://example.com');"},
+  "display": {
+    "summary": {"en": "Allow browser use?", "zh-CN": "是否允许使用浏览器？"},
+    "labels": {"code": {"en": "Operation code", "zh-CN": "操作代码"}}
+  }
+}
+```
+
+`display` comes from the pinned plugin's `approval_display` metadata and only
+changes presentation. An explicit `proposed_grant` uses the grant scope format
+(for example `{"kind":"exact","tool":"cua_repl","args":{...}}`) and must cover
+the reviewed operation. Current requests omit this proposal; the UI only shows it
+when supplied. It is not a second copy of the default exact grant.
 
 One-time approval belongs to the concrete call and is consumed before execution.
 Permanent operation grants match the complete normalized tool arguments, including
