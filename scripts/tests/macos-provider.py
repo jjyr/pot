@@ -4,6 +4,7 @@
 import http.client
 import socket
 import importlib.util
+import sys
 import json
 from pathlib import Path
 import sqlite3
@@ -15,6 +16,7 @@ from types import SimpleNamespace
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "sandbox-images/linux/default"))
 spec = importlib.util.spec_from_file_location(
     "macos_executor", ROOT / "sandbox-images/macos/xcode/executor.py"
 )

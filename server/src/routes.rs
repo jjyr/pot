@@ -82,6 +82,7 @@ pub fn router(s: Service) -> Router {
         )
         .route("/api/v1/tasks/{id}", get(tasks::snapshot))
         .route("/api/v1/tasks/{id}/messages", post(tasks::input))
+        .route("/api/v1/tasks/{id}/interrupt", post(tasks::interrupt))
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))
         .route(
             "/api/v1/agent",

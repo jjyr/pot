@@ -22,6 +22,7 @@ install -d -m 700 "$private"
 install -d -m 755 /usr/local/libexec
 install -m 755 "$enrollment/pot-tool-executor" /usr/local/libexec/pot-tool-executor
 install -m 644 "$(dirname "$0")/executor.py" /usr/local/libexec/pot-macos-executor.py
+install -m 644 "$(dirname "$0")/permission_state.py" /usr/local/libexec/permission_state.py
 for name in executor-token guest-cert.pem guest-key.pem; do
   install -m 600 "$enrollment/$name" "$private/$name"
 done

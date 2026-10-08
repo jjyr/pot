@@ -456,7 +456,7 @@ async fn native_agent_duplicate_tool_ids_reuse_receipts_and_reject_conflicts() {
 #[tokio::test]
 async fn native_agent_dispatches_pot_task_tools_through_shared_authorization() {
     let calls = vec![
-        json!({"id":"delegate","name":"pot_create_task","arguments":{"text":"Research APRICOT with sources"}}),
+        json!({"id":"delegate","name":"create_task","arguments":{"text":"Research APRICOT with sources"}}),
     ];
     let (s, mut rx, server, captured) = fixture("openai_chat", calls).await;
     turn(&s, &mut rx, "delegate").await;
@@ -1004,7 +1004,7 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
         let directory = std::env::temp_dir().join(format!("pot-owner-{}", id()));
         std::fs::create_dir(&directory).unwrap();
         let path = directory.canonicalize().unwrap().join("file.txt");
-        let (mut s, mut rx, server, captured) = fixture("openai_chat", vec![json!({"id":"host","name":"host_write_file","arguments":{"path":path,"content":"owner-approved"}})]).await;
+        let (mut s, mut rx, server, captured) = fixture("openai_chat", vec![json!({"id":"host","name":"exec_command","arguments":{"cmd":"printf owner-approved > file.txt","workdir":directory}})]).await;
         let permissions_file = s.sandboxes.agent_home.join("permissions.json");
         s.permissions = Arc::new(crate::permissions::Hub::open(&permissions_file).unwrap());
         let owner = async {
@@ -1029,7 +1029,10 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
                 "Agent sampled while waiting for approval"
             );
             assert_eq!(record["request"]["owner"], "main");
-            assert_eq!(record["request"]["args"]["content"], "owner-approved");
+            assert_eq!(
+                record["request"]["args"]["cmd"],
+                "printf owner-approved > file.txt"
+            );
             let decision =
                 serde_json::from_value(json!({"id":record["id"],"action":action})).unwrap();
             let Json(result) = crate::permissions::decide(

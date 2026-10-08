@@ -215,7 +215,7 @@ fn allowed(method: &Method, path: &str) -> bool {
         return (*method == Method::GET && parts.len() == 5)
             || (*method == Method::POST
                 && parts.len() == 6
-                && matches!(parts[5], "messages" | "cancel"));
+                && matches!(parts[5], "messages" | "cancel" | "interrupt"));
     }
     false
 }

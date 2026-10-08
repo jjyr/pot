@@ -14,6 +14,7 @@ assets = [
     "install.sh",
     "executor.py",
     "skill_mounts.py",
+    "permission_state.py",
     "pot-tool-executor",
     "desktop.sh",
     "desktop-config.sh",

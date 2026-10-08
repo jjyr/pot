@@ -1,9 +1,10 @@
 //! Owner approval transport. Only current permanent grants are persisted;
 //! pending/one-time decisions are memory-only. Policy lives in pot-agent.
 use super::*;
-use pot_agent::permissions::{Config, Grant, Request, Scope};
+use pot_agent::permissions::{Config, Grant, Policy, Request, Scope};
 use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     io::Write,
     os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
 };
@@ -17,6 +18,7 @@ struct Pending {
 }
 #[derive(Clone, Default)]
 struct Book {
+    policy: Policy,
     requests: Vec<Pending>,
     grants: Vec<Grant>,
     disk: Option<Vec<u8>>,
@@ -25,6 +27,9 @@ pub(crate) struct Hub {
     book: Mutex<Book>,
     path: Option<PathBuf>,
     changed: tokio::sync::Notify,
+    remotes: Mutex<BTreeMap<String, Arc<Hub>>>,
+    executors: Mutex<BTreeMap<String, (u64, Arc<pot_tool_executor::LocalTools>)>>,
+    decisions: tokio::sync::Mutex<()>,
 }
 fn read(path: &std::path::Path) -> Result<Option<Vec<u8>>> {
     match std::fs::read(path) {
@@ -40,6 +45,9 @@ impl Hub {
             book: Mutex::new(Book::default()),
             path: None,
             changed: Default::default(),
+            remotes: Default::default(),
+            executors: Default::default(),
+            decisions: Default::default(),
         }
     }
     pub fn open(path: &std::path::Path) -> Result<Self> {
@@ -49,15 +57,20 @@ impl Hub {
             .map(|bytes| serde_json::from_slice(bytes))
             .transpose()?
             .unwrap_or_default();
+        let policy = config.policy.unwrap_or_default();
         let grants = config.into_grants()?;
         let hub = Self {
             book: Mutex::new(Book {
+                policy,
                 grants,
                 disk,
                 ..Book::default()
             }),
             path: Some(path.into()),
             changed: Default::default(),
+            remotes: Default::default(),
+            executors: Default::default(),
+            decisions: Default::default(),
         };
         // Absence means no grants. Do not create or rewrite user configuration on startup.
         Ok(hub)
@@ -102,17 +115,25 @@ impl Hub {
             book: Mutex::new(Book::default()),
             path: Some(path.into()),
             changed: Default::default(),
+            remotes: Default::default(),
+            executors: Default::default(),
+            decisions: Default::default(),
         };
         {
             let mut book = hub.book.lock().unwrap();
-            book.disk = Some(hub.persist(&grants, None)?);
+            book.disk = Some(hub.persist(&grants, Policy::default(), None)?);
             book.grants = grants;
         }
         // Successful migration discards the old request/history store.
         std::fs::remove_file(legacy)?;
         Ok(hub)
     }
-    fn persist(&self, grants: &[Grant], expected: Option<&[u8]>) -> Result<Vec<u8>> {
+    fn persist(
+        &self,
+        grants: &[Grant],
+        policy: Policy,
+        expected: Option<&[u8]>,
+    ) -> Result<Vec<u8>> {
         let path = self
             .path
             .as_ref()
@@ -137,7 +158,9 @@ impl Hub {
             read(path)?.as_deref() == expected,
             "permissions.json changed externally; restart Server before editing permissions in the UI"
         );
-        let mut bytes = serde_json::to_vec_pretty(&Config::from_grants(grants))?;
+        let mut config = Config::from_grants(grants);
+        config.policy = Some(policy);
+        let mut bytes = serde_json::to_vec_pretty(&config)?;
         bytes.push(b'\n');
         let temporary = parent.join(format!(".permissions-{}.tmp", id()));
         let result = (|| -> Result<()> {
@@ -160,7 +183,7 @@ impl Hub {
     }
     fn save(&self, mut next: Book, book: &mut Book) -> Result<()> {
         if next.grants != book.grants && self.path.is_some() {
-            next.disk = Some(self.persist(&next.grants, book.disk.as_deref())?);
+            next.disk = Some(self.persist(&next.grants, next.policy, book.disk.as_deref())?);
         }
         *book = next;
         self.changed.notify_waiters();
@@ -176,6 +199,10 @@ impl Hub {
                 .filter(|g| g.owner == owner)
                 .collect::<Vec<_>>()
         )
+    }
+    pub fn state(&self, owner: &str) -> Value {
+        let book = self.book.lock().unwrap();
+        json!({"policy":book.policy,"grants":book.grants.iter().filter(|g|g.owner==owner).collect::<Vec<_>>()})
     }
     fn enqueue(&self, request: Request) -> Result<String> {
         let mut book = self.book.lock().unwrap();
@@ -220,8 +247,7 @@ impl Hub {
         self.changed.notify_waiters();
         Ok(Some(approved))
     }
-    fn decide(&self, key: &str, action: &str, scope: Option<Scope>) -> Result<()> {
-        let mut book = self.book.lock().unwrap();
+    fn plan(book: &Book, key: &str, action: &str, scope: Option<Scope>) -> Result<Book> {
         let mut next = book.clone();
         if action == "revoke" {
             next.grants.retain(|g| g.id != key);
@@ -246,7 +272,7 @@ impl Hub {
                         "Conflicting repeated grant scope"
                     );
                 }
-                return Ok(());
+                return Ok(next);
             }
             anyhow::ensure!(
                 p.phase == "pending",
@@ -280,9 +306,182 @@ impl Hub {
                 }
             }
         }
+        Ok(next)
+    }
+    fn decide(&self, key: &str, action: &str, scope: Option<Scope>) -> Result<()> {
+        let mut book = self.book.lock().unwrap();
+        let next = Self::plan(&book, key, action, scope)?;
         self.save(next, &mut book)
     }
+    #[cfg(test)]
+    pub fn configured(&self) -> bool {
+        self.path.is_some()
+    }
+    pub fn host_executor(&self, owner: &str, epoch: u64) -> Arc<pot_tool_executor::LocalTools> {
+        let mut executors = self.executors.lock().unwrap();
+        if executors.get(owner).is_some_and(|(old, _)| *old != epoch) {
+            executors.remove(owner);
+        }
+        executors
+            .entry(owner.into())
+            .or_insert_with(|| (epoch, Arc::new(Default::default())))
+            .1
+            .clone()
+    }
+    pub async fn finish_host(&self, s: &Service) -> Result<()> {
+        let executor = self
+            .executors
+            .lock()
+            .unwrap()
+            .remove(&s.usage_scope)
+            .map(|(_, e)| e);
+        if let Some(executor) = executor {
+            executor.shutdown().await?;
+        }
+        Ok(())
+    }
+    pub fn environment(self: &Arc<Self>, environment: &str) -> Result<Arc<Self>> {
+        if environment == "host" {
+            return Ok(self.clone());
+        }
+        self.remotes
+            .lock()
+            .unwrap()
+            .get(environment)
+            .cloned()
+            .ok_or_else(|| anyhow!("Execution environment has not been prepared"))
+    }
+    fn all(self: &Arc<Self>) -> Vec<(String, Arc<Self>)> {
+        let mut all = vec![("host".into(), self.clone())];
+        all.extend(
+            self.remotes
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(env, hub)| (env.clone(), hub.clone())),
+        );
+        all
+    }
+    fn guest_hub(&self, environment: &str) -> Arc<Hub> {
+        self.remotes
+            .lock()
+            .unwrap()
+            .entry(environment.into())
+            .or_insert_with(|| {
+                Arc::new(Self {
+                    book: Mutex::new(Book::default()),
+                    path: None,
+                    changed: Default::default(),
+                    remotes: Default::default(),
+                    executors: Default::default(),
+                    decisions: Default::default(),
+                })
+            })
+            .clone()
+    }
+    fn load_guest(&self, config: Value) -> Result<()> {
+        let parsed = serde_json::from_value::<Config>(config.clone())?;
+        let policy = parsed.policy.unwrap_or_else(Policy::sandbox);
+        let grants = parsed.into_grants()?;
+        let mut book = self.book.lock().unwrap();
+        book.grants = grants;
+        book.policy = policy;
+        book.disk = Some(serde_json::to_vec(&config)?);
+        Ok(())
+    }
 }
+fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
+    let base = s.sandboxes.guest_workspace(target)?;
+    let cwd = if owner == "main" {
+        base
+    } else {
+        format!("{base}/tasks/{owner}")
+    };
+    Ok(json!({"cwd":cwd,"role":if owner == "main" {"main"} else {"task"}}))
+}
+pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<Value> {
+    let requested = args["environment"].as_str().map(str::to_owned).or_else(|| {
+        args["sandbox_id"]
+            .as_str()
+            .map(|id| format!("sandbox:{id}"))
+    });
+    anyhow::ensure!(
+        args.get("environment").is_none_or(Value::is_string),
+        "Invalid environment"
+    );
+    let environment = requested.unwrap_or_else(|| {
+        if s.is_worker {
+            format!("sandbox:{}", s.sandbox_id.as_deref().unwrap_or("default"))
+        } else {
+            "host".into()
+        }
+    });
+    let object = args
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Arguments must be an object"))?;
+    object.remove("environment");
+    object.remove("sandbox_id");
+    pot_core::environment_tools::validate(name, &args)?;
+    let binding = agent::binding(s)?;
+    if environment == "host" {
+        let workspace = s.data.join("agent-workspace");
+        std::fs::create_dir_all(&workspace)?;
+        pot_tool_executor::tools::normalize(
+            name,
+            &mut args,
+            &workspace,
+            &binding.spec.params.agent.shell,
+        )?;
+    } else {
+        let target = environment
+            .strip_prefix("sandbox:")
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow!("Use host or sandbox:ID"))?;
+        let target = s.sandboxes.assignment(target)?;
+        anyhow::ensure!(
+            !s.is_worker || s.sandbox_id.as_deref() == Some(target.as_str()),
+            "Workers cannot switch Sandboxes"
+        );
+        if name == "write_stdin" {
+            // Existing session handles are resolved and checked by the dispatcher.
+            // Polling/input must not boot a guest or reload permission state.
+            args["environment"] = json!(environment);
+            return Ok(args);
+        }
+        let turn = {
+            let inner = s.inner.lock().unwrap();
+            let turn = inner
+                .turn
+                .as_ref()
+                .ok_or_else(|| anyhow!("Active turn required"))?;
+            inner
+                .store
+                .message(&turn.user_message_id)?
+                .and_then(|m| m.request_id)
+                .ok_or_else(|| anyhow!("Turn identity missing"))?
+        };
+        s.sandboxes
+            .prepare(&target, &s.usage_scope, Some(&turn), &|| {
+                agent::cancelled(s) || s.stopping()
+            })
+            .await?;
+        let hub = s.permissions.guest_hub(&environment);
+        let _decision = hub.decisions.lock().await;
+        let mut body = guest_body(s, &target, &s.usage_scope)?;
+        body["action"] = json!("prepare");
+        body["tool"] = json!(name);
+        body["args"] = args;
+        body["policy"] = json!(binding.spec.params.agent.shell);
+        let prepared = s.sandboxes.permissions(&target, &body).await?;
+        hub.load_guest(prepared["config"].clone())?;
+        args = prepared["args"].clone();
+        pot_core::environment_tools::validate(name, &args)?;
+        // Canonicalization occurs in the guest. Host paths are never used to normalize it.
+    }
+    args["environment"] = json!(environment);
+    Ok(args)
+}
+
 fn live(s: &Service, r: &Request) -> bool {
     if s.stopping() {
         return false;
@@ -329,18 +528,19 @@ pub(crate) async fn request(s: &Service, epoch: u64, turn: &str, value: Value) -
         request.suggested_scope == pot_agent::permissions::scope(&request.tool, &request.args)?,
         "Permission scope does not match operation"
     );
-    let key = s.permissions.enqueue(request.clone())?;
+    let hub = s.permissions.environment(&request.environment)?;
+    let key = hub.enqueue(request.clone())?;
     let _waiting = WaitingRequest {
-        hub: &s.permissions,
+        hub: &hub,
         key: key.clone(),
     };
     loop {
-        let notification = s.permissions.changed.notified();
+        let notification = hub.changed.notified();
         if !live(s, &request) {
-            s.permissions.cancel(&key)?;
+            hub.cancel(&key)?;
             anyhow::bail!("Permission request cancelled");
         }
-        if let Some(approved) = s.permissions.consume(&key)? {
+        if let Some(approved) = hub.consume(&key)? {
             return Ok(json!({"request":request,"approved":approved}));
         }
         tokio::select! {
@@ -359,13 +559,12 @@ fn lane(root: &Service, owner: &str) -> Option<Service> {
     }
 }
 fn refresh(root: &Service) -> Result<()> {
-    let records = root.permissions.book.lock().unwrap().requests.clone();
-    for p in records
-        .into_iter()
-        .filter(|p| matches!(p.phase.as_str(), "pending" | "approved"))
-    {
-        if lane(root, &p.request.owner).is_none_or(|s| !live(&s, &p.request)) {
-            root.permissions.cancel(&p.id)?;
+    for (_, hub) in root.permissions.all() {
+        let records = hub.book.lock().unwrap().requests.clone();
+        for p in records {
+            if lane(root, &p.request.owner).is_none_or(|s| !live(&s, &p.request)) {
+                hub.cancel(&p.id)?;
+            }
         }
     }
     Ok(())
@@ -380,10 +579,23 @@ pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Jso
         ));
     }
     refresh(&root).map_err(internal)?;
-    let book = root.permissions.book.lock().unwrap();
-    Ok(Json(
-        json!({"requests":book.requests.iter().filter(|p| p.phase == "pending").map(|p| json!({"id":p.id,"request":p.request})).collect::<Vec<_>>(),"grants":book.grants}),
-    ))
+    let mut requests = vec![];
+    let mut grants = vec![];
+    for (environment, hub) in root.permissions.all() {
+        let book = hub.book.lock().unwrap();
+        requests.extend(
+            book.requests
+                .iter()
+                .filter(|p| p.phase == "pending")
+                .map(|p| json!({"id":p.id,"request":p.request})),
+        );
+        grants.extend(book.grants.iter().map(|g| {
+            let mut value = json!(g);
+            value["environment"] = json!(environment);
+            value
+        }));
+    }
+    Ok(Json(json!({"requests":requests,"grants":grants})))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -407,9 +619,69 @@ pub async fn decide(
         ));
     }
     refresh(&root).map_err(internal)?;
-    root.permissions
-        .decide(&body.id, &body.action, body.scope)
-        .map_err(|e| error(StatusCode::CONFLICT, "permission_decision", &e.to_string()))?;
+    let (environment, hub) = root
+        .permissions
+        .all()
+        .into_iter()
+        .find(|(_, hub)| {
+            let book = hub.book.lock().unwrap();
+            book.requests.iter().any(|p| p.id == body.id)
+                || book.grants.iter().any(|g| g.id == body.id)
+        })
+        .ok_or_else(|| {
+            error(
+                StatusCode::CONFLICT,
+                "permission_decision",
+                "Permission is no longer active",
+            )
+        })?;
+    let _decision = hub.decisions.lock().await;
+    if environment == "host" || !["allow_persistent", "revoke"].contains(&body.action.as_str()) {
+        hub.decide(&body.id, &body.action, body.scope)
+            .map_err(|e| error(StatusCode::CONFLICT, "permission_decision", &e.to_string()))?;
+    } else {
+        let (next, expected) = {
+            let book = hub.book.lock().unwrap();
+            (
+                Hub::plan(&book, &body.id, &body.action, body.scope).map_err(internal)?,
+                serde_json::from_slice::<Value>(
+                    book.disk
+                        .as_ref()
+                        .ok_or_else(|| internal(anyhow!("Guest config missing")))?,
+                )
+                .map_err(|e| internal(e.into()))?,
+            )
+        };
+        let target = environment
+            .strip_prefix("sandbox:")
+            .ok_or_else(|| internal(anyhow!("Invalid environment")))?;
+        let mut config = Config::from_grants(&next.grants);
+        config.policy = Some(next.policy);
+        let config = json!(config);
+        let decision_id = body.id.clone();
+        let body = guest_body(&root, target, "main").map_err(internal)?;
+        let mut write = body;
+        write["action"] = json!("write");
+        write["expected"] = expected;
+        write["config"] = config.clone();
+        root.sandboxes
+            .permissions(target, &write)
+            .await
+            .map_err(internal)?;
+        let mut book = hub.book.lock().unwrap();
+        // Requests can be cancelled while publication is awaiting the guest. Never restore them.
+        book.grants = next.grants;
+        book.disk = Some(serde_json::to_vec(&config).map_err(|e| internal(e.into()))?);
+        if let Some(planned) = next.requests.iter().find(|n| n.id == decision_id)
+            && let Some(p) = book
+                .requests
+                .iter_mut()
+                .find(|p| p.id == decision_id && p.phase == "pending")
+        {
+            *p = planned.clone();
+        }
+        hub.changed.notify_waiters();
+    }
     Ok(Json(json!({"ok":true})))
 }
 
@@ -420,14 +692,15 @@ mod tests {
     fn operation() -> Request {
         Request {
             owner: "main".into(),
+            environment: "host".into(),
             epoch: 1,
             turn: "turn".into(),
             call_id: "call".into(),
-            tool: "host_exec_command".into(),
-            args: json!({"cmd":"true","workdir":"/","timeout_ms":60000}),
+            tool: "exec_command".into(),
+            args: json!({"cmd":"true","workdir":"/","timeout_ms":60000,"shell":"/bin/bash","login":true,"tty":false}),
             suggested_scope: Scope::Exact {
-                tool: "host_exec_command".into(),
-                args: json!({"cmd":"true","workdir":"/","timeout_ms":60000}),
+                tool: "exec_command".into(),
+                args: json!({"cmd":"true","workdir":"/","timeout_ms":60000,"shell":"/bin/bash","login":true,"tty":false}),
             },
         }
     }
@@ -435,6 +708,41 @@ mod tests {
         let path = std::env::temp_dir().join(format!("pot-permissions-{}", id()));
         std::fs::create_dir(&path).unwrap();
         path
+    }
+    #[test]
+    fn host_and_guest_defaults_and_explicit_policies_survive_grant_changes() {
+        let root = directory();
+        let path = root.join("permissions.json");
+        let host = Hub::open(&path).unwrap();
+        assert_eq!(host.state("main")["policy"]["default"], "ask");
+        let guest = Hub::memory();
+        guest.load_guest(json!({"version":1,"grants":[]})).unwrap();
+        assert_eq!(guest.state("main")["policy"]["default"], "allow");
+        guest
+            .load_guest(json!({"version":1,"policy":{"default":"ask"},"grants":[]}))
+            .unwrap();
+        assert_eq!(guest.state("main")["policy"]["default"], "ask");
+        std::fs::write(
+            &path,
+            r#"{"version":1,"policy":{"default":"allow"},"grants":[]}"#,
+        )
+        .unwrap();
+        let host = Hub::open(&path).unwrap();
+        assert_eq!(host.state("main")["policy"]["default"], "allow");
+        let key = host.enqueue(operation()).unwrap();
+        host.decide(&key, "allow_persistent", None).unwrap();
+        host.decide(&key, "revoke", None).unwrap();
+        assert_eq!(
+            Hub::open(&path).unwrap().state("main")["policy"]["default"],
+            "allow"
+        );
+        std::fs::write(
+            &path,
+            r#"{"version":1,"policy":{"default":"anything"},"grants":[]}"#,
+        )
+        .unwrap();
+        assert!(Hub::open(&path).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn once_is_consumed_once_and_only_current_grants_survive_restart() {

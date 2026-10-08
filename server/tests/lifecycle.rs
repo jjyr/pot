@@ -222,7 +222,7 @@ async fn shutdown_settles_active_main_and_worker_model_requests_without_host_exe
         let _ = shutdown.await;
     }));
     let client = reqwest::Client::new();
-    client.post(format!("{base}/api/v1/providers")).bearer_auth(&endpoint.token).json(&json!({"request_id":uuid::Uuid::new_v4().to_string(),"expected_revision":0,"endpoint":format!("http://{address}/model"),"model":"fixture","protocol":"openai_chat","api_key":"fixture"})).send().await.unwrap().error_for_status().unwrap();
+    client.post(format!("{base}/api/v1/providers")).bearer_auth(&endpoint.token).json(&json!({"request_id":uuid::Uuid::new_v4().to_string(),"expected_revision":0,"endpoint":format!("http://{address}/model"),"model":"fixture","protocol":"openai_chat","api_key":"fixture","max_output_tokens":1024})).send().await.unwrap().error_for_status().unwrap();
     client
         .post(format!("{base}/api/v1/messages"))
         .bearer_auth(&endpoint.token)

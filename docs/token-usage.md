@@ -60,7 +60,7 @@ Usage query/policy/recovery APIs require the main Runtime token; workers cannot 
 - `POST /api/agent/compactions`: internal Agent lifecycle events require the current session token and active turn. Workers write only their own records and cannot read global usage/change policies.
 - `POST /api/v1/usage/policy`: `{period: none|day|week, limit, timezone, auto_resume}`.
 - `POST /api/v1/usage/resume`: `{scope}` clears the manual-resume gate, still requiring allowance.
-- `POST /api/v1/usage/cancel`: cancels main chat waiting; tasks use the task cancellation API.
+- `POST /api/v1/usage/cancel`: cancels main chat waiting; tasks use the task interruption API.
 
 Legacy `/api/v1/usage` remains for request-count diagnostics; new UI uses summary.
 

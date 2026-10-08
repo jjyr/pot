@@ -32,6 +32,8 @@ impl Default for AgentSettings {
                 "exec_command".into(),
                 "write_stdin".into(),
                 "apply_patch".into(),
+                "exec".into(),
+                "wait".into(),
             ],
             allowed_tools: None,
             request_timeout_ms: 180000,
@@ -88,9 +90,10 @@ impl AgentSettings {
             "Request timeout must be positive"
         );
         ensure!(
-            self.builtin_tools
-                .iter()
-                .all(|n| matches!(n.as_str(), "exec_command" | "write_stdin" | "apply_patch")),
+            self.builtin_tools.iter().all(|n| matches!(
+                n.as_str(),
+                "exec_command" | "write_stdin" | "apply_patch" | "exec" | "wait"
+            )),
             "Unknown built-in tool"
         );
         ensure!(

@@ -510,7 +510,15 @@ impl Provider for LinuxPodmanProvider {
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             ensure!(
-                ["execute", "finish", "cancel", "inspect", "desktop"].contains(&route),
+                [
+                    "execute",
+                    "finish",
+                    "cancel",
+                    "inspect",
+                    "desktop",
+                    "permissions"
+                ]
+                .contains(&route),
                 "Unsupported executor route"
             );
             let (url, token) = Self::endpoint(c).await?;

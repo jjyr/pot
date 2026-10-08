@@ -111,7 +111,7 @@ window.potAction=async(action,value)=>{
     if(action==='retry')await sendPending();
     if(action==='stop'){
       const target=snapshot?.turn?.user_message_id;if(!target)throw Error('no_active_turn');
-      await api(task?`/api/v1/tasks/${encodeURIComponent(task)}/cancel`:'/api/v1/turn/cancel',{request_id:requestUUID(),user_message_id:target});notice=t('mobile.shell.stopping');
+      await api(task?`/api/v1/tasks/${encodeURIComponent(task)}/interrupt`:'/api/v1/turn/cancel',{request_id:requestUUID(),user_message_id:target});notice=t('mobile.shell.stopping');
     }
     if(action==='notifications'){
       if(!pushStatus.push_available)throw Error(t('mobile.shell.host-push-is-not-configured'));

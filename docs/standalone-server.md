@@ -58,6 +58,7 @@ pot config set routing /secure/routing-request.json
 pot chat "Inspect the project"
 pot tasks list
 pot tasks show TASK_ID
+pot tasks interrupt TASK_ID
 pot tasks cancel TASK_ID
 pot api /api/v1/snapshot
 ```

@@ -35,7 +35,7 @@ impl ExecutionFeedback for Feedback {
         Box::pin(async move {
             self.check()?;
             anyhow::ensure!(
-                !self.cancelled() && !self.service.is_worker && name == "host_set_sandbox_mappings",
+                !self.cancelled() && !self.service.is_worker && name == "set_sandbox_mappings",
                 "Host operation unavailable"
             );
             crate::sandbox::management(&self.service, &json!({"action":"set_mounts","sandbox_id":args["sandbox_id"],"mappings":args["mappings"]})).await
@@ -43,7 +43,7 @@ impl ExecutionFeedback for Feedback {
     }
     fn prepare_permission_operation(&self, name: &str, mut args: Value) -> Result<Value> {
         self.check()?;
-        if name == "pot_manage_sandbox" && args["action"] != "create" {
+        if name == "manage_sandbox" && args["action"] != "create" {
             args["sandbox_id"] = json!(
                 self.service
                     .sandboxes
@@ -52,8 +52,42 @@ impl ExecutionFeedback for Feedback {
         }
         Ok(args)
     }
+    fn execution_home(&self) -> Option<PathBuf> {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+    fn prepare_execution_operation(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
+        let name = name.to_owned();
+        Box::pin(async move {
+            self.check()?;
+            #[cfg(test)]
+            if self.service.test_tool_executor.is_some() && !self.service.permissions.configured() {
+                return Ok(args);
+            }
+            crate::permissions::prepare(&self.service, &name, args).await
+        })
+    }
+    fn environment_grants(&self, environment: &str) -> BoxFuture<'_, Result<Option<Value>>> {
+        let environment = environment.to_owned();
+        Box::pin(async move {
+            self.check()?;
+            #[cfg(test)]
+            if self.service.test_tool_executor.is_some() && !self.service.permissions.configured() {
+                return Ok(None);
+            }
+            Ok(Some(
+                self.service
+                    .permissions
+                    .environment(&environment)?
+                    .state(&self.service.usage_scope),
+            ))
+        })
+    }
     fn permission_grants(&self) -> Result<Option<Value>> {
         self.check()?;
+        #[cfg(test)]
+        if self.service.test_tool_executor.is_some() && !self.service.permissions.configured() {
+            return Ok(None);
+        }
         Ok(Some(
             self.service.permissions.grants(&self.service.usage_scope),
         ))
@@ -225,7 +259,7 @@ fn make_context(
         orchestration::MAIN_PROMPT.into()
     };
     if binding.spec.engine == Engine::Pot {
-        main_prompt = main_prompt.replace("Direct Host tool execution is unavailable.", "You normally chat on the Host. Use host_read_file, host_write_file, host_list_directory or host_exec_command for explicit Host work; these request owner permission. Use host_set_sandbox_mappings only to make an explicit owner-reviewed mapping change. Other execution tools run inside Sandboxes. Persistent permissions require an explicit owner decision; never claim they exist before approval.");
+        main_prompt = main_prompt.replace("Environment tools execute in the current default Sandbox unless you pass an explicit sandbox_id.", "Main execution defaults to Host; use environment=sandbox:ID for explicit Sandbox execution.").replace("Direct Host tool execution is unavailable.", "You normally chat on the Host. exec_command, write_stdin and apply_patch operate in the selected execution environment. Main defaults to host; task agents default to their assigned Sandbox. environment=host explicitly requests Host execution; environment=sandbox:ID selects a Sandbox. Each environment loads its own ~/.pot/agent/permissions.json. Host policy defaults to ask: execution needs a matching grant or owner approval. Sandbox policy defaults to allow: ordinary Sandbox execution does not need approval, unless the owner configures ask. Task and Sandbox management do not require permission approval. write_stdin continues an authorized process session without asking again. Role and assignment boundaries still apply. Use set_sandbox_mappings only for an owner-reviewed mapping change. Never claim permanent permission exists before approval.");
     }
     let instructions = if role == ExecutionRole::Summary {
         String::new()
@@ -245,7 +279,9 @@ fn make_context(
         skill_resources,
         tool_executor: {
             #[cfg(test)]
-            if let Some(executor) = &s.test_tool_executor {
+            if let Some(executor) = &s.test_tool_executor
+                && !s.permissions.configured()
+            {
                 Some(executor.clone())
             } else {
                 Some(Arc::new(crate::sandbox::Tools {

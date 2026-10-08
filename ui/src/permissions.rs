@@ -23,8 +23,9 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
             .child(pages::title(catalog.text("permissions.request")))
             .child(pages::hint(
                 format!(
-                    "{} · {}",
+                    "{} · {} · {}",
                     request["owner"].as_str().unwrap_or(""),
+                    request["environment"].as_str().unwrap_or("host"),
                     request["tool"].as_str().unwrap_or("")
                 ),
                 cx,
@@ -39,7 +40,7 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
             .child(div().text_sm().whitespace_normal().child(
                 serde_json::to_string_pretty(&request["suggested_scope"]).unwrap_or_default(),
             ));
-        if request["tool"] == "host_exec_command" {
+        if request["tool"] == "exec_command" && request["environment"] == "host" {
             card = card.child(pages::hint(catalog.text("permissions.shell-effects"), cx));
         }
         let mut actions = div().flex().flex_wrap().gap_2();
@@ -69,7 +70,11 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
             pages::card(cx)
                 .child(pages::title(catalog.text("permissions.grant")))
                 .child(pages::hint(
-                    grant["owner"].as_str().unwrap_or("").to_owned(),
+                    format!(
+                        "{} · {}",
+                        grant["owner"].as_str().unwrap_or(""),
+                        grant["environment"].as_str().unwrap_or("host")
+                    ),
                     cx,
                 ))
                 .child(

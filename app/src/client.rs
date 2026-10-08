@@ -568,7 +568,7 @@ impl Client {
                     .timeout_global(Some(Duration::from_secs(3)))
                     .build()
                     .new_agent()
-                    .post(&if selected.is_empty(){PATH_CANCEL.to_string()}else{format!("{PATH_TASKS}/{selected}/cancel")})
+                    .post(&if selected.is_empty(){PATH_CANCEL.to_string()}else{format!("{PATH_TASKS}/{selected}/interrupt")})
                     .send_json(json!({"request_id":uuid::Uuid::new_v4().to_string(),"user_message_id":message_id}))
                     .map_err(|e| e.to_string())?;
                 Ok(())

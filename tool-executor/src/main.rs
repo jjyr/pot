@@ -8,6 +8,9 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::io::{AsyncBufReadExt, BufReader};
 struct Feedback;
 impl ExecutionFeedback for Feedback {
+    fn execution_home(&self) -> Option<PathBuf> {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
     fn cancelled(&self) -> bool {
         false
     }

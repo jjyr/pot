@@ -1,13 +1,14 @@
 //! Pot-owned model/tool loop and permission policy. Embedders provide owner decisions, storage and execution services.
 mod extensions;
 mod meter;
+mod orchestration;
 mod skills;
 pub use skills::{Skill, SkillCatalog, discover_skills, format_skills_for_prompt};
 #[cfg(test)]
 mod processes {
     pub use pot_tool_executor::Processes;
 }
-mod host_tools;
+mod environment_tools;
 pub mod permissions;
 #[cfg(test)]
 mod tests;
@@ -674,12 +675,13 @@ async fn run(
             })
             .collect()
     };
-    if s.role == ExecutionRole::Main {
-        for tool in &mut available {
-            if tool["name"] != "write_stdin" {
-                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string","description":"Omitted uses the current execution default Sandbox."});
-            }
-        }
+    if s.role != ExecutionRole::Summary {
+        available.extend(orchestration::schemas().into_iter().filter(|t| {
+            settings
+                .builtin_tools
+                .iter()
+                .any(|name| t["name"] == name.as_str())
+        }));
     }
     let custom = if s.role == ExecutionRole::Summary {
         vec![]
@@ -699,17 +701,32 @@ async fn run(
         custom_names.iter().all(|name| !name.is_empty()
             && !matches!(
                 name.as_str(),
-                "exec_command" | "write_stdin" | "apply_patch"
+                "exec_command"
+                    | "write_stdin"
+                    | "apply_patch"
+                    | "set_sandbox_mappings"
+                    | "exec"
+                    | "wait"
             )),
         "Extension tool conflicts with a reserved built-in name"
     );
     available.extend(custom);
     if s.role != ExecutionRole::Summary && s.feedback.permission_grants()?.is_some() {
         available.extend(
-            host_tools::schemas().into_iter().filter(|t| {
-                s.role == ExecutionRole::Main || t["name"] != "host_set_sandbox_mappings"
-            }),
+            environment_tools::schemas()
+                .into_iter()
+                .filter(|t| s.role == ExecutionRole::Main || t["name"] != "set_sandbox_mappings"),
         );
+    }
+    if s.feedback.permission_grants()?.is_some() {
+        for tool in &mut available {
+            if tool["name"]
+                .as_str()
+                .is_some_and(permissions::is_execution_tool)
+            {
+                tool["inputSchema"]["properties"]["environment"] = json!({"type":"string","description":"Execution target: host or sandbox:ID. Omitted uses this Agent's environment. Permissions are checked in that environment."});
+            }
+        }
     }
     let session = if s.role != ExecutionRole::Worker {
         let (_,session)=rpc(services,&client,s,None,"initialize","initialize",json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"pot-agent","version":"0.1"}})).await?;
@@ -761,7 +778,7 @@ async fn run(
         prompt.clone()
     } else {
         format!(
-            "You are Pot. Your execution tools run in the assigned Sandbox with network access. Use exec_command to inspect files and retrieve sources; cite URLs for current facts. Use apply_patch for file edits. Report observed failures accurately. {}",
+            "You are Pot. Your execution tools run in the selected execution environment with network access. Use exec_command to inspect files and retrieve sources; cite URLs for current facts. Use apply_patch for file edits. Report observed failures accurately. {}",
             if s.role == ExecutionRole::Worker {
                 "Complete the assigned task. You cannot delegate."
             } else {
@@ -777,6 +794,50 @@ async fn run(
     if s.role != ExecutionRole::Summary && available.iter().any(|t| t["name"] == "exec_command") {
         system.push_str(&skills::prompt(&extensions.skills(s)?)?);
     }
+    if available.iter().any(|t| t["name"] == "exec") {
+        system.push_str(" Use exec for complex combinations of available tools and publish only needed results with text(). Child calls retain individual permissions. Await running execs with wait before giving the final answer; execs end with this turn. For file inspection use exec_command, for edits use apply_patch or an approved command.");
+    }
+    let dispatcher = Dispatcher {
+        s,
+        binding,
+        request,
+        extensions,
+        services,
+        client: &client,
+        session: session.as_deref(),
+        available: &available,
+        custom_names: &custom_names,
+    };
+    let dispatch: orchestration::Dispatch<'_> = Arc::new(move |name, arguments, id, events| {
+        Box::pin(async move {
+            ensure!(
+                !matches!(name.as_str(), "exec" | "wait"),
+                "Recursive orchestration unavailable"
+            );
+            dispatcher
+                .invoke(
+                    model::ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    },
+                    &mut |update| {
+                        events.lock().unwrap().push(update);
+                        Ok(())
+                    },
+                )
+                .await
+        })
+    });
+    let mut composed = orchestration::Manager::new(
+        dispatch,
+        available
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .filter(|n| !matches!(*n, "exec" | "wait"))
+            .map(str::to_owned)
+            .collect(),
+    );
     loop {
         if s.feedback.cancelled() {
             return Ok(());
@@ -791,7 +852,7 @@ async fn run(
             .diagnostic(&json!({"kind":"model_started","model":binding.spec.model}))?;
         let (response, prefix) = tokio::select! {
             _=s.feedback.cancellation()=>return Ok(()),
-            result=async {
+            result=composed.drive(async {
                 compact(services,&client,s,binding,&mut state,emit,extensions,&system,&available).await?;
                 let mut input = state.messages.clone();
                 extensions.prepare_context(s, &mut input)?;
@@ -800,8 +861,9 @@ async fn run(
                 let response = sample(services,&client,s,binding,&system,&input,&available,None,emit).await?;
                 input.push(response.clone());
                 Ok::<_, anyhow::Error>((response, input))
-            }=>result?,
+            })=>result?,
         };
+        composed.drain(emit)?;
         if let Some(anchor) = meter::UsageAnchor::capture(
             &protocol,
             &binding.spec.model,
@@ -825,21 +887,10 @@ async fn run(
             }
             return Ok(());
         }
-        while let Some(mut call) = state.pending.first().cloned() {
+        while let Some(call) = state.pending.first().cloned() {
             if s.feedback.cancelled() {
                 return Ok(());
             }
-            let prepared = if call.name.starts_with("host_")
-                && available.iter().any(|t| t["name"] == call.name)
-            {
-                host_tools::normalize(&call.name, &mut call.arguments)
-            } else if call.name == "pot_manage_sandbox" {
-                s.feedback
-                    .prepare_permission_operation(&call.name, call.arguments.clone())
-                    .map(|args| call.arguments = args)
-            } else {
-                Ok(())
-            };
             state.started = Some(call.id.clone());
             state.save(s)?;
             emit(Update::ToolStarted {
@@ -861,53 +912,29 @@ async fn run(
                 }
             } else if !allowed {
                 Err(anyhow!("Tool unavailable for this role"))
-            } else if let Err(error) = prepared {
-                Err(error)
-            } else if let Err(error) =
-                permissions::authorize(s, binding, request, &call.id, &call.name, &call.arguments)
-                    .await
-            {
-                Err(error)
-            } else if call.name.starts_with("host_") {
-                host_tools::execute(s, &call.name, &call.arguments).await
-            } else if matches!(
-                call.name.as_str(),
-                "exec_command" | "write_stdin" | "apply_patch"
-            ) {
-                if let Some(executor) = &s.tool_executor {
-                    executor
-                        .execute(
-                            s,
-                            &settings.shell,
-                            &call.name,
-                            &call.arguments,
-                            &call.id,
-                            emit,
-                        )
-                        .await
-                } else {
-                    Err(anyhow!(
-                        "Tool execution backend unavailable; no Host fallback"
-                    ))
+            } else if matches!(call.name.as_str(), "exec" | "wait") {
+                tokio::select! {
+                    result = composed.call(&call.name, &call.arguments, &call.id) => result,
+                    _ = s.feedback.cancellation() => return Ok(()),
                 }
-            } else if custom_names.contains(&call.name) {
-                tokio::select! { result = extensions.execute(s, &call.name, &call.arguments) => result, _ = s.feedback.cancellation() => Err(anyhow!("cancelled")) }
             } else {
-                let session = session
-                    .as_deref()
-                    .ok_or_else(|| anyhow!("Tool API unavailable"))?;
-                rpc(
-                    services,
-                    &client,
-                    s,
-                    Some(session),
-                    &format!("{}:{}", request.request_id, call.id),
-                    "tools/call",
-                    json!({"name":call.name,"arguments":call.arguments}),
-                )
-                .await
-                .map(|r| r.0)
+                let quiet = &mut |update: Update| {
+                    if matches!(
+                        update,
+                        Update::ToolStarted { .. } | Update::ToolFinished { .. }
+                    ) {
+                        Ok(())
+                    } else {
+                        emit(update)
+                    }
+                };
+                let invoke = dispatcher.invoke(call.clone(), quiet);
+                tokio::select! {
+                    result = composed.drive(invoke) => result,
+                    _ = s.feedback.cancellation() => return Ok(()),
+                }
             };
+            composed.drain(emit)?;
             if let Err(e) = &result
                 && e.to_string().contains("stop unconfirmed")
             {
@@ -919,6 +946,12 @@ async fn run(
             };
             if !cached {
                 state.receipts.push(json!({"id":call.id,"name":call.name,"arguments":call.arguments,"result":value}));
+            }
+            if value["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("stop unconfirmed"))
+            {
+                return Err(anyhow!("{}", value["error"]));
             }
             let failed = value["isError"] == true
                 || value["exit_code"].as_i64().is_some_and(|c| c != 0)
@@ -939,6 +972,151 @@ async fn run(
         }
     }
 }
+
+#[derive(Clone, Copy)]
+struct Dispatcher<'a> {
+    s: &'a ExecutionContext,
+    binding: &'a Binding,
+    request: &'a TurnRequest,
+    extensions: &'a dyn AgentExtensions,
+    services: Option<&'a dyn ExecutionServices>,
+    client: &'a reqwest::Client,
+    session: Option<&'a str>,
+    available: &'a [Value],
+    custom_names: &'a [String],
+}
+impl Dispatcher<'_> {
+    async fn invoke(
+        &self,
+        mut call: model::ToolCall,
+        emit: &mut (dyn FnMut(Update) -> Result<()> + Send),
+    ) -> Result<Value> {
+        let Self {
+            s,
+            binding,
+            request,
+            extensions,
+            services,
+            client,
+            session,
+            available,
+            custom_names,
+        } = *self;
+        let settings = &binding.spec.params.agent;
+        ensure!(
+            available.iter().any(|t| t["name"] == call.name),
+            "Tool unavailable for this role"
+        );
+        let prepared = if permissions::is_execution_tool(&call.name) {
+            let result = tokio::select! {
+                result = s.feedback.prepare_execution_operation(&call.name, call.arguments.clone()) => result,
+                _ = s.feedback.cancellation() => return Err(anyhow!("cancelled")),
+            };
+            result.and_then(|args| {
+                call.arguments = args;
+                // Local opt-in embedders use the same tools and gate as Runtime.
+                if s.feedback.permission_grants()?.is_some()
+                    && call.arguments.get("environment").is_none()
+                {
+                    pot_tool_executor::tools::normalize(
+                        &call.name,
+                        &mut call.arguments,
+                        &s.workspace,
+                        &settings.shell,
+                    )?;
+                    call.arguments["environment"] = json!("host");
+                }
+                Ok(())
+            })
+        } else if call.name == "set_sandbox_mappings" {
+            environment_tools::normalize_mapping(&mut call.arguments).map(|()| {
+                call.arguments["environment"] = json!("host");
+            })
+        } else if call.name == "manage_sandbox" {
+            s.feedback
+                .prepare_permission_operation(&call.name, call.arguments.clone())
+                .map(|args| {
+                    call.arguments = args;
+                    call.arguments["environment"] = json!("host");
+                })
+        } else {
+            Ok(())
+        };
+
+        emit(Update::ToolStarted {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            args: call.arguments.clone(),
+        })?;
+        let result = async {
+            prepared?;
+            permissions::authorize(s, binding, request, &call.id, &call.name, &call.arguments).await?;
+            if call.name == "set_sandbox_mappings" {
+                s.feedback
+                    .execute_authorized_host(&call.name, call.arguments.clone())
+                    .await
+            } else if permissions::is_execution_tool(&call.name) {
+                if let Some(executor) = &s.tool_executor {
+                    let mut execution_args = call.arguments.clone();
+                    if s.feedback.permission_grants()?.is_some()
+                        && execution_args["environment"] == "host"
+                        && s.backend_url.is_empty()
+                    {
+                        execution_args
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("environment");
+                    }
+                    executor
+                        .execute(
+                            s,
+                            &settings.shell,
+                            &call.name,
+                            &execution_args,
+                            &call.id,
+                            emit,
+                        )
+                        .await
+                } else {
+                    Err(anyhow!(
+                        "Tool execution backend unavailable; no Host fallback"
+                    ))
+                }
+            } else if custom_names.contains(&call.name) {
+                tokio::select! { result = extensions.execute(s, &call.name, &call.arguments) => result, _ = s.feedback.cancellation() => Err(anyhow!("cancelled")) }
+            } else {
+                let session = session
+                    .ok_or_else(|| anyhow!("Tool API unavailable"))?;
+                rpc(
+                    services,
+                    client,
+                    s,
+                    Some(session),
+                    &format!("{}:{}", request.request_id, call.id),
+                    "tools/call",
+                    json!({"name":call.name,"arguments":call.arguments}),
+                )
+                .await
+                .map(|r| r.0)
+            }
+
+        }.await;
+        let value = match &result {
+            Ok(v) => v.clone(),
+            Err(e) => json!({"isError":true,"error":e.to_string()}),
+        };
+        emit(Update::ToolFinished {
+            id: call.id,
+            name: call.name,
+            failed: value["isError"] == true
+                || value["exit_code"].as_i64().is_some_and(|c| c != 0)
+                || value["reason"].is_string(),
+            result: json!({"content":[{"type":"text","text":value.to_string()}]}),
+        })?;
+        result
+    }
+}
+
 fn accept_steering(s: &ExecutionContext, state: &mut Context, finalizing: bool) -> Result<bool> {
     let pending = s.feedback.steering(finalizing)?;
     let mut added = false;

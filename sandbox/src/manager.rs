@@ -715,6 +715,11 @@ impl Manager {
     }
 }
 impl Manager {
+    /// Trusted control channel for the guest's ~/.pot state; never exposed as a model tool.
+    pub async fn permissions(&self, target: &str, body: &Value) -> Result<Value> {
+        self.request(target, "permissions", body, Duration::from_secs(30))
+            .await
+    }
     pub async fn execute(
         self: &Arc<Self>,
         grant: &AccessGrant,
@@ -729,7 +734,7 @@ impl Manager {
             "Invalid execution identity"
         );
         anyhow::ensure!(
-            ["exec_command", "write_stdin", "apply_patch"].contains(&name),
+            ["exec_command", "write_stdin", "apply_patch",].contains(&name),
             "Unknown execution operation"
         );
         anyhow::ensure!(
@@ -779,7 +784,6 @@ impl Manager {
         }
         let requested = args["sandbox_id"].as_str().unwrap_or("");
         let prior_scope = if name == "write_stdin" {
-            anyhow::ensure!(requested.is_empty(), "write_stdin cannot switch Sandbox");
             let session = args["session_id"]
                 .as_str()
                 .ok_or_else(|| anyhow!("Missing session ID"))?;
@@ -800,6 +804,10 @@ impl Manager {
             anyhow::ensure!(
                 scope.owner == grant.owner && scope.epoch == grant.epoch,
                 "Session belongs to another task/agent epoch"
+            );
+            anyhow::ensure!(
+                requested.is_empty() || requested == scope.target,
+                "write_stdin cannot switch Sandbox"
             );
             Some(scope)
         } else {

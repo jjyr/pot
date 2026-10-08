@@ -2,14 +2,20 @@
 
 The Host Agent (Pot or Codex) calls the same role-scoped tools. Runtime validates
 arguments and routes them to a credential-free guest runner. Agent processes and
-model connections remain on Host. This protocol does not expose Host execution.
+model connections remain on Host. pot-agent also routes these same tool names to
+Host after its [permission gate](permissions.md); Codex remains Sandbox-only.
+`environment` selects Host or a Sandbox for pot-agent. Main defaults to Host and
+tasks default to their fixed Sandbox. File tools share the same runner implementation.
 
 ## Commands and shells
 
 Every `exec_command` starts a separate command with an explicit cwd. Relative
-`workdir` resolves against `/data/workspace` for main or
+`workdir` in Linux Sandbox resolves against `/data/workspace` for main or
 `/data/workspace/tasks/TASK_ID` for a worker. A previous command's `cd`, exports or
-functions do not change later commands. Files written in the workspace persist.
+functions do not change later commands. Files written in the workspace persist. Host relative paths use Runtime’s private
+Agent workspace; Host HOME remains the Server account home. Shell settings, PTY
+and process-session behavior are shared. Host sessions are scoped by Agent/epoch
+and drained on cancellation/shutdown, using process groups rather than guest cgroups.
 
 Profiles default to `/bin/bash`, with login shells and snapshots enabled; the
 bundled image already includes Bash. Omitted settings use the same current
@@ -40,7 +46,9 @@ command timeout. Supplying it returns after a bounded wait with a `session_id`
 when the process is still running. For such sessions, an explicit `timeout_ms`
 sets a total command timeout; otherwise they live until exit, cancellation,
 termination or inactivity. `session_idle_timeout_ms` defaults to 30 minutes and
-must be positive. A stdin call/poll refreshes activity; output alone does not.
+must be positive. A stdin call/poll refreshes activity; output alone does not. `write_stdin` input,
+polling, resizing and stopping continue the authorized session without additional
+permission approval; the same Agent/epoch/environment ownership checks still apply.
 
 Normal turn completion retains sessions. Runtime binds them to owner, Agent
 binding epoch, Sandbox and VM generation. A main default selection change does

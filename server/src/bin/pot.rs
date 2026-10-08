@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Server and Web UI in this process\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
+const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Server and Web UI in this process\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|interrupt ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--version") {
@@ -256,15 +256,17 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
                 uuid::Uuid::parse_str(id)?;
                 print(api(root, &format!("/api/v1/tasks/{id}"), None).await?)
             }
-            "cancel" => {
+            "interrupt" | "cancel" => {
                 let id = argument(args, 2)?;
                 uuid::Uuid::parse_str(id)?;
-                let path = format!("/api/v1/tasks/{id}");
-                let snapshot = api(root, &path, None).await?;
-                let message = snapshot["turn"]["user_message_id"]
-                    .as_str()
-                    .context("No active task turn")?;
-                print(api(root,&format!("{path}/cancel"),Some(json!({"request_id":uuid::Uuid::new_v4().to_string(),"user_message_id":message}))).await?)
+                print(
+                    api(
+                        root,
+                        &format!("/api/v1/tasks/{id}/{}", argument(args, 1)?),
+                        Some(json!({})),
+                    )
+                    .await?,
+                )
             }
             _ => bail!("Unknown tasks command"),
         },
