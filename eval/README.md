@@ -1,6 +1,6 @@
 # Pot evaluation CLI
 
-`pot-eval` runs the real Pot Agent through `DriverHost` with injected execution services. It is a separate workspace crate with no dependency on Runtime, Storage or App internals. The CLI supports deterministic contract runs and bounded live Pot runs against **DeepSeek Flash only**, using local Pi configuration. Cross-runtime statistical comparisons remain pending. See the [framework design](../docs/token-evaluation.md) for the remaining modes.
+`pot-eval` runs the real Pot Agent through the concrete `pot_agent::Agent::execute` entry point with injected execution services. It is a separate workspace crate with no dependency on Runtime, Storage or App internals. The CLI supports deterministic contract runs and bounded live Pot runs against **DeepSeek Flash only**, using local Pi configuration. Cross-runtime statistical comparisons remain pending. See the [framework design](../docs/token-evaluation.md) for the remaining modes.
 
 ## Run and inspect
 
@@ -33,7 +33,7 @@ mise exec -- python eval/experiments/pi-small-suite.py /tmp/pot-small-live /tmp/
 
 Use fresh output directories. The suite has a five-turn, tool-free retention task, a five-request fresh-session cache sequence, a single-worker/serial-two-child comparison and eleven deterministic failure/receipt cases. A live suite caps all Pot Agent requests across the sweep at 22 attempts and 50,000 encoded-byte/output reservation units, with 64/128-token response caps and thinking/compaction disabled. The tree has a shared eight-attempt/30,000-unit budget; `tree` applies it to a standalone rerun too. Budget units are conservative reservations, not actual consumed tokens. All tools run in the explicitly recorded local fixture environment, without creating a VM.
 
-Delegation uses an eval-only task-management extension and real child Driver sessions; the parent exposes only the dispatch tool, while children read their own partition through exec_command. Tree totals sum disjoint parent/child request usage. The suite records task lifecycle, individual child reports, per-turn answers/usage, cache-request identity checks and shared budget snapshots. JSON assertions allow insignificant JSON whitespace/key-order differences. Ordinary `compare` still requires identical scenarios/policies; architecture-changing comparisons use the suite's explicitly labeled reports, not a bypass of that check.
+Delegation uses an eval-only task-management extension and real child Agent executions; the parent exposes only the dispatch tool, while children read their own partition through exec_command. Tree totals sum disjoint parent/child request usage. The suite records task lifecycle, individual child reports, per-turn answers/usage, cache-request identity checks and shared budget snapshots. JSON assertions allow insignificant JSON whitespace/key-order differences. Ordinary `compare` still requires identical scenarios/policies; architecture-changing comparisons use the suite's explicitly labeled reports, not a bypass of that check.
 
 The fault cases inject typed pre-response HTTP/connection failures and an interrupted native stream through the service boundary. They make no provider calls, even during `suite live`. Optional retries in these fixtures are an explicitly declared eval transport policy (two attempts, recorded one-millisecond delay), not a change to production automatic retry or a test of HTTP-header parsing. Tool recovery and duplicate-effect receipts exercise real local shell calls. Interrupted/failed requests without usage keep unknown consumption. Expected failures pass their contract check while their native run reports remain failed. These cases do not establish real-provider retry cost.
 
@@ -66,9 +66,9 @@ The initial hash covers the entire scenario, including configuration and scripte
 
 Each run contains:
 
-- `manifest.json`: schema/run/scenario identity, effective resolved configuration, declared Driver capabilities and build provenance.
+- `manifest.json`: schema/run/scenario identity, effective resolved configuration, executor identity and build provenance.
 - `scenario.json`: the complete scenario used for replay.
-- `events.jsonl`: append-only ordered Driver and typed execution observations, including usage snapshots and causal compaction IDs.
+- `events.jsonl`: append-only ordered Agent events and typed execution observations, including usage snapshots and causal compaction IDs.
 - `requests.json`: credential-free native encoded model requests captured by the scripted service.
 - `workspace/`: fresh fixtures and final artifacts.
 - `context.json`: final Agent context for diagnosis; persistence during execution is run-local memory.
@@ -77,10 +77,10 @@ Each run contains:
 
 Unknown usage/subsets remain null. Cache/reasoning are included in input/output totals, not added again. Stream snapshots replace previous values for a measurement. Usage normalization supports explicit request/turn/run scopes, cumulative counters with a stable known baseline and event-deduplicated deltas; conflicting sources, resets and overflows are rejected. Failed attempts retain observed usage. Context estimates are separate events and never contribute to observed token totals.
 
-The validator checks manifest/configuration consistency, envelope and Driver sequence/terminal rules, request/tool/compaction lifecycle, usage semantics and task assertions. It requires matching explicit measurement IDs to deduplicate sources; it does not infer arbitrary overlapping parent/child scope coverage. JSON records are a local diagnostic format, not a tamper-proof audit system.
+The validator checks manifest/configuration consistency, envelope and Agent sequence/terminal rules, request/tool/compaction lifecycle, usage semantics and task assertions. It requires matching explicit measurement IDs to deduplicate sources; it does not infer arbitrary overlapping parent/child scope coverage. JSON records are a local diagnostic format, not a tamper-proof audit system.
 
 ## Integration boundary
 
-Core declares `DriverDescription`, `ExecutionObservation` and `ExecutionServices`. Pot's existing `AgentHost` can accept services through `with_services`, alongside its existing extension hooks. The normal product host continues to call its authenticated HTTP services and settle usage through Runtime. Observations do not authorize requests or replace reservations.
+Core declares execution context/events, `ExecutionObservation` and `ExecutionServices`. The concrete `pot_agent::Agent` accepts injected services and extension hooks; no driver/session adapter is involved. The normal product host continues to call its authenticated HTTP services and settle usage through Runtime. Observations do not authorize requests or replace reservations.
 
-`run_driver` is the runner entry point for service-injectable hosts. The CLI selects the Pot host with scripted transport or the DeepSeek Flash live service. Other live models, paired repeats, verified price tables, statistical regression budgets and HTML reports are also pending. Paid DeepSeek calls occur only through the explicit `live` entry point; no scheduled evaluations are enabled.
+`run_agent` is the runner entry point for the concrete Agent executor. The CLI constructs pot-agent with scripted transport or the DeepSeek Flash live service. Other live models, paired repeats, verified price tables, statistical regression budgets and HTML reports are also pending. Paid DeepSeek calls occur only through the explicit `live` entry point; no scheduled evaluations are enabled.

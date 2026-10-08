@@ -1,13 +1,13 @@
 # Backend crate boundaries
 
-Updated: 2026-10-06. See [architecture](architecture.md) for deployment and [Agent/Sandbox design](agent-sandbox-design.md) for authority.
+Updated: 2026-10-09. See [architecture](architecture.md) for deployment and [Agent/Sandbox design](agent-sandbox-design.md) for authority.
 
 | Crate | Responsibility |
 |---|---|
-| `pot-core` | Immutable profiles/bindings, execution/feedback/backend traits, shared environment and control tool schemas; no process or filesystem implementation |
+| `pot-core` | Profile templates, Thread configurations, execution feedback and service contracts, shared environment and control tool schemas; no process or filesystem implementation |
 | `pot-agent` | Host in-process model loop, context, compaction, tool loadouts, filesystem skill discovery and metering; execution requires an injected ToolExecutor |
 | `pot-tool-executor` | Shared patch and pipe-session implementation; credential-free guest binary. Local execution is explicitly injected only in eval and isolated tests |
-| `pot-storage` | Host product SQLite, bindings, request/usage ledgers and durable transactions |
+| `pot-storage` | Host product SQLite, Thread contexts/configuration, request/usage ledgers and durable transactions |
 | `pot-gateway` | Provider transport and Chat/Responses/Messages/Gemini codecs |
 | `pot-runtime` | Product tool authorization/routing, tasks/schedules, execution preferences, accounting and recovery |
 | `pot-resource` | Generic HTTPS downloads, byte count/SHA-256 checks, safe extraction, digest cache, shared progress/cancellation |
@@ -21,7 +21,7 @@ Updated: 2026-10-06. See [architecture](architecture.md) for deployment and [Age
 | `pot-app` | GPUI/native UI, protocol client and cached projections |
 | `pot-eval` | Standalone deterministic and explicitly selected live evaluation |
 
-App depends on Protocol and embeds Server through its local service adapter. Server composes Runtime without App or GPUI. Runtime owns Storage, Gateway and Agent integration, and injects its Sandbox ToolExecutor into pot-agent. Core carries the backend trait without depending on Runtime. The guest executor knows neither Runtime, model providers nor Host product credentials.
+App depends on Protocol and embeds Server through its local service adapter. Server composes Runtime without App or GPUI. Runtime owns Storage, Gateway and Agent integration, and injects its Sandbox ToolExecutor into pot-agent. Core carries execution values and feedback/service contracts without depending on Runtime. Runtime and eval directly call the concrete pot-agent executor; there is no engine adapter or external session mapping. The guest executor knows neither Runtime, model providers nor Host product credentials.
 
 App embeds Host Server; standalone CLI hosts it independently. Helper owns local VM lifecycle and supports Sandbox-only hosting. Execution tools run in assigned guest scopes; shell code cannot access unmounted Host product state. Tasks sharing a Sandbox use the same guest account, so separate directories are organizational rather than mutual filesystem/process isolation.
 

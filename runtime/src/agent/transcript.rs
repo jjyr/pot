@@ -1,5 +1,5 @@
 use super::{
-    driver::{Outcome, Update},
+    runner::{Outcome, Update},
     *,
 };
 use std::collections::HashMap;

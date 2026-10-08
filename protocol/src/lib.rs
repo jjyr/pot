@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 pub const RUNTIME_PORT: u16 = 17700;
 /// Written by the runtime into the shared data directory; read by the helper.
 pub const RUNTIME_ENDPOINT_FILE: &str = "runtime.json";
@@ -27,29 +27,17 @@ pub struct RuntimeEndpoint {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum EnginePhase {
-    Installing,
-    Starting,
-    NeedsAuth,
-    Authenticating,
+pub enum AgentPhase {
+    NeedsConfiguration,
     Ready,
     Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AuthMethod {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EngineStatus {
-    pub engine: String,
-    pub phase: EnginePhase,
+pub struct AgentStatus {
+    pub model: String,
+    pub phase: AgentPhase,
     pub detail: Option<String>,
-    pub version: Option<String>,
-    pub auth_methods: Vec<AuthMethod>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,7 +52,7 @@ pub enum Role {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageStatus {
-    /// Persisted, not yet consumed by the engine.
+    /// Persisted, not yet consumed by the Agent.
     Accepted,
     Streaming,
     Complete,
@@ -109,7 +97,7 @@ pub struct Snapshot {
     pub api_version: u32,
     pub boot_id: String,
     pub cursor: i64,
-    pub engine: EngineStatus,
+    pub agent: AgentStatus,
     pub conversation_id: String,
     pub messages: Vec<Message>,
     pub turn: Option<TurnState>,
@@ -119,7 +107,7 @@ pub struct Snapshot {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventKind {
     Budget { budget: RequestBudget },
-    Engine { status: EngineStatus },
+    Agent { status: AgentStatus },
     Message { message: Message },
     Turn { turn: Option<TurnState> },
 }

@@ -1,4 +1,4 @@
-//! Versioned Sandbox plugin packages. Resolved bindings contain immutable bundles.
+//! Versioned Sandbox plugin packages. Resolved configuration snapshots contain immutable bundles.
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -70,7 +70,7 @@ pub struct PluginIdentity {
 #[serde(default, deny_unknown_fields)]
 pub struct PluginConfig {
     pub enabled: bool,
-    /// Imported only when owner settings are saved; removed from pinned bindings.
+    /// Imported only when owner settings are saved; removed from pinned configuration snapshots.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]

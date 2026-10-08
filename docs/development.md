@@ -132,7 +132,7 @@ Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk r
 | `server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
 | `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
 | `core/` | Immutable Agent models, execution contracts, shared tool schema |
-| `storage/` | SQLite, binding/usage/file-request ledgers, transactions |
+| `storage/` | SQLite, Thread context/configuration, usage/file-request ledgers, transactions |
 | `agent/` | In-process pot-agent |
 | `tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for eval/tests |
 | `gateway/` | Provider HTTP transport and model protocol codecs |

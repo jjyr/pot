@@ -73,13 +73,13 @@ pub fn replace(s: &Service, request: &str, text: &str, revision: u64) -> ApiResu
         .0
         .transaction()
         .map_err(|e| internal(e.into()))?;
-    pot_storage::bindings::set(
+    pot_storage::threads::set(
         &tx,
         KEY,
         &serde_json::to_string(&saved).map_err(|e| internal(e.into()))?,
     )
     .map_err(internal)?;
-    pot_storage::bindings::set(
+    pot_storage::threads::set(
         &tx,
         &receipt,
         &json!({"text":text,"expected_revision":revision,"result":saved}).to_string(),
@@ -108,9 +108,9 @@ pub fn inspect(s: &Service) -> Result<Value> {
             } else {
                 None
             };
-            json!({"id":p.id,"name":p.name,"engine":p.engine,"provider":p.provider,"model":p.model,
+            json!({"id":p.id,"name":p.name,"provider":p.provider,"model":p.model,
             "eligible":eligible,"unavailable_reason":unavailable,
-            "capabilities":resolved.as_ref().ok().map(|spec|&spec.capabilities)})
+            "capabilities":resolved.as_ref().ok().map(|spec|json!({"native_compaction":true,"safe_checkpoint_resume":spec.supports_checkpoint(),"live_steering":true,"model_switch":false,"usage_reporting":spec.supports_checkpoint(),"request_level_budget_enforcement":spec.supports_checkpoint(),"tool_policy_enforcement":true,"mcp_tools":false,"subagents_disableable":true}))})
         })
         .collect();
     Ok(json!({"preferences":prefs,"profiles":catalog}))

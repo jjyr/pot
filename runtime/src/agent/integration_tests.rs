@@ -274,7 +274,7 @@ async fn native_agent_four_protocols_tools_usage_and_reopen() {
         assert_eq!(tokens, 45);
         drop(ledger);
         drop(captured);
-        let state = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+        let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
             .unwrap()
             .unwrap();
         assert!(!state.to_string().contains("upstream-secret"));
@@ -379,7 +379,7 @@ async fn native_agent_compaction_is_persisted_and_metered() {
     ];
     let (s, mut rx, server, captured) = fixture("openai_chat", calls).await;
     turn(&s, &mut rx, "seed").await;
-    let mut value = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+    let mut value = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     let last = value["messages"]
@@ -389,7 +389,7 @@ async fn native_agent_compaction_is_persisted_and_metered() {
         .unwrap();
     last["text"] = json!("old context ".repeat(6000));
     last["replay"]["content"] = last["text"].clone();
-    pot_storage::bindings::save_context(&s.inner.lock().unwrap().store, &value).unwrap();
+    pot_storage::threads::save_context(&s.inner.lock().unwrap().store, &value).unwrap();
     turn(&s, &mut rx, "compact").await;
     assert_eq!(captured.lock().unwrap().len(), 4);
     let ledger = s.usage.lock().unwrap();
@@ -409,7 +409,7 @@ async fn native_agent_compaction_is_persisted_and_metered() {
         std::fs::read_to_string(s.workspace.join("once.txt")).unwrap(),
         "APRICOT\n"
     );
-    let state = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert!(state.to_string().contains("Previous context summary"));
@@ -421,7 +421,7 @@ async fn native_agent_compaction_is_persisted_and_metered() {
 async fn native_agent_interrupted_tool_receipt_is_not_replayed() {
     let (s, mut rx, server, _) = fixture("openai_chat", vec![]).await;
     turn(&s, &mut rx, "seed").await;
-    let mut value = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+    let mut value = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     let call =
@@ -429,10 +429,10 @@ async fn native_agent_interrupted_tool_receipt_is_not_replayed() {
     value["pending"] = json!([call]);
     value["started"] = json!("unknown");
     value["messages"].as_array_mut().unwrap().push(json!({"role":"assistant","text":"","calls":[call],"call_id":"","replay":{"role":"assistant","content":null,"tool_calls":[{"id":"unknown","type":"function","function":{"name":"exec_command","arguments":call["arguments"].to_string()}}]}}));
-    pot_storage::bindings::save_context(&s.inner.lock().unwrap().store, &value).unwrap();
+    pot_storage::threads::save_context(&s.inner.lock().unwrap().store, &value).unwrap();
     turn(&s, &mut rx, "recover").await;
     assert!(!s.workspace.join("replayed.txt").exists());
-    let state = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert!(
@@ -661,11 +661,9 @@ async fn native_agent_code_extensions_tools_context_and_token_estimation() {
     )
     .await;
     let estimates = Arc::new(AtomicUsize::new(0));
-    s.agent_host = Arc::new(pot_agent::AgentHost::with_extensions(Arc::new(
-        CustomAgent {
-            estimates: estimates.clone(),
-        },
-    )));
+    s.agent_executor = Arc::new(pot_agent::Agent::with_extensions(Arc::new(CustomAgent {
+        estimates: estimates.clone(),
+    })));
     configure_agent(
         &s,
         pot_core::AgentSettings {
@@ -688,7 +686,7 @@ async fn native_agent_code_extensions_tools_context_and_token_estimation() {
             .contains("CODE CONTEXT HOOK")
     );
     assert!(estimates.load(Ordering::SeqCst) >= 2);
-    let state = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert!(!state.to_string().contains("CODE CONTEXT HOOK"));
@@ -784,8 +782,7 @@ async fn native_agent_pause_steering_resume_and_cancellation_are_scoped() {
     s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            if s.inner.lock().unwrap().engine.detail.as_deref() == Some("已暂停，等待继续")
-            {
+            if s.inner.lock().unwrap().agent.detail.as_deref() == Some("已暂停，等待继续") {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -814,7 +811,7 @@ async fn native_agent_pause_steering_resume_and_cancellation_are_scoped() {
             .to_string()
             .contains("Include the guidance APRICOT")
     );
-    let state = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert_eq!(
@@ -914,8 +911,7 @@ async fn native_agent_cancel_while_manually_paused_settles_without_sampling() {
     let job = tokio::spawn(async move { run(&running, req).await });
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            if s.inner.lock().unwrap().engine.detail.as_deref() == Some("已暂停，等待继续")
-            {
+            if s.inner.lock().unwrap().agent.detail.as_deref() == Some("已暂停，等待继续") {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -972,7 +968,7 @@ async fn native_agent_display_duplicates_do_not_trigger_compaction_or_extra_usag
             vec![json!({"id":"once","name":"exec_command","arguments":{"cmd":"echo APRICOT"}})];
         let (s, mut rx, server, captured) = fixture(protocol, calls).await;
         turn(&s, &mut rx, "seed-meter").await;
-        let mut state = pot_storage::bindings::load_context(&s.inner.lock().unwrap().store)
+        let mut state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
             .unwrap()
             .unwrap();
         assert!(state["usage_anchor"].is_object());
@@ -982,7 +978,7 @@ async fn native_agent_display_duplicates_do_not_trigger_compaction_or_extra_usag
                 message["text"] = json!("DISPLAY_ONLY_DUPLICATE ".repeat(6000));
             }
         }
-        pot_storage::bindings::save_context(&s.inner.lock().unwrap().store, &state).unwrap();
+        pot_storage::threads::save_context(&s.inner.lock().unwrap().store, &state).unwrap();
         s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         turn(&s, &mut rx, "after-meter-reopen").await;
         let requests = captured.lock().unwrap();
@@ -1102,9 +1098,9 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                         .0;
                 for card in pending["requests"].as_array().unwrap() {
                     assert_eq!(card["request"]["tool"], "cua_repl");
-                    let plugin = binding(&s)
+                    let plugin = thread(&s)
                         .unwrap()
-                        .spec
+                        .config
                         .params
                         .agent
                         .plugin_for_tool("cua_repl")
@@ -1126,7 +1122,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                         assert_eq!(captured.lock().unwrap().len(), 1);
                         assert!(
                             s.permissions
-                                .host_executor("main", binding(&s).unwrap().epoch)
+                                .host_executor("main", thread(&s).unwrap().generation)
                                 .plugin_sessions()
                                 .await
                                 .is_empty()

@@ -608,7 +608,7 @@ SKILLS""",
                     ),
                 ]
             )
-            before = (await api("agent"))["bindings"][0]["native_ref"]
+            before = (await api("agent"))["thread"]
             await turn([action("exec_command", cmd="echo RESUMED >> api-fixture.txt")])
             assert (default / "api-fixture.txt").read_text() == "API_DEFAULT\nRESUMED\n"
             assert (second / "api-fixture.txt").read_text().strip() == "API_SECOND"
@@ -696,9 +696,9 @@ SKILLS""",
             await ipc("backend-restart")
             await wait_endpoint(boot)
             await turn([action("exec_command", cmd="cat api-fixture.txt")])
-            after = (await api("agent"))["bindings"][0]["native_ref"]
+            after = (await api("agent"))["thread"]
             assert before == after, (before, after)
-            report["host_restart_native_resume"] = True
+            report["host_restart_thread_resume"] = True
             # Resume the original worker after Host restart; target remains immutable.
             await api(
                 "tasks/" + task_id + "/messages",

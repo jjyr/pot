@@ -108,12 +108,12 @@ fn child(
         sandboxes: root.sandboxes.clone(),
         sandbox_id: Some(sandbox_id.into()),
         terminals: root.terminals.clone(),
-        agent_host: root.agent_host.clone(),
+        agent_executor: root.agent_executor.clone(),
         usage: root.usage.clone(),
         usage_scope: task_id.into(),
         inner: Arc::new(Mutex::new(Inner {
             store: Store::open(&data.join("pot-v2.sqlite"))?,
-            engine: root.inner.lock().unwrap().engine.clone(),
+            agent: root.inner.lock().unwrap().agent.clone(),
             turn: None,
             model_requests: 0,
         })),
@@ -222,13 +222,13 @@ fn info(record: &Record) -> TaskInfo {
 }
 fn lane_info(lane: &Lane) -> TaskInfo {
     let mut task = info(&lane.record);
-    if let Ok(Some(binding)) = agent::current(&lane.service.inner.lock().unwrap().store) {
-        let icon = crate::gateway::executor_icon(&lane.service, &binding.spec);
+    if let Ok(Some(thread)) = agent::current(&lane.service.inner.lock().unwrap().store) {
+        let icon = crate::gateway::executor_icon(&lane.service, &thread.config);
         // Missing old provider configuration must not erase a known historical icon.
         if icon != "custom"
             || task.executor_icon.is_empty()
             || task.routing.as_ref().is_some_and(|r| {
-                r.profile != binding.spec.source_profile_id || r.provider != binding.spec.provider
+                r.profile != thread.config.source_profile_id || r.provider != thread.config.provider
             })
         {
             task.executor_icon = icon;
@@ -501,8 +501,7 @@ fn enqueue_from(
     {
         let mut inner = service.inner.lock().unwrap();
         if agent::current(&inner.store).map_err(internal)?.is_none() {
-            agent::select_initial(&mut inner.store, &task_id, &service.data, spec)
-                .map_err(internal)?;
+            agent::select_initial(&mut inner.store, &task_id, spec).map_err(internal)?;
         } else {
             agent::assign_new(&mut inner.store, spec).map_err(internal)?;
         }
@@ -560,7 +559,7 @@ pub async fn input(
             duplicate: true,
         }));
     }
-    if lane.service.inner.lock().unwrap().engine.phase == EnginePhase::Failed {
+    if lane.service.inner.lock().unwrap().agent.phase == AgentPhase::Failed {
         return Err(error(
             StatusCode::CONFLICT,
             "engine_uncertain",
@@ -732,7 +731,7 @@ async fn stop_task(
             };
             lane.record.info.updated_at_ms = now();
             if let Err(error) = &result {
-                service.phase(EnginePhase::Failed, Some(error.to_string()));
+                service.phase(AgentPhase::Failed, Some(error.to_string()));
             }
             persist(&root, &hub).map_err(internal)?;
         }
@@ -936,7 +935,7 @@ pub(super) fn execution_service(root: &Service, h: &HeaderMap) -> ApiResult<Serv
 pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessage)>> {
     let mut hub = root.tasks.lock().unwrap();
     for lane in hub.lanes.values().filter(|l| l.record.active.is_none()) {
-        agent::migration::apply_pending(&lane.service, false)?;
+        agent::settings::apply_pending(&lane.service, false)?;
     }
     let active: Vec<_> = hub
         .lanes
@@ -952,7 +951,7 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
     let policy = agent::routing::policy(root)?;
     let active_specs = active
         .iter()
-        .map(|l| agent::binding(&l.service).map(|b| b.spec))
+        .map(|l| agent::thread(&l.service).map(|b| b.config))
         .collect::<Result<Vec<_>>>()?;
     let shared = active.iter().any(|l| l.record.info.resource == "shared");
     let candidate = hub
@@ -969,9 +968,9 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
                             .ready(&l.record.info.id, now())
                             .unwrap_or(false)))
                 && !l.record.queue.is_empty()
-                // Let the normal execution path report a corrupt binding visibly.
-                && agent::binding(&l.service)
-                    .map(|b| policy.admits(&b.spec, &active_specs)).unwrap_or(true)
+                // Let the normal execution path report a corrupt thread visibly.
+                && agent::thread(&l.service)
+                    .map(|b| policy.admits(&b.config, &active_specs)).unwrap_or(true)
                 && !(shared && l.record.info.resource == "shared")
         })
         .min_by_key(|(_, l)| l.record.queue.front().unwrap().order)
@@ -1063,7 +1062,7 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     let snap = lane.service.snapshot()?;
     // Unconfirmed resource shutdown keeps every scheduling lease until Runtime
     // restart. A cancellation request alone must never release capacity.
-    if snap.engine.phase == EnginePhase::Failed {
+    if snap.agent.phase == AgentPhase::Failed {
         lane.record.info.phase = TaskPhase::Failed;
         lane.record.info.updated_at_ms = now();
         return persist(root, &hub);
@@ -1181,7 +1180,7 @@ pub(super) fn owner(root: &Service, owner: &str) -> ApiResult<Service> {
         .map(|lane| lane.service.clone())
         .ok_or_else(|| error(StatusCode::NOT_FOUND, "owner_missing", "Owner not found"))
 }
-pub(super) fn validate_migration(
+pub(super) fn validate_configuration(
     root: &Service,
     owner: &str,
     spec: &agent::ResolvedSpec,
@@ -1232,8 +1231,8 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
                 eprintln!("schedule tick: {e}");
             }
             ticks = (ticks + 1) % 10;
-            if let Err(e) = agent::migration::apply_pending(&root, false) {
-                eprintln!("agent migration: {e}");
+            if let Err(e) = agent::settings::apply_pending(&root, false) {
+                eprintln!("thread configuration: {e}");
             }
             if let Err(e) = usage::resume_main(&root) {
                 eprintln!("usage resume: {e}");
@@ -2179,9 +2178,9 @@ pub(super) mod tests {
         restore(&s).unwrap();
         let worker = owner(&s, &task.id).unwrap();
         assert_eq!(
-            agent::binding(&worker)
+            agent::thread(&worker)
                 .unwrap()
-                .spec
+                .config
                 .source_profile_revision,
             1
         );
@@ -2297,9 +2296,9 @@ pub(super) mod tests {
         .unwrap();
         let tid = first["task_id"].as_str().unwrap();
         assert_eq!(
-            agent::binding(&owner(&s, tid).unwrap())
+            agent::thread(&owner(&s, tid).unwrap())
                 .unwrap()
-                .spec
+                .config
                 .source_profile_id,
             "alternate"
         );
@@ -2334,14 +2333,14 @@ pub(super) mod tests {
             now(),
         )
         .unwrap();
-        let binding =
-            agent::binding(&owner(&s, second["task_id"].as_str().unwrap()).unwrap()).unwrap();
-        assert_eq!(binding.spec.source_profile_revision, 2);
-        assert_eq!(binding.spec.model, "later");
+        let thread =
+            agent::thread(&owner(&s, second["task_id"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(thread.config.source_profile_revision, 2);
+        assert_eq!(thread.config.model, "later");
         assert_eq!(
-            agent::binding(&owner(&s, tid).unwrap())
+            agent::thread(&owner(&s, tid).unwrap())
                 .unwrap()
-                .spec
+                .config
                 .source_profile_revision,
             1
         );
@@ -2357,7 +2356,7 @@ pub(super) mod tests {
         let _ = interrupt(State(s.clone()), headers(), Path(first.id.clone()))
             .await
             .unwrap();
-        worker.phase(EnginePhase::Failed, Some("stop unconfirmed".into()));
+        worker.phase(AgentPhase::Failed, Some("stop unconfirmed".into()));
         finish(&s, &first.id, Ok(())).unwrap();
         assert_eq!(
             s.tasks.lock().unwrap().lanes[&first.id].record.info.phase,
@@ -2755,36 +2754,36 @@ pub(super) mod tests {
         let s = fixture();
         agent::initialize(&s).unwrap();
         let old = add(&s, "old snapshot", "").await;
-        let before = agent::binding(&owner(&s, &old.id).unwrap()).unwrap().spec;
+        let before = agent::thread(&owner(&s, &old.id).unwrap()).unwrap().config;
         let mut profile = agent::Profile::api(s.execution.as_ref().unwrap());
         profile.revision = 2;
         profile.params.max_output_tokens = 77;
         let settings=serde_json::from_value(json!({"profile":profile,"expected_revision":1,"request_id":"edit","follow_main":false})).unwrap();
-        let _ = agent::migration::settings(State(s.clone()), headers(), Json(settings))
+        let _ = agent::settings::settings(State(s.clone()), headers(), Json(settings))
             .await
             .unwrap();
         let new = add(&s, "new snapshot", "").await;
         assert_eq!(
-            agent::binding(&owner(&s, &old.id).unwrap()).unwrap().spec,
+            agent::thread(&owner(&s, &old.id).unwrap()).unwrap().config,
             before
         );
         assert_eq!(
-            agent::binding(&owner(&s, &new.id).unwrap())
+            agent::thread(&owner(&s, &new.id).unwrap())
                 .unwrap()
-                .spec
+                .config
                 .params
                 .max_output_tokens,
             77
         );
         restore(&s).unwrap();
         assert_eq!(
-            agent::binding(&owner(&s, &old.id).unwrap()).unwrap().spec,
+            agent::thread(&owner(&s, &old.id).unwrap()).unwrap().config,
             before
         );
         assert_eq!(
-            agent::binding(&owner(&s, &new.id).unwrap())
+            agent::thread(&owner(&s, &new.id).unwrap())
                 .unwrap()
-                .spec
+                .config
                 .params
                 .max_output_tokens,
             77
@@ -3070,14 +3069,14 @@ pub(super) mod tests {
             1
         );
         let (_, worker, request) = claim(&s).unwrap().unwrap();
-        let binding = agent::binding(&worker).unwrap();
-        let pending = crate::control::pending(&worker, binding.epoch, false).unwrap();
+        let thread = agent::thread(&worker).unwrap();
+        let pending = crate::control::pending(&worker, thread.generation, false).unwrap();
         assert_eq!(pending.len(), 1);
         assert!(pending[0].1.contains("Sender: main"));
         assert!(pending[0].1.contains("not owner authorization"));
-        crate::control::acknowledge(&worker, binding.epoch, &[pending[0].0.clone()]).unwrap();
+        crate::control::acknowledge(&worker, thread.generation, &[pending[0].0.clone()]).unwrap();
         assert!(
-            crate::control::pending(&worker, binding.epoch, false)
+            crate::control::pending(&worker, thread.generation, false)
                 .unwrap()
                 .is_empty()
         );
@@ -3099,9 +3098,9 @@ pub(super) mod tests {
         restore(&s).unwrap();
         guide(&s, &task.id, "resume", "review new reference").await;
         let (_, worker, _) = claim(&s).unwrap().unwrap();
-        let binding = agent::binding(&worker).unwrap();
+        let thread = agent::thread(&worker).unwrap();
         assert_eq!(
-            crate::control::pending(&worker, binding.epoch, false)
+            crate::control::pending(&worker, thread.generation, false)
                 .unwrap()
                 .len(),
             1

@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use pot_core::{DriverDescription, DriverEvent, ExecutionObservation, ResolvedSpec};
+use pot_core::{AgentEvent, ExecutionObservation, ResolvedSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -11,11 +11,10 @@ pub struct Manifest {
     pub scenario_id: String,
     pub scenario_hash: String,
     pub mode: String,
-    pub driver: String,
+    pub executor: String,
     pub build_version: String,
     pub runtime_revision: Option<String>,
     pub effective_spec: ResolvedSpec,
-    pub capabilities: DriverDescription,
     pub deadline_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<serde_json::Value>,
@@ -32,7 +31,7 @@ pub struct Event {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum Payload {
-    Driver(DriverEvent),
+    Agent(AgentEvent),
     Observation(ExecutionObservation),
     Usage(UsageReport),
 }

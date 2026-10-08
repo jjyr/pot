@@ -17,15 +17,6 @@ impl ExecutionFeedback for Feedback {
     fn cancellation(&self) -> BoxFuture<'_, ()> {
         Box::pin(std::future::pending())
     }
-    fn native_identity(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
-    fn binding_broken(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
-    fn needs_rebind(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
     fn record_turn(&self, _: &str) -> Result<()> {
         Ok(())
     }

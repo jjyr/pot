@@ -63,7 +63,7 @@ import Foundation
          "return_to_chat": returnToChat, "ai_busy": aiBusy, "active_spec": activeSpec,
          "active_name": savedProfiles
              .first { $0["id"] as? String == activeSpec["source_profile_id"] as? String }?["name"] as? String ??
-             (activeSpec["engine"] as? String ?? "Agent"),
+             "Pot",
          "connections": connections, "model_options": modelOptions,
          "check_message": checkMessage,
          "profiles": savedProfiles, "routing": routingPolicy, "routing_profile": routingProfile,
@@ -77,7 +77,7 @@ import Foundation
          "environment_phase": environment["phase"] as? String ?? L.text("settingspanel.waiting-to-start"),
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
-         "selected_engine": profile["engine"] as? String ?? "pot", "selected_model": profile["model"] as? String ?? "",
+         "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
          "locale": L.locale, "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
     }
@@ -274,16 +274,16 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                _ = try await bridge.runtime.request("api/v1/agent/migrate", body: [
-                    "request_id": UUID().uuidString, "target_profile": target,
-                    "owner": owner, "reason": "settings_changed",
+                _ = try await bridge.runtime.request("api/v1/agent/config", body: [
+                    "request_id": UUID().uuidString, "profile": target,
+                    "owner": owner,
                 ])
                 while true {
                     let response = try await bridge.runtime.request("api/v1/agent?owner=" + owner)
-                    if response["pending_migration"] is NSNull || response["pending_migration"] == nil {
+                    if response["pending_config"] is NSNull || response["pending_config"] == nil {
                         break
                     }
-                    result = L.text("settingspanel.this-task-is-waiting-for-handoff-finish")
+                    result = L.text("settingspanel.this-task-is-waiting-for-configuration")
                     try await Task.sleep(nanoseconds: 750_000_000)
                 }
                 result = L.text("settingspanel.this-task-s-agent-changed-other-tasks")

@@ -1,6 +1,7 @@
 //! Unit fixtures for private Agent state transitions; no HTTP service or paid calls.
 use super::*;
 use crate::extensions::Defaults;
+use futures::future::BoxFuture;
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -89,15 +90,6 @@ impl ExecutionFeedback for Feedback {
                 changed.await;
             }
         })
-    }
-    fn native_identity(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
-    fn binding_broken(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
-    fn needs_rebind(&self, _: &str) -> Result<()> {
-        Ok(())
     }
     fn record_turn(&self, _: &str) -> Result<()> {
         Ok(())
@@ -196,7 +188,7 @@ struct Fixture {
     dir: PathBuf,
     feedback: Arc<Feedback>,
     context: ExecutionContext,
-    binding: Binding,
+    thread: Thread,
     services: Services,
 }
 struct BrowserFixtureExecutor {
@@ -235,8 +227,8 @@ async fn browser_model_configuration_selects_schema_and_typed_observations() {
     ] {
         for vision in [false, true] {
             let mut f = Fixture::new(protocol);
-            f.binding.spec.params.agent.builtin_tools = vec![];
-            f.binding.spec.params.agent.model_catalog = Some(serde_json::from_value(json!({"schema_version":1,"default":{"input_modalities":if vision {vec!["text", "image"]} else {vec!["text"]}}})).unwrap());
+            f.thread.config.params.agent.builtin_tools = vec![];
+            f.thread.config.params.agent.model_catalog = Some(serde_json::from_value(json!({"schema_version":1,"default":{"input_modalities":if vision {vec!["text", "image"]} else {vec!["text"]}}})).unwrap());
             f.context.tool_executor = Some(Arc::new(BrowserFixtureExecutor { vision }));
             let calls = vec![model::ToolCall {
                 id: "browser-call".into(),
@@ -315,25 +307,16 @@ impl Fixture {
         profile.params.agent.builtin_tools = vec!["exec_command".into()];
         let mut spec = profile.resolve().unwrap();
         spec.set_gateway_protocol(protocol).unwrap();
-        let binding = Binding {
-            pot_owner: "unit".into(),
-            epoch: 1,
-            spec,
-            native_ref: NativeRef::Pot {
-                file: dir.join("context.json"),
-                session_id: None,
-            },
-            schema_version: SCHEMA_VERSION,
-            state: BindingState::Active,
-            model_switches: vec![],
-            handoff_ref: None,
-            failure: None,
+        let thread = Thread {
+            owner: "unit".into(),
+            generation: 1,
+            config: spec,
         };
         Self {
             dir,
             feedback,
             context,
-            binding,
+            thread,
             services: Services::default(),
         }
     }
@@ -348,7 +331,7 @@ impl Fixture {
         let mut updates = vec![];
         let result = run(
             &self.context,
-            &self.binding,
+            &self.thread,
             &TurnRequest {
                 request_id: "turn".into(),
                 text: "task".into(),
@@ -376,9 +359,8 @@ impl Drop for Fixture {
 }
 fn context(messages: Vec<Message>) -> Context {
     Context {
-        kind: "session".into(),
+        kind: "context".into(),
         version: 1,
-        id: "unit-context".into(),
         messages,
         pending: vec![],
         started: None,
@@ -468,8 +450,8 @@ async fn compaction_threshold_exact_boundary_minimum_history_and_disabled_policy
         (100, 4, false, false),
     ] {
         let mut f = Fixture::new("openai_chat");
-        f.binding.spec.params.agent.auto_compact = enabled;
-        f.binding.spec.params.agent.compact_at = Some(100);
+        f.thread.config.params.agent.auto_compact = enabled;
+        f.thread.config.params.agent.compact_at = Some(100);
         let mut state = compact_history();
         state.messages.truncate(len);
         f.services.queue(wire("openai_chat", "summary", &[]));
@@ -477,7 +459,7 @@ async fn compaction_threshold_exact_boundary_minimum_history_and_disabled_policy
             Some(&f.services),
             &client(1000).unwrap(),
             &f.context,
-            &f.binding,
+            &f.thread,
             &mut state,
             &mut |_| Ok(()),
             &Estimate(estimate),
@@ -505,16 +487,16 @@ async fn compaction_threshold_exact_boundary_minimum_history_and_disabled_policy
 async fn compaction_derived_threshold_accounts_for_output_and_context_reservations() {
     for (output, expected) in [(128, 852), (400, 730)] {
         let mut f = Fixture::new("openai_chat");
-        f.binding.spec.context_window = 1000;
-        f.binding.spec.params.max_output_tokens = output;
-        f.binding.spec.params.agent.context_reserve = 20;
-        f.binding.spec.params.agent.auto_compact = true;
+        f.thread.config.context_window = 1000;
+        f.thread.config.params.max_output_tokens = output;
+        f.thread.config.params.agent.context_reserve = 20;
+        f.thread.config.params.agent.auto_compact = true;
         let mut state = compact_history();
         compact(
             Some(&f.services),
             &client(1000).unwrap(),
             &f.context,
-            &f.binding,
+            &f.thread,
             &mut state,
             &mut |_| Ok(()),
             &Estimate(expected - 1),
@@ -530,8 +512,8 @@ async fn compaction_derived_threshold_accounts_for_output_and_context_reservatio
 #[tokio::test]
 async fn compaction_without_a_recent_user_boundary_preserves_history() {
     let mut f = Fixture::new("openai_chat");
-    f.binding.spec.params.agent.auto_compact = true;
-    f.binding.spec.params.agent.compact_at = Some(1);
+    f.thread.config.params.agent.auto_compact = true;
+    f.thread.config.params.agent.compact_at = Some(1);
     let mut state = context(vec![
         Message::text("user", "only user".into()),
         Message::text("assistant", "a".into()),
@@ -543,7 +525,7 @@ async fn compaction_without_a_recent_user_boundary_preserves_history() {
         Some(&f.services),
         &client(1000).unwrap(),
         &f.context,
-        &f.binding,
+        &f.thread,
         &mut state,
         &mut |_| Ok(()),
         &Estimate(100),
@@ -559,9 +541,9 @@ async fn compaction_without_a_recent_user_boundary_preserves_history() {
 async fn provider_calibration_switch_changes_compaction_decision_without_changing_billing() {
     for calibrated in [true, false] {
         let mut f = Fixture::new("openai_chat");
-        f.binding.spec.params.agent.auto_compact = true;
-        f.binding.spec.params.agent.compact_at = Some(500);
-        f.binding.spec.params.agent.use_provider_usage = calibrated;
+        f.thread.config.params.agent.auto_compact = true;
+        f.thread.config.params.agent.compact_at = Some(500);
+        f.thread.config.params.agent.use_provider_usage = calibrated;
         let mut state = compact_history();
         state.messages[1].usage = Some(model::TokenUsage {
             input: 100,
@@ -580,7 +562,7 @@ async fn provider_calibration_switch_changes_compaction_decision_without_changin
             Some(&f.services),
             &client(1000).unwrap(),
             &f.context,
-            &f.binding,
+            &f.thread,
             &mut state,
             &mut |_| Ok(()),
             &Defaults,
@@ -607,8 +589,8 @@ async fn provider_calibration_switch_changes_compaction_decision_without_changin
 async fn unsuccessful_compaction_keeps_original_history_and_closes_lifecycle() {
     for failure in ["stream", "tools", "no-reduction", "persistence"] {
         let mut f = Fixture::new("openai_chat");
-        f.binding.spec.params.agent.auto_compact = true;
-        f.binding.spec.params.agent.compact_at = Some(1);
+        f.thread.config.params.agent.auto_compact = true;
+        f.thread.config.params.agent.compact_at = Some(1);
         let mut state = compact_history();
         state.messages[1].usage = Some(model::TokenUsage {
             input: 100,
@@ -643,7 +625,7 @@ async fn unsuccessful_compaction_keeps_original_history_and_closes_lifecycle() {
                 Some(&f.services),
                 &client(1000).unwrap(),
                 &f.context,
-                &f.binding,
+                &f.thread,
                 &mut state,
                 &mut |_| Ok(()),
                 &Estimate(100),
@@ -666,8 +648,8 @@ async fn unsuccessful_compaction_keeps_original_history_and_closes_lifecycle() {
 #[tokio::test]
 async fn successful_compaction_clears_anchor_and_excludes_tools_from_summary_request() {
     let mut f = Fixture::new("openai_chat");
-    f.binding.spec.params.agent.auto_compact = true;
-    f.binding.spec.params.agent.compact_at = Some(1);
+    f.thread.config.params.agent.auto_compact = true;
+    f.thread.config.params.agent.compact_at = Some(1);
     let mut state = compact_history();
     state.messages[1].usage = Some(model::TokenUsage {
         input: 100,
@@ -686,7 +668,7 @@ async fn successful_compaction_clears_anchor_and_excludes_tools_from_summary_req
         Some(&f.services),
         &client(1000).unwrap(),
         &f.context,
-        &f.binding,
+        &f.thread,
         &mut state,
         &mut |_| Ok(()),
         &Estimate(100),
@@ -716,8 +698,8 @@ async fn successful_compaction_clears_anchor_and_excludes_tools_from_summary_req
 async fn rejected_completion_ack_and_failed_display_sink_do_not_publish_two_terminals() {
     for reject_ack in [true, false] {
         let mut f = Fixture::new("openai_chat");
-        f.binding.spec.params.agent.auto_compact = true;
-        f.binding.spec.params.agent.compact_at = Some(1);
+        f.thread.config.params.agent.auto_compact = true;
+        f.thread.config.params.agent.compact_at = Some(1);
         f.services
             .reject_complete
             .store(reject_ack, Ordering::SeqCst);
@@ -727,7 +709,7 @@ async fn rejected_completion_ack_and_failed_display_sink_do_not_publish_two_term
             Some(&f.services),
             &client(1000).unwrap(),
             &f.context,
-            &f.binding,
+            &f.thread,
             &mut state,
             &mut |_| Err(anyhow!("Injected display failure")),
             &Estimate(100),
@@ -787,7 +769,7 @@ async fn cumulative_usage_snapshots_cache_and_reasoning_are_not_added_twice() {
             Some(&f.services),
             &client(1000).unwrap(),
             &f.context,
-            &f.binding,
+            &f.thread,
             "system",
             &[],
             &[],
@@ -903,12 +885,12 @@ async fn context_window_guard_includes_output_reservation_and_rejects_before_tra
         (u64::MAX, 128, 1000, false),
     ] {
         let mut f = Fixture::new("openai_chat");
-        f.binding.spec.context_window = window;
-        f.binding.spec.params.max_output_tokens = output;
+        f.thread.config.context_window = window;
+        f.thread.config.params.max_output_tokens = output;
         f.services.queue(wire("openai_chat", "done", &[]));
         let result = run(
             &f.context,
-            &f.binding,
+            &f.thread,
             &TurnRequest {
                 request_id: "guard".into(),
                 text: "task".into(),
@@ -1293,14 +1275,14 @@ fn parameters<'a>(tool: &'a Value, protocol: &str) -> &'a Value {
     }]
 }
 fn full_loadout(f: &mut Fixture) {
-    f.binding.spec.params.agent.builtin_tools = vec![
+    f.thread.config.params.agent.builtin_tools = vec![
         "exec_command".into(),
         "write_stdin".into(),
         "apply_patch".into(),
     ];
     let mut control: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).unwrap();
     // Shared tool discovery must not execute tools outside the injected backend.
-    control.extend(tools::schemas(&f.binding.spec.params.agent.shell));
+    control.extend(tools::schemas(&f.thread.config.params.agent.shell));
     f.services.rpc_tools = Some(control);
 }
 #[tokio::test]
@@ -1310,7 +1292,7 @@ async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
             let mut f = Fixture::new(protocol);
             full_loadout(&mut f);
             f.context.role = role;
-            f.binding.spec.params.agent.shell.max_output_bytes = 4096;
+            f.thread.config.params.agent.shell.max_output_bytes = 4096;
             let executor = Arc::new(RecordingExecutor::default());
             f.context.tool_executor = Some(executor.clone());
             let calls = vec![
@@ -1382,7 +1364,7 @@ async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
             for (record, call) in dispatched.iter().zip(&calls) {
                 assert_eq!(
                     *record,
-                    json!({"role":role_name(role),"owner":f.context.owner,"policy":f.binding.spec.params.agent.shell,"name":call.name,"args":call.arguments,"call":call.id})
+                    json!({"role":role_name(role),"owner":f.context.owner,"policy":f.thread.config.params.agent.shell,"name":call.name,"args":call.arguments,"call":call.id})
                 );
             }
             assert_eq!(*executor.finishes.lock().unwrap(), vec!["unit"]);
@@ -1412,8 +1394,8 @@ async fn configured_loadout_restricts_model_tools_and_dispatch() {
     let mut f = Fixture::new("openai_chat");
     full_loadout(&mut f);
     f.context.role = ExecutionRole::Main;
-    f.binding.spec.params.agent.builtin_tools = vec!["apply_patch".into()];
-    f.binding.spec.params.agent.allowed_tools =
+    f.thread.config.params.agent.builtin_tools = vec!["apply_patch".into()];
+    f.thread.config.params.agent.allowed_tools =
         Some(vec!["apply_patch".into(), "list_tasks".into()]);
     let executor = Arc::new(RecordingExecutor::default());
     f.context.tool_executor = Some(executor.clone());
@@ -1513,7 +1495,7 @@ async fn skills_are_not_requested_for_summary_or_without_authorized_reader() {
     for role in [ExecutionRole::Summary, ExecutionRole::Worker] {
         let mut f = Fixture::new("openai_chat");
         f.context.role = role;
-        f.binding.spec.params.agent.builtin_tools = vec![];
+        f.thread.config.params.agent.builtin_tools = vec![];
         f.services.rpc_tools = Some(vec![]);
         let catalog = CatalogExtension::default();
         f.services.queue(wire("openai_chat", "done", &[]));
@@ -1593,7 +1575,7 @@ async fn unavailable_selected_skill_fails_before_model_request() {
 async fn allowed_tools_excluding_reader_skips_skill_provider() {
     let mut f = Fixture::new("openai_chat");
     full_loadout(&mut f);
-    f.binding.spec.params.agent.allowed_tools = Some(vec!["apply_patch".into()]);
+    f.thread.config.params.agent.allowed_tools = Some(vec!["apply_patch".into()]);
     let catalog = CatalogExtension::default();
     f.services.queue(wire("openai_chat", "done", &[]));
     f.turn_with(false, &catalog).await.unwrap();
@@ -1611,7 +1593,7 @@ async fn injected_instructions_refresh_for_main_and_worker_without_history_copie
             f.context.role = role;
             f.services.rpc_tools = Some(vec![]);
             // Directory instructions are relevant even without an authorized reader.
-            f.binding.spec.params.agent.builtin_tools.clear();
+            f.thread.config.params.agent.builtin_tools.clear();
             for text in ["FIRST_INSTRUCTIONS", "UPDATED_INSTRUCTIONS"] {
                 f.context.instructions =
                     format!("# AGENTS.md instructions for /data/workspace\n{text}");
@@ -1670,7 +1652,7 @@ async fn instructions_are_caller_owned_and_never_discovered_from_agent_cwd() {
 #[tokio::test]
 async fn host_write_waits_for_owner_and_denial_has_no_effect() {
     let mut f = Fixture::new("openai_chat");
-    f.binding.spec.params.agent.builtin_tools = vec![
+    f.thread.config.params.agent.builtin_tools = vec![
         "exec_command".into(),
         "write_stdin".into(),
         "apply_patch".into(),
@@ -1756,7 +1738,7 @@ async fn path_grants_do_not_authorize_shell_commands() {
     assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
 }
 #[tokio::test]
-async fn permanent_grants_survive_rebinding_but_remain_agent_specific() {
+async fn permanent_grants_survive_configuration_changes_but_remain_owner_specific() {
     let mut f = Fixture::new("openai_chat");
     *f.feedback.grants.lock().unwrap() = Some(json!([permissions::Grant {
         id: "saved".into(),
@@ -1772,10 +1754,10 @@ async fn permanent_grants_survive_rebinding_but_remain_agent_specific() {
         text: "read".into(),
     };
     let args = json!({"patch":"prepared"});
-    f.binding.epoch = 99;
+    f.thread.generation = 99;
     permissions::authorize(
         &f.context,
-        &f.binding,
+        &f.thread,
         &request,
         "call",
         "apply_patch",
@@ -1788,7 +1770,7 @@ async fn permanent_grants_survive_rebinding_but_remain_agent_specific() {
     assert!(
         permissions::authorize(
             &f.context,
-            &f.binding,
+            &f.thread,
             &request,
             "call",
             "apply_patch",
@@ -1864,7 +1846,7 @@ async fn environment_policy_allows_tools_without_grants_but_preserves_role_limit
     *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"allow"},"grants":[]}));
     permissions::authorize(
         &f.context,
-        &f.binding,
+        &f.thread,
         &request,
         "allow",
         "apply_patch",
@@ -1876,7 +1858,7 @@ async fn environment_policy_allows_tools_without_grants_but_preserves_role_limit
     assert!(
         permissions::authorize(
             &f.context,
-            &f.binding,
+            &f.thread,
             &request,
             "mapping",
             "set_sandbox_mappings",
@@ -1889,7 +1871,7 @@ async fn environment_policy_allows_tools_without_grants_but_preserves_role_limit
     assert!(
         permissions::authorize(
             &f.context,
-            &f.binding,
+            &f.thread,
             &request,
             "summary",
             "apply_patch",
@@ -1902,16 +1884,9 @@ async fn environment_policy_allows_tools_without_grants_but_preserves_role_limit
     *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"ask"},"grants":[]}));
     *f.feedback.permission_decision.lock().unwrap() = Some(false);
     assert!(
-        permissions::authorize(
-            &f.context,
-            &f.binding,
-            &request,
-            "ask",
-            "apply_patch",
-            &args
-        )
-        .await
-        .is_err()
+        permissions::authorize(&f.context, &f.thread, &request, "ask", "apply_patch", &args)
+            .await
+            .is_err()
     );
     assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
 }
@@ -1943,7 +1918,7 @@ async fn management_and_existing_session_input_skip_approval_but_mappings_do_not
             json!({"session_id":"existing","environment":"host","terminate":true}),
         ),
     ] {
-        permissions::authorize(&f.context, &f.binding, &turn, tool, tool, &args)
+        permissions::authorize(&f.context, &f.thread, &turn, tool, tool, &args)
             .await
             .unwrap();
     }
@@ -1952,7 +1927,7 @@ async fn management_and_existing_session_input_skip_approval_but_mappings_do_not
     assert!(
         permissions::authorize(
             &f.context,
-            &f.binding,
+            &f.thread,
             &turn,
             "mapping",
             "set_sandbox_mappings",
@@ -1966,7 +1941,7 @@ async fn management_and_existing_session_input_skip_approval_but_mappings_do_not
     assert!(
         permissions::authorize(
             &f.context,
-            &f.binding,
+            &f.thread,
             &turn,
             "worker-manage",
             "manage_sandbox",
@@ -1979,7 +1954,7 @@ async fn management_and_existing_session_input_skip_approval_but_mappings_do_not
     assert!(
         permissions::authorize(
             &f.context,
-            &f.binding,
+            &f.thread,
             &turn,
             "summary-input",
             "write_stdin",
@@ -1994,8 +1969,8 @@ async fn management_and_existing_session_input_skip_approval_but_mappings_do_not
 async fn composed_shell_calls_use_owner_approval_and_hide_intermediate_results() {
     for approved in [false, true] {
         let mut f = Fixture::new("openai_chat");
-        f.binding
-            .spec
+        f.thread
+            .config
             .params
             .agent
             .builtin_tools
@@ -2032,13 +2007,13 @@ async fn composed_shell_calls_use_owner_approval_and_hide_intermediate_results()
 #[tokio::test]
 async fn removed_file_tools_and_disallowed_composed_tools_cannot_execute() {
     let mut f = Fixture::new("openai_chat");
-    f.binding
-        .spec
+    f.thread
+        .config
         .params
         .agent
         .builtin_tools
         .extend(["exec".into(), "wait".into()]);
-    f.binding.spec.params.agent.allowed_tools = Some(vec!["exec".into(), "wait".into()]);
+    f.thread.config.params.agent.allowed_tools = Some(vec!["exec".into(), "wait".into()]);
     let calls = ["read_file", "write_file", "list_directory"]
         .into_iter()
         .map(|name| model::ToolCall {
@@ -2070,8 +2045,8 @@ async fn composition_reuses_parent_receipts_and_routes_product_calls_across_prot
     for protocol in ["openai_chat", "openai_responses", "anthropic_messages"] {
         let mut f = Fixture::new(protocol);
         f.context.role = ExecutionRole::Main;
-        f.binding
-            .spec
+        f.thread
+            .config
             .params
             .agent
             .builtin_tools
@@ -2139,7 +2114,7 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
                 f.context.role = role;
                 f.context.backend_url = "http://fixture".into();
                 f.services.rpc_tools = Some(vec![]);
-                f.binding.spec.params.agent.builtin_tools = vec!["exec".into(), "wait".into()];
+                f.thread.config.params.agent.builtin_tools = vec!["exec".into(), "wait".into()];
                 *f.feedback.grants.lock().unwrap() = Some(json!([]));
                 let environment = if role == ExecutionRole::Main {
                     "host"
@@ -2205,21 +2180,21 @@ async fn plugin_exact_grants_allow_only_the_approved_code_and_summary_cannot_exe
         request_id: "turn".into(),
         text: String::new(),
     };
-    permissions::authorize(&f.context, &f.binding, &turn, "one", "cua_repl", &args)
+    permissions::authorize(&f.context, &f.thread, &turn, "one", "cua_repl", &args)
         .await
         .unwrap();
     assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
     let mut changed = args.clone();
     changed["code"] = json!("nodeRepl.write(2)");
     assert!(
-        permissions::authorize(&f.context, &f.binding, &turn, "two", "cua_repl", &changed)
+        permissions::authorize(&f.context, &f.thread, &turn, "two", "cua_repl", &changed)
             .await
             .is_err()
     );
     assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
     f.context.role = ExecutionRole::Summary;
     assert!(
-        permissions::authorize(&f.context, &f.binding, &turn, "summary", "cua_repl", &args)
+        permissions::authorize(&f.context, &f.thread, &turn, "summary", "cua_repl", &args)
             .await
             .is_err()
     );
@@ -2252,5 +2227,60 @@ async fn sandbox_allow_policy_executes_computer_use_without_owner_prompt() {
         f.turn(false).await.unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn thread_switches_between_all_protocols_without_losing_tool_history_or_replaying_effects() {
+    for source in PROTOCOLS {
+        for target in PROTOCOLS {
+            let mut f = Fixture::new(source);
+            let call = model::ToolCall {
+                id: "effect".into(),
+                name: "exec_command".into(),
+                arguments: json!({"cmd":"echo once >> effects.txt"}),
+            };
+            f.services.queue(wire(source, "working", &[call]));
+            f.services.queue(wire(source, "completed", &[]));
+            f.turn(false).await.unwrap();
+            let original = f.feedback.load_context().unwrap().unwrap();
+            f.thread.config.set_gateway_protocol(target).unwrap();
+            f.thread.config.model = "other-model".into();
+            f.thread.config.provider = "other-provider".into();
+            f.thread.generation += 1;
+            f.services.queue(wire(target, "continued", &[]));
+            let request = TurnRequest {
+                request_id: "next-turn".into(),
+                text: "continue the same goal".into(),
+            };
+            run(
+                &f.context,
+                &f.thread,
+                &request,
+                false,
+                &Defaults,
+                Some(&f.services),
+                &mut |_| Ok(()),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(f.context.workspace.join("effects.txt")).unwrap(),
+                "once\n"
+            );
+            let requests = f.services.requests.lock().unwrap();
+            let body = requests.last().unwrap()["body"].to_string();
+            assert!(body.contains("working"));
+            assert!(body.contains("completed"));
+            assert!(body.contains("effect"));
+            assert!(body.contains("echo once"));
+            assert!(!body.contains("thoughtSignature"));
+            let saved = f.feedback.load_context().unwrap().unwrap();
+            let n = original["messages"].as_array().unwrap().len();
+            assert_eq!(
+                &saved["messages"].as_array().unwrap()[..n],
+                original["messages"].as_array().unwrap()
+            );
+        }
     }
 }

@@ -4,7 +4,7 @@ use super::*;
 /// In-process Agent calls use the same Runtime authorization as MCP calls.
 pub struct Tools {
     pub service: Service,
-    pub epoch: u64,
+    pub generation: u64,
 }
 impl pot_core::ToolExecutor for Tools {
     fn execute<'a>(
@@ -18,8 +18,8 @@ impl pot_core::ToolExecutor for Tools {
     ) -> futures::future::BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             anyhow::ensure!(
-                agent::binding(&self.service)?.epoch == self.epoch,
-                "Execution binding changed"
+                agent::thread(&self.service)?.generation == self.generation,
+                "Execution thread changed"
             );
             let environment = args["environment"].as_str().unwrap_or("");
             let mut execution_args = args.clone();
@@ -27,17 +27,17 @@ impl pot_core::ToolExecutor for Tools {
                 object.remove("environment");
             }
             if environment == "host" {
-                let binding = agent::binding(&self.service)?;
-                if let Some(plugin) = binding.spec.params.agent.plugin_for_tool(name)? {
+                let thread = agent::thread(&self.service)?;
+                if let Some(plugin) = thread.config.params.agent.plugin_for_tool(name)? {
                     anyhow::ensure!(
                         plugin.manifest.execution == "environment",
                         "This plugin supports Sandbox execution only"
                     );
-                    let descriptor = binding
-                        .spec
+                    let descriptor = thread
+                        .config
                         .params
                         .agent
-                        .model_descriptor(&binding.spec.provider, &binding.spec.model)?;
+                        .model_descriptor(&thread.config.provider, &thread.config.model)?;
                     execution_args =
                         pot_core::plugins::call(plugin, name, execution_args, descriptor.vision())?;
                 } else {
@@ -49,12 +49,12 @@ impl pot_core::ToolExecutor for Tools {
                 let executor = self
                     .service
                     .permissions
-                    .host_executor(&self.service.usage_scope, self.epoch);
+                    .host_executor(&self.service.usage_scope, self.generation);
                 return pot_core::ToolExecutor::execute(
                     &*executor,
                     context,
                     policy,
-                    if binding.spec.params.agent.plugin_for_tool(name)?.is_some() {
+                    if thread.config.params.agent.plugin_for_tool(name)?.is_some() {
                         "plugin_call"
                     } else {
                         name
@@ -332,17 +332,15 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             .map(|v| v.remove("resource_request_id"));
         return Ok(result);
     }
-    let binding = agent::binding(s)?;
-    let settings = &binding.spec.params.agent;
+    let thread = agent::thread(s)?;
+    let settings = &thread.config.params.agent;
     let plugin = settings.plugin_for_tool(name)?;
     anyhow::ensure!(
         plugin.is_some() || ["exec_command", "write_stdin", "apply_patch"].contains(&name),
         "Unknown execution operation"
     );
     anyhow::ensure!(
-        (plugin.is_some()
-            || binding.spec.engine != agent::Engine::Pot
-            || settings.builtin_tools.iter().any(|n| n == name))
+        (plugin.is_some() || settings.builtin_tools.iter().any(|n| n == name))
             && settings
                 .allowed_tools
                 .as_ref()
@@ -381,7 +379,8 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             .await?;
     }
     let (name, args) = if let Some(plugin) = plugin {
-        let descriptor = settings.model_descriptor(&binding.spec.provider, &binding.spec.model)?;
+        let descriptor =
+            settings.model_descriptor(&thread.config.provider, &thread.config.model)?;
         let target = args.get("sandbox_id").cloned();
         let mut envelope =
             pot_core::plugins::call(plugin, name, args.clone(), descriptor.vision())?;
@@ -405,10 +404,10 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     let grant = pot_sandbox::AccessGrant {
         owner: s.usage_scope.clone(),
         turn: turn.clone(),
-        epoch: binding.epoch,
+        thread_generation: thread.generation,
         target: s.sandbox_id.clone().unwrap_or_default(),
         worker: s.is_worker,
-        policy: binding.spec.params.agent.shell.clone(),
+        policy: thread.config.params.agent.shell.clone(),
     };
     s.sandboxes
         .environment
@@ -436,13 +435,13 @@ pub async fn reap_idle(s: &Service) -> Result<()> {
     s.permissions.reap_host_plugins().await?;
     s.sandboxes.environment.reap_idle().await
 }
-pub async fn finish_stale(s: &Service, epoch: u64) -> Result<()> {
+pub async fn finish_stale(s: &Service, generation: u64) -> Result<()> {
     s.permissions
-        .finish_stale_host(&s.usage_scope, epoch)
+        .finish_stale_host(&s.usage_scope, generation)
         .await?;
     s.sandboxes
         .environment
-        .finish_stale(&s.usage_scope, epoch)
+        .finish_stale(&s.usage_scope, generation)
         .await
 }
 pub async fn shutdown(s: &Service) -> Result<()> {

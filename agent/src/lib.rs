@@ -15,7 +15,7 @@ mod tests;
 mod tools;
 use anyhow::{Result, anyhow, bail, ensure};
 pub use extensions::AgentExtensions;
-use futures::{StreamExt, future::BoxFuture};
+use futures::StreamExt;
 use pot_core::*;
 use pot_gateway::{
     codecs::Protocol,
@@ -29,154 +29,92 @@ use std::{
 };
 pub use tools::schemas as tool_schemas;
 
-pub struct AgentHost;
-pub struct ExtendedHost {
+pub struct Agent {
     extensions: Arc<dyn AgentExtensions>,
     services: Option<Arc<dyn ExecutionServices>>,
 }
-impl AgentHost {
-    pub fn with_extensions(extensions: Arc<dyn AgentExtensions>) -> ExtendedHost {
-        ExtendedHost {
-            extensions,
+impl Default for Agent {
+    fn default() -> Self {
+        Self {
+            extensions: Arc::new(extensions::Defaults),
             services: None,
         }
     }
 }
-impl ExtendedHost {
-    pub fn with_services(mut self, services: Arc<dyn ExecutionServices>) -> Self {
+impl Agent {
+    pub fn with_extensions(extensions: Arc<dyn AgentExtensions>) -> Self {
+        Self {
+            extensions,
+            services: None,
+        }
+    }
+    pub fn with_services(services: Arc<dyn ExecutionServices>) -> Self {
+        Self::default().services(services)
+    }
+    pub fn services(mut self, services: Arc<dyn ExecutionServices>) -> Self {
         self.services = Some(services);
         self
     }
-}
-impl AgentHost {
-    pub fn with_services(services: Arc<dyn ExecutionServices>) -> ExtendedHost {
-        Self::with_extensions(Arc::new(extensions::Defaults)).with_services(services)
-    }
-}
-struct Session {
-    context: ExecutionContext,
-    binding: Binding,
-    extensions: Arc<dyn AgentExtensions>,
-    services: Option<Arc<dyn ExecutionServices>>,
-}
-fn description(spec: &ResolvedSpec) -> Result<DriverDescription> {
-    AgentHost.probe(spec)?;
-    Ok(DriverDescription {
-        configurable_context: true,
-        configurable_tools: true,
-        injectable_services: true,
-        request_usage: true,
-        compaction_lifecycle: true,
-    })
-}
-impl DriverHost for AgentHost {
-    fn describe(&self, spec: &ResolvedSpec) -> Result<DriverDescription> {
-        description(spec)
-    }
-    fn probe(&self, spec: &ResolvedSpec) -> Result<()> {
-        spec.validate()?;
-        ensure!(spec.engine == Engine::Pot, "Expected Pot Agent");
+    pub fn validate(&self, config: &ResolvedSpec) -> Result<()> {
+        config.validate()?;
         ensure!(
-            Protocol::from_name(&spec.gateway_protocol)? != Protocol::Unknown,
-            "Unsupported Agent model protocol"
+            Protocol::from_name(&config.gateway_protocol)? != Protocol::Unknown,
+            "Unsupported model protocol"
         );
         Ok(())
     }
-    fn session(
+    pub async fn execute(
         &self,
-        context: ExecutionContext,
-        binding: Binding,
-    ) -> Result<Box<dyn SessionHandle>> {
-        self.probe(&binding.spec)?;
-        ensure!(
-            binding.state == BindingState::Active,
-            "Agent binding is broken"
-        );
-        Ok(Box::new(Session {
-            context,
-            binding,
-            extensions: Arc::new(extensions::Defaults),
-            services: None,
-        }))
-    }
-}
-impl DriverHost for ExtendedHost {
-    fn describe(&self, spec: &ResolvedSpec) -> Result<DriverDescription> {
-        description(spec)
-    }
-    fn probe(&self, spec: &ResolvedSpec) -> Result<()> {
-        AgentHost.probe(spec)
-    }
-    fn session(
-        &self,
-        context: ExecutionContext,
-        binding: Binding,
-    ) -> Result<Box<dyn SessionHandle>> {
-        self.probe(&binding.spec)?;
-        ensure!(
-            binding.state == BindingState::Active,
-            "Agent binding is broken"
-        );
-        Ok(Box::new(Session {
-            context,
-            binding,
-            extensions: self.extensions.clone(),
-            services: self.services.clone(),
-        }))
-    }
-}
-impl SessionHandle for Session {
-    fn start_turn<'a>(
-        &'a mut self,
-        request: &'a TurnRequest,
+        context: &ExecutionContext,
+        thread: &Thread,
+        request: &TurnRequest,
         resuming: bool,
-        sink: Sink<'a>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut seq = 0;
-            let mut emit = |update| {
-                seq += 1;
-                sink(DriverEvent {
-                    epoch: self.binding.epoch,
-                    turn_id: request.request_id.clone(),
-                    seq,
-                    update,
-                })
-            };
-            let result = run(
-                &self.context,
-                &self.binding,
-                request,
-                resuming,
-                self.extensions.as_ref(),
-                self.services.as_deref(),
-                &mut emit,
-            )
-            .await;
-            let cleanup = if let Some(executor) = &self.context.tool_executor {
-                if result.is_err() {
-                    executor.abort(&self.context).await
-                } else {
-                    executor.finish(&self.context).await
-                }
+        sink: Sink<'_>,
+    ) -> Result<()> {
+        self.validate(&thread.config)?;
+        let mut seq = 0;
+        let mut emit = |update| {
+            seq += 1;
+            sink(AgentEvent {
+                generation: thread.generation,
+                turn_id: request.request_id.clone(),
+                seq,
+                update,
+            })
+        };
+        let result = run(
+            context,
+            thread,
+            request,
+            resuming,
+            self.extensions.as_ref(),
+            self.services.as_deref(),
+            &mut emit,
+        )
+        .await;
+        let cleanup = if let Some(executor) = &context.tool_executor {
+            if result.is_err() {
+                executor.abort(context).await
             } else {
-                Ok(())
-            };
-            let result = cleanup.and(result);
-            self.context
-                .feedback
-                .diagnostic(&json!({"kind":"turn_finished","failed":result.is_err()}))?;
-            let outcome = if self.context.feedback.cancelled() && result.is_ok() {
-                Outcome::Cancelled
-            } else {
-                match &result {
-                    Ok(()) => Outcome::Success,
-                    Err(e) => Outcome::Failed(e.to_string()),
-                }
-            };
-            emit(Update::TurnFinished(outcome))?;
-            result
-        })
+                executor.finish(context).await
+            }
+        } else {
+            Ok(())
+        };
+        let result = cleanup.and(result);
+        context
+            .feedback
+            .diagnostic(&json!({"kind":"turn_finished","failed":result.is_err()}))?;
+        let outcome = if context.feedback.cancelled() && result.is_ok() {
+            Outcome::Cancelled
+        } else {
+            match &result {
+                Ok(()) => Outcome::Success,
+                Err(e) => Outcome::Failed(e.to_string()),
+            }
+        };
+        emit(Update::TurnFinished(outcome))?;
+        result
     }
 }
 #[derive(Serialize, Deserialize)]
@@ -184,7 +122,6 @@ struct Context {
     #[serde(rename = "type")]
     kind: String,
     version: u32,
-    id: String,
     messages: Vec<Message>,
     #[serde(default)]
     pending: Vec<model::ToolCall>,
@@ -246,28 +183,49 @@ async fn rpc(
     ensure!(result["error"].is_null(), "Pot tool API failed");
     Ok((result["result"].clone(), session))
 }
+fn replay_route(config: &ResolvedSpec) -> String {
+    format!(
+        "{}:{}:{}",
+        config.provider, config.model, config.gateway_protocol
+    )
+}
+fn portable_context(config: &ResolvedSpec, messages: &[Message]) -> Vec<Message> {
+    let route = replay_route(config);
+    messages
+        .iter()
+        .cloned()
+        .map(|mut m| {
+            if m.replay_route.as_deref() != Some(&route) {
+                m.replay = Value::Null;
+                m.replay_route = None;
+            }
+            m
+        })
+        .collect()
+}
 // Keep request state and injected services explicit at this execution boundary.
 #[allow(clippy::too_many_arguments)]
 async fn sample(
     services: Option<&dyn ExecutionServices>,
     client: &reqwest::Client,
     s: &ExecutionContext,
-    binding: &Binding,
+    thread: &Thread,
     system: &str,
     messages: &[Message],
     tools: &[Value],
     compaction: Option<&str>,
     emit: &mut (dyn FnMut(Update) -> Result<()> + Send),
 ) -> Result<Message> {
-    let protocol = Protocol::from_name(&binding.spec.gateway_protocol)?;
+    let protocol = Protocol::from_name(&thread.config.gateway_protocol)?;
+    let messages = portable_context(&thread.config, messages);
     let body = model::request(
         &protocol,
-        &binding.spec.model,
+        &thread.config.model,
         system,
-        messages,
+        &messages,
         tools,
-        binding.spec.params.max_output_tokens,
-        binding.spec.params.reasoning_effort.as_deref(),
+        thread.config.params.max_output_tokens,
+        thread.config.params.reasoning_effort.as_deref(),
     )?;
     let id = uuid::Uuid::new_v4().to_string();
     s.feedback.observe(&ExecutionObservation::RequestStarted {
@@ -288,9 +246,9 @@ async fn sample(
             services
                 .model(ModelRequest {
                     id: id.clone(),
-                    protocol: binding.spec.gateway_protocol.clone(),
-                    provider: binding.spec.provider.clone(),
-                    model: binding.spec.model.clone(),
+                    protocol: thread.config.gateway_protocol.clone(),
+                    provider: thread.config.provider.clone(),
+                    model: thread.config.model.clone(),
                     body,
                     compaction_id: compaction.map(str::to_owned),
                 })
@@ -302,14 +260,14 @@ async fn sample(
                     Protocol::OpenaiResponses => "v1/responses".into(),
                     Protocol::AnthropicMessages => "v1/messages".into(),
                     Protocol::Gemini => {
-                        format!("v1/models/{}:streamGenerateContent", binding.spec.model)
+                        format!("v1/models/{}:streamGenerateContent", thread.config.model)
                     }
                     Protocol::Unknown => bail!("Unsupported protocol"),
                 };
                 let mut req = client
                     .post(format!(
                         "{}/gw/{}/{path}",
-                        s.backend_url, binding.spec.provider
+                        s.backend_url, thread.config.provider
                     ))
                     .bearer_auth(&s.lane_token)
                     .json(&body);
@@ -368,7 +326,9 @@ async fn sample(
                 emit(Update::TextDelta(text))?;
             }
         }
-        decoder.finish()
+        let mut message = decoder.finish()?;
+        message.replay_route = Some(replay_route(&thread.config));
+        Ok(message)
     }
     .await;
     s.feedback.observe(&ExecutionObservation::RequestFinished {
@@ -465,24 +425,24 @@ async fn compact(
     services: Option<&dyn ExecutionServices>,
     client: &reqwest::Client,
     s: &ExecutionContext,
-    binding: &Binding,
+    thread: &Thread,
     state: &mut Context,
     emit: &mut (dyn FnMut(Update) -> Result<()> + Send),
     extensions: &dyn AgentExtensions,
     system: &str,
     tools: &[Value],
 ) -> Result<()> {
-    let settings = &binding.spec.params.agent;
+    let settings = &thread.config.params.agent;
     if !settings.auto_compact {
         return Ok(());
     }
-    let protocol = Protocol::from_name(&binding.spec.gateway_protocol)?;
-    let mut prepared = state.messages.clone();
+    let protocol = Protocol::from_name(&thread.config.gateway_protocol)?;
+    let mut prepared = portable_context(&thread.config, &state.messages);
     extensions.prepare_context(s, &mut prepared)?;
     let tokens = meter::estimate(
         extensions,
         &protocol,
-        &binding.spec.model,
+        &thread.config.model,
         system,
         &prepared,
         tools,
@@ -493,21 +453,21 @@ async fn compact(
     )?;
     let before_bytes = serde_json::to_vec(&model::context_payload(
         &protocol,
-        &binding.spec.model,
+        &thread.config.model,
         system,
         &prepared,
         tools,
     )?)?
     .len();
-    let reserve = binding
-        .spec
+    let reserve = thread
+        .config
         .params
         .max_output_tokens
-        .min(binding.spec.context_window / 4)
+        .min(thread.config.context_window / 4)
         .saturating_add(settings.context_reserve);
     let threshold = settings
         .compact_at
-        .unwrap_or_else(|| binding.spec.context_window.saturating_sub(reserve).max(1));
+        .unwrap_or_else(|| thread.config.context_window.saturating_sub(reserve).max(1));
     s.feedback
         .observe(&ExecutionObservation::ContextEstimated { tokens, threshold })?;
     // UTF-8 bytes conservatively bound token counts; retain complete recent user turns.
@@ -538,7 +498,7 @@ async fn compact(
             services,
             client,
             s,
-            binding,
+            thread,
             "Produce a concise factual continuation summary.",
             &history,
             &[],
@@ -555,18 +515,23 @@ async fn compact(
             ),
         )];
         replacement.extend_from_slice(&state.messages[cut..]);
-        let mut prepared = replacement.clone();
+        let mut prepared = portable_context(&thread.config, &replacement);
         extensions.prepare_context(s, &mut prepared)?;
         let after_bytes = serde_json::to_vec(&model::context_payload(
             &protocol,
-            &binding.spec.model,
+            &thread.config.model,
             system,
             &prepared,
             tools,
         )?)?
         .len();
-        let after =
-            extensions.estimate_tokens(&protocol, &binding.spec.model, system, &prepared, tools)?;
+        let after = extensions.estimate_tokens(
+            &protocol,
+            &thread.config.model,
+            system,
+            &prepared,
+            tools,
+        )?;
         // Compare identical units; the pre-compaction estimate may use measured tokens.
         ensure!(
             after_bytes < before_bytes,
@@ -601,7 +566,7 @@ async fn compact(
 #[allow(clippy::too_many_arguments)]
 async fn run(
     s: &ExecutionContext,
-    binding: &Binding,
+    thread: &Thread,
     request: &TurnRequest,
     resuming: bool,
     extensions: &dyn AgentExtensions,
@@ -615,9 +580,8 @@ async fn run(
     let mut state = match s.feedback.load_context()? {
         Some(value) => serde_json::from_value::<Context>(value)?,
         None => Context {
-            kind: "session".into(),
+            kind: "context".into(),
             version: 1,
-            id: uuid::Uuid::new_v4().to_string(),
             messages: vec![],
             pending: vec![],
             started: None,
@@ -628,11 +592,10 @@ async fn run(
         },
     };
     ensure!(
-        state.kind == "session" && state.version == 1,
+        state.kind == "context" && state.version == 1,
         "Invalid Pot context"
     );
     state.save(s)?;
-    s.feedback.native_identity(&state.id)?;
     // An interrupted tool batch is never replayed. Preserve call/result pairing.
     if !state.pending.is_empty() {
         for call in state.pending.drain(..) {
@@ -658,14 +621,14 @@ async fn run(
         state.save(s)?;
     }
     s.feedback.input_streaming(&request.request_id)?;
-    let settings = &binding.spec.params.agent;
-    let descriptor = settings.model_descriptor(&binding.spec.provider, &binding.spec.model)?;
+    let settings = &thread.config.params.agent;
+    let descriptor = settings.model_descriptor(&thread.config.provider, &thread.config.model)?;
     if !descriptor.vision() {
         for message in &mut state.messages {
             message.images.clear();
         }
     }
-    let protocol = Protocol::from_name(&binding.spec.gateway_protocol)?;
+    let protocol = Protocol::from_name(&thread.config.gateway_protocol)?;
     let client = client(settings.request_timeout_ms)?;
     let mut available = if s.role == ExecutionRole::Summary {
         vec![]
@@ -820,7 +783,7 @@ async fn run(
     }
     let dispatcher = Dispatcher {
         s,
-        binding,
+        thread,
         request,
         extensions,
         services,
@@ -870,16 +833,16 @@ async fn run(
         accept_steering(s, &mut state, false)?;
         let started = Instant::now();
         s.feedback
-            .diagnostic(&json!({"kind":"model_started","model":binding.spec.model}))?;
+            .diagnostic(&json!({"kind":"model_started","model":thread.config.model}))?;
         let (response, prefix) = tokio::select! {
             _=s.feedback.cancellation()=>return Ok(()),
             result=composed.drive(async {
-                compact(services,&client,s,binding,&mut state,emit,extensions,&system,&available).await?;
-                let mut input = state.messages.clone();
+                compact(services,&client,s,thread,&mut state,emit,extensions,&system,&available).await?;
+                let mut input = portable_context(&thread.config, &state.messages);
                 extensions.prepare_context(s, &mut input)?;
-                ensure!(meter::estimate(extensions, &protocol, &binding.spec.model, &system, &input, &available, state.usage_anchor.as_ref().filter(|_| settings.use_provider_usage))?.saturating_add(binding.spec.params.max_output_tokens) <= binding.spec.context_window, "Context exceeds configured window; compact, trim, or raise the profile limit");
+                ensure!(meter::estimate(extensions, &protocol, &thread.config.model, &system, &input, &available, state.usage_anchor.as_ref().filter(|_| settings.use_provider_usage))?.saturating_add(thread.config.params.max_output_tokens) <= thread.config.context_window, "Context exceeds configured window; compact, trim, or raise the profile limit");
                 emit(Update::MessageStarted)?;
-                let response = sample(services,&client,s,binding,&system,&input,&available,None,emit).await?;
+                let response = sample(services,&client,s,thread,&system,&input,&available,None,emit).await?;
                 input.push(response.clone());
                 Ok::<_, anyhow::Error>((response, input))
             })=>result?,
@@ -887,7 +850,7 @@ async fn run(
         composed.drain(emit)?;
         if let Some(anchor) = meter::UsageAnchor::capture(
             &protocol,
-            &binding.spec.model,
+            &thread.config.model,
             &system,
             &prefix,
             &available,
@@ -1017,7 +980,7 @@ async fn run(
 #[derive(Clone, Copy)]
 struct Dispatcher<'a> {
     s: &'a ExecutionContext,
-    binding: &'a Binding,
+    thread: &'a Thread,
     request: &'a TurnRequest,
     extensions: &'a dyn AgentExtensions,
     services: Option<&'a dyn ExecutionServices>,
@@ -1034,7 +997,7 @@ impl Dispatcher<'_> {
     ) -> Result<Value> {
         let Self {
             s,
-            binding,
+            thread,
             request,
             extensions,
             services,
@@ -1043,7 +1006,7 @@ impl Dispatcher<'_> {
             available,
             custom_names,
         } = *self;
-        let settings = &binding.spec.params.agent;
+        let settings = &thread.config.params.agent;
         ensure!(
             available.iter().any(|t| t["name"] == call.name),
             "Tool unavailable for this role"
@@ -1095,7 +1058,7 @@ impl Dispatcher<'_> {
         })?;
         let result = async {
             prepared?;
-            permissions::authorize(s, binding, request, &call.id, &call.name, &call.arguments).await?;
+            permissions::authorize(s, thread, request, &call.id, &call.name, &call.arguments).await?;
             if call.name == "set_sandbox_mappings" {
                 s.feedback
                     .execute_authorized_host(&call.name, call.arguments.clone())

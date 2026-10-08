@@ -1,11 +1,11 @@
 //! Small, bounded experiments. Trial plans and delegation stay outside product Runtime.
 use crate::{
     DeepSeekConnection, LiveBudget, LiveLimits, OutputAssertion, Report, Scenario,
-    ScriptedResponse, ScriptedServices, records::Totals, runner::run_driver_configured,
+    ScriptedResponse, ScriptedServices, records::Totals, runner::run_agent_configured,
 };
 use anyhow::{Result, ensure};
 use futures::{FutureExt, StreamExt, future::BoxFuture};
-use pot_agent::{AgentExtensions, AgentHost};
+use pot_agent::{Agent, AgentExtensions};
 use pot_core::{ExecutionContext, ExecutionServices, ModelRequest, Profile, ProfileConfig};
 use serde_json::{Value, json};
 use std::{
@@ -214,11 +214,11 @@ impl NodeRunner {
                 (scenario, service, None, "deterministic_contract")
             };
             let host = if let Some(extension) = extension {
-                AgentHost::with_extensions(extension).with_services(service)
+                Agent::with_extensions(extension).services(service)
             } else {
-                AgentHost::with_services(service)
+                Agent::with_services(service)
             };
-            run_driver_configured(&host, &scenario, directory, mode, config).await
+            run_agent_configured(&host, &scenario, directory, mode, config).await
         }
         .boxed()
     }
@@ -594,9 +594,9 @@ pub async fn run_fault_suite(directory: &Path) -> Result<Value> {
             retry,
             attempts: Mutex::new(vec![]),
         });
-        let host = AgentHost::with_services(service.clone());
+        let host = Agent::with_services(service.clone());
         let path = directory.join(name);
-        let report = crate::run_driver(&host, &s, &path).await?;
+        let report = crate::run_agent(&host, &s, &path).await?;
         let attempts = service.attempts.lock().unwrap().clone();
         write_json(&path.join("attempts.json"), &attempts)?;
         let passed = report.success == expected_success

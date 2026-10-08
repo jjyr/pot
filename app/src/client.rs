@@ -97,8 +97,8 @@ impl View {
         self.running_total > 0
             || self.main_snapshot.as_ref().is_some_and(|s| {
                 s.turn.is_some()
-                    && s.engine.phase == EnginePhase::Ready
-                    && s.engine.detail.as_deref() != Some("等待 Pot 额度恢复")
+                    && s.agent.phase == AgentPhase::Ready
+                    && s.agent.detail.as_deref() != Some("等待 Pot 额度恢复")
             })
     }
 
@@ -190,7 +190,7 @@ impl View {
                     s.messages.push(message);
                 }
             }
-            EventKind::Engine { status } => s.engine = status,
+            EventKind::Agent { status } => s.agent = status,
             EventKind::Turn { turn } => s.turn = turn,
             EventKind::Budget { budget } => s.budget = Some(budget),
         }
@@ -919,7 +919,7 @@ mod tests {
             cancelling: false,
         });
         assert!(v.is_cooking());
-        v.main_snapshot.as_mut().unwrap().engine.detail = Some("等待 Pot 额度恢复".into());
+        v.main_snapshot.as_mut().unwrap().agent.detail = Some("等待 Pot 额度恢复".into());
         assert!(!v.is_cooking());
         v.running_total = 1;
         assert!(v.is_cooking()); // A paused main does not hide background execution.
@@ -979,12 +979,10 @@ mod tests {
                 api_version: API_VERSION,
                 boot_id: "boot".into(),
                 cursor: 0,
-                engine: EngineStatus {
-                    engine: "test".into(),
-                    phase: EnginePhase::Ready,
+                agent: AgentStatus {
+                    model: "test".into(),
+                    phase: AgentPhase::Ready,
                     detail: None,
-                    version: None,
-                    auth_methods: vec![],
                 },
                 conversation_id: "main".into(),
                 messages: vec![],
@@ -1064,12 +1062,12 @@ mod tests {
     #[test]
     fn unconfigured_or_auth_required_blocks_send_until_ready() {
         let mut v = view();
-        v.snapshot.as_mut().unwrap().engine.phase = EnginePhase::NeedsAuth;
+        v.snapshot.as_mut().unwrap().agent.phase = AgentPhase::NeedsConfiguration;
         assert!(!v.can_send());
         v.selected = "task-a".into();
         assert!(!v.can_send());
         v.selected.clear();
-        v.snapshot.as_mut().unwrap().engine.phase = EnginePhase::Ready;
+        v.snapshot.as_mut().unwrap().agent.phase = AgentPhase::Ready;
         assert!(v.can_send());
     }
     #[test]

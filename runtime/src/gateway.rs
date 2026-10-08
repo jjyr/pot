@@ -54,7 +54,7 @@ fn stored_provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> 
     let p = providers
         .into_iter()
         .find(|p| p.id == spec.provider)
-        .ok_or_else(|| anyhow!("Provider unavailable; needs rebind"))?;
+        .ok_or_else(|| anyhow!("Provider unavailable; update the Thread configuration"))?;
     Ok(p)
 }
 fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
@@ -76,7 +76,7 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
             parsed
                 .path()
                 .ends_with(&format!("/models/{}:streamGenerateContent", spec.model)),
-            "Gemini endpoint model differs from binding"
+            "Gemini endpoint model differs from thread"
         );
     }
     let url = reqwest::Url::parse(&p.endpoint)?;
@@ -127,7 +127,7 @@ pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedS
     spec.set_gateway_protocol(route.protocol.name())?;
     Ok(spec)
 }
-/// Brand derives from the executed binding's immutable route identity, never model names.
+/// Brand derives from the executed thread's immutable route identity, never model names.
 pub fn executor_icon(s: &Service, spec: &agent::ResolvedSpec) -> String {
     let endpoint = stored_provider(s, spec)
         .ok()
@@ -158,7 +158,7 @@ pub fn validate_spec(s: &Service, spec: &agent::ResolvedSpec) -> Result<()> {
     let route = provider(s, spec)?;
     anyhow::ensure!(
         spec.gateway_protocol == route.protocol.name(),
-        "Provider protocol changed; needs rebind"
+        "Provider protocol differs from the Thread configuration"
     );
     Ok(())
 }
@@ -171,12 +171,12 @@ pub async fn routed(
     body: Json<Value>,
 ) -> ApiResult<Response> {
     let s = tasks::execution_service(&root, &h)?;
-    let binding = agent::binding(&s).map_err(internal)?;
-    if binding.spec.provider != provider_id {
+    let thread = agent::thread(&s).map_err(internal)?;
+    if thread.config.provider != provider_id {
         return Err(error(
             StatusCode::FORBIDDEN,
             "provider_mismatch",
-            "Provider does not match active binding",
+            "Provider does not match active thread",
         ));
     }
     forward(State(s), h, body).await
@@ -206,13 +206,14 @@ pub async fn routed_protocol(
         h.insert("authorization", bearer);
     }
     let s = tasks::execution_service(&root, &h)?;
-    let binding = agent::binding(&s).map_err(internal)?;
-    let protocol = Protocol::from_name(&binding.spec.gateway_protocol).map_err(internal)?;
-    if binding.spec.provider != provider_id || !protocol.path_matches(&path, &binding.spec.model) {
+    let thread = agent::thread(&s).map_err(internal)?;
+    let protocol = Protocol::from_name(&thread.config.gateway_protocol).map_err(internal)?;
+    if thread.config.provider != provider_id || !protocol.path_matches(&path, &thread.config.model)
+    {
         return Err(error(
             StatusCode::FORBIDDEN,
             "provider_mismatch",
-            "Provider protocol or model path differs from binding",
+            "Provider protocol or model path differs from thread",
         ));
     }
     forward(State(s), h, body).await
@@ -227,9 +228,9 @@ pub async fn forward(
 ) -> ApiResult<Response> {
     s.authorized(&h)?;
     let c = agent::execution_config_for(&s).map_err(internal)?;
-    let binding = agent::binding(&s).map_err(internal)?;
-    validate_spec(&s, &binding.spec).map_err(internal)?;
-    let provider = provider(&s, &binding.spec).map_err(internal)?;
+    let thread = agent::thread(&s).map_err(internal)?;
+    validate_spec(&s, &thread.config).map_err(internal)?;
+    let provider = provider(&s, &thread.config).map_err(internal)?;
     if (provider.protocol != Protocol::Gemini
         && (body["model"] != c.model || body["stream"] != true))
         || body.to_string().len() > execution::MAX_MODEL_BODY
@@ -297,8 +298,8 @@ pub async fn forward(
                 &s.usage_scope,
                 &turn_id,
                 now(),
-                &binding.spec,
-                binding.epoch,
+                &thread.config,
+                thread.generation,
                 input_estimate,
                 max_output,
             )
@@ -321,7 +322,7 @@ pub async fn forward(
                 &turn_id,
                 now(),
                 input_estimate + 1,
-                &binding.spec.provider,
+                &thread.config.provider,
             )
             .map_err(internal)?;
         return Err(error(
@@ -515,23 +516,11 @@ mod integration_tests {
         .unwrap();
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let _ = agent::migration::settings(State(s.clone()), h.clone(), Json(settings))
+        let _ = agent::settings::settings(State(s.clone()), h.clone(), Json(settings))
             .await
             .unwrap();
-        assert!(
-            !agent::binding(&s)
-                .unwrap()
-                .spec
-                .capabilities
-                .request_level_budget_enforcement
-        );
-        assert!(
-            !agent::binding(&s)
-                .unwrap()
-                .spec
-                .capabilities
-                .safe_checkpoint_resume
-        );
+        assert!(!agent::thread(&s).unwrap().config.supports_checkpoint());
+        assert!(!agent::thread(&s).unwrap().config.supports_checkpoint());
         s.turn(Some(TurnState {
             user_message_id: "turn".into(),
             cancelling: false,

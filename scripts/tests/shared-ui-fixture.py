@@ -26,7 +26,7 @@ if endpoint.exists():
 endpoint.write_text(
     json.dumps(
         {
-            "api_version": 1,
+            "api_version": 2,
             "port": args.port,
             "token": "isolated-ui-fixture",
             "boot_id": "ui-fixture",
@@ -49,10 +49,10 @@ def message(identifier, role, text, request=None):
 
 
 snapshot = dict(
-    api_version=1,
+    api_version=2,
     boot_id="ui-fixture",
     cursor=0,
-    engine=dict(engine="pot-agent", phase="ready", detail=None, version="fixture", auth_methods=[]),
+    agent=dict(model="fixture", phase="ready", detail=None),
     conversation_id="main",
     turn=None,
     budget=None,

@@ -2,27 +2,9 @@
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Engine {
-    Pot,
-}
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Capabilities {
-    pub native_compaction: bool,
-    pub safe_checkpoint_resume: bool,
-    pub live_steering: bool,
-    pub model_switch: bool,
-    pub usage_reporting: bool,
-    pub request_level_budget_enforcement: bool,
-    pub tool_policy_enforcement: bool,
-    pub mcp_tools: bool,
-    pub subagents_disableable: bool,
-}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Parameters {
     pub max_output_tokens: u64,
@@ -41,7 +23,6 @@ pub struct Profile {
     pub id: String,
     pub revision: u64,
     pub name: String,
-    pub engine: Engine,
     pub provider: String,
     pub model: String,
     pub auth_ref: String,
@@ -54,7 +35,6 @@ impl Profile {
             id: "pot-default".into(),
             revision: 1,
             name: "Pot · DeepSeek Flash".into(),
-            engine: Engine::Pot,
             provider: "deepseek".into(),
             model: config.model().to_owned(),
             auth_ref: "providers.json:deepseek".into(),
@@ -129,7 +109,6 @@ impl Profile {
             "Unsupported credential route"
         );
         let mut spec = ResolvedSpec {
-            engine: self.engine.clone(),
             provider: self.provider.clone(),
             model: self.model.clone(),
             auth_ref: self.auth_ref.clone(),
@@ -137,16 +116,6 @@ impl Profile {
             tool_policy: self.tool_policy.clone(),
             gateway_protocol: "openai_chat".into(),
             context_window: self.params.agent.context_window,
-            capabilities: Capabilities {
-                native_compaction: true,
-                safe_checkpoint_resume: true,
-                live_steering: true,
-                usage_reporting: true,
-                request_level_budget_enforcement: true,
-                tool_policy_enforcement: true,
-                subagents_disableable: true,
-                ..Default::default()
-            },
             source_profile_id: self.id.clone(),
             source_profile_revision: self.revision,
             spec_hash: String::new(),
@@ -158,7 +127,6 @@ impl Profile {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedSpec {
-    pub engine: Engine,
     pub provider: String,
     pub model: String,
     pub auth_ref: String,
@@ -166,12 +134,14 @@ pub struct ResolvedSpec {
     pub tool_policy: ToolPolicy,
     pub gateway_protocol: String,
     pub context_window: u64,
-    pub capabilities: Capabilities,
     pub source_profile_id: String,
     pub source_profile_revision: u64,
     pub spec_hash: String,
 }
 impl ResolvedSpec {
+    pub fn supports_checkpoint(&self) -> bool {
+        self.gateway_protocol != "unknown"
+    }
     pub fn set_gateway_protocol(&mut self, protocol: &str) -> Result<()> {
         ensure!(
             matches!(
@@ -181,9 +151,6 @@ impl ResolvedSpec {
             "Unsupported gateway protocol"
         );
         self.gateway_protocol = protocol.into();
-        self.capabilities.request_level_budget_enforcement = protocol != "unknown";
-        self.capabilities.usage_reporting = protocol != "unknown";
-        self.capabilities.safe_checkpoint_resume = protocol != "unknown";
         self.spec_hash = self.hash()?;
         Ok(())
     }
@@ -205,37 +172,12 @@ impl ResolvedSpec {
         Ok(())
     }
 }
+/// A product-owned conversation. Configuration changes never replace its context.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "engine", rename_all = "snake_case")]
-pub enum NativeRef {
-    Pot {
-        file: PathBuf,
-        session_id: Option<String>,
-    },
-}
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum BindingState {
-    Active,
-    Archived,
-    Broken,
-}
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ModelSwitch {
-    pub from_turn: String,
-    pub model: String,
-}
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Binding {
-    pub pot_owner: String,
-    pub epoch: u64,
-    pub spec: ResolvedSpec,
-    pub native_ref: NativeRef,
-    pub schema_version: u32,
-    pub state: BindingState,
-    pub model_switches: Vec<ModelSwitch>,
-    pub handoff_ref: Option<PathBuf>,
-    pub failure: Option<String>,
+pub struct Thread {
+    pub owner: String,
+    pub generation: u64,
+    pub config: ResolvedSpec,
 }
 
 /// Non-secret settings for constructing an API profile.

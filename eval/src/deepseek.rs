@@ -1,5 +1,5 @@
 //! Single-model live evaluation. Pi is a read-only configuration source, not a runtime dependency.
-use crate::{Report, Scenario, runner::run_driver_configured};
+use crate::{Report, Scenario, runner::run_agent_configured};
 use anyhow::{Result, ensure};
 use futures::{FutureExt, StreamExt, future::BoxFuture};
 use pot_core::{ExecutionServices, ModelRequest};
@@ -111,10 +111,6 @@ impl DeepSeekConnection {
         &self.model
     }
     fn configure(&self, scenario: &mut Scenario) -> Result<Value> {
-        ensure!(
-            scenario.profile.engine == pot_core::Engine::Pot,
-            "DeepSeek live evaluation requires Pot Agent"
-        );
         ensure!(
             scenario.responses.is_empty(),
             "Live scenarios must not include scripted model responses"
@@ -294,8 +290,8 @@ pub async fn run_deepseek(
 ) -> Result<Report> {
     let (scenario, service, config) =
         deepseek_services(scenario, directory, connection, limits, vec![])?;
-    let host = pot_agent::AgentHost::with_services(service);
-    run_driver_configured(
+    let host = pot_agent::Agent::with_services(service);
+    run_agent_configured(
         &host,
         &scenario,
         directory,

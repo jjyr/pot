@@ -10,7 +10,7 @@ Pot runs Agent loops and the persistent product control plane on the Host. Sandb
 - Host-side Agent execution does not mean local model inference. Model connections remain a separate configuration concern.
 - pot-agent uses shared execution tools with an explicit environment target through its [Agent-owned permission layer](permissions.md), with environment-local policy (Host defaults to ask; Sandbox defaults to allow). No execution falls back to Host when a Sandbox is unavailable.
 - Multiple Sandbox instances are part of the target model. Linux is implemented. The minimum provider redesign targets Linux default/isolated tasks and macOS development; Android, iOS and Windows remain later extensions. Providers expose qualified capabilities rather than assuming every environment has a shell or POSIX workspace.
-- Host Runtime, Storage, Gateway and native Agent sessions remain available when every Sandbox is stopped. Sandbox shutdown does not delete a conversation or product task record.
+- Host Runtime, Storage, Gateway and Thread contexts remain available when every Sandbox is stopped. Sandbox shutdown does not delete a conversation or product task record.
 
 ## Authority and execution
 
@@ -40,7 +40,7 @@ The main Agent changes the execution default through `manage_sandbox` with `acti
 
 The assignment persists before dispatch. Changing the main selection affects only later task creation and main environment tools, never existing tasks or saved schedules. Current Linux tasks use `/data/workspace/tasks/TASK_ID`. In the provider redesign, filesystem environments declare native workspace roots; device environments may expose only artifact and app/document scopes. Agent profile routing and global/profile/provider concurrency limits do not choose a Sandbox. Runtime starts the bound environment when required; it does not retarget a task to another ready VM.
 
-Persist the Sandbox identity separately from the Agent/profile binding. Each worker has one assigned Sandbox and workspace scope before environment execution begins. The worker cannot switch that binding across turns or after restart.
+Persist the Sandbox identity separately from the Thread configuration. Each worker has one assigned Sandbox and workspace scope before environment execution begins. The worker cannot switch that binding across turns or after restart.
 
 A task's single-environment constraint does not require a newly created VM for every task. Reuse and shared environments remain scheduling choices, with workspace scoping and resource arbitration. Sharing a Sandbox is not automatically task-level filesystem isolation; any stronger isolation claim requires enforcement and tests.
 
@@ -96,8 +96,8 @@ The UI uses one environment vocabulary. pot-agent receives its execution backend
 
 1. Host pot-agent sessions and the product backend work independently of Linux VM startup/shutdown.
 2. Main Agent can manage two Linux Sandbox instances through policy-checked tools, select a target for its own operations and assign tasks to each.
-3. Worker attempts to manage Sandboxes, select another target, access another target's credentials or invoke Host tools without owner authorization fail at the execution boundary, including after native-session resume.
-4. Stopping/crashing one environment does not stop chat, corrupt native sessions or interrupt tasks in another environment. Busy-stop, task cancellation and shared-environment behavior follow the distinct contracts above.
+3. Worker attempts to manage Sandboxes, select another target, access another target's credentials or invoke Host tools without owner authorization fail at the execution boundary, including after Thread resume.
+4. Stopping/crashing one environment does not stop chat, corrupt Thread contexts or interrupt tasks in another environment. Busy-stop, task cancellation and shared-environment behavior follow the distinct contracts above.
 5. Persistent artifacts remain accessible after Sandbox shutdown; unknown side effects are reconciled without silent replay.
 
 These existing Linux gates remain prerequisites for provider extraction. macOS has separate qualification gates in [Sandbox providers](sandbox-providers.md#implementation-map-and-delivery-gates); they are not delivered by this specification. Host permission and mapping qualification follows the separate [permission contract](permissions.md).

@@ -143,7 +143,7 @@ fn grant(owner: &str, worker: bool) -> AccessGrant {
     AccessGrant {
         owner: owner.into(),
         turn: "turn".into(),
-        epoch: 1,
+        thread_generation: 1,
         target: "default".into(),
         worker,
         policy: Default::default(),
@@ -218,7 +218,10 @@ async fn sessions_are_fixed_to_owner_epoch_and_target() {
         )
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("another task/agent epoch"));
+    assert!(
+        err.to_string()
+            .contains("another thread execution generation")
+    );
     let err = m
         .execute(
             &grant("worker", true),
@@ -276,7 +279,7 @@ async fn browser_sessions_cannot_retarget_or_cross_owner_and_boot() {
         .await
         .unwrap_err()
         .to_string()
-        .contains("another task")
+        .contains("another thread")
     );
     let mut same_target = observe.clone();
     same_target["sandbox_id"] = json!("default");

@@ -23,8 +23,9 @@ fn fingerprint(
     tools: &[Value],
 ) -> Result<String> {
     let payload = model::context_payload(protocol, model, system, messages, tools)?;
+    let routes: Vec<_> = messages.iter().map(|m| &m.replay_route).collect();
     Ok(
-        Sha256::digest(serde_json::to_vec(&(protocol, model, payload))?)
+        Sha256::digest(serde_json::to_vec(&(protocol, model, payload, routes))?)
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect(),
@@ -86,6 +87,52 @@ mod tests {
             output: 20,
         });
         vec![Message::text("user", "history".repeat(1000)), reply]
+    }
+    #[test]
+    fn provider_route_change_invalidates_calibration_with_identical_message_payload() {
+        let protocol = Protocol::OpenaiChat;
+        let mut messages = history();
+        messages.last_mut().unwrap().replay_route = Some("provider-a:model:openai_chat".into());
+        let anchor = UsageAnchor::capture(&protocol, "model", "system", &messages, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            estimate(
+                &Defaults,
+                &protocol,
+                "model",
+                "system",
+                &messages,
+                &[],
+                Some(&anchor)
+            )
+            .unwrap(),
+            120
+        );
+        messages.last_mut().unwrap().replay_route = None;
+        let local = estimate(
+            &Defaults,
+            &protocol,
+            "model",
+            "system",
+            &messages,
+            &[],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            estimate(
+                &Defaults,
+                &protocol,
+                "model",
+                "system",
+                &messages,
+                &[],
+                Some(&anchor)
+            )
+            .unwrap(),
+            local
+        );
     }
     #[test]
     fn measured_prefix_survives_reopen_and_only_new_input_is_estimated() {

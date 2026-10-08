@@ -47,7 +47,7 @@ Cards show the bound plugin ID (or built-in tool label) and the environment's di
 name. Internal tool names, routing IDs and versions stay out of the card. A supplied
 summary replaces code/argument display; missing summaries fall back to raw arguments.
 Runtime verifies plugin
-identity (including bundle digest) against the Agent binding; package IDs are not
+identity (including bundle digest) against the Thread configuration; package IDs are not
 publisher authentication.
 The request's outer `environment` identifies the target; `args` excludes this routing field.
 Actions are **Always allow**, **Allow once**, **Deny** (永久允许、允许一次、拒绝).
@@ -62,7 +62,7 @@ Requests separate the execution target, actual operation and presentation:
 {
   "owner": "main",
   "environment": "host",
-  "epoch": 3,
+  "generation": 3,
   "turn": "turn-id",
   "call_id": "call-id",
   "tool": "cua_repl",
@@ -83,10 +83,10 @@ when supplied. It is not a second copy of the default exact grant.
 
 One-time approval belongs to the concrete call and is consumed before execution.
 Permanent operation grants match the complete normalized tool arguments, including
-command and working directory. They survive restart and rebinding for the same
-Agent. They do not permit arbitrary commands under an approved directory.
+command and working directory. They survive restart and configuration changes for the same
+Thread. They do not permit arbitrary commands under an approved directory.
 Revocation affects future checks and does not undo effects or stop an authorized
-session. Ended turns, changed bindings and shutdown invalidate pending approvals.
+session. Ended turns, changed execution generations and shutdown invalidate pending approvals.
 Execution receipts prevent duplicate effects; uncertain calls are not replayed.
 
 ## Editable configuration

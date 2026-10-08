@@ -1,5 +1,5 @@
 //! Transport-independent chat commands, receipts and draft ownership.
-use pot_protocol::{EnginePhase, SendMessage, Snapshot};
+use pot_protocol::{AgentPhase, SendMessage, Snapshot};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -99,8 +99,8 @@ pub fn can_send(snapshot: Option<&Snapshot>, task: bool, pending: bool, connecte
         && connected
         && snapshot.is_some_and(|s| {
             (s.turn.is_none() || task)
-                && (task || s.engine.detail.as_deref() != Some("等待 Pot 额度恢复"))
-                && s.engine.phase == EnginePhase::Ready
+                && (task || s.agent.detail.as_deref() != Some("等待 Pot 额度恢复"))
+                && s.agent.phase == AgentPhase::Ready
                 && s.budget.as_ref().is_none_or(|b| b.remaining() > 0)
         })
 }
@@ -158,18 +158,16 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use pot_protocol::{EngineStatus, Message, MessageStatus, RequestBudget, Role, TurnState};
+    use pot_protocol::{AgentStatus, Message, MessageStatus, RequestBudget, Role, TurnState};
     fn snapshot() -> Snapshot {
         Snapshot {
             api_version: pot_protocol::API_VERSION,
             boot_id: "fixture".into(),
             cursor: 0,
-            engine: EngineStatus {
-                engine: "pot-agent".into(),
-                phase: EnginePhase::Ready,
+            agent: AgentStatus {
+                model: "pot-agent".into(),
+                phase: AgentPhase::Ready,
                 detail: None,
-                version: None,
-                auth_methods: vec![],
             },
             conversation_id: "main".into(),
             messages: vec![],
@@ -212,9 +210,9 @@ mod integration_tests {
         });
         assert!(!can_send(Some(&snapshot), false, false, true));
         assert!(can_send(Some(&snapshot), true, false, true));
-        snapshot.engine.phase = EnginePhase::NeedsAuth;
+        snapshot.agent.phase = AgentPhase::NeedsConfiguration;
         assert!(!can_send(Some(&snapshot), true, false, true));
-        snapshot.engine.phase = EnginePhase::Ready;
+        snapshot.agent.phase = AgentPhase::Ready;
         snapshot.budget = Some(RequestBudget {
             used: 1,
             limit: 1,

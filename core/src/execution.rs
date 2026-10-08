@@ -43,58 +43,31 @@ pub enum Update {
     TurnFinished(Outcome),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DriverEvent {
-    pub epoch: u64,
+pub struct AgentEvent {
+    pub generation: u64,
     pub turn_id: String,
     pub seq: u64,
     pub update: Update,
 }
-pub type Sink<'a> = &'a mut (dyn FnMut(DriverEvent) -> Result<()> + Send);
-
-/// In-process Agent host with independent sessions; shared by Runtime and evaluation.
-pub trait DriverHost: Send + Sync {
-    /// Conservative defaults: unsupported observations are never inferred.
-    fn describe(&self, spec: &ResolvedSpec) -> Result<DriverDescription> {
-        self.probe(spec)?;
-        Ok(DriverDescription::default())
-    }
-    fn probe(&self, spec: &ResolvedSpec) -> Result<()>;
-    fn session(
-        &self,
-        context: ExecutionContext,
-        binding: Binding,
-    ) -> Result<Box<dyn SessionHandle>>;
-}
-pub trait SessionHandle: Send {
-    /// Must release any session-owned resources after the active turn has stopped.
-    fn close(&mut self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn start_turn<'a>(
-        &'a mut self,
-        request: &'a TurnRequest,
-        resuming: bool,
-        sink: Sink<'a>,
-    ) -> BoxFuture<'a, Result<()>>;
-}
+pub type Sink<'a> = &'a mut (dyn FnMut(AgentEvent) -> Result<()> + Send);
 
 pub struct EventGate {
-    epoch: u64,
+    generation: u64,
     turn_id: String,
     seq: u64,
     terminal: Option<Outcome>,
 }
 impl EventGate {
-    pub fn new(epoch: u64, turn_id: &str) -> Self {
+    pub fn new(generation: u64, turn_id: &str) -> Self {
         Self {
-            epoch,
+            generation,
             turn_id: turn_id.into(),
             seq: 0,
             terminal: None,
         }
     }
-    pub fn accept(&mut self, event: &DriverEvent) -> bool {
-        if event.epoch != self.epoch
+    pub fn accept(&mut self, event: &AgentEvent) -> bool {
+        if event.generation != self.generation
             || event.turn_id != self.turn_id
             || event.seq <= self.seq
             || self.terminal.is_some()
@@ -157,7 +130,7 @@ pub struct ExecutionContext {
     pub tool_executor: Option<Arc<dyn ToolExecutor>>,
 }
 /// Synchronous acknowledgements preserve persistence-before-network ordering.
-/// Runtime validates owner/epoch/turn before applying these observations.
+/// Runtime validates owner/generation/turn before applying these observations.
 pub trait ExecutionFeedback: Send + Sync {
     /// Prepare execution-visible arguments and fix the environment before approval.
     fn prepare_execution_operation(
@@ -219,22 +192,10 @@ pub trait ExecutionFeedback: Send + Sync {
     }
     fn cancelled(&self) -> bool;
     fn cancellation(&self) -> BoxFuture<'_, ()>;
-    fn native_identity(&self, identity: &str) -> Result<()>;
-    fn binding_broken(&self, reason: &str) -> Result<()>;
-    fn needs_rebind(&self, reason: &str) -> Result<()>;
     fn record_turn(&self, request: &str) -> Result<()>;
     fn input_streaming(&self, request: &str) -> Result<()>;
 }
 
-/// Execution controls and observation precision are negotiated independently.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DriverDescription {
-    pub configurable_context: bool,
-    pub configurable_tools: bool,
-    pub injectable_services: bool,
-    pub request_usage: bool,
-    pub compaction_lifecycle: bool,
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExecutionObservation {

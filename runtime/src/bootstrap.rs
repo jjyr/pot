@@ -58,24 +58,25 @@ impl Backend {
     }
 }
 pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
-    initialize_with_agent_host(config, Arc::new(pot_agent::AgentHost)).await
+    initialize_with_agent_executor(config, Arc::new(pot_agent::Agent::default())).await
 }
 /// Embedders can install code-level tools, context transforms and token estimation.
-pub async fn initialize_with_agent_host(
+pub async fn initialize_with_agent_executor(
     config: RuntimeConfig,
-    agent_host: Arc<dyn pot_core::DriverHost>,
+    agent_executor: Arc<pot_agent::Agent>,
 ) -> Result<Backend> {
-    initialize_with_providers_and_agent(config, agent_host, vec![]).await
+    initialize_with_providers_and_agent(config, agent_executor, vec![]).await
 }
 pub async fn initialize_with_providers(
     config: RuntimeConfig,
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
 ) -> Result<Backend> {
-    initialize_with_providers_and_agent(config, Arc::new(pot_agent::AgentHost), providers).await
+    initialize_with_providers_and_agent(config, Arc::new(pot_agent::Agent::default()), providers)
+        .await
 }
 async fn initialize_with_providers_and_agent(
     config: RuntimeConfig,
-    agent_host: Arc<dyn pot_core::DriverHost>,
+    agent_executor: Arc<pot_agent::Agent>,
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
 ) -> Result<Backend> {
     let data = config.data;
@@ -126,12 +127,10 @@ async fn initialize_with_providers_and_agent(
         usage_scope: "main".into(),
         inner: Arc::new(Mutex::new(Inner {
             store: Store::open(&data.join("pot-v2.sqlite"))?,
-            engine: EngineStatus {
-                engine: "unconfigured".into(),
-                phase: EnginePhase::NeedsAuth,
+            agent: AgentStatus {
+                model: String::new(),
+                phase: AgentPhase::NeedsConfiguration,
                 detail: Some("Open AI Configuration to select an Agent and model".into()),
-                version: None,
-                auth_methods: vec![],
             },
             turn: None,
             model_requests: 0,
@@ -150,7 +149,7 @@ async fn initialize_with_providers_and_agent(
         stop: tokio::sync::watch::channel(false).0,
         tasks: Arc::new(Mutex::new(tasks::Hub::default())),
         terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-        agent_host,
+        agent_executor,
     };
     let configured = agent::configured(&s);
     s.inner.lock().unwrap().store.set(
@@ -158,11 +157,11 @@ async fn initialize_with_providers_and_agent(
         if configured { "false" } else { "true" },
     )?;
     if configured {
-        s.phase(EnginePhase::Ready, None);
+        s.phase(AgentPhase::Ready, None);
     }
     if !configured {
         s.phase(
-            EnginePhase::NeedsAuth,
+            AgentPhase::NeedsConfiguration,
             Some("请先配置主 Agent；Sandbox Terminal 可独立使用".into()),
         );
     }
@@ -183,7 +182,7 @@ async fn initialize_with_providers_and_agent(
                 match agent::preferences::context(&worker) {
                     Ok(context) => req.text.push_str(&context),
                     Err(e) => {
-                        worker.phase(EnginePhase::Failed, Some(e.to_string()));
+                        worker.phase(AgentPhase::Failed, Some(e.to_string()));
                         worker.turn(None);
                         continue;
                     }
@@ -195,10 +194,10 @@ async fn initialize_with_providers_and_agent(
                 Err(anyhow!("Configure a main Agent before sending messages"))
             };
             if let Err(e) = result {
-                worker.phase(EnginePhase::Failed, Some(e.to_string()));
+                worker.phase(AgentPhase::Failed, Some(e.to_string()));
             }
             if let Err(e) = usage::settle_cancelled_pause(&worker) {
-                worker.phase(EnginePhase::Failed, Some(e.to_string()));
+                worker.phase(AgentPhase::Failed, Some(e.to_string()));
             }
             worker.turn(None);
         }

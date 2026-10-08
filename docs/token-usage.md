@@ -6,7 +6,7 @@ Each task (including archived tasks) and main chat has a usage entry. Details sh
 
 ## Metering
 
-Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
+Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, execution generation, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
 
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
@@ -58,16 +58,14 @@ Usage query/policy/recovery APIs require the main Runtime token; workers cannot 
 Legacy `/api/v1/usage` remains for request-count diagnostics; new UI uses summary.
 
 
-## Agent binding attribution
+## Thread configuration attribution
 
-Gateway accepts only the current binding's provider/model. `request_routes` links request IDs to
-Agent type, profile ID, provider, epoch, and spec hash. Existing request tables retain executed binding models/turns; no legacy ledger import or schema migration is provided.
-OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Post-migration requests use
-new snapshots; old epoch usage remains. Global/session summaries group input/output/cache/records/unknown usage by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/epoch in request details.
+Gateway accepts only the current Thread's provider/model. `request_routes` links request IDs to
+Agent type, profile ID, provider, generation, and spec hash. Existing request tables retain executed configuration models/turns; no legacy ledger import or schema migration is provided.
+OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Requests after a configuration change use the new snapshot; previous request attribution remains unchanged. Global/session summaries group input/output/cache/records/unknown usage by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/generation in request details.
 
 `unknown` protocol neither parses response usage nor changes output caps or pretends usage is zero. Requests retain
-unknown usage and conservative reservations. Its ResolvedSpec disables exact request budgets, usage reporting, and
-safe checkpoint resume. Subscription quotas remain unintegrated and cannot be inferred from the API ledger.
+unknown usage and conservative reservations. Exact request budgets, usage reporting and safe checkpoint resume require a known protocol. Subscription quotas remain unintegrated and cannot be inferred from the API ledger.
 
 Terminal operations and API metadata queries trigger no model calls/usage records. Terminal text enters neither usage nor product logs.
 
@@ -82,14 +80,14 @@ Task routing settings configure daily/weekly token allowances, zones, and automa
 UI retains policy zones (new policies default to Asia/Shanghai); API accepts other valid zones.
 Global/provider allowances apply together; all main/worker requests share one ledger.
 Reservation/provider attribution commit in one transaction; output cap is the smaller available allowance;
-unknown requests remain reserved after restart. Resume checks both policies and automatically continues only checkpoint-capable drivers.
+unknown requests remain reserved after restart. Resume checks both policies and automatically continues only supported API protocols.
 Each saved API route has an independent immutable identity; a new endpoint route needs its own allowance.
 Provider rate limits are not Pot allowance exhaustion.
 
 
 ## Agent / model categories
 
-Attribution persists with the immutable binding at API reservation. Later Agent,
+Attribution persists with the turn configuration snapshot at API reservation. Later Agent,
 model, background-default, or profile changes do not rewrite past records. Main chat, background tasks, schedules, and compaction
 share one ledger; compaction retains its actual Agent/model attribution.
 

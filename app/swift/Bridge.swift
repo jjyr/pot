@@ -999,7 +999,7 @@ var bridge: PotBridge?
         composerBox.isHidden = (page != 0 && page != 3) || value["task_list"] as? Bool == true
         placeholder.stringValue = next == "new" ? L.text("bridge.describe-the-goal-of-a-new-task") : next.isEmpty ? L
             .text("bridge.message-pot") : L.text("bridge.add-instructions-interrupted-tasks-resume-next-turn")
-        if page == 0 && value["needs_auth"] as? Bool == true {
+        if page == 0 && value["needs_configuration"] as? Bool == true {
             composerBox.isHidden = true
         }
         ready = (value["can_send"] as? Bool ?? false) && !isApplying
@@ -1056,7 +1056,7 @@ var bridge: PotBridge?
     func updateIcon() {
         (navigation.first as? CompanionButton)?.update(cooking: running)
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let waiting = (snapshot["needs_auth"] as? Bool ?? false)
+        let waiting = (snapshot["needs_configuration"] as? Bool ?? false)
         let highlighted = status.button?.cell?.isHighlighted ?? false
         let signature = "\(running)-\(unread)-\(waiting)-\(failed)-\(reduce)-\(highlighted)-\(NSApp.effectiveAppearance.name.rawValue)"
         guard signature != lastIconState || (running && !reduce) else { return }

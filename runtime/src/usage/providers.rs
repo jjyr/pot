@@ -14,15 +14,7 @@ pub async fn inspect(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
     let mut entries = vec![];
     for id in ids {
         let mut quota = ledger.provider_quota(&id, now()).map_err(internal)?;
-        quota["enforcement"] = json!(if profiles
-            .iter()
-            .filter(|p| p.provider == id)
-            .all(|p| p.engine == agent::Engine::Pot)
-        {
-            "pre_request"
-        } else {
-            "reported_only"
-        });
+        quota["enforcement"] = json!("pre_request");
         entries.push(quota);
     }
     Ok(Json(json!({"providers":entries})))
@@ -34,10 +26,7 @@ pub async fn configure(
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
-    if !profiles
-        .iter()
-        .any(|p| p.provider == r.provider && p.engine == agent::Engine::Pot)
-    {
+    if !profiles.iter().any(|p| p.provider == r.provider) {
         return Err(error(
             StatusCode::BAD_REQUEST,
             "provider_allowance",

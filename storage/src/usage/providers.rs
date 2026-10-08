@@ -60,7 +60,7 @@ impl Ledger {
         turn: &str,
         at: i64,
         spec: &agent::ResolvedSpec,
-        epoch: u64,
+        generation: u64,
         input: u64,
         output: u64,
     ) -> Result<Option<u64>> {
@@ -79,7 +79,7 @@ impl Ledger {
         let result = (|| -> Result<Option<u64>> {
             let value = self.reserve(id, scope, turn, at, &spec.model, input, output)?;
             if value.is_some() {
-                self.route(id, spec, epoch)?;
+                self.route(id, spec, generation)?;
             }
             Ok(value)
         })();

@@ -17,7 +17,7 @@ fn id() -> String {
 pub struct AccessGrant {
     pub owner: String,
     pub turn: String,
-    pub epoch: u64,
+    pub thread_generation: u64,
     pub target: String,
     pub worker: bool,
     pub policy: pot_core::ShellSettings,
@@ -47,7 +47,7 @@ struct Scope {
     id: String,
     target: String,
     owner: String,
-    epoch: u64,
+    thread_generation: u64,
     parked: bool,
     generation: u64,
 }
@@ -229,7 +229,7 @@ impl Manager {
         let mut scopes = self.scopes.lock().unwrap();
         if let Some(scope) = scopes
             .values()
-            .find(|v| v.owner == owner && v.epoch == epoch && v.target == target)
+            .find(|v| v.owner == owner && v.thread_generation == epoch && v.target == target)
         {
             anyhow::ensure!(
                 scope.generation == generation,
@@ -269,7 +269,7 @@ impl Manager {
             id: id(),
             target: target.into(),
             owner: owner.into(),
-            epoch,
+            thread_generation: epoch,
             parked: false,
             generation,
         };
@@ -737,7 +737,9 @@ impl Manager {
             .unwrap()
             .get(session)
             .cloned()
-            .ok_or_else(|| anyhow!("Session expired or belongs to another task/agent epoch"))?;
+            .ok_or_else(|| {
+                anyhow!("Session expired or belongs to another thread execution generation")
+            })?;
         let scope = self
             .scopes
             .lock()
@@ -746,8 +748,8 @@ impl Manager {
             .cloned()
             .ok_or_else(|| anyhow!("Session scope expired"))?;
         anyhow::ensure!(
-            scope.owner == owner && scope.epoch == epoch,
-            "Session belongs to another task/agent epoch"
+            scope.owner == owner && scope.thread_generation == epoch,
+            "Session belongs to another thread execution generation"
         );
         Ok(scope.target)
     }
@@ -826,7 +828,9 @@ impl Manager {
                 .unwrap()
                 .get(session)
                 .cloned()
-                .ok_or_else(|| anyhow!("Session expired or belongs to another task/agent epoch"))?;
+                .ok_or_else(|| {
+                    anyhow!("Session expired or belongs to another thread execution generation")
+                })?;
             let scope = self
                 .scopes
                 .lock()
@@ -835,8 +839,8 @@ impl Manager {
                 .cloned()
                 .ok_or_else(|| anyhow!("Session scope expired"))?;
             anyhow::ensure!(
-                scope.owner == grant.owner && scope.epoch == grant.epoch,
-                "Session belongs to another task/agent epoch"
+                scope.owner == grant.owner && scope.thread_generation == grant.thread_generation,
+                "Session belongs to another thread execution generation"
             );
             anyhow::ensure!(
                 requested.is_empty() || requested == scope.target,
@@ -916,7 +920,7 @@ impl Manager {
             !cancelled(),
             "Execution turn ended during Sandbox preparation"
         );
-        let scope = self.scope(&target, &grant.owner, grant.epoch, generation)?;
+        let scope = self.scope(&target, &grant.owner, grant.thread_generation, generation)?;
         let mut record =
             json!({"id":id(),"target":target,"name":name,"args":args,"status":"accepted"});
         private_json(&receipt, &record)?;
@@ -1204,7 +1208,7 @@ impl Manager {
             .lock()
             .unwrap()
             .values()
-            .filter(|v| v.owner == owner && v.epoch != epoch)
+            .filter(|v| v.owner == owner && v.thread_generation != epoch)
             .cloned()
             .collect();
         for scope in scopes {
