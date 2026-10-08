@@ -10,7 +10,7 @@ browser. **HTTPS is recommended for remote access.**
 | Tailscale HTTPS | Devices on the same tailnet | Supported; provision certificates on Host |
 | Own-domain HTTPS | LAN, VPN or public access | Supported; provision certificates on Host |
 | Local HTTP | Browser on Host or through an SSH local tunnel | Supported |
-| Remote HTTP | Basic access with fewer browser features | Planned; not implemented |
+| Remote HTTP | App LAN / embedded Tailscale access with fewer browser features | Supported in App; manual CLI HTTP remains localhost-only |
 
 ## Deploy with an Agent
 
@@ -49,7 +49,8 @@ For a browser on another desktop, create a local tunnel and open the same URL:
 ssh -N -L 17701:127.0.0.1:17701 USER@HOST
 ```
 
-Raw remote HTTP is currently refused, including LAN and Tailscale IP addresses.
+Manual CLI HTTP configuration is localhost-only. App Web UI settings independently
+provide private-IPv4 LAN HTTP and embedded Tailscale HTTP.
 The localhost tunnel is not a general iPhone access method.
 
 ## HTTPS
@@ -121,12 +122,15 @@ browser connections.
 
 ## Embedded Tailscale and App
 
-App Web access exclusively uses embedded Tailscale. Settings → Web access →
-Connect Tailscale → complete login/approval → Enable Web access. The address is
-clickable; Copy address produces a plain URL, Scan to connect includes the Token.
-Enable MagicDNS and HTTPS certificates in Tailscale DNS settings. Client devices
-need tailnet connectivity. No certificate files are required.
+App has separate Settings → Web UI and Settings → Tailscale tabs. Both Web UI
+entry points are off for new instances. Enable LAN access for HTTP on private IPv4
+Host addresses, or connect Tailscale and independently enable Tailscale access.
+Tailscale access supports HTTP and optional HTTPS. HTTPS requires MagicDNS and
+HTTPS Certificates in tailnet DNS settings, and applies only to the tailnet listener.
+Addresses are clickable; Copy address produces a plain URL, Scan to connect
+includes the Token. The node connects independently of Web UI, and disabling Web
+UI leaves it connected. Disconnecting the node leaves LAN access running and
+retains tailnet Web UI preferences for reconnection. Existing enabled tailnet HTTPS
+instances retain that mode on upgrade.
 
-CLI optionally uses the same transport through `POT_TAILSCALE_HOSTNAME`; see
-[Standalone Server](standalone-server.md#optional-embedded-tailscale). Existing
-manual HTTPS procedures above remain supported independently.
+CLI localhost and manual HTTPS procedures above remain supported independently.

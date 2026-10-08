@@ -1,11 +1,19 @@
 # Browser access
 
-App: Settings → Web access → Connect Tailscale → finish login/device approval →
-Enable Web access. Enable MagicDNS and HTTPS certificates in Tailscale DNS settings.
-Pot joins as an independent userspace node, provisions HTTPS and renews certificates.
+App has separate **Web UI** and **Tailscale** settings. New instances start with
+both LAN and Tailscale browser access disabled. In Web UI, enable LAN access to
+serve HTTP on the Host's active private IPv4 addresses (port 17701), or enable
+Tailscale access after connecting the embedded node in Settings → Tailscale.
+The two browser listeners can run together. Tailscale access defaults to HTTP;
+its optional HTTPS switch requires MagicDNS and HTTPS Certificates in Tailscale
+DNS settings. Pot provisions and renews tailnet certificates automatically.
 Other devices need tailnet connectivity and ACL permission. No system Tailscale
 installation, certificate paths, port forwarding or Funnel is needed on the App host.
-
+Connecting Tailscale does not enable Web UI. Disabling Web UI does not disconnect
+Tailscale. Both browser entry points retain the same persistent instance Token.
+HTTP does not encrypt LAN traffic; tailnet HTTP is network-encrypted but is not a
+browser secure context. Installation, notifications and clipboard capabilities
+remain subject to browser secure-context requirements.
 CLI retains localhost HTTP and owner-terminated HTTPS, and optionally embeds
 Tailscale. See [Web deployment](web-ui-deployment.md) and [Standalone Server](standalone-server.md).
 Native Runtime and guest brokers stay private.
@@ -44,9 +52,10 @@ streams and releases input. Desktop assets ship with the Web release; private
 broker URLs, tokens and addresses are never exposed by inventory.
 
 App shutdown closes its embedded node. Restart restores previously enabled access;
-login/certificate failures do not stop local chat/tasks. Disconnecting Tailscale closes
-Web access but preserves node state for reconnection. HTTPS is available only on the
-tailnet; no public Funnel endpoint is configured.
+login/certificate failures do not stop local chat/tasks. Disconnecting Tailscale closes only tailnet access and preserves Web UI preferences
+for reconnection; LAN access continues. Closing one listener invalidates its live
+authorization guards without disabling the other listener. Both listeners stop when
+App quits. HTTPS is available only on the tailnet; no public Funnel endpoint is configured.
 
 The browser runs GPUI Kit 0.7.1 WASM. The authentication shell and same-origin
 transport adapter are JS. GPUI reuses `pot-ui` Chat/Tasks/Sandbox/Usage components, Markdown, page/chat state,
@@ -87,7 +96,7 @@ Open as Web App when that option is shown. Launch the Pot icon to use a standalo
 window. The app detects standalone mode and browser installation events rather
 than treating acceptance of a prompt as completed installation.
 
-A browser-trusted HTTPS certificate is required for remote deployment. A Service Worker
+A browser-trusted HTTPS certificate is required for remote Service Worker and push support. A Service Worker
 registers even when VAPID/push is not configured, but uses network-only fetches:
 there is no offline transcript or credential cache. Installation does not grant
 access, change authorization or request notification permission. A newly installed

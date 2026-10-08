@@ -136,10 +136,16 @@ Category pages do not change totals/trends/allowances; range/session/zone change
 
 ## Web access settings
 
-Settings has a dedicated Web access tab. App must connect its embedded Tailscale
-node before enabling the switch. Login/device approval and DNS/HTTPS prerequisites
-are shown inline with recovery links. Web access failures do not stop local features.
-The actual HTTPS address is clickable and configures the browser using a Token
+Settings has separate Web UI and Tailscale tabs, available from every settings page.
+General continues to contain language, appearance and keyboard-shortcut help.
+Web UI offers independently persisted LAN and Tailscale access switches, both off
+for new instances, and optional Tailscale HTTPS. LAN access needs no Tailscale login.
+Tailscale has its own connect/disconnect, login/device approval and DNS settings
+controls. Web UI links to that tab when the node is disconnected. Connecting a node
+does not enable browser access; disabling browser access does not disconnect it.
+HTTPS is applied only to the Tailscale entry point; LAN remains HTTP. Listener or
+certificate failures do not stop local features or the other access entry point.
+Each available address is clickable and configures the browser using a Token
 fragment; Copy address copies only the plain URL. Scan to connect expands a
 credential-bearing QR with a do-not-share warning. Access Token has Show/Hide,
 Copy and Regenerate controls; regeneration invalidates every browser connection.

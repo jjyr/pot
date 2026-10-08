@@ -61,7 +61,31 @@ pub fn admin_router(access: Access) -> Router {
         .route("/api/v1/access", get(admin_status).post(admin_command))
         .with_state(access)
 }
-async fn boundary(State(a): State<Access>, req: Request, next: Next) -> Response {
+async fn boundary(State(a): State<Access>, mut req: Request, next: Next) -> Response {
+    let secure = a.origin().starts_with("https://");
+    if !secure {
+        let cookies = req
+            .headers()
+            .get_all("cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(';'))
+            .map(|item| {
+                let item = item.trim();
+                if item.starts_with("pot-session=") || item.starts_with("pot-installation=") {
+                    format!("__Host-{item}")
+                } else {
+                    item.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !cookies.is_empty()
+            && let Ok(value) = HeaderValue::from_str(&cookies)
+        {
+            req.headers_mut().insert("cookie", value);
+        }
+    }
     if !a.inner.lock().unwrap().enabled {
         return fail(StatusCode::SERVICE_UNAVAILABLE, "access_disabled").into_response();
     }
@@ -96,6 +120,31 @@ async fn boundary(State(a): State<Access>, req: Request, next: Next) -> Response
         ("strict-transport-security", "max-age=31536000"),
     ] {
         r.headers_mut().insert(k, HeaderValue::from_static(v));
+    }
+    if !secure {
+        r.headers_mut().remove("strict-transport-security");
+        if url::Url::parse(&a.origin())
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .as_deref()
+            != Some("localhost")
+        {
+            r.headers_mut().remove("cross-origin-opener-policy");
+            r.headers_mut().remove("cross-origin-embedder-policy");
+        }
+        let cookies = r
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .map(|v| v.trim_start_matches("__Host-").replace("; Secure", ""))
+            .collect::<Vec<_>>();
+        r.headers_mut().remove("set-cookie");
+        for cookie in cookies {
+            if let Ok(value) = HeaderValue::from_str(&cookie) {
+                r.headers_mut().append("set-cookie", value);
+            }
+        }
     }
     if desktop_page {
         r.headers_mut().insert("content-security-policy", HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"));
@@ -166,7 +215,8 @@ fn allowed(method: &Method, path: &str) -> bool {
     }
     false
 }
-async fn proxy(State(a): State<Access>, mut req: Request) -> Result<Response, Failure> {
+async fn proxy(State(mut a): State<Access>, mut req: Request) -> Result<Response, Failure> {
+    a.capture_endpoint();
     let session = a
         .authorization(req.headers())
         .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "invalid_token"))?;
@@ -294,9 +344,14 @@ async fn admin_status(State(a): State<Access>, h: HeaderMap) -> Result<Json<Valu
     } else {
         json!({"available":false})
     };
+    let web = if let Some(web) = &a.web {
+        web.status(&a).await
+    } else {
+        Value::Null
+    };
     let i = a.inner.lock().unwrap();
     Ok(Json(
-        json!({"origin":a.origin(),"enabled":i.enabled,"tailscale":ts,"token":i.credentials.token,"scope":"owner_instance"}),
+        json!({"origin":a.origin(),"enabled":i.enabled,"tailscale":ts,"web":web,"token":i.credentials.token,"scope":"owner_instance"}),
     ))
 }
 async fn admin_command(
@@ -306,20 +361,53 @@ async fn admin_command(
 ) -> Result<Json<Value>, Failure> {
     admin(&a, &h)?;
     let action = v["action"].as_str().ok_or_else(invalid)?;
+    if matches!(action, "lan" | "tailscale" | "https") {
+        let web = a.web.as_ref().ok_or_else(invalid)?;
+        let enabled = v["enabled"].as_bool().ok_or_else(invalid)?;
+        web.configure(&a, action, enabled)
+            .await
+            .map_err(|e| fail(StatusCode::BAD_REQUEST, &e.to_string()))?;
+        return Ok(Json(json!({"ok":true})));
+    }
     if action == "connect" || action == "disconnect" {
         let ts = a
             .tailscale
             .as_ref()
             .ok_or_else(|| fail(StatusCode::BAD_REQUEST, "tailscale_unavailable"))?;
         if action == "disconnect" {
-            set_enabled(&a, false)?;
-            ts.disconnect()
-                .await
-                .map_err(|_| fail(StatusCode::BAD_GATEWAY, "tailscale_disconnect_failed"))?;
+            if let Some(web) = &a.web {
+                web.disconnect(&a)
+                    .await
+                    .map_err(|e| fail(StatusCode::BAD_GATEWAY, &e.to_string()))?;
+            } else {
+                set_enabled(&a, false)?;
+                ts.disconnect()
+                    .await
+                    .map_err(|_| fail(StatusCode::BAD_GATEWAY, "tailscale_disconnect_failed"))?;
+            }
         } else {
-            ts.connect()
+            if let Some(web) = &a.web {
+                web.connect(&a)
+                    .await
+                    .map_err(|e| fail(StatusCode::BAD_GATEWAY, &e.to_string()))?;
+            } else {
+                ts.connect()
+                    .await
+                    .map_err(|e| fail(StatusCode::BAD_GATEWAY, &e.to_string()))?;
+            }
+        }
+        return Ok(Json(json!({"ok":true})));
+    }
+    if matches!(action, "enable" | "disable")
+        && let Some(web) = &a.web
+    {
+        web.configure(&a, "tailscale", action == "enable")
+            .await
+            .map_err(|e| fail(StatusCode::BAD_REQUEST, &e.to_string()))?;
+        if action == "disable" {
+            web.configure(&a, "lan", false)
                 .await
-                .map_err(|e| fail(StatusCode::BAD_GATEWAY, &e.to_string()))?;
+                .map_err(|e| fail(StatusCode::BAD_REQUEST, &e.to_string()))?;
         }
         return Ok(Json(json!({"ok":true})));
     }

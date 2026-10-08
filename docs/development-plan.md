@@ -72,8 +72,9 @@ Podman desktop follow-up (2026-10-07): private loopback broker transport, bundle
 
 ## Web access redesign — 2026-10-08
 
-App Web access now requires an embedded libtailscale node with tailnet-only HTTPS,
-automatic certificate provisioning/renewal and a dedicated settings page. CLI retains
+App has separate Web UI and Tailscale settings. New instances default to no browser
+listeners. LAN HTTP and embedded tailnet access are independent; tailnet HTTPS is
+optional with automatic certificate provisioning/renewal. CLI retains
 localhost/manual HTTPS and optionally uses the same embedded transport. A persistent
 instance Token replaces browser enrollment; connection links/QR fragments configure
 browser storage automatically. Rotation invalidates every browser/stream/desktop.

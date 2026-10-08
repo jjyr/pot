@@ -72,7 +72,21 @@ pub struct Credentials {
     pub disabled: bool,
     pub token: String,
     #[serde(default)]
+    pub web: Option<super::web::Preferences>,
+    #[serde(default)]
     pub subscriptions: HashMap<String, super::push::Subscription>,
+}
+pub struct DesktopTicket {
+    pub owner: String,
+    pub expires: Instant,
+    pub endpoint: Arc<std::sync::atomic::AtomicU64>,
+    pub generation: u64,
+}
+impl DesktopTicket {
+    pub fn live(&self) -> bool {
+        self.expires > Instant::now()
+            && self.generation == self.endpoint.load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 pub struct Inner {
     pub credentials: Credentials,
@@ -83,6 +97,10 @@ pub struct Inner {
 pub struct Access {
     pub origin: Arc<std::sync::RwLock<String>>,
     pub tailscale: Option<Arc<super::tailscale::Tailscale>>,
+    pub web: Option<Arc<super::web::Web>>,
+    pub endpoint_enabled: Option<Arc<std::sync::atomic::AtomicBool>>,
+    pub endpoint_epoch: Arc<std::sync::atomic::AtomicU64>,
+    endpoint_snapshot: Option<u64>,
     pub assets: PathBuf,
     pub data: PathBuf,
     pub root_token: String,
@@ -92,7 +110,7 @@ pub struct Access {
     pub push: Option<Arc<super::push::Push>>,
     pub policy: tokio::sync::watch::Sender<bool>,
     pub desktop_open: Arc<tokio::sync::Mutex<()>>,
-    pub desktops: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    pub desktops: Arc<Mutex<HashMap<String, DesktopTicket>>>,
     pub foreground: Arc<Mutex<HashMap<String, Instant>>>,
 }
 impl Access {
@@ -125,6 +143,10 @@ impl Access {
                 config.origin.origin().ascii_serialization(),
             )),
             tailscale: None,
+            web: None,
+            endpoint_enabled: None,
+            endpoint_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            endpoint_snapshot: None,
             assets: config.assets.clone(),
             data,
             root_token,
@@ -182,7 +204,39 @@ impl Access {
             .map_err(|_| anyhow::anyhow!("Token generation failed"))?;
         Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
     }
+    pub fn endpoint_generation(&self) -> u64 {
+        self.endpoint_snapshot.unwrap_or_else(|| {
+            self.endpoint_epoch
+                .load(std::sync::atomic::Ordering::Acquire)
+        })
+    }
+    pub fn capture_endpoint(&mut self) {
+        self.endpoint_snapshot = Some(
+            self.endpoint_epoch
+                .load(std::sync::atomic::Ordering::Acquire),
+        );
+    }
+    pub fn invalidate_endpoint(&self) {
+        self.endpoint_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+    pub fn endpoint_active(&self) -> bool {
+        if self.endpoint_snapshot.is_some_and(|generation| {
+            generation
+                != self
+                    .endpoint_epoch
+                    .load(std::sync::atomic::Ordering::Acquire)
+        }) {
+            return false;
+        }
+        self.endpoint_enabled
+            .as_ref()
+            .is_none_or(|enabled| enabled.load(std::sync::atomic::Ordering::Acquire))
+    }
     pub fn valid_token(&self, token: &str) -> bool {
+        if !self.endpoint_active() {
+            return false;
+        }
         let inner = self.inner.lock().unwrap();
         inner.enabled
             && token.len() == inner.credentials.token.len()
@@ -217,6 +271,9 @@ impl Access {
         )
     }
     pub fn valid_session(&self, value: &str, _: bool) -> bool {
+        if !self.endpoint_active() {
+            return false;
+        }
         use base64::Engine;
         let Some((id, mac)) = value.split_once('.') else {
             return false;
