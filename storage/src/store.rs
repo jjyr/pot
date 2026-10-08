@@ -235,11 +235,11 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn restart_preserves_binding_and_marks_interrupted_turn() {
+    fn restart_preserves_metadata_and_marks_interrupted_turn() {
         let path = std::env::temp_dir().join(format!("pot-{}.sqlite", id()));
         {
             let mut s = Store::open(&path).unwrap();
-            s.set("session", "native-123").unwrap();
+            s.set("thread-label", "main").unwrap();
             s.save(Message {
                 id: id(),
                 conversation_id: "main".into(),
@@ -254,7 +254,7 @@ mod tests {
         }
         {
             let s = Store::open(&path).unwrap();
-            assert_eq!(s.get("session").unwrap().as_deref(), Some("native-123"));
+            assert_eq!(s.get("thread-label").unwrap().as_deref(), Some("main"));
             let m = s.duplicate("r1").unwrap().unwrap();
             assert_eq!(m.text, "partial");
             assert_eq!(m.status, MessageStatus::Failed);

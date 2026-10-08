@@ -21,7 +21,7 @@ Unconfigured Chat opens the shared AI Configuration page on request. Saved conne
 
 The main assistant answers short questions and delegates research, reports, and multistep execution to tasks with explicit goals. Main chat stays available during background work. Guidance first shows Received, then Applied after consumption; without real-time steering, explicitly queue it for the next turn.
 
-Completed tasks enter archive; failed/interrupted tasks need attention. Archiving preserves records/native sessions; further guidance can continue the same task. The main assistant searches status/results on demand rather than loading all history every turn.
+Completed tasks enter archive; failed/interrupted tasks need attention. Archiving preserves records/Thread contexts; further guidance can continue the same task. The main assistant searches status/results on demand rather than loading all history every turn.
 
 ## Control and authorization
 
@@ -43,7 +43,7 @@ Secrets do not enter chat, logs, or ordinary memory. Host shared directories/rea
 
 ## Execution context and recovery
 
-Runtime owns product messages, tasks, schedules, and bindings; drivers own native sessions, context, and compaction. One main driver can serve the assistant without another model forwarding each sentence.
+Runtime owns product messages, tasks, schedules, Thread contexts/configuration and execution state. It calls pot-agent directly for the model/tool loop and compaction. Main chat and background tasks share this structure; roles determine tools and environment assignments. Configuration changes preserve context without external session mappings or handoff summaries.
 
 Adapters explicitly declare auth, tools, guidance, stop, resume, and compaction capabilities. Failed native resume must not silently create a new session and claim continuation. Driver switching must not impersonate native context migration; active execution retains its binding.
 

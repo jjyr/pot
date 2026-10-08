@@ -63,6 +63,8 @@ Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](va
 
 Single Agent engine: [Removal and automated validation, 2026-10-09](validation/single-agent-20261009.md).
 
+Product-owned Threads: [Direct execution and context continuity, 2026-10-09](validation/thread-execution-20261009.md).
+
 ## Research on demand
 
 `research/` contains dated background material, not current implementation specifications:

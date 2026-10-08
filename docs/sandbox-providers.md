@@ -52,7 +52,7 @@ The initial service is in-process, constructed by the embedded App or standalone
 
 | Layer | Owns | Does not own |
 |---|---|---|
-| Runtime | Conversations, Agent/Driver sessions, tasks/schedules, immutable task-to-sandbox binding, product permissions and tool schemas | Provider routing, VM health, ADB commands, scope cleanup or environment receipt ledger |
+| Runtime | Conversations, Thread contexts, tasks/schedules, immutable task-to-sandbox binding, product permissions and tool schemas | Provider routing, VM health, ADB commands, scope cleanup or environment receipt ledger |
 | Sandbox Manager | Provider registration/probe, profiles/templates, environment inventory/allocation, lifecycle/readiness, capacity/locks/leases, execution scopes, capability enforcement, receipts/recovery, artifacts and display/input arbitration | Models/prompts, task dependency graphs, schedule triggers or chat presentation |
 | Provider | Engine-specific preparation/start/stop/inspect, authenticated guest transport, qualified shell/device/files/display operations and cleanup primitives | Product authorization, choosing a task target, global allocation or shared recovery policy |
 

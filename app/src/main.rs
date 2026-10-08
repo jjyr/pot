@@ -295,9 +295,9 @@ impl Shell {
         self.last_content = content;
         let state = serde_json::json!({
             "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
-            "needs_auth":snapshot.is_some_and(|s|s.engine.phase == pot_protocol::EnginePhase::NeedsAuth),
-            "error":snapshot.is_some_and(|s|s.engine.phase == pot_protocol::EnginePhase::Failed),
-            "engine":snapshot.map(|s|s.engine.engine.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
+            "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
+            "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),
+            "model":snapshot.map(|s|s.agent.model.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
             "used":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.used),
             "limit":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.limit),
             "accepted":accepted,"accepted_conversation":accepted_conversation,"at_bottom":at_bottom,
@@ -390,23 +390,12 @@ impl Shell {
             }
             _ => {}
         }
-        let active_engine = self.native["settings"]["active_spec"]["engine"]
-            .as_str()
-            .unwrap_or("");
-        let known_logged_out = self.native["settings"]["agents"]
-            .as_array()
-            .is_some_and(|agents| {
-                agents
-                    .iter()
-                    .any(|a| a["id"] == active_engine && a["authentication"] == "required")
-            });
         if !self.show_tasks
             && view.selected.is_empty()
-            && (known_logged_out
-                || view
-                    .main_snapshot
-                    .as_ref()
-                    .is_some_and(|s| s.engine.phase == pot_protocol::EnginePhase::NeedsAuth))
+            && (view
+                .main_snapshot
+                .as_ref()
+                .is_some_and(|s| s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration))
         {
             return ui::page(cx).child(
                 ui::content().child(

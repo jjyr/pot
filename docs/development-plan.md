@@ -106,3 +106,13 @@ contracts, native thread bindings and native usage accounting are removed.
 No legacy conversation or usage migration is provided. Core execution contracts
 remain shared by Runtime and evaluation; Sandbox Manager/Provider boundaries and
 Agent tool interfaces remain intact.
+
+## Product-owned Threads (2026-10-09)
+
+Main chat and tasks now own their configuration snapshots and Agent contexts directly.
+Runtime and eval call pot-agent without Engine/Binding/NativeRef or Driver host/session
+adapters. Context is persisted in the owner's SQLite Store. Configuration updates
+preserve history at a safe turn boundary; the old handoff/migration state machine is
+removed. Client snapshot/event schema is version 2 with a minimal Agent status.
+No old conversation/configuration/usage compatibility is provided. See
+[Thread validation](validation/thread-execution-20261009.md).

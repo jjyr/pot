@@ -12,7 +12,7 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 |---|---|
 | Scenario catalog | Versioned user turns, workspace fixtures, environment, task assertions, resource limits and optional controlled response trace |
 | Runner | Run matrix, isolated fresh sessions/workspaces, repeats, ordering, deadlines, lifecycle and artifact collection |
-| Driver host/session | Reuse the Core execution contract to launch/configure an implementation, send turns, cancel and report capabilities, effective configuration and observations |
+| Agent executor | Directly invoke pot-agent with Thread configuration, injected services, controls and ordered observations |
 | Environment/tool service | Prepare identical fixtures and, where supported, common tool semantics/results for controlled comparisons |
 | Usage collector | Capture provider usage or native counters and declare what scope/stages are observable |
 | Normalizer/validator | Convert observations into a versioned schema, resolve cumulative snapshots and duplicate sources, preserve missing fields and raw provenance |
@@ -20,28 +20,13 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 
 The runner is a separate workspace crate, `pot-eval`, under `eval/`. It depends on shared contracts in `pot-core` and uses the host from `pot-agent`, with `pot-gateway` where direct transport or collection is needed. It does not depend on `pot-runtime`, product Storage or App. The crate owns scenario execution, immutable run records, validation, scoring, comparison and the CLI. The initial crate and scripted Pot runner are implemented; the remaining delivery sequence is listed below.
 
-Use the existing `DriverHost`/`SessionHandle` contract rather than creating a second Agent adapter layer. Pot already implements this contract. A future Pi baseline would implement the same Driver contract as an optional evaluation integration, without restoring Pi as a production engine. Vendor protocol translation remains inside each Driver implementation. Scenario definitions and aggregation do not depend on those protocols.
+Runtime and eval directly invoke the concrete `pot_agent::Agent::execute` entry point. Thread context belongs to the caller's Store, not to an external engine session. The Engine/Binding/NativeRef and DriverHost/SessionHandle abstractions have been removed. A future external baseline belongs in a separate evaluation command; it must not restore adapters to production execution.
 
-Execution and usage observation remain separate concerns: several Drivers may share a gateway collector, and one Driver may expose different observations depending on its transport. Environment preparation is replaceable, allowing local fixtures or an existing Sandbox without requiring product UI.
+## Standalone execution services
 
-## Driver extensions and capability negotiation
+`ExecutionContext` supplies instructions, environment tools, context persistence and cancellation feedback. `ExecutionServices` injects model transport, product RPC and compaction lifecycle transport. Runtime supplies authenticated Gateway and owner services; eval supplies deterministic or explicitly selected live transport, run-local context storage, tools and controls. Product reservations remain durable before networking; observers cannot authorize requests or replace settlement.
 
-A Driver accepts shared execution configuration and emits ordered lifecycle events. Keep `probe`, `session` and `start_turn`; extend the contract with capability description and explicit session shutdown. Cancellation must be usable while `start_turn` holds the mutable session, through an independent control handle or the existing cancellation service. Optional controls include steering, pause/resume, checkpoint/restart and forced compaction. Tools and policy configuration must report requested and effective values; unsupported settings are not silently assumed to apply. Evaluation run IDs, trial ordering and scoring rules stay in `pot-eval`, not in Driver configuration.
-
-Capability description declares control capabilities separately from observation capabilities:
-
-- Control: configurable prompt/model/output cap/context window, custom tools, deterministic response replay, forced compaction, context retention, fresh session, restart/checkpoint.
-- Observation: complete run/turn/request usage, request bodies, tool arguments/results, compaction lifecycle and usage, reasoning/cache fields, request IDs, cumulative counters.
-
-### Standalone execution services
-
-The current contract avoids a Runtime dependency, but standalone construction still needs work: `ExecutionContext` carries `backend_url` and `lane_token`, and Pot uses product HTTP endpoints for gateway/tool/compaction services. `ExecutionFeedback` also mixes cancellation, context persistence, binding validation, usage settlement and diagnostics. Merely reusing the trait does not remove those service requirements.
-
-Introduce injectable execution services for model transport, external tools and compaction transport where applicable; keep the Agent's loop, context policy and compaction decisions in the Agent. Separate context persistence/control, authoritative settlement and typed observation responsibilities. Runtime supplies its existing authenticated gateway, storage and binding/ledger implementations. `pot-eval` supplies standalone transport, run-local context storage, tool services and controls. Product reservations must still be persisted before networking; an observer cannot authorize or replace settlement.
-
-Add a typed execution observer in Core for request lifecycle, usage reports, compaction lifecycle, context estimates and truncation decisions. Reuse existing tool/message events and their epoch/turn/sequence validation. Request/attempt IDs link provider observations to Driver events; retries get distinct attempts. Observation is an opt-in stream, independent of UI projection and metadata-only `diagnostic`. Sensitive payload capture is a separate explicit option, with credential redaction and run-local retention; credentials never enter manifests or raw request records.
-
-Core contains runtime-neutral capabilities, service contracts and observation types. The evaluation schema adds run/trial identity and serialized provenance around those observations. Drivers report supported measurements rather than inventing missing request or stage detail. Collector failures invalidate measurement coverage; they must not silently produce a successful comparable record.
+Core defines ordered Agent events and typed request/usage/compaction observations. Owner/generation/turn/sequence checks reject stale updates. Evaluation adds run/trial identity and provenance without a Driver capability-negotiation layer. Request/attempt IDs link observations; retries have distinct attempts. Collector failures invalidate measurement coverage, and missing measurements remain unknown. Credentials never enter manifests or raw request records.
 
 ## Scenario and run identity
 
@@ -50,7 +35,7 @@ Each scenario pins an ID/version, user input sequence, fixture content hash, env
 Every immutable run manifest records:
 
 - Schema version, run ID, comparison group/pair ID, scenario version/hash and trial number.
-- Driver version, runtime commit/build, requested/effective model/provider and generation settings.
+- Agent version, runtime commit/build, requested/effective model/provider and generation settings.
 - Prompt/tool-set hashes, runtime policy including compaction/retention/output limits, environment/image/fixture hashes.
 - Collector versions and negotiated observation precision; pricing snapshot ID when cost is calculable.
 - Mode, ordering, seed when supported, timestamps, resource limits and terminal status.
@@ -82,7 +67,7 @@ Usage reports carry a measurement scope (`request`, `turn`, or `run`), source (`
 
 Normalized input includes cached input; cache reads/writes are subsets, not extra totals. Normalized output includes reasoning; reasoning is a subset. Preserve provider-native fields and cache TTL categories for pricing. Unknown fields are null, not zero. Unknown reasoning breakdown does not invalidate a fully observed output total.
 
-Repeated stream usage snapshots replace the same measurement, never add together. Native thread cumulative counters require a known baseline and monotonic progression; a reset or missing baseline makes the delta unknown. HTTP and Driver reports for the same request are correlated and deduplicated using explicit measurement identity. Parent turn/run usage and child request usage must never both be added to a total. Validate disjoint coverage and reconciliation before choosing a total; retain mismatches as diagnostics, not silently repaired data.
+Repeated stream usage snapshots replace the same measurement, never add together. Native thread cumulative counters require a known baseline and monotonic progression; a reset or missing baseline makes the delta unknown. HTTP and Agent reports for the same request are correlated and deduplicated using explicit measurement identity. Parent turn/run usage and child request usage must never both be added to a total. Validate disjoint coverage and reconciliation before choosing a total; retain mismatches as diagnostics, not silently repaired data.
 
 Keep three independent quantities:
 
@@ -109,7 +94,7 @@ The headline is cost/tokens for equivalent successful outcomes, alongside succes
 
 Cost requires a versioned price table for the actual provider/model/cache categories. Do not convert subscription usage into hypothetical billed cost. Keep token comparisons and priced cost comparisons separate when a valid price is unavailable.
 
-Pair candidate/baseline runs by scenario and trial, alternate or randomize execution order, and start with fresh sessions/workspaces. A seed or low temperature does not guarantee deterministic models. Server-side cache state cannot always be forced cold: record reported cache usage and analyze cache conditions separately; avoid consistently giving one Driver the second, warmed request. Repeat promising cases more often, report paired deltas and distributions/confidence intervals where sample size permits, and retain every failed/timeout/budget-stopped run.
+Pair candidate/baseline runs by scenario and trial, alternate or randomize execution order, and start with fresh sessions/workspaces. A seed or low temperature does not guarantee deterministic models. Server-side cache state cannot always be forced cold: record reported cache usage and analyze cache conditions separately; avoid consistently giving one candidate the second, warmed request. Repeat promising cases more often, report paired deltas and distributions/confidence intervals where sample size permits, and retain every failed/timeout/budget-stopped run.
 
 CI can enforce contract tests without networking. Live regression rules require explicit limits and sufficient repeats: fail task-quality regressions, and flag sustained token/cost changes exceeding a configured absolute and relative threshold. No scheduled paid runs are implied by this design.
 
@@ -117,13 +102,13 @@ CI can enforce contract tests without networking. Live regression rules require 
 
 The [small-budget suite](token-evaluation-next-suite.md) delivers at most five conversational turns, cache utilization, deterministic fault/retry contracts and directed serial two-child delegation, with [dated results](validation/small-budget-evaluation.md). Large-output and long/repeated-compaction tests are deferred for this increment. The broader sequence below remains long-term scope; generic experiment matrices, parallel scheduling and verified pricing are not delivered by this fixed suite.
 
-1. Create the separate `pot-eval` crate, stabilize manifests/events/usage validation and implement a scripted Driver plus fixtures for duplicate snapshots, partial usage, counter resets, interrupted tools and compaction retries.
-2. Extend Core Driver capabilities/observation and inject standalone execution services; run the existing Pot host directly with a request collector. Deliver CLI commands to run cases, validate records and compare two run sets; JSONL/raw artifacts first, compact HTML report second.
+1. Create the separate `pot-eval` crate, stabilize manifests/events/usage validation and implement a scripted Agent execution plus fixtures for duplicate snapshots, partial usage, counter resets, interrupted tools and compaction retries.
+2. Define Core observations and inject standalone execution services; run pot-agent directly with a request collector. Deliver CLI commands to run cases, validate records and compare two run sets; JSONL/raw artifacts first, compact HTML report second.
 3. Add short-chat, single/multiple tool rounds, large output, forced/automatic repeated compaction and post-compaction continuation cases with machine-checkable outcomes.
 4. Add comparison baselines through the same execution contract. Baseline-specific tests do not change benchmark scenarios or scoring rules.
 5. Establish live baselines and regression budgets once comparable real-provider measurements exist. Keep baseline runtime revisions and case versions pinned; version report formulas separately from raw observations.
 
-The schema and aggregation validator should be the first concrete implementation. They are what make longitudinal results comparable; Driver implementations are replaceable inputs to that contract.
+The schema and aggregation validator should be the first concrete implementation. They are what make longitudinal results comparable; Agent implementations are replaceable inputs to that contract.
 
 Current delivery: steps 1 and the Pot standalone/CLI portion of step 2 are implemented. Step 3 has short-chat, tool batch, shell-output-limit and repeated automatic-compaction scenarios/tests, including continuation assertions. Other live transports, repeat statistics and HTML reporting remain future work. The initial Core change adds opt-in observation to existing feedback and standalone services to the Pot host; a full decomposition of product feedback responsibilities is not claimed.
 

@@ -1,7 +1,6 @@
 //! Durable input at model boundaries and bounded execution metadata.
 use crate::*;
 use axum::extract::{Path, Query};
-use pot_core::Engine;
 use serde::{Deserialize, Serialize};
 
 const STEERING: &str = "execution.steering";
@@ -58,10 +57,7 @@ fn change_control(s: &Service, req: TurnControl) -> ApiResult<Json<Value>> {
             "Turn ended or is stopping",
         ));
     }
-    if agent::current(&inner.store)
-        .map_err(internal)?
-        .is_none_or(|b| b.spec.engine != Engine::Pot)
-    {
+    if agent::current(&inner.store).map_err(internal)?.is_none() {
         return Err(error(
             StatusCode::CONFLICT,
             "unsupported",
@@ -99,13 +95,13 @@ pub(crate) async fn ready(s: &Service) -> Result<()> {
         };
         if !paused {
             if observed {
-                s.phase(EnginePhase::Ready, None);
+                s.phase(AgentPhase::Ready, None);
             }
             return Ok(());
         }
         if !observed {
             observed = true;
-            s.phase(EnginePhase::Ready, Some("已暂停，等待继续".into()));
+            s.phase(AgentPhase::Ready, Some("已暂停，等待继续".into()));
         }
         tokio::select! { _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}, _ = s.cancel_notify.notified() => return Ok(()), _ = s.stop_requested() => return Ok(()) }
     }
@@ -120,7 +116,7 @@ pub struct Steer {
 struct Input {
     request_id: String,
     target: String,
-    epoch: u64,
+    generation: u64,
     text: String,
     message_id: String,
     consumed: bool,
@@ -190,21 +186,14 @@ fn enqueue(s: &Service, req: Steer) -> ApiResult<Json<SendMessageAccepted>> {
             "Turn is settling; send a new message after completion",
         ));
     }
-    let binding = agent::current(&inner.store)
+    let thread = agent::current(&inner.store)
         .map_err(internal)?
-        .ok_or_else(|| error(StatusCode::CONFLICT, "binding_missing", "Binding missing"))?;
-    if binding.spec.engine != Engine::Pot {
-        return Err(error(
-            StatusCode::CONFLICT,
-            "unsupported",
-            "Live steering requires Pot Agent",
-        ));
-    }
+        .ok_or_else(|| error(StatusCode::CONFLICT, "thread_missing", "Thread missing"))?;
     let mut entries = load(&inner.store).map_err(internal)?;
     if let Some(old) = entries.iter().find(|i| {
         i.request_id == req.request_id
             && i.target == req.user_message_id
-            && i.epoch == binding.epoch
+            && i.generation == thread.generation
     }) {
         if old.text != req.text {
             return Err(error(
@@ -219,7 +208,7 @@ fn enqueue(s: &Service, req: Steer) -> ApiResult<Json<SendMessageAccepted>> {
         }));
     }
     // Keep receipts for the current turn; stale turn targets are rejected above.
-    entries.retain(|i| i.target == req.user_message_id && i.epoch == binding.epoch);
+    entries.retain(|i| i.target == req.user_message_id && i.generation == thread.generation);
     if entries.len() >= 100 {
         return Err(error(
             StatusCode::CONFLICT,
@@ -231,7 +220,7 @@ fn enqueue(s: &Service, req: Steer) -> ApiResult<Json<SendMessageAccepted>> {
     entries.push(Input {
         request_id: req.request_id,
         target: req.user_message_id,
-        epoch: binding.epoch,
+        generation: thread.generation,
         text: req.text,
         message_id: message_id.clone(),
         consumed: false,
@@ -290,10 +279,7 @@ pub(crate) fn send_reference(
         ));
     }
     let inner = s.inner.lock().unwrap();
-    if agent::current(&inner.store)
-        .map_err(internal)?
-        .is_none_or(|b| b.spec.engine != Engine::Pot)
-    {
+    if agent::current(&inner.store).map_err(internal)?.is_none() {
         return Err(error(
             StatusCode::CONFLICT,
             "unsupported",
@@ -350,7 +336,11 @@ pub(crate) fn send_reference(
     Ok(reply)
 }
 
-pub(crate) fn pending(s: &Service, epoch: u64, finalizing: bool) -> Result<Vec<(String, String)>> {
+pub(crate) fn pending(
+    s: &Service,
+    generation: u64,
+    finalizing: bool,
+) -> Result<Vec<(String, String)>> {
     let inner = s.inner.lock().unwrap();
     let turn = inner
         .turn
@@ -358,7 +348,7 @@ pub(crate) fn pending(s: &Service, epoch: u64, finalizing: bool) -> Result<Vec<(
         .ok_or_else(|| anyhow!("No active turn"))?;
     let mut pending: Vec<_> = load(&inner.store)?
         .into_iter()
-        .filter(|i| i.epoch == epoch && i.target == turn.user_message_id && !i.consumed)
+        .filter(|i| i.generation == generation && i.target == turn.user_message_id && !i.consumed)
         .map(|i| (i.request_id, i.text))
         .collect();
     pending.extend(
@@ -374,7 +364,7 @@ pub(crate) fn pending(s: &Service, epoch: u64, finalizing: bool) -> Result<Vec<(
     }
     Ok(pending)
 }
-pub(crate) fn acknowledge(s: &Service, epoch: u64, ids: &[String]) -> Result<()> {
+pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Result<()> {
     let mut inner = s.inner.lock().unwrap();
     let target = inner
         .turn
@@ -384,7 +374,10 @@ pub(crate) fn acknowledge(s: &Service, epoch: u64, ids: &[String]) -> Result<()>
         .clone();
     let mut entries = load(&inner.store)?;
     for entry in &mut entries {
-        if entry.epoch == epoch && entry.target == target && ids.contains(&entry.request_id) {
+        if entry.generation == generation
+            && entry.target == target
+            && ids.contains(&entry.request_id)
+        {
             // Repeated saves are idempotent, including after a partial acknowledgement.
             let event = inner.store.save(Message {
                 id: entry.message_id.clone(),
@@ -420,7 +413,7 @@ pub(crate) fn acknowledge(s: &Service, epoch: u64, ids: &[String]) -> Result<()>
     }
     inner.store.set(MAILBOX, &serde_json::to_string(&mails)?)
 }
-pub(crate) fn record(s: &Service, epoch: u64, metadata: &Value) -> Result<()> {
+pub(crate) fn record(s: &Service, generation: u64, metadata: &Value) -> Result<()> {
     let inner = s.inner.lock().unwrap();
     let mut entries: Vec<Value> = inner
         .store
@@ -429,7 +422,7 @@ pub(crate) fn record(s: &Service, epoch: u64, metadata: &Value) -> Result<()> {
         .transpose()?
         .unwrap_or_default();
     // Select fields explicitly so even an extension cannot accidentally persist payloads.
-    let mut entry = json!({"at_ms":now(),"epoch":epoch,"owner":s.usage_scope,"user_message_id":inner.turn.as_ref().map(|t| &t.user_message_id)});
+    let mut entry = json!({"at_ms":now(),"generation":generation,"owner":s.usage_scope,"user_message_id":inner.turn.as_ref().map(|t| &t.user_message_id)});
     for key in [
         "kind",
         "model",

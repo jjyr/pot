@@ -213,15 +213,15 @@ async fn main_context_routes_commands_patch_and_sessions_through_sandbox() {
     let fixture = SandboxFixture::new().await;
     let s = &fixture.service;
     let request = SandboxFixture::activate(s);
-    let binding = binding(s).unwrap();
-    let context = make_context(s, &binding, Some(&request)).unwrap();
+    let thread = thread(s).unwrap();
+    let context = make_context(s, &thread, Some(&request)).unwrap();
     assert!(context.role == ExecutionRole::Main);
     assert_eq!(context.workspace, s.data.join("agent-workspace"));
     assert!(
         fixture.http.lock().unwrap().is_empty(),
         "context injection started Sandbox"
     );
-    let policy = &binding.spec.params.agent.shell;
+    let policy = &thread.config.params.agent.shell;
     let args = json!({"cmd":"printf host-write > effects.txt","workdir":"src","yield_time_ms":1});
     let (result, events) =
         execute(&context, policy, "exec_command", args.clone(), "model-exec").await;
@@ -363,13 +363,13 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
     .0;
     let (_, worker, request) = tasks::claim(root).unwrap().unwrap();
     assert_eq!(worker.usage_scope, task.id);
-    let binding = binding(&worker).unwrap();
-    let context = make_context(&worker, &binding, Some(&request)).unwrap();
+    let thread = thread(&worker).unwrap();
+    let context = make_context(&worker, &thread, Some(&request)).unwrap();
     assert!(context.role == ExecutionRole::Worker);
     crate::sandbox::management(root, &json!({"action":"select","sandbox_id":"linux-b"}))
         .await
         .unwrap();
-    let policy = &binding.spec.params.agent.shell;
+    let policy = &thread.config.params.agent.shell;
     let (result, _) = execute(
         &context,
         policy,
@@ -412,7 +412,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
 }
 
 #[tokio::test]
-async fn runtime_injects_fresh_instructions_for_both_engines_and_roles_but_not_summary() {
+async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary() {
     let fixture = SandboxFixture::new().await;
     let main = &fixture.service;
     let base = main.sandboxes.workspace("default");
@@ -436,14 +436,13 @@ async fn runtime_injects_fresh_instructions_for_both_engines_and_roles_but_not_s
     .0;
     let worker = tasks::owner(main, &task.id).unwrap();
     std::fs::write(worker.workspace.join("AGENTS.md"), "WORKER_LOCAL").unwrap();
-    for engine in [Engine::Pot] {
+    {
         for service in [main, &worker] {
             let request = SandboxFixture::activate(service);
-            let mut binding = binding(service).unwrap();
-            binding.spec.engine = engine.clone();
+            let thread = thread(service).unwrap();
             for text in ["PROJECT_FIRST", "PROJECT_UPDATED"] {
                 std::fs::write(base.join("AGENTS.md"), text).unwrap();
-                let context = make_context(service, &binding, Some(&request)).unwrap();
+                let context = make_context(service, &thread, Some(&request)).unwrap();
                 assert!(context.instructions.contains(text));
                 assert!(!context.instructions.contains("WRONG_HOST"));
                 assert_eq!(
@@ -457,7 +456,7 @@ async fn runtime_injects_fresh_instructions_for_both_engines_and_roles_but_not_s
             }
             let mut summary = request.clone();
             summary.request_id = format!("{}fixture", orchestration::RESULT_PREFIX);
-            let context = make_context(service, &binding, Some(&summary)).unwrap();
+            let context = make_context(service, &thread, Some(&summary)).unwrap();
             assert!(context.role == ExecutionRole::Summary);
             assert!(context.instructions.is_empty());
             assert!(!context.main_prompt.contains("PROJECT_"));
@@ -471,9 +470,9 @@ async fn sessions_survive_turns_keep_original_environment_and_cancel_explicitly(
     let fixture = SandboxFixture::new().await;
     let s = &fixture.service;
     let request = SandboxFixture::activate(s);
-    let binding = binding(s).unwrap();
-    let context = make_context(s, &binding, Some(&request)).unwrap();
-    let policy = &binding.spec.params.agent.shell;
+    let thread = thread(s).unwrap();
+    let context = make_context(s, &thread, Some(&request)).unwrap();
+    let policy = &thread.config.params.agent.shell;
     let (open, _) = execute(
         &context,
         policy,
@@ -511,7 +510,7 @@ async fn sessions_survive_turns_keep_original_environment_and_cancel_explicitly(
     crate::sandbox::management(s, &json!({"action":"select","sandbox_id":"linux-b"}))
         .await
         .unwrap();
-    let context = make_context(s, &binding, Some(&next)).unwrap();
+    let context = make_context(s, &thread, Some(&next)).unwrap();
     execute(
         &context,
         policy,
@@ -544,7 +543,7 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
     let fixture = SandboxFixture::new().await;
     let s = &fixture.service;
     SandboxFixture::activate(s);
-    let binding = binding(s).unwrap();
+    let thread = thread(s).unwrap();
     let empty = json!({"sessions":[],"active":false,"ended":false});
     fixture
         .inspect
@@ -590,7 +589,7 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     assert_ne!(fixture.requests("/execute")[2]["body"]["scope"], initial);
-    crate::sandbox::finish_stale(s, binding.epoch + 1)
+    crate::sandbox::finish_stale(s, thread.generation + 1)
         .await
         .unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
@@ -734,7 +733,7 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     let fixture = SandboxFixture::new().await;
     let s = &fixture.service;
     let turn = SandboxFixture::activate(s);
-    let binding = binding(s).unwrap();
+    let thread = thread(s).unwrap();
     let host = crate::permissions::prepare(s, "exec_command", json!({"cmd":"cat notes.txt"}))
         .await
         .unwrap();
@@ -751,7 +750,7 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     let permission = pot_agent::permissions::Request {
         owner: "main".into(),
         environment: "sandbox:linux-b".into(),
-        epoch: binding.epoch,
+        generation: thread.generation,
         turn: turn.request_id.clone(),
         call_id: "guest-read".into(),
         tool: "exec_command".into(),
@@ -764,7 +763,7 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     let waiter = tokio::spawn(async move {
         crate::permissions::request(
             &wait_service,
-            binding.epoch,
+            thread.generation,
             &turn.request_id,
             json!(permission),
         )
@@ -875,8 +874,8 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
     );
     // Skipping approval/preparation never makes an invalid handle executable.
     SandboxFixture::activate(&fixture.service);
-    let binding = binding(&fixture.service).unwrap();
-    let context = make_context(&fixture.service, &binding, None).unwrap();
+    let thread = thread(&fixture.service).unwrap();
+    let context = make_context(&fixture.service, &thread, None).unwrap();
     let mut events = vec![];
     assert!(
         context
@@ -885,7 +884,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
             .unwrap()
             .execute(
                 &context,
-                &binding.spec.params.agent.shell,
+                &thread.config.params.agent.shell,
                 "write_stdin",
                 &args,
                 "invalid-session",
@@ -900,7 +899,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
     assert!(fixture.http.lock().unwrap().is_empty());
     let (opened, _) = execute(
         &context,
-        &binding.spec.params.agent.shell,
+        &thread.config.params.agent.shell,
         "exec_command",
         json!({"cmd":"true","environment":"sandbox:linux-b"}),
         "open-session",
@@ -915,7 +914,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
     .unwrap();
     let (_, _) = execute(
         &context,
-        &binding.spec.params.agent.shell,
+        &thread.config.params.agent.shell,
         "write_stdin",
         continued.clone(),
         "continue-session",
@@ -931,7 +930,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
             .unwrap()
             .execute(
                 &context,
-                &binding.spec.params.agent.shell,
+                &thread.config.params.agent.shell,
                 "write_stdin",
                 &wrong,
                 "wrong-target",

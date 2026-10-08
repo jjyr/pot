@@ -4,7 +4,6 @@
     "id": "eval",
     "revision": 1,
     "name": "Evaluation fixture",
-    "engine": "pot",
     "provider": "mock",
     "model": "fixture",
     "auth_ref": "providers.json:mock",

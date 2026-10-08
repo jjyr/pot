@@ -29,7 +29,7 @@ use axum::{
 use pot_protocol::*;
 mod bootstrap;
 pub use bootstrap::{
-    Backend, RuntimeConfig, initialize, initialize_with_agent_host, initialize_with_providers,
+    Backend, RuntimeConfig, initialize, initialize_with_agent_executor, initialize_with_providers,
 };
 pub mod desktop;
 pub mod api {
@@ -57,7 +57,7 @@ use tokio::sync::{broadcast, mpsc};
 
 struct Inner {
     store: Store,
-    engine: EngineStatus,
+    agent: AgentStatus,
     turn: Option<TurnState>,
     model_requests: u64,
 }
@@ -86,7 +86,7 @@ pub struct Service {
     stop: tokio::sync::watch::Sender<bool>,
     tasks: Arc<Mutex<tasks::Hub>>,
     terminals: Arc<Mutex<terminal::Hub>>,
-    agent_host: Arc<dyn pot_core::DriverHost>,
+    agent_executor: Arc<pot_agent::Agent>,
 }
 impl Service {
     /// Trusted in-process notification adapter. Only the owner main Store is eligible.
@@ -118,18 +118,18 @@ impl Service {
             api_version: API_VERSION,
             boot_id: self.boot.clone(),
             cursor: s.store.cursor()?,
-            engine: {
-                let mut engine = s.engine.clone();
-                if let Some(binding) = agent::current(&s.store)? {
-                    engine.engine = format!("{:?} · {}", binding.spec.engine, binding.spec.model);
+            agent: {
+                let mut agent = s.agent.clone();
+                if let Some(thread) = agent::current(&s.store)? {
+                    agent.model = thread.config.model.clone();
                 }
                 if s.store
                     .get("execution.paused")?
                     .is_some_and(|v| !v.is_empty())
                 {
-                    engine.detail = Some("等待 Pot 额度恢复".into());
+                    agent.detail = Some("等待 Pot 额度恢复".into());
                 }
-                engine
+                agent
             },
             conversation_id: "main".into(),
             messages: s.store.messages()?,
@@ -140,11 +140,8 @@ impl Service {
         self.budget_for(&self.inner.lock().unwrap().store)
     }
     fn budget_for(&self, store: &Store) -> Result<Option<RequestBudget>> {
-        if let Some(binding) = agent::current(store)? {
-            if binding.spec.engine != agent::Engine::Pot {
-                return Ok(None);
-            }
-            return gateway::agent_budget(self, binding.spec.params.max_output_tokens)?
+        if let Some(thread) = agent::current(store)? {
+            return gateway::agent_budget(self, thread.config.params.max_output_tokens)?
                 .status()
                 .map(Some);
         }
@@ -177,15 +174,15 @@ impl Service {
         let _ = self.events.send(event);
         Ok(())
     }
-    fn phase(&self, phase: EnginePhase, detail: Option<String>) {
+    fn phase(&self, phase: AgentPhase, detail: Option<String>) {
         let mut s = self.inner.lock().unwrap();
-        s.engine.phase = phase;
-        s.engine.detail = detail;
+        s.agent.phase = phase;
+        s.agent.detail = detail;
         let _ = self.events.send(Event {
             event_id: id(),
             cursor: None,
-            kind: EventKind::Engine {
-                status: s.engine.clone(),
+            kind: EventKind::Agent {
+                status: s.agent.clone(),
             },
         });
     }
@@ -304,13 +301,13 @@ pub async fn send(
         ));
     }
     if !matches!(
-        inner.engine.phase,
-        EnginePhase::Ready | EnginePhase::NeedsAuth
+        inner.agent.phase,
+        AgentPhase::Ready | AgentPhase::NeedsConfiguration
     ) {
         return Err(error(
             StatusCode::CONFLICT,
-            "engine_unavailable",
-            "Authenticate the guest engine, then restart the environment",
+            "agent_unavailable",
+            "Configure the Agent or settle its current turn before continuing",
         ));
     }
     if s.budget_for(&inner.store)
@@ -409,7 +406,7 @@ pub async fn cancel(
         return Err(error(
             StatusCode::NOT_IMPLEMENTED,
             "cancel_unavailable",
-            "Cancellation requires an Agent binding",
+            "Cancellation requires an Agent thread",
         ));
     }
     let mut inner = s.inner.lock().unwrap();
@@ -480,12 +477,10 @@ mod tests {
             usage_scope: "main".into(),
             inner: Arc::new(Mutex::new(Inner {
                 store: Store::open(std::path::Path::new(":memory:")).unwrap(),
-                engine: EngineStatus {
-                    engine: "test".into(),
-                    phase: EnginePhase::Ready,
+                agent: AgentStatus {
+                    model: "test".into(),
+                    phase: AgentPhase::Ready,
                     detail: None,
-                    version: None,
-                    auth_methods: vec![],
                 },
                 turn: None,
                 model_requests: 0,
@@ -504,28 +499,27 @@ mod tests {
             stop: tokio::sync::watch::channel(false).0,
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-            agent_host: Arc::new(pot_agent::AgentHost),
+            agent_executor: Arc::new(pot_agent::Agent::default()),
         }
     }
     #[test]
-    fn snapshot_reports_persisted_binding_before_first_turn() {
+    fn snapshot_reports_thread_configuration_before_first_turn() {
         let s = service();
         agent::initialize_store(
             &mut s.inner.lock().unwrap().store,
             "main",
-            std::path::Path::new("/tmp"),
             &execution::Config {
                 model: "deepseek-v4-flash".into(),
                 ..execution::Config::default()
             },
         )
         .unwrap();
-        let binding = agent::current(&s.inner.lock().unwrap().store)
+        let thread = agent::current(&s.inner.lock().unwrap().store)
             .unwrap()
             .unwrap();
         assert_eq!(
-            s.snapshot().unwrap().engine.engine,
-            format!("{:?} · {}", binding.spec.engine, binding.spec.model)
+            s.snapshot().unwrap().agent.model,
+            thread.config.model.clone()
         );
     }
     #[tokio::test]

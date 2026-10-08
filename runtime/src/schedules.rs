@@ -563,7 +563,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
         }
     }
     if !agent::configured(root)
-        || root.inner.lock().unwrap().engine.phase != EnginePhase::Ready
+        || root.inner.lock().unwrap().agent.phase != AgentPhase::Ready
         || root.budget()?.is_some_and(|b| b.remaining() == 0)
     {
         return Ok(());

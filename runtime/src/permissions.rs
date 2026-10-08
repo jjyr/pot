@@ -208,7 +208,7 @@ impl Hub {
         let mut book = self.book.lock().unwrap();
         if let Some(old) = book.requests.iter().find(|p| {
             p.request.owner == request.owner
-                && p.request.epoch == request.epoch
+                && p.request.generation == request.generation
                 && p.request.turn == request.turn
                 && p.request.call_id == request.call_id
         }) {
@@ -317,24 +317,31 @@ impl Hub {
     pub fn configured(&self) -> bool {
         self.path.is_some()
     }
-    pub fn host_executor(&self, owner: &str, epoch: u64) -> Arc<pot_tool_executor::LocalTools> {
+    pub fn host_executor(
+        &self,
+        owner: &str,
+        generation: u64,
+    ) -> Arc<pot_tool_executor::LocalTools> {
         let mut executors = self.executors.lock().unwrap();
-        if executors.get(owner).is_some_and(|(old, _)| *old != epoch) {
+        if executors
+            .get(owner)
+            .is_some_and(|(old, _)| *old != generation)
+        {
             executors.remove(owner);
         }
         executors
             .entry(owner.into())
-            .or_insert_with(|| (epoch, Arc::new(pot_tool_executor::LocalTools::host())))
+            .or_insert_with(|| (generation, Arc::new(pot_tool_executor::LocalTools::host())))
             .1
             .clone()
     }
-    async fn host_plugin_session(&self, owner: &str, epoch: u64, session: &str) -> bool {
+    async fn host_plugin_session(&self, owner: &str, generation: u64, session: &str) -> bool {
         let executor = self
             .executors
             .lock()
             .unwrap()
             .get(owner)
-            .filter(|(bound, _)| *bound == epoch)
+            .filter(|(bound, _)| *bound == generation)
             .map(|(_, e)| e.clone());
         match executor {
             Some(e) => e.has_plugin_session(session).await,
@@ -354,12 +361,12 @@ impl Hub {
         }
         Ok(())
     }
-    pub async fn finish_stale_host(&self, owner: &str, epoch: u64) -> Result<()> {
+    pub async fn finish_stale_host(&self, owner: &str, generation: u64) -> Result<()> {
         let executor = {
             let mut executors = self.executors.lock().unwrap();
             if executors
                 .get(owner)
-                .is_some_and(|(bound, _)| *bound != epoch)
+                .is_some_and(|(bound, _)| *bound != generation)
             {
                 executors.remove(owner).map(|(_, e)| e)
             } else {
@@ -455,7 +462,7 @@ fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
 }
 async fn execution_environment(
     s: &Service,
-    epoch: u64,
+    generation: u64,
     plugin: bool,
     args: &Value,
 ) -> Result<String> {
@@ -471,14 +478,15 @@ async fn execution_environment(
     let session_environment = if plugin {
         if let Some(session) = args["session_id"].as_str() {
             if s.permissions
-                .host_plugin_session(&s.usage_scope, epoch, session)
+                .host_plugin_session(&s.usage_scope, generation, session)
                 .await
             {
                 Some("host".to_owned())
             } else {
                 Some(format!(
                     "sandbox:{}",
-                    s.sandboxes.session_target(&s.usage_scope, epoch, session)?
+                    s.sandboxes
+                        .session_target(&s.usage_scope, generation, session)?
                 ))
             }
         } else {
@@ -505,9 +513,9 @@ async fn execution_environment(
     Ok(environment)
 }
 pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<Value> {
-    let binding = agent::binding(s)?;
-    let plugin = binding.spec.params.agent.plugin_for_tool(name)?;
-    let environment = execution_environment(s, binding.epoch, plugin.is_some(), &args).await?;
+    let thread = agent::thread(s)?;
+    let plugin = thread.config.params.agent.plugin_for_tool(name)?;
+    let environment = execution_environment(s, thread.generation, plugin.is_some(), &args).await?;
     let object = args
         .as_object_mut()
         .ok_or_else(|| anyhow!("Arguments must be an object"))?;
@@ -531,7 +539,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
                 name,
                 &mut args,
                 &workspace,
-                &binding.spec.params.agent.shell,
+                &thread.config.params.agent.shell,
             )?;
         }
     } else {
@@ -573,7 +581,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         body["action"] = json!("prepare");
         body["tool"] = json!(name);
         body["args"] = args;
-        body["policy"] = json!(binding.spec.params.agent.shell);
+        body["policy"] = json!(thread.config.params.agent.shell);
         let prepared = s.sandboxes.permissions(&target, &body).await?;
         hub.load_guest(prepared["config"].clone())?;
         args = prepared["args"].clone();
@@ -596,9 +604,7 @@ fn live(s: &Service, r: &Request) -> bool {
     agent::current(&inner.store)
         .ok()
         .flatten()
-        .is_some_and(|b| {
-            b.spec.engine == agent::Engine::Pot && b.epoch == r.epoch && b.pot_owner == r.owner
-        })
+        .is_some_and(|b| b.generation == r.generation && b.owner == r.owner)
         && inner
             .turn
             .as_ref()
@@ -615,11 +621,16 @@ impl Drop for WaitingRequest<'_> {
         let _ = self.hub.cancel(&self.key);
     }
 }
-pub(crate) async fn request(s: &Service, epoch: u64, turn: &str, value: Value) -> Result<Value> {
+pub(crate) async fn request(
+    s: &Service,
+    generation: u64,
+    turn: &str,
+    value: Value,
+) -> Result<Value> {
     let request: Request = serde_json::from_value(value)?;
     anyhow::ensure!(
         request.owner == s.usage_scope
-            && request.epoch == epoch
+            && request.generation == generation
             && request.turn == turn
             && live(s, &request),
         "Permission identity changed"
@@ -638,8 +649,8 @@ pub(crate) async fn request(s: &Service, epoch: u64, turn: &str, value: Value) -
         }),
         "Permission scope does not match operation"
     );
-    let plugin = agent::binding(s)?
-        .spec
+    let plugin = agent::thread(s)?
+        .config
         .params
         .agent
         .plugin_for_tool(&request.tool)?;
@@ -828,7 +839,7 @@ mod tests {
         Request {
             owner: "main".into(),
             environment: "host".into(),
-            epoch: 1,
+            generation: 1,
             turn: "turn".into(),
             call_id: "call".into(),
             tool: "exec_command".into(),
@@ -971,7 +982,7 @@ mod tests {
         hub.decide(&saved, "allow_persistent", None).unwrap();
         // The same Agent/scope replaces its previous state rather than appending history.
         next.call_id = "replacement".into();
-        next.epoch = 99;
+        next.generation = 99;
         let replacement = hub.enqueue(next.clone()).unwrap();
         hub.decide(&replacement, "allow_persistent", None).unwrap();
         assert_eq!(hub.grants("main").as_array().unwrap().len(), 1);
@@ -989,7 +1000,7 @@ mod tests {
         assert_eq!(file["grants"][0]["agent"], "main");
         assert_eq!(file["grants"][0]["permission"]["type"], "operation");
         assert!(file.get("requests").is_none());
-        assert!(file["grants"][0].get("epoch").is_none());
+        assert!(file["grants"][0].get("generation").is_none());
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
@@ -1102,7 +1113,7 @@ mod tests {
         );
         s.is_worker = false;
         let mut r = operation();
-        r.epoch = agent::binding(&s).unwrap().epoch;
+        r.generation = agent::thread(&s).unwrap().generation;
         let key = s.permissions.enqueue(r).unwrap();
         let body = serde_json::from_value(json!({"id":key,"action":"allow_once"})).unwrap();
         assert_eq!(

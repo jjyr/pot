@@ -109,7 +109,7 @@ pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Js
             inner.store.save(user).map_err(internal)?;
         }
         inner.store.set("execution.paused", "").map_err(internal)?;
-        inner.engine.detail = None;
+        inner.agent.detail = None;
         s.usage
             .lock()
             .unwrap()
@@ -135,7 +135,7 @@ pub fn settle_cancelled_pause(s: &Service) -> Result<()> {
             inner.store.save(m)?;
         }
         inner.store.set("execution.paused", "")?;
-        inner.engine.detail = None;
+        inner.agent.detail = None;
         s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
     }
     Ok(())
@@ -223,11 +223,7 @@ mod tests {
         assert!(d["capabilities"].get("skills").is_none());
     }
 
-    fn attributed_spec(
-        engine: agent::Engine,
-        model: &str,
-        profile_id: &str,
-    ) -> agent::ResolvedSpec {
+    fn attributed_spec(model: &str, profile_id: &str) -> agent::ResolvedSpec {
         let mut profile = agent::Profile::api(&execution::Config {
             api_key: "unused".into(),
             model: model.into(),
@@ -237,30 +233,20 @@ mod tests {
             max_parallel_tasks: 2,
         });
         profile.id = profile_id.into();
-        profile.auth_ref = match engine {
-            agent::Engine::Pot => "providers.json:deepseek",
-        }
-        .into();
-        profile.engine = engine;
+        profile.auth_ref = "providers.json:deepseek".into();
         profile.resolve().unwrap()
     }
     #[test]
     fn agent_model_usage_keeps_snapshot_scope_window_and_unknown_counts() {
         let l = ledger();
         let t = at("2026-10-04T01:00:00Z");
-        for (key, engine, scope, model, stamp) in [
-            ("p", agent::Engine::Pot, "main", "shared", t),
-            ("c", agent::Engine::Pot, "main", "shared", t),
-            ("a", agent::Engine::Pot, "task-1", "worker-model", t),
-            (
-                "older",
-                agent::Engine::Pot,
-                "main",
-                "old-model",
-                t - 10 * 86400000,
-            ),
+        for (key, scope, model, stamp) in [
+            ("p", "main", "shared", t),
+            ("c", "main", "shared", t),
+            ("a", "task-1", "worker-model", t),
+            ("older", "main", "old-model", t - 10 * 86400000),
         ] {
-            let spec = attributed_spec(engine, model, key);
+            let spec = attributed_spec(model, key);
             l.reserve(key, scope, "turn", stamp, model, 100, 20)
                 .unwrap();
             l.route(key, &spec, 2).unwrap();
@@ -268,7 +254,7 @@ mod tests {
                 l.settle(key,&json!({"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":60})).unwrap();
             }
         }
-        let pending = attributed_spec(agent::Engine::Pot, "shared", "pending-profile");
+        let pending = attributed_spec("shared", "pending-profile");
         l.reserve("pending", "main", "other-turn", t, "shared", 100, 20)
             .unwrap();
         l.route("pending", &pending, 3).unwrap();
@@ -311,7 +297,7 @@ mod tests {
             .unwrap();
         assert_eq!(row["agent"], "pot");
         assert_eq!(row["profile_id"], "pending-profile");
-        assert_eq!(row["epoch"], 3);
+        assert_eq!(row["generation"], 3);
     }
 
     #[test]

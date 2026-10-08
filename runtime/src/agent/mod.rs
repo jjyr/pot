@@ -1,13 +1,12 @@
-pub(super) mod driver;
-pub mod migration;
 pub mod preferences;
 pub mod routing;
+pub(super) mod runner;
+pub mod settings;
 pub(super) mod transcript;
-// Runtime owns profile snapshots and bindings; engines own native context.
-mod model;
+// Runtime owns threads and turn state; pot-agent executes their contexts.
 mod storage;
 use crate::*;
-pub use model::*;
+pub use pot_core::*;
 pub use storage::*;
 
 /// Initialize an explicitly supplied API profile; persisted snapshots stay immutable.
@@ -16,7 +15,7 @@ pub fn initialize(s: &Service) -> Result<()> {
         return Ok(());
     };
     let mut inner = s.inner.lock().unwrap();
-    initialize_store(&mut inner.store, &s.usage_scope, &s.data, config)?;
+    initialize_store(&mut inner.store, &s.usage_scope, config)?;
     Ok(())
 }
 
@@ -28,22 +27,12 @@ pub fn configured(s: &Service) -> bool {
             .is_some()
 }
 
-pub fn binding(s: &Service) -> Result<Binding> {
+pub fn thread(s: &Service) -> Result<Thread> {
     initialize(s)?;
-    current(&s.inner.lock().unwrap().store)?.ok_or_else(|| anyhow!("Agent binding missing"))
+    current(&s.inner.lock().unwrap().store)?.ok_or_else(|| anyhow!("Thread configuration missing"))
 }
-
 pub fn execution_config_for(s: &Service) -> Result<execution::Config> {
-    let binding = binding(s)?;
-    anyhow::ensure!(
-        binding.state == BindingState::Active,
-        "Agent binding is broken: {}",
-        binding.failure.as_deref().unwrap_or("needs rebind")
-    );
-    anyhow::ensure!(
-        binding.spec.engine == Engine::Pot,
-        "Agent engine needs rebind"
-    );
+    let thread = thread(s)?;
     let data = if s.is_worker {
         s.data
             .parent()
@@ -53,40 +42,16 @@ pub fn execution_config_for(s: &Service) -> Result<execution::Config> {
         &s.data
     };
     let mut config = execution::execution_config(s.execution.clone().unwrap_or_default(), data)?;
-    config.model = binding.spec.model;
-    config.max_tokens = binding.spec.params.max_output_tokens;
+    config.model = thread.config.model;
+    config.max_tokens = thread.config.params.max_output_tokens;
     Ok(config)
 }
 
-pub fn native_session(s: &Service) -> Result<(PathBuf, Option<String>)> {
-    let binding = binding(s)?;
-    anyhow::ensure!(
-        binding.state == BindingState::Active,
-        "Agent binding is broken: {}",
-        binding.failure.as_deref().unwrap_or("needs rebind")
-    );
-    match binding.native_ref {
-        NativeRef::Pot { file, session_id } => {
-            if let Some(expected) = &session_id
-                && let Err(e) = validate_agent_session(&file, expected)
-            {
-                mark_broken(&mut s.inner.lock().unwrap().store, &e.to_string())?;
-                return Err(e);
-            }
-            Ok((file, session_id))
-        }
-    }
-}
-
-pub fn bind_agent_session(s: &Service, session_id: &str) -> Result<()> {
-    save_agent_session(&mut s.inner.lock().unwrap().store, session_id)
-}
-
 pub fn record_turn(s: &Service, turn: &str) -> Result<()> {
-    let binding = binding(s)?;
+    let thread = thread(s)?;
     s.inner.lock().unwrap().store.set(
         &format!("agent.turn:{turn}"),
-        &json!({"epoch":binding.epoch,"spec_hash":binding.spec.spec_hash,"engine":binding.spec.engine,"provider":binding.spec.provider,"model":binding.spec.model}).to_string(),
+        &json!({"generation":thread.generation,"spec_hash":thread.config.spec_hash,"provider":thread.config.provider,"model":thread.config.model}).to_string(),
     )
 }
 
@@ -109,16 +74,9 @@ pub async fn inspect(
     let s = tasks::owner(&root, &query.owner)?;
     initialize(&s).map_err(internal)?;
     let inner = s.inner.lock().unwrap();
-    let pending = inner
-        .store
-        .get("agent.migration.pending")
-        .map_err(internal)?
-        .filter(|v| !v.is_empty())
-        .map(|v| serde_json::from_str::<Value>(&v))
-        .transpose()
-        .map_err(|e| internal(e.into()))?;
+    let pending = settings::pending(&inner.store).map_err(internal)?;
     Ok(Json(
-        json!({"profiles":profiles,"bindings":bindings(&inner.store).map_err(internal)?,"pending_migration":pending,"needs_rebind":inner.store.get("agent.needs_rebind").map_err(internal)?.filter(|s|!s.is_empty())}),
+        json!({"profiles":profiles,"thread":current(&inner.store).map_err(internal)?,"pending_config":pending}),
     ))
 }
 
@@ -133,15 +91,14 @@ pub(super) fn cancelled(s: &Service) -> bool {
 
 pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     anyhow::ensure!(
-        s.inner.lock().unwrap().engine.phase != EnginePhase::Failed,
+        s.inner.lock().unwrap().agent.phase != AgentPhase::Failed,
         "Agent stop was not confirmed; restart the environment before another turn"
     );
-    migration::apply_pending(s, true)?;
-    let spec = binding(s)?.spec;
+    settings::apply_pending(s, true)?;
+    let spec = thread(s)?.config;
     {
         let mut inner = s.inner.lock().unwrap();
-        inner.engine.engine = format!("{:?} · {}", spec.engine, spec.model);
-        inner.engine.version = None;
+        inner.agent.model = spec.model.clone();
     }
     let mut user = s
         .inner
@@ -154,7 +111,6 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     if resuming {
         req.text = "Pot allowance is available again. Continue the unfinished user request from the saved session. Preserve completed tool results; do not repeat completed external actions.".into();
     }
-    req.text = migration::bootstrap(s, &req)?;
     s.inner.lock().unwrap().store.set("execution.paused", "")?;
     s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
     s.usage
@@ -162,7 +118,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
         .unwrap()
         .interrupt_compactions(&s.usage_scope, "interrupted", now())?;
     let mut transcript = transcript::Transcript::default();
-    let result = driver::execute(s, &req, &mut transcript, resuming).await;
+    let result = runner::execute(s, &req, &mut transcript, resuming).await;
     let interrupted_state = if cancelled(s) {
         "cancelled"
     } else {
@@ -176,7 +132,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     let uncertain = result.as_ref().err().is_some_and(|e| {
         e.to_string().contains("未确认停止") || e.to_string().contains("stop unconfirmed")
     });
-    if waiting && spec.capabilities.safe_checkpoint_resume && !cancelled(s) && !uncertain {
+    if waiting && spec.supports_checkpoint() && !cancelled(s) && !uncertain {
         transcript.finish(s, MessageStatus::Failed, "\n等待 Pot 额度恢复")?;
         if let Some(m) = transcript.assistant.as_mut() {
             m.text = "等待 Pot Token 额度恢复。可在此会话的用量详情中继续或取消。".into();
@@ -189,7 +145,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
             .unwrap()
             .store
             .set("execution.paused", &serde_json::to_string(&req)?)?;
-        s.phase(EnginePhase::Ready, Some("等待 Pot 额度恢复".into()));
+        s.phase(AgentPhase::Ready, Some("等待 Pot 额度恢复".into()));
         return Ok(());
     }
     s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
@@ -233,9 +189,9 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     // A failed request is recoverable; keep the composer usable for a correction.
     s.phase(
         if uncertain {
-            EnginePhase::Failed
+            AgentPhase::Failed
         } else {
-            EnginePhase::Ready
+            AgentPhase::Ready
         },
         if uncertain {
             Some("Agent 未确认停止，请 Quit 后重开环境".into())

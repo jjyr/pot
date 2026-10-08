@@ -1,4 +1,4 @@
-//! Standalone evaluation using the production Driver contract, without Runtime/Storage.
+//! Standalone evaluation using the production pot-agent executor, without Runtime/Storage.
 mod deepseek;
 pub mod records;
 mod runner;

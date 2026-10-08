@@ -284,7 +284,7 @@ pub(super) fn deliver(s: &Service) -> Result<()> {
     }
     let mut inner = s.inner.lock().unwrap();
     if inner.turn.is_some()
-        || inner.engine.phase != EnginePhase::Ready
+        || inner.agent.phase != AgentPhase::Ready
         || s.budget_for(&inner.store)?
             .is_some_and(|b| b.remaining() == 0)
     {

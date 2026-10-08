@@ -141,9 +141,9 @@ pub fn resolve(
         if (policy.follow_chat
             || (policy.worker_profile.is_none()
                 && inner.store.get("agent.default.worker")?.is_none()))
-            && let Some(binding) = current(&inner.store)?
+            && let Some(thread) = current(&inner.store)?
         {
-            let spec = binding.spec;
+            let spec = thread.config;
             check_requirements(&spec, requirements)?;
             let routing = TaskRouting {
                 profile: spec.source_profile_id.clone(),
@@ -169,7 +169,7 @@ pub fn resolve(
             if policy(root)?.follow_chat {
                 current(&root.inner.lock().unwrap().store)?
                     .ok_or_else(|| anyhow!("Chat Agent is not configured"))?
-                    .spec
+                    .config
                     .source_profile_id
             } else {
                 policy(root)?.worker_profile.unwrap_or({
@@ -178,7 +178,7 @@ pub fn resolve(
                         current(&inner.store)
                             .ok()
                             .flatten()
-                            .map(|b| b.spec.source_profile_id)
+                            .map(|b| b.config.source_profile_id)
                             .unwrap_or_else(|| "pot-default".into())
                     })
                 })
@@ -203,23 +203,14 @@ pub fn resolve(
     Ok((spec, routing))
 }
 pub fn check_requirements(spec: &ResolvedSpec, requirements: &TaskRequirements) -> Result<()> {
-    let c = &spec.capabilities;
-    anyhow::ensure!(
-        !requirements.tools || c.tool_policy_enforcement,
-        "Profile cannot enforce task tool policy"
-    );
     // Desktop isolation has not passed D4 acceptance. Shell access is not a declaration of that capability.
     anyhow::ensure!(
         !requirements.desktop,
         "Desktop task capability has not passed acceptance"
     );
     anyhow::ensure!(
-        !requirements.exact_budget || c.request_level_budget_enforcement,
+        !requirements.exact_budget || spec.supports_checkpoint(),
         "Profile cannot enforce exact request budgets"
-    );
-    anyhow::ensure!(
-        !requirements.live_steering || c.live_steering,
-        "Profile does not support live steering"
     );
     Ok(())
 }

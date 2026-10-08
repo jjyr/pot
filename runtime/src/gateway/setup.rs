@@ -45,11 +45,11 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
                     "model":spec.model,"protocol":p.protocol,"has_key":!p.api_key.is_empty()}));
         }
     }
-    let binding = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?;
-    let connection = binding.and_then(|b| {
+    let thread = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?;
+    let connection = thread.and_then(|b| {
         connections
             .iter()
-            .find(|c| c["profile_id"] == b.spec.source_profile_id)
+            .find(|c| c["profile_id"] == b.config.source_profile_id)
             .cloned()
     });
     Ok(Json(
@@ -165,7 +165,7 @@ pub async fn save(
     } else {
         all.push(next);
         // Persist the immutable credential route first. A failed profile save can
-        // leave an unused route, but cannot change any existing binding's endpoint.
+        // leave an unused route, but cannot change any existing thread's endpoint.
         execution::private_json(
             &path,
             &serde_json::to_value(&all).map_err(|e| internal(e.into()))?,
@@ -173,7 +173,7 @@ pub async fn save(
         .map_err(internal)?;
     }
     let settings=serde_json::from_value(json!({"profile":profile,"expected_revision":input.expected_revision,"request_id":input.request_id,"follow_main":input.follow_main,"follow_worker":false})).map_err(|e|internal(e.into()))?;
-    agent::migration::settings(State(s), h, Json(settings)).await
+    agent::settings::settings(State(s), h, Json(settings)).await
 }
 
 #[cfg(test)]
@@ -237,7 +237,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let active = agent::binding(&s).unwrap();
+        let active = agent::thread(&s).unwrap();
         let _ = save(
             State(s.clone()),
             h.clone(),
@@ -245,7 +245,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(agent::binding(&s).unwrap(), active);
+        assert_eq!(agent::thread(&s).unwrap(), active);
         assert!(
             s.inner
                 .lock()
@@ -339,8 +339,8 @@ mod tests {
             .0["duplicate"],
             true
         );
-        let current = agent::binding(&s).unwrap();
-        assert_eq!(current.spec.model, "custom-model");
+        let current = agent::thread(&s).unwrap();
+        assert_eq!(current.config.model, "custom-model");
         assert_eq!(
             agent::execution_config_for(&s)
                 .unwrap()
@@ -386,7 +386,7 @@ mod tests {
             .await
             .is_err()
         );
-        assert_eq!(agent::binding(&s).unwrap(), current);
+        assert_eq!(agent::thread(&s).unwrap(), current);
         let mut update = input;
         update["request_id"] = json!(id());
         update["expected_revision"] = json!(1);
@@ -399,10 +399,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let all = agent::bindings(&s.inner.lock().unwrap().store).unwrap();
-        assert_eq!(all.len(), 2);
-        assert_eq!(all[0].spec, current.spec);
-        assert_ne!(all[0].spec.provider, all[1].spec.provider);
+        let updated = agent::thread(&s).unwrap();
+        assert_ne!(updated.config.provider, current.config.provider);
+        assert_eq!(updated.generation, current.generation + 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

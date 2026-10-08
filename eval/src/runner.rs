@@ -210,15 +210,6 @@ impl ExecutionFeedback for RunFeedback {
         }
         .boxed()
     }
-    fn native_identity(&self, _identity: &str) -> Result<()> {
-        Ok(())
-    }
-    fn binding_broken(&self, reason: &str) -> Result<()> {
-        anyhow::bail!("Binding broken: {reason}")
-    }
-    fn needs_rebind(&self, reason: &str) -> Result<()> {
-        anyhow::bail!("Binding needs rebind: {reason}")
-    }
     fn record_turn(&self, request: &str) -> Result<()> {
         self.state.lock().unwrap().1 = request.into();
         Ok(())
@@ -227,16 +218,16 @@ impl ExecutionFeedback for RunFeedback {
         Ok(())
     }
 }
-/// Generic Driver runner. Caller chooses a host; no second Agent adapter contract.
-pub async fn run_driver(
-    host: &dyn DriverHost,
+/// Run the concrete pot-agent executor with caller-provided services.
+pub async fn run_agent(
+    host: &pot_agent::Agent,
     scenario: &Scenario,
     directory: &Path,
 ) -> Result<Report> {
-    run_driver_configured(host, scenario, directory, "deterministic_contract", None).await
+    run_agent_configured(host, scenario, directory, "deterministic_contract", None).await
 }
-pub(crate) async fn run_driver_configured(
-    host: &dyn DriverHost,
+pub(crate) async fn run_agent_configured(
+    host: &pot_agent::Agent,
     scenario: &Scenario,
     directory: &Path,
     mode: &str,
@@ -261,11 +252,7 @@ pub(crate) async fn run_driver_configured(
     );
     let mut spec = scenario.profile.resolve()?;
     spec.set_gateway_protocol(&scenario.protocol)?;
-    let capabilities = host.describe(&spec)?;
-    ensure!(
-        capabilities.injectable_services,
-        "This delivery requires a Driver with injectable standalone services"
-    );
+    host.validate(&spec)?;
     fs::create_dir(directory)?; // Never overwrite a prior run.
     let workspace = directory.join("workspace");
     fs::create_dir(&workspace)?;
@@ -281,30 +268,20 @@ pub(crate) async fn run_driver_configured(
         scenario_id: scenario.id.clone(),
         scenario_hash: hash(scenario)?,
         mode: mode.into(),
-        driver: format!("{:?}", spec.engine),
+        executor: "pot-agent".into(),
         build_version: env!("CARGO_PKG_VERSION").into(),
         runtime_revision: option_env!("POT_EVAL_REVISION").map(str::to_owned),
         effective_spec: spec.clone(),
-        capabilities,
         deadline_ms: scenario.deadline_ms,
         transport,
     };
     write_json(&directory.join("manifest.json"), &manifest)?;
     write_json(&directory.join("scenario.json"), scenario)?;
     let feedback = Arc::new(RunFeedback::new(&directory.join("events.jsonl"), run_id)?);
-    let binding = Binding {
-        pot_owner: "eval".into(),
-        epoch: 1,
-        spec,
-        native_ref: NativeRef::Pot {
-            file: directory.join("context.json"),
-            session_id: None,
-        },
-        schema_version: SCHEMA_VERSION,
-        state: BindingState::Active,
-        model_switches: vec![],
-        handoff_ref: None,
-        failure: None,
+    let thread = Thread {
+        owner: "eval".into(),
+        generation: 1,
+        config: spec,
     };
     let context = ExecutionContext {
         instructions: String::new(),
@@ -319,7 +296,6 @@ pub(crate) async fn run_driver_configured(
         main_prompt: String::new(),
         feedback: feedback.clone(),
     };
-    let mut session = host.session(context, binding)?;
     let started = Instant::now();
     let mut execution_errors = vec![];
     for (i, text) in scenario.turns.iter().enumerate() {
@@ -328,8 +304,8 @@ pub(crate) async fn run_driver_configured(
             text: text.clone(),
         };
         feedback.record_turn(&request.request_id)?;
-        let mut sink = |event| feedback.record(Payload::Driver(event));
-        let turn = session.start_turn(&request, false, &mut sink);
+        let mut sink = |event| feedback.record(Payload::Agent(event));
+        let turn = host.execute(&context, &thread, &request, false, &mut sink);
         tokio::pin!(turn);
         let remaining = std::time::Duration::from_millis(scenario.deadline_ms)
             .saturating_sub(started.elapsed());
@@ -349,9 +325,6 @@ pub(crate) async fn run_driver_configured(
             break;
         }
     }
-    if let Err(error) = session.close().await {
-        execution_errors.push(error.to_string());
-    }
     write_json(&directory.join("execution.json"), &execution_errors)?;
     if let Some(context) = feedback.load_context()? {
         write_json(&directory.join("context.json"), &context)?;
@@ -362,13 +335,9 @@ pub(crate) async fn run_driver_configured(
 }
 
 pub async fn run_scripted(scenario: &Scenario, directory: &Path) -> Result<Report> {
-    ensure!(
-        scenario.profile.engine == Engine::Pot,
-        "Scripted transport requires Pot Agent"
-    );
     let services = Arc::new(ScriptedServices::new(scenario.responses.clone()));
-    let host = pot_agent::AgentHost::with_services(services.clone());
-    let mut report = run_driver(&host, scenario, directory).await?;
+    let host = pot_agent::Agent::with_services(services.clone());
+    let mut report = run_agent(&host, scenario, directory).await?;
     write_json(
         &directory.join("requests.json"),
         &*services.requests.lock().unwrap(),
@@ -398,7 +367,8 @@ pub fn validate(directory: &Path) -> Result<Report> {
     let mut expected_spec = scenario.profile.resolve()?;
     expected_spec.set_gateway_protocol(&scenario.protocol)?;
     ensure!(
-        manifest.effective_spec == expected_spec
+        manifest.executor == "pot-agent"
+            && manifest.effective_spec == expected_spec
             && manifest.scenario_id == scenario.id
             && matches!(
                 manifest.mode.as_str(),
@@ -444,34 +414,34 @@ pub fn validate(directory: &Path) -> Result<Report> {
             "Unknown turn"
         );
         match event.payload {
-            Payload::Driver(driver) => {
-                ensure!(driver.turn_id == event.turn_id, "Driver turn mismatch");
+            Payload::Agent(update) => {
+                ensure!(update.turn_id == event.turn_id, "Agent turn mismatch");
                 let gate = gates
-                    .entry(event.turn_id.clone())
-                    .or_insert_with(|| EventGate::new(1, &driver.turn_id));
-                ensure!(gate.accept(&driver), "Invalid Driver event order/terminal");
-                match driver.update {
+                    .entry(update.turn_id.clone())
+                    .or_insert_with(|| EventGate::new(1, &update.turn_id));
+                ensure!(gate.accept(&update), "Invalid Agent event order/terminal");
+                match update.update {
                     Update::ToolStarted { id, name, .. } => {
                         ensure!(
-                            active_tools.insert((driver.turn_id, id), name).is_none(),
+                            active_tools.insert((update.turn_id, id), name).is_none(),
                             "Tool started twice while active"
                         );
                         tool_count += 1;
                     }
                     Update::ToolOutput { id, .. } => {
                         ensure!(
-                            active_tools.contains_key(&(driver.turn_id, id)),
+                            active_tools.contains_key(&(update.turn_id, id)),
                             "Output without active tool"
                         );
                     }
                     Update::ToolFinished { id, name, .. } => {
                         ensure!(
-                            active_tools.remove(&(driver.turn_id, id)).as_ref() == Some(&name),
+                            active_tools.remove(&(update.turn_id, id)).as_ref() == Some(&name),
                             "Tool finish without matching start"
                         );
                     }
                     Update::MessageFinished { text, .. } => {
-                        turn_answers.insert(event.turn_id.clone(), text.clone());
+                        turn_answers.insert(update.turn_id.clone(), text.clone());
                         final_text = text;
                     }
                     Update::TurnFinished(outcome) => {

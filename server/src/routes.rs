@@ -81,9 +81,9 @@ pub fn router(s: Service) -> Router {
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))
         .route(
             "/api/v1/agent",
-            get(agent::inspect).post(agent::migration::settings),
+            get(agent::inspect).post(agent::settings::settings),
         )
-        .route("/api/v1/agent/migrate", post(agent::migration::migrate))
+        .route("/api/v1/agent/config", post(agent::settings::select))
         .route(
             "/api/v1/agent/routing",
             get(agent::routing::inspect).post(agent::routing::configure),

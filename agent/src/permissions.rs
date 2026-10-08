@@ -1,7 +1,7 @@
 //! Agent-owned permission policy. Embedders supply durable grants and owner UI,
-//! never model-generated approval. Drivers other than pot-agent do not use this.
+//! never model-generated approval.
 use anyhow::{Result, ensure};
-use pot_core::{Binding, ExecutionContext, ExecutionRole, TurnRequest};
+use pot_core::{ExecutionContext, ExecutionRole, Thread, TurnRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
@@ -27,7 +27,7 @@ pub struct Grant {
     pub scope: Scope,
 }
 
-/// User-editable current permissions, independent of execution bindings/history.
+/// User-editable current permissions, independent of execution threads/history.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -220,7 +220,7 @@ pub struct Request {
     pub owner: String,
     #[serde(default = "default_environment")]
     pub environment: String,
-    pub epoch: u64,
+    pub generation: u64,
     pub turn: String,
     pub call_id: String,
     pub tool: String,
@@ -317,14 +317,14 @@ pub fn is_execution_tool(name: &str) -> bool {
 
 pub async fn authorize(
     context: &ExecutionContext,
-    binding: &Binding,
+    thread: &Thread,
     turn: &TurnRequest,
     call_id: &str,
     tool: &str,
     args: &Value,
 ) -> Result<()> {
     let execution =
-        is_execution_tool(tool) || binding.spec.params.agent.plugin_for_tool(tool)?.is_some();
+        is_execution_tool(tool) || thread.config.params.agent.plugin_for_tool(tool)?.is_some();
     if context.role == ExecutionRole::Summary {
         ensure!(
             !execution && !["manage_sandbox", "set_sandbox_mappings"].contains(&tool),
@@ -369,7 +369,7 @@ pub async fn authorize(
         return Ok(());
     }
     let operation_scope = scope(tool, args)?;
-    let plugin = binding.spec.params.agent.plugin_for_tool(tool)?;
+    let plugin = thread.config.params.agent.plugin_for_tool(tool)?;
     let display = plugin
         .as_ref()
         .map(|plugin| plugin.approval_display(tool))
@@ -378,7 +378,7 @@ pub async fn authorize(
     let request = Request {
         owner: context.owner.clone(),
         environment: environment.into(),
-        epoch: binding.epoch,
+        generation: thread.generation,
         turn: turn.request_id.clone(),
         call_id: call_id.into(),
         tool: tool.into(),

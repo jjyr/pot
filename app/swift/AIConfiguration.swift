@@ -12,10 +12,8 @@ import Foundation
         guard let bridge else { return }
         let state = try await bridge.runtime.request("api/v1/agent")
         savedProfiles = state["profiles"] as? [[String: Any]] ?? []
-        let bindings = state["bindings"] as? [[String: Any]] ?? []
-        activeSpec = bindings
-            .first { $0["pot_owner"] as? String == "main" && $0["state"] as? String == "active"
-            }?["spec"] as? [String: Any] ?? [:]
+        let thread = state["thread"] as? [String: Any] ?? [:]
+        activeSpec = thread["config"] as? [String: Any] ?? [:]
         let providerState = try await bridge.runtime.request("api/v1/providers")
         connections = providerState["connections"] as? [[String: Any]] ?? []
         if !draftInitialized {
@@ -34,7 +32,7 @@ import Foundation
 
     func editConnection(_ id: String) {
         guard !aiBusy, let selected = savedProfiles.first(where: { $0["id"] as? String == id }) else { return }
-        section = 1; profile = selected; connectionKind = selected["engine"] as? String ?? ""
+        section = 1; profile = selected
         connectionName = selected["name"] as? String ?? ""
         connectionModel = selected["model"] as? String ?? ""
         secretRevision += 1; aiScreen = "manage"; checkMessage = ""; result = ""; modelOptions = []
@@ -42,14 +40,12 @@ import Foundation
         apiEndpoint = connection?["endpoint"] as? String ?? ""
         apiProtocol = connection?["protocol"] as? String ?? "openai_chat"
         hasAPIKey = connection?["has_key"] as? Bool ?? false
-        if connectionKind == "pot" {
-            let host = URLComponents(string: apiEndpoint)?.host ?? ""
-            connectionKind = host == "api.anthropic.com" && apiProtocol == "anthropic_messages" ? "anthropic" :
-                host == "generativelanguage.googleapis.com" && apiProtocol == "gemini" ? "gemini" :
-                host == "api.openai.com" ? "openai" :
-                host == "api.deepseek.com" ? "deepseek" :
-                host == "opencode.ai" ? (apiEndpoint.contains("/zen/go/") ? "opencode-go" : "opencode-zen") : "custom"
-        }
+        let host = URLComponents(string: apiEndpoint)?.host ?? ""
+        connectionKind = host == "api.anthropic.com" && apiProtocol == "anthropic_messages" ? "anthropic" :
+            host == "generativelanguage.googleapis.com" && apiProtocol == "gemini" ? "gemini" :
+            host == "api.openai.com" ? "openai" :
+            host == "api.deepseek.com" ? "deepseek" :
+            host == "opencode.ai" ? (apiEndpoint.contains("/zen/go/") ? "opencode-go" : "opencode-zen") : "custom"
         revision += 1
     }
 
@@ -171,7 +167,7 @@ import Foundation
                 if firstMain {
                     while true {
                         let state = try await bridge.runtime.request("api/v1/agent")
-                        if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
+                        if state["pending_config"] is NSNull || state["pending_config"] == nil {
                             break
                         }
                         result = L.text("aiconfiguration.setting-the-main-agent-waiting-for-the")
@@ -233,7 +229,7 @@ import Foundation
                 )
                 while true {
                     let state = try await bridge.runtime.request("api/v1/agent")
-                    if state["pending_migration"] is NSNull || state["pending_migration"] == nil {
+                    if state["pending_config"] is NSNull || state["pending_config"] == nil {
                         break
                     }
                     result = L.text("aiconfiguration.switching-agent-waiting-for-the-current-turn")

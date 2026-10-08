@@ -1,19 +1,20 @@
 use super::*;
+use futures::future::BoxFuture;
 use pot_core::{ExecutionContext, ExecutionFeedback, ExecutionRole};
 
 struct Feedback {
     service: Service,
-    epoch: u64,
+    generation: u64,
     request: Option<String>,
 }
 impl Feedback {
     fn check(&self) -> Result<()> {
         let s = &self.service;
         let inner = s.inner.lock().unwrap();
-        let binding = current(&inner.store)?.ok_or_else(|| anyhow!("Binding missing"))?;
+        let thread = current(&inner.store)?.ok_or_else(|| anyhow!("Thread missing"))?;
         anyhow::ensure!(
-            binding.epoch == self.epoch && binding.pot_owner == s.usage_scope,
-            "Execution binding changed"
+            thread.generation == self.generation && thread.owner == s.usage_scope,
+            "Execution thread changed"
         );
         if let Some(request) = &self.request {
             let turn = inner
@@ -97,7 +98,7 @@ impl ExecutionFeedback for Feedback {
             self.check()?;
             crate::permissions::request(
                 &self.service,
-                self.epoch,
+                self.generation,
                 self.request
                     .as_deref()
                     .ok_or_else(|| anyhow!("Active turn required"))?,
@@ -114,47 +115,29 @@ impl ExecutionFeedback for Feedback {
     }
     fn steering(&self, finalizing: bool) -> Result<Vec<(String, String)>> {
         self.check()?;
-        crate::control::pending(&self.service, self.epoch, finalizing)
+        crate::control::pending(&self.service, self.generation, finalizing)
     }
     fn acknowledge_steering(&self, ids: &[String]) -> Result<()> {
         self.check()?;
-        crate::control::acknowledge(&self.service, self.epoch, ids)
+        crate::control::acknowledge(&self.service, self.generation, ids)
     }
     fn diagnostic(&self, metadata: &Value) -> Result<()> {
         self.check()?;
-        crate::control::record(&self.service, self.epoch, metadata)
+        crate::control::record(&self.service, self.generation, metadata)
     }
     fn load_context(&self) -> Result<Option<Value>> {
         self.check()?;
-        pot_storage::bindings::load_context(&self.service.inner.lock().unwrap().store)
+        pot_storage::threads::load_context(&self.service.inner.lock().unwrap().store)
     }
     fn save_context(&self, value: &Value) -> Result<()> {
         self.check()?;
-        pot_storage::bindings::save_context(&self.service.inner.lock().unwrap().store, value)
+        pot_storage::threads::save_context(&self.service.inner.lock().unwrap().store, value)
     }
     fn cancelled(&self) -> bool {
         self.service.stopping() || self.check().is_err() || cancelled(&self.service)
     }
     fn cancellation(&self) -> BoxFuture<'_, ()> {
         Box::pin(self.service.cancel_notify.notified())
-    }
-    fn native_identity(&self, identity: &str) -> Result<()> {
-        self.check()?;
-        let mut inner = self.service.inner.lock().unwrap();
-        save_agent_session(&mut inner.store, identity)
-    }
-    fn binding_broken(&self, reason: &str) -> Result<()> {
-        self.check()?;
-        mark_broken(&mut self.service.inner.lock().unwrap().store, reason)
-    }
-    fn needs_rebind(&self, reason: &str) -> Result<()> {
-        self.check()?;
-        self.service
-            .inner
-            .lock()
-            .unwrap()
-            .store
-            .set("agent.needs_rebind", reason)
     }
     fn record_turn(&self, request: &str) -> Result<()> {
         self.check()?;
@@ -184,7 +167,7 @@ impl ExecutionFeedback for Feedback {
 }
 fn make_context(
     s: &Service,
-    binding: &Binding,
+    thread: &Thread,
     request: Option<&SendMessage>,
 ) -> Result<ExecutionContext> {
     let endpoint: RuntimeEndpoint =
@@ -206,7 +189,7 @@ fn make_context(
     } else {
         orchestration::MAIN_PROMPT.into()
     };
-    if binding.spec.engine == Engine::Pot {
+    {
         main_prompt = main_prompt.replace("Environment tools execute in the current default Sandbox unless you pass an explicit sandbox_id.", "Main execution defaults to Host; use environment=sandbox:ID for explicit Sandbox execution.").replace("Direct Host tool execution is unavailable.", "You normally chat on the Host. exec_command, write_stdin and apply_patch operate in the selected execution environment. Main defaults to host; task agents default to their assigned Sandbox. environment=host explicitly requests Host execution; environment=sandbox:ID selects a Sandbox. Each environment loads its own ~/.pot/agent/permissions.json. Host policy defaults to ask: execution needs a matching grant or owner approval. Sandbox policy defaults to allow: ordinary Sandbox execution does not need approval, unless the owner configures ask. Task and Sandbox management do not require permission approval. write_stdin continues an authorized process session without asking again. Role and assignment boundaries still apply. Use set_sandbox_mappings only for an owner-reviewed mapping change. Never claim permanent permission exists before approval.");
     }
     let instructions = if role == ExecutionRole::Summary {
@@ -230,14 +213,14 @@ fn make_context(
             } else {
                 Some(Arc::new(crate::sandbox::Tools {
                     service: s.clone(),
-                    epoch: binding.epoch,
+                    generation: thread.generation,
                 }))
             }
             #[cfg(not(test))]
             {
                 Some(Arc::new(crate::sandbox::Tools {
                     service: s.clone(),
-                    epoch: binding.epoch,
+                    generation: thread.generation,
                 }))
             }
         },
@@ -261,7 +244,7 @@ fn make_context(
         main_prompt,
         feedback: Arc::new(Feedback {
             service: s.clone(),
-            epoch: binding.epoch,
+            generation: thread.generation,
             request: request.map(|r| r.request_id.clone()),
         }),
     })
@@ -269,17 +252,16 @@ fn make_context(
 pub(super) fn context(
     s: &Service,
     request: &SendMessage,
-    binding: &Binding,
+    thread: &Thread,
 ) -> Result<ExecutionContext> {
-    native_session(s)?;
-    make_context(s, binding, Some(request))
+    make_context(s, thread, Some(request))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[tokio::test]
-    async fn feedback_rejects_foreign_requests_old_turns_and_epochs() {
+    async fn feedback_rejects_foreign_requests_old_turns_and_generations() {
         let mut s = tasks::tests::fixture();
         let (commands, _receiver) = mpsc::unbounded_channel();
         s.commands = commands;
@@ -295,38 +277,28 @@ mod tests {
         )
         .await
         .unwrap();
-        let binding = binding(&s).unwrap();
+        let thread = thread(&s).unwrap();
         let feedback = Feedback {
             service: s.clone(),
-            epoch: binding.epoch,
+            generation: thread.generation,
             request: Some(request.request_id.clone()),
         };
         assert!(!feedback.cancelled());
         assert!(feedback.record_turn("other").is_err());
         feedback.record_turn(&request.request_id).unwrap();
-        let mut all = bindings(&s.inner.lock().unwrap().store).unwrap();
-        all[0].epoch += 1;
+        let mut next = current(&s.inner.lock().unwrap().store).unwrap().unwrap();
+        next.generation += 1;
         s.inner
             .lock()
             .unwrap()
             .store
-            .set(BINDINGS, &serde_json::to_string(&all).unwrap())
+            .set(THREAD, &serde_json::to_string(&next).unwrap())
             .unwrap();
-        assert!(feedback.needs_rebind("stale update").is_err());
+        assert!(feedback.record_turn(&request.request_id).is_err());
         assert!(feedback.cancelled());
-        assert_ne!(
-            s.inner
-                .lock()
-                .unwrap()
-                .store
-                .get("agent.needs_rebind")
-                .unwrap()
-                .as_deref(),
-            Some("stale update")
-        );
         let current_feedback = Feedback {
             service: s.clone(),
-            epoch: all[0].epoch,
+            generation: next.generation,
             request: Some(request.request_id),
         };
         s.turn(None);

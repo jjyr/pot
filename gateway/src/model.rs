@@ -22,6 +22,8 @@ pub struct Message {
     pub call_id: String,
     #[serde(default)]
     pub replay: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_route: Option<String>,
     /// Complete provider-reported usage for context calibration, never sent upstream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
@@ -73,6 +75,7 @@ impl Message {
             calls: vec![],
             call_id: String::new(),
             replay: Value::Null,
+            replay_route: None,
             usage: None,
         }
     }
@@ -153,7 +156,11 @@ pub fn request(
                 } else if m.role == "tool" {
                     input.push(json!({"role":"tool","tool_call_id":m.call_id,"content":m.text}));
                 } else {
-                    input.push(json!({"role":m.role,"content":m.text}));
+                    let mut message = json!({"role":m.role,"content":m.text});
+                    if !m.calls.is_empty() {
+                        message["tool_calls"] = json!(m.calls.iter().map(|c| json!({"id":c.id,"type":"function","function":{"name":c.name,"arguments":c.arguments.to_string()}})).collect::<Vec<_>>());
+                    }
+                    input.push(message);
                 }
                 images.extend(m.images.iter().map(|image| json!({"type":"image_url","image_url":{"url":image.data_url(),"detail":"high"}})));
             }
@@ -197,7 +204,10 @@ pub fn request(
                         json!({"type":"function_call_output","call_id":m.call_id,"output":m.text}),
                     );
                 } else {
-                    input.push(json!({"role":m.role,"content":m.text}));
+                    if !m.text.is_empty() || m.calls.is_empty() {
+                        input.push(json!({"role":m.role,"content":m.text}));
+                    }
+                    input.extend(m.calls.iter().map(|c| json!({"type":"function_call","call_id":c.id,"name":c.name,"arguments":c.arguments.to_string()})));
                 }
                 images.extend(m.images.iter().map(|image| json!({"type":"input_image","image_url":image.data_url(),"detail":"high"})));
             }
@@ -233,7 +243,13 @@ pub fn request(
                     content.extend(m.images.iter().map(|image| json!({"type":"image","source":{"type":"base64","media_type":image.mime_type,"data":image.data}})));
                     vec![json!({"type":"tool_result","tool_use_id":m.call_id,"content":content})]
                 } else {
-                    let mut content = vec![json!({"type":"text","text":m.text})];
+                    let mut content = vec![];
+                    if !m.text.is_empty() || m.calls.is_empty() {
+                        content.push(json!({"type":"text","text":m.text}));
+                    }
+                    content.extend(m.calls.iter().map(
+                        |c| json!({"type":"tool_use","id":c.id,"name":c.name,"input":c.arguments}),
+                    ));
                     content.extend(m.images.iter().map(|image| json!({"type":"image","source":{"type":"base64","media_type":image.mime_type,"data":image.data}})));
                     content
                 };
@@ -277,7 +293,14 @@ pub fn request(
                         json!({"functionResponse":{"id":m.call_id,"name":name,"response":{"output":m.text}}}),
                     ]
                 } else {
-                    vec![json!({"text":m.text})]
+                    let mut parts = vec![];
+                    if !m.text.is_empty() || m.calls.is_empty() {
+                        parts.push(json!({"text":m.text}));
+                    }
+                    parts.extend(m.calls.iter().map(
+                        |c| json!({"functionCall":{"id":c.id,"name":c.name,"args":c.arguments}}),
+                    ));
+                    parts
                 };
                 parts.extend(m.images.iter().map(
                     |image| json!({"inlineData":{"mimeType":image.mime_type,"data":image.data}}),
@@ -585,6 +608,7 @@ impl Decoder {
             calls,
             call_id: String::new(),
             replay,
+            replay_route: None,
             usage: self.usage,
         })
     }

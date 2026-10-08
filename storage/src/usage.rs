@@ -105,11 +105,10 @@ impl Ledger {
         )?;
         Ok(())
     }
-    pub fn route(&self, request: &str, spec: &agent::ResolvedSpec, epoch: u64) -> Result<()> {
-        let engine = serde_json::to_value(&spec.engine)?;
+    pub fn route(&self, request: &str, spec: &agent::ResolvedSpec, generation: u64) -> Result<()> {
         self.0.execute(
-            "INSERT INTO request_routes(request_id,provider,epoch,spec_hash,agent,profile_id) VALUES (?,?,?,?,?,?)",
-            params![request, spec.provider, epoch, spec.spec_hash, engine.as_str().unwrap(), spec.source_profile_id],
+            "INSERT INTO request_routes(request_id,provider,generation,spec_hash,agent,profile_id) VALUES (?,?,?,?,?,?)",
+            params![request, spec.provider, generation, spec.spec_hash, "pot", spec.source_profile_id],
         )?;
         Ok(())
     }
@@ -128,7 +127,7 @@ impl Ledger {
         CREATE TABLE IF NOT EXISTS waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0);")?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS wait_routes(scope TEXT PRIMARY KEY,provider TEXT NOT NULL);
         CREATE TRIGGER IF NOT EXISTS clear_wait_route AFTER DELETE ON waits BEGIN DELETE FROM wait_routes WHERE scope=OLD.scope; END;
-        CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL,agent TEXT NOT NULL,profile_id TEXT NOT NULL);")?;
+        CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,generation INTEGER NOT NULL,spec_hash TEXT NOT NULL,agent TEXT NOT NULL,profile_id TEXT NOT NULL);")?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS compactions(id TEXT PRIMARY KEY, scope TEXT NOT NULL, turn_id TEXT NOT NULL, at INTEGER NOT NULL, end_at INTEGER, reason TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'running', tokens_before INTEGER, tokens_after INTEGER, entry_id TEXT);
         CREATE INDEX IF NOT EXISTS compaction_scope ON compactions(scope,at);")?;
         c.execute_batch(
@@ -438,8 +437,8 @@ impl Ledger {
         let mut requests = vec![];
         let mut tools = vec![];
         if !q.scope.is_empty() {
-            let mut stmt=self.0.prepare("SELECT r.id,r.turn_id,r.at,r.model,r.input,r.output,r.cache,r.state,r.compaction_id,COALESCE(t.agent,'unknown'),COALESCE(t.provider,'unknown'),COALESCE(t.profile_id,''),t.epoch FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE r.scope=? ORDER BY r.at DESC,r.id DESC LIMIT 20 OFFSET ?")?;
-            for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"turn":r.get::<_,String>(1)?,"at":r.get::<_,i64>(2)?,"label":if r.get::<_,i64>(2)?==0 {"历史 · 时间未知".into()}else{Utc.timestamp_millis_opt(r.get::<_,i64>(2)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string()},"model":r.get::<_,String>(3)?,"input":r.get::<_,Option<u64>>(4)?,"output":r.get::<_,Option<u64>>(5)?,"cache":r.get::<_,u64>(6)?,"state":r.get::<_,String>(7)?,"agent":r.get::<_,String>(9)?,"provider":r.get::<_,String>(10)?,"profile_id":r.get::<_,String>(11)?,"epoch":r.get::<_,Option<u64>>(12)?,"purpose":if r.get::<_,Option<String>>(8)?.is_some(){"compaction"}else{"conversation"}})))? {requests.push(row?);}
+            let mut stmt=self.0.prepare("SELECT r.id,r.turn_id,r.at,r.model,r.input,r.output,r.cache,r.state,r.compaction_id,COALESCE(t.agent,'unknown'),COALESCE(t.provider,'unknown'),COALESCE(t.profile_id,''),t.generation FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE r.scope=? ORDER BY r.at DESC,r.id DESC LIMIT 20 OFFSET ?")?;
+            for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"turn":r.get::<_,String>(1)?,"at":r.get::<_,i64>(2)?,"label":if r.get::<_,i64>(2)?==0 {"历史 · 时间未知".into()}else{Utc.timestamp_millis_opt(r.get::<_,i64>(2)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string()},"model":r.get::<_,String>(3)?,"input":r.get::<_,Option<u64>>(4)?,"output":r.get::<_,Option<u64>>(5)?,"cache":r.get::<_,u64>(6)?,"state":r.get::<_,String>(7)?,"agent":r.get::<_,String>(9)?,"provider":r.get::<_,String>(10)?,"profile_id":r.get::<_,String>(11)?,"generation":r.get::<_,Option<u64>>(12)?,"purpose":if r.get::<_,Option<String>>(8)?.is_some(){"compaction"}else{"conversation"}})))? {requests.push(row?);}
             let mut labels = std::collections::HashMap::new();
             let mut rounds=self.0.prepare("SELECT turn_id,DENSE_RANK() OVER (ORDER BY MIN(at),turn_id) FROM requests WHERE scope=? AND at>0 GROUP BY turn_id")?;
             for row in rounds.query_map([&q.scope], |r| {

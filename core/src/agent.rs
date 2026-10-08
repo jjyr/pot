@@ -1,4 +1,4 @@
-//! Serializable policy for the Pot-owned loop, pinned with each profile binding.
+//! Serializable policy for the Pot-owned loop, copied into each Thread configuration.
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
