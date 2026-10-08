@@ -8,6 +8,12 @@ const initialRoute=new URLSearchParams(location.search);
 task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','sandbox','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
 function navigate(){history.pushState({page,task,scope,query,offset},'',task?'/?task='+encodeURIComponent(task):'/?page='+page);}
 const el=id=>document.getElementById(id);
+function requestUUID(){
+  if(crypto.randomUUID)return crypto.randomUUID();
+  const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+  const h=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
 const catalogs=await fetch('/locales.json',{cache:'no-store'}).then(r=>r.json());
 const languages=Object.keys(catalogs).sort();
 function matchLocale(value){const normalized=value.replaceAll('_','-').toLowerCase();return languages.find(l=>l.toLowerCase()===normalized)||languages.find(l=>l.toLowerCase().split('-')[0]===normalized.split('-')[0]);}
@@ -97,13 +103,13 @@ window.potAction=async(action,value)=>{
     if(action==='logout'){await api('/access/logout',{});await tokenStore(undefined,true);const reg=await navigator.serviceWorker?.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();location.reload();return;}
     if(action==='send'){
       if(JSON.parse(module.pending_send()))throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));
-      module.begin_send(task||'main',value,crypto.randomUUID());
+      module.begin_send(task||'main',value,requestUUID());
       notice=t('mobile.shell.sending');await sendPending();
     }
     if(action==='retry')await sendPending();
     if(action==='stop'){
       const target=snapshot?.turn?.user_message_id;if(!target)throw Error('no_active_turn');
-      await api(task?`/api/v1/tasks/${encodeURIComponent(task)}/cancel`:'/api/v1/turn/cancel',{request_id:crypto.randomUUID(),user_message_id:target});notice=t('mobile.shell.stopping');
+      await api(task?`/api/v1/tasks/${encodeURIComponent(task)}/cancel`:'/api/v1/turn/cancel',{request_id:requestUUID(),user_message_id:target});notice=t('mobile.shell.stopping');
     }
     if(action==='notifications'){
       if(!pushStatus.push_available)throw Error(t('mobile.shell.host-push-is-not-configured'));

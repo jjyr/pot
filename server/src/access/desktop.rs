@@ -29,10 +29,18 @@ fn owns(a: &Access, ticket: &str, session: &str) -> bool {
         .lock()
         .unwrap()
         .get(ticket)
-        .is_some_and(|(owner, expires)| owner == session && *expires > Instant::now())
+        .is_some_and(|ticket| {
+            ticket.owner == session
+                && ticket.live()
+                && Arc::ptr_eq(&ticket.endpoint, &a.endpoint_epoch)
+        })
         && a.valid_session(session, false)
 }
-pub(super) async fn proxy(State(a): State<Access>, mut req: Request) -> Result<Response, Failure> {
+pub(super) async fn proxy(
+    State(mut a): State<Access>,
+    mut req: Request,
+) -> Result<Response, Failure> {
+    a.capture_endpoint();
     let session = session(&a, &req)?;
     let opening = req.uri().path() == "/api/v1/desktop/sessions" && req.method() == Method::POST;
     let path = req.uri().path().to_owned();
@@ -76,8 +84,14 @@ pub(super) async fn proxy(State(a): State<Access>, mut req: Request) -> Result<R
     }
     if opening {
         let mut tickets = a.desktops.lock().unwrap();
-        tickets.retain(|_, (s, e)| *e > Instant::now() && a.valid_session(s, false));
-        if tickets.len() >= 64 || tickets.values().filter(|(s, _)| s == &session).count() >= 16 {
+        tickets.retain(|_, ticket| ticket.live() && a.valid_session(&ticket.owner, false));
+        if tickets.len() >= 64
+            || tickets
+                .values()
+                .filter(|ticket| ticket.owner == session)
+                .count()
+                >= 16
+        {
             return Err(fail(StatusCode::TOO_MANY_REQUESTS, "desktop_limit"));
         }
     }
@@ -127,7 +141,12 @@ pub(super) async fn proxy(State(a): State<Access>, mut req: Request) -> Result<R
         }
         a.desktops.lock().unwrap().insert(
             id.into(),
-            (session, Instant::now() + Duration::from_secs(3600)),
+            DesktopTicket {
+                owner: session,
+                expires: Instant::now() + Duration::from_secs(3600),
+                endpoint: a.endpoint_epoch.clone(),
+                generation: a.endpoint_generation(),
+            },
         );
     }
     Ok(Response::from_parts(parts, Body::from(bytes)))

@@ -121,19 +121,26 @@ impl Tailscale {
     }
     pub async fn enable(self: &Arc<Self>) -> Result<String> {
         self.connect().await?;
+        self.set_web(true, true).await
+    }
+    pub async fn set_web(self: &Arc<Self>, enabled: bool, https: bool) -> Result<String> {
         let this = self.clone();
         let result = tokio::task::spawn_blocking(move || {
             let node = this.node.lock().unwrap();
-            let node = node.as_ref().context("Tailscale disconnected")?;
-            let v = unsafe {
-                let f: unsafe extern "C" fn(c_int, c_int) -> *mut c_char =
-                    std::mem::transmute(node.library.symbol(c"PotTsEnable")?);
-                node.library.result(f(node.id, this.port.into()))?
+            let Some(node) = node.as_ref() else {
+                anyhow::ensure!(!enabled, "Connect Tailscale first");
+                return Ok("http://localhost".to_owned());
+            };
+            let value = unsafe {
+                let f: unsafe extern "C" fn(c_int, c_int, c_int, c_int) -> *mut c_char =
+                    std::mem::transmute(node.library.symbol(c"PotTsSetWeb")?);
+                node.library
+                    .result(f(node.id, this.port.into(), enabled.into(), https.into()))?
             };
             Ok::<_, anyhow::Error>(
-                v["origin"]
+                value["origin"]
                     .as_str()
-                    .context("Missing HTTPS address")?
+                    .context("Missing Web address")?
                     .to_owned(),
             )
         })
@@ -180,6 +187,7 @@ mod tests {
             for name in [
                 c"PotTsConnect",
                 c"PotTsEnable",
+                c"PotTsSetWeb",
                 c"PotTsDisconnect",
                 c"PotTsFree",
             ] {

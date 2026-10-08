@@ -116,19 +116,33 @@ impl Server {
             access.notifications = Some(backend.state());
             let (listener, tls) = access_listener.unwrap();
             if use_ts {
-                let first = !access.data.join("tailscale-enabled").exists();
                 access.tailscale = Some(crate::access::tailscale::Tailscale::new(
                     access.data.clone(),
                     ts_hostname.unwrap_or_else(|| "pot".into()),
                     listener.local_addr()?.port(),
                 ));
-                if first {
-                    let mut i = access.inner.lock().unwrap();
-                    i.enabled = false;
-                    i.credentials.disabled = true;
-                    access.persist(&i)?;
-                    access.policy.send_replace(false);
-                }
+                let preferences = {
+                    let mut inner = access.inner.lock().unwrap();
+                    let preferences = inner.credentials.web.unwrap_or_else(|| {
+                        if access.data.join("tailscale-enabled").exists() && inner.enabled {
+                            crate::access::web::Preferences {
+                                tailscale: true,
+                                https: true,
+                                lan: false,
+                            }
+                        } else {
+                            Default::default()
+                        }
+                    });
+                    inner.credentials.web = Some(preferences);
+                    inner.credentials.disabled = !(preferences.lan || preferences.tailscale);
+                    inner.enabled = !inner.credentials.disabled;
+                    access.persist(&inner)?;
+                    access.policy.send_replace(inner.enabled);
+                    preferences
+                };
+                access.endpoint_enabled = Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
+                access.web = Some(crate::access::web::Web::new(preferences));
             }
             Some((access, listener, tls))
         } else {
@@ -214,27 +228,22 @@ impl Server {
         let mut public_task = None;
         let mut ts_node = None;
         let mut ts_restore = None;
+        let mut web_manager = None;
         let mut push_task = None;
         if let Some((access, listener, tls)) = self.access {
+            if let Some(web) = &access.web {
+                web.restore(&access).await;
+                web_manager = Some(web.clone());
+            }
             if let Some(ts) = access.tailscale.clone() {
                 ts_node = Some(ts.clone());
                 let a = access.clone();
                 ts_restore = Some(tokio::spawn(async move {
-                    if ts.configured() {
-                        if let Err(e) = ts.connect().await {
-                            eprintln!("Tailscale: {e}");
-                            return;
+                    loop {
+                        if let Some(web) = &a.web {
+                            web.maintain_tailnet(&a).await;
                         }
-                        loop {
-                            if !a.inner.lock().unwrap().enabled {
-                                break;
-                            }
-                            if let Ok(origin) = ts.enable().await {
-                                *a.origin.write().unwrap() = origin;
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                     }
                 }));
             }
@@ -277,6 +286,9 @@ impl Server {
 
                 if let Some(task) = ts_restore {
                     task.abort();
+                }
+                if let Some(web) = web_manager {
+                    web.shutdown().await;
                 }
                 if let Some(ts) = ts_node {
                     let _ = ts.stop().await;

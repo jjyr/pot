@@ -37,6 +37,8 @@ Linux/Podman and multiple-client acceptance: [Linux Server and clients, 2026-10-
 
 Web access redesign: [Token authentication and embedded Tailscale, 2026-10-08](validation/web-access-token-20261008.md).
 
+Independent Web UI access: [LAN HTTP and optional tailnet HTTPS, 2026-10-08](validation/web-access-independent-20261008.md).
+
 Native client reliability acceptance: [Helper failures and conversation receipts, 2026-10-07](validation/client-reliability-20261007.md).
 
 Provider/executor merge acceptance: [Cross-turn sessions and executor v2 image, 2026-10-07](validation/sandbox-merge-20261007.md).
