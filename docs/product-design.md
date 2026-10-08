@@ -1,6 +1,6 @@
 # Pot product goals
 
-Updated: 2026-10-06. This page maintains long-term product constraints. See the [Development plan](development-plan.md) for delivered scope and [UI specification](ui-ux-design.md) for interfaces. Unfinished goals must not be promised as existing capabilities.
+Updated: 2026-10-09. This page maintains long-term product constraints. See the [Development plan](development-plan.md) for delivered scope and [UI specification](ui-ux-design.md) for interfaces. Unfinished goals must not be promised as existing capabilities.
 
 ## Positioning and boundaries
 
@@ -15,9 +15,9 @@ Pot is a personal assistant accessed from the Mac menu bar. The approved target 
 
 ## User journey
 
-Target flow: install -> environment/driver Setup and auth -> main chat naming/preferences -> delegation -> background execution -> artifacts or desktop takeover -> results -> reopen and continue.
+Target flow: install -> model API configuration and environment setup -> main chat naming/preferences -> delegation -> background execution -> artifacts or desktop takeover -> results -> reopen and continue.
 
-Unconfigured Chat opens the shared AI Configuration page on request. Saved connections and explicit preferences persist. Configuration failure retains the draft and valid settings. Unvalidated drivers must not appear ready.
+Unconfigured Chat opens the shared AI Configuration page on request. Saved connections and explicit preferences persist. Configuration failure retains the draft and valid settings. Unconfigured model connections must not appear ready.
 
 The main assistant answers short questions and delegates research, reports, and multistep execution to tasks with explicit goals. Main chat stays available during background work. Guidance first shows Received, then Applied after consumption; without real-time steering, explicitly queue it for the next turn.
 
@@ -45,11 +45,11 @@ Secrets do not enter chat, logs, or ordinary memory. Host shared directories/rea
 
 Runtime owns product messages, tasks, schedules, Thread contexts/configuration and execution state. It calls pot-agent directly for the model/tool loop and compaction. Main chat and background tasks share this structure; roles determine tools and environment assignments. Configuration changes preserve context without external session mappings or handoff summaries.
 
-Adapters explicitly declare auth, tools, guidance, stop, resume, and compaction capabilities. Failed native resume must not silently create a new session and claim continuation. Driver switching must not impersonate native context migration; active execution retains its binding.
+Context corruption fails visibly. Provider/model configuration changes wait for a safe turn boundary and retain the same Thread history; interruption receipts prevent completed or uncertain tool actions from being replayed.
 
 Product commands are idempotent and events recoverable; files/task state survive restart. Verify external actions with uncertain results before replaying. Saved input does not imply execution success; recovery summaries point to verifiable artifacts/evidence.
 
-Future long-term memory initially stores explicit preferences, facts, and sources with correction/forgetting. Do not mix task logs, secrets, or inferred personas into core memory. Forgetting explains the actual scope of product storage and existing native context without promising deletion of uncontrolled copies.
+Future long-term memory initially stores explicit preferences, facts, and sources with correction/forgetting. Do not mix task logs, secrets, or inferred personas into core memory. Forgetting explains the actual scope of product storage and retained Thread context without promising deletion of uncontrolled copies.
 
 Runtime triggers schedules; each run uses an independent task. No overlap by default; missed triggers can coalesce into one catch-up or skip. Notification conditions are separate from frequency. The first successful observation currently counts as changed; later observations compare stable fingerprints. See [Scheduled tasks](scheduled-tasks.md). Offline local environments do not execute, and waking a powered-off computer is not promised.
 
