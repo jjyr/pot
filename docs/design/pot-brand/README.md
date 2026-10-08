@@ -20,6 +20,11 @@ Respect Reduce Motion with static expressions and execution indicators. Stop nav
 
 The user authorized implementation on 2026-10-07. The left navigation uses a native vector interpretation of the character, with the above motion. After rebasing onto `origin/main` fa3483b, the application bundle, Mobile login/header, Home Screen icons and README also use this character. The editable application/Home Screen vector master lives in `scripts/make-icons.swift`; the compact animated character lives in `app/swift/PotIcon.swift`. Home Screen assets have an opaque cream background with no pre-applied corner mask. See the [UI specification](../../ui-ux-design.md) for exact timing and state semantics.
 
+The README displays `app/assets/Pot384.png` at 128 × 128 CSS pixels to preserve
+detail on 2x/3x displays without loading the 1024 px application master. Regenerate
+it with `swift scripts/make-icons.swift --readme-only`, or alongside the other
+brand assets by omitting the flag.
+
 ## Validation (2026-10-07)
 
 - `mise exec -- cargo build --locked -p pot-app -j 4`: passed.
