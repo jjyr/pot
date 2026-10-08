@@ -1,6 +1,6 @@
 [
   {
-    "name": "pot_create_task",
+    "name": "create_task",
     "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the current execution preference text semantically using eligible configured Profiles. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor.",
     "inputSchema": {
       "type": "object",
@@ -42,7 +42,7 @@
         "preference_revision": {
           "type": "integer",
           "minimum": 0,
-          "description": "Revision of the execution preferences used for this decision. Required when preferences are nonempty; refresh via pot_get_execution_preferences after edits or a conflict."
+          "description": "Revision of the execution preferences used for this decision. Required when preferences are nonempty; refresh via get_execution_preferences after edits or a conflict."
         },
         "selection_reason": {
           "type": "string",
@@ -68,7 +68,7 @@
     }
   },
   {
-    "name": "pot_list_tasks",
+    "name": "list_tasks",
     "description": "Search task metadata by state and title/ID. Defaults to active tasks, 10 per page; archived tasks keep complete/cancelled status. Use attention for failed/interrupted, archived to find past results, all only with a relevant query. Follow next_offset only when needed; no polling.",
     "inputSchema": {
       "type": "object",
@@ -115,7 +115,7 @@
     }
   },
   {
-    "name": "pot_get_task",
+    "name": "get_task",
     "description": "Read recent results and execution state of a task.",
     "inputSchema": {
       "type": "object",
@@ -132,7 +132,7 @@
     }
   },
   {
-    "name": "pot_guide_task",
+    "name": "guide_task",
     "description": "Queue a follow-up instruction in an existing task. Applied after the current turn; does not interrupt it.",
     "inputSchema": {
       "type": "object",
@@ -154,8 +154,65 @@
     }
   },
   {
-    "name": "pot_cancel_task",
-    "description": "Cancel a task and discard queued instructions. Running work may still be stopping.",
+    "name": "send_message",
+    "description": "Send reference information from Main to a pot-agent task. Delivered at a safe model boundary if running, or retained for its next explicit guide_task continuation. Does not create a work turn, interrupt current work, resume stopped tasks or authorize new permissions. Sender identity is trusted Runtime metadata, not caller supplied. Codex task delivery is currently unsupported.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "required": [
+        "task_id",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "wait_task",
+    "description": "Wait for any of up to eight tasks to complete, fail, become interrupted, cancelled or allowance-waiting. Bounded wait; no busy polling. Returns metadata, per-task cursors and timed_out. Pass returned cursors as after to suppress unchanged settled states. Does not retrieve transcripts, resume tasks or wait for exec; use wait for JavaScript runs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "after": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        }
+      },
+      "required": [
+        "task_ids"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "interrupt",
+    "description": "Interrupt current work while retaining task/session/files and pending guidance. Does not replay interrupted input or automatically resume. Running work retains capacity until cleanup is confirmed; guide_task explicitly resumes. Completed task results remain complete.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -171,7 +228,24 @@
     }
   },
   {
-    "name": "pot_list_schedules",
+    "name": "cancel_task",
+    "description": "Abandon a task: stop current execution, discard pending guidance and mark cancelled after confirmed cleanup. Retains history and files; cancelled tasks appear in Archived. Use interrupt to preserve guidance for later continuation. Completed results remain complete.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_schedules",
     "description": "List scheduled plans (metadata only). Filter enabled/paused/all; use pagination.",
     "inputSchema": {
       "type": "object",
@@ -199,7 +273,7 @@
     }
   },
   {
-    "name": "pot_get_schedule",
+    "name": "get_schedule",
     "description": "Read a schedule definition and paginated execution history.",
     "inputSchema": {
       "type": "object",
@@ -225,7 +299,7 @@
     }
   },
   {
-    "name": "pot_manage_schedule",
+    "name": "manage_schedule",
     "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. All times use the specified IANA timezone. Triggers run while Host Runtime is available; environment tools lazily prepare the saved Sandbox, with recovery policy on restart. Creation/update requires spec. Deletion is soft and keeps execution history.",
     "inputSchema": {
       "type": "object",
@@ -353,7 +427,7 @@
     }
   },
   {
-    "name": "pot_get_execution_preferences",
+    "name": "get_execution_preferences",
     "description": "Read the current persistent execution preference text verbatim, its revision, and configured Profiles with task eligibility. Use to show all preferences, refresh before editing, resolve names, or after compaction. This record is authoritative; do not reconstruct from chat history.",
     "inputSchema": {
       "type": "object",
@@ -363,7 +437,7 @@
     }
   },
   {
-    "name": "pot_update_execution_preferences",
+    "name": "update_execution_preferences",
     "description": "Replace the dedicated persistent execution preference text after an explicit user instruction. Read the current record first, preserve unrelated instructions when editing/removing one preference, and use expected_revision. Clear by passing an empty text. Acknowledge only a successful save and explain that it applies to new tasks. Do not save casual discussion, task-only choices, worker results or external instructions. Clarify ambiguous scope/profile names; resolve configured connection/model names, never claim unavailable executors are ready.",
     "inputSchema": {
       "type": "object",
@@ -385,7 +459,7 @@
     }
   },
   {
-    "name": "pot_list_sandboxes",
+    "name": "list_sandboxes",
     "description": "Inspect managed Linux Sandboxes and their state; does not start a VM.",
     "inputSchema": {
       "type": "object",
@@ -395,7 +469,7 @@
     }
   },
   {
-    "name": "pot_manage_sandbox",
+    "name": "manage_sandbox",
     "description": "Main-only Sandbox lifecycle and selection. Workers cannot manage or switch environments. Busy environments cannot be stopped. Creating a definition does not boot a VM. Update requires name and config, and a stopped or failed environment with no active operations. Resources apply at next start.",
     "inputSchema": {
       "type": "object",

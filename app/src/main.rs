@@ -84,6 +84,7 @@ impl Shell {
                     return;
                 };
                 match event.kind {
+                    "permission-decision" => this.client.permission_decision(event.value),
                     "native" => ui::command(event.value),
                     "sandbox-select" => {
                         ui::command(serde_json::json!({"action":"sandbox-view","id":event.value}))
@@ -604,6 +605,7 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap_5()
+                    .child(pot_ui::permissions::cards(&view.permissions, if view.selected.is_empty() { "main" } else { &view.selected }, self.catalog(), self.page_handler(cx), cx))
                     .child(pot_ui::resources::cards(&self.native["resource_requests"],self.catalog(),self.page_handler(cx),cx))
                     .when(messages.is_empty(), |el| {
                         el.child(

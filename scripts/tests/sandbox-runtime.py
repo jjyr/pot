@@ -66,7 +66,6 @@ class Model:
             forbidden = {
                 "shell",
                 "shell_command",
-                "read_file",
                 "view_image",
                 "node_repl",
                 "spawn_agent",
@@ -83,15 +82,15 @@ class Model:
                     for t in tools
                 ), tools
             if "Pot task completion notification." in text:
-                pot_names = {
-                    t.rsplit("__", 1)[-1] for t in tools if t.rsplit("__", 1)[-1].startswith("pot_")
-                }
-                assert pot_names == {"pot_list_tasks", "pot_get_task"}, pot_names
+                pot_names = {t.rsplit("__", 1)[-1] for t in tools}
+                assert pot_names == {"list_tasks", "get_task"}, pot_names
                 self.summary_requests += 1
                 if codex:
                     self.codex_summary_requests += 1
             if worker:
                 expected = {"exec_command", "write_stdin", "apply_patch"}
+                if not codex:
+                    expected |= {"exec", "wait"}
                 names = {
                     t.rsplit("__", 1)[-1]
                     for t in tools
@@ -418,7 +417,7 @@ async def run(args):
             )
             await turn(
                 [
-                    action("pot_manage_sandbox", action="select", sandbox_id="linux-b"),
+                    action("manage_sandbox", action="select", sandbox_id="linux-b"),
                     action(
                         "write_stdin",
                         session_id="$last_session",
@@ -427,7 +426,7 @@ async def run(args):
                         chars=f"stty size > {prefix}-terminal; printf BOUND >> {prefix}-terminal; exit\n",
                         yield_time_ms=1000,
                     ),
-                    action("pot_manage_sandbox", action="select", sandbox_id="default"),
+                    action("manage_sandbox", action="select", sandbox_id="default"),
                     action("exec_command", login=False, cmd="rm .bash_profile"),
                 ]
             )
@@ -483,7 +482,7 @@ async def run(args):
             await turn(
                 [
                     action(
-                        "pot_manage_sandbox",
+                        "manage_sandbox",
                         action="create",
                         sandbox_id="linux-b",
                         name="Second Linux",
@@ -555,7 +554,7 @@ SKILLS""",
                         cmd='read value; printf "%s" "$value" > session.txt',
                         yield_time_ms=10,
                     ),
-                    action("pot_manage_sandbox", action="select", sandbox_id="linux-b"),
+                    action("manage_sandbox", action="select", sandbox_id="linux-b"),
                     action(
                         "write_stdin",
                         session_id="$last_session",
@@ -567,7 +566,7 @@ SKILLS""",
                         "apply_patch",
                         patch="*** Begin Patch\n*** Add File: selected.txt\n+SECOND\n*** End Patch",
                     ),
-                    action("pot_manage_sandbox", action="select", sandbox_id="default"),
+                    action("manage_sandbox", action="select", sandbox_id="default"),
                 ]
             )
             assert (default / "session.txt").read_text() == "BOUND"
@@ -694,8 +693,8 @@ SKILLS""",
             report["codex_chat_without_sandbox"] = True
             await turn(
                 [
-                    action("pot_list_sandboxes"),
-                    action("pot_manage_sandbox", action="select", sandbox_id="default"),
+                    action("list_sandboxes"),
+                    action("manage_sandbox", action="select", sandbox_id="default"),
                     action(
                         "apply_patch",
                         patch="*** Begin Patch\n*** Add File: codex.txt\n+CODEX_DEFAULT\n*** End Patch",
@@ -871,7 +870,7 @@ SKILLS""",
             await reject(
                 "execution",
                 {
-                    "name": "pot_manage_sandbox",
+                    "name": "manage_sandbox",
                     "call_id": "manage",
                     "args": {"action": "stop", "sandbox_id": "linux-b"},
                 },

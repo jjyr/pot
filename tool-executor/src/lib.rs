@@ -1,4 +1,5 @@
 //! Explicit local execution backend, used inside Sandbox runners and isolated eval fixtures.
+pub mod files;
 mod processes;
 mod snapshot;
 mod terminal;
@@ -10,6 +11,11 @@ pub use processes::Processes;
 use serde_json::Value;
 #[derive(Default)]
 pub struct LocalTools(tokio::sync::Mutex<Processes>);
+impl LocalTools {
+    pub async fn shutdown(&self) -> Result<()> {
+        self.0.lock().await.shutdown().await
+    }
+}
 impl ToolExecutor for LocalTools {
     fn execute<'a>(
         &'a self,
@@ -21,7 +27,7 @@ impl ToolExecutor for LocalTools {
         emit: &'a mut (dyn FnMut(Update) -> Result<()> + Send),
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
-            tools::validate(name, args)?;
+            pot_core::environment_tools::validate(name, args)?;
             if name == "apply_patch" {
                 tools::patch(context, args)
             } else {

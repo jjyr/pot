@@ -9,7 +9,7 @@ pub struct Tools {
 impl pot_core::ToolExecutor for Tools {
     fn execute<'a>(
         &'a self,
-        _: &'a pot_core::ExecutionContext,
+        context: &'a pot_core::ExecutionContext,
         policy: &'a pot_core::ShellSettings,
         name: &'a str,
         args: &'a Value,
@@ -21,7 +21,31 @@ impl pot_core::ToolExecutor for Tools {
                 agent::binding(&self.service)?.epoch == self.epoch,
                 "Execution binding changed"
             );
-            let mut value = tool(&self.service, name, call, args).await?;
+            let environment = args["environment"].as_str().unwrap_or("");
+            let mut execution_args = args.clone();
+            if let Some(object) = execution_args.as_object_mut() {
+                object.remove("environment");
+            }
+            if environment == "host" {
+                let executor = self
+                    .service
+                    .permissions
+                    .host_executor(&self.service.usage_scope, self.epoch);
+                return pot_core::ToolExecutor::execute(
+                    &*executor,
+                    context,
+                    policy,
+                    name,
+                    &execution_args,
+                    call,
+                    emit,
+                )
+                .await;
+            }
+            if let Some(target) = environment.strip_prefix("sandbox:") {
+                execution_args["sandbox_id"] = json!(target);
+            }
+            let mut value = tool(&self.service, name, call, &execution_args).await?;
             if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
                 let mut remaining = policy.max_output_bytes.saturating_mul(2);
                 for event in events.drain(..) {
@@ -109,8 +133,11 @@ impl Manager {
         #[cfg(test)]
         let agent_home = root.join("agent-home");
         #[cfg(not(test))]
-        let agent_home =
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".pot/agent");
+        let agent_home = std::env::var_os("POT_AGENT_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".pot/agent")
+            });
         #[cfg(test)]
         let skill_user = root.join("skills-user");
         #[cfg(not(test))]
@@ -249,11 +276,15 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         !turn.starts_with(orchestration::RESULT_PREFIX),
         "Summary is read-only"
     );
-    if name == "pot_list_sandboxes" {
+    if name == "list_sandboxes" {
         anyhow::ensure!(!s.is_worker, "Workers cannot list Sandbox inventory");
         return Ok(inventory(s).await);
     }
-    if name == "pot_manage_sandbox" {
+    if name == "manage_sandbox" {
+        anyhow::ensure!(
+            args["action"] != "set_mounts",
+            "Host mappings require the pot-agent permission flow"
+        );
         let result = management(s, args).await?;
         if matches!(
             args["action"].as_str(),
@@ -279,7 +310,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         return Ok(result);
     }
     anyhow::ensure!(
-        ["exec_command", "write_stdin", "apply_patch"].contains(&name),
+        ["exec_command", "write_stdin", "apply_patch",].contains(&name),
         "Unknown execution operation"
     );
     let binding = agent::binding(s)?;
@@ -375,9 +406,11 @@ pub async fn finish_idle(s: &Service) -> Result<()> {
     s.sandboxes.environment.finish_idle(&s.usage_scope).await
 }
 pub async fn finish(s: &Service) -> Result<()> {
+    s.permissions.finish_host(s).await?;
     s.sandboxes.environment.finish(&s.usage_scope).await
 }
 pub async fn drain(s: &Service) -> Result<()> {
+    s.permissions.finish_host(s).await?;
     s.sandboxes.environment.drain(&s.usage_scope).await
 }
 pub async fn execute(
@@ -463,7 +496,7 @@ mod tests {
                 .is_err()
         );
         assert!(
-            tool(&worker, "pot_list_sandboxes", "list", &json!({}))
+            tool(&worker, "list_sandboxes", "list", &json!({}))
                 .await
                 .is_err()
         );

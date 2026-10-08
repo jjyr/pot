@@ -14,10 +14,10 @@ Configured connections determine Agent/model selections. Claude, Gemini, DeepSee
 
 The shared Pot/MCP tool schema exposes:
 
-- `pot_get_execution_preferences`: current `{preferences: {text, revision, updated_at_ms}, profiles}`. Catalog entries show configured identity/name/model, capability declarations, eligibility and a safe unavailability explanation, without credentials or launch commands.
-- `pot_update_execution_preferences`: `{text, expected_revision}`. Empty text clears. The main active turn is required; worker and summary roles cannot mutate preferences. Writes atomically commit a revision and an idempotent result receipt. A stale version returns a conflict and requires rereading.
+- `get_execution_preferences`: current `{preferences: {text, revision, updated_at_ms}, profiles}`. Catalog entries show configured identity/name/model, capability declarations, eligibility and a safe unavailability explanation, without credentials or launch commands.
+- `update_execution_preferences`: `{text, expected_revision}`. Empty text clears. The main active turn is required; worker and summary roles cannot mutate preferences. Writes atomically commit a revision and an idempotent result receipt. A stale version returns a conflict and requires rereading.
 
-Fresh preferences and the catalog enter each ordinary main turn, including resumed turns. After a same-turn edit or compaction, the Agent can refresh through the read tool. `pot_create_task` accepts `preference_revision` and `selection_reason`. Nonempty preferences require the current revision; stale decisions fail visibly before task creation. Preference edits and task creation are serialized. Existing authorization, capabilities, concurrency and request-id deduplication still apply. Unauthorized Profiles are not enabled by saving preferences; allow-list changes remain in existing Task Configuration.
+Fresh preferences and the catalog enter each ordinary main turn, including resumed turns. After a same-turn edit or compaction, the Agent can refresh through the read tool. `create_task` accepts `preference_revision` and `selection_reason`. Nonempty preferences require the current revision; stale decisions fail visibly before task creation. Preference edits and task creation are serialized. Existing authorization, capabilities, concurrency and request-id deduplication still apply. Unauthorized Profiles are not enabled by saving preferences; allow-list changes remain in existing Task Configuration.
 
 The main Agent interprets the deliverable and picks an eligible Profile ID. Explicit task choices override general preferences; unmatched tasks retain existing defaults. The selected configuration remains an immutable task binding. The preference revision and short explanation are creation-time metadata, not a description regenerated from later preferences. Changes to defaults or preference text do not alter old tasks, their follow-ups, or the main Chat Agent. Explicit task switching uses existing migration boundaries. Icon projection follows the actual binding after a switch, never the latest editable Profile.
 
@@ -27,7 +27,7 @@ Pot and Codex main Agents expose these tools. Workers and read-only summary turn
 
 ## Usage
 
-A main turn that attempts `pot_create_task` is marked once in the shared usage ledger. `routing_total` is the subset of actual main-chat requests/turn records matching those markers. It includes the whole turn's understanding, replies and compaction, including requests preceding the tool call. It is not an independent allocation of routing reasoning tokens.
+A main turn that attempts `create_task` is marked once in the shared usage ledger. `routing_total` is the subset of actual main-chat requests/turn records matching those markers. It includes the whole turn's understanding, replies and compaction, including requests preceding the tool call. It is not an independent allocation of routing reasoning tokens.
 
 The Usage page and main-chat Usage show **Main-chat usage including task routing** only when matching records exist, with input/output/input-cache and incomplete-record counts. This subset is already included in the total and must never be added again. Global queries follow the selected date window/timezone; main-chat details use lifetime scope. Task details do not include main-chat routing usage. Pagination does not change totals. Missing usage remains incomplete, not measured zero. Existing unmarked historical turns are not guessed or backfilled.
 

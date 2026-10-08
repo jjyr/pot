@@ -33,18 +33,36 @@ impl SandboxFixture {
         ));
         let generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
         for target in ["default", "linux-b"] {
+            let config = Arc::new(Mutex::new(json!({"version":1,"grants":[]})));
             let captured = http.clone();
             let inventory = inspect.clone();
             let app = Router::new().fallback(any(
             move |uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
                 let captured = captured.clone();
                 let inventory=inventory.clone();
+                let config=config.clone();
                 async move {
                     let auth = headers.get("authorization").unwrap().to_str().unwrap();
                     assert_eq!(auth,format!("Bearer fixture-{target}"));
                     let body: Value = if body.is_empty() { json!(null) } else { serde_json::from_slice(&body).unwrap() };
                     captured.lock().unwrap().push(json!({"path":uri.path(),"target":target,"auth":auth,"body":body}));
                     Json(match uri.path() {
+                        "/permissions" => {
+                            let mut current = config.lock().unwrap();
+                            if body["action"] == "write" {
+                                assert_eq!(*current, body["expected"]);
+                                *current = body["config"].clone();
+                            }
+                            let mut args = body["args"].clone();
+                            if body["tool"] == "exec_command" {
+                                args["workdir"] = json!(format!("/guest-only/{target}"));
+                                args["shell"] = body["policy"]["executable"].clone();
+                                args["login"] = body["policy"]["allow_login_shell"].clone();
+                                args["tty"] = json!(false);
+                                if args.get("yield_time_ms").is_none() { args["timeout_ms"] = body["policy"]["default_timeout_ms"].clone(); }
+                            }
+                            json!({"config":*current,"args":args})
+                        },
                         "/health" => json!({"ok":true}),
                         "/execute" => {
                             let mut result = json!({"exit_code":0,"stdout":"guest output"});
@@ -372,10 +390,10 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
     for (name, args) in [
         ("exec_command", json!({"cmd":"true","sandbox_id":"linux-b"})),
         (
-            "pot_manage_sandbox",
+            "manage_sandbox",
             json!({"action":"start","sandbox_id":"linux-b"}),
         ),
-        ("pot_list_sandboxes", json!({})),
+        ("list_sandboxes", json!({})),
     ] {
         let before = fixture.helper_calls.lock().unwrap().len();
         let error = context
@@ -542,7 +560,7 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .unwrap();
     let initial = fixture.requests("/execute")[0]["body"]["scope"].clone();
     crate::sandbox::finish_turn(s).await.unwrap();
-    let inventory = crate::sandbox::tool(s, "pot_list_sandboxes", "inventory", &json!({}))
+    let inventory = crate::sandbox::tool(s, "list_sandboxes", "inventory", &json!({}))
         .await
         .unwrap();
     let rows = inventory["items"].as_array().unwrap();
@@ -712,5 +730,216 @@ async fn completed_task_cancellation_closes_retained_resources_without_rewriting
     assert_eq!(
         tasks::task_phase(&root.tasks.lock().unwrap(), &task.id),
         Some(TaskPhase::Complete)
+    );
+}
+
+#[tokio::test]
+async fn unified_tools_use_environment_local_grants_and_guest_paths() {
+    let fixture = SandboxFixture::new().await;
+    let s = &fixture.service;
+    let turn = SandboxFixture::activate(s);
+    let binding = binding(s).unwrap();
+    let host = crate::permissions::prepare(s, "exec_command", json!({"cmd":"cat notes.txt"}))
+        .await
+        .unwrap();
+    assert_eq!(host["environment"], "host");
+    assert!(fixture.requests("/permissions").is_empty());
+    let args = crate::permissions::prepare(
+        s,
+        "exec_command",
+        json!({"cmd":"cat notes.txt","environment":"sandbox:linux-b"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(args["workdir"], "/guest-only/linux-b");
+    let permission = pot_agent::permissions::Request {
+        owner: "main".into(),
+        environment: "sandbox:linux-b".into(),
+        epoch: binding.epoch,
+        turn: turn.request_id.clone(),
+        call_id: "guest-read".into(),
+        tool: "exec_command".into(),
+        suggested_scope: pot_agent::permissions::scope("exec_command", &args).unwrap(),
+        args: args.clone(),
+    };
+    let wait_service = s.clone();
+    let waiter = tokio::spawn(async move {
+        crate::permissions::request(
+            &wait_service,
+            binding.epoch,
+            &turn.request_id,
+            json!(permission),
+        )
+        .await
+    });
+    let pending = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let state = crate::permissions::inspect(State(s.clone()), tasks::tests::headers())
+                .await
+                .unwrap()
+                .0;
+            if !state["requests"].as_array().unwrap().is_empty() {
+                break state["requests"][0]["id"].clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let _ = crate::permissions::decide(
+        State(s.clone()),
+        tasks::tests::headers(),
+        Json(serde_json::from_value(json!({"id":pending,"action":"allow_persistent"})).unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(waiter.await.unwrap().unwrap()["approved"], true);
+    assert!(s.permissions.grants("main").as_array().unwrap().is_empty());
+    let guest = s.permissions.environment("sandbox:linux-b").unwrap();
+    assert_eq!(guest.grants("main").as_array().unwrap().len(), 1);
+    crate::permissions::prepare(
+        s,
+        "exec_command",
+        json!({"cmd":"cat notes.txt","environment":"sandbox:default"}),
+    )
+    .await
+    .unwrap();
+    assert!(
+        s.permissions
+            .environment("sandbox:default")
+            .unwrap()
+            .grants("main")
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    crate::permissions::prepare(s, "exec_command", args)
+        .await
+        .unwrap();
+    assert_eq!(guest.grants("main").as_array().unwrap().len(), 1);
+    let _ = crate::permissions::decide(
+        State(s.clone()),
+        tasks::tests::headers(),
+        Json(serde_json::from_value(json!({"id":pending,"action":"revoke"})).unwrap()),
+    )
+    .await
+    .unwrap();
+    assert!(guest.grants("main").as_array().unwrap().is_empty());
+    assert_eq!(
+        fixture
+            .requests("/permissions")
+            .iter()
+            .filter(|r| r["body"]["action"] == "write")
+            .count(),
+        2
+    );
+    let mut worker = s.clone();
+    worker.is_worker = true;
+    worker.sandbox_id = Some("default".into());
+    assert!(
+        crate::permissions::prepare(
+            &worker,
+            "exec_command",
+            json!({"cmd":"true","environment":"sandbox:linux-b"})
+        )
+        .await
+        .is_err()
+    );
+    let host = crate::permissions::prepare(
+        &worker,
+        "exec_command",
+        json!({"cmd":"cat notes.txt","environment":"host"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(host["environment"], "host");
+}
+
+#[tokio::test]
+async fn session_continuation_preparation_does_not_boot_guest_or_read_permissions() {
+    let fixture = SandboxFixture::new().await;
+    let args = crate::permissions::prepare(
+        &fixture.service,
+        "write_stdin",
+        json!({"session_id":"missing-session","environment":"sandbox:linux-b","chars":"yes\n"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(args["environment"], "sandbox:linux-b");
+    assert!(fixture.http.lock().unwrap().is_empty());
+    assert!(fixture.helper_calls.lock().unwrap().is_empty());
+    assert!(
+        fixture
+            .service
+            .permissions
+            .environment("sandbox:linux-b")
+            .is_err()
+    );
+    // Skipping approval/preparation never makes an invalid handle executable.
+    SandboxFixture::activate(&fixture.service);
+    let binding = binding(&fixture.service).unwrap();
+    let context = make_context(&fixture.service, &binding, None).unwrap();
+    let mut events = vec![];
+    assert!(
+        context
+            .tool_executor
+            .as_ref()
+            .unwrap()
+            .execute(
+                &context,
+                &binding.spec.params.agent.shell,
+                "write_stdin",
+                &args,
+                "invalid-session",
+                &mut |event| {
+                    events.push(event);
+                    Ok(())
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert!(fixture.http.lock().unwrap().is_empty());
+    let (opened, _) = execute(
+        &context,
+        &binding.spec.params.agent.shell,
+        "exec_command",
+        json!({"cmd":"true","environment":"sandbox:linux-b"}),
+        "open-session",
+    )
+    .await;
+    let continued = crate::permissions::prepare(
+        &fixture.service,
+        "write_stdin",
+        json!({"session_id":opened["session_id"],"environment":"sandbox:linux-b","chars":"yes\n"}),
+    )
+    .await
+    .unwrap();
+    let (_, _) = execute(
+        &context,
+        &binding.spec.params.agent.shell,
+        "write_stdin",
+        continued.clone(),
+        "continue-session",
+    )
+    .await;
+    assert!(fixture.requests("/permissions").is_empty());
+    let mut wrong = continued;
+    wrong["environment"] = json!("sandbox:default");
+    assert!(
+        context
+            .tool_executor
+            .as_ref()
+            .unwrap()
+            .execute(
+                &context,
+                &binding.spec.params.agent.shell,
+                "write_stdin",
+                &wrong,
+                "wrong-target",
+                &mut |_| Ok(())
+            )
+            .await
+            .is_err()
     );
 }

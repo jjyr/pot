@@ -15,6 +15,20 @@ Updated: 2026-10-08.
 
 See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
 
+## Agent permissions and tools — 2026-10-08
+
+pot-agent now owns environment-local policy and Agent-specific permanent grants.
+Host defaults to ask; ordinary Sandbox execution defaults to allow. Shared
+execution tools and turn-scoped `exec`/`wait` composition retain role checks and
+owner review. Main can coordinate Tasks with reference messages and bounded waits,
+interrupt while preserving guidance, or cancel and discard it.
+
+Automated checks passed; live guest/UI qualification and Codex integration remain
+open. Independent archive state and inactivity rules are deferred. See
+[permissions](permissions.md), [tools](tool-composition.md),
+[Task coordination](task-coordination.md) and the
+[dated validation](validation/agent-permissions-20261008.md).
+
 ## Remaining validation and scope
 
 Remote HTTP basic access is an agreed deployment direction, not delivered. It
@@ -28,7 +42,7 @@ Mobile physical iOS/Android input, accessibility, startup performance, productio
 
 Real-provider login/inference must be requalified after the Host deployment changes. Full native appearance, IME, weak-network and sleep/wake matrices are not established by mock-model tests. Public release requires cold-install validation and distribution signing/notarization.
 
-Qualified macOS execution, Android/iOS/Windows Sandbox providers, direct Host tools, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
+Qualified macOS execution, Android/iOS/Windows Sandbox providers, Codex Host tools, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
 
 ## Sandbox redesign — 2026-10-07
 

@@ -456,7 +456,7 @@ async fn native_agent_duplicate_tool_ids_reuse_receipts_and_reject_conflicts() {
 #[tokio::test]
 async fn native_agent_dispatches_pot_task_tools_through_shared_authorization() {
     let calls = vec![
-        json!({"id":"delegate","name":"pot_create_task","arguments":{"text":"Research APRICOT with sources"}}),
+        json!({"id":"delegate","name":"create_task","arguments":{"text":"Research APRICOT with sources"}}),
     ];
     let (s, mut rx, server, captured) = fixture("openai_chat", calls).await;
     turn(&s, &mut rx, "delegate").await;
@@ -995,5 +995,67 @@ async fn native_agent_display_duplicates_do_not_trigger_compaction_or_extra_usag
         drop(ledger);
         server.abort();
         std::fs::remove_dir_all(s.data).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explicit_grants() {
+    for action in ["deny", "allow_once", "allow_persistent"] {
+        let directory = std::env::temp_dir().join(format!("pot-owner-{}", id()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.canonicalize().unwrap().join("file.txt");
+        let (mut s, mut rx, server, captured) = fixture("openai_chat", vec![json!({"id":"host","name":"exec_command","arguments":{"cmd":"printf owner-approved > file.txt","workdir":directory}})]).await;
+        let permissions_file = s.sandboxes.agent_home.join("permissions.json");
+        s.permissions = Arc::new(crate::permissions::Hub::open(&permissions_file).unwrap());
+        let owner = async {
+            let record = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    let Json(book) =
+                        crate::permissions::inspect(State(s.clone()), tasks::tests::headers())
+                            .await
+                            .unwrap();
+                    if let Some(record) = book["requests"].as_array().unwrap().first() {
+                        break record.clone();
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(!path.exists());
+            assert_eq!(
+                captured.lock().unwrap().len(),
+                1,
+                "Agent sampled while waiting for approval"
+            );
+            assert_eq!(record["request"]["owner"], "main");
+            assert_eq!(
+                record["request"]["args"]["cmd"],
+                "printf owner-approved > file.txt"
+            );
+            let decision =
+                serde_json::from_value(json!({"id":record["id"],"action":action})).unwrap();
+            let Json(result) = crate::permissions::decide(
+                State(s.clone()),
+                tasks::tests::headers(),
+                Json(decision),
+            )
+            .await
+            .unwrap();
+            assert_eq!(result["ok"], true);
+        };
+        tokio::join!(turn(&s, &mut rx, "owner-turn"), owner);
+        assert_eq!(path.exists(), action != "deny");
+        if path.exists() {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "owner-approved");
+        }
+        let reopened = crate::permissions::Hub::open(&permissions_file).unwrap();
+        assert_eq!(
+            reopened.grants("main").as_array().unwrap().len(),
+            usize::from(action == "allow_persistent")
+        );
+        server.abort();
+        std::fs::remove_dir_all(directory).unwrap();
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
 }

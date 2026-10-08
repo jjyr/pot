@@ -160,6 +160,39 @@ pub struct ExecutionContext {
 /// Synchronous acknowledgements preserve persistence-before-network ordering.
 /// Runtime validates owner/epoch/turn before applying these observations.
 pub trait ExecutionFeedback: Send + Sync {
+    /// Prepare execution-visible arguments and fix the environment before approval.
+    fn prepare_execution_operation(
+        &self,
+        _name: &str,
+        args: Value,
+    ) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move { Ok(args) })
+    }
+    /// Current {policy, grants} for the resolved execution environment. Legacy
+    /// grant arrays retain ask-by-default behavior. None disables this service.
+    fn environment_grants(&self, _environment: &str) -> BoxFuture<'_, Result<Option<Value>>> {
+        Box::pin(async move { self.permission_grants() })
+    }
+    /// HOME is independent from an operation's working directory.
+    fn execution_home(&self) -> Option<PathBuf> {
+        None
+    }
+    /// Resolve mutable product defaults before asking the owner to approve.
+    fn prepare_permission_operation(&self, _name: &str, args: Value) -> Result<Value> {
+        Ok(args)
+    }
+    /// Optional owner-controlled permission storage/UI. Policy lives in pot-agent.
+    /// None disables Host tools; embeddings must opt in explicitly.
+    fn permission_grants(&self) -> Result<Option<Value>> {
+        Ok(None)
+    }
+    /// Execute an already authorized product-specific Host operation.
+    fn execute_authorized_host(&self, _name: &str, _args: Value) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async { anyhow::bail!("Host operation backend unavailable") })
+    }
+    fn request_permission(&self, _request: Value) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async { anyhow::bail!("Owner approval service unavailable") })
+    }
     /// Observation never substitutes for authoritative usage settlement.
     fn observe(&self, _event: &ExecutionObservation) -> Result<()> {
         Ok(())

@@ -13,8 +13,10 @@ import ssl
 import subprocess
 import threading
 import time
+from permission_state import PermissionState, ordinary
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+PERMISSIONS = PermissionState(Path("/var/db/pot-permissions/.pot"))
 PRIVATE = Path("/var/db/pot-executor")
 WORK = Path("/Volumes/PotWorkspace/workspace")
 PREFIX = str(WORK)
@@ -57,6 +59,13 @@ def terminate(process):
     # Detached children/launchd jobs may survive. Never claim process containment.
 
 
+def permission_profile(home):
+    return "(version 1)(allow default)" + "".join(
+        "(deny file-write* (subpath " + json.dumps(str(path)) + "))"
+        for path in [PERMISSIONS.base.parent, home / ".pot"]
+    )
+
+
 class Runner:
     def __init__(self, scope, cwd, policy, role):
         self.lock = threading.Lock()
@@ -67,6 +76,8 @@ class Runner:
         temporary.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chown(temporary, USER.pw_uid, USER.pw_gid)
         # Each guest gets only readonly skill content, never Host credentials.
+        ordinary(cwd / ".pot")
+        ordinary(cwd / ".pot/agent")
         skills = Path("/Volumes/PotSkills")
         if skills.is_dir():
             destination = cwd / ".pot/agent"
@@ -74,8 +85,19 @@ class Runner:
             link = destination / "skills"
             if not link.exists() and not link.is_symlink():
                 link.symlink_to(skills)
+        PERMISSIONS.ensure()
+        view = cwd / ".pot/agent/permissions.json"
+        view.parent.mkdir(parents=True, exist_ok=True)
+        if view.is_symlink():
+            if view.resolve() != PERMISSIONS.file:
+                raise ValueError("Permission view redirected")
+        elif view.exists():
+            raise ValueError("Permission view must be managed by the broker")
+        else:
+            view.symlink_to(PERMISSIONS.file)
+        profile = permission_profile(cwd)
         self.process = subprocess.Popen(
-            ["/usr/local/libexec/pot-tool-executor"],
+            ["/usr/bin/sandbox-exec", "-p", profile, "/usr/local/libexec/pot-tool-executor"],
             cwd=cwd,
             env={
                 "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -314,7 +336,11 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 3 * 1024 * 1024:
                 raise ValueError("Invalid request size")
             request = json.loads(self.rfile.read(length))
-            if self.path == "/execute":
+            if self.path == "/permissions":
+                self.respond(
+                    200, PERMISSIONS.request(request, workspace(request["cwd"], request["role"]))
+                )
+            elif self.path == "/execute":
                 self.respond(200, execute(request))
             elif self.path == "/inspect":
                 self.respond(200, inspect(request["id"]))

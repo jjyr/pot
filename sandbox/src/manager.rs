@@ -545,6 +545,47 @@ impl Manager {
             return Ok(json!({"sandbox_id":id,"phase":"stopped"}));
         }
         let id = self.assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
+        if action == "set_mounts" {
+            anyhow::ensure!(
+                [
+                    crate::MACOS_APPLE_CONTAINER_PROVIDER,
+                    crate::LINUX_PODMAN_PROVIDER
+                ]
+                .contains(&self.describe(&id)?.id.as_str()),
+                "Host mappings are supported only by Linux guest providers"
+            );
+            let path = self.root.join("sandboxes").join(&id).join("sandbox.json");
+            let mut config: Value = if path.exists() {
+                serde_json::from_slice(&std::fs::read(&path)?)?
+            } else {
+                self.provider(&id)?.default_config()
+            };
+            config["mappings"] = args
+                .get("mappings")
+                .cloned()
+                .ok_or_else(|| anyhow!("Mappings required"))?;
+            crate::host_mappings(&config)?;
+            anyhow::ensure!(
+                *self.leases.lock().unwrap().get(&id).unwrap_or(&0) == 0
+                    && !self
+                        .pending
+                        .lock()
+                        .unwrap()
+                        .values()
+                        .any(|v| v.target == id),
+                "Sandbox busy; finish or recover operations first"
+            );
+            let state = self.helper(&id, "status").await?;
+            anyhow::ensure!(
+                state["phase"] == "stopped" || state["phase"] == "failed",
+                "Stop the environment before changing mappings"
+            );
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            private_json(&path, &config)?;
+            return Ok(
+                json!({"sandbox_id":id,"mappings":config["mappings"],"applies":"next-start","access":"all tasks in this Sandbox"}),
+            );
+        }
         if action == "update" {
             let name = args["name"]
                 .as_str()
@@ -577,9 +618,15 @@ impl Manager {
             );
             let path = self.root.join("sandboxes").join(&id);
             std::fs::create_dir_all(&path)?;
+            let config_path = path.join("sandbox.json");
+            let old: Value = if config_path.exists() {
+                serde_json::from_slice(&std::fs::read(&config_path)?)?
+            } else {
+                json!({})
+            };
             private_json(
-                &path.join("sandbox.json"),
-                &json!({"cpus":c,"memory_gib":m,"disk_gib":d}),
+                &config_path,
+                &json!({"cpus":c,"memory_gib":m,"disk_gib":d,"mappings":old.get("mappings").cloned().unwrap_or_else(||json!([]))}),
             )?;
             self.book.lock().unwrap().items.get_mut(&id).unwrap().name = name.into();
             self.persist(&self.data)?;
@@ -668,6 +715,11 @@ impl Manager {
     }
 }
 impl Manager {
+    /// Trusted control channel for the guest's ~/.pot state; never exposed as a model tool.
+    pub async fn permissions(&self, target: &str, body: &Value) -> Result<Value> {
+        self.request(target, "permissions", body, Duration::from_secs(30))
+            .await
+    }
     pub async fn execute(
         self: &Arc<Self>,
         grant: &AccessGrant,
@@ -682,7 +734,7 @@ impl Manager {
             "Invalid execution identity"
         );
         anyhow::ensure!(
-            ["exec_command", "write_stdin", "apply_patch"].contains(&name),
+            ["exec_command", "write_stdin", "apply_patch",].contains(&name),
             "Unknown execution operation"
         );
         anyhow::ensure!(
@@ -732,7 +784,6 @@ impl Manager {
         }
         let requested = args["sandbox_id"].as_str().unwrap_or("");
         let prior_scope = if name == "write_stdin" {
-            anyhow::ensure!(requested.is_empty(), "write_stdin cannot switch Sandbox");
             let session = args["session_id"]
                 .as_str()
                 .ok_or_else(|| anyhow!("Missing session ID"))?;
@@ -753,6 +804,10 @@ impl Manager {
             anyhow::ensure!(
                 scope.owner == grant.owner && scope.epoch == grant.epoch,
                 "Session belongs to another task/agent epoch"
+            );
+            anyhow::ensure!(
+                requested.is_empty() || requested == scope.target,
+                "write_stdin cannot switch Sandbox"
             );
             Some(scope)
         } else {

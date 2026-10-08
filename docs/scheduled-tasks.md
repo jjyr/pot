@@ -18,7 +18,7 @@ Validate result -> compare fingerprint -> save history
 
 ## Usage
 
-Describe goal, time, time zone, and frequency in main chat; main Agent creates the schedule. Tasks -> Schedules only views/manages existing definitions without manual creation. Tools: `pot_list_schedules`, `pot_get_schedule`, `pot_manage_schedule`. Lists return summaries; details/history are loaded on demand.
+Describe goal, time, time zone, and frequency in main chat; main Agent creates the schedule. Tasks -> Schedules only views/manages existing definitions without manual creation. Tools: `list_schedules`, `get_schedule`, `manage_schedule`. Lists return summaries; details/history are loaded on demand.
 
 - Once: local date/time `YYYY-MM-DD HH:MM`.
 - Interval: positive integer minutes, measured from creation/resume.
@@ -28,7 +28,7 @@ Describe goal, time, time zone, and frequency in main chat; main Agent creates t
 - Notifications: changes/failures by default; optionally every run or failures only. First successful observation counts as changed.
 - Missed triggers: coalesce into one catch-up by default; with skip, triggers at least 60 seconds late only enter history.
 
-Pause/delete stops future triggers; queued/running tasks continue and can be cancelled on the task page. Paused schedules can run now. Skip a trigger while its previous run is queued/running to prevent backlog. Delete preserves history; APIs hide deleted definitions by default.
+Pause/delete stops future triggers; queued/running tasks continue and can be interrupted on the task page. Paused schedules can run now. Skip a trigger while its previous run is queued/running to prevent backlog. Delete preserves history; APIs hide deleted definitions by default.
 
 Hiding the window keeps execution running; Quit/sleep/shutdown stops it. Resume applies catch-up policy without waking the Mac. Interrupted model execution is not replayed automatically. Scheduling waits while the model is unready or budget exhausted.
 

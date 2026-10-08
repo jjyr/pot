@@ -34,6 +34,7 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
     let child = Command::new(env!("CARGO_BIN_EXE_pot-server"))
         .env("POT_DATA_DIR", root.join("product"))
         .env("POT_WORKSPACE", root.join("workspace"))
+        .env("POT_AGENT_HOME", root.join("agent-home"))
         .env("POT_RUNTIME_BIND", "127.0.0.1:0")
         .env("POT_ACCESS_ORIGIN", format!("https://localhost:{port}"))
         .env("POT_ACCESS_BIND", format!("127.0.0.1:{port}"))

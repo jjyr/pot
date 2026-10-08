@@ -20,11 +20,7 @@ pub fn schemas(summary: bool, worker: bool) -> Vec<Value> {
                 || tool["name"]
                     .as_str()
                     .is_some_and(|n| matches!(n, "exec_command" | "write_stdin" | "apply_patch")))
-                && (!summary
-                    || matches!(
-                        tool["name"].as_str(),
-                        Some("pot_list_tasks" | "pot_get_task")
-                    ))
+                && (!summary || matches!(tool["name"].as_str(), Some("list_tasks" | "get_task")))
         })
         .collect()
 }
@@ -104,7 +100,7 @@ pub async fn mcp(
         "tools/call" => {
             let name = call["params"]["name"].as_str().unwrap_or("");
             if !schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker).iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
-            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || matches!(name,"pot_list_sandboxes" | "pot_manage_sandbox") {
+            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || matches!(name,"list_sandboxes" | "manage_sandbox") {
                 let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));
                 let operation = tokio::spawn(async move { sandbox::tool(&s,&name,&id,&args).await });
                 let result = operation.await.map_err(|e|internal(e.into()))?;
@@ -196,13 +192,13 @@ mod tests {
                 tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
             assert_eq!(names.len(), tools.len());
             if summary {
-                assert_eq!(names, ["pot_get_task", "pot_list_tasks"].into());
+                assert_eq!(names, ["get_task", "list_tasks"].into());
             } else if worker {
                 assert_eq!(names, ["exec_command", "write_stdin", "apply_patch"].into());
             } else {
-                assert!(names.contains("pot_manage_sandbox"));
-                assert!(names.contains("pot_list_sandboxes"));
-                assert!(names.contains("pot_create_task"));
+                assert!(names.contains("manage_sandbox"));
+                assert!(names.contains("list_sandboxes"));
+                assert!(names.contains("create_task"));
             }
             if !summary {
                 for name in ["exec_command", "write_stdin", "apply_patch"] {
@@ -215,14 +211,37 @@ mod tests {
                     );
                 }
             }
+            for name in ["send_message", "wait_task", "interrupt", "cancel_task"] {
+                assert_eq!(names.contains(name), !summary && !worker);
+            }
             assert!(names.iter().all(|n| !n.starts_with("pot_sandbox_")));
         }
     }
     #[tokio::test]
+    async fn workers_and_summary_sessions_cannot_invoke_task_coordination() {
+        for (summary, worker) in [(true, false), (false, true)] {
+            let mut s = lane(summary);
+            s.is_worker = worker;
+            let h = init(&s).await;
+            for name in ["send_message", "wait_task", "interrupt", "cancel_task"] {
+                let call = json!({"jsonrpc":"2.0","id":name,"method":"tools/call",
+                    "params":{"name":name,"arguments":{"task_id":"target"}}});
+                assert_eq!(
+                    mcp(State(s.clone()), h.clone(), Json(call))
+                        .await
+                        .unwrap_err()
+                        .0,
+                    StatusCode::FORBIDDEN
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn mcp_identity_expires_at_turn_boundary_and_summary_cannot_mutate() {
         let s = lane(true);
         let h = init(&s).await;
-        let call = json!({"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"pot_create_task","arguments":{"text":"unauthorized"}}});
+        let call = json!({"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"create_task","arguments":{"text":"unauthorized"}}});
         assert_eq!(
             mcp(State(s.clone()), h.clone(), Json(call.clone()))
                 .await
@@ -240,7 +259,7 @@ mod tests {
     async fn mcp_calls_share_durable_dispatcher_receipts_and_detect_conflicts() {
         let s = lane(false);
         let h = init(&s).await;
-        let call = json!({"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"pot_list_tasks","arguments":{}}});
+        let call = json!({"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"list_tasks","arguments":{}}});
         for _ in 0..2 {
             let response = mcp(State(s.clone()), h.clone(), Json(call.clone()))
                 .await

@@ -15,8 +15,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from skill_mounts import SKILL_SOURCES, skill_namespace
+from permission_state import PermissionState
 
 ROOT = Path(os.environ.get("POT_EXECUTOR_ROOT", "/data")).resolve()
+PERMISSIONS = PermissionState(ROOT / ".pot")
 WORK = ROOT / "workspace"
 WORK.mkdir(parents=True, exist_ok=True)
 # Never put control credentials/ledgers on virtiofs: Host ownership is mapped
@@ -118,10 +120,12 @@ class Runner:
             raise RuntimeError("Root-owned cgroup v2 containment required")
         group.mkdir(mode=0o700)
 
+        permission_mounts = PERMISSIONS.mounts(cwd)
+
         def contain():
             (group / "cgroup.procs").write_text(str(os.getpid()))
             try:
-                skill_namespace(role, cwd)
+                skill_namespace(role, cwd, permission_mounts)
                 demote(role)
                 os.write(1, b'{"ready":true}\n')
             except Exception as error:
@@ -328,7 +332,10 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 3 * 1024 * 1024:
                 raise ValueError("Invalid request size")
             request = json.loads(self.rfile.read(length))
-            if self.path == "/execute":
+            if self.path == "/permissions":
+                home = workspace(request["cwd"], request["role"])
+                self.respond(200, PERMISSIONS.request(request, home))
+            elif self.path == "/execute":
                 self.respond(200, execute(request))
             elif self.path == "/inspect":
                 self.respond(200, inspect(request["id"]))

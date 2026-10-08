@@ -254,7 +254,7 @@ class Mock:
                 )
                 text = json.dumps(body["input"])
                 lane = "a" if "LANE_A" in text else "b"
-                probe_name = "pot_list_tasks" if self.runtime_tools else "pot_probe"
+                probe_name = "list_tasks" if self.runtime_tools else "pot_probe"
                 probe = next((name for name in tools if probe_name in name), None)
                 inputs = body["input"]
                 if self.runtime_tools:
@@ -281,20 +281,20 @@ class Mock:
                 )
                 preference_steps = (
                     [
-                        ("pot_get_execution_preferences", {}),
+                        ("get_execution_preferences", {}),
                         (
-                            "pot_update_execution_preferences",
+                            "update_execution_preferences",
                             {"text": "Use Codex test for coding.", "expected_revision": 0},
                         ),
-                        ("pot_get_execution_preferences", {}),
+                        ("get_execution_preferences", {}),
                     ]
                     if preference_save
-                    else [("pot_get_execution_preferences", {})]
+                    else [("get_execution_preferences", {})]
                 )
                 if preference_route:
                     preference_steps = [
                         (
-                            "pot_create_task",
+                            "create_task",
                             {
                                 "text": "Preference routed worker",
                                 "profile": "codex-test",

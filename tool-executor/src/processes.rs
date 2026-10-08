@@ -193,7 +193,16 @@ impl Processes {
             let tty = args["tty"].as_bool().unwrap_or(false);
             let mut command = self
                 .snapshots
-                .command(shell, &cwd, &s.workspace, cmd, login, policy.shell_snapshot)
+                .command(
+                    shell,
+                    &cwd,
+                    &s.feedback
+                        .execution_home()
+                        .unwrap_or_else(|| s.workspace.clone()),
+                    cmd,
+                    login,
+                    policy.shell_snapshot,
+                )
                 .await;
             command.kill_on_drop(true);
             let (mut child, input, terminal, stdout, stderr): Spawned = if tty {

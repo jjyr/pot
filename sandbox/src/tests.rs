@@ -483,3 +483,51 @@ async fn disconnected_viewer_does_not_confirm_input_return() {
     assert!(release.await.unwrap().is_err());
     assert!(p.running.load(Ordering::SeqCst));
 }
+
+#[tokio::test]
+async fn approved_mappings_are_persisted_preserved_on_resource_update_and_refused_when_busy() {
+    let (dir, manager, provider) = fixture();
+    let source = dir.path().canonicalize().unwrap();
+    let mappings = json!([{"source":source,"destination":"/mnt/host/project","read_only":true}]);
+    let operation = json!({"action":"set_mounts","sandbox_id":"default","mappings":mappings});
+    manager
+        .management(&operation, false, &|| false, &|_, f| f())
+        .await
+        .unwrap();
+    let path = dir.path().join("sandboxes/default/sandbox.json");
+    let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved["mappings"], mappings);
+    manager.management(&json!({"action":"update","sandbox_id":"default","name":"Linux","config":{"cpus":2,"memory_gib":2,"disk_gib":8}}),false,&||false,&|_,f|f()).await.unwrap();
+    let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved["mappings"], mappings);
+    provider.running.store(true, Ordering::SeqCst);
+    assert!(
+        manager
+            .management(&operation, false, &|| false, &|_, f| f())
+            .await
+            .is_err()
+    );
+    provider.running.store(false, Ordering::SeqCst);
+    let lease = manager.acquire("default").await.unwrap();
+    assert!(
+        manager
+            .management(&operation, false, &|| false, &|_, f| f())
+            .await
+            .is_err()
+    );
+    drop(lease);
+    manager
+        .management(
+            &json!({"action":"set_mounts","sandbox_id":"default","mappings":[]}),
+            false,
+            &|| false,
+            &|_, f| f(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        host_mappings(&serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap())
+            .unwrap()
+            .is_empty()
+    );
+}

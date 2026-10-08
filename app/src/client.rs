@@ -53,6 +53,7 @@ fn task_progress(snapshot: &Snapshot) -> String {
 
 #[derive(Default, Clone, PartialEq)]
 pub struct View {
+    pub permissions: Value,
     pub access: Value,
     pub access_notice: String,
     pub access_pending: bool,
@@ -361,6 +362,14 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .and_then(|mut r| r.body_mut().read_json::<Value>().ok())
         .unwrap_or(Value::Null);
     view.lock().unwrap().access = access;
+    let permissions: Value = agent
+        .get("/api/v1/permissions")
+        .call()
+        .map_err(|e| e.to_string())?
+        .body_mut()
+        .read_json()
+        .map_err(|e| e.to_string())?;
+    view.lock().unwrap().permissions = permissions;
     let main: Snapshot = agent
         .get(PATH_SNAPSHOT)
         .call()
@@ -559,7 +568,7 @@ impl Client {
                     .timeout_global(Some(Duration::from_secs(3)))
                     .build()
                     .new_agent()
-                    .post(&if selected.is_empty(){PATH_CANCEL.to_string()}else{format!("{PATH_TASKS}/{selected}/cancel")})
+                    .post(&if selected.is_empty(){PATH_CANCEL.to_string()}else{format!("{PATH_TASKS}/{selected}/interrupt")})
                     .send_json(json!({"request_id":uuid::Uuid::new_v4().to_string(),"user_message_id":message_id}))
                     .map_err(|e| e.to_string())?;
                 Ok(())
@@ -572,6 +581,33 @@ impl Client {
                     turn.cancelling = false;
                 }
             }
+        });
+    }
+    pub fn permission_decision(&self, body: Value) {
+        let view = self.view.clone();
+        let refresh = self.refresh.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(), String> {
+                let mut response = crate::backend::Requests::config_builder()
+                    .timeout_global(Some(Duration::from_secs(10)))
+                    .build()
+                    .new_agent()
+                    .post("/api/v1/permissions")
+                    .config()
+                    .http_status_as_error(false)
+                    .build()
+                    .send_json(body)
+                    .map_err(|e| e.to_string())?;
+                if response.status().is_client_error() || response.status().is_server_error() {
+                    return Err(rejection_detail(
+                        response.body_mut(),
+                        "client.operation-rejected",
+                    ));
+                }
+                Ok(())
+            })();
+            view.lock().unwrap().command_error = result.err().unwrap_or_default();
+            let _ = refresh.try_send(());
         });
     }
     pub fn usage_action(&self, path: &'static str, body: Value) {

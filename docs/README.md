@@ -11,6 +11,9 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Publish a macOS release or update the Homebrew cask | [Releases and Homebrew](development.md#releases-and-homebrew) |
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
+| Understand task messaging, interruption, resume and archive rules | [Task coordination](task-coordination.md) |
+| Understand direct tools, JavaScript composition and waiting | [Agent tool composition](tool-composition.md) |
+| Understand pot-agent approvals, persistent grants and environment-local access | [Agent permissions](permissions.md) |
 | Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
 | Review the Linux and macOS target design | [Sandbox provider redesign](sandbox-providers.md) (Linux extraction delivered; macOS prepared-instance implementation awaiting VM qualification) |
 | Prepare/enroll a macOS development VM | [macOS Sandbox](macos-sandbox.md) |
@@ -36,6 +39,8 @@ Podman Web desktop acceptance: [Desktop and Client isolation, 2026-10-07](valida
 Linux/Podman and multiple-client acceptance: [Linux Server and clients, 2026-10-07](validation/linux-server-clients-20261007.md).
 
 Web access redesign: [Token authentication and embedded Tailscale, 2026-10-08](validation/web-access-token-20261008.md).
+
+Agent permissions: [Owner approvals, grants and Host access, 2026-10-08](validation/agent-permissions-20261008.md).
 
 Independent Web UI access: [LAN HTTP and optional tailnet HTTPS, 2026-10-08](validation/web-access-independent-20261008.md).
 

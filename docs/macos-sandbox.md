@@ -57,7 +57,7 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    This generates a dedicated CA, guest certificate/key and token; it deletes the temporary CA signing key. It neither starts a VM nor accepts OS/Xcode terms.
 
-2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `sandbox-images/macos/xcode/` as trusted bootstrap inputs. Inside the prepared guest, run:
+2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `sandbox-images/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `permission_state.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
 
    ```sh
    sudo ./provision.sh STANDARD_ACCOUNT /PRIVATE/GUEST_ENROLLMENT
@@ -73,7 +73,13 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    Enrollment copies the complete fixed-file bundle, rejects symlinks/non-private files and existing instances, and creates a macOS definition through the local management API. It requires the source to be stopped; it cannot prove the state of a third-party VM engine. A failed final API registration retains the private copy for owner inspection. Do not simply retry over an existing copy. Raw whole-GiB disk size is recorded in the instance resource config; disk resizing is rejected. CPU/RAM changes apply after stopping, subject to VZ validation.
 
-4. Main can select `mac-dev` or bind a task explicitly to it. `pot_manage_sandbox` accepts `provider` only at creation; it never accepts a Host bundle path. Worker binding, ownership/session IDs and receipts use the same Manager contracts as Linux.
+4. Main can select `mac-dev` or bind a task explicitly to it. `manage_sandbox` accepts `provider` only at creation; it never accepts a Host bundle path. Worker binding, ownership/session IDs and receipts use the same Manager contracts as Linux.
+
+Guest permissions are stored on guest disk and exposed readonly at execution
+HOME’s `~/.pot/agent/permissions.json`; the broker owns writes through its trusted
+control endpoint. Reprovisioning and rebuilding the runner are required for this
+permission protocol. The macOS file-write policy has portable construction checks
+but still requires live VM qualification.
 
 ## Workspace and capability limits
 

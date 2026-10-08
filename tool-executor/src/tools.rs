@@ -4,6 +4,27 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 pub use pot_core::environment_tools::{schemas, validate};
+pub fn normalize(
+    name: &str,
+    args: &mut Value,
+    workspace: &Path,
+    policy: &pot_core::ShellSettings,
+) -> Result<()> {
+    validate(name, args)?;
+    if name == "exec_command" {
+        let cwd = args["workdir"].as_str().map(Path::new).unwrap_or(workspace);
+        let cwd = crate::files::resolve(cwd, workspace)?;
+        ensure!(cwd.is_dir(), "Working directory required");
+        args["workdir"] = json!(cwd);
+        args["shell"] = json!(args["shell"].as_str().unwrap_or(&policy.executable));
+        args["login"] = json!(args["login"].as_bool().unwrap_or(policy.allow_login_shell));
+        args["tty"] = json!(args["tty"].as_bool().unwrap_or(false));
+        if args.get("yield_time_ms").is_none() && args.get("timeout_ms").is_none() {
+            args["timeout_ms"] = json!(policy.default_timeout_ms);
+        }
+    }
+    Ok(())
+}
 pub fn patch(s: &ExecutionContext, args: &Value) -> Result<Value> {
     let patch = args["patch"]
         .as_str()

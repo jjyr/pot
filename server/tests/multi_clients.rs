@@ -476,7 +476,7 @@ async fn idle(browser: &Browser, host: &Host) {
 }
 
 #[tokio::test]
-async fn another_client_cancels_main_and_tasks_and_both_observe_the_same_outcome() {
+async fn another_client_cancels_main_and_interrupts_tasks_and_both_observe_the_same_outcome() {
     let root = Root::new();
     let h = Host::start(&root.0).await;
     let mut a = Browser::new();
@@ -511,7 +511,11 @@ async fn another_client_cancels_main_and_tasks_and_both_observe_the_same_outcome
     let task:Value=h.admin("/api/v1/tasks",Some(json!({"request_id":"client-task","text":"cancel this task","profile":"apot-default"}))).await.error_for_status().unwrap().json().await.unwrap();
     let id = task["id"].as_str().unwrap();
     let cancel = b
-        .request(&h, &format!("/api/v1/tasks/{id}/cancel"), Some(json!({})))
+        .request(
+            &h,
+            &format!("/api/v1/tasks/{id}/interrupt"),
+            Some(json!({})),
+        )
         .await;
     let status = cancel.status();
     let value = cancel.text().await.unwrap();
@@ -530,7 +534,7 @@ async fn another_client_cancels_main_and_tasks_and_both_observe_the_same_outcome
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|t| t["id"] == id && t["phase"] == "cancelled")
+                .any(|t| t["id"] == id && t["phase"] == "interrupted")
             {
                 break;
             }

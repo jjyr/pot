@@ -14,11 +14,18 @@ Only Pot and Codex engines/transports/session identities are accepted. There are
 
 ## Agent execution
 
-pot-agent runs in-process on Host. Runtime injects a ToolExecutor, with no implicit local backend. The execution tools are exec_command, write_stdin and apply_patch; search/list/read use shell commands. Main receives task/schedule and Sandbox management tools; workers cannot delegate, manage or retarget. Agent context, compaction, usage, execution preferences and deterministic evaluation remain Host-owned.
+pot-agent runs in-process on Host with an injected ToolExecutor and owner services;
+there is no implicit local backend. It owns [permission policy](../docs/permissions.md)
+and [tool composition](../docs/tool-composition.md). Main defaults to Host; Workers
+default to their assigned Sandbox and may request authorized Host execution.
+Agent context, compaction, usage and preferences remain Host-owned.
 
 Codex App Server runs on Host with an empty native environment list. Native shell/patch/image/code/web/hooks/apps/plugins/subagent tools and inherited MCP are disabled. Lane-scoped Pot MCP exposes the common execution protocol. Each turn gets a distinct managed MCP URL to rediscover its role's tools after native resume; the native thread identity remains fixed.
 
-Main loadouts include task/schedule and Sandbox management. Workers receive exec_command, write_stdin and apply_patch, a lane token and a fixed Sandbox. Summary turns can only inspect tasks. Credentials, Host data and Helper sockets are never mounted in guest workspaces.
+Main manages Tasks, schedules and Sandboxes; Workers cannot delegate, manage or
+switch Sandboxes. Summary turns inspect Tasks only. Guest workspaces contain
+artifacts rather than credentials or Helper sockets. Owner-reviewed Host mappings
+are visible to every Task sharing the Sandbox.
 
 Cancellation settles the native session and drains remote operations. Executor subprocesses run as an ordinary guest user inside root-owned cgroups, including detached descendants. Unknown outcomes quarantine the environment until explicit main-only recovery; commands are never replayed automatically. Quit settles Host work and stops VMs. Artifacts and native/product history persist.
 
@@ -53,19 +60,21 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `POST /api/v1/agent/migrate` | Explicit Driver/profile handoff at a safe turn boundary |
 | `GET/POST /api/v1/agent/routing` | Worker profile defaults, model-visible allowlist and concurrency policies |
 | `GET/POST /api/v1/sandboxes` | Main/operator inventory and typed lifecycle actions |
+| `GET/POST /api/v1/permissions` | Owner approval decisions, persisted grants and revocation; no worker administration |
 | `POST /api/v1/execution` | Active lane `{name,call_id,args}`; fixed worker scope, durable receipts |
 | `POST /api/v1/mcp`, `POST /api/v1/orchestration` | Role-scoped shared product tool dispatcher |
 | `/gw/{provider}/{*path}` | Internal lane-authorized provider gateway |
 | `POST /api/agent/compactions` | Active-lane compaction lifecycle, no cross-lane writes |
 | `/api/v1/tasks`, `/api/v1/tasks/query`, `/api/v1/tasks/{id}` | Main task creation, bounded list/search and scoped detail |
-| `/api/v1/tasks/{id}/messages`, `/cancel` | Persistent guidance and per-lane cancellation |
+| `/api/v1/tasks/{id}/messages`, `/interrupt` | Persistent guidance and interruption preserving pending guidance |
+| `/api/v1/tasks/{id}/cancel` | Explicit task abandonment; discards guidance, marks cancelled and archives after cleanup |
 | `GET/POST /api/v1/schedules` | Durable schedules, occurrences and user actions |
 | `/api/v1/usage`, `/summary`, `/policy`, `/providers`, `/resume`, `/cancel` | Request/token accounting and allowance policy/recovery |
 | `/api/v1/terminals`, `/{id}/socket`, `/{id}/close` | Native/operator Sandbox PTY; no authentication command injection |
 
 ## Tasks, profiles and schedules
 
-Every task has a private product transcript/native session and persisted Sandbox binding. Guidance receipts are durable and consumed in order. FIFO dispatch respects configured concurrency and cooperative resource locks; one lane cannot cancel another. Restart marks already-started work interrupted rather than replaying it. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context.
+Every task has a private product transcript/native session and persisted Sandbox binding. Guidance receipts are durable and consumed in order. FIFO dispatch respects configured concurrency and cooperative resource locks; one lane cannot cancel another. Restart marks already-started work interrupted rather than replaying it. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. See [Task coordination](../docs/task-coordination.md) for guidance, messages, waiting, stopping and archive semantics.
 
 Explicit task profiles take precedence over configured worker defaults. With no explicit worker default, new tasks snapshot the active Main Agent. Saved profile changes do not rewrite existing task bindings. Explicit Change Agent uses transactional handoff to a new epoch; it changes Driver/model while preserving the task's Sandbox assignment. Events are filtered by owner/epoch/turn to reject late native updates.
 

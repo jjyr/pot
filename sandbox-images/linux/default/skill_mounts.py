@@ -33,7 +33,7 @@ def skill_mounts(role, home):
     return mounts
 
 
-def skill_namespace(role, home):
+def skill_namespace(role, home, permission_mounts=None):
     mounts = skill_mounts(role, home)
     libc = ctypes.CDLL(None, use_errno=True)
     libc.mount.argtypes = [
@@ -55,6 +55,24 @@ def skill_namespace(role, home):
 
     checked(libc.unshare(0x00020000))
     mount(None, "/", flags=0x40000 | 0x4000)  # MS_PRIVATE | MS_REC
+    if permission_mounts:
+        for source, target, _ in permission_mounts:
+            Path(target).mkdir(mode=0o755, parents=True, exist_ok=True)
+            ordinary_directory(Path(target))
+            mount(source, target, flags=0x1000)
+            inherited = os.statvfs(target).f_flag
+            flags = 0x1021
+            for stat_flag, mount_flag in [
+                (2, 2),
+                (4, 4),
+                (8, 8),
+                (1024, 1024),
+                (2048, 2048),
+                (4096, 0x200000),
+            ]:
+                if inherited & stat_flag:
+                    flags |= mount_flag
+            mount(None, target, flags=flags)
     view = Path(home) / ".pot/agent/skills"
     # Create builtin mountpoints in the writable source before the task view
     # becomes readonly. They contain no builtin files on the backing store.
@@ -66,8 +84,9 @@ def skill_namespace(role, home):
         raise ValueError("Skill view must not be a symlink")
     view.mkdir(mode=0o755, parents=True, exist_ok=True)
     ordinary_directory(view)
-    for parent in [view.parent.parent, view.parent, view]:
-        os.chmod(parent, 0o755)
+    if not permission_mounts:
+        for parent in [view.parent.parent, view.parent, view]:
+            os.chmod(parent, 0o755)
     for source, target, readonly in mounts:
         mount(source, target, flags=0x1000)
         if readonly:

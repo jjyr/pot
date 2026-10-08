@@ -40,6 +40,21 @@ class SkillMounts(unittest.TestCase):
         self.addCleanup(libc_patch.stop)
         self.addCleanup(stat_patch.stop)
 
+    def test_permission_backing_and_home_are_readonly_before_skill_mounts(self):
+        backing = self.base / "permission-state"
+        (backing / "agent/skills").mkdir(parents=True)
+        module.skill_namespace(
+            "task",
+            self.home,
+            [(str(backing), str(backing), True), (str(backing), str(self.home / ".pot"), True)],
+        )
+        calls = self.libc.mount.call_args_list
+        self.assertEqual(
+            [c.args[1].decode() for c in calls[1:5]],
+            [str(backing), str(backing), str(self.home / ".pot"), str(self.home / ".pot")],
+        )
+        self.assertEqual([c.args[3] for c in calls[1:5]], [0x1000, 0x1021, 0x1000, 0x1021])
+
     def test_readonly_remount_preserves_locked_container_flags(self):
         module.os.statvfs.return_value.f_flag = 2 | 4 | 8 | 4096
         module.skill_namespace("task", self.home)

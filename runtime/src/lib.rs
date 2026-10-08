@@ -8,6 +8,7 @@ pub mod execution;
 pub mod gateway;
 mod instructions;
 pub mod orchestration;
+pub mod permissions;
 pub mod sandbox;
 pub mod sandbox_resources;
 pub mod schedules;
@@ -64,6 +65,7 @@ struct Inner {
 }
 #[derive(Clone)]
 pub struct Service {
+    permissions: Arc<permissions::Hub>,
     skill_selection: Option<Vec<String>>,
     #[cfg(test)]
     test_tool_executor: Option<Arc<dyn pot_core::ToolExecutor>>,
@@ -464,6 +466,7 @@ mod tests {
         let (events, _) = broadcast::channel(8);
         let (commands, _rx) = mpsc::unbounded_channel();
         Service {
+            permissions: Arc::new(permissions::Hub::memory()),
             skill_selection: None,
             test_tool_executor: None,
             sandboxes: Arc::new(

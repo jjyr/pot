@@ -82,6 +82,9 @@ impl Mobile {
                             action("task-query", &serde_json::to_string(&query).unwrap());
                         }
                     }
+                    "permission-decision" => {
+                        action("permission-decision", &event.value.to_string())
+                    }
                     "task-open" => action("task", event.value.as_str().unwrap_or("")),
                     "sandbox-select" => {
                         this.sandbox_selection = event.value.as_str().unwrap_or("").into()
@@ -186,7 +189,13 @@ impl Render for Mobile {
             .flex_col()
             .gap_3();
         if self.page == "chat" || self.page == "task" {
-            content = content.gap_5();
+            content = content.gap_5().child(pot_ui::permissions::cards(
+                &self.data["permissions"],
+                &self.conversation,
+                self.catalog(),
+                self.page_handler(cx),
+                cx,
+            ));
             if let Some(snapshot) = &snapshot {
                 let labels = pot_ui::chat::Labels::new(|key| self.label(key));
                 let handler: pot_ui::chat::ChatHandler = Rc::new(cx.listener(

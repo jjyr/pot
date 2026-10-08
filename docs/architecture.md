@@ -1,6 +1,6 @@
 # Current architecture
 
-Updated: 2026-10-06. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for authority and lifecycle contracts.
+Updated: 2026-10-08. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for authority and lifecycle contracts.
 
 The [Sandbox provider redesign](sandbox-providers.md) has extracted Linux support and implemented prepared-instance macOS integration (awaiting real VM qualification), with Android/iOS deferred, and inserts a dedicated Sandbox Manager between Runtime and Providers. Runtime retains product/task authority; Manager owns environment coordination and state. Separate Provider crates implement `pot-sandbox` contracts and are registered by App/Server assembly without reverse Cargo dependencies. The diagram and implementation details below describe current Linux behavior, not that target architecture.
 
@@ -10,9 +10,11 @@ flowchart TB
     Server --> Helper[Sandbox Helper]
     Server --> Pot[Host pot-agent in-process]
     Server --> Codex[Host Codex App Server]
-    Pot --> Tools[Injected Runtime execution backend]
+    Pot --> Permission[pot-agent permission policy]
+    Permission --> Tools[Injected Runtime execution backend]
     Codex --> MCP[Scoped Pot MCP]
     MCP --> Tools
+    Tools --> Host[Authorized Host executor]
     Tools --> Manager[Host Sandbox manager]
     Manager --> Helper
     Manager --> A[Linux Sandbox A: executor and optional desktop]
@@ -31,9 +33,12 @@ flowchart TB
 | Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite and native session bindings | `gateway/src/`, `storage/src/` |
 | Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `sandbox-images/linux/default/executor.py`, `tool-executor/src/`, `sandbox-images/linux/default/sandbox.sh` |
 
-The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` remains for authenticated Codex/model integration, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects management and target overrides.
+The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` remains for authenticated Codex/model integration, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects worker management and switching Sandboxes.
 
-pot-agent receives a Runtime ToolExecutor with no Host fallback. One shared schema and argument validator covers the three environment tools. The guest runner retains process sessions inside a root-owned per-session cgroup; Runtime binds opaque session IDs to owner, Agent epoch, Sandbox and VM generation. Codex has native shell, patch, image, code execution, apps, plugins, subagent and inherited MCP capabilities disabled; its environment list is empty and Pot MCP supplies Sandbox operations. Both Agents use a private Host working directory. Host tool execution has no fallback.
+pot-agent owns [permission policy](permissions.md) and bounded
+[tool composition](tool-composition.md); Runtime supplies owner services and
+execution routing. Main defaults to Host and Workers to their assigned Sandbox.
+Codex retains its scoped Sandbox MCP loadout. No Sandbox failure causes Host fallback.
 
 Model inference location is independent: Agent processes are local, model APIs can be remote or an explicitly configured loopback endpoint.
 
@@ -45,7 +50,7 @@ Tasks keep independent Agent/profile snapshots and immutable `sandbox_id`. Sched
 
 Host restart preserves CLI bindings and artifacts, marks interrupted turns visibly and quarantines unsettled executions. Main-only `recover` confirms executor cancellation or VM termination; it never repeats a command. Definitions referenced by tasks or schedules cannot be deleted. Deleted identities cannot be reused, and deletion retains workspace artifacts. Desktop is optional and explicitly started; stopping its environment closes it along with the guest.
 
-Multiple tasks sharing a VM are cooperative users of the same guest account. Workspace directories are organization, not task-level filesystem isolation. macOS/Windows providers and direct Host tools are outside this increment.
+Multiple tasks sharing a VM are cooperative users of the same guest account. Workspace directories are organization, not task-level filesystem isolation. macOS/Windows provider qualification and Codex Host tools are outside this increment.
 
 ## Tasks, profiles and usage
 

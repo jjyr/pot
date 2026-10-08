@@ -13,6 +13,10 @@ use tokio::sync::Notify;
 
 #[derive(Default)]
 struct Feedback {
+    grants: Mutex<Option<Value>>,
+    permission_requests: Mutex<Vec<Value>>,
+    permission_decision: Mutex<Option<bool>>,
+    permission_changed: Notify,
     saved: Mutex<Option<Value>>,
     observations: Mutex<Vec<ExecutionObservation>>,
     cancelled: AtomicBool,
@@ -26,6 +30,24 @@ enum SaveFault {
     Receipt,
 }
 impl ExecutionFeedback for Feedback {
+    fn permission_grants(&self) -> Result<Option<Value>> {
+        Ok(self.grants.lock().unwrap().clone())
+    }
+    fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move {
+            self.permission_requests
+                .lock()
+                .unwrap()
+                .push(request.clone());
+            loop {
+                let notified = self.permission_changed.notified();
+                if let Some(approved) = *self.permission_decision.lock().unwrap() {
+                    return Ok(json!({"request":request,"approved":approved}));
+                }
+                notified.await;
+            }
+        })
+    }
     fn observe(&self, event: &ExecutionObservation) -> Result<()> {
         self.observations.lock().unwrap().push(event.clone());
         Ok(())
@@ -1221,12 +1243,12 @@ async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
                 },
                 model::ToolCall {
                     id: "manage".into(),
-                    name: "pot_manage_sandbox".into(),
+                    name: "manage_sandbox".into(),
                     arguments: json!({"action":"select","sandbox_id":"linux-b"}),
                 },
                 model::ToolCall {
                     id: "delegate".into(),
-                    name: "pot_create_task".into(),
+                    name: "create_task".into(),
                     arguments: json!({"text":"task"}),
                 },
             ];
@@ -1253,11 +1275,10 @@ async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
             assert_eq!(names, expected.iter().map(String::as_str).collect());
             for name in ["exec_command", "write_stdin", "apply_patch"] {
                 let schema = actual.iter().find(|t| t["name"] == name).unwrap();
-                assert_eq!(
+                assert!(
                     parameters(schema, protocol)["properties"]
                         .get("sandbox_id")
-                        .is_some(),
-                    role == ExecutionRole::Main && name != "write_stdin"
+                        .is_none()
                 );
             }
             assert_eq!(
@@ -1292,8 +1313,8 @@ async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
             } else {
                 let external: Vec<_> = rpc.iter().filter(|r| r["method"] == "tools/call").collect();
                 assert_eq!(external.len(), 2);
-                assert_eq!(external[0]["params"]["name"], "pot_manage_sandbox");
-                assert_eq!(external[1]["params"]["name"], "pot_create_task");
+                assert_eq!(external[0]["params"]["name"], "manage_sandbox");
+                assert_eq!(external[1]["params"]["name"], "create_task");
             }
             assert!(
                 !f.dir.join("effects.txt").exists(),
@@ -1309,7 +1330,7 @@ async fn configured_loadout_restricts_model_tools_and_dispatch() {
     f.context.role = ExecutionRole::Main;
     f.binding.spec.params.agent.builtin_tools = vec!["apply_patch".into()];
     f.binding.spec.params.agent.allowed_tools =
-        Some(vec!["apply_patch".into(), "pot_list_tasks".into()]);
+        Some(vec!["apply_patch".into(), "list_tasks".into()]);
     let executor = Arc::new(RecordingExecutor::default());
     f.context.tool_executor = Some(executor.clone());
     f.services
@@ -1322,7 +1343,7 @@ async fn configured_loadout_restricts_model_tools_and_dispatch() {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec!["apply_patch", "pot_list_tasks"]
+        vec!["apply_patch", "list_tasks"]
     );
     assert!(executor.calls.lock().unwrap().is_empty());
     assert!(
@@ -1560,4 +1581,442 @@ async fn instructions_are_caller_owned_and_never_discovered_from_agent_cwd() {
     let body = f.services.requests.lock().unwrap()[0]["body"].to_string();
     assert!(body.contains("CALLER_INSTRUCTIONS"));
     assert!(!body.contains("WRONG_HOST_DOCUMENT"));
+}
+
+#[tokio::test]
+async fn host_write_waits_for_owner_and_denial_has_no_effect() {
+    let mut f = Fixture::new("openai_chat");
+    f.binding.spec.params.agent.builtin_tools = vec![
+        "exec_command".into(),
+        "write_stdin".into(),
+        "apply_patch".into(),
+        "exec".into(),
+        "wait".into(),
+    ];
+    *f.feedback.grants.lock().unwrap() = Some(json!([]));
+    let path = f.dir.canonicalize().unwrap().join("owner-file.txt");
+    let operation = model::ToolCall {
+        id: "host-write".into(),
+        name: "exec_command".into(),
+        arguments: json!({"cmd":"printf 'approved content' > owner-file.txt"}),
+    };
+    f.services.queue(wire("openai_chat", "", &[operation]));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    let decide = async {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while f.feedback.permission_requests.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!path.exists(), "Host write occurred before approval");
+        let request = f.feedback.permission_requests.lock().unwrap()[0].clone();
+        assert_eq!(request["owner"], "unit");
+        assert_eq!(request["environment"], "host");
+        assert_eq!(
+            request["args"]["cmd"],
+            "printf 'approved content' > owner-file.txt"
+        );
+        let captured = f.services.requests.lock().unwrap();
+        let tools = model_tools(&captured[0], "openai_chat");
+        for name in ["exec_command", "write_stdin", "apply_patch", "exec", "wait"] {
+            assert_eq!(tools.iter().filter(|t| t["name"] == name).count(), 1);
+        }
+        assert!(
+            !tools
+                .iter()
+                .any(|t| t["name"].as_str().is_some_and(|n| n.starts_with("host_")))
+        );
+        drop(captured);
+        *f.feedback.permission_decision.lock().unwrap() = Some(false);
+        f.feedback.permission_changed.notify_waiters();
+    };
+    let (updates, ()) = tokio::join!(f.turn(false), decide);
+    assert!(!path.exists());
+    assert!(
+        updates
+            .unwrap()
+            .iter()
+            .any(|u| matches!(u, Update::ToolFinished { failed: true, .. }))
+    );
+}
+#[tokio::test]
+async fn path_grants_do_not_authorize_shell_commands() {
+    let f = Fixture::new("openai_chat");
+    let root = f.dir.canonicalize().unwrap();
+    *f.feedback.grants.lock().unwrap() = Some(json!([permissions::Grant {
+        id: "grant".into(),
+        owner: "unit".into(),
+        scope: permissions::Scope::Path {
+            path: root.clone(),
+            write: true,
+            recursive: true
+        }
+    }]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    f.services.queue(wire(
+        "openai_chat",
+        "",
+        &[model::ToolCall {
+            id: "shell".into(),
+            name: "exec_command".into(),
+            arguments: json!({"cmd":"printf bad > shell-effect","workdir":root}),
+        }],
+    ));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn(false).await.unwrap();
+    assert!(!root.join("shell-effect").exists());
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+}
+#[tokio::test]
+async fn permanent_grants_survive_rebinding_but_remain_agent_specific() {
+    let mut f = Fixture::new("openai_chat");
+    *f.feedback.grants.lock().unwrap() = Some(json!([permissions::Grant {
+        id: "saved".into(),
+        owner: "unit".into(),
+        scope: permissions::Scope::Exact {
+            tool: "apply_patch".into(),
+            args: json!({"patch":"prepared"})
+        },
+    }]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    let request = TurnRequest {
+        request_id: "turn".into(),
+        text: "read".into(),
+    };
+    let args = json!({"patch":"prepared"});
+    f.binding.epoch = 99;
+    permissions::authorize(
+        &f.context,
+        &f.binding,
+        &request,
+        "call",
+        "apply_patch",
+        &args,
+    )
+    .await
+    .unwrap();
+    assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    f.context.owner = "other-agent".into();
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &request,
+            "call",
+            "apply_patch",
+            &args
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+}
+#[tokio::test]
+async fn once_approvals_do_not_authorize_another_call_and_receipts_prevent_reexecution() {
+    let f = Fixture::new("openai_chat");
+    *f.feedback.grants.lock().unwrap() = Some(json!([]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(true);
+    let path = f.dir.canonicalize().unwrap().join("once.txt");
+    let call = model::ToolCall {
+        id: "once".into(),
+        name: "exec_command".into(),
+        arguments: json!({"cmd":"printf first >> once.txt"}),
+    };
+    f.services
+        .queue(wire("openai_chat", "", std::slice::from_ref(&call)));
+    f.services.queue(wire(
+        "openai_chat",
+        "",
+        &[
+            call.clone(),
+            model::ToolCall {
+                id: "next".into(),
+                ..call
+            },
+        ],
+    ));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn(false).await.unwrap();
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 2);
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "firstfirst");
+}
+
+#[tokio::test]
+async fn approved_host_shell_has_bounded_output_and_timeout() {
+    let f = Fixture::new("openai_chat");
+    *f.feedback.grants.lock().unwrap() = Some(json!([]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(true);
+    let root = f.dir.canonicalize().unwrap();
+    f.services.queue(wire("openai_chat", "", &[
+        model::ToolCall {id:"shell-ok".into(),name:"exec_command".into(),arguments:json!({"cmd":"printf shell-ok > host-result.txt; printf output","workdir":root})},
+        model::ToolCall {id:"shell-timeout".into(),name:"exec_command".into(),arguments:json!({"cmd":"sleep 20; printf bad > delayed.txt","workdir":root,"timeout_ms":20})}
+    ]));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    let updates = f.turn(false).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("host-result.txt")).unwrap(),
+        "shell-ok"
+    );
+    assert!(!root.join("delayed.txt").exists());
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u,Update::ToolFinished{id,failed:true,..} if id == "shell-timeout"))
+    );
+}
+
+#[tokio::test]
+async fn environment_policy_allows_tools_without_grants_but_preserves_role_limits() {
+    let mut f = Fixture::new("openai_chat");
+    let request = TurnRequest {
+        request_id: "policy-turn".into(),
+        text: "read".into(),
+    };
+    let args = json!({"patch":"prepared","environment":"sandbox:default"});
+    *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"allow"},"grants":[]}));
+    permissions::authorize(
+        &f.context,
+        &f.binding,
+        &request,
+        "allow",
+        "apply_patch",
+        &args,
+    )
+    .await
+    .unwrap();
+    assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &request,
+            "mapping",
+            "set_sandbox_mappings",
+            &json!({"environment":"host"})
+        )
+        .await
+        .is_err()
+    );
+    f.context.role = ExecutionRole::Summary;
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &request,
+            "summary",
+            "apply_patch",
+            &args
+        )
+        .await
+        .is_err()
+    );
+    f.context.role = ExecutionRole::Worker;
+    *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"ask"},"grants":[]}));
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &request,
+            "ask",
+            "apply_patch",
+            &args
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn management_and_existing_session_input_skip_approval_but_mappings_do_not() {
+    let mut f = Fixture::new("openai_chat");
+    f.context.role = ExecutionRole::Main;
+    let turn = TurnRequest {
+        request_id: "builtin-policy".into(),
+        text: "manage".into(),
+    };
+    *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"ask"},"grants":[]}));
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    for (tool, args) in [
+        ("create_task", json!({"text":"work"})),
+        ("manage_schedule", json!({"action":"create"})),
+        (
+            "manage_sandbox",
+            json!({"action":"delete","environment":"host"}),
+        ),
+        ("web_search", json!({"query":"public documentation"})),
+        (
+            "write_stdin",
+            json!({"session_id":"existing","environment":"host","chars":"yes\n"}),
+        ),
+        (
+            "write_stdin",
+            json!({"session_id":"existing","environment":"host","terminate":true}),
+        ),
+    ] {
+        permissions::authorize(&f.context, &f.binding, &turn, tool, tool, &args)
+            .await
+            .unwrap();
+    }
+    assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    *f.feedback.grants.lock().unwrap() = Some(json!({"policy":{"default":"allow"},"grants":[]}));
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &turn,
+            "mapping",
+            "set_sandbox_mappings",
+            &json!({"environment":"host","sandbox_id":"default","mappings":[]})
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+    f.context.role = ExecutionRole::Worker;
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &turn,
+            "worker-manage",
+            "manage_sandbox",
+            &json!({"action":"select"})
+        )
+        .await
+        .is_err()
+    );
+    f.context.role = ExecutionRole::Summary;
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &turn,
+            "summary-input",
+            "write_stdin",
+            &json!({"session_id":"existing"})
+        )
+        .await
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn composed_shell_calls_use_owner_approval_and_hide_intermediate_results() {
+    for approved in [false, true] {
+        let mut f = Fixture::new("openai_chat");
+        f.binding
+            .spec
+            .params
+            .agent
+            .builtin_tools
+            .extend(["exec".into(), "wait".into()]);
+        *f.feedback.grants.lock().unwrap() = Some(json!([]));
+        *f.feedback.permission_decision.lock().unwrap() = Some(approved);
+        f.services.queue(wire("openai_chat","",&[model::ToolCall {
+            id:"composition".into(),name:"exec".into(),
+            arguments:json!({"code":"const r = await tools.exec_command({cmd:'printf PRIVATE_OUTPUT; printf effect > composed-effect'}); text(r.isError ? 'denied' : 'done');","yield_time_ms":1000})
+        }]));
+        f.services.queue(wire("openai_chat", "done", &[]));
+        let updates = f.turn(false).await.unwrap();
+        assert_eq!(f.dir.join("composed-effect").exists(), approved);
+        let requests = f.feedback.permission_requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["tool"], "exec_command");
+        assert_eq!(requests[0]["call_id"], "composition:js:1");
+        let saved = f.feedback.saved.lock().unwrap();
+        let tool = saved.as_ref().unwrap()["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["call_id"] == "composition")
+            .unwrap();
+        assert!(!tool.to_string().contains("PRIVATE_OUTPUT"));
+        assert!(
+            updates
+                .iter()
+                .any(|u| matches!(u,Update::ToolFinished{name,..} if name=="exec"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn removed_file_tools_and_disallowed_composed_tools_cannot_execute() {
+    let mut f = Fixture::new("openai_chat");
+    f.binding
+        .spec
+        .params
+        .agent
+        .builtin_tools
+        .extend(["exec".into(), "wait".into()]);
+    f.binding.spec.params.agent.allowed_tools = Some(vec!["exec".into(), "wait".into()]);
+    let calls = ["read_file", "write_file", "list_directory"]
+        .into_iter()
+        .map(|name| model::ToolCall {
+            id: name.into(),
+            name: name.into(),
+            arguments: json!({"path":f.dir.join("removed"),"content":"bad"}),
+        })
+        .chain(std::iter::once(model::ToolCall {
+            id: "composed".into(),
+            name: "exec".into(),
+            arguments: json!({"code":"await tools.exec_command({cmd:'touch removed'});"}),
+        }))
+        .collect::<Vec<_>>();
+    f.services.queue(wire("openai_chat", "", &calls));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    let updates = f.turn(false).await.unwrap();
+    assert!(!f.dir.join("removed").exists());
+    assert_eq!(
+        updates
+            .iter()
+            .filter(|u| matches!(u, Update::ToolFinished { failed: true, .. }))
+            .count(),
+        4
+    );
+}
+
+#[tokio::test]
+async fn composition_reuses_parent_receipts_and_routes_product_calls_across_protocols() {
+    for protocol in ["openai_chat", "openai_responses", "anthropic_messages"] {
+        let mut f = Fixture::new(protocol);
+        f.context.role = ExecutionRole::Main;
+        f.binding
+            .spec
+            .params
+            .agent
+            .builtin_tools
+            .extend(["exec".into(), "wait".into()]);
+        f.services.rpc_tools = Some(serde_json::from_str(pot_core::TOOL_SCHEMA).unwrap());
+        *f.feedback.grants.lock().unwrap() = Some(json!([]));
+        *f.feedback.permission_decision.lock().unwrap() = Some(true);
+        let call = model::ToolCall {
+            id: "compose-once".into(),
+            name: "exec".into(),
+            arguments: json!({"code":"await tools.exec_command({cmd:'printf once >> effect'}); text((await tools.list_tasks({})).managed);","yield_time_ms":1000}),
+        };
+        f.services
+            .queue(wire(protocol, "", std::slice::from_ref(&call)));
+        f.services.queue(wire(protocol, "", &[call]));
+        f.services.queue(wire(protocol, "done", &[]));
+        f.turn(false).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(f.dir.join("effect")).unwrap(),
+            "once"
+        );
+        assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+        assert_eq!(
+            f.services
+                .rpc_calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|c| c["method"] == "tools/call")
+                .count(),
+            1
+        );
+    }
 }

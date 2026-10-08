@@ -750,5 +750,13 @@
   "web.https": "Tailscale HTTPS",
   "web.https-hint": "HTTPS 需要在 Tailscale DNS 设置中启用 MagicDNS 和 HTTPS Certificates。",
   "tailscale.title": "Tailscale",
-  "tailscale.description": "将 Pot 接入你的 Tailscale 私人网络。Web UI 访问单独配置。"
+  "tailscale.description": "将 Pot 接入你的 Tailscale 私人网络。Web UI 访问单独配置。",
+  "permissions.request": "Agent 请求授权",
+  "permissions.scope": "权限范围（仅此 Agent）",
+  "permissions.allow_once": "允许一次",
+  "permissions.allow_persistent": "永久允许",
+  "permissions.deny": "拒绝",
+  "permissions.grant": "Agent 永久授权",
+  "permissions.revoke": "撤销",
+  "permissions.shell-effects": "此命令可以执行 Server 系统账号可执行的任何操作。路径授权不能限制 Shell 命令的行为。"
 }
