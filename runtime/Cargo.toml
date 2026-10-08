@@ -14,7 +14,6 @@ pot-protocol.workspace = true
 pot-core.workspace = true
 pot-tool-executor.workspace = true
 pot-storage.workspace = true
-pot-driver.workspace = true
 pot-agent.workspace = true
 pot-gateway.workspace = true
 serde.workspace = true

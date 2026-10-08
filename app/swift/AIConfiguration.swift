@@ -3,15 +3,9 @@ import Foundation
 
 /// One configuration model shared by Chat setup and ordinary Settings.
 @MainActor extension SettingsPanel {
-    var activeNeedsLogin: Bool {
-        let engine = activeSpec["engine"] as? String ?? ""
-        return engine == "codex" && agentStates
-            .contains { $0["id"] as? String == engine && $0["authentication"] as? String == "required" }
-    }
-
     func openAI(fromChat: Bool = false) {
         section = 1; returnToChat = fromChat
-        bridge?.selectPage(2); refreshAgents()
+        bridge?.selectPage(2); refreshAI()
     }
 
     func reloadAI() async throws {
@@ -39,9 +33,6 @@ import Foundation
     }
 
     func editConnection(_ id: String) {
-        if loginVisible {
-            cancelLogin()
-        }
         guard !aiBusy, let selected = savedProfiles.first(where: { $0["id"] as? String == id }) else { return }
         section = 1; profile = selected; connectionKind = selected["engine"] as? String ?? ""
         connectionName = selected["name"] as? String ?? ""
@@ -59,28 +50,15 @@ import Foundation
                 host == "api.deepseek.com" ? "deepseek" :
                 host == "opencode.ai" ? (apiEndpoint.contains("/zen/go/") ? "opencode-go" : "opencode-zen") : "custom"
         }
-        let launch = selected["launch_spec"] as? [String: Any] ?? [:]
-        invocationExecutable = launch["executable"] as? String ?? connectionKind
-        let literals = (launch["argv"] as? [[String: Any]] ?? [])
-            .compactMap { $0["kind"] as? String == "literal" ? $0["value"] as? String : nil }
-        invocationArgs = String(
-            data: (try? JSONSerialization.data(withJSONObject: literals)) ?? Data("[]".utf8),
-            encoding: .utf8
-        ) ?? "[]"
         revision += 1
     }
 
     func newConnection(_ kind: String) {
         guard !aiBusy else { return }
-        if loginVisible {
-            cancelLogin()
-        }
         connectionDraftID = "agent-" + UUID().uuidString.lowercased()
         secretRevision += 1; profile = [:]; connectionKind = kind; aiScreen = "manage"
         checkMessage = ""; result = ""; modelOptions = []; hasAPIKey = false
         switch kind {
-        case "codex":
-            connectionName = kind.capitalized; apiEndpoint = ""
         case "deepseek":
             connectionName = "DeepSeek"; apiEndpoint = "https://api.deepseek.com/v1/chat/completions"; apiProtocol = "openai_chat"
         case "opencode-go", "opencode-zen":
@@ -98,13 +76,6 @@ import Foundation
             connectionName = "OpenAI API"; apiEndpoint = "https://api.openai.com/v1"; apiProtocol = "openai_chat"
         }
         connectionModel = ""
-        if kind == "codex",
-           let agent = agentStates
-           .first(where: { $0["id"] as? String == kind && $0["authentication"] as? String == "authenticated" })
-        {
-            modelOptions = agent["models"] as? [String] ?? []
-            connectionModel = modelOptions.first ?? ""
-        }
         revision += 1
     }
 
@@ -162,15 +133,11 @@ import Foundation
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { result = L.text("aiconfiguration.enter-an-agent-name"); return }
         guard !model.isEmpty else { result = L.text("aiconfiguration.choose-or-enter-a-model"); return }
-        let native = connectionKind == "codex"
         let firstMain = activeSpec.isEmpty && routingOwner == "main"
         if connectionKind.hasPrefix("opencode-"), !selectOpenCodeRoute(model) {
             return
         }
-        if native, !nativeAccountReady(connectionKind) {
-            result = L.text("aiconfiguration.finish-installation-and-sign-in-then-check"); return
-        }
-        if !native, endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             result = L.text("aiconfiguration.enter-a-service-url"); return
         }
         let expected = profile["revision"] as? Int ?? 0
@@ -184,48 +151,20 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                if native {
-                    var value = profile
-                    value["id"] = target; value["revision"] = expected + 1; value["name"] = name
-                    value["engine"] = kind; value["model"] = model
-                    value["provider"] = "openai"
-                    value["auth_ref"] = "cli:" + kind
-                    if value["params"] == nil {
-                        value["params"] = ["max_output_tokens": 8192]
-                    }
-                    if value["tool_policy"] == nil {
-                        value["tool_policy"] = [
-                            "worker_orchestration": false,
-                            "summary_read_only": true,
-                            "unattended": "sandbox",
-                        ]
-                    }
-                    _ = try await bridge.runtime.request(
-                        "api/v1/agent",
-                        body: [
-                            "profile": value,
-                            "expected_revision": expected,
-                            "request_id": UUID().uuidString,
-                            "follow_main": firstMain,
-                            "follow_worker": false,
-                        ]
-                    )
-                } else {
-                    _ = try await bridge.runtime.request(
-                        "api/v1/providers",
-                        body: [
-                            "profile_id": target,
-                            "name": name,
-                            "expected_revision": expected,
-                            "request_id": UUID().uuidString,
-                            "endpoint": connectionEndpoint(kind.hasPrefix("opencode-") ? apiEndpoint : endpoint),
-                            "api_key": key,
-                            "model": model,
-                            "protocol": protocolName,
-                            "follow_main": firstMain,
-                        ]
-                    )
-                }
+                _ = try await bridge.runtime.request(
+                    "api/v1/providers",
+                    body: [
+                        "profile_id": target,
+                        "name": name,
+                        "expected_revision": expected,
+                        "request_id": UUID().uuidString,
+                        "endpoint": connectionEndpoint(kind.hasPrefix("opencode-") ? apiEndpoint : endpoint),
+                        "api_key": key,
+                        "model": model,
+                        "protocol": protocolName,
+                        "follow_main": firstMain,
+                    ]
+                )
                 try await reloadAI()
                 // Keep the saved identity if activation later needs a retry.
                 profile = savedProfiles.first { $0["id"] as? String == target } ?? [:]
@@ -269,10 +208,6 @@ import Foundation
         else { result = L.text("aiconfiguration.add-and-choose-an-agent-first"); return }
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { result = L.text("aiconfiguration.enter-a-model-for-chat"); return }
-        let engine = selected["engine"] as? String ?? ""
-        if engine != "pot", !nativeAccountReady(engine) {
-            result = L.text("aiconfiguration.this-agent-needs-installation-or-sign-in"); return
-        }
         if activeSpec["source_profile_id"] as? String == draftProfile, activeSpec["model"] as? String == model,
            activeSpec["source_profile_revision"] as? Int == selected["revision"] as? Int
         {
@@ -320,20 +255,6 @@ import Foundation
                     .text("aiconfiguration.a-switch-is-already-pending-wait-for") : L
                     .text("aiconfiguration.chat-configuration-unchanged-check-the-connection-refresh")
             }
-        }
-    }
-
-    func openLogin(_ engine: String) {
-        startAuthorization(engine)
-    }
-
-    func cancelLogin() {
-        stopAuthorization()
-    }
-
-    func reopenLogin() {
-        if let url = URL(string: authorizationURL), loginVisible {
-            NSWorkspace.shared.open(url)
         }
     }
 }

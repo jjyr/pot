@@ -51,8 +51,7 @@ pub struct DriverEvent {
 }
 pub type Sink<'a> = &'a mut (dyn FnMut(DriverEvent) -> Result<()> + Send);
 
-/// Host and session lifetimes differ: Pot runs in-process; native hosts can
-/// multiplex independent sessions behind this execution boundary.
+/// In-process Agent host with independent sessions; shared by Runtime and evaluation.
 pub trait DriverHost: Send + Sync {
     /// Conservative defaults: unsupported observations are never inferred.
     fn describe(&self, spec: &ResolvedSpec) -> Result<DriverDescription> {
@@ -225,10 +224,6 @@ pub trait ExecutionFeedback: Send + Sync {
     fn needs_rebind(&self, reason: &str) -> Result<()>;
     fn record_turn(&self, request: &str) -> Result<()>;
     fn input_streaming(&self, request: &str) -> Result<()>;
-    fn begin_usage(&self, ledger: &str, spec: &ResolvedSpec, epoch: u64) -> Result<()>;
-    fn initialize_usage(&self, native: &str) -> Result<()>;
-    fn cumulative_usage(&self, ledger: &str, native: &str, usage: &Value) -> Result<()>;
-    fn incomplete_usage(&self, ledger: &str) -> Result<()>;
 }
 
 /// Execution controls and observation precision are negotiated independently.
@@ -238,7 +233,6 @@ pub struct DriverDescription {
     pub configurable_tools: bool,
     pub injectable_services: bool,
     pub request_usage: bool,
-    pub native_cumulative_usage: bool,
     pub compaction_lifecycle: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

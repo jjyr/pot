@@ -1,9 +1,7 @@
 //! Reusable backend application services. The executable and route assembly live in pot-server.
 pub mod agent;
-pub mod authorization;
 mod budget;
 pub mod control;
-pub mod discovery;
 pub mod execution;
 pub mod gateway;
 mod instructions;
@@ -38,8 +36,8 @@ pub mod api {
     pub use crate::usage as accounting;
     pub use crate::{Service, cancel, events_handler, send, snapshot, usage};
     pub use crate::{
-        agent, authorization, control, discovery, execution, gateway, orchestration, sandbox,
-        schedules, tasks, terminal, tool_bridge,
+        agent, control, execution, gateway, orchestration, sandbox, schedules, tasks, terminal,
+        tool_bridge,
     };
 }
 #[cfg(test)]
@@ -88,9 +86,7 @@ pub struct Service {
     stop: tokio::sync::watch::Sender<bool>,
     tasks: Arc<Mutex<tasks::Hub>>,
     terminals: Arc<Mutex<terminal::Hub>>,
-    codex: Arc<agent::codex::Hosts>,
     agent_host: Arc<dyn pot_core::DriverHost>,
-    authorization: Arc<tokio::sync::Mutex<authorization::Hub>>,
 }
 impl Service {
     /// Trusted in-process notification adapter. Only the owner main Store is eligible.
@@ -508,9 +504,7 @@ mod tests {
             stop: tokio::sync::watch::channel(false).0,
             tasks: Arc::new(Mutex::new(tasks::Hub::default())),
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-            codex: Arc::new(agent::codex::Hosts::default()),
             agent_host: Arc::new(pot_agent::AgentHost),
-            authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
         }
     }
     #[test]

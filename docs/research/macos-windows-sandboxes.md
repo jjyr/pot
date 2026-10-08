@@ -175,7 +175,7 @@ For Pot on the current Mac, Docker adds a Linux VM/container layer around the ac
 ## Proposed provider contract
 
 ```text
-Host Agent / Codex -> existing scoped execution tools -> Runtime authority
+Host Agent -> existing scoped execution tools -> Runtime authority
                                                      -> provider lifecycle
                                                      -> authenticated guest broker
                                                         -> OS-specific runner

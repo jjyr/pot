@@ -2,8 +2,7 @@
 
 pot-agent owns permission policy and grant matching. Runtime supplies trusted
 Agent identity, owner approval/storage and execution routing. Agent process
-placement on Host does not grant Host execution authority. Codex integration is
-deferred; its managed execution remains Sandbox-only.
+placement on Host does not grant Host execution authority.
 
 ## Environments and authority
 

@@ -32,7 +32,7 @@ import Foundation
         var notice = LocalizedMessage(wrappedValue: L.format("settingspanel.command-not-saved-0", ["HTTP 401: {1}"]))
         assert(notice.wrappedValue == "Command not saved: HTTP 401: {1}")
         let secret = "user content {0} 简体中文"
-        assert(L.format("authorization.enter-code-0-on-the-official-page", [secret]).contains(secret))
+        assert(L.format("settingspanel.profile-not-saved-0", [secret]).contains(secret))
         L.select("zh-CN")
         assert(UserDefaults.standard.string(forKey: "language") == "zh-CN")
         assert(L.text("settings.language") == "语言")

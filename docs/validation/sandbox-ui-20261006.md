@@ -13,7 +13,6 @@ More provides reconnect, browser, clipboard, workspace, associated-task summarie
 - `mise run check`, `test`, `test:app`, `build`, `bundle` passed; `git diff --check` passed.
 - Backend: 100 passed, zero ignored. App: 14 passed.
 - Added regression coverage for invalid names/resources, rejecting settings updates under a lease before Helper I/O/file mutation, and worker settings rejection.
-- Real Helper with two Linux VMs, Host Pi 0.87.1 and Codex 0.159.1 passed the local mock-model acceptance script: 34 requests and four read-only summaries. The script now additionally checks selected-environment settings persist without starting a VM, inventory task attribution fields, and busy update rejection. Existing fixed worker assignment, native resume, Host restart, cancellation, independent stop and optional desktop assertions passed.
 - Native App interaction in isolated `/tmp/pot-ui-visual` verified new environment creation stays stopped, selected settings save, explicit execution-default changes persist, noVNC displays directly below the toolbar, Take Over / Give Back synchronizes labels, and switching to a stopped environment hides the desktop without starting it. Rapid switches and final accessible environment buttons were exercised.
 
 Local logs: `/tmp/pot-ui-check.log`, `/tmp/pot-ui-tests.log`, `/tmp/pot-ui-app-tests.log`, `/tmp/pot-ui-build.log`, `/tmp/pot-ui-bundle.log`, `/tmp/pot-ui-e2e.log`; machine-readable VM results: `/tmp/pot-sandbox-ui-acceptance.json`.

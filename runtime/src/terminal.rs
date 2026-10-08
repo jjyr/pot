@@ -538,9 +538,13 @@ mod lifecycle_tests {
             .0;
         let session = s.terminals.lock().unwrap().sessions[shell["id"].as_str().unwrap()].clone();
         assert!(
-            create(State(s.clone()), auth(&s), request(Some("codex".into())))
-                .await
-                .is_err()
+            create(
+                State(s.clone()),
+                auth(&s),
+                request(Some("unsupported".into()))
+            )
+            .await
+            .is_err()
         );
         assert_eq!(s.terminals.lock().unwrap().sessions.len(), 1);
         // A rejected command-injection request never creates another process or writes PTY input.

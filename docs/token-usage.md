@@ -6,13 +6,13 @@ Each task (including archived tasks) and main chat has a usage entry. Details sh
 
 ## Metering
 
-Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent type (Pot/Codex), profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
+Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, binding epoch, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
 
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
 - Tools show calls, failures, duration, and output estimates (serialized UTF-8 bytes / 4). Estimates are not provider billing and are not added to actual totals.
 - Pot Agent compacts completed older user turns when its context estimate approaches the profile-configured window, reserving room for output. Estimates use the actual provider-native context projection without duplicate display/replay fields. Complete usage calibrates an unchanged request prefix; later input is estimated locally. Cache is included once in input and reasoning once in output. Edits, tool/system/model changes and compaction invalidate old calibration. Missing usage supplies no new calibration; new context is estimated from a valid earlier prefix, or locally when no prefix is valid, and missing billed usage remains unknown. Context estimates and allowance reservations do not contribute to actual token totals. The replacement summary and complete recent turn are persisted through Storage.
-- Agent reports compaction lifecycle directly to Runtime. Start persists before its ID tags the metered gateway request. Summary usage is a subset of request usage, never counted twice. Native Codex compaction remains Codex-owned.
+- Agent reports compaction lifecycle directly to Runtime. Start persists before its ID tags the metered gateway request. Summary usage is a subset of request usage, never counted twice.
 - Session details have no tabs/per-request list. Horizontal stacks show recorded conversation/compaction tokens and proportions, with input/output/cache hover. Hide zero compaction; show empty state without confirmed usage. Rank tools by output bytes using a shared maximum bar scale, with estimated tokens/calls, top 5 by default and expandable. Hide empty tools; tool output contributes neither to model proportions nor totals.
 - Underlying request/compaction lifecycle records and archived records remain; API detail pagination remains supported. Context sizes before/after compaction are estimates, not billing.
 - Skills lack a reliable independent metering boundary, so no Skills statistics tab or estimated allocation. Skills loading remains unintegrated and unchanged here.
@@ -24,13 +24,6 @@ Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages
 
 The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global scope follows the selected date window; main-chat details use lifetime scope. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](execution-preferences.md).
 
-## Native Codex metering
-
-Codex bypasses the model gateway and records per-Pot-turn deltas of native thread cumulative usage. This includes native compaction within the turn,
-without individual request/compaction breakdown; the UI states this precision. Duplicate notifications do not double-count.
-Missing historical baselines, counter rollback, or missing required fields remain unknown rather than attributing historical consumption to the current turn.
-Pot checks allowance only before new turns, with no per-request CLI reservation, so a turn may exceed the allowance;
-no per-request hard budget, automatic checkpoint resume, or provider subscription balance is claimed.
 
 ## Display and limits
 
@@ -38,7 +31,7 @@ Pot Agent executes direct API connections; the model service determines billing.
 
 Daily reset is 00: 00 in the configured zone, weekly Monday 00: 00. The policy explicitly stores its zone and uses calendar DST rules. Chart ranges do not affect allowance windows; changing periods preserves history.
 
-Future subscription allowance adapters must report window, remaining fraction, reset time, and collection time, shown separately as Provider allowance. Codex subscription allowances are not integrated; no provider balance is shown/inferred, and Pot tokens do not represent other clients' subscription consumption.
+Future subscription allowance adapters must report window, remaining fraction, reset time, and collection time, shown separately as Provider allowance. No provider balance is shown/inferred, and Pot tokens do not represent other clients' subscription consumption.
 
 Conversation/compaction requests reserve in the shared ledger before networking: conservative input estimate = request UTF-8 bytes + 1024; output cap = smaller of configured cap and remaining allowance. Settle actual usage when received; unknown/interrupted requests keep conservative reservations until the window ends. Tokenizers/hidden overhead can differ, so no universal billing hard cap is promised. If the whole allowance is smaller than current context reservation, suggest raising it.
 
@@ -68,7 +61,7 @@ Legacy `/api/v1/usage` remains for request-count diagnostics; new UI uses summar
 ## Agent binding attribution
 
 Gateway accepts only the current binding's provider/model. `request_routes` links request IDs to
-Agent type, profile ID, provider, epoch, and spec hash. Existing request tables retain executed binding models/turns; old ledgers are not reset.
+Agent type, profile ID, provider, epoch, and spec hash. Existing request tables retain executed binding models/turns; no legacy ledger import or schema migration is provided.
 OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Post-migration requests use
 new snapshots; old epoch usage remains. Global/session summaries group input/output/cache/records/unknown usage by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/epoch in request details.
 
@@ -76,7 +69,7 @@ new snapshots; old epoch usage remains. Global/session summaries group input/out
 unknown usage and conservative reservations. Its ResolvedSpec disables exact request budgets, usage reporting, and
 safe checkpoint resume. Subscription quotas remain unintegrated and cannot be inferred from the API ledger.
 
-Terminal, official login queries, and command saves trigger no model calls/usage records. Terminal text enters neither usage nor product logs. CLI discovery Logged in means only official status, not validated real requests, model budgets, or role capabilities.
+Terminal operations and API metadata queries trigger no model calls/usage records. Terminal text enters neither usage nor product logs.
 
 Responses codec reads usage from response.completed/incomplete/failed; Messages codec
 combines message_start input with message_delta output without releasing reservations at initial output=0;
@@ -91,19 +84,16 @@ Global/provider allowances apply together; all main/worker requests share one le
 Reservation/provider attribution commit in one transaction; output cap is the smaller available allowance;
 unknown requests remain reserved after restart. Resume checks both policies and automatically continues only checkpoint-capable drivers.
 Each saved API route has an independent immutable identity; a new endpoint route needs its own allowance.
-CLI subscriptions report native post-execution usage without pre-request hard limits; provider rate limits are not Pot allowance exhaustion.
+Provider rate limits are not Pot allowance exhaustion.
 
 
 ## Agent / model categories
 
-Attribution persists with the immutable binding at API reservation or native CLI turn start. Later Agent,
+Attribution persists with the immutable binding at API reservation. Later Agent,
 model, background-default, or profile changes do not rewrite past records. Main chat, background tasks, schedules, and compaction
-share one ledger; compaction retains its actual Agent/model attribution. Native CLI summaries retain turn precision.
+share one ledger; compaction retains its actual Agent/model attribution.
 
 Global categories use the page's selected range/zone, matching global totals; session/task details use their scope's
 lifetime range, matching the total card. Pages hold 20 categories, sorted by input+output descending, then stable Agent/model order.
 Pagination does not change totals/trends/allowances; scope/range/zone changes reset pages and stale responses are discarded.
 Categories show input/output/input-cache hits/incomplete records without presenting unknown consumption as zero.
-
-Old ledgers gain agent/profile_id fields while preserving provider/epoch/hash and all metering.
-Backfill historical Agent/profile only when scope, provider, epoch, spec hash, and model all match saved immutable bindings. Unconfirmed records show Unknown Agent without guesses from current settings, model names, or request IDs.

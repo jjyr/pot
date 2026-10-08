@@ -10,13 +10,7 @@ import Foundation
     var connectionDraftID = ""
     var returnToChat = false, aiBusy = false, draftInitialized = false
     var activeSpec: [String: Any] = [:], connections: [[String: Any]] = [], modelOptions: [String] = []
-    var authorizationTask: Task<Void, Never>?
-    var authorizationID = "", authorizationURL = ""
-    var loginEngine = "", loginVisible = false
-    @LocalizedMessage var loginMessage = ""
     @LocalizedMessage var checkMessage = ""
-    var agentStates: [[String: Any]] = []
-    var invocationExecutable = "codex", invocationArgs = "[]", codexModel = ""
     var profile: [String: Any] = [:]
     var savedProfiles: [[String: Any]] = []
     var routingPolicy: [String: Any] = [:]
@@ -28,8 +22,6 @@ import Foundation
     var providerAllowance: [String: Any] = [:]
     var providerPeriod = "none", providerTokens = "2000000", providerAutoResume = true
     var apiEndpoint = "", apiModel = "", apiProtocol = "openai_chat", hasAPIKey = false
-    var lastDiscovery = Date.distantPast
-    var discovering = false
     var environment: [String: Any] = [:]
     var section = 0, revision = 0
     var awaitingBoot: String?
@@ -37,13 +29,6 @@ import Foundation
     var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "8"
     var cpuField = "4", memoryField = "8", diskField = "32"
     @LocalizedMessage var result = ""
-    func nativeAccountReady(_ engine: String) -> Bool {
-        guard let agent = agentStates.first(where: { $0["id"] as? String == engine }),
-              agent["installation"] as? String == "present",
-              agent["status_check"] as? String != "failed" else { return false }
-        let status = agent["authentication"] as? String
-        return status == "authenticated" || status == "unknown"
-    }
 
     var root: URL {
         bridge?.localRuntime?.root ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/pot")
@@ -80,9 +65,6 @@ import Foundation
              .first { $0["id"] as? String == activeSpec["source_profile_id"] as? String }?["name"] as? String ??
              (activeSpec["engine"] as? String ?? "Agent"),
          "connections": connections, "model_options": modelOptions,
-         "login_engine": loginEngine,
-         "login_visible": loginVisible,
-         "login_message": loginMessage,
          "check_message": checkMessage,
          "profiles": savedProfiles, "routing": routingPolicy, "routing_profile": routingProfile,
          "routing_name": routingName, "routing_model": routingModel,
@@ -97,68 +79,14 @@ import Foundation
          "memory": memoryField, "disk": diskField,
          "selected_engine": profile["engine"] as? String ?? "pot", "selected_model": profile["model"] as? String ?? "",
          "api_endpoint": apiEndpoint, "api_model": apiModel, "api_protocol": apiProtocol, "has_api_key": hasAPIKey,
-         "codex_model": codexModel, "agents": agentStates,
-         "discovering": discovering,
-         "executable": invocationExecutable, "argv": invocationArgs,
          "locale": L.locale, "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
     }
 
-    func refreshAgents() {
-        guard let bridge, !discovering, bridge.snapshot["connected"] as? Bool == true,
-              Date().timeIntervalSince(lastDiscovery) > 1 else { return }
-        lastDiscovery = Date(); discovering = true
+    func refreshAI() {
+        guard bridge?.snapshot["connected"] as? Bool == true else { return }
         Task {
-            defer { discovering = false }
-            do {
-                let facts = try await bridge.runtime.request("api/v1/agents/refresh", body: [:])
-                agentStates = facts["agents"] as? [[String: Any]] ?? []
-                if connectionKind == "codex",
-                   let agent = agentStates.first(where: { $0["id"] as? String == connectionKind })
-                {
-                    modelOptions = agent["models"] as? [String] ?? []
-                    if connectionModel.isEmpty, let first = modelOptions.first {
-                        connectionModel = first; draftRevision += 1
-                    }
-                }
-                try await reloadAI()
-                result = L.text("settingspanel.status-refreshed-no-model-requests-sent")
-            } catch {
-                result = L.text("settingspanel.unable-to-detect-status-check-the-environment"); loginMessage = result
-            }
-        }
-    }
-
-    func saveInvocation(executable: String, arguments: String) {
-        guard profile["engine"] as? String == "codex", let bridge, let data = arguments.data(using: .utf8),
-              let args = try? JSONSerialization.jsonObject(with: data) as? [String],
-              let revision = profile["revision"] as? Int
-        else { result = L.text("settingspanel.arguments-must-be-a-json-array-of"); return }
-        var updated = profile
-        updated["revision"] = revision + 1
-        updated["launch_spec"] = [
-            "transport": "codex_app_server",
-            "executable": executable,
-            "argv": args
-                .map { ["kind": "literal", "value": $0] } + [["kind": "runtime_arguments"]],
-            "cwd_policy": "workspace",
-        ]
-        Task {
-            do {
-                _ = try await bridge.runtime.request(
-                    "api/v1/agent",
-                    body: [
-                        "profile": updated,
-                        "expected_revision": revision,
-                        "request_id": UUID().uuidString,
-                        "follow_main": false,
-                        "follow_worker": false,
-                    ]
-                )
-                result = L.text("settingspanel.command-saved-save-the-chat-selection-in"); refreshAgents()
-            } catch { result = L.format(
-                "settingspanel.command-not-saved-0",
-                [String(describing: error.localizedDescription)]
-            ) }
+            do { try await reloadAI() }
+            catch { result = error.localizedDescription }
         }
     }
 

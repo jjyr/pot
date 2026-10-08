@@ -5,7 +5,6 @@ Date: 2026-10-06. Scope: standalone deterministic evaluation and Driver service/
 ## Delivered
 
 - Separate `pot-eval` workspace crate and `run`, `validate`, `compare` CLI commands; no Runtime/Storage/App dependencies or separate Agent adapter contract.
-- Core Driver capability descriptions, session close hook, typed request/usage/context/compaction observations and injectable execution services. Existing Pot hosts retain default product HTTP services; Codex only declares its native cumulative observation capability.
 - Real Pot loop and native SSE decoding against scripted streams, fresh workspaces, real apply_patch/shell effects, run deadlines, cancellation cleanup and final artifact/answer assertions.
 - Versioned manifest, append-only JSONL events, native encoded requests, context, failure records and recomputable reports. Task success and measurement completeness are independent.
 - Usage normalization with explicit request/turn/run scope, source deduplication, snapshot replacement, cumulative baseline/reset validation, deduplicated deltas, overflow checks and null unknowns. Cache and reasoning subsets are reported without increasing input/output totals. Failed executions retain observed usage.
@@ -25,11 +24,7 @@ All model generation used local fixture frames. These numbers validate bookkeepi
 
 ## Remaining scope
 
-Native Codex evaluation feedback/standalone endpoints, direct live transports, Pi or other baseline Drivers, forced compaction controls, run matrices/paired repeats, separate workload/policy hashes, provider price snapshots, statistical regression budgets and HTML reports remain unimplemented. Product feedback responsibilities remain in the existing trait with an optional observation hook; this increment does not claim a complete feedback decomposition. Initial comparison accepts strict identical scenarios across builds only.
-
 ## DeepSeek Flash live follow-up (2026-10-06)
-
-The explicit `pot-eval live` command now reads only the local Pi DeepSeek provider/Flash model configuration. The local configuration selected `deepseek-v4-flash` at `https://api.deepseek.com/chat/completions`, Chat Completions, with a declared 1,000,000-token model context window. Pi remains a configuration source only. No other live model, Pi runtime baseline or native Codex evaluation was added.
 
 Thinking was disabled for all three runs. Responses were capped at 512 tokens for short chat and 768 for the tool/compaction cases. Run deadlines were 180/240 seconds; every run was bounded by eight requests and a conservative cumulative 100,000 encoded-request-byte/output-cap reservation. These reservation units are operational limits, separate from observed provider usage. The compaction case used a 65,536-token configured window, threshold 6,000 and `use_provider_usage: false` to reliably test local-estimator-triggered compression. No automatic HTTP retry or redirect was enabled.
 
@@ -44,8 +39,6 @@ The compaction request consumed **5,162 input and 218 output tokens**. The other
 All runs reported complete usage. Independently decoded raw response chunks and last usage snapshots reconciled with report totals for each run. A credential scan using the configured key verified its absence from every recorded file, without printing the key. The source Pi configuration was not changed. Credential-free manifests capture effective compatibility/limits and the configured price snapshot with `price_verified: false`; no claim of actual billed currency cost is made.
 
 Run records are preserved under `.local/eval/deepseek-flash-20261006/{chat,tools,compact}` with `summary.json`; this directory is ignored by Git. Initial execution directories were `/tmp/pot-deepseek-live-20261006-{chat,tools,compact}`. Supplied scenarios under `eval/scenarios/deepseek-*.json` reproduce the workload, but outputs, caching and usage are not deterministic.
-
-Verification: **144 backend tests** passed, including four new credential-free local HTTP/configuration tests for model selection, compatibility, usage/raw capture, credential exclusion, pre-network limits and existing-run preservation. `mise run check` passed lint, workspace Rust and Swift Helper checks. These are three single-run smoke tests of Pot only. They do not establish average token efficiency, cold-cache consumption or equivalence to Pi/Codex; no cross-runtime experiment or scheduled paid evaluation was performed.
 
 ## Same-command Pi CLI comparison follow-up (2026-10-06)
 

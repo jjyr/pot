@@ -18,7 +18,7 @@ mise run open
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
-Configure the Main Agent in Chat or Settings → AI Configuration. pot-agent uses saved API connections; Codex uses official Host browser authorization. pot-agent is built into Server; Node and Codex are bundled. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
+Configure the Main Agent in Chat or Settings → AI Configuration. pot-agent uses saved API connections. pot-agent is built into Server; Node is bundled for JavaScript tools and plugins. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
 
 ## Releases and Homebrew
 
@@ -63,7 +63,7 @@ mise exec -- cargo build --locked -p pot-server
 POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, Codex hosts, and SSE.
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
 
 App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](standalone-server.md) for CLI installation, local OS authority and packaging.
 
@@ -92,9 +92,7 @@ Current real CLI/VM acceptance (build and bundle first; no paid model calls):
 mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/Contents/Helpers/PotHelper --resources .local/d1/Pot.app/Contents/Resources/runtime --output /tmp/pot-sandbox-acceptance.json
 ```
 
-Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host Pot/Codex and local mock models, validates lazy startup, worker scope, environment independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/host-pot-agent-20261006.md).
-
-Application account authorization uses official Host Codex App Server APIs. pot-agent supports API connections. The official Host Codex process handles browser callbacks directly; account credentials remain with the native CLI. Real-provider account/inference acceptance is separate from the credential-free Sandbox routing contract.
+Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host pot-agent and local mock models, validates lazy startup, worker scope, environment independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/host-pot-agent-20261006.md).
 
 ### CI cache behavior
 
@@ -135,7 +133,7 @@ Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk r
 | `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
 | `core/` | Immutable Agent models, execution contracts, shared tool schema |
 | `storage/` | SQLite, binding/usage/file-request ledgers, transactions |
-| `agent/`, `driver/` | In-process pot-agent and Host Codex App Server |
+| `agent/` | In-process pot-agent |
 | `tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for eval/tests |
 | `gateway/` | Provider HTTP transport and model protocol codecs |
 | `protocol/` | Shared message and control types |
@@ -148,7 +146,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; Codex Host tools and macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.
+Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. No legacy conversation or usage migration is provided; use a fresh Host root.
 
 ## About and dependency licenses
 

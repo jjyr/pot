@@ -5,7 +5,6 @@ Date: 2026-10-06. Issue #3 implementation in this worktree; not full release or 
 ## Delivered behavior
 
 - One plain-text record with revision/update time, verbatim readback, replace/clear, stale-write conflicts and atomic idempotent mutation receipts.
-- Main Pi tools and native Codex MCP tools, fresh per-turn preference/catalog context, main-only mutation, summary/worker denials, and no structured rule compiler.
 - Task creation detects stale/missing preference revisions. Existing Profile authorization, capability checks, queueing and immutable bindings remain. Tasks record creation-time preference revision/reason.
 - Chat running-task summaries and task-list rows reuse the existing brand icon assets, with no additional model/reason labels. Opening tasks retains existing model/switching interactions. Icon projection follows actual bindings across migration/restart and does not follow global Profile edits; paginated projection only reads bindings for visible rows.
 - Usage adds a whole-main-turn routing subset, already included in totals, with date/scope precision, cache subsets, unknown usage and durable/deduplicated markers. No extra routing request.
@@ -20,8 +19,6 @@ Metering tests cover requests before/after delegation in the same turn, multiple
 
 Nine installed-Pi/local-mock integration tests pass. The added integration performs read -> save -> fresh read -> delegate -> reply with five real Pi gateway requests, checks schema exposure, preference revision, DeepSeek icon and whole-turn measured usage. Existing compaction/cancellation/allowance/resume/multi-provider/schedule tests also pass. These use no paid models.
 
-Native Codex App Server is exercised with isolated HOME/CODEX_HOME, a loopback model and actual MCP. Preference read/update/read and restart use the real tool bridge, with fresh context on native resume. Existing session retention, native worker isolation, schedules, authorization failure, cancellation and read-only summary contracts are retained. The final contract also creates a preference-selected native worker, checks its Codex icon/revision, and verifies one complete native main-turn routing record. It passes with 46 loopback model requests and zero paid calls. No user account/authentication is used by this contract.
-
 ## Real main-model semantic evaluation
 
 The opt-in evaluation uses configured DeepSeek `deepseek-v4-flash` as the real main model and two **synthetic, unexecuted** worker Profiles named Claude Coding and Gemini Design. It tests semantic interpretation and tool invocation, not real Claude/Gemini worker inference. Workers remain queued in test fixtures; no worker-provider requests occur. Preference tools and task creation use actual Runtime operations in temporary product directories.
@@ -33,15 +30,6 @@ The corpus now distinguishes a document task with supplied notes from a missing-
 Measured paid main-model calls for these observations: 29 requests, 160,838 input and 7,133 output tokens (cache hits remain part of input). No production product records, preferences or ledgers are changed by the fixtures. Test directories are removed after completed evaluation.
 
 ## Reproduction
-
-```sh
-mise run check
-mise run test
-mise run test:app
-POT_TEST_PI_BIN="$(command -v pi)" mise exec -- cargo test --locked -p pot-runtime real_pi -- --ignored
-mise exec -- cargo build --locked -p pot-server
-mise exec -- python scripts/tests/codex-runtime.py --runtime .local/poc/cargo-target/debug/pot-server --codex /absolute/path/to/codex
-```
 
 Explicit paid semantic evaluation, using a configured Pi models file (credential values are never printed):
 

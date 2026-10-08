@@ -23,7 +23,7 @@ The Apple engines target an Apple silicon Mac host; Podman targets Linux. Linux 
 ```mermaid
 flowchart TB
     Hosts[Embedded App or standalone Server] --> Runtime[Runtime: product authority, tasks, schedules]
-    Agent[Host Pot / Codex tools] --> Runtime
+    Agent[Host pot-agent tools] --> Runtime
     Runtime --> Manager[Sandbox Manager: inventory, lifecycle, scopes, recovery]
     Manager --> Registry[Provider registry and typed transport]
     Registry --> Linux[Linux provider: Containerization helper]
@@ -200,9 +200,9 @@ Separate supported, qualified and presently usable capabilities. The Manager ena
 
 Keep `exec_command`, `write_stdin` and `apply_patch` stable for compatible providers. For later qualified device/desktop capabilities, add typed tools such as `sandbox_observe` (screen/UI tree), `sandbox_input` (tap/swipe/text/button), `sandbox_apps` (list/launch/terminate/open URL), and bounded `sandbox_files` where qualified. Do not create a tool accepting arbitrary provider RPC, URL, guest PID, Host path or CLI arguments.
 
-Worker tool schemas derive from its fixed assignment. Main may see the safe union of qualified operations across its inventory with explicit target arguments and availability metadata. Calls are revalidated against the selected target; changing the execution default never redirects existing scopes or sessions. Refresh capability discovery at turn/session boundaries for both Pot and Codex; stale calls return `capability_unavailable` rather than falling back to Host or another provider.
+Worker tool schemas derive from its fixed assignment. Main may see the safe union of qualified operations across its inventory with explicit target arguments and availability metadata. Calls are revalidated against the selected target; changing the execution default never redirects existing scopes or sessions. Refresh capability discovery at turn/session boundaries for pot-agent; stale calls return `capability_unavailable` rather than falling back to Host or another provider.
 
-First preserve and qualify the shell/file loadout for Linux/macOS. Device tool schemas and image-valued MCP output are deferred with device automation; future screen tools must update both Drivers together.
+First preserve and qualify the shell/file loadout for Linux/macOS. Device tool schemas and image-valued MCP output are deferred with device automation; future screen tools must update pot-agent together.
 
 ## Lifecycle and preparation
 

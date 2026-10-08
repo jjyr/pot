@@ -33,9 +33,7 @@ mod tests {
             )
             .is_err()
         );
-        let NativeRef::Pot { file, .. } = current(&store).unwrap().unwrap().native_ref else {
-            panic!()
-        };
+        let NativeRef::Pot { file, .. } = current(&store).unwrap().unwrap().native_ref;
         std::fs::remove_file(file).unwrap();
         assert!(load_context(&store).is_err());
         drop(store);

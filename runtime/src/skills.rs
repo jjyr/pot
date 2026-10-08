@@ -64,17 +64,6 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
         selection: s.skill_selection.clone(),
     })
 }
-pub(crate) fn instructions(s: &Service, resources: &SkillResources) -> Result<String> {
-    let catalog = pot_agent::discover_skills(resources)?;
-    for message in &catalog.diagnostics {
-        tracing_diagnostic(s, message)?;
-    }
-    pot_agent::format_skills_for_prompt(&catalog.skills)
-}
-fn tracing_diagnostic(_s: &Service, message: &str) -> Result<()> {
-    eprintln!("Skill discovery: {message}");
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

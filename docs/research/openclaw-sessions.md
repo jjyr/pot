@@ -62,7 +62,7 @@ Six concepts:
   |        |                    |                           |
   |        v                    v                           |
   | G. Model/harness <-> Tools   [Workspace memory files]    |
-  |    built-in / Codex / CLI     MEMORY.md, memory/*.md     |
+  |    built-in / CLI             MEMORY.md, memory/*.md     |
   |        |                                                |
   |        v                                                |
   | H. Persist results + settle run + reply to source        |
@@ -85,7 +85,6 @@ Six concepts:
   Incognito uses process-memory storage rather than durable disk storage.
 ```
 
-D-G vary: legacy methods pass/no-op, Codex owns native thread/compactor; not uniform backend pipelines.[S6][S7]
 
 ## 3. A: Routing / isolation
 
@@ -174,7 +173,6 @@ Operator active-parent fork rejected except last-completed excludes unfinished t
 
 ### 5.1 Serial per session, budgeted parallel across
 
-CLI/embedded/Codex lane then claim; one writer/session, global-background parallel budget.[S4]
 
 maxConcurrent normal; subagents budget direct controller/maxConcurrent; cron-heartbeat-Swarm separate lanes avoid foreground blocking.
 
@@ -189,7 +187,6 @@ Check identity/lifecycle/owner; reset-delete-cancel fences old writes.**Cancel d
 | collect | Debounced merge, preserve source routes |
 | interrupt | Stop run, latest message |
 
-Default500ms/cap20/summarize overflow. Steering not force-stop tools/batches; Codex model boundaries.[S4]
 
 Merging/delegation retains sender permission ceiling, no borrowing later stronger sender.
 
@@ -251,7 +248,6 @@ Identity/rules/current history/summaries/tools/input/recall; bootstrap budgets/s
 
 Private-main MEMORY.md only, not shared-group merely same Agent; interpret broad fresh-session docs with privacy scope.[S2][S10]
 
-Codex projection into developer/current prompt but native history/compactor still owned; model/backend/client switch not all-state copying.[S7]
 
 ## 8. E: Pruning vs compaction
 
@@ -271,7 +267,6 @@ Near budget/provider overflow/manual/byte guard; include system/tools/pending/ou
 
 Safeguard new default pending asks/exactIDs/quality; failed validation keeps history/fails. Text-only summarizer marks images omitted, not screenshot understanding.
 
-Provider checkpoints/nativeCodex/custom successors differ; SQLite compactor keeps identity, raw retention not maintenance exemption.[S6]
 
 ## 9. F: Flush/memory/recall
 
@@ -334,7 +329,6 @@ Also profile/allow-deny/sandbox/identity-ACL. Unsandboxed all not privacy; watch
 
 Incognito memory-only entry/transcript/compact, expires24h/restart, no extension/archive/auto-flush; stop/clear.[S1]
 
-Hidden cross-tools/search but tools can persist files; ephemeral Codex still provider requests. Storage lifecycle, not all-effects sandbox.
 
 ## 12. Restart/archive/maintenance
 
@@ -398,7 +392,6 @@ All same pinned snapshot, do not transfer defaults across versions.
 - [S4 Queue](https://github.com/openclaw/openclaw/blob/a272cf0cd56eb9d0a1245daaaf139902ac32da01/docs/concepts/queue.md): lanes/input/restart.
 - [S5 Session schema](https://github.com/openclaw/openclaw/blob/a272cf0cd56eb9d0a1245daaaf139902ac32da01/docs/reference/session-management-compaction/schema.md): ID, metadata, fork, reset/transcript events.
 - [S6 Compaction](https://github.com/openclaw/openclaw/blob/a272cf0cd56eb9d0a1245daaaf139902ac32da01/docs/concepts/compaction.md): budgets/native/cancel.
-- [S7 Context](https://github.com/openclaw/openclaw/blob/a272cf0cd56eb9d0a1245daaaf139902ac32da01/docs/concepts/context-engine.md): API/legacy/Codex.
 - [S8 Store](https://github.com/openclaw/openclaw/blob/a272cf0cd56eb9d0a1245daaaf139902ac32da01/docs/reference/session-management-compaction/store.md): SQLite/migration/workers.
 - [S9 Pruning](https://github.com/openclaw/openclaw/blob/a272cf0cd56eb9d0a1245daaaf139902ac32da01/docs/concepts/session-pruning.md): projection/server-client/images.
 - [S10 Workspace](https://github.com/openclaw/openclaw/blob/a272cf0cd56eb9d0a1245daaaf139902ac32da01/docs/concepts/agent-workspace.md): bootstrap/private memory.

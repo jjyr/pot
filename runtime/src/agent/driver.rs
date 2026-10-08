@@ -4,7 +4,7 @@ use futures::future::BoxFuture;
 use pot_core::{DriverEvent, Sink};
 pub use pot_core::{DriverHost, EventGate, Outcome, SessionHandle, TurnRequest, Update};
 mod feedback;
-use feedback::{context, prepare_context};
+use feedback::context;
 pub async fn execute(
     s: &Service,
     request: &SendMessage,
@@ -45,15 +45,9 @@ pub async fn execute(
         "Engine does not support checkpoint resume"
     );
     let epoch = binding.epoch;
-    let mut session = match binding.spec.engine {
-        Engine::Pot => s
-            .agent_host
-            .session(context(s, request, &binding)?, binding)?,
-        Engine::Codex => pot_driver::codex::CodexHost {
-            hosts: s.codex.clone(),
-        }
-        .session(context(s, request, &binding)?, binding)?,
-    };
+    let mut session = s
+        .agent_host
+        .session(context(s, request, &binding)?, binding)?;
     let result = run_session(session.as_mut(), epoch, request, resuming, &mut |update| {
         transcript.record(s, update)
     })
@@ -97,19 +91,6 @@ async fn run_session(
         Outcome::Unknown => {
             bail!("Agent event stream ended without a terminal event; stop unconfirmed")
         }
-    }
-}
-
-/// Validate a candidate before settings commit; preparation never calls a model.
-pub async fn prepare(s: &Service, spec: &ResolvedSpec) -> Result<Option<NativeRef>> {
-    // Initial selection is metadata-only; open the native session on the first real turn.
-    if current(&s.inner.lock().unwrap().store)?.is_none() {
-        return Ok(None);
-    }
-    if spec.engine == Engine::Codex {
-        codex::prepare(&prepare_context(s)?, &s.codex, spec).await
-    } else {
-        Ok(None)
     }
 }
 

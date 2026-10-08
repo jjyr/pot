@@ -6032,19 +6032,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pot-driver"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "libc",
- "pot-core",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "pot-eval"
 version = "0.1.0"
 dependencies = [
@@ -6125,7 +6112,6 @@ dependencies = [
  "libc",
  "pot-agent",
  "pot-core",
- "pot-driver",
  "pot-gateway",
  "pot-protocol",
  "pot-resource",

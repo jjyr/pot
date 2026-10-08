@@ -130,7 +130,6 @@ page_usage = dict(
         )
     ],
     agent_model_next_offset=None,
-    native_turn_usage=False,
     tools=[],
     timezone="Asia/Shanghai",
     scope="all",

@@ -67,7 +67,6 @@ fn description(spec: &ResolvedSpec) -> Result<DriverDescription> {
         injectable_services: true,
         request_usage: true,
         compaction_lifecycle: true,
-        ..Default::default()
     })
 }
 impl DriverHost for AgentHost {

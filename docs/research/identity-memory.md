@@ -34,21 +34,12 @@ Same main UI, selected per-call context; timeline/topics/tasks/memory lifetimes 
 
 OpenClaw rolling/Hermes snapshots/Dot tasks/Muse side chats support directions.[O3][H1][D1][M2]
 
-### 1.3 Candidate to test
-
-**Light hybrid, not final: product identity/explicit choices/business state; native inference/sessions; gradual experience memory.**
-
-No required extra product LLM+Codex worker; one Codex main with product persistence/scheduler/UI, role not self-built loop.
-
-Test dynamic per-turn injection and native memory correction/disable/forget, pinned prototypes not diagram proof.
-
 ## 2. Evidence/confidence
 
 | System | Read | Confirm | Cannot confirm |
 |---|---|---|---|
 | OpenClaw |Pinned workspace/memory/main/compact/provenance docs |Public files/runtime/search/maintenance |All code correctness/our measured quality |
 | Hermes |Memory/personality/providers/compact |Small core/frozen/search/providers |Provider equivalence/claimed quality |
-| Codex |Official memories/App Server/AGENTS |Local lifecycle/interfaces |Hosted internals/ACP parity |
 | Claude Code |Official memory/execution |Rules/auto/project/session/compact |Consumer Claude parity |
 | Consumer Claude |Current/legacy help |Controls/topics/project boundaries |Schemas/ranking/full algorithms |
 | Dot |Tasks-memory |Notes/memory/task/background |Notes schema/recall/rolling internals |
@@ -59,7 +50,6 @@ Hermes: 6dbb7b9ab857842617c2c35b63b49bd6ee77fc56.
 
 Confirmed means explicit docs, not measured; recommendations labeled, pins matter, old JSONL/reset defaults not current facts.
 
-Codex core partly open-source, not wholly closed; compare public client vs undisclosed hosted mechanisms.
 
 ## 3. Separate state concepts
 
@@ -110,7 +100,6 @@ Workspace separates:
 
 - Human-readable identity/memory;
 - Agent SQLite runtime/sessions/transcripts/indexes;
-- Native codex-home;
 - Legacy migration/sidecars.[O1]
 
 Not few Markdown+sessions.json; cwd not hard sandbox.
@@ -207,45 +196,6 @@ Instance-project separation/small cost/search/skills/simple.
 Frozen permanent-main conflict/multiple writers/learning guesses; official one-Agent/home.[H1]
 
 Specific page search actual messages/noLLM vs README FTS+summarization; prefer page, no benchmark claims.
-
-## 6. Codex sessions/identity ownership
-
-### 6.1 Local memory exists
-
-Official: [C1]
-
-- Web/local separate controls;
-- Local **off by default**;
-- Eligible past chats, skip active/short-lived;
-- Idle background, not immediate per-turn;
-- Low allowance may skip;
-- Memories summaries/durable/evidence in HOME;
-- Generated state, manual edits not primary control;
-- Per-chat use/contribute switches.
-
-Cannot justify own system by absence; always-active main idle-driven freshness needs testing.
-
-### 6.2 AGENTS vs auto
-
-Explicit stable role/preferences vs generated experience.[C3]
-
-Cannot override all built-in higher rules; test identity/task expression/conflicts, not just file read.
-
-### 6.3 App Server
-
-start/resume/fork/compact lifecycle.[C2]
-
-Product timeline/native mapping, independent task threads, no full inheritance requirement.
-
-**ACP communication != all memory controls**; pinned control/update/compact/import-export tests, no assumed native parity.
-
-### 6.4 Different promises
-
-**Codex-first**reuse sessions/memory, less work, only supported freshness/control/scope promises.
-
-**Product memory/native execution**authoritative profile/duties/events, relevant injection, native experience optional, own versions/consistency/forget.
-
-First fast desktop loop, second future drivers/nodes; not all duplicated memories naturally consistent.
 
 ## 7. Claude Code vs consumer
 
@@ -344,14 +294,14 @@ Similar filenames not shared implementation/file-only proof; assembly/compact un
 
 ## 10. Comparison
 
-| Dimension | OpenClaw | Hermes | Codex | Claude Code | Dot | Muse |
-|---|---|---|---|---|---|---|
-| Identity |Files |SOUL-overlay |AGENTS bounded |CLAUDE |Product, unknown internals |GUI/files |
-| Core |USER/MEMORY/journal |Small core |Generated |Index/topics |Notes/ChatGPT |Memory/files |
-| Recall |Scoped search |SQLite |Evidence not generic API |Resume/files |Selected, unknown |Files, unknown |
-| Main |Rolling/no time reset |Continuous/natural new |Thread |Cwd task |Main/task conversations |Main/side |
-| Update |Writes/flush/dream |Writes-review/frozen |Idle eligible |Active writes |Responsibilities |Chat/UI |
-| Correct/forget |Limited lineage |Tools/providers |Official generated controls |Edit/delete |Separate notes |Best-effort/reset |
+| Dimension | OpenClaw | Hermes | Claude Code | Dot | Muse |
+|---|---|---|---|---|---|
+| Identity |Files |SOUL-overlay |CLAUDE |Product, unknown internals |GUI/files |
+| Core |USER/MEMORY/journal |Small core |Index/topics |Notes/ChatGPT |Memory/files |
+| Recall |Scoped search |SQLite |Resume/files |Selected, unknown |Files, unknown |
+| Main |Rolling/no time reset |Continuous/natural new |Cwd task |Main/task conversations |Main/side |
+| Update |Writes/flush/dream |Writes-review/frozen |Active writes |Responsibilities |Chat/UI |
+| Correct/forget |Limited lineage |Tools/providers |Edit/delete |Separate notes |Best-effort/reset |
 
 No best-project-copy answer; choose ownership/freshness/delete/runtime cost.
 
@@ -367,7 +317,6 @@ Engineering synthesis, not market statistics.
 | RAG/hybrid |Bounded large history |Misses/wrong scope/stale ranking |Archives/search |
 | Skills |Reusable procedure |Wrong propagation/expiry |Integrations/browser |
 | Graph/user service |Rich relations |Ops/copies/explainability |Later proven need |
-| Vendor memory |Less work/native fit |Control/migration |Experience/Codex-first |
 
 **Files/SQLite/vector index coexist**: edit surface/authority/rebuildable views, explicit facts owner.
 
@@ -662,8 +611,6 @@ agent-volume/
   state/
     agent.sqlite
   artifacts/
-  engine-homes/
-    codex/
 ```
 
 Concept only, core.md DB-readable view; edits same commit path, no second authority.
@@ -763,10 +710,6 @@ Official read materials, pinned references/live help changes; not full source au
 
 ### OpenAI / ChatGPT Dot
 
-- [C1 Memories](https://developers.openai.com/codex/customization/memories): local/web/background/controls.
-- [C2 App Server](https://developers.openai.com/codex/app-server): threads/integration.
-- [C3 AGENTS](https://developers.openai.com/codex/guides/agents-md): explicit guidance/earlier research.
-- [D1 Dot](https://developers.openai.com/codex/dots/tasks-and-memory): background/tasks/notes/channels/schedules.
 
 ### Anthropic
 

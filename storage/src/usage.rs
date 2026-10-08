@@ -1,8 +1,4 @@
 //! One shared, request-level ledger for the main agent and every task.
-use crate::{
-    bindings,
-    store::{Store, now},
-};
 use anyhow::{Result, anyhow, bail};
 use pot_core as agent;
 use serde::Deserialize;
@@ -121,7 +117,7 @@ impl Ledger {
     pub fn open(path: &std::path::Path) -> Result<Self> {
         let c = Connection::open(path)?;
         c.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=EXTRA;
-        CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending');
+        CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending',compaction_id TEXT);
         CREATE INDEX IF NOT EXISTS usage_time ON requests(at);
         CREATE INDEX IF NOT EXISTS usage_scope ON requests(scope,at);
         CREATE TABLE IF NOT EXISTS tools(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,name TEXT NOT NULL,at INTEGER NOT NULL,end_at INTEGER,bytes INTEGER,failed INTEGER NOT NULL DEFAULT 0);
@@ -132,33 +128,9 @@ impl Ledger {
         CREATE TABLE IF NOT EXISTS waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0);")?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS wait_routes(scope TEXT PRIMARY KEY,provider TEXT NOT NULL);
         CREATE TRIGGER IF NOT EXISTS clear_wait_route AFTER DELETE ON waits BEGIN DELETE FROM wait_routes WHERE scope=OLD.scope; END;
-        CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL);")?;
-        let route_columns = c
-            .prepare("PRAGMA table_info(request_routes)")?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        // Old requests retain unknown provenance; never infer from the current profile/model.
-        for (column, definition) in [
-            ("agent", "TEXT NOT NULL DEFAULT 'unknown'"),
-            ("profile_id", "TEXT NOT NULL DEFAULT ''"),
-        ] {
-            if !route_columns.iter().any(|name| name == column) {
-                c.execute_batch(&format!(
-                    "ALTER TABLE request_routes ADD COLUMN {column} {definition};"
-                ))?;
-            }
-        }
+        CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL,agent TEXT NOT NULL,profile_id TEXT NOT NULL);")?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS compactions(id TEXT PRIMARY KEY, scope TEXT NOT NULL, turn_id TEXT NOT NULL, at INTEGER NOT NULL, end_at INTEGER, reason TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'running', tokens_before INTEGER, tokens_after INTEGER, entry_id TEXT);
         CREATE INDEX IF NOT EXISTS compaction_scope ON compactions(scope,at);")?;
-        let has_column = c
-            .prepare("PRAGMA table_info(requests)")?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-            .iter()
-            .any(|name| name == "compaction_id");
-        if !has_column {
-            c.execute_batch("ALTER TABLE requests ADD COLUMN compaction_id TEXT;")?;
-        }
         c.execute_batch(
             "CREATE INDEX IF NOT EXISTS request_compaction ON requests(compaction_id);
             UPDATE compactions SET state='interrupted' WHERE state='running';",
@@ -170,27 +142,7 @@ impl Ledger {
         )?;
         Ok(Self(c))
     }
-    pub fn import_legacy(&self, scope: &str, store: &Store) -> Result<()> {
-        // Recover old provenance only from validated immutable snapshots for this lane.
-        for binding in bindings::bindings(store)? {
-            if binding.pot_owner != scope {
-                continue;
-            }
-            let engine = serde_json::to_value(&binding.spec.engine)?;
-            self.0.execute("UPDATE request_routes SET agent=?,profile_id=? WHERE agent='unknown' AND provider=? AND epoch=? AND spec_hash=? AND request_id IN(SELECT id FROM requests WHERE scope=? AND model=?)",params![engine.as_str().unwrap(),binding.spec.source_profile_id,binding.spec.provider,binding.epoch,binding.spec.spec_hash,scope,binding.spec.model])?;
-        }
-        if let Some(raw) = store.get("execution.usage")? {
-            let values: Vec<Value> = serde_json::from_str(&raw)?;
-            for (i, value) in values.iter().enumerate() {
-                let key = format!("legacy:{scope}:{i}");
-                let inserted=self.0.execute("INSERT OR IGNORE INTO requests(id,scope,turn_id,at,model,state) VALUES (?,?, 'legacy',0,'DeepSeek (历史)','legacy')",params![key,scope])?;
-                if inserted > 0 {
-                    self.settle(&key, value)?;
-                }
-            }
-        }
-        Ok(())
-    }
+
     pub fn policy(&self) -> Result<Policy> {
         use rusqlite::OptionalExtension;
         let s: Option<String> = self
@@ -446,7 +398,7 @@ impl Ledger {
             json!({"label":a.format("%m-%d").to_string(),"range":format!("{a} — {b}"),"input":0,"output":0,"cache":0,"unknown":0})
         }).collect();
         let aggregate = |from: i64, to: i64| -> Result<Totals> {
-            Ok(self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL OR state='native_incomplete' THEN 1 ELSE 0 END),0) FROM requests WHERE (?='' OR scope=?) AND at>=? AND at<?",params![q.scope,q.scope,from,to],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?)
+            Ok(self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL THEN 1 ELSE 0 END),0) FROM requests WHERE (?='' OR scope=?) AND at>=? AND at<?",params![q.scope,q.scope,from,to],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?)
         };
         let lifetime = aggregate(0, i64::MAX)?;
         let historical = aggregate(0, 1)?;
@@ -472,10 +424,10 @@ impl Ledger {
             (0, i64::MAX)
         };
         let routing_total: Totals = self.0.query_row(
-            "SELECT COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.input IS NULL OR r.output IS NULL OR r.state='native_incomplete' THEN 1 ELSE 0 END),0) FROM requests r WHERE r.scope='main' AND (?='' OR r.scope=?) AND r.at>=? AND r.at<? AND EXISTS(SELECT 1 FROM routing_turns t WHERE t.turn_id=r.turn_id)",
+            "SELECT COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.input IS NULL OR r.output IS NULL THEN 1 ELSE 0 END),0) FROM requests r WHERE r.scope='main' AND (?='' OR r.scope=?) AND r.at>=? AND r.at<? AND EXISTS(SELECT 1 FROM routing_turns t WHERE t.turn_id=r.turn_id)",
             params![q.scope,q.scope,group_start,group_end],
             |r| Ok(Totals { requests:r.get(0)?, input:r.get(1)?, output:r.get(2)?, cache:r.get(3)?, unknown:r.get(4)? }))?;
-        let mut stmt = self.0.prepare("SELECT COALESCE(t.agent,'unknown'),r.model,COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),SUM(CASE WHEN r.input IS NULL OR r.output IS NULL OR r.state='native_incomplete' THEN 1 ELSE 0 END) FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? GROUP BY COALESCE(t.agent,'unknown'),r.model ORDER BY COALESCE(SUM(r.input),0)+COALESCE(SUM(r.output),0) DESC,1,2 LIMIT 21 OFFSET ?")?;
+        let mut stmt = self.0.prepare("SELECT COALESCE(t.agent,'unknown'),r.model,COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),SUM(CASE WHEN r.input IS NULL OR r.output IS NULL THEN 1 ELSE 0 END) FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? GROUP BY COALESCE(t.agent,'unknown'),r.model ORDER BY COALESCE(SUM(r.input),0)+COALESCE(SUM(r.output),0) DESC,1,2 LIMIT 21 OFFSET ?")?;
         let mut agent_models = stmt.query_map(params![q.scope,q.scope,group_start,group_end,q.offset], |r| Ok(json!({"agent":r.get::<_,String>(0)?,"model":r.get::<_,String>(1)?,"requests":r.get::<_,u64>(2)?,"input":r.get::<_,u64>(3)?,"output":r.get::<_,u64>(4)?,"cache":r.get::<_,u64>(5)?,"unknown":r.get::<_,u64>(6)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let agent_model_next_offset = if agent_models.len() > 20 {
             agent_models.truncate(20);
@@ -513,98 +465,14 @@ impl Ledger {
             [&q.scope],
             |r| r.get(0),
         )?;
-        let compaction_totals: Totals = self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL OR state='native_incomplete' THEN 1 ELSE 0 END),0) FROM requests WHERE scope=? AND compaction_id IS NOT NULL",[&q.scope],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?;
+        let compaction_totals: Totals = self.0.query_row("SELECT COUNT(*),COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache),0),COALESCE(SUM(CASE WHEN input IS NULL OR output IS NULL THEN 1 ELSE 0 END),0) FROM requests WHERE scope=? AND compaction_id IS NOT NULL",[&q.scope],|r|Ok(Totals{requests:r.get(0)?,input:r.get(1)?,output:r.get(2)?,cache:r.get(3)?,unknown:r.get(4)?}))?;
         if !q.scope.is_empty() {
-            let mut stmt = self.0.prepare("SELECT c.id,c.at,c.reason,c.state,c.tokens_before,c.tokens_after,COUNT(r.id),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.id IS NOT NULL AND (r.input IS NULL OR r.output IS NULL OR r.state='native_incomplete') THEN 1 ELSE 0 END),0) FROM compactions c LEFT JOIN requests r ON r.compaction_id=c.id WHERE c.scope=? GROUP BY c.id ORDER BY c.at DESC,c.id DESC LIMIT 20 OFFSET ?")?;
+            let mut stmt = self.0.prepare("SELECT c.id,c.at,c.reason,c.state,c.tokens_before,c.tokens_after,COUNT(r.id),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.id IS NOT NULL AND (r.input IS NULL OR r.output IS NULL) THEN 1 ELSE 0 END),0) FROM compactions c LEFT JOIN requests r ON r.compaction_id=c.id WHERE c.scope=? GROUP BY c.id ORDER BY c.at DESC,c.id DESC LIMIT 20 OFFSET ?")?;
             for row in stmt.query_map(params![q.scope,q.offset],|r|Ok(json!({"id":r.get::<_,String>(0)?,"label":Utc.timestamp_millis_opt(r.get::<_,i64>(1)?).single().unwrap().with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string(),"reason":r.get::<_,String>(2)?,"state":r.get::<_,String>(3)?,"tokens_before":r.get::<_,Option<u64>>(4)?,"tokens_after":r.get::<_,Option<u64>>(5)?,"requests":r.get::<_,u64>(6)?,"input":r.get::<_,u64>(7)?,"output":r.get::<_,u64>(8)?,"cache":r.get::<_,u64>(9)?,"unknown":r.get::<_,u64>(10)?})))? { compactions.push(row?); }
         }
-        let native_turn_usage: bool = self.0.query_row(
-            "SELECT EXISTS(SELECT 1 FROM requests WHERE (?='' OR scope=?) AND state LIKE 'native_%')",
-            params![q.scope,q.scope], |row| row.get(0))?;
         Ok(
-            json!({"routing_total":routing_total,"agent_models":agent_models,"agent_model_next_offset":agent_model_next_offset,"native_turn_usage":native_turn_usage,"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
+            json!({"routing_total":routing_total,"agent_models":agent_models,"agent_model_next_offset":agent_model_next_offset,"days":q.days,"timezone":q.timezone,"scope":q.scope,"bucket_days":width,"total":total,"lifetime":lifetime,"historical":historical,"buckets":buckets,"requests":requests,"tools":tools,"offset":q.offset,"next_offset":if q.offset+20<lifetime.requests as usize {Some(q.offset+20)} else {None},"quota":self.quota(at)?,"waiting":self.waiting(&q.scope)?,"compactions":compactions,"compaction_total":compaction_totals,"compaction_count":compaction_count,"compaction_next_offset":if q.offset+20<compaction_count as usize {Some(q.offset+20)} else {None},"capabilities":{"compaction":true,"provider_quota":false}}),
         )
     }
 }
-impl Ledger {
-    /// CLI subscription usage is post-hoc. A pending turn has unknown usage, not zero.
-    pub fn begin_native(
-        &self,
-        id: &str,
-        scope: &str,
-        turn: &str,
-        spec: &agent::ResolvedSpec,
-        epoch: u64,
-    ) -> Result<()> {
-        let quota = self.quota(now())?;
-        anyhow::ensure!(
-            quota["active"] != true || quota["remaining"].as_u64().unwrap_or(0) > 0,
-            "Pot allowance is exhausted; native CLI turns require manual continuation after it resets"
-        );
-        let tx = self.0.unchecked_transaction()?;
-        self.0.execute("INSERT INTO requests(id,scope,turn_id,at,model,state) VALUES (?,?,?,?,?,'native_pending')", params![id,scope,turn,now(),spec.model])?;
-        self.route(id, spec, epoch)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn native_incomplete(&self, request: &str) -> Result<()> {
-        self.0.execute(
-            "UPDATE requests SET state='native_incomplete' WHERE id=?",
-            [request],
-        )?;
-        Ok(())
-    }
-
-    pub fn initialize_native_usage(&self, native: &str) -> Result<()> {
-        self.0.execute_batch("CREATE TABLE IF NOT EXISTS native_usage(native TEXT PRIMARY KEY,input INTEGER NOT NULL,output INTEGER NOT NULL,cache INTEGER NOT NULL)")?;
-        self.0.execute(
-            "INSERT OR IGNORE INTO native_usage VALUES (?,0,0,0)",
-            [native],
-        )?;
-        Ok(())
-    }
-    /// Persist the cumulative baseline and per-turn difference atomically. Duplicate
-    /// notifications cannot add usage twice, including after Runtime restart.
-    pub fn native_usage(&self, request: &str, native: &str, totals: &Value) -> Result<()> {
-        self.0.execute_batch("CREATE TABLE IF NOT EXISTS native_usage(native TEXT PRIMARY KEY,input INTEGER NOT NULL,output INTEGER NOT NULL,cache INTEGER NOT NULL)")?;
-        let input = totals["inputTokens"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("Missing native input usage"))?;
-        let output = totals["outputTokens"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("Missing native output usage"))?;
-        let cache = totals["cachedInputTokens"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("Missing native cached usage"))?;
-        anyhow::ensure!(cache <= input, "Invalid native cached usage");
-        anyhow::ensure!(
-            input <= i64::MAX as u64 && output <= i64::MAX as u64,
-            "Invalid native usage"
-        );
-        let tx = self.0.unchecked_transaction()?;
-        let previous = self
-            .0
-            .query_row(
-                "SELECT input,output,cache FROM native_usage WHERE native=?",
-                [native],
-                |r| {
-                    Ok((
-                        r.get::<_, u64>(0)?,
-                        r.get::<_, u64>(1)?,
-                        r.get::<_, u64>(2)?,
-                    ))
-                },
-            )
-            .map_err(|_| anyhow!("Native usage baseline unavailable; historical usage cannot be attributed to this turn"))?;
-        anyhow::ensure!(
-            input >= previous.0 && output >= previous.1 && cache >= previous.2,
-            "Native usage counter reset; usage precision unavailable"
-        );
-        let changed = self.0.execute("UPDATE requests SET input=COALESCE(input,0)+?,output=COALESCE(output,0)+?,cache=cache+?,state='native_reported' WHERE id=?", params![input-previous.0,output-previous.1,cache-previous.2,request])?;
-        anyhow::ensure!(changed == 1, "Native usage request missing");
-        self.0.execute("INSERT INTO native_usage VALUES (?,?,?,?) ON CONFLICT(native) DO UPDATE SET input=excluded.input,output=excluded.output,cache=excluded.cache",params![native,input,output,cache])?;
-        tx.commit()?;
-        Ok(())
-    }
-}
+impl Ledger {}

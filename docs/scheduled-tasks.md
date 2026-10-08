@@ -44,7 +44,7 @@ API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `reques
 
 ## Validation
 
-Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and fixed environment assignment. The current Host Pot/Codex and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/host-pot-agent-20261006.md).
+Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and fixed environment assignment. The current Host pot-agent and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/host-pot-agent-20261006.md).
 
 ```sh
 mise run test

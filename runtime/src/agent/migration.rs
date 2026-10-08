@@ -46,7 +46,6 @@ fn queue(
     workspace: &std::path::Path,
     request: &Request,
     spec: ResolvedSpec,
-    native: Option<NativeRef>,
 ) -> Result<Migration> {
     anyhow::ensure!(
         !request.request_id.is_empty() && request.request_id.len() <= 128,
@@ -83,13 +82,9 @@ fn queue(
     let target = Binding {
         pot_owner: request.owner.clone(),
         epoch,
-        native_ref: if spec.engine == Engine::Codex {
-            native.ok_or_else(|| anyhow!("Codex candidate must be opened before migration"))?
-        } else {
-            NativeRef::Pot {
-                file: data.join(format!("agent-context-{epoch}-{}.json", id())),
-                session_id: Some(id()),
-            }
+        native_ref: NativeRef::Pot {
+            file: data.join(format!("agent-context-{epoch}-{}.json", id())),
+            session_id: Some(id()),
         },
         spec,
         schema_version: SCHEMA_VERSION,
@@ -463,30 +458,12 @@ pub async fn migrate(
         .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     let owner = crate::tasks::owner(&root, &request.owner)?;
     initialize(&owner).map_err(internal)?;
-    let previous = owner
-        .inner
-        .lock()
-        .unwrap()
-        .store
-        .get(&format!("agent.migration:{}", request.request_id))
-        .map_err(internal)?;
-    let native = if let Some(previous) = previous {
-        Some(
-            serde_json::from_str::<Migration>(&previous)
-                .map_err(|e| internal(e.into()))?
-                .target
-                .native_ref,
-        )
-    } else {
-        driver::prepare(&owner, &spec).await.map_err(internal)?
-    };
     let migration = queue(
         &mut owner.inner.lock().unwrap().store,
         &owner.data,
         &owner.workspace,
         &request,
         spec,
-        native,
     )
     .map_err(|e| error(StatusCode::CONFLICT, "migration_conflict", &e.to_string()))?;
     apply_pending(&owner, false).map_err(internal)?;
@@ -569,11 +546,6 @@ pub async fn settings(
             ));
         }
     }
-    let native = if settings.follow_main && !already_saved {
-        driver::prepare(&s, &spec).await.map_err(internal)?
-    } else {
-        None
-    };
     let mut inner = s.inner.lock().unwrap();
     let mut fingerprint = json!({"profile":settings.profile,"expected_revision":settings.expected_revision,"follow_main":settings.follow_main});
     if !settings.follow_worker {
@@ -622,12 +594,6 @@ pub async fn settings(
     let result = (|| -> Result<()> {
         if settings.follow_main && current(&inner.store)?.is_none() {
             select_initial(&mut inner.store, "main", &s.data, spec)?;
-            if let Some(NativeRef::Codex {
-                thread_id: Some(thread),
-            }) = &native
-            {
-                save_codex_thread(&mut inner.store, thread)?;
-            }
         } else if settings.follow_main {
             queue(
                 &mut inner.store,
@@ -640,7 +606,6 @@ pub async fn settings(
                     reason: "settings_changed".into(),
                 },
                 spec,
-                native,
             )?;
         }
         profiles.retain(|p| p.id != settings.profile.id);
@@ -721,8 +686,7 @@ mod tests {
     fn crash_after_every_stage_preserves_single_current_binding_and_runtime_state() {
         for crash_after in 0..=3 {
             let (dir, mut store, request, spec) = fixture();
-            let mut migration =
-                queue(&mut store, &dir, &dir, &request, spec.clone(), None).unwrap();
+            let mut migration = queue(&mut store, &dir, &dir, &request, spec.clone()).unwrap();
             for _ in 0..crash_after {
                 step(&mut store, &dir, &["fixture-secret".into()], &mut migration).unwrap();
             }
@@ -764,7 +728,7 @@ mod tests {
                 store.get("execution.paused").unwrap().unwrap(),
                 "checkpoint"
             );
-            let duplicate = queue(&mut store, &dir, &dir, &request, spec, None).unwrap();
+            let duplicate = queue(&mut store, &dir, &dir, &request, spec).unwrap();
             assert_eq!(duplicate.stage, Stage::Active);
             assert_eq!(
                 store
@@ -783,17 +747,15 @@ mod tests {
     fn failed_candidate_keeps_old_binding_and_conflicting_requests_are_rejected() {
         let (dir, mut store, request, spec) = fixture();
         let source = current(&store).unwrap().unwrap();
-        let mut migration = queue(&mut store, &dir, &dir, &request, spec.clone(), None).unwrap();
+        let mut migration = queue(&mut store, &dir, &dir, &request, spec.clone()).unwrap();
         step(&mut store, &dir, &[], &mut migration).unwrap();
-        let NativeRef::Pot { file, .. } = &migration.target.native_ref else {
-            panic!()
-        };
+        let NativeRef::Pot { file, .. } = &migration.target.native_ref;
         std::fs::write(file, "corrupt").unwrap();
         assert!(step(&mut store, &dir, &[], &mut migration).is_err());
         assert_eq!(current(&store).unwrap().unwrap(), source);
         let mut conflicting = request.clone();
         conflicting.reason = "needs_rebind".into();
-        assert!(queue(&mut store, &dir, &dir, &conflicting, spec, None).is_err());
+        assert!(queue(&mut store, &dir, &dir, &conflicting, spec).is_err());
         drop(store);
         std::fs::remove_dir_all(dir).unwrap();
     }

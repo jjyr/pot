@@ -9,11 +9,10 @@ flowchart TB
     App[macOS App: chat, tasks, settings, environments] --> Server[Host Server / Runtime / Storage / Gateway]
     Server --> Helper[Sandbox Helper]
     Server --> Pot[Host pot-agent in-process]
-    Server --> Codex[Host Codex App Server]
+    Pot --> Gateway[Model Gateway]
+    Gateway --> APIs[Model APIs]
     Pot --> Permission[pot-agent permission policy]
     Permission --> Tools[Injected Runtime execution backend]
-    Codex --> MCP[Scoped Pot MCP]
-    MCP --> Tools
     Tools --> Host[Authorized Host executor]
     Tools --> Manager[Host Sandbox manager]
     Manager --> Helper
@@ -29,16 +28,16 @@ flowchart TB
 | Helper | Start Host Server; separate VM instances and mounts; graceful product/VM shutdown | `helper/Sources/PotHelper/main.swift` |
 | Server / Runtime | HTTP/SSE/MCP/PTY hosting, authoritative messages, scheduling, sessions, cancellations | `server/src/`, `runtime/src/` |
 | Sandbox manager | Inventory, selection, lifecycle serialization, scoped execution, leases, durable operation receipts/quarantine | `sandbox/src/manager.rs`; Runtime authorization bridge in `runtime/src/sandbox.rs` |
-| Agent / Driver | Host in-process pot-agent and Codex App Server; injected execution backend / MCP | `agent/src/lib.rs`, `driver/src/codex.rs` |
+| Agent | Host in-process pot-agent; injected execution backend | `agent/src/lib.rs` |
 | Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite and native session bindings | `gateway/src/`, `storage/src/` |
 | Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `sandbox-images/linux/default/executor.py`, `tool-executor/src/`, `sandbox-images/linux/default/sandbox.sh` |
 
-The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` remains for authenticated Codex/model integration, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects worker management and switching Sandboxes.
+The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` carries authenticated tool/model integration metadata, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects worker management and switching Sandboxes.
 
 pot-agent owns [permission policy](permissions.md) and bounded
 [tool composition](tool-composition.md); Runtime supplies owner services and
 execution routing. Main defaults to Host and Workers to their assigned Sandbox.
-Codex retains its scoped Sandbox MCP loadout. Pinned plugins use the same tool admission path and environment-specific Node runners; [computer use](computer-use.md) follows Host/Sandbox permissions. No Sandbox failure causes Host fallback.
+Pinned plugins use the same tool admission path and environment-specific Node runners; [computer use](computer-use.md) follows Host/Sandbox permissions. No Sandbox failure causes Host fallback.
 
 Model inference location is independent: Agent processes are local, model APIs can be remote or an explicitly configured loopback endpoint.
 
@@ -48,14 +47,14 @@ Host state lives in `root/product`: SQLite messages/usage, tasks/schedules, priv
 
 Tasks keep independent Agent/profile snapshots and immutable `sandbox_id`. Schedules resolve and save their environment when configured. A worker turn holds an environment lease, and dispatched tools hold operation leases. Stop/delete rejects active task/operation leases and unknown outcomes. Task cancellation settles its remote processes without stopping the shared VM. A cgroup contains background and `setsid` descendants. Completed execution receipts replay the saved result, while conflicting/incomplete requests never reexecute. Client disconnects do not discard cleanup.
 
-Host restart preserves CLI bindings and artifacts, marks interrupted turns visibly and quarantines unsettled executions. Main-only `recover` confirms executor cancellation or VM termination; it never repeats a command. Definitions referenced by tasks or schedules cannot be deleted. Deleted identities cannot be reused, and deletion retains workspace artifacts. Desktop is optional and explicitly started; stopping its environment closes it along with the guest.
+Host restart preserves Agent bindings and artifacts, marks interrupted turns visibly and quarantines unsettled executions. Main-only `recover` confirms executor cancellation or VM termination; it never repeats a command. Definitions referenced by tasks or schedules cannot be deleted. Deleted identities cannot be reused, and deletion retains workspace artifacts. Desktop is optional and explicitly started; stopping its environment closes it along with the guest.
 
-Multiple tasks sharing a VM are cooperative users of the same guest account. Workspace directories are organization, not task-level filesystem isolation. macOS/Windows provider qualification and Codex Host tools are outside this increment.
+Multiple tasks sharing a VM are cooperative users of the same guest account. Workspace directories are organization, not task-level filesystem isolation. macOS/Windows provider qualification are outside this increment.
 
 ## Tasks, profiles and usage
 
 Background concurrency defaults to 8, with profile/provider limits, FIFO runnable queues, independent main chat and serial turns within each lane. Follow-ups persist; workers cannot recursively delegate. Completion reports are durable and summarized by a read-only main turn. Schedules own time zones, occurrence deduplication, missed-run policy and overlap prevention.
 
-`agent.bindings.v1` holds resolved immutable Agent specifications, checksums, epochs and native refs. Profile changes use durable migration; existing tasks keep their bindings. Model requests reserve allowance before networking, including tool continuations and failures. pot-agent uses a gateway token rather than provider secrets; Codex retains its native Host authorization home. Product execution limits remain separate from credentials.
+`agent.bindings.v1` holds resolved immutable Agent specifications, checksums, epochs and native refs. Profile changes use durable migration; existing tasks keep their bindings. Model requests reserve allowance before networking, including tool continuations and failures. pot-agent uses a gateway token rather than provider secrets; product execution limits remain separate from credentials.
 
 Runtime exposes HTTP/SSE; App uses cached snapshots and paginated polling with stale-result rejection. SQLite uses DELETE journal and synchronous=EXTRA. Query live state through the API. [Runtime contract](../runtime/README.md) documents the API, and [validation](validation/host-pot-agent-20261006.md) records current acceptance.

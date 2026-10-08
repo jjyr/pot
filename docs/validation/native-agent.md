@@ -5,12 +5,8 @@ Date: 2026-10-06. This replaces Pi execution in source. Old Pi acceptance report
 ## Implemented scope
 
 - Rust `pot-agent` handles direct OpenAI Chat Completions / Responses, Anthropic Messages, and Gemini model/tool loops.
-- Codex App Server and Grok ACP remain native drivers with their own agent loops.
-- Built-in tools use Codex-style `apply_patch` and bounded `exec_command`; main task/schedule tools reuse the role-scoped MCP dispatcher.
 - Storage persists complete provider-native assistant replay, tool calls/results/receipts and checkpoints. Compaction and model requests share Runtime's reservation/usage policy.
 - Pi RPC, extensions, npm dependencies, credential import scripts, executable discovery and smoke-agent fallback are removed. New `pot-v2.sqlite` / `usage-v2.sqlite` files intentionally do not import old development sessions.
-
-Design references were the locally checked-out Pi commit `9ad083102aa9afd483dbb5e0da53e69f2902c6a6` (agent loop, protocol adapters and replay transformations) and Codex commit `822e58cc3d666166c7446c5b1ea2e52f5d09594c` (turn state, tool execution/cancellation and context management). The implementation is Rust code in this repository; neither upstream runtime is embedded for API execution.
 
 ## Verification
 
@@ -22,7 +18,6 @@ Design references were the locally checked-out Pi commit `9ad083102aa9afd483dbb5
 | `mise run check:swift` | Pass | Helper, image builder, image checker compile; no VM boot |
 | `cargo zigbuild --locked -p pot-server --target aarch64-unknown-linux-musl -j 4` through mise | Pass | Linux ARM64 backend including Pot Agent |
 | `mise run lint` / `git diff --check` | Pass | Source formatting, scripts, whitespace |
-| Native npm lock dependency closure | Pass | Codex/Grok required packages retained; Pi packages absent |
 
 Local Agent integration uses real HTTP streams and real filesystem/shell operations against deterministic providers. The eight integration tests cover:
 

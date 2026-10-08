@@ -41,9 +41,8 @@ fn main() -> Result<()> {
             std::env::set_var(
                 "PATH",
                 format!(
-                    "{}:{}:{}",
+                    "{}:{}",
                     resources.join("node/bin").display(),
-                    resources.join("host-tools/node_modules/.bin").display(),
                     std::env::var("PATH").unwrap_or_default()
                 ),
             );

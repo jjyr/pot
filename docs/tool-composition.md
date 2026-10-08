@@ -2,7 +2,7 @@
 
 pot-agent keeps tools focused on individual operations. `exec` combines calls
 without merging their interfaces. Model-visible interface changes require explicit
-user agreement; see the repository `AGENTS.md`. Codex integration is deferred.
+user agreement; see the repository `AGENTS.md`.
 
 ## Tool roles
 

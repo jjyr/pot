@@ -105,18 +105,6 @@ impl ExecutionFeedback for Feedback {
     fn input_streaming(&self, _: &str) -> Result<()> {
         Ok(())
     }
-    fn begin_usage(&self, _: &str, _: &ResolvedSpec, _: u64) -> Result<()> {
-        Ok(())
-    }
-    fn initialize_usage(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
-    fn cumulative_usage(&self, _: &str, _: &str, _: &Value) -> Result<()> {
-        Ok(())
-    }
-    fn incomplete_usage(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
 }
 type Chunks = Vec<std::result::Result<Vec<u8>, String>>;
 #[derive(Default)]
@@ -1311,7 +1299,7 @@ fn full_loadout(f: &mut Fixture) {
         "apply_patch".into(),
     ];
     let mut control: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).unwrap();
-    // MCP publishes the same execution tools for Codex; Pot must use its injected backend once.
+    // Shared tool discovery must not execute tools outside the injected backend.
     control.extend(tools::schemas(&f.binding.spec.params.agent.shell));
     f.services.rpc_tools = Some(control);
 }

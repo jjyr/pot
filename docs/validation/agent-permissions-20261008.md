@@ -3,7 +3,7 @@
 Date: 2026-10-08. Scope: pot-agent permissions, shared execution, composition and
 Task lifecycle for [issue #29](https://github.com/jjyr/pot/issues/29). Specifications:
 [permissions](../permissions.md), [tools](../tool-composition.md),
-[Tasks](../task-coordination.md). Codex permission/composition integration is deferred.
+[Tasks](../task-coordination.md).
 
 ## Final automated results
 

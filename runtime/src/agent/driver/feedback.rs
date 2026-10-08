@@ -141,14 +141,7 @@ impl ExecutionFeedback for Feedback {
     fn native_identity(&self, identity: &str) -> Result<()> {
         self.check()?;
         let mut inner = self.service.inner.lock().unwrap();
-        match current(&inner.store)?
-            .ok_or_else(|| anyhow!("Binding missing"))?
-            .spec
-            .engine
-        {
-            Engine::Pot => save_agent_session(&mut inner.store, identity),
-            Engine::Codex => save_codex_thread(&mut inner.store, identity),
-        }
+        save_agent_session(&mut inner.store, identity)
     }
     fn binding_broken(&self, reason: &str) -> Result<()> {
         self.check()?;
@@ -188,51 +181,6 @@ impl ExecutionFeedback for Feedback {
         message.status = MessageStatus::Streaming;
         self.service.save(message)
     }
-    fn begin_usage(&self, ledger: &str, spec: &ResolvedSpec, epoch: u64) -> Result<()> {
-        self.check()?;
-        anyhow::ensure!(
-            epoch == self.epoch && spec.spec_hash == binding(&self.service)?.spec.spec_hash,
-            "Usage binding changed"
-        );
-        let turn = self
-            .service
-            .inner
-            .lock()
-            .unwrap()
-            .turn
-            .as_ref()
-            .ok_or_else(|| anyhow!("No active turn"))?
-            .user_message_id
-            .clone();
-        self.service.usage.lock().unwrap().begin_native(
-            ledger,
-            &self.service.usage_scope,
-            &turn,
-            spec,
-            epoch,
-        )
-    }
-    fn initialize_usage(&self, native: &str) -> Result<()> {
-        self.check()?;
-        self.service
-            .usage
-            .lock()
-            .unwrap()
-            .initialize_native_usage(native)
-    }
-    fn cumulative_usage(&self, ledger: &str, native: &str, usage: &Value) -> Result<()> {
-        self.check()?;
-        self.service
-            .usage
-            .lock()
-            .unwrap()
-            .native_usage(ledger, native, usage)
-    }
-
-    fn incomplete_usage(&self, ledger: &str) -> Result<()> {
-        self.check()?;
-        self.service.usage.lock().unwrap().native_incomplete(ledger)
-    }
 }
 fn make_context(
     s: &Service,
@@ -270,10 +218,6 @@ fn make_context(
         }
         catalog.text
     };
-    if binding.spec.engine == Engine::Codex && role != ExecutionRole::Summary {
-        main_prompt.push_str(&instructions);
-        main_prompt.push_str(&crate::skills::instructions(s, &skill_resources)?);
-    }
     Ok(ExecutionContext {
         instructions,
         skill_resources,
@@ -327,13 +271,8 @@ pub(super) fn context(
     request: &SendMessage,
     binding: &Binding,
 ) -> Result<ExecutionContext> {
-    if binding.spec.engine == Engine::Pot {
-        native_session(s)?;
-    }
+    native_session(s)?;
     make_context(s, binding, Some(request))
-}
-pub(super) fn prepare_context(s: &Service) -> Result<ExecutionContext> {
-    make_context(s, &binding(s)?, None)
 }
 
 #[cfg(test)]

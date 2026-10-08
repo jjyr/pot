@@ -349,9 +349,8 @@ actor Sandboxes {
         environment["POT_RUNTIME_RESOURCES"] = resources.path
         environment["POT_MACOS_HELPER"] = resources.appendingPathComponent("PotMacOSHelper").path
         environment["POT_RUNTIME_BIND"] = "127.0.0.1:0"
-        let hostTools = resources.appendingPathComponent("host-tools/node_modules/.bin").path
         environment["PATH"] = resources.appendingPathComponent("node/bin")
-            .path + ":" + hostTools + ":/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
+            .path + ":/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
         backend.environment = environment
         if !CommandLine.arguments.contains("--sandbox-only") {
             do { try backend.run() } catch { event("backend.failed") }

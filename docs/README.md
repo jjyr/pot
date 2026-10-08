@@ -59,7 +59,9 @@ Sandbox UI acceptance: [Sandbox environment list and desktop, 2026-10-06](valida
 
 Sandbox architecture extraction: [Manager and Linux Provider, 2026-10-07](validation/sandbox-architecture-20261007.md).
 
-Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](validation/host-pot-agent-20261006.md). Earlier Pi/Codex observations remain dated history.
+Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](validation/host-pot-agent-20261006.md).
+
+Single Agent engine: [Removal and automated validation, 2026-10-09](validation/single-agent-20261009.md).
 
 ## Research on demand
 
@@ -71,8 +73,8 @@ Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](va
 - Native OS execution: [macOS and Windows Sandbox providers](research/macos-windows-sandboxes.md).
 - Deferred Android: [SDK Emulator provider research](research/android-provider.md).
 - Deferred virtual iPhone: [vphone provider research](research/vphone-provider.md).
-- Driver sessions: [Coordination comparison](research/session-coordination.md), [Hermes](research/hermes-sessions.md), [OpenClaw](research/openclaw-sessions.md).
 - Future memory: [Identity and memory](research/identity-memory.md).
+- Driver sessions: [Coordination comparison](research/session-coordination.md), [Hermes](research/hermes-sessions.md), [OpenClaw](research/openclaw-sessions.md).
 
 ## Maintenance rules
 

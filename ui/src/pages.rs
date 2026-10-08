@@ -277,9 +277,7 @@ pub fn notice(text: impl Into<SharedString>, error: bool, cx: &App) -> Div {
 
 pub fn brand_icon(kind: &str) -> Icon {
     let icon = match kind {
-        "codex" | "openai" => {
-            Icon::empty().data(include_bytes!("../../app/assets/agents/openai.svg"))
-        }
+        "openai" => Icon::empty().data(include_bytes!("../../app/assets/agents/openai.svg")),
         "anthropic" => Icon::empty().data(include_bytes!("../../app/assets/agents/claude.svg")),
         "gemini" => Icon::empty().data(include_bytes!("../../app/assets/agents/gemini.svg")),
         "deepseek" => Icon::empty().data(include_bytes!("../../app/assets/agents/deepseek.svg")),
@@ -289,7 +287,7 @@ pub fn brand_icon(kind: &str) -> Icon {
         _ => Icon::new(IconName::Globe),
     };
     icon.text_color(gpui::rgb(match kind {
-        "codex" | "openai" => 0x159B7D,
+        "openai" => 0x159B7D,
         "anthropic" => 0xD97757,
         "gemini" => 0x4285F4,
         "deepseek" => 0x4D6BFE,
