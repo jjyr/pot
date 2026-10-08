@@ -761,6 +761,7 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
         tool: "exec_command".into(),
         proposed_grant: None,
         display: None,
+        plugin: None,
         args: args.clone(),
     };
     let wait_service = s.clone();

@@ -1102,6 +1102,18 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                         .0;
                 for card in pending["requests"].as_array().unwrap() {
                     assert_eq!(card["request"]["tool"], "cua_repl");
+                    let plugin = binding(&s)
+                        .unwrap()
+                        .spec
+                        .params
+                        .agent
+                        .plugin_for_tool("cua_repl")
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        card["request"]["plugin"],
+                        serde_json::to_value(plugin.identity()).unwrap()
+                    );
                     assert_eq!(card["request"]["environment"], "host");
                     assert!(card["request"]["args"].get("environment").is_none());
                     assert!(card["request"].get("proposed_grant").is_none());

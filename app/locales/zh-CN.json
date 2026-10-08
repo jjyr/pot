@@ -785,5 +785,9 @@
   "permissions.exact-grant": "永久允许仅适用于此 Agent、此环境及所展示的完全相同操作。",
   "permissions.read-only": "只读",
   "permissions.read-write": "读写",
-  "permissions.no-mappings": "移除所有目录映射"
+  "permissions.no-mappings": "移除所有目录映射",
+  "permissions.plugin": "插件",
+  "permissions.version": "版本",
+  "permissions.builtin-tool": "内置工具",
+  "permissions.unknown-source": "工具来源未提供"
 }

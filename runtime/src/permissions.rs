@@ -638,17 +638,23 @@ pub(crate) async fn request(s: &Service, epoch: u64, turn: &str, value: Value) -
         }),
         "Permission scope does not match operation"
     );
-    let expected_display = agent::binding(s)?
+    let plugin = agent::binding(s)?
         .spec
         .params
         .agent
-        .plugin_for_tool(&request.tool)?
+        .plugin_for_tool(&request.tool)?;
+    let expected_display = plugin
+        .as_ref()
         .map(|plugin| plugin.approval_display(&request.tool))
         .transpose()?
         .flatten();
     anyhow::ensure!(
         request.display == expected_display,
         "Permission display does not match bound tool"
+    );
+    anyhow::ensure!(
+        request.plugin == plugin.map(|plugin| plugin.identity()),
+        "Permission plugin identity does not match bound package"
     );
     let hub = s.permissions.environment(&request.environment)?;
     let key = hub.enqueue(request.clone())?;
@@ -822,6 +828,7 @@ mod tests {
             args: json!({"cmd":"true","workdir":"/","timeout_ms":60000,"shell":"/bin/bash","login":true,"tty":false}),
             proposed_grant: None,
             display: None,
+            plugin: None,
         }
     }
     fn directory() -> PathBuf {

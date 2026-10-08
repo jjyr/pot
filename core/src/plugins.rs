@@ -60,6 +60,13 @@ pub struct PluginBundle {
     pub digest: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PluginIdentity {
+    pub id: String,
+    pub version: String,
+    pub digest: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct PluginConfig {
     pub enabled: bool,
@@ -114,6 +121,13 @@ pub fn is_plugin_tool_name(name: &str) -> bool {
             .any(|tool| tool["name"] == name)
 }
 impl PluginBundle {
+    pub fn identity(&self) -> PluginIdentity {
+        PluginIdentity {
+            id: self.manifest.id.clone(),
+            version: self.manifest.version.clone(),
+            digest: self.digest.clone(),
+        }
+    }
     pub fn hash(&self) -> Result<String> {
         Ok(
             Sha256::digest(serde_json::to_vec(&json!([&self.manifest, &self.files]))?)

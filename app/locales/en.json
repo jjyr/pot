@@ -785,5 +785,9 @@
   "permissions.exact-grant": "Always allow applies only to this Agent, environment and the exact operation shown.",
   "permissions.read-only": "Read only",
   "permissions.read-write": "Read and write",
-  "permissions.no-mappings": "Remove all directory mappings"
+  "permissions.no-mappings": "Remove all directory mappings",
+  "permissions.plugin": "Plugin",
+  "permissions.version": "Version",
+  "permissions.builtin-tool": "Built-in tool",
+  "permissions.unknown-source": "Tool source not provided"
 }

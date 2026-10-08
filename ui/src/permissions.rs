@@ -30,6 +30,10 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
                 ),
                 cx,
             ))
+            .child(pages::hint(
+                crate::permission_display::source(request, catalog),
+                cx,
+            ))
             .child(div().text_sm().whitespace_normal().child(
                 crate::permission_display::description(request, catalog).unwrap_or_else(|| {
                     serde_json::to_string_pretty(&request["args"]).unwrap_or_default()
