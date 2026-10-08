@@ -782,7 +782,6 @@
   "permissions.output-limit": "Output character limit",
   "permissions.yes": "Yes",
   "permissions.no": "No",
-  "permissions.exact-grant": "Always allow applies only to this Agent, environment and the exact operation shown.",
   "permissions.read-only": "Read only",
   "permissions.read-write": "Read and write",
   "permissions.no-mappings": "Remove all directory mappings",

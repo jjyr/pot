@@ -40,9 +40,6 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
                         .child(serde_json::to_string_pretty(scope).unwrap_or_default()),
                 );
         }
-        if request.get("proposed_grant").is_none_or(Value::is_null) {
-            card = card.child(pages::hint(catalog.text("permissions.exact-grant"), cx));
-        }
         if request["tool"] == "exec_command" && request["environment"] == "host" {
             card = card.child(pages::hint(catalog.text("permissions.shell-effects"), cx));
         }
