@@ -286,8 +286,15 @@ async fn native_agent_cancel_kills_shell_descendants() {
     let req = rx.recv().await.unwrap();
     let runner = s.clone();
     let job = tokio::spawn(async move { run(&runner, req).await });
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while !s.workspace.join("child.pid").exists() {
+    let pid: i32 = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Some(pid) = std::fs::read_to_string(s.workspace.join("child.pid"))
+                .ok()
+                .and_then(|text| text.trim().parse::<i32>().ok())
+                .filter(|pid| *pid > 0)
+            {
+                break pid;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
@@ -309,11 +316,6 @@ async fn native_agent_cancel_kills_shell_descendants() {
         .unwrap()
         .unwrap();
     assert!(!s.workspace.join("after-cancel.txt").exists());
-    let pid: i32 = std::fs::read_to_string(s.workspace.join("child.pid"))
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
     s.turn(None);
     turn(&s, &mut rx, "after-cancel").await;
