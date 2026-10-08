@@ -33,22 +33,12 @@ flowchart TB
 | Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite and native session bindings | `gateway/src/`, `storage/src/` |
 | Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `sandbox-images/linux/default/executor.py`, `tool-executor/src/`, `sandbox-images/linux/default/sandbox.sh` |
 
-The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` remains for authenticated Codex/model integration, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects management and target overrides.
+The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` remains for authenticated Codex/model integration, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects worker management and switching Sandboxes.
 
-pot-agent uses one Runtime ToolExecutor and one registration per execution tool:
-exec_command, write_stdin and apply_patch. pot-agent also owns bounded JavaScript
-composition through exec/wait; child calls retain existing role, environment and
-permission checks. See [tool composition](tool-composition.md).
-Main defaults to Host, workers to their fixed Sandbox; a worker can explicitly
-request Host but cannot select another Sandbox. Its permission policy gates calls
-against the selected environment's `~/.pot/agent/permissions.json`. Host defaults
-to asking for approval; Sandbox defaults to allowing ordinary execution. Guest path
-preparation and grant publication use the authenticated guest control service.
-Host and guest dispatch share tool implementations. Guest runners retain process
-sessions in root-owned per-session cgroups; Runtime binds opaque handles to owner,
-Agent epoch, Sandbox and generation. Codex retains its existing Sandbox MCP
-loadout with native execution/apps/plugins/subagents disabled. No automatic Host
-fallback exists. See [Agent permissions](permissions.md).
+pot-agent owns [permission policy](permissions.md) and bounded
+[tool composition](tool-composition.md); Runtime supplies owner services and
+execution routing. Main defaults to Host and Workers to their assigned Sandbox.
+Codex retains its scoped Sandbox MCP loadout. No Sandbox failure causes Host fallback.
 
 Model inference location is independent: Agent processes are local, model APIs can be remote or an explicitly configured loopback endpoint.
 

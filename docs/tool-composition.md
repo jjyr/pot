@@ -1,138 +1,61 @@
-# Agent tools and JavaScript composition
+# Agent tools and composition
 
-Updated: 2026-10-08. This contract applies to pot-agent. Native Codex composition
-and permissions integration remain deferred.
+pot-agent keeps tools focused on individual operations. `exec` combines calls
+without merging their interfaces. Model-visible interface changes require explicit
+user agreement; see the repository `AGENTS.md`. Codex integration is deferred.
 
-## Tool interfaces
-
-Changes to model-visible tools require explicit user agreement before implementation:
-names, additions/removals, arguments and behavior. Existing tools keep their separate
-responsibilities. Composition combines calls without merging the underlying tools.
+## Tool roles
 
 | Capability | Tools | Roles |
 |---|---|---|
-| Environment execution | `exec_command`, `write_stdin`, `apply_patch` | Main, Worker |
+| Execution | `exec_command`, `write_stdin`, `apply_patch` | Main, Worker |
 | Composition | `exec`, `wait` | Main, Worker |
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
-| Execution preferences | `get_execution_preferences`, `update_execution_preferences` | Main |
-| Sandbox management | `list_sandboxes`, `manage_sandbox` | Main |
-| Reviewed mappings | `set_sandbox_mappings` | Main |
+| Preferences | `get_execution_preferences`, `update_execution_preferences` | Main |
+| Sandboxes | `list_sandboxes`, `manage_sandbox`, `set_sandbox_mappings` | Main |
 
-The twelve product tools previously used a `pot_` prefix; their arguments and
-responsibilities were preserved in the rename. `interrupt` preserves pending guidance;
-`cancel_task` discards it when a Task is abandoned. Model-visible registrations and the product MCP
-interface now use the unprefixed names. Old names are not aliases. Update external
-MCP consumers, explicit profile `allowed_tools` lists and custom prompts that refer
-to them. Persisted receipts/history are not renamed or replayed.
+Profile filters can narrow visibility. Execution tools accept `environment: "host"`
+or `"sandbox:ID"`; defaults and approval rules are in [Agent permissions](permissions.md).
+There are no separate file/list tools: inspect with commands and edit with patches
+or approved commands. Task semantics are in [Task coordination](task-coordination.md).
 
-There are no `read_file`, `write_file` or `list_directory` tools. Use
-`exec_command` to inspect files/directories, and `apply_patch` or approved commands
-to write. Legacy path grants cannot authorize these commands or patches.
+## JavaScript composition
 
-Main defaults to 21 tools, Worker to 5, Summary to 2. Profile `builtin_tools`
-controls execution and composition tools; its new default includes `exec` and
-`wait`. Existing profiles with an explicit saved list retain that list and must
-include these names to enable composition. `allowed_tools` further narrows the
-loadout. `tools` inside JavaScript exposes exactly the current role/profile tools,
-excluding `exec` and `wait`; recursion is unavailable. Task messaging, interruption
-and lifecycle waiting are described in [Task coordination](task-coordination.md).
-
-## Composition contract
-
-`exec` takes `{code, yield_time_ms?}`. Code supports top-level `await`, standard
-JavaScript data processing and `Promise.all` for independent calls. It receives:
-
-- `tools.NAME(args)`: a Promise containing the ordinary tool's JSON result.
-- `text(value)`: publish a string or JSON-serialized value to the model.
+`exec({code, yield_time_ms?})` runs bounded QuickJS with top-level `await`, ordinary
+JavaScript processing, `tools.NAME(args)` and `text(value)`. Only `text()` output
+enters model history; child operations remain visible in events and approval cards.
 
 ```javascript
 const results = await Promise.all([
   tools.exec_command({cmd: "git status --short", environment: "sandbox:project"}),
   tools.exec_command({cmd: "git diff --stat", environment: "sandbox:project"})
 ]);
-text(results.map(result => ({stdout: result.stdout, stderr: result.stderr, exit_code: result.exit_code})));
+text(results.map(r => ({stdout: r.stdout, exit_code: r.exit_code})));
 ```
 
-Concurrency is supported at the tool bridge. Individual execution backends may
-serialize operations sharing process or environment state. Calls with dependencies
-or shared mutations should be awaited sequentially.
+Await dependent calls sequentially. Inspect tool results for failures; transport
+and approval errors reject their Promises. Product tools retain their MCP wrappers.
+Unawaited calls may have effects, but do not survive script completion.
 
-Runtime/transport/approval errors reject the Promise. A tool may also return a
-normal JSON object reporting failure (`isError`, nonzero `exit_code`, etc.); inspect
-that result as with direct calls. Product MCP tools retain their normal MCP content
-wrapper; parse text content when the underlying product data is needed.
+Results contain `output` and `completed`, plus `exec_id` while running.
+`wait({exec_id, yield_time_ms?})` returns new output or completion without repeating
+previous output. `wait_task` observes Tasks; `write_stdin` manages shell sessions.
 
-Subcall results remain inside the isolate. Only explicit `text()` output is added
-to model history; tool events and owner approval cards still show concrete child
-operations. This avoids sending full intermediate results back to the model. It
-does not guarantee a fixed token saving; compare usage for equivalent tasks.
+Runs belong to the current accepted turn and continue while the Agent awaits other
+work. Await completion before finishing the turn. Ending the turn stops pending
+calls; completed effects remain. Restart does not restore JavaScript memory or
+replay uncertain calls. Existing receipts prevent duplicate execution.
 
-## Waiting and lifetime
+## Boundaries and migration
 
-Both tools return `{output, completed}` plus `exec_id` while running, and
-`{isError: true, error}` on failure. Output contains newline-separated publications.
-`yield_time_ms` defaults to 1,000 and accepts 1–60,000 ms. Explicit output may be
-returned before completion. Call `wait` with `{exec_id, yield_time_ms?}` to collect
-new output or completion. Already delivered output is not repeated. A completed
-run can be queried again with its previously returned ID, yielding empty output.
-Unknown IDs, other-turn IDs and malformed arguments fail.
+The isolate has no direct filesystem, network, Node or process APIs. Its tools are
+limited to the current role/profile, with recursive `exec`/`wait` excluded. Each
+child call uses the ordinary dispatcher and its own concrete approval. Composition
+cannot broaden authority. Code, memory, output, concurrency and execution time
+are bounded; exact limits and schemas live in `agent/src/orchestration.rs`.
 
-Running jobs continue being driven while the Agent awaits model responses and
-ordinary tools. Runs are scoped to the current accepted turn, not background Tasks.
-Await completion before the final answer. Ending/cancelling a turn drops pending
-child futures and interrupts the JavaScript worker; completed effects are not
-rolled back. Unawaited calls may already have effects and are not kept alive after
-script completion. Managed process cleanup follows the existing execution backend
-contract. Use `write_stdin` for shell sessions and normal task notifications for
-background Tasks; `wait` does not wait for Task lifecycle events.
-
-The Agent persists the parent call as started before launching a run. Subcalls get
-unique parent-derived IDs and use existing Runtime/executor receipts. A repeated
-parent call returns its saved result. Restart recovery marks interrupted parent
-calls as uncertain and does not replay scripts or resume JavaScript memory. This
-prevents automatic duplicate effects; inspection is required after interruption.
-
-## Authority and limits
-
-`pot-agent` owns the QuickJS runtime and composition manager. JavaScript has no
-Node, filesystem, network, process, module-loader or timer bindings. All external
-effects go through the same dispatcher as direct calls:
-
-```text
-exec code -> tools.NAME(args)
-                  |
-             role/profile check
-                  |
-             resolve environment
-                  |
-             permission approval
-                  |
-             injected executor / product MCP
-                  |
-             JSON result -> JavaScript -> text(selected output) -> model
-```
-
-Approvals apply to each concrete child operation, not the script. Host defaults
-to ask, Sandbox to allow; mappings still require their explicit approved scope.
-A permanent approval stores the actual child operation. Scripts cannot extend
-Worker role/assignment boundaries or enable disabled tools.
-
-Limits per turn/run: four runs per turn, 128 calls per run, eight simultaneous
-calls per run, 64 KiB code, 4 MiB serialized arguments per child call, 64 MiB JS
-memory, 512 KiB JS stack, 64 KiB total published output, two seconds uninterrupted
-JavaScript execution and ten minutes wall time (including approval waits).
-Cancellation also interrupts synchronous JavaScript. Outputs and result decoding
-remain bounded by memory and existing tool limits.
-
-## Sources and verification
-
-Schemas/manager/isolate: `agent/src/orchestration.rs`. Shared dispatch and model
-loadouts: `agent/src/lib.rs`. Execution schemas: `core/src/environment_tools.rs`.
-Product schemas: `core/src/pot-tools.json`. See [permissions](permissions.md).
-
-Backend fixtures cover parallel calls, private intermediate results, incremental
-wait output, unknown handles, role/profile restrictions, owner approval/denial,
-removed tool rejection, resource limits and synchronous-loop interruption. Use
-`mise run test` with an isolated temporary `POT_AGENT_HOME`. Guest permission tests
-remain under `mise run test:permissions`; live VM/UI acceptance is separate.
+Old `pot_` names are not aliases. Update explicit tool filters and custom prompts.
+Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable composition.
+Expanded schemas count toward context limits. Validation and qualification limits:
+[acceptance report](validation/agent-permissions-20261008.md).

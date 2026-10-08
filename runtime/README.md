@@ -14,18 +14,18 @@ Only Pot and Codex engines/transports/session identities are accepted. There are
 
 ## Agent execution
 
-pot-agent owns [permission policy and grant matching](../docs/permissions.md).
-Runtime supplies owner decisions and current permanent-grant storage through
-injected feedback services. Main and task pot-agent sessions use one set of execution tools, gated by
-permissions from the selected environment. Host uses Host `~/.pot/agent/permissions.json`;
-Sandbox uses the guest execution HOME’s corresponding file via trusted control RPC.
-Codex permission integration is deferred.
-
-pot-agent runs in-process on Host. Runtime injects a ToolExecutor, with no implicit local backend. The pot-agent execution tools are exec_command, write_stdin and apply_patch. The Agent also owns turn-scoped exec/wait JavaScript composition, with each child call using the same approval and dispatch path. See [tool composition](../docs/tool-composition.md). Main defaults to Host; workers default to their saved Sandbox and may explicitly request Host with owner approval. Main receives task/schedule and Sandbox management tools; workers cannot delegate, manage or retarget. Agent context, compaction, usage, execution preferences and deterministic evaluation remain Host-owned.
+pot-agent runs in-process on Host with an injected ToolExecutor and owner services;
+there is no implicit local backend. It owns [permission policy](../docs/permissions.md)
+and [tool composition](../docs/tool-composition.md). Main defaults to Host; Workers
+default to their assigned Sandbox and may request authorized Host execution.
+Agent context, compaction, usage and preferences remain Host-owned.
 
 Codex App Server runs on Host with an empty native environment list. Native shell/patch/image/code/web/hooks/apps/plugins/subagent tools and inherited MCP are disabled. Lane-scoped Pot MCP exposes the common execution protocol. Each turn gets a distinct managed MCP URL to rediscover its role's tools after native resume; the native thread identity remains fixed.
 
-Main loadouts include task/schedule and Sandbox management. Workers receive exec_command, write_stdin and apply_patch, a lane token and a fixed Sandbox. Summary turns can only inspect tasks. Task/Sandbox management and existing-session `write_stdin` calls do not ask for permission; role/session checks remain. Mapping changes still require explicit approval or an exact approved grant, even with Host allow policy. New pot-agent execution uses each environment’s policy: Host defaults to asking unless a matching Agent grant exists; Sandbox defaults to allowing ordinary operations. Role and assignment checks remain enforced. Default guest workspaces contain artifacts rather than credentials or Helper sockets. Additional Host directory mappings require explicit owner authorization and are visible to every task sharing that Sandbox.
+Main manages Tasks, schedules and Sandboxes; Workers cannot delegate, manage or
+switch Sandboxes. Summary turns inspect Tasks only. Guest workspaces contain
+artifacts rather than credentials or Helper sockets. Owner-reviewed Host mappings
+are visible to every Task sharing the Sandbox.
 
 Cancellation settles the native session and drains remote operations. Executor subprocesses run as an ordinary guest user inside root-owned cgroups, including detached descendants. Unknown outcomes quarantine the environment until explicit main-only recovery; commands are never replayed automatically. Quit settles Host work and stops VMs. Artifacts and native/product history persist.
 
@@ -74,7 +74,7 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 
 ## Tasks, profiles and schedules
 
-Every task has a private product transcript/native session and persisted Sandbox binding. Guidance receipts are durable and consumed in order. FIFO dispatch respects configured concurrency and cooperative resource locks; one lane cannot cancel another. Restart marks already-started work interrupted rather than replaying it. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. Main-only `send_message` delivers durable reference information at a model boundary without resuming the target; `wait_task` waits for any selected task to settle with cursor suppression. See [Task coordination](../docs/task-coordination.md) for interruption, resume and archive semantics.
+Every task has a private product transcript/native session and persisted Sandbox binding. Guidance receipts are durable and consumed in order. FIFO dispatch respects configured concurrency and cooperative resource locks; one lane cannot cancel another. Restart marks already-started work interrupted rather than replaying it. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. See [Task coordination](../docs/task-coordination.md) for guidance, messages, waiting, stopping and archive semantics.
 
 Explicit task profiles take precedence over configured worker defaults. With no explicit worker default, new tasks snapshot the active Main Agent. Saved profile changes do not rewrite existing task bindings. Explicit Change Agent uses transactional handoff to a new epoch; it changes Driver/model while preserving the task's Sandbox assignment. Events are filtered by owner/epoch/turn to reject late native updates.
 

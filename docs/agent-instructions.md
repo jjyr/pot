@@ -4,7 +4,7 @@ Runtime owns AGENTS.md discovery, execution-environment selection, refresh and e
 
 ## Sources and scope
 
-Global instructions come from `~/.pot/agent/AGENTS.md` (`POT_AGENT_HOME` overrides the Agent home directory). Host permanent permissions are stored alongside it in `permissions.json`; Sandbox permissions use the guest’s own corresponding file. This permission separation does not change the global instruction loader; see [Agent permissions](permissions.md). Project instructions come from the assigned Sandbox workspace, not the Host agent session directory. Main uses the default Sandbox at context creation; a task uses its fixed assignment and task working directory. Selecting another default affects subsequent Main contexts and does not move existing tasks.
+Global instructions come from `~/.pot/agent/AGENTS.md` (`POT_AGENT_HOME` overrides the Agent home directory). Permission storage is separate from instruction discovery; see [Agent permissions](permissions.md). Project instructions come from the assigned Sandbox workspace, not the Host agent session directory. Main uses the default Sandbox at context creation; a task uses its fixed assignment and task working directory. Selecting another default affects subsequent Main contexts and does not move existing tasks.
 
 Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory, stopping at the Sandbox workspace mount boundary. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 
@@ -22,12 +22,9 @@ Managed Codex receives the same Runtime text through its developer instructions.
 
 ## Reference and tests
 
-Main's built-in task coordination/delegation prompt is the `MAIN_PROMPT` constant
-in `runtime/src/orchestration.rs`. Runtime injects it through
-`runtime/src/agent/driver/feedback.rs`; the Pot engine receives its Host-permission
-wording there. pot-agent uses it in its default system prompt in `agent/src/lib.rs`.
-A configured `system_prompt` replaces that default. This built-in prompt is not
-stored in the global `AGENTS.md` and is not an independent routine scheduler.
+Main's built-in delegation prompt is `MAIN_PROMPT` in `runtime/src/orchestration.rs`,
+injected by Runtime. It is not global `AGENTS.md` or a routine scheduler. A custom
+`system_prompt` replaces the default pot-agent prompt.
 
 The discovery order, nearest repository root, no-root cwd behavior and global last-good refresh policy follow the local Codex implementation reviewed on 2026-10-07. Pot intentionally omits Codex override filenames, configurable fallback/root markers and the project byte cap. It selects one execution environment per agent context.
 

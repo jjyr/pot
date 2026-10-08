@@ -15,18 +15,19 @@ Updated: 2026-10-08.
 
 See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
 
-## pot-agent permission layer — 2026-10-08
+## Agent permissions and tools — 2026-10-08
 
-Issue #29 adds Agent-owned permission policy with one-time approvals and persistent
-Agent-scoped permanent grants. Runtime stores only current permanent grants in
-`~/.pot/agent/permissions.json`; pending/one-time decisions remain in memory with
-no approval history. Native/Web owner interaction uses the same permission service. Unified file/list/write/command tools target Host or Sandbox. Main defaults to
-Host and tasks to their Sandbox; each environment stores its own current grants
-and default policy (Host `ask`, Sandbox `allow`).
-Guest state uses a trusted root control route and readonly runner views; rebuilt
-images/reprovisioned guests and live qualification are required. Main can make owner-reviewed Linux Sandbox Host mapping
-changes. Codex retains its existing capabilities and permission integration is
-deferred. See [Agent permissions](permissions.md) for scope and qualification limits.
+pot-agent now owns environment-local policy and Agent-specific permanent grants.
+Host defaults to ask; ordinary Sandbox execution defaults to allow. Shared
+execution tools and turn-scoped `exec`/`wait` composition retain role checks and
+owner review. Main can coordinate Tasks with reference messages and bounded waits,
+interrupt while preserving guidance, or cancel and discard it.
+
+Automated checks passed; live guest/UI qualification and Codex integration remain
+open. Independent archive state and inactivity rules are deferred. See
+[permissions](permissions.md), [tools](tool-composition.md),
+[Task coordination](task-coordination.md) and the
+[dated validation](validation/agent-permissions-20261008.md).
 
 ## Remaining validation and scope
 
@@ -94,21 +95,3 @@ browser storage automatically. Rotation invalidates every browser/stream/desktop
 Go source and dependency graph are pinned, and linked dependency notices are packaged.
 Local Server/CLI/TLS and multi-client tests cover Token behavior. Real tailnet login,
 certificate issuance, physical phones and complete App bundle acceptance remain live gates.
-
-## Agent tool interfaces (2026-10-08)
-
-Removed the three standalone file tools, renamed the twelve product tools without
-the `pot_` prefix, and added pot-agent-owned `exec`/`wait` composition. Existing
-product tools keep their separate responsibilities and argument contracts. Tool
-interface changes require explicit user agreement. See [tool composition](tool-composition.md)
-for role loadouts, limits, approval boundaries and restart behavior.
-
-Task coordination update (2026-10-08): Main now has `send_message` and
-`wait_task`; `interrupt` replaces model-visible cancellation and preserves pending
-guidance until explicit resume. App/Web/CLI stopping uses interruption. Archive
-remains phase-derived with no inactivity timer. See [Task coordination](task-coordination.md).
-
-Cancellation refinement (2026-10-08): `cancel_task` is available alongside
-`interrupt`. Explicit abandonment clears pending guidance and archives cancelled
-Tasks; interruption retains guidance. CLI `cancel` and `interrupt` now call their
-respective endpoints. Independent archive state and inactivity rules remain deferred.

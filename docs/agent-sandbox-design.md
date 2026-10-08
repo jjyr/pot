@@ -69,9 +69,14 @@ The provider redesign permits a declared VM-stop cancellation fallback only for 
 
 ## Driver integration
 
-pot-agent runs in-process on Host with an injected Runtime ToolExecutor. The shared pot-agent tools are exec_command, write_stdin and apply_patch. Main defaults to Host; task workers default to Sandbox. Permissions use the selected environment’s own `~/.pot/agent/permissions.json`. There is no automatic local executor. Main and worker loadouts differ: inventory and lifecycle tools are main-only; workers default to their persisted assignment and may explicitly request authorized Host execution. Runtime checks product authorization independently of model-visible schemas. In the target redesign, the Sandbox Manager additionally enforces scoped grants, environment leases, epoch and capabilities before provider dispatch. Guest operations run in a credential-free Rust runner behind the authenticated root broker. Runtime-owned sessions remain in their original Sandbox even after main changes its default, and survive normal turns and expire on inactivity, cancellation, epoch change or generation change. See [command execution](executor.md) for shells, PTY and snapshot semantics.
+pot-agent runs on Host with injected Runtime execution and owner services. Main
+and Worker authority follows [Agent permissions](permissions.md); shared tools and
+composition follow [Agent tools](tool-composition.md). Runtime and Manager enforce
+assignments, scoped sessions, leases and capabilities independently of prompts.
+Guest execution uses a credential-free runner behind the authenticated root broker.
+Sessions remain in their original environment; see [command execution](executor.md).
 
-That three-tool loadout describes current Linux execution. The first provider redesign preserves Linux/macOS command tools and derives both Drivers' loadouts from assignment capabilities. Device observation/input/app operations remain future capabilities; lifecycle authority remains main-only.
+The shared command/patch tools describe current Linux execution. The first provider redesign preserves Linux/macOS command tools and derives both Drivers' loadouts from assignment capabilities. Device observation/input/app operations remain future capabilities; lifecycle authority remains main-only.
 
 Codex App Server stays on the Host. Pot disables native environment tools, supplies an empty native environment list, and exposes the same Sandbox execution API through lane-scoped MCP. Inherited MCP servers, plugins/apps and native subagent tools are disabled. The implementation uses Pot's execution-only HTTP service rather than `codex exec-server`, keeping one environment protocol for both Drivers.
 
