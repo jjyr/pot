@@ -58,6 +58,10 @@ run = "python scripts/tests/executor-lifecycle.py"
 description = "Verify guest permission state and atomic owner publication without a VM"
 run = "python scripts/tests/permission-state.py"
 
+[tasks."test:browser"]
+description = "Qualify persistent CUA plugin text and mixed observations against a Chromium fixture"
+run = "python scripts/tests/browser.py"
+
 [tasks."test:skills"]
 description = "Verify guest per-scope skills mount policy without a VM"
 run = "python scripts/tests/skill-mounts.py"

@@ -30,6 +30,8 @@ impl ProfileConfig for Config {
 }
 pub fn small_scenario(id: &str, turns: Vec<String>, tools: bool) -> Scenario {
     let mut profile = Profile::api(&Config);
+    // This bounded benchmark deliberately exposes only its scenario tools.
+    profile.params.agent.plugins.clear();
     profile.params.agent.system_prompt =
         Some("Complete the task. Return only the requested output.".into());
     profile.params.agent.auto_compact = false;

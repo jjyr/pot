@@ -720,6 +720,28 @@ impl Manager {
         self.request(target, "permissions", body, Duration::from_secs(30))
             .await
     }
+    /// Resolve a live session without booting or retargeting its environment.
+    pub fn session_target(&self, owner: &str, epoch: u64, session: &str) -> Result<String> {
+        let id = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(session)
+            .cloned()
+            .ok_or_else(|| anyhow!("Session expired or belongs to another task/agent epoch"))?;
+        let scope = self
+            .scopes
+            .lock()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Session scope expired"))?;
+        anyhow::ensure!(
+            scope.owner == owner && scope.epoch == epoch,
+            "Session belongs to another task/agent epoch"
+        );
+        Ok(scope.target)
+    }
     pub async fn execute(
         self: &Arc<Self>,
         grant: &AccessGrant,
@@ -734,7 +756,7 @@ impl Manager {
             "Invalid execution identity"
         );
         anyhow::ensure!(
-            ["exec_command", "write_stdin", "apply_patch",].contains(&name),
+            ["exec_command", "write_stdin", "apply_patch", "plugin_call"].contains(&name),
             "Unknown execution operation"
         );
         anyhow::ensure!(
@@ -783,7 +805,9 @@ impl Manager {
             bail!("Prior execution outcome unknown; inspect before retrying with a new call ID");
         }
         let requested = args["sandbox_id"].as_str().unwrap_or("");
-        let prior_scope = if name == "write_stdin" {
+        let prior_scope = if name == "write_stdin"
+            || (name == "plugin_call" && args.get("session_id").is_some())
+        {
             let session = args["session_id"]
                 .as_str()
                 .ok_or_else(|| anyhow!("Missing session ID"))?;
@@ -839,8 +863,43 @@ impl Manager {
             self.describe(&target)?.capabilities.shell,
             "Shell capability unavailable"
         );
+        if name == "plugin_call" {
+            anyhow::ensure!(
+                self.describe(&target)?.os == "linux",
+                "Node plugins require a qualified Linux Sandbox"
+            );
+        }
         let _preparation = self.acquire(&target).await?;
         self.ready(&target, cancelled).await?;
+        if name == "plugin_call" {
+            let capabilities = self
+                .request(
+                    &target,
+                    "capabilities",
+                    &json!({"protocol_version":1}),
+                    Duration::from_secs(10),
+                )
+                .await?;
+            let bundle = pot_core::plugins::validate_call(&validated)?;
+            anyhow::ensure!(
+                capabilities["protocol_version"] == 1
+                    && capabilities["plugins"]["protocol_version"] == 1
+                    && capabilities["plugins"]["runtime"] == bundle.manifest.runtime,
+                "Plugin runtime unavailable; update the Linux Sandbox image"
+            );
+            let available = capabilities["plugins"]["requirements"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            anyhow::ensure!(
+                bundle
+                    .manifest
+                    .requirements
+                    .iter()
+                    .all(|r| available.iter().any(|v| v == r)),
+                "Plugin dependency unavailable in Sandbox image"
+            );
+        }
         let generation = self.helper(&target, "status").await?["generation"]
             .as_u64()
             .unwrap_or(0);
@@ -888,7 +947,10 @@ impl Manager {
                 .unwrap()
                 .insert(session.to_owned(), scope.id.clone());
         }
-        if name == "write_stdin" && result["result"].get("session_id").is_none() {
+        if matches!(name, "write_stdin" | "plugin_call")
+            && args.get("session_id").is_some()
+            && result["result"].get("session_id").is_none()
+        {
             self.sessions
                 .lock()
                 .unwrap()

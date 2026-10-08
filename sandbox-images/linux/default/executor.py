@@ -337,6 +337,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, PERMISSIONS.request(request, home))
             elif self.path == "/execute":
                 self.respond(200, execute(request))
+            elif self.path == "/capabilities":
+                probe = subprocess.run(
+                    ["/opt/pot/pot-tool-executor", "--capabilities"],
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
+                    env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
+                )
+                capabilities = json.loads(probe.stdout)
+                plugins = capabilities.get("plugins", {})
+                plugins["requirements"] = [
+                    name
+                    for name in plugins.get("requirements", [])
+                    if name in ("node", "chromium") and Path("/usr/bin/" + name).is_file()
+                ]
+                if not Path("/usr/bin/node").is_file():
+                    plugins["runtime"] = None
+                capabilities["plugins"] = plugins
+                self.respond(200, capabilities)
             elif self.path == "/inspect":
                 self.respond(200, inspect(request["id"]))
             elif self.path == "/desktop":

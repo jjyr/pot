@@ -47,8 +47,16 @@ impl ExecutionFeedback for Feedback {
 }
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--capabilities") {
+        println!(
+            "{}",
+            json!({"protocol_version":1,"plugins":{"protocol_version":1,"runtime":"node","requirements":["node","chromium"]},"observation_modes":["text","mixed"]})
+        );
+        return Ok(());
+    }
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut processes = Processes::default();
+    let mut plugins = pot_tool_executor::plugins::Plugins::default();
     while let Some(line) = lines.next_line().await? {
         let request: Value = serde_json::from_str(&line)?;
         let policy: ShellSettings = serde_json::from_value(request["policy"].clone())?;
@@ -73,11 +81,21 @@ async fn main() -> Result<()> {
         let name = request["operation"].as_str().unwrap_or("");
         let args = &request["args"];
         let result = if name == "inspect" {
-            Ok(processes.inspect())
+            let mut result = processes.inspect();
+            let sessions = plugins.sessions();
+            if !sessions.is_empty() {
+                result["active"] = json!(true);
+                result["sessions"]
+                    .as_array_mut()
+                    .unwrap()
+                    .extend(sessions.into_iter().map(Value::String));
+            }
+            Ok(result)
         } else {
             match tools::validate(name, args) {
                 Err(e) => Err(e),
                 Ok(()) if name == "apply_patch" => tools::patch(&context, args),
+                Ok(()) if name == "plugin_call" => plugins.execute(args).await,
                 Ok(()) => {
                     processes
                         .execute(
@@ -100,5 +118,6 @@ async fn main() -> Result<()> {
             json!({"result":result.unwrap_or_else(|e|json!({"isError":true,"error":e.to_string()}))})
         );
     }
+    plugins.shutdown().await?;
     processes.shutdown().await
 }

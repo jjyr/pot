@@ -14,6 +14,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand task messaging, interruption, resume and archive rules | [Task coordination](task-coordination.md) |
 | Understand direct tools, JavaScript composition and waiting | [Agent tool composition](tool-composition.md) |
 | Understand pot-agent approvals, persistent grants and environment-local access | [Agent permissions](permissions.md) |
+| Configure text/vision browser computer use | [Browser computer use](computer-use.md) |
 | Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
 | Review the Linux and macOS target design | [Sandbox provider redesign](sandbox-providers.md) (Linux extraction delivered; macOS prepared-instance implementation awaiting VM qualification) |
 | Prepare/enroll a macOS development VM | [macOS Sandbox](macos-sandbox.md) |

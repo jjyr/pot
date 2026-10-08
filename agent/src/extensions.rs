@@ -56,10 +56,27 @@ pub trait AgentExtensions: Send + Sync {
         messages: &[Message],
         tools: &[Value],
     ) -> Result<u64> {
-        Ok(serde_json::to_vec(&model::context_payload(
-            protocol, model, system, messages, tools,
+        // Image payload bytes are transport data, not textual tokens. Count bounded
+        // image tiles separately instead of charging Base64 as ordinary prose.
+        let mut messages = messages.to_vec();
+        let mut image_tokens = 0u64;
+        for message in &mut messages {
+            for image in &message.images {
+                image.validate()?;
+                image_tokens = image_tokens.saturating_add(
+                    u64::from(image.width.div_ceil(512))
+                        * u64::from(image.height.div_ceil(512))
+                        * 256
+                        + 1024,
+                );
+            }
+            message.images.clear();
+        }
+        Ok((serde_json::to_vec(&model::context_payload(
+            protocol, model, system, &messages, tools,
         )?)?
         .len() as u64)
+            .saturating_add(image_tokens))
     }
 }
 pub(crate) struct Defaults;

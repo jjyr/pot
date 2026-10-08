@@ -2,6 +2,8 @@
 
 Updated: 2026-10-08.
 
+Computer use (2026-10-08): a default-enabled plugin provides persistent `cua_repl` sessions in Linux Sandboxes, with pinned packages and model-configured text/image observations. Host execution, native desktop automation and manual takeover remain pending. See [configuration and contract](computer-use.md).
+
 ## Delivered
 
 - Host Runtime, product storage and Pot/Codex Agent loops run independently of Sandbox readiness.

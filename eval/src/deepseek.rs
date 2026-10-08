@@ -385,6 +385,7 @@ mod tests {
     fn scenario() -> Scenario {
         let mut profile = pot_core::Profile::api(&Config);
         profile.params.agent.builtin_tools.clear();
+        profile.params.agent.plugins.clear();
         Scenario {
             id: "live-contract-v1".into(),
             profile,

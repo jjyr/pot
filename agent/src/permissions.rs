@@ -167,6 +167,7 @@ impl Config {
                     }
                     ensure!(
                         is_execution_tool(&tool)
+                            || pot_core::plugins::is_plugin_tool_name(&tool)
                             || tool == "manage_sandbox"
                             || tool == "set_sandbox_mappings",
                         "Unsupported permission tool"
@@ -305,9 +306,11 @@ pub async fn authorize(
     tool: &str,
     args: &Value,
 ) -> Result<()> {
+    let execution =
+        is_execution_tool(tool) || binding.spec.params.agent.plugin_for_tool(tool)?.is_some();
     if context.role == ExecutionRole::Summary {
         ensure!(
-            !is_execution_tool(tool) && !["manage_sandbox", "set_sandbox_mappings"].contains(&tool),
+            !execution && !["manage_sandbox", "set_sandbox_mappings"].contains(&tool),
             "Summary is read-only"
         );
     }
@@ -326,7 +329,7 @@ pub async fn authorize(
     }
     // Product management is trusted role-scoped capability. Session input/polls
     // continue an existing authorized command; the executor checks ownership.
-    if tool == "write_stdin" || (!is_execution_tool(tool) && tool != "set_sandbox_mappings") {
+    if tool == "write_stdin" || (!execution && tool != "set_sandbox_mappings") {
         return Ok(());
     }
     let Some(state) = context.feedback.environment_grants(environment).await? else {
