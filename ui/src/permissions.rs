@@ -4,8 +4,9 @@ use crate::{
     pages::{self, Handler},
 };
 use gpui::{prelude::*, *};
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    Sizable,
+    ActiveTheme, Icon, Sizable,
     button::{Button, ButtonVariants},
 };
 use serde_json::{Value, json};
@@ -21,8 +22,26 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
         let id = record["id"].as_str().unwrap_or("");
         let mut card = pages::card(cx)
             .child(pages::title(catalog.text("permissions.request")))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_size(px(13.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("{}:", catalog.text("permissions.environment")))
+                    .child(
+                        Icon::new(if request["environment"] == "host" {
+                            IconName::Monitor
+                        } else {
+                            IconName::Box
+                        })
+                        .size(px(16.)),
+                    )
+                    .child(crate::permission_display::environment_name(record)),
+            )
             .child(pages::hint(
-                crate::permission_display::heading(record, catalog),
+                crate::permission_display::source(request, catalog),
                 cx,
             ))
             .child(div().text_sm().whitespace_normal().child(
