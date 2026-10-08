@@ -1,6 +1,6 @@
 # Computer use plugin
 
-The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaScript session and headless Chromium in the assigned **Linux Sandbox**. The Host runs model inference and imports plugins. Main and Worker can use it under the Sandbox permission policy; Main uses the selected Sandbox and Worker uses its assignment. Host browser execution and native desktop automation are not supported.
+The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaScript session and a dedicated headless Chromium on **Host or Linux Sandbox**. It follows the shared [permissions](permissions.md): Main defaults to Host with owner approval; Worker defaults to its assigned Sandbox, which allows execution by default. Environment policies and Agent-specific grants apply to every invocation. Native desktop automation is not supported.
 
 ## Configuration
 
@@ -10,7 +10,7 @@ Use owner-only `pot config get/set agent` (`GET/POST /api/v1/agent`). The defaul
 {"computer-use": {"enabled": true}}
 ```
 
-Set `enabled:false` to disable it, or `plugins:{}` to disable all plugins. If `allowed_tools` is configured, include `cua_repl`. `builtin_tools` controls shell, stdin and patch tools only. Saving older settings removes the `browser` builtin and migrates its allowed-tool entry to `cua_repl`; re-save/rebind old profiles to pin the plugin.
+Set `enabled:false` to disable it, or `plugins:{}` to disable all plugins. If `allowed_tools` is configured, include `cua_repl`. `builtin_tools` controls core execution and composition tools. Saving older settings removes the `browser` builtin and migrates its allowed-tool entry to `cua_repl`; re-save/rebind old profiles to pin the plugin.
 
 Import or replace a trusted package from an absolute Host directory:
 
@@ -47,7 +47,7 @@ Model code cannot change the mode. Canvas or inaccessible content may require vi
 
 ## CUA REPL
 
-`cua_repl` is exposed to pot-agent and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls and turns. Main may supply `sandbox_id` when opening a session; later calls retain its original target. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
+`cua_repl` is exposed to pot-agent and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls and turns. Use `environment:"host"` or `"sandbox:ID"` to choose a target; Main may also use `sandbox_id`. Omitted targets follow the Agent default for new sessions and the original environment for existing sessions. Sessions cannot switch environments. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
 
 ```javascript
 let tab = await cua.open("https://example.com");
@@ -68,11 +68,13 @@ Closing the tab preserves JS state. End the REPL with `reset:true` and its exist
 
 ## Plugin contract and lifecycle
 
-Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). Version 1 requires `runtime:"node"`, `execution:"sandbox"`, confined package paths, unique tool names, and flat scalar input schemas. Bundles are limited to 32 files / 512 KiB. Plugins export `createPlugin({mode,emit})` with `execute({tool,input})` and `dispose()`.
+Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). Version 1 requires `runtime:"node"`, `execution:"environment"` (Host and Sandbox) or `"sandbox"` (Sandbox only), confined package paths, unique tool names, and flat scalar input schemas. Bundles are limited to 32 files / 512 KiB. Plugins export `createPlugin({mode,environment,emit})` with `execute({tool,input})` and `dispose()`.
 
-Runtime checks tool admission and sends the pinned bundle and model-derived mode to the generic Guest runner. Sessions are bound to owner, Agent epoch, Sandbox and boot generation; bundle digest and observation mode stay fixed. A qualified Linux image with the declared dependencies is required.
+Runtime resolves the environment, checks permission, and sends the pinned bundle and model-derived mode to its runner. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, environment and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
 
-Node and Chromium run in the existing unprivileged Guest scope/cgroup, with temporary package files and browser profiles. CDP uses inherited pipes. Chromium runs with `--no-sandbox` inside the managed Sandbox; JavaScript itself is not an isolation boundary. Model credentials and Host product files are not supplied to the Guest. Browser sessions are separate from noVNC and have no manual takeover or persistent login profile.
+Host needs Node and an installed Chrome/Chromium; the App supplies Node. Standard Linux and macOS browser paths are discovered automatically, or set `POT_BROWSER_EXECUTABLE`. Host uses temporary profiles, process-group cleanup and Chrome's native sandbox. Plugin children receive a restricted environment without inherited model credentials. Host approval authorizes code execution with the user's OS privileges; the JS context is not an isolation boundary.
+
+Linux Sandbox execution uses the unprivileged Guest scope/cgroup and `--no-sandbox` inside the managed boundary. It requires a qualified image with Node/Chromium. Both paths use inherited CDP pipes, temporary files and idle expiry. Browser sessions are separate from existing user profiles and noVNC, without manual takeover or persistent logins.
 
 Ordinary JS errors preserve state and emitted observations. Timeout, cancellation, process loss, binding changes or Guest restart invalidate the session; start a new REPL after loss. Reset/shutdown clean up temporary files, and cancellation ends the scope. Inspect the page before retrying an action: cancellation is not rollback, and receipts deduplicate whole invocations, not nested actions.
 
@@ -89,4 +91,4 @@ mise exec -- cargo build --locked -p pot-tool-executor --bin pot-tool-executor
 mise run test:browser -- --chromium /usr/bin/chromium
 ```
 
-The browser suite checks both modes, persistent state, interactions, stale recovery, reset, replay and cancellation against a disposable page. For a live root Guest broker, use `scripts/tests/browser.py --broker --package /qualification/computer-use` with `POT_BROWSER_TEST_TOKEN`. These tests make no model API calls; local macOS browser runs are test fixtures only.
+The browser suite checks both modes, persistent state, interactions, stale recovery, reset, replay and cancellation against a disposable page. For a live root Guest broker, use `scripts/tests/browser.py --broker --package /qualification/computer-use` with `POT_BROWSER_TEST_TOKEN`. These tests make no model API calls. `main_host_computer_use_waits_for_owner_and_keeps_session_scope` exercises the Host Agent/approval/runner path; `POT_TEST_HOST_BROWSER_URL` enables Chrome interactions against a disposable fixture.

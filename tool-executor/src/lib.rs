@@ -1,4 +1,4 @@
-//! Explicit local execution backend, used inside Sandbox runners and isolated eval fixtures.
+//! Local execution backend for authorized Host calls, Sandbox runners and eval fixtures.
 pub mod files;
 pub mod plugins;
 mod processes;
@@ -16,6 +16,21 @@ pub struct LocalTools(
     tokio::sync::Mutex<plugins::Plugins>,
 );
 impl LocalTools {
+    pub fn host() -> Self {
+        Self(
+            Default::default(),
+            tokio::sync::Mutex::new(plugins::Plugins::host()),
+        )
+    }
+    pub async fn has_plugin_session(&self, session: &str) -> bool {
+        self.plugin_sessions().await.iter().any(|id| id == session)
+    }
+    pub async fn plugin_sessions(&self) -> Vec<String> {
+        self.1.lock().await.sessions()
+    }
+    pub async fn reap_plugins(&self) -> Result<()> {
+        self.1.lock().await.reap_idle().await
+    }
     pub async fn shutdown(&self) -> Result<()> {
         self.1.lock().await.shutdown().await?;
         self.0.lock().await.shutdown().await
@@ -36,7 +51,11 @@ impl ToolExecutor for LocalTools {
             if name == "apply_patch" {
                 tools::patch(context, args)
             } else if name == "plugin_call" {
-                self.1.lock().await.execute(args).await
+                self.1
+                    .lock()
+                    .await
+                    .execute_with_idle(args, policy.session_idle_timeout_ms)
+                    .await
             } else {
                 self.0
                     .lock()

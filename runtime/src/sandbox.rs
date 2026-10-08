@@ -27,16 +27,25 @@ impl pot_core::ToolExecutor for Tools {
                 object.remove("environment");
             }
             if environment == "host" {
-                anyhow::ensure!(
-                    agent::binding(&self.service)?
+                let binding = agent::binding(&self.service)?;
+                if let Some(plugin) = binding.spec.params.agent.plugin_for_tool(name)? {
+                    anyhow::ensure!(
+                        plugin.manifest.execution == "environment",
+                        "This plugin supports Sandbox execution only"
+                    );
+                    let descriptor = binding
                         .spec
                         .params
                         .agent
-                        .plugin_for_tool(name)?
-                        .is_none()
-                        && name != "plugin_call",
-                    "Plugins require a Linux Sandbox"
-                );
+                        .model_descriptor(&binding.spec.provider, &binding.spec.model)?;
+                    execution_args =
+                        pot_core::plugins::call(plugin, name, execution_args, descriptor.vision())?;
+                } else {
+                    anyhow::ensure!(
+                        name != "plugin_call",
+                        "Internal plugin envelopes cannot be called directly"
+                    );
+                }
                 let executor = self
                     .service
                     .permissions
@@ -45,7 +54,11 @@ impl pot_core::ToolExecutor for Tools {
                     &*executor,
                     context,
                     policy,
-                    name,
+                    if binding.spec.params.agent.plugin_for_tool(name)?.is_some() {
+                        "plugin_call"
+                    } else {
+                        name
+                    },
                     &execution_args,
                     call,
                     emit,
@@ -420,15 +433,20 @@ pub async fn refresh(s: &Service) -> Result<()> {
     finish_turn(s).await
 }
 pub async fn reap_idle(s: &Service) -> Result<()> {
+    s.permissions.reap_host_plugins().await?;
     s.sandboxes.environment.reap_idle().await
 }
 pub async fn finish_stale(s: &Service, epoch: u64) -> Result<()> {
+    s.permissions
+        .finish_stale_host(&s.usage_scope, epoch)
+        .await?;
     s.sandboxes
         .environment
         .finish_stale(&s.usage_scope, epoch)
         .await
 }
 pub async fn shutdown(s: &Service) -> Result<()> {
+    s.permissions.shutdown_host().await?;
     s.sandboxes.environment.shutdown().await
 }
 pub async fn finish_idle(s: &Service) -> Result<()> {

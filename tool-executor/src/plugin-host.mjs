@@ -1,4 +1,4 @@
-// Generic Node plugin transport. Plugin processes are contained by the Guest scope cgroup.
+// Generic Node plugin transport. Plugin processes use Host process groups or Guest scope cgroups.
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 const entry = process.argv[1];
@@ -24,7 +24,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     };
     // Each execute receives a fresh sink, while plugin state survives calls.
     currentEmit = emit;
-    if (!plugin) plugin = (await import(pathToFileURL(entry))).createPlugin({ mode: request.mode, emit: item => currentEmit(item) });
+    if (!plugin) plugin = (await import(pathToFileURL(entry))).createPlugin({ mode: request.mode, environment: request.environment, emit: item => currentEmit(item) });
     await plugin.execute({ tool: request.tool, input: request.input });
     process.stdout.write(JSON.stringify({ content }) + '\n');
   } catch (error) {

@@ -13,8 +13,7 @@ manage environments or delegate. Sandbox failure never causes Host fallback.
 
 | Operation | Default policy |
 |---|---|
-| New Host command or patch | Ask unless an Agent-specific grant matches |
-| Sandbox plugin invocation (including `cua_repl`) | Same environment policy; every invocation is checked |
+| Host command, patch or plugin invocation | Ask unless an Agent-specific grant matches |
 | Ordinary assigned-Sandbox execution | Allow; owner may configure ask |
 | Continue an authorized command session | Allow with session ownership checks |
 | Task, schedule, preference and Sandbox management | Allow within the role's authority |

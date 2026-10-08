@@ -133,6 +133,22 @@ async fn fixture(
                 &protocol,
                 if i == 0 {
                     first
+                } else if (i == 1 || i == 2) && first.iter().any(|c| c["plugin_session"] == true) {
+                    let tool = body["messages"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .rev()
+                        .find(|m| m["role"] == "tool")
+                        .unwrap();
+                    let result: Value =
+                        serde_json::from_str(tool["content"].as_str().unwrap()).unwrap();
+                    let args = if i == 1 {
+                        json!({"session_id":result["session_id"],"code":"nodeRepl.write(43)"})
+                    } else {
+                        json!({"session_id":result["session_id"],"reset":true})
+                    };
+                    vec![json!({"id":format!("plugin-{i}"),"name":"cua_repl","arguments":args})]
                 } else if i == 1 && first.iter().any(|c| c["process_session"] == true) {
                     let content = body["messages"]
                         .as_array()
@@ -1058,6 +1074,79 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
         );
         server.abort();
         std::fs::remove_dir_all(directory).unwrap();
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
+    let browser_url = std::env::var("POT_TEST_HOST_BROWSER_URL").ok();
+    let code = browser_url.as_ref().map_or_else(|| "let value = 41; nodeRepl.write(++value);".to_owned(), |url| format!(r#"let tab = await cua.open({}); let state = await tab.observe(); let input = state.elements.find(e => e.role === 'textbox'); state = await tab.fill({{element:input.element,sequence:state.sequence,text:'Pot'}}); let button = state.elements.find(e => e.role === 'button'); state = await tab.click({{element:button.element,sequence:state.sequence}}); await tab.observe(); nodeRepl.write(42);"#, json!(url)));
+    for approved in [false, true] {
+        let calls = vec![
+            json!({"id":"host-cua","name":"cua_repl","arguments":{"code":code},"plugin_session":approved}),
+        ];
+        let (mut s, mut rx, server, captured) = fixture("openai_chat", calls).await;
+        s.test_tool_executor = None;
+        let runner = s.clone();
+        let job = tokio::spawn(async move {
+            turn(&runner, &mut rx, "host-plugin").await;
+        });
+        let mut approvals = 0;
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            while !job.is_finished() {
+                let pending =
+                    crate::permissions::inspect(State(s.clone()), tasks::tests::headers())
+                        .await
+                        .unwrap()
+                        .0;
+                for card in pending["requests"].as_array().unwrap() {
+                    assert_eq!(card["request"]["tool"], "cua_repl");
+                    assert_eq!(card["request"]["environment"], "host");
+                    if approvals == 0 {
+                        assert_eq!(captured.lock().unwrap().len(), 1);
+                        assert!(
+                            s.permissions
+                                .host_executor("main", binding(&s).unwrap().epoch)
+                                .plugin_sessions()
+                                .await
+                                .is_empty()
+                        );
+                    }
+                    let decision: crate::permissions::Decision = serde_json::from_value(
+                        json!({"id":card["id"],"action":if approved {"allow_once"} else {"deny"}}),
+                    )
+                    .unwrap();
+                    let _ = crate::permissions::decide(
+                        State(s.clone()),
+                        tasks::tests::headers(),
+                        Json(decision),
+                    )
+                    .await
+                    .unwrap();
+                    approvals += 1;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        job.await.unwrap();
+        assert_eq!(approvals, if approved { 3 } else { 1 });
+        {
+            let requests = captured.lock().unwrap();
+            let continuation = requests[1].to_string();
+            assert_eq!(continuation.contains("Computer-use API"), approved);
+            if approved {
+                assert!(continuation.contains("42"));
+                if browser_url.is_some() {
+                    assert!(continuation.contains("Saved Pot"));
+                }
+                assert!(requests[2].to_string().contains("43"));
+            }
+        }
+        s.permissions.finish_host(&s).await.unwrap();
+        server.abort();
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
 }
