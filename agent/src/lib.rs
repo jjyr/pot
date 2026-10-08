@@ -1,4 +1,4 @@
-//! Pot-owned model/tool loop. Runtime remains authoritative for execution policy and storage.
+//! Pot-owned model/tool loop and permission policy. Embedders provide owner decisions, storage and execution services.
 mod extensions;
 mod meter;
 mod skills;
@@ -7,6 +7,8 @@ pub use skills::{Skill, SkillCatalog, discover_skills, format_skills_for_prompt}
 mod processes {
     pub use pot_tool_executor::Processes;
 }
+mod host_tools;
+pub mod permissions;
 #[cfg(test)]
 mod tests;
 mod tools;
@@ -702,6 +704,13 @@ async fn run(
         "Extension tool conflicts with a reserved built-in name"
     );
     available.extend(custom);
+    if s.role != ExecutionRole::Summary && s.feedback.permission_grants()?.is_some() {
+        available.extend(
+            host_tools::schemas().into_iter().filter(|t| {
+                s.role == ExecutionRole::Main || t["name"] != "host_set_sandbox_mappings"
+            }),
+        );
+    }
     let session = if s.role != ExecutionRole::Worker {
         let (_,session)=rpc(services,&client,s,None,"initialize","initialize",json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"pot-agent","version":"0.1"}})).await?;
         let session = session.ok_or_else(|| anyhow!("MCP session missing"))?;
@@ -816,10 +825,21 @@ async fn run(
             }
             return Ok(());
         }
-        while let Some(call) = state.pending.first().cloned() {
+        while let Some(mut call) = state.pending.first().cloned() {
             if s.feedback.cancelled() {
                 return Ok(());
             }
+            let prepared = if call.name.starts_with("host_")
+                && available.iter().any(|t| t["name"] == call.name)
+            {
+                host_tools::normalize(&call.name, &mut call.arguments)
+            } else if call.name == "pot_manage_sandbox" {
+                s.feedback
+                    .prepare_permission_operation(&call.name, call.arguments.clone())
+                    .map(|args| call.arguments = args)
+            } else {
+                Ok(())
+            };
             state.started = Some(call.id.clone());
             state.save(s)?;
             emit(Update::ToolStarted {
@@ -841,6 +861,15 @@ async fn run(
                 }
             } else if !allowed {
                 Err(anyhow!("Tool unavailable for this role"))
+            } else if let Err(error) = prepared {
+                Err(error)
+            } else if let Err(error) =
+                permissions::authorize(s, binding, request, &call.id, &call.name, &call.arguments)
+                    .await
+            {
+                Err(error)
+            } else if call.name.starts_with("host_") {
+                host_tools::execute(s, &call.name, &call.arguments).await
             } else if matches!(
                 call.name.as_str(),
                 "exec_command" | "write_stdin" | "apply_patch"

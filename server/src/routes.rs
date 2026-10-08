@@ -44,6 +44,10 @@ pub fn router(s: Service) -> Router {
             get(pot_runtime::sandbox_resources::status)
                 .post(pot_runtime::sandbox_resources::command),
         )
+        .route(
+            "/api/v1/permissions",
+            get(pot_runtime::permissions::inspect).post(pot_runtime::permissions::decide),
+        )
         .route("/api/v1/execution", post(sandbox::execute))
         .route("/api/v1/authorization/start", post(authorization::start))
         .route("/api/v1/authorization/status", get(authorization::status))

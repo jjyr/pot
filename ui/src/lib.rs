@@ -25,3 +25,6 @@ pub mod page_state;
 
 #[cfg(feature = "presentation")]
 pub mod resources;
+
+#[cfg(feature = "presentation")]
+pub mod permissions;

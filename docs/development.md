@@ -148,7 +148,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. Direct Host tools and macOS/Windows Sandbox providers are outside this increment. Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.
+Codex uses native official authorization. Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; Codex Host tools and macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. Historical data is not deleted; use a fresh Host root for the new design.
 
 ## About and dependency licenses
 

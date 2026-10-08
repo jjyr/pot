@@ -5,6 +5,8 @@ pub use desktop::{
     DesktopCapabilities, DesktopIo, DesktopProtocol, DesktopSession, DesktopStream, RfbGate,
 };
 mod manager;
+mod mappings;
+pub use mappings::{HostMapping, host_mappings};
 mod provider;
 pub use files::private_json;
 pub use manager::{AccessGrant, Lease, Manager};

@@ -13,6 +13,10 @@ use tokio::sync::Notify;
 
 #[derive(Default)]
 struct Feedback {
+    grants: Mutex<Option<Value>>,
+    permission_requests: Mutex<Vec<Value>>,
+    permission_decision: Mutex<Option<bool>>,
+    permission_changed: Notify,
     saved: Mutex<Option<Value>>,
     observations: Mutex<Vec<ExecutionObservation>>,
     cancelled: AtomicBool,
@@ -26,6 +30,24 @@ enum SaveFault {
     Receipt,
 }
 impl ExecutionFeedback for Feedback {
+    fn permission_grants(&self) -> Result<Option<Value>> {
+        Ok(self.grants.lock().unwrap().clone())
+    }
+    fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move {
+            self.permission_requests
+                .lock()
+                .unwrap()
+                .push(request.clone());
+            loop {
+                let notified = self.permission_changed.notified();
+                if let Some(approved) = *self.permission_decision.lock().unwrap() {
+                    return Ok(json!({"request":request,"approved":approved}));
+                }
+                notified.await;
+            }
+        })
+    }
     fn observe(&self, event: &ExecutionObservation) -> Result<()> {
         self.observations.lock().unwrap().push(event.clone());
         Ok(())
@@ -1560,4 +1582,190 @@ async fn instructions_are_caller_owned_and_never_discovered_from_agent_cwd() {
     let body = f.services.requests.lock().unwrap()[0]["body"].to_string();
     assert!(body.contains("CALLER_INSTRUCTIONS"));
     assert!(!body.contains("WRONG_HOST_DOCUMENT"));
+}
+
+#[tokio::test]
+async fn host_write_waits_for_owner_and_denial_has_no_effect() {
+    let f = Fixture::new("openai_chat");
+    *f.feedback.grants.lock().unwrap() = Some(json!([]));
+    let path = f.dir.canonicalize().unwrap().join("owner-file.txt");
+    let operation = model::ToolCall {
+        id: "host-write".into(),
+        name: "host_write_file".into(),
+        arguments: json!({"path":path,"content":"approved content"}),
+    };
+    f.services.queue(wire("openai_chat", "", &[operation]));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    let decide = async {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while f.feedback.permission_requests.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!path.exists(), "Host write occurred before approval");
+        let request = f.feedback.permission_requests.lock().unwrap()[0].clone();
+        assert_eq!(request["owner"], "unit");
+        assert_eq!(request["args"]["content"], "approved content");
+        *f.feedback.permission_decision.lock().unwrap() = Some(false);
+        f.feedback.permission_changed.notify_waiters();
+    };
+    let (updates, ()) = tokio::join!(f.turn(false), decide);
+    assert!(!path.exists());
+    assert!(
+        updates
+            .unwrap()
+            .iter()
+            .any(|u| matches!(u, Update::ToolFinished { failed: true, .. }))
+    );
+}
+#[tokio::test]
+async fn persistent_host_scope_is_agent_bound_and_symlink_escape_requires_approval() {
+    let f = Fixture::new("openai_chat");
+    let root = f.dir.canonicalize().unwrap();
+    let allowed = root.join("allowed");
+    std::fs::create_dir(&allowed).unwrap();
+    let outside = root.join("outside.txt");
+    std::fs::write(&outside, "outside").unwrap();
+    let target = allowed.join("file.txt");
+    std::os::unix::fs::symlink(&outside, allowed.join("link")).unwrap();
+    let grant = permissions::Grant {
+        id: "grant".into(),
+        owner: "unit".into(),
+        scope: permissions::Scope::Path {
+            path: allowed.clone(),
+            write: true,
+            recursive: true,
+        },
+    };
+    *f.feedback.grants.lock().unwrap() = Some(json!([grant]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    f.services.queue(wire(
+        "openai_chat",
+        "",
+        &[
+            model::ToolCall {
+                id: "write".into(),
+                name: "host_write_file".into(),
+                arguments: json!({"path":target,"content":"effect"}),
+            },
+            model::ToolCall {
+                id: "link".into(),
+                name: "host_read_file".into(),
+                arguments: json!({"path":allowed.join("link")}),
+            },
+            model::ToolCall {
+                id: "shell".into(),
+                name: "host_exec_command".into(),
+                arguments: json!({"cmd":"printf bad > shell-effect","workdir":allowed}),
+            },
+        ],
+    ));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn(false).await.unwrap();
+    assert_eq!(std::fs::read_to_string(target).unwrap(), "effect");
+    assert!(!allowed.join("shell-effect").exists());
+    let requests = f.feedback.permission_requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["args"]["path"], json!(outside));
+}
+#[tokio::test]
+async fn permanent_grants_survive_rebinding_but_remain_agent_specific() {
+    let mut f = Fixture::new("openai_chat");
+    let path = f.dir.canonicalize().unwrap().join("file");
+    *f.feedback.grants.lock().unwrap() = Some(json!([permissions::Grant {
+        id: "saved".into(),
+        owner: "unit".into(),
+        scope: permissions::Scope::Path {
+            path: path.clone(),
+            write: false,
+            recursive: false
+        },
+    }]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    let request = TurnRequest {
+        request_id: "turn".into(),
+        text: "read".into(),
+    };
+    let args = json!({"path":path});
+    f.binding.epoch = 99;
+    permissions::authorize(
+        &f.context,
+        &f.binding,
+        &request,
+        "call",
+        "host_read_file",
+        &args,
+    )
+    .await
+    .unwrap();
+    assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    f.context.owner = "other-agent".into();
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.binding,
+            &request,
+            "call",
+            "host_read_file",
+            &args
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+}
+#[tokio::test]
+async fn once_approvals_do_not_authorize_another_call_and_receipts_prevent_reexecution() {
+    let f = Fixture::new("openai_chat");
+    *f.feedback.grants.lock().unwrap() = Some(json!([]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(true);
+    let path = f.dir.canonicalize().unwrap().join("once.txt");
+    let call = model::ToolCall {
+        id: "once".into(),
+        name: "host_write_file".into(),
+        arguments: json!({"path":path,"content":"first"}),
+    };
+    f.services
+        .queue(wire("openai_chat", "", std::slice::from_ref(&call)));
+    f.services.queue(wire(
+        "openai_chat",
+        "",
+        &[
+            call.clone(),
+            model::ToolCall {
+                id: "next".into(),
+                ..call
+            },
+        ],
+    ));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    f.turn(false).await.unwrap();
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 2);
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "first");
+}
+
+#[tokio::test]
+async fn approved_host_shell_has_bounded_output_and_timeout() {
+    let f = Fixture::new("openai_chat");
+    *f.feedback.grants.lock().unwrap() = Some(json!([]));
+    *f.feedback.permission_decision.lock().unwrap() = Some(true);
+    let root = f.dir.canonicalize().unwrap();
+    f.services.queue(wire("openai_chat", "", &[
+        model::ToolCall {id:"shell-ok".into(),name:"host_exec_command".into(),arguments:json!({"cmd":"printf shell-ok > host-result.txt; printf output","workdir":root})},
+        model::ToolCall {id:"shell-timeout".into(),name:"host_exec_command".into(),arguments:json!({"cmd":"sleep 20; printf bad > delayed.txt","workdir":root,"timeout_ms":20})}
+    ]));
+    f.services.queue(wire("openai_chat", "done", &[]));
+    let updates = f.turn(false).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("host-result.txt")).unwrap(),
+        "shell-ok"
+    );
+    assert!(!root.join("delayed.txt").exists());
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u,Update::ToolFinished{id,failed:true,..} if id == "shell-timeout"))
+    );
 }

@@ -95,6 +95,16 @@ Resource maxima remain constrained by hardware/virtualization. Update UI, Swift 
 
 Token input is decimal: 1K=1, 000, 1M=1, 000, 000, stored as integers. Remove the product 32K cap; retain exact JSON integer bound (2^53-1), rejecting zero/negative/fractional results/overflow. Model context and output limits differ; servers may reject unsupported ranges.
 
+## Agent approval cards
+
+Native and Web main/task conversations display pending pot-agent approval cards
+with owner identity, tool, complete arguments and permission scope. Actions are
+Always allow, Allow once and Deny, in that order. Always allow saves the displayed
+scope; there is no additional directory-grant button or Sandbox-mapping-specific
+card. Saved grants have Revoke actions. Host shell cards explain command authority. Requests
+remain separate from model-generated messages, and cancelling a conversation
+invalidates pending approval. See [Agent permissions](permissions.md).
+
 ## Sandbox desktop
 
 The Host chat/backend stay available with every environment stopped. Sandbox uses the existing 56 pt global rail, a 224 pt environment sidebar, and a desktop area with two 56 pt toolbar rows. Selecting an environment shows its noVNC desktop directly. A stopped environment stays stopped until Start Desktop is pressed. Selecting a running execution environment requests its desktop component automatically. View selection never changes the execution default; Set Execution Default is an explicit menu action affecting future unspecified assignments. Each task retains its immutable Sandbox ID.

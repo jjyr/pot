@@ -277,6 +277,15 @@ impl LinuxPodmanProvider {
                 if ro { "ro" } else { "rw" }
             ));
         }
+        for mapping in pot_sandbox::host_mappings(&config)? {
+            args.push("--volume".into());
+            args.push(format!(
+                "{}:{}:{}",
+                mapping.source.display(),
+                mapping.destination.display(),
+                if mapping.read_only { "ro" } else { "rw" }
+            ));
+        }
         args.extend([
             i.image.clone(),
             // Podman's --init conflicts with --systemd=always (needed for the

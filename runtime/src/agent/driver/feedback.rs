@@ -30,6 +30,48 @@ impl Feedback {
     }
 }
 impl ExecutionFeedback for Feedback {
+    fn execute_authorized_host(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
+        let name = name.to_owned();
+        Box::pin(async move {
+            self.check()?;
+            anyhow::ensure!(
+                !self.cancelled() && !self.service.is_worker && name == "host_set_sandbox_mappings",
+                "Host operation unavailable"
+            );
+            crate::sandbox::management(&self.service, &json!({"action":"set_mounts","sandbox_id":args["sandbox_id"],"mappings":args["mappings"]})).await
+        })
+    }
+    fn prepare_permission_operation(&self, name: &str, mut args: Value) -> Result<Value> {
+        self.check()?;
+        if name == "pot_manage_sandbox" && args["action"] != "create" {
+            args["sandbox_id"] = json!(
+                self.service
+                    .sandboxes
+                    .assignment(args["sandbox_id"].as_str().unwrap_or(""))?
+            );
+        }
+        Ok(args)
+    }
+    fn permission_grants(&self) -> Result<Option<Value>> {
+        self.check()?;
+        Ok(Some(
+            self.service.permissions.grants(&self.service.usage_scope),
+        ))
+    }
+    fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move {
+            self.check()?;
+            crate::permissions::request(
+                &self.service,
+                self.epoch,
+                self.request
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("Active turn required"))?,
+                request,
+            )
+            .await
+        })
+    }
     fn ready(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async {
             self.check()?;
@@ -182,6 +224,9 @@ fn make_context(
     } else {
         orchestration::MAIN_PROMPT.into()
     };
+    if binding.spec.engine == Engine::Pot {
+        main_prompt = main_prompt.replace("Direct Host tool execution is unavailable.", "You normally chat on the Host. Use host_read_file, host_write_file, host_list_directory or host_exec_command for explicit Host work; these request owner permission. Use host_set_sandbox_mappings only to make an explicit owner-reviewed mapping change. Other execution tools run inside Sandboxes. Persistent permissions require an explicit owner decision; never claim they exist before approval.");
+    }
     let instructions = if role == ExecutionRole::Summary {
         String::new()
     } else {

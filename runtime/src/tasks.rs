@@ -99,6 +99,7 @@ fn child(
     let (events, _) = broadcast::channel(256);
     let (commands, _) = mpsc::unbounded_channel();
     let service = Service {
+        permissions: root.permissions.clone(),
         skill_selection: skills,
         #[cfg(test)]
         test_tool_executor: root.test_tool_executor.clone(),
@@ -1091,6 +1092,15 @@ pub(super) fn sandbox_tasks(root: &Service) -> Vec<TaskInfo> {
         .values()
         .map(|lane| lane.record.info.clone())
         .collect()
+}
+
+pub(super) fn permission_lane(root: &Service, owner: &str) -> Option<Service> {
+    root.tasks
+        .lock()
+        .unwrap()
+        .lanes
+        .get(owner)
+        .map(|l| l.service.clone())
 }
 
 #[cfg(test)]

@@ -109,11 +109,17 @@ async fn initialize_with_providers_and_agent(
     });
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
+    let sandboxes = Arc::new(sandbox::Manager::with_providers(&data, providers)?);
+    let permissions = Arc::new(permissions::Hub::open_with_legacy(
+        &sandboxes.agent_home.join("permissions.json"),
+        &data.join("permissions-v1.sqlite"),
+    )?);
     let s = Service {
+        permissions,
         skill_selection: None,
         #[cfg(test)]
         test_tool_executor: None,
-        sandboxes: Arc::new(sandbox::Manager::with_providers(&data, providers)?),
+        sandboxes,
         sandbox_id: None,
         usage: Arc::new(Mutex::new(usage::Ledger::open(
             &data.join("usage-v2.sqlite"),

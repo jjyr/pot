@@ -49,6 +49,7 @@ async function refresh(){
     const receipt=JSON.parse(module.reconcile_send(JSON.stringify(current)));
     if(receipt){accepted=receipt;notice=t('mobile.shell.received');}
     const data={connected:true,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches,page,conversation:task||'main',locale:language,notice,snapshot,accepted,installed:isInstalled(),dark:matchMedia('(prefers-color-scheme: dark)').matches};
+    if(page==='chat'||page==='task')data.permissions=await api('/api/v1/permissions');
     if(page==='tasks'){const result=await api(`/api/v1/tasks/query?scope=${scope}&q=${encodeURIComponent(query)}&offset=${offset}&limit=20`);data.task_page=result;data.task_query={scope,q:query,offset,limit:20,selected:''};nextOffset=result.next_offset;}
     if(page==='sandbox'){const result=await api('/api/v1/sandboxes');data.sandbox_inventory=result;}
     if(page==='usage'){data.usage=await api('/api/v1/usage/summary?days='+usageDays+'&offset='+usageOffset+'&timezone='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone));}
@@ -94,6 +95,7 @@ window.potAction=async(action,value)=>{
     if(action==='task'){task=value;page='task';navigate();}
     if(action==='filter'){scope=value;offset=0;}
     if(action==='task-query'){const q=JSON.parse(value);scope=q.scope;query=q.q;offset=q.offset;}
+    if(action==='permission-decision')await api('/api/v1/permissions',JSON.parse(value));
     if(action==='usage-query'){const q=JSON.parse(value);usageDays=q.days;usageOffset=q.offset;}
     if(action==='search'){query=value;offset=0;}
     if(action==='next'&&nextOffset!=null)offset=nextOffset;

@@ -15,6 +15,16 @@ Updated: 2026-10-08.
 
 See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
 
+## pot-agent permission layer — 2026-10-08
+
+Issue #29 adds Agent-owned permission policy with one-time approvals and persistent
+Agent-scoped permanent grants. Runtime stores only current permanent grants in
+`~/.pot/agent/permissions.json`; pending/one-time decisions remain in memory with
+no approval history. Native/Web owner interaction uses the same permission service. Explicit Host file/list/write/command tools are available to Main and
+task pot-agent sessions; Main can make owner-reviewed Linux Sandbox Host mapping
+changes. Codex retains its existing capabilities and permission integration is
+deferred. See [Agent permissions](permissions.md) for scope and qualification limits.
+
 ## Remaining validation and scope
 
 Remote HTTP basic access is an agreed deployment direction, not delivered. It
@@ -28,7 +38,7 @@ Mobile physical iOS/Android input, accessibility, startup performance, productio
 
 Real-provider login/inference must be requalified after the Host deployment changes. Full native appearance, IME, weak-network and sleep/wake matrices are not established by mock-model tests. Public release requires cold-install validation and distribution signing/notarization.
 
-Qualified macOS execution, Android/iOS/Windows Sandbox providers, direct Host tools, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
+Qualified macOS execution, Android/iOS/Windows Sandbox providers, Codex Host tools, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
 
 ## Sandbox redesign — 2026-10-07
 

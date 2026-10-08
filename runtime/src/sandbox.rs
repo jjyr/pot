@@ -109,8 +109,11 @@ impl Manager {
         #[cfg(test)]
         let agent_home = root.join("agent-home");
         #[cfg(not(test))]
-        let agent_home =
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".pot/agent");
+        let agent_home = std::env::var_os("POT_AGENT_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".pot/agent")
+            });
         #[cfg(test)]
         let skill_user = root.join("skills-user");
         #[cfg(not(test))]
@@ -254,6 +257,10 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         return Ok(inventory(s).await);
     }
     if name == "pot_manage_sandbox" {
+        anyhow::ensure!(
+            args["action"] != "set_mounts",
+            "Host mappings require the pot-agent permission flow"
+        );
         let result = management(s, args).await?;
         if matches!(
             args["action"].as_str(),

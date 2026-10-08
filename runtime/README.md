@@ -14,11 +14,17 @@ Only Pot and Codex engines/transports/session identities are accepted. There are
 
 ## Agent execution
 
+pot-agent owns [permission policy and grant matching](../docs/permissions.md).
+Runtime supplies owner decisions and current permanent-grant storage through
+injected feedback services. Main and task pot-agent sessions have explicit,
+approval-gated Host tools; Sandbox execution retains its existing scoped backend.
+Codex permission integration is deferred.
+
 pot-agent runs in-process on Host. Runtime injects a ToolExecutor, with no implicit local backend. The execution tools are exec_command, write_stdin and apply_patch; search/list/read use shell commands. Main receives task/schedule and Sandbox management tools; workers cannot delegate, manage or retarget. Agent context, compaction, usage, execution preferences and deterministic evaluation remain Host-owned.
 
 Codex App Server runs on Host with an empty native environment list. Native shell/patch/image/code/web/hooks/apps/plugins/subagent tools and inherited MCP are disabled. Lane-scoped Pot MCP exposes the common execution protocol. Each turn gets a distinct managed MCP URL to rediscover its role's tools after native resume; the native thread identity remains fixed.
 
-Main loadouts include task/schedule and Sandbox management. Workers receive exec_command, write_stdin and apply_patch, a lane token and a fixed Sandbox. Summary turns can only inspect tasks. Credentials, Host data and Helper sockets are never mounted in guest workspaces.
+Main loadouts include task/schedule and Sandbox management. Workers receive exec_command, write_stdin and apply_patch, a lane token and a fixed Sandbox. Summary turns can only inspect tasks. pot-agent Host tools are separate from those loadouts and require owner approval or a matching persistent grant. Default guest workspaces contain artifacts rather than credentials or Helper sockets. Additional Host directory mappings require explicit owner authorization and are visible to every task sharing that Sandbox.
 
 Cancellation settles the native session and drains remote operations. Executor subprocesses run as an ordinary guest user inside root-owned cgroups, including detached descendants. Unknown outcomes quarantine the environment until explicit main-only recovery; commands are never replayed automatically. Quit settles Host work and stops VMs. Artifacts and native/product history persist.
 
@@ -53,6 +59,7 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `POST /api/v1/agent/migrate` | Explicit Driver/profile handoff at a safe turn boundary |
 | `GET/POST /api/v1/agent/routing` | Worker profile defaults, model-visible allowlist and concurrency policies |
 | `GET/POST /api/v1/sandboxes` | Main/operator inventory and typed lifecycle actions |
+| `GET/POST /api/v1/permissions` | Owner approval decisions, persisted grants and revocation; no worker administration |
 | `POST /api/v1/execution` | Active lane `{name,call_id,args}`; fixed worker scope, durable receipts |
 | `POST /api/v1/mcp`, `POST /api/v1/orchestration` | Role-scoped shared product tool dispatcher |
 | `/gw/{provider}/{*path}` | Internal lane-authorized provider gateway |

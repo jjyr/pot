@@ -188,6 +188,9 @@ async fn logout(State(a): State<Access>, h: HeaderMap) -> Response {
     )
 }
 fn allowed(method: &Method, path: &str) -> bool {
+    if *method == Method::POST && path == "/api/v1/permissions" {
+        return true;
+    }
     if *method == Method::GET
         && matches!(
             path,
@@ -196,6 +199,7 @@ fn allowed(method: &Method, path: &str) -> bool {
                 | "/api/v1/tasks"
                 | "/api/v1/tasks/query"
                 | "/api/v1/sandboxes"
+                | "/api/v1/permissions"
                 | "/api/v1/usage"
                 | "/api/v1/usage/summary"
                 | "/api/v1/schedules"

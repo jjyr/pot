@@ -750,5 +750,13 @@
   "web.https": "Tailscale HTTPS",
   "web.https-hint": "HTTPS requires MagicDNS and HTTPS Certificates in Tailscale DNS settings.",
   "tailscale.title": "Tailscale",
-  "tailscale.description": "Connect Pot to your private Tailscale network. Web UI access is configured separately."
+  "tailscale.description": "Connect Pot to your private Tailscale network. Web UI access is configured separately.",
+  "permissions.request": "Agent requests permission",
+  "permissions.scope": "Permission scope (only for this Agent)",
+  "permissions.allow_once": "Allow once",
+  "permissions.allow_persistent": "Always allow",
+  "permissions.deny": "Deny",
+  "permissions.grant": "Persistent Agent permission",
+  "permissions.revoke": "Revoke",
+  "permissions.shell-effects": "This command can perform any action available to the Server OS account. A path permission does not constrain shell execution."
 }

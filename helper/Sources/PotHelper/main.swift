@@ -52,12 +52,14 @@ actor Runtime {
     }
 
     var cpus = 4; var memoryGiB = 8; var diskGiB = 32
+    var hostMappings: [(String, String, Bool)] = []
     var imageReference = "pot.local/sandbox"
     func loadConfiguration() throws {
         let path = root.appendingPathComponent("sandbox.json")
         guard FileManager.default.fileExists(atPath: path.path) else { return }
-        let values = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Int] ?? [:]
-        guard let c = values["cpus"], let m = values["memory_gib"], let d = values["disk_gib"], (1 ... 32).contains(c),
+        let values = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any] ?? [:]
+        guard let c = values["cpus"] as? Int, let m = values["memory_gib"] as? Int, let d = values["disk_gib"] as? Int,
+              (1 ... 32).contains(c),
               (1 ... 128).contains(m), (4 ... 512).contains(d)
         else { throw NSError(
             domain: "pot",
@@ -65,6 +67,35 @@ actor Runtime {
             userInfo: [NSLocalizedDescriptionKey: "Invalid Sandbox resource configuration"]
         ) }
         cpus = c; memoryGiB = m; diskGiB = d
+        hostMappings = []
+        if let mappings = values["mappings"] {
+            guard let rows = mappings as? [[String: Any]], rows.count <= 16 else { throw NSError(
+                domain: "pot",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid Host mappings"]
+            ) }
+            for row in rows {
+                var isDirectory: ObjCBool = false
+                guard let source = row["source"] as? String,
+                      let destination = row["destination"] as? String,
+                      let readOnly = row["read_only"] as? Bool,
+                      source.hasPrefix("/"), destination.hasPrefix("/mnt/host/"),
+                      !destination.split(separator: "/").contains(".."),
+                      URL(fileURLWithPath: source).resolvingSymlinksInPath().path == source,
+                      FileManager.default.fileExists(atPath: source, isDirectory: &isDirectory),
+                      isDirectory.boolValue,
+                      !hostMappings
+                      .contains(where: {
+                          destination == $0.1 || destination.hasPrefix($0.1 + "/") || $0.1.hasPrefix(destination + "/")
+                      })
+                else { throw NSError(
+                    domain: "pot",
+                    code: 4,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid Host mapping path"]
+                ) }
+                hostMappings.append((source, destination, readOnly))
+            }
+        }
     }
 
     func status() -> [String: Any] {
@@ -197,6 +228,13 @@ actor Runtime {
                     destination: "/run/pot-skill-sources/builtin",
                     options: ["ro"]
                 ))
+                for (source, destination, readOnly) in hostMappings {
+                    config.mounts.append(.share(
+                        source: source,
+                        destination: destination,
+                        options: readOnly ? ["ro"] : []
+                    ))
+                }
                 config.dns = DNS(nameservers: ["1.1.1.1"])
             }
             manager = creatingManager
