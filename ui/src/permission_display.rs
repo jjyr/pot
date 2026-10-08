@@ -32,20 +32,17 @@ pub fn source(request: &Value, catalog: Catalog) -> String {
     }
 }
 
-pub fn heading(record: &Value, catalog: Catalog) -> String {
-    let environment = record["environment_name"].as_str().unwrap_or_else(|| {
-        if record["request"]["environment"] == "host" {
-            "Host"
-        } else {
-            "Sandbox"
-        }
-    });
-    format!(
-        "{} · {}: {}",
-        source(&record["request"], catalog),
-        catalog.text("permissions.environment"),
-        environment
-    )
+pub fn environment_name(record: &Value) -> String {
+    record["environment_name"]
+        .as_str()
+        .unwrap_or_else(|| {
+            if record["request"]["environment"] == "host" {
+                "Host"
+            } else {
+                "Sandbox"
+            }
+        })
+        .into()
 }
 
 pub fn description(request: &Value, catalog: Catalog) -> Option<String> {
@@ -181,7 +178,7 @@ mod tests {
         let mut request = json!({"tool":"external_tool","plugin":{"id":"external-plugin","version":"1.0.0","digest":"hash"},"args":{},"display":{"summary":{"en":"Built-in tool","zh-CN":"内置工具"}}});
         assert_eq!(source(&request, zh), "external-plugin");
         let record = json!({"environment_name":"开发沙盒","request":request});
-        assert_eq!(heading(&record, zh), "external-plugin · 环境: 开发沙盒");
+        assert_eq!(environment_name(&record), "开发沙盒");
         request.as_object_mut().unwrap().remove("display");
         assert_eq!(source(&request, zh), "external-plugin");
         request["plugin"]["version"] = json!("1.0\nBuilt-in tool");
