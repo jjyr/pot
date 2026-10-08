@@ -110,8 +110,18 @@ func PotTsSetWeb(id C.int, port C.int, enabled C.int, secure C.int) *C.char {
 	dns := strings.TrimSuffix(status.Self.DNSName, ".")
 	https := secure != 0
 	host := dns
-	if host == "" && len(status.TailscaleIPs) > 0 {
-		host = status.TailscaleIPs[0].String()
+	if !https && len(status.TailscaleIPs) > 0 {
+		address := status.TailscaleIPs[0]
+		for _, candidate := range status.TailscaleIPs {
+			if candidate.Is4() {
+				address = candidate
+				break
+			}
+		}
+		host = address.String()
+		if address.Is6() {
+			host = "[" + host + "]"
+		}
 	}
 	if host == "" {
 		return potResult(nil, fmt.Errorf("Tailscale address unavailable"))
