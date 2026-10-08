@@ -1103,6 +1103,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                 for card in pending["requests"].as_array().unwrap() {
                     assert_eq!(card["request"]["tool"], "cua_repl");
                     assert_eq!(card["request"]["environment"], "host");
+                    assert!(card["request"]["args"].get("environment").is_none());
                     if approvals == 0 {
                         assert_eq!(captured.lock().unwrap().len(), 1);
                         assert!(
