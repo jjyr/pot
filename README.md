@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/assets/Pot128.png" width="128" height="128" alt="Pot — a smiling terracotta pot">
+  <img src="app/assets/Pot384.png" width="128" height="128" alt="Pot — a smiling terracotta pot">
 </p>
 
 # Pot

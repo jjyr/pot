@@ -76,6 +76,14 @@ func render(size: Int, homeScreen: Bool = false) -> Data {
 }
 
 try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+// README displays at 128 CSS pixels; provide enough detail for 3x screens.
+try render(size: 384).write(to: assets.appendingPathComponent("Pot384.png"))
+
+if CommandLine.arguments.contains("--readme-only") {
+    print("Generated README icon")
+    exit(0)
+}
+
 try render(size: 1024).write(to: assets.appendingPathComponent("Pot.png"))
 try render(size: 128).write(to: assets.appendingPathComponent("Pot128.png"))
 try render(size: 1024, homeScreen: true).write(to: assets.appendingPathComponent("PotHomeScreen.png"))
