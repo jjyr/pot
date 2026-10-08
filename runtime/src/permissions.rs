@@ -399,7 +399,7 @@ fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
     };
     Ok(json!({"cwd":cwd,"role":if owner == "main" {"main"} else {"task"}}))
 }
-pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<Value> {
+fn execution_environment(s: &Service, epoch: u64, plugin: bool, args: &Value) -> Result<String> {
     let requested = args["environment"].as_str().map(str::to_owned).or_else(|| {
         args["sandbox_id"]
             .as_str()
@@ -409,20 +409,55 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         args.get("environment").is_none_or(Value::is_string),
         "Invalid environment"
     );
+    let session_target = if plugin {
+        args["session_id"]
+            .as_str()
+            .map(|id| s.sandboxes.session_target(&s.usage_scope, epoch, id))
+            .transpose()?
+    } else {
+        None
+    };
+    let selected = if requested.is_none() && session_target.is_none() && plugin && !s.is_worker {
+        Some(s.sandboxes.assignment("")?)
+    } else {
+        None
+    };
     let environment = requested.unwrap_or_else(|| {
-        if s.is_worker {
+        if let Some(target) = &session_target {
+            format!("sandbox:{target}")
+        } else if plugin && !s.is_worker {
+            format!("sandbox:{}", selected.as_deref().unwrap())
+        } else if s.is_worker {
             format!("sandbox:{}", s.sandbox_id.as_deref().unwrap_or("default"))
         } else {
             "host".into()
         }
     });
+    if plugin {
+        anyhow::ensure!(environment != "host", "Plugins require a Linux Sandbox");
+        if let Some(target) = &session_target {
+            anyhow::ensure!(
+                environment == format!("sandbox:{target}"),
+                "Session operation cannot switch Sandbox"
+            );
+        }
+    }
+    Ok(environment)
+}
+pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<Value> {
+    let binding = agent::binding(s)?;
+    let plugin = binding.spec.params.agent.plugin_for_tool(name)?;
+    let environment = execution_environment(s, binding.epoch, plugin.is_some(), &args)?;
     let object = args
         .as_object_mut()
         .ok_or_else(|| anyhow!("Arguments must be an object"))?;
     object.remove("environment");
     object.remove("sandbox_id");
-    pot_core::environment_tools::validate(name, &args)?;
-    let binding = agent::binding(s)?;
+    if let Some(plugin) = &plugin {
+        plugin.validate_input(name, &args)?;
+    } else {
+        pot_core::environment_tools::validate(name, &args)?;
+    }
     if environment == "host" {
         let workspace = s.data.join("agent-workspace");
         std::fs::create_dir_all(&workspace)?;
@@ -475,7 +510,11 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         let prepared = s.sandboxes.permissions(&target, &body).await?;
         hub.load_guest(prepared["config"].clone())?;
         args = prepared["args"].clone();
-        pot_core::environment_tools::validate(name, &args)?;
+        if let Some(plugin) = &plugin {
+            plugin.validate_input(name, &args)?;
+        } else {
+            pot_core::environment_tools::validate(name, &args)?;
+        }
         // Canonicalization occurs in the guest. Host paths are never used to normalize it.
     }
     args["environment"] = json!(environment);
@@ -708,6 +747,45 @@ mod tests {
         let path = std::env::temp_dir().join(format!("pot-permissions-{}", id()));
         std::fs::create_dir(&path).unwrap();
         path
+    }
+    #[tokio::test]
+    async fn plugins_use_sandbox_defaults_and_reject_host_or_lost_sessions_before_preparation() {
+        let s = tasks::tests::fixture();
+        assert_eq!(
+            execution_environment(&s, 1, false, &json!({})).unwrap(),
+            "host"
+        );
+        assert_eq!(
+            execution_environment(&s, 1, true, &json!({})).unwrap(),
+            "sandbox:default"
+        );
+        crate::sandbox::management(
+            &s,
+            &json!({"action":"create","sandbox_id":"second","name":"Second"}),
+        )
+        .await
+        .unwrap();
+        crate::sandbox::management(&s, &json!({"action":"select","sandbox_id":"second"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            execution_environment(&s, 1, true, &json!({})).unwrap(),
+            "sandbox:second"
+        );
+        assert_eq!(
+            execution_environment(&s, 1, true, &json!({"sandbox_id":"default"})).unwrap(),
+            "sandbox:default"
+        );
+        assert!(execution_environment(&s, 1, true, &json!({"environment":"host"})).is_err());
+        assert!(execution_environment(&s, 1, true, &json!({"session_id":"lost"})).is_err());
+        let mut worker = s.clone();
+        worker.is_worker = true;
+        worker.sandbox_id = Some("default".into());
+        assert_eq!(
+            execution_environment(&worker, 1, true, &json!({})).unwrap(),
+            "sandbox:default"
+        );
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
     #[test]
     fn host_and_guest_defaults_and_explicit_policies_survive_grant_changes() {

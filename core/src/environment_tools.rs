@@ -15,6 +15,10 @@ pub fn schemas(policy: &crate::ShellSettings) -> Vec<Value> {
     ]
 }
 pub fn validate(name: &str, args: &Value) -> Result<()> {
+    if name == "plugin_call" {
+        crate::plugins::validate_call(args)?;
+        return Ok(());
+    }
     let object = args
         .as_object()
         .ok_or_else(|| anyhow!("Tool arguments must be an object"))?;
@@ -94,7 +98,10 @@ mod tests {
     use super::*;
     #[test]
     fn shell_and_terminal_arguments_are_shared_and_type_checked() {
-        let tools = schemas(&crate::ShellSettings::default());
+        let tools: Vec<_> = schemas(&crate::ShellSettings::default())
+            .into_iter()
+            .filter(|t| t["name"] != "browser")
+            .collect();
         for key in ["shell", "login", "tty"] {
             assert!(tools[0]["inputSchema"]["properties"].get(key).is_some());
         }

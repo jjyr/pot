@@ -78,9 +78,15 @@ impl Profile {
         }
     }
     pub fn validate(&self) -> Result<()> {
-        if self.engine == Engine::Pot {
-            self.params.agent.validate()?;
-        }
+        self.params.agent.validate()?;
+        let descriptor = self
+            .params
+            .agent
+            .model_descriptor(&self.provider, &self.model)?;
+        ensure!(
+            self.engine != Engine::Pot || descriptor.supported_in_api,
+            "Configured model does not support API execution"
+        );
         ensure!(
             !self.id.is_empty() && self.id.len() <= 128 && self.revision > 0,
             "Invalid profile identity"
@@ -179,6 +185,7 @@ impl Profile {
             source_profile_revision: self.revision,
             spec_hash: String::new(),
         };
+        spec.params.agent.pin_plugins()?;
         spec.spec_hash = spec.hash()?;
         Ok(spec)
     }
@@ -235,6 +242,7 @@ impl Profile {
             source_profile_revision: self.revision,
             spec_hash: String::new(),
         };
+        spec.params.agent.pin_plugins()?;
         spec.spec_hash = spec.hash()?;
         Ok(spec)
     }
@@ -288,6 +296,7 @@ impl ResolvedSpec {
             .collect())
     }
     pub fn validate(&self) -> Result<()> {
+        self.params.agent.validate()?;
         self.launch_spec.clone().unwrap_or_default().validate()?;
         self.protocol_contract
             .clone()

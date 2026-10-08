@@ -4,8 +4,22 @@ use crate::*;
 use axum::response::Response;
 
 pub fn schemas(summary: bool, worker: bool) -> Vec<Value> {
-    let mut all: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA).expect("bundled schemas");
-    let mut execution = pot_agent::tool_schemas(&pot_core::ShellSettings::default());
+    configured_schemas(summary, worker, &pot_core::AgentSettings::default())
+        .expect("bundled tool schemas")
+}
+fn configured_schemas(
+    summary: bool,
+    worker: bool,
+    settings: &pot_core::AgentSettings,
+) -> Result<Vec<Value>> {
+    let mut all: Vec<Value> = serde_json::from_str(pot_core::TOOL_SCHEMA)?;
+    let mut execution = pot_agent::tool_schemas(&settings.shell);
+    execution.retain(|t| settings.builtin_tools.iter().any(|n| t["name"] == *n));
+    execution.extend(settings.plugin_tools()?);
+    let execution_names: Vec<_> = execution
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(str::to_owned))
+        .collect();
     if !worker {
         for tool in &mut execution {
             if tool["name"] != "write_stdin" {
@@ -14,15 +28,30 @@ pub fn schemas(summary: bool, worker: bool) -> Vec<Value> {
         }
     }
     all.extend(execution);
-    all.into_iter()
+    Ok(all
+        .into_iter()
         .filter(|tool| {
             (!worker
                 || tool["name"]
                     .as_str()
-                    .is_some_and(|n| matches!(n, "exec_command" | "write_stdin" | "apply_patch")))
+                    .is_some_and(|n| execution_names.iter().any(|v| v == n)))
                 && (!summary || matches!(tool["name"].as_str(), Some("list_tasks" | "get_task")))
+                && settings.allowed_tools.as_ref().is_none_or(|allow| {
+                    tool["name"]
+                        .as_str()
+                        .is_some_and(|n| allow.iter().any(|v| v == n))
+                })
         })
-        .collect()
+        .collect())
+}
+fn mcp_content(mut value: Value) -> Vec<Value> {
+    let mut content = value
+        .as_object_mut()
+        .and_then(|v| v.remove("content"))
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    content.insert(0, json!({"type":"text","text":value.to_string()}));
+    content
 }
 fn current_turn(s: &Service) -> ApiResult<String> {
     let inner = s.inner.lock().unwrap();
@@ -96,16 +125,22 @@ pub async fn mcp(
             json!({"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"pot","version":env!("CARGO_PKG_VERSION")}})
         }
         "ping" => json!({}),
-        "tools/list" => json!({"tools":schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker)}),
+        "tools/list" => {
+            let settings = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?
+                .map(|binding| binding.spec.params.agent).unwrap_or_default();
+            let tools = configured_schemas(turn.starts_with(orchestration::RESULT_PREFIX), s.is_worker, &settings).map_err(internal)?;
+            json!({"tools":tools})
+        },
         "tools/call" => {
             let name = call["params"]["name"].as_str().unwrap_or("");
-            if !schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker).iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
-            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || matches!(name,"list_sandboxes" | "manage_sandbox") {
+            let settings = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?.map(|b| b.spec.params.agent).unwrap_or_default();
+            if !configured_schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker,&settings).map_err(internal)?.iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
+            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || matches!(name,"list_sandboxes" | "manage_sandbox") {
                 let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));
                 let operation = tokio::spawn(async move { sandbox::tool(&s,&name,&id,&args).await });
                 let result = operation.await.map_err(|e|internal(e.into()))?;
                 let (value,failed) = match result { Ok(v)=>{let v=v.get("result").cloned().unwrap_or(v);let failed=v.get("error").is_some() || v["isError"]==true;(v,failed)}, Err(e)=>(json!({"error":e.to_string()}),true) };
-                return Ok(Json(json!({"jsonrpc":"2.0","id":rpc_id,"result":{"content":[{"type":"text","text":value.to_string()}],"isError":failed}})).into_response());
+                return Ok(Json(json!({"jsonrpc":"2.0","id":rpc_id,"result":{"content":mcp_content(value),"isError":failed}})).into_response());
             }
             let dispatch: orchestration::Call = serde_json::from_value(json!({"name":name,"call_id":format!("mcp:{rpc_id}"),"args":call["params"].get("arguments").cloned().unwrap_or_else(||json!({}))})).map_err(|e|internal(e.into()))?;
             match orchestration::invoke(State(root),h,Json(dispatch)).await {
@@ -194,7 +229,10 @@ mod tests {
             if summary {
                 assert_eq!(names, ["get_task", "list_tasks"].into());
             } else if worker {
-                assert_eq!(names, ["exec_command", "write_stdin", "apply_patch"].into());
+                assert_eq!(
+                    names,
+                    ["exec_command", "write_stdin", "apply_patch", "cua_repl"].into()
+                );
             } else {
                 assert!(names.contains("manage_sandbox"));
                 assert!(names.contains("list_sandboxes"));

@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 struct Fake {
+    browser: AtomicBool,
     desktop: AtomicBool,
     generation: AtomicUsize,
     running: AtomicBool,
@@ -22,6 +23,7 @@ struct Fake {
 impl Fake {
     fn new() -> Self {
         Self {
+            browser: AtomicBool::new(true),
             desktop: AtomicBool::new(false),
             generation: AtomicUsize::new(1),
             running: AtomicBool::new(false),
@@ -114,7 +116,11 @@ impl Provider for Fake {
         _: Duration,
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
-            if route == "execute" {
+            if route == "capabilities" {
+                Ok(
+                    json!({"protocol_version":1,"plugins":{"protocol_version":1,"runtime":if self.browser.load(Ordering::SeqCst) {"node"} else {"unavailable"},"requirements":["node","chromium"]}}),
+                )
+            } else if route == "execute" {
                 self.dispatches.fetch_add(1, Ordering::SeqCst);
                 Ok(json!({"result":{"session_id":"session","stdout":"guest"},"events":[]}))
             } else {
@@ -240,6 +246,103 @@ async fn sessions_are_fixed_to_owner_epoch_and_target() {
         .to_string()
         .contains("expired")
     );
+}
+#[tokio::test]
+async fn browser_sessions_cannot_retarget_or_cross_owner_and_boot() {
+    let (_dir, m, p) = fixture();
+    let owner = grant("main", false);
+    let open = plugin_args(json!({"code":r#"let tab = await cua.open("https://example.com");"#}));
+    m.execute(&owner, "plugin_call", "open", &open, &|| false, None)
+        .await
+        .unwrap();
+    // Completed operation IDs replay the receipt rather than a second navigation.
+    m.execute(&owner, "plugin_call", "open", &open, &|| false, None)
+        .await
+        .unwrap();
+    assert_eq!(p.dispatches.load(Ordering::SeqCst), 1);
+    assert_eq!(m.session_target("main", 1, "session").unwrap(), "default");
+    assert!(m.session_target("worker", 1, "session").is_err());
+    assert!(m.session_target("main", 2, "session").is_err());
+    let observe = plugin_args(json!({"code":"await tab.observe();","session_id":"session"}));
+    assert!(
+        m.execute(
+            &grant("worker", true),
+            "plugin_call",
+            "foreign",
+            &observe,
+            &|| false,
+            None
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("another task")
+    );
+    let mut same_target = observe.clone();
+    same_target["sandbox_id"] = json!("default");
+    m.execute(
+        &owner,
+        "plugin_call",
+        "same-target",
+        &same_target,
+        &|| false,
+        None,
+    )
+    .await
+    .unwrap();
+    let mut retarget = observe.clone();
+    retarget["sandbox_id"] = json!("other");
+    assert!(
+        m.execute(
+            &owner,
+            "plugin_call",
+            "retarget",
+            &retarget,
+            &|| false,
+            None
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("cannot switch")
+    );
+    p.generation.store(2, Ordering::SeqCst);
+    assert!(
+        m.execute(&owner, "plugin_call", "boot", &observe, &|| false, None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("generation changed")
+    );
+    m.finish("main").await.unwrap();
+    assert!(m.session_target("main", 1, "session").is_err());
+    assert!(
+        m.execute(&owner, "plugin_call", "expired", &observe, &|| false, None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("expired")
+    );
+}
+#[tokio::test]
+async fn browser_unavailable_guest_is_rejected_before_action_dispatch() {
+    let (_dir, m, p) = fixture();
+    p.browser.store(false, Ordering::SeqCst);
+    assert!(
+        m.execute(
+            &grant("main", false),
+            "plugin_call",
+            "unsupported",
+            &plugin_args(json!({"code":r#"await cua.open("https://example.com");"#})),
+            &|| false,
+            None
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("Plugin runtime unavailable")
+    );
+    assert_eq!(p.dispatches.load(Ordering::SeqCst), 0);
 }
 #[tokio::test]
 async fn unknown_cleanup_quarantines_persistently_and_busy_stop_cannot_delete_state() {
@@ -530,4 +633,14 @@ async fn approved_mappings_are_persisted_preserved_on_resource_update_and_refuse
             .unwrap()
             .is_empty()
     );
+}
+
+fn plugin_args(input: Value) -> Value {
+    pot_core::plugins::call(
+        pot_core::plugins::PluginBundle::builtin("computer-use").unwrap(),
+        "cua_repl",
+        input,
+        false,
+    )
+    .unwrap()
 }

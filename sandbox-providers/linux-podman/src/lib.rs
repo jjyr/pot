@@ -516,7 +516,8 @@ impl Provider for LinuxPodmanProvider {
                     "cancel",
                     "inspect",
                     "desktop",
-                    "permissions"
+                    "permissions",
+                    "capabilities"
                 ]
                 .contains(&route),
                 "Unsupported executor route"

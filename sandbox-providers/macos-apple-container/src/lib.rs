@@ -293,7 +293,8 @@ impl Provider for MacOSAppleContainerProvider {
                     "cancel",
                     "inspect",
                     "desktop",
-                    "permissions"
+                    "permissions",
+                    "capabilities"
                 ]
                 .contains(&route),
                 "Unsupported guest route"

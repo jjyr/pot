@@ -14,6 +14,7 @@ use tokio::sync::Notify;
 #[derive(Default)]
 struct Feedback {
     grants: Mutex<Option<Value>>,
+    prepared_environment: Mutex<Option<String>>,
     permission_requests: Mutex<Vec<Value>>,
     permission_decision: Mutex<Option<bool>>,
     permission_changed: Notify,
@@ -30,6 +31,18 @@ enum SaveFault {
     Receipt,
 }
 impl ExecutionFeedback for Feedback {
+    fn prepare_execution_operation(
+        &self,
+        _: &str,
+        mut args: Value,
+    ) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move {
+            if let Some(environment) = &*self.prepared_environment.lock().unwrap() {
+                args["environment"] = json!(environment);
+            }
+            Ok(args)
+        })
+    }
     fn permission_grants(&self) -> Result<Option<Value>> {
         Ok(self.grants.lock().unwrap().clone())
     }
@@ -197,6 +210,89 @@ struct Fixture {
     context: ExecutionContext,
     binding: Binding,
     services: Services,
+}
+struct BrowserFixtureExecutor {
+    vision: bool,
+}
+impl ToolExecutor for BrowserFixtureExecutor {
+    fn execute<'a>(
+        &'a self,
+        _: &'a ExecutionContext,
+        _: &'a ShellSettings,
+        name: &'a str,
+        _: &'a Value,
+        _: &'a str,
+        _: &'a mut (dyn FnMut(Update) -> Result<()> + Send),
+    ) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            assert_eq!(name, "cua_repl");
+            let mut content = vec![json!({"type":"text","text":"Saved Pot"})];
+            if self.vision {
+                content.push(json!({"type":"image","mimeType":"image/jpeg","data":"AQID","width":1280,"height":800}));
+            }
+            Ok(json!({"session_id":"browser-session","sequence":1,"content":content}))
+        })
+    }
+    fn finish<'a>(&'a self, _: &'a ExecutionContext) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+#[tokio::test]
+async fn browser_model_configuration_selects_schema_and_typed_observations() {
+    for protocol in [
+        "openai_chat",
+        "openai_responses",
+        "anthropic_messages",
+        "gemini",
+    ] {
+        for vision in [false, true] {
+            let mut f = Fixture::new(protocol);
+            f.binding.spec.params.agent.builtin_tools = vec![];
+            f.binding.spec.params.agent.model_catalog = Some(serde_json::from_value(json!({"schema_version":1,"default":{"input_modalities":if vision {vec!["text", "image"]} else {vec!["text"]}}})).unwrap());
+            f.context.tool_executor = Some(Arc::new(BrowserFixtureExecutor { vision }));
+            let calls = vec![model::ToolCall {
+                id: "browser-call".into(),
+                name: "cua_repl".into(),
+                arguments: json!({"code":r#"let tab = await cua.open("https://example.com");"#}),
+            }];
+            f.services.queue(wire(protocol, "", &calls));
+            f.services.queue(wire(protocol, "done", &[]));
+            let updates = f.turn(false).await.unwrap();
+            let requests = f.services.requests.lock().unwrap();
+            // Gemini publishes functionDeclarations rather than top-level function tools.
+            let body = &requests[0]["body"];
+            let encoded_schema = body["tools"].to_string();
+            assert!(encoded_schema.contains("cua_repl"));
+            assert!(encoded_schema.contains("code"));
+            let continuation = requests[1]["body"].to_string();
+            assert!(continuation.contains("Saved Pot"));
+            assert_eq!(continuation.contains("AQID"), vision);
+            let context: Context =
+                serde_json::from_value(f.feedback.load_context().unwrap().unwrap()).unwrap();
+            let observation = context.messages.iter().find(|m| m.role == "tool").unwrap();
+            assert_eq!(observation.images.len(), usize::from(vision));
+            assert!(!observation.text.contains("AQID"));
+            for update in updates {
+                if let Update::ToolFinished { result, .. } = update {
+                    assert!(!result.to_string().contains("AQID"));
+                }
+            }
+        }
+    }
+}
+#[test]
+fn image_context_estimate_counts_tiles_instead_of_base64_text() {
+    let mut message = Message::text("tool", "observed page".into());
+    message.images.push(model::ModelImage {
+        mime_type: "image/jpeg".into(),
+        data: "AQID".repeat(200000),
+        width: 1280,
+        height: 800,
+    });
+    let tokens = Defaults
+        .estimate_tokens(&Protocol::OpenaiChat, "model", "system", &[message], &[])
+        .unwrap();
+    assert!(tokens > 2500 && tokens < 10000);
 }
 struct Config;
 impl ProfileConfig for Config {
@@ -1261,7 +1357,7 @@ async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
                 actual.iter().map(|t| t["name"].as_str().unwrap()).collect();
             assert_eq!(names.len(), actual.len(), "duplicate injected tools");
             let mut expected: std::collections::BTreeSet<String> =
-                ["exec_command", "write_stdin", "apply_patch"]
+                ["exec_command", "write_stdin", "apply_patch", "cua_repl"]
                     .map(str::to_owned)
                     .into();
             if role == ExecutionRole::Main {
@@ -2019,4 +2115,115 @@ async fn composition_reuses_parent_receipts_and_routes_product_calls_across_prot
             1
         );
     }
+}
+
+struct CountPluginExecutor(Arc<std::sync::atomic::AtomicUsize>);
+impl ToolExecutor for CountPluginExecutor {
+    fn execute<'a>(
+        &'a self,
+        _: &'a ExecutionContext,
+        _: &'a ShellSettings,
+        name: &'a str,
+        args: &'a Value,
+        _: &'a str,
+        _: &'a mut (dyn FnMut(Update) -> Result<()> + Send),
+    ) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            assert_eq!(name, "cua_repl");
+            assert_eq!(args["environment"], "sandbox:default");
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(json!({"status":"observed"}))
+        })
+    }
+    fn finish<'a>(&'a self, _: &'a ExecutionContext) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test]
+async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
+    for role in [ExecutionRole::Main, ExecutionRole::Worker] {
+        for composed in [false, true] {
+            for approved in [false, true] {
+                let mut f = Fixture::new("openai_chat");
+                f.context.role = role;
+                f.services.rpc_tools = Some(vec![]);
+                f.binding.spec.params.agent.builtin_tools = vec!["exec".into(), "wait".into()];
+                *f.feedback.grants.lock().unwrap() = Some(json!([]));
+                *f.feedback.prepared_environment.lock().unwrap() = Some("sandbox:default".into());
+                *f.feedback.permission_decision.lock().unwrap() = Some(approved);
+                let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                f.context.tool_executor = Some(Arc::new(CountPluginExecutor(count.clone())));
+                let (name, arguments) = if composed {
+                    (
+                        "exec",
+                        json!({"code":"const r = await tools.cua_repl({code:'nodeRepl.write(1)'}); text(r.status);","yield_time_ms":1000}),
+                    )
+                } else {
+                    ("cua_repl", json!({"code":"nodeRepl.write(1)"}))
+                };
+                f.services.queue(wire(
+                    "openai_chat",
+                    "",
+                    &[model::ToolCall {
+                        id: "plugin".into(),
+                        name: name.into(),
+                        arguments,
+                    }],
+                ));
+                f.services.queue(wire("openai_chat", "done", &[]));
+                f.turn(false).await.unwrap();
+                assert_eq!(count.load(Ordering::SeqCst), usize::from(approved));
+                let requests = f.feedback.permission_requests.lock().unwrap();
+                assert_eq!(requests.len(), 1);
+                assert_eq!(requests[0]["tool"], "cua_repl");
+                assert_eq!(requests[0]["environment"], "sandbox:default");
+                assert_eq!(
+                    requests[0]["call_id"],
+                    if composed { "plugin:js:1" } else { "plugin" }
+                );
+                let schemas = f.services.requests.lock().unwrap()[0]["body"]["tools"].to_string();
+                assert!(schemas.contains("cua_repl"));
+                assert_eq!(schemas.contains("sandbox_id"), role == ExecutionRole::Main);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn plugin_exact_grants_allow_only_the_approved_code_and_summary_cannot_execute() {
+    let mut f = Fixture::new("openai_chat");
+    let args = json!({"code":"nodeRepl.write(1)","environment":"sandbox:default"});
+    let grant = permissions::Grant {
+        id: "plugin".into(),
+        owner: f.context.owner.clone(),
+        scope: permissions::scope("cua_repl", &args).unwrap(),
+    };
+    let grants = permissions::Config::from_grants(&[grant])
+        .into_grants()
+        .unwrap();
+    *f.feedback.grants.lock().unwrap() = Some(json!(grants));
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    let turn = TurnRequest {
+        request_id: "turn".into(),
+        text: String::new(),
+    };
+    permissions::authorize(&f.context, &f.binding, &turn, "one", "cua_repl", &args)
+        .await
+        .unwrap();
+    assert!(f.feedback.permission_requests.lock().unwrap().is_empty());
+    let mut changed = args.clone();
+    changed["code"] = json!("nodeRepl.write(2)");
+    assert!(
+        permissions::authorize(&f.context, &f.binding, &turn, "two", "cua_repl", &changed)
+            .await
+            .is_err()
+    );
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+    f.context.role = ExecutionRole::Summary;
+    assert!(
+        permissions::authorize(&f.context, &f.binding, &turn, "summary", "cua_repl", &args)
+            .await
+            .is_err()
+    );
 }

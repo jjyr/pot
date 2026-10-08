@@ -27,6 +27,16 @@ impl pot_core::ToolExecutor for Tools {
                 object.remove("environment");
             }
             if environment == "host" {
+                anyhow::ensure!(
+                    agent::binding(&self.service)?
+                        .spec
+                        .params
+                        .agent
+                        .plugin_for_tool(name)?
+                        .is_none()
+                        && name != "plugin_call",
+                    "Plugins require a Linux Sandbox"
+                );
                 let executor = self
                     .service
                     .permissions
@@ -309,30 +319,36 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             .map(|v| v.remove("resource_request_id"));
         return Ok(result);
     }
-    anyhow::ensure!(
-        ["exec_command", "write_stdin", "apply_patch",].contains(&name),
-        "Unknown execution operation"
-    );
     let binding = agent::binding(s)?;
     let settings = &binding.spec.params.agent;
+    let plugin = settings.plugin_for_tool(name)?;
     anyhow::ensure!(
-        binding.spec.engine != agent::Engine::Pot
-            || (settings.builtin_tools.iter().any(|n| n == name)
-                && settings
-                    .allowed_tools
-                    .as_ref()
-                    .is_none_or(|names| names.iter().any(|n| n == name))),
+        plugin.is_some() || ["exec_command", "write_stdin", "apply_patch"].contains(&name),
+        "Unknown execution operation"
+    );
+    anyhow::ensure!(
+        (plugin.is_some()
+            || binding.spec.engine != agent::Engine::Pot
+            || settings.builtin_tools.iter().any(|n| n == name))
+            && settings
+                .allowed_tools
+                .as_ref()
+                .is_none_or(|names| names.iter().any(|n| n == name)),
         "Tool disabled by execution policy"
     );
     let mut validated = args.clone();
     if let Some(object) = validated.as_object_mut() {
         object.remove("sandbox_id");
     }
-    pot_core::environment_tools::validate(name, &validated)?;
+    if let Some(plugin) = &plugin {
+        plugin.validate_input(name, &validated)?;
+    } else {
+        pot_core::environment_tools::validate(name, &validated)?;
+    }
 
     // Pipe sessions already belong to a prepared scope; their Manager validation
     // must run without consulting the current selection or asking for downloads.
-    if name != "write_stdin" {
+    if name != "write_stdin" && !(plugin.is_some() && args.get("session_id").is_some()) {
         let requested = args["sandbox_id"].as_str().unwrap_or("");
         if s.is_worker {
             anyhow::ensure!(
@@ -351,6 +367,19 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             })
             .await?;
     }
+    let (name, args) = if let Some(plugin) = plugin {
+        let descriptor = settings.model_descriptor(&binding.spec.provider, &binding.spec.model)?;
+        let target = args.get("sandbox_id").cloned();
+        let mut envelope =
+            pot_core::plugins::call(plugin, name, args.clone(), descriptor.vision())?;
+        if let Some(target) = target {
+            envelope["sandbox_id"] = target;
+        }
+        ("plugin_call", envelope)
+    } else {
+        (name, args.clone())
+    };
+    let args = &args;
     let legacy_key = format!("sandbox.operation:{turn}:{call_id}");
     let legacy = s
         .inner
@@ -513,13 +542,14 @@ mod tests {
             .contains("cannot switch")
         );
         let tools = tool_bridge::schemas(false, true);
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
         assert!(
             tools
                 .iter()
                 .all(|t| t["name"].as_str().unwrap() == "exec_command"
                     || t["name"] == "write_stdin"
-                    || t["name"] == "apply_patch")
+                    || t["name"] == "apply_patch"
+                    || t["name"] == "cua_repl")
         );
         std::fs::remove_dir_all(&s.data).unwrap();
     }

@@ -522,10 +522,16 @@ fn follow() -> bool {
 pub async fn settings(
     State(s): State<Service>,
     h: HeaderMap,
-    Json(settings): Json<Settings>,
+    Json(mut settings): Json<Settings>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     initialize(&s).map_err(internal)?;
+    settings
+        .profile
+        .params
+        .agent
+        .pin_plugins()
+        .map_err(|e| error(StatusCode::BAD_REQUEST, "invalid_plugin", &e.to_string()))?;
     let spec = gateway::resolve(&s, &settings.profile)
         .map_err(|e| error(StatusCode::BAD_REQUEST, "invalid_profile", &e.to_string()))?;
     gateway::validate_spec(&s, &spec).map_err(internal)?;

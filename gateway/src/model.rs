@@ -12,6 +12,8 @@ pub struct ToolCall {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ModelImage>,
     pub role: String,
     pub text: String,
     #[serde(default)]
@@ -25,6 +27,37 @@ pub struct Message {
     pub usage: Option<TokenUsage>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelImage {
+    pub mime_type: String,
+    pub data: String,
+    pub width: u32,
+    pub height: u32,
+}
+impl ModelImage {
+    pub fn data_url(&self) -> String {
+        format!("data:{};base64,{}", self.mime_type, self.data)
+    }
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            matches!(
+                self.mime_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp"
+            ) && self.width > 0
+                && self.width <= 4096
+                && self.height > 0
+                && self.height <= 4096
+                && !self.data.is_empty()
+                && self.data.len() <= 1400000
+                && self
+                    .data
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=')),
+            "Invalid model image"
+        );
+        Ok(())
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TokenUsage {
     /// Includes cache reads/writes where the provider reports them separately.
     pub input: u64,
@@ -34,6 +67,7 @@ pub struct TokenUsage {
 impl Message {
     pub fn text(role: &str, text: String) -> Self {
         Self {
+            images: vec![],
             role: role.into(),
             text,
             calls: vec![],
@@ -76,6 +110,11 @@ pub fn request(
     effort: Option<&str>,
 ) -> Result<Value> {
     let mut names = std::collections::HashSet::new();
+    for message in messages {
+        for image in &message.images {
+            image.validate()?;
+        }
+    }
     for tool in tools {
         ensure!(
             tool["name"]
@@ -103,7 +142,12 @@ pub fn request(
     Ok(match protocol {
         Protocol::OpenaiChat => {
             let mut input = vec![json!({"role":"system","content":system})];
+            let mut images = vec![];
             for m in messages {
+                if m.role != "tool" && !images.is_empty() {
+                    input.push(json!({"role":"user","content":images}));
+                    images = vec![];
+                }
                 if m.role == "assistant" && m.replay.is_object() {
                     input.push(m.replay.clone());
                 } else if m.role == "tool" {
@@ -111,6 +155,10 @@ pub fn request(
                 } else {
                     input.push(json!({"role":m.role,"content":m.text}));
                 }
+                images.extend(m.images.iter().map(|image| json!({"type":"image_url","image_url":{"url":image.data_url(),"detail":"high"}})));
+            }
+            if !images.is_empty() {
+                input.push(json!({"role":"user","content":images}));
             }
             let mut b = json!({"model":model,"messages":input,"stream":true,"stream_options":{"include_usage":true},"max_tokens":cap});
             if !functions.is_empty() {
@@ -136,7 +184,12 @@ pub fn request(
         }
         Protocol::OpenaiResponses => {
             let mut input = vec![];
+            let mut images = vec![];
             for m in messages {
+                if m.role != "tool" && !images.is_empty() {
+                    input.push(json!({"role":"user","content":images}));
+                    images = vec![];
+                }
                 if m.role == "assistant" && m.replay.is_array() {
                     input.extend(m.replay.as_array().unwrap().clone());
                 } else if m.role == "tool" {
@@ -146,6 +199,10 @@ pub fn request(
                 } else {
                     input.push(json!({"role":m.role,"content":m.text}));
                 }
+                images.extend(m.images.iter().map(|image| json!({"type":"input_image","image_url":image.data_url(),"detail":"high"})));
+            }
+            if !images.is_empty() {
+                input.push(json!({"role":"user","content":images}));
             }
             let mut b = json!({"model":model,"instructions":system,"input":input,"stream":true,"store":false,"include":["reasoning.encrypted_content"],"max_output_tokens":cap});
             if !functions.is_empty() {
@@ -172,9 +229,13 @@ pub fn request(
                 let blocks = if m.role == "assistant" && m.replay.is_array() {
                     m.replay.as_array().unwrap().clone()
                 } else if m.role == "tool" {
-                    vec![json!({"type":"tool_result","tool_use_id":m.call_id,"content":m.text})]
+                    let mut content = vec![json!({"type":"text","text":m.text})];
+                    content.extend(m.images.iter().map(|image| json!({"type":"image","source":{"type":"base64","media_type":image.mime_type,"data":image.data}})));
+                    vec![json!({"type":"tool_result","tool_use_id":m.call_id,"content":content})]
                 } else {
-                    vec![json!({"type":"text","text":m.text})]
+                    let mut content = vec![json!({"type":"text","text":m.text})];
+                    content.extend(m.images.iter().map(|image| json!({"type":"image","source":{"type":"base64","media_type":image.mime_type,"data":image.data}})));
+                    content
                 };
                 if input.last().is_some_and(|p| p["role"] == role) {
                     input.last_mut().unwrap()["content"]
@@ -203,7 +264,7 @@ pub fn request(
                 } else {
                     "user"
                 };
-                let parts = if m.role == "assistant" && m.replay.is_array() {
+                let mut parts = if m.role == "assistant" && m.replay.is_array() {
                     m.replay.as_array().unwrap().clone()
                 } else if m.role == "tool" {
                     let name = messages
@@ -218,6 +279,9 @@ pub fn request(
                 } else {
                     vec![json!({"text":m.text})]
                 };
+                parts.extend(m.images.iter().map(
+                    |image| json!({"inlineData":{"mimeType":image.mime_type,"data":image.data}}),
+                ));
                 if input.last().is_some_and(|p| p["role"] == role) {
                     input.last_mut().unwrap()["parts"]
                         .as_array_mut()
@@ -515,6 +579,7 @@ impl Decoder {
         }
         ensure!(calls.len() <= 128, "Too many tool calls in one response");
         Ok(Message {
+            images: vec![],
             role: "assistant".into(),
             text: self.text,
             calls,
@@ -568,6 +633,57 @@ impl Sse {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn typed_images_survive_serialization_and_use_provider_image_blocks() {
+        use super::*;
+        let mut tool = Message::text("tool", "Browser observation".into());
+        tool.call_id = "call".into();
+        tool.images.push(ModelImage {
+            mime_type: "image/jpeg".into(),
+            data: "AQID".into(),
+            width: 1280,
+            height: 800,
+        });
+        let restored: Message =
+            serde_json::from_value(serde_json::to_value(&tool).unwrap()).unwrap();
+        assert_eq!(restored.images[0].width, 1280);
+        let mut assistant = Message::text("assistant", String::new());
+        assistant.calls.push(ToolCall {
+            id: "call".into(),
+            name: "browser".into(),
+            arguments: json!({}),
+        });
+        for protocol in [
+            Protocol::OpenaiChat,
+            Protocol::OpenaiResponses,
+            Protocol::AnthropicMessages,
+            Protocol::Gemini,
+        ] {
+            let body = request(
+                &protocol,
+                "model",
+                "system",
+                &[assistant.clone(), restored.clone()],
+                &[],
+                100,
+                None,
+            )
+            .unwrap();
+            let encoded = body.to_string();
+            let key = match protocol {
+                Protocol::OpenaiChat => "image_url",
+                Protocol::OpenaiResponses => "input_image",
+                Protocol::AnthropicMessages => "media_type",
+                Protocol::Gemini => "inlineData",
+                _ => unreachable!(),
+            };
+            assert!(encoded.contains(key), "{encoded}");
+            assert!(
+                !encoded.contains("\\\"data\\\""),
+                "Image Base64 must not be serialized into tool text"
+            );
+        }
+    }
     use super::*;
     #[test]
     fn sse_handles_split_unicode_crlf_and_multiline_data() {

@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct AgentSettings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_catalog: Option<crate::ModelCatalog>,
+    #[serde(skip_serializing_if = "crate::plugins::is_default")]
+    pub plugins: std::collections::BTreeMap<String, crate::plugins::PluginConfig>,
     pub context_window: u64,
     /// None derives the threshold from the context window and output reservation.
     pub compact_at: Option<u64>,
@@ -22,6 +26,8 @@ pub struct AgentSettings {
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
+            model_catalog: None,
+            plugins: crate::plugins::defaults(),
             context_window: 32768,
             compact_at: None,
             auto_compact: true,
@@ -74,7 +80,17 @@ impl Default for ShellSettings {
     }
 }
 impl AgentSettings {
+    pub fn model_descriptor(&self, provider: &str, model: &str) -> Result<crate::ModelDescriptor> {
+        self.model_catalog.as_ref().map_or_else(
+            || Ok(crate::ModelDescriptor::default()),
+            |catalog| catalog.resolve(provider, model),
+        )
+    }
     pub fn validate(&self) -> Result<()> {
+        self.validate_plugins()?;
+        if let Some(catalog) = &self.model_catalog {
+            catalog.validate()?;
+        }
         ensure!(self.context_window > 0, "Context window must be positive");
         ensure!(
             self.context_reserve < self.context_window,
