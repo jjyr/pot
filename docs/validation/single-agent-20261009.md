@@ -15,7 +15,7 @@ No legacy conversation or usage schema migration/import is provided.
 | Check | Result |
 |---|---|
 | Workspace compilation and Clippy, warnings denied | Passed, including the Rust/Swift App |
-| Backend tests | 336 passed; 2 explicitly ignored live-model tests |
+| Backend tests | 336 passed; paid-model and libtailscale-fixture tests ignored |
 | Native App and shared UI tests | 17 and 11 passed; Swift client safety tests passed |
 | Deterministic evaluation CLI contracts | Passed |
 | Swift Helper build | Passed |
