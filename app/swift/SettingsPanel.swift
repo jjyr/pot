@@ -34,7 +34,7 @@ import Foundation
     var section = 0, revision = 0
     var awaitingBoot: String?
     var cpu = 4, memory = 8, disk = 32
-    var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "5"
+    var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "8"
     var cpuField = "4", memoryField = "8", diskField = "32"
     @LocalizedMessage var result = ""
     func nativeAccountReady(_ engine: String) -> Bool {
@@ -163,13 +163,13 @@ import Foundation
     }
 
     func load() {
-        key = ""; limit = "10000"; tokens = "8192"; perTurn = "100"; parallel = "5"
+        key = ""; limit = "10000"; tokens = "8192"; perTurn = "100"; parallel = "8"
         if let data = try? Data(contentsOf: root.appendingPathComponent("product/execution-limits.json")),
            let limits = try? JSONSerialization.jsonObject(with: data) as? [String: Int]
         {
             limit = String(limits["request_limit"] ?? 10000); tokens = String(limits["max_tokens"] ?? 8192)
             perTurn = String(limits["max_requests_per_turn"] ?? 100); parallel =
-                String(limits["max_parallel_tasks"] ?? 5)
+                String(limits["max_parallel_tasks"] ?? 8)
         }
         revision += 1
     }
