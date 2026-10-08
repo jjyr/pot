@@ -27,7 +27,6 @@ fn main() {
         .arg("swift/SettingsPanel.swift")
         .arg("swift/AIConfiguration.swift")
         .arg("swift/APIIntegration.swift")
-        .arg("swift/Authorization.swift")
         .arg("swift/UnreadTracker.swift")
         .arg("swift/TokenCount.swift")
         .arg("swift/PotIcon.swift")
@@ -54,7 +53,6 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/SettingsPanel.swift");
     println!("cargo:rerun-if-changed=swift/AIConfiguration.swift");
     println!("cargo:rerun-if-changed=swift/APIIntegration.swift");
-    println!("cargo:rerun-if-changed=swift/Authorization.swift");
     println!("cargo:rerun-if-changed=swift/UnreadTracker.swift");
     println!("cargo:rerun-if-changed=swift/TokenCount.swift");
     println!("cargo:rerun-if-changed=swift/PotIcon.swift");

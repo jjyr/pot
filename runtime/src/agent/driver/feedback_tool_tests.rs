@@ -436,7 +436,7 @@ async fn runtime_injects_fresh_instructions_for_both_engines_and_roles_but_not_s
     .0;
     let worker = tasks::owner(main, &task.id).unwrap();
     std::fs::write(worker.workspace.join("AGENTS.md"), "WORKER_LOCAL").unwrap();
-    for engine in [Engine::Pot, Engine::Codex] {
+    for engine in [Engine::Pot] {
         for service in [main, &worker] {
             let request = SandboxFixture::activate(service);
             let mut binding = binding(service).unwrap();
@@ -450,11 +450,7 @@ async fn runtime_injects_fresh_instructions_for_both_engines_and_roles_but_not_s
                     context.instructions.contains("WORKER_LOCAL"),
                     service.is_worker
                 );
-                if engine == Engine::Codex {
-                    assert_eq!(context.main_prompt.matches(text).count(), 1);
-                } else {
-                    assert!(!context.main_prompt.contains(text));
-                }
+                assert!(!context.main_prompt.contains(text));
                 if text == "PROJECT_UPDATED" {
                     assert!(!context.instructions.contains("PROJECT_FIRST"));
                 }

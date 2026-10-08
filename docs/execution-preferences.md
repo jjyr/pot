@@ -8,7 +8,7 @@ Chat is the management entry point. An explicit lasting instruction ("From now o
 
 When asked to show all preferences, the main Agent reads and displays the complete saved text rather than reconstructing it from conversation history. Selective changes replace the whole document while preserving unrelated text; clearing saves an empty document. There are no extra task-summary labels, rule-management buttons, or confirmation screens. Running-task summaries in Chat and task-list rows show only an executor icon in addition to their existing content. Open the task to inspect its specific Agent/model or use its existing Change Agent interaction.
 
-Configured connections determine Agent/model selections. Claude, Gemini, DeepSeek, OpenCode and Custom API use Pot Agent; Codex uses official App Server. Antigravity and Claude native CLI are unsupported. Display names/model names are resolved against configured Profiles; ambiguous or unavailable names need clarification or connection recovery. A configured connection is not proof of successful inference or authentication.
+Configured connections determine Agent/model selections. Claude, Gemini, DeepSeek, OpenCode and Custom API use Pot Agent. Antigravity and Claude native CLI are unsupported. Display names/model names are resolved against configured Profiles; ambiguous or unavailable names need clarification or connection recovery. A configured connection is not proof of successful inference or authentication.
 
 ## Tools and routing
 
@@ -23,7 +23,7 @@ The main Agent interprets the deliverable and picks an eligible Profile ID. Expl
 
 Schedules retain their explicit Profile or existing default behavior; this feature adds no scheduled classification call. Unavailable preferred executors must not be silently replaced. Concurrency queues work with its selected executor.
 
-Pot and Codex main Agents expose these tools. Workers and read-only summary turns cannot edit preferences.
+The main pot-agent expose these tools. Workers and read-only summary turns cannot edit preferences.
 
 ## Usage
 
@@ -31,7 +31,7 @@ A main turn that attempts `create_task` is marked once in the shared usage ledge
 
 The Usage page and main-chat Usage show **Main-chat usage including task routing** only when matching records exist, with input/output/input-cache and incomplete-record counts. This subset is already included in the total and must never be added again. Global queries follow the selected date window/timezone; main-chat details use lifetime scope. Task details do not include main-chat routing usage. Pagination does not change totals. Missing usage remains incomplete, not measured zero. Existing unmarked historical turns are not guessed or backfilled.
 
-Native Codex uses its existing cumulative per-turn deltas; Pot uses request-level gateway usage. No extra routing model call is introduced.
+Pot uses request-level gateway usage. No extra routing model call is introduced.
 
 ## Validation
 

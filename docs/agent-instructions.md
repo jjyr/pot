@@ -18,15 +18,11 @@ Runtime reloads sources when preparing each execution context. The resulting sna
 
 pot-agent appends the injected text for Main and Worker, including custom system prompts and configurations with no execution reader tool. Summary contexts skip loading and injection. Instruction injection does not copy the text into pot-agent's persistent conversation history.
 
-Managed Codex receives the same Runtime text through its developer instructions. Native Host project discovery is disabled with `project_doc_max_bytes = 0`, preventing the Host session cwd from supplying an unrelated project document. This setting disables Codex discovery; it does not cap the Runtime-injected text. Codex's native account home global instructions remain owned by the CLI: the upstream App Server does not expose a global instruction-provider replacement through the public protocol. This change does not isolate or modify that account home, so native Codex-home global instructions may still be present. Pot's own loader never reads overrides.
-
 ## Reference and tests
 
 Main's built-in delegation prompt is `MAIN_PROMPT` in `runtime/src/orchestration.rs`,
 injected by Runtime. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default pot-agent prompt.
-
-The discovery order, nearest repository root, no-root cwd behavior and global last-good refresh policy follow the local Codex implementation reviewed on 2026-10-07. Pot intentionally omits Codex override filenames, configurable fallback/root markers and the project byte cap. It selects one execution environment per agent context.
 
 Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, default Sandbox switching and fixed task assignment. Runtime context tests cover both engines and roles plus Summary exclusion; pot-agent request tests cover all three supported model protocols, custom prompts and history separation. Run `mise run test` and `mise run clippy:backend`.
 

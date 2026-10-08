@@ -123,50 +123,38 @@ pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<budget::Budge
 
 pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedSpec> {
     let mut spec = profile.resolve()?;
-    if matches!(spec.engine, agent::Engine::Codex) {
-        return Ok(spec);
-    }
     let route = provider(s, &spec)?;
     spec.set_gateway_protocol(route.protocol.name())?;
     Ok(spec)
 }
 /// Brand derives from the executed binding's immutable route identity, never model names.
 pub fn executor_icon(s: &Service, spec: &agent::ResolvedSpec) -> String {
-    match spec.engine {
-        agent::Engine::Codex => "codex".into(),
-        agent::Engine::Pot => {
-            let endpoint = stored_provider(s, spec)
-                .ok()
-                .map(|p| p.endpoint)
-                .unwrap_or_default();
-            let url = reqwest::Url::parse(&endpoint).ok();
-            match url.as_ref().and_then(|u| u.host_str()) {
-                Some("api.anthropic.com") => "anthropic",
-                Some("generativelanguage.googleapis.com") => "gemini",
-                Some("api.deepseek.com") => "deepseek",
-                Some("api.openai.com") => "openai",
-                Some("opencode.ai")
-                    if url
-                        .as_ref()
-                        .is_some_and(|u| u.path().starts_with("/zen/go/")) =>
-                {
-                    "opencode-go"
-                }
-                Some("opencode.ai")
-                    if url.as_ref().is_some_and(|u| u.path().starts_with("/zen/")) =>
-                {
-                    "opencode-zen"
-                }
-                _ => "custom",
-            }
-            .into()
+    let endpoint = stored_provider(s, spec)
+        .ok()
+        .map(|p| p.endpoint)
+        .unwrap_or_default();
+    let url = reqwest::Url::parse(&endpoint).ok();
+    match url.as_ref().and_then(|u| u.host_str()) {
+        Some("api.anthropic.com") => "anthropic",
+        Some("generativelanguage.googleapis.com") => "gemini",
+        Some("api.deepseek.com") => "deepseek",
+        Some("api.openai.com") => "openai",
+        Some("opencode.ai")
+            if url
+                .as_ref()
+                .is_some_and(|u| u.path().starts_with("/zen/go/")) =>
+        {
+            "opencode-go"
         }
+        Some("opencode.ai") if url.as_ref().is_some_and(|u| u.path().starts_with("/zen/")) => {
+            "opencode-zen"
+        }
+        _ => "custom",
     }
+    .into()
 }
+
 pub fn validate_spec(s: &Service, spec: &agent::ResolvedSpec) -> Result<()> {
-    if matches!(spec.engine, agent::Engine::Codex) {
-        return spec.validate();
-    }
     let route = provider(s, spec)?;
     anyhow::ensure!(
         spec.gateway_protocol == route.protocol.name(),

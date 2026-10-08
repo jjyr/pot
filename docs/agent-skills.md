@@ -34,7 +34,7 @@ Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and
 
 ## Injection and task selection
 
-ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved names and optional selections. pot-agent discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. AgentExtensions::skills(context) is the shared override for main/task callers. Runtime uses the same discovery/rendering for Codex developer instructions.
+ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved names and optional selections. pot-agent discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. AgentExtensions::skills(context) is the shared override for main/task callers.
 
 Task creation accepts optional `skills: ["name", ...]`: omitted discovers all skills, a list narrows discovery, and an empty list disables injection. The normal task request record preserves selected names across restart, not skill contents or versions. Unavailable selected skills fail visibly when preparing a turn.
 
@@ -44,7 +44,7 @@ Catalogs reload each turn and append to the system prompt without entering persi
 
 Builtin skill-creator describes format, concise instruction design, supporting resources and validation. Builtin skill-installer handles local/GitHub installation, updates, listing and removal. Their instructions expose only the unified skill path, project paths and usable commands; they do not describe source storage or mounts. Tasks can read these same instructions, but readonly global mounts prevent global mutations.
 
-The creator's scripts/quick_validate.py follows Codex skill-creator's YAML/metadata/scaffold validation, adapted to Pot, and checks ordinary resource files and inline local Markdown links. Authored bundles require explicit names and matching directory names. Standard license/metadata/allowed-tools fields may be preserved but do not grant tool permissions. Shared format fixtures exercise Rust discovery and Python validation. Validation does not execute scripts or establish behavioral quality.
+The creator's scripts/quick_validate.py validates YAML metadata and scaffolds, and checks ordinary resource files and inline local Markdown links. Authored bundles require explicit names and matching directory names. Standard license/metadata/allowed-tools fields may be preserved but do not grant tool permissions. Shared format fixtures exercise Rust discovery and Python validation. Validation does not execute scripts or establish behavioral quality.
 
 The installer uses the adjacent creator validator. It accepts a local bundle, GitHub repo/path/ref or tree URL. Downloads use only credentials available in the current execution environment. Archive extraction rejects traversal and special files. Installation preserves resource contents and executable permissions, normalizes readable permissions, validates before publishing, and refuses replacement without --replace. Ordinary publication failures restore the previous directory; crash recovery and concurrent installers are not transactional.
 

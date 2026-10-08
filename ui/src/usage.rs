@@ -417,7 +417,6 @@ impl UsageUI {
             for (index, row) in groups.iter().enumerate() {
                 let agent = match row["agent"].as_str().unwrap_or("unknown") {
                     "pot" => "Pot",
-                    "codex" => "Codex",
                     "claude" => "Claude",
                     _ => catalog.text("usage-ui.unknown-agent"),
                 };
@@ -499,12 +498,6 @@ impl UsageUI {
                 );
             }
             scroll = scroll.child(card);
-        }
-        if d["native_turn_usage"] == true {
-            scroll = scroll.child(pages::hint(
-                catalog.text("usage-ui.native-cli-usage-is-recorded-by-turn"),
-                cx,
-            ));
         }
         if detail {
             let compression = &d["compaction_total"];

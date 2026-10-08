@@ -106,8 +106,6 @@ if cmd == "prepare":
     if not (RES / "node/bin/node").exists():
         call(["tar", "xzf", node_archive, "-C", RES])
         (RES / node_name).rename(RES / "node")
-    for name in ["package.json", "package-lock.json"]:
-        shutil.copy2(REPO / "sandbox-images/linux/default/agents" / name, RES / ("agents-" + name))
 elif cmd == "build":
     call([sys.executable, REPO / "scripts/build-mobile"], cwd=REPO, env=env)
     call([sys.executable, REPO / "scripts/build-tailscale"], cwd=REPO, env=env)
@@ -193,30 +191,6 @@ elif cmd == "bundle":
         REPO / "skills",
         APP / "Contents/Resources/runtime/skills",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
-    host_tools = APP / "Contents/Resources/runtime/host-tools"
-    host_tools.mkdir(exist_ok=True)
-    shutil.copy2(
-        REPO / "sandbox-images/linux/default/agents/package.json", host_tools / "package.json"
-    )
-    shutil.copy2(
-        REPO / "sandbox-images/linux/default/agents/package-lock.json",
-        host_tools / "package-lock.json",
-    )
-    call(
-        [
-            RES / "node/bin/node",
-            RES / "node/lib/node_modules/npm/bin/npm-cli.js",
-            "ci",
-            "--cache",
-            ROOT / "npm-cache",
-            "--prefix",
-            host_tools,
-            "--ignore-scripts",
-            "--omit=dev",
-            "--no-audit",
-            "--no-fund",
-        ]
     )
     for name in ["Pot.icns"]:
         shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)

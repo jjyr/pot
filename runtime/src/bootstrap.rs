@@ -55,7 +55,6 @@ impl Backend {
         if let Err(error) = sandbox::shutdown(&self.state).await {
             eprintln!("{error}");
         }
-        self.state.codex.shutdown().await;
     }
 }
 pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
@@ -151,9 +150,7 @@ async fn initialize_with_providers_and_agent(
         stop: tokio::sync::watch::channel(false).0,
         tasks: Arc::new(Mutex::new(tasks::Hub::default())),
         terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-        codex: Arc::new(agent::codex::Hosts::default()),
         agent_host,
-        authorization: Arc::new(tokio::sync::Mutex::new(authorization::Hub::default())),
     };
     let configured = agent::configured(&s);
     s.inner.lock().unwrap().store.set(

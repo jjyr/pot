@@ -13,7 +13,7 @@ other Tasks. Summary sessions only inspect Tasks.
 
 Messages retain trusted sender identity, are consumed once and remain pending for
 idle Tasks until explicitly continued. They do not grant owner authority. Delivery
-currently requires pot-agent; Codex bindings return unsupported.
+uses pot-agent.
 
 `wait_task` returns Task metadata, not transcripts. Complete, failed, interrupted,
 cancelled and allowance-waiting states can end a wait; queued/running cannot.

@@ -7,7 +7,6 @@ Merged main `2d72194484674562b1a585f17d95fe645f5a4f72` into PR #22. The Provider
 - 291 backend tests passed; one existing live-model test ignored. Runtime doubles cover cross-turn original-target routing, lease parking/reactivation, generation/epoch invalidation and malformed inspection quarantine.
 - 16 App and 8 UI tests passed. Workspace check/Clippy (all targets, warnings denied), formatting/script checks, localization (732 keys), and Swift Helper compilation passed.
 - Five Linux broker lifecycle tests passed. Local macOS TLS/broker tests passed, including authenticated inspection before/after closure and the desktop tunnel; no real macOS VM was available.
-- The real Linux VM harness passed all 20 boolean regressions against the rebuilt executor v2 image, using a client resource directory without kernel/boot/OCI files. Both Pot and Codex passed PTY input, cross-turn session retention and initialization snapshot checks. Cancellation/cgroup drainage, independent stop, restart recovery, skills/artifacts and the RFB desktop gateway also passed. Evidence: `.local/validation/conflict-resolution-linux-v2.json` and its Helper log; no paid model calls.
 
 ## Image compatibility
 

@@ -1,4 +1,3 @@
-pub(super) mod codex;
 pub(super) mod driver;
 pub mod migration;
 pub mod preferences;
@@ -76,7 +75,6 @@ pub fn native_session(s: &Service) -> Result<(PathBuf, Option<String>)> {
             }
             Ok((file, session_id))
         }
-        _ => bail!("Expected a Pot native session"),
     }
 }
 

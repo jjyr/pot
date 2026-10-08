@@ -108,9 +108,7 @@ fn child(
         sandboxes: root.sandboxes.clone(),
         sandbox_id: Some(sandbox_id.into()),
         terminals: root.terminals.clone(),
-        codex: root.codex.clone(),
         agent_host: root.agent_host.clone(),
-        authorization: root.authorization.clone(),
         usage: root.usage.clone(),
         usage_scope: task_id.into(),
         inner: Arc::new(Mutex::new(Inner {
@@ -2055,9 +2053,9 @@ pub(super) mod tests {
         let task = add(&s, "original task", "").await;
         assert_eq!(task.executor_icon, "deepseek");
         let mut replacement = agent::Profile::api(s.execution.as_ref().unwrap());
-        replacement.engine = agent::Engine::Codex;
         replacement.provider = "openai".into();
-        replacement.auth_ref = "cli:codex".into();
+        replacement.auth_ref = "providers.json:openai".into();
+        execution::private_json(&s.data.join("providers.json"), &json!([{"id":"openai","endpoint":"https://api.openai.com/v1/chat/completions","allowed_hosts":["api.openai.com"],"api_key":"test-only","protocol":"openai_chat"}])).unwrap();
         replacement.revision = 2;
         s.inner
             .lock()
@@ -2080,13 +2078,13 @@ pub(super) mod tests {
         .unwrap();
         assert_eq!(
             page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
-            "codex"
+            "openai"
         );
         persist(&s, &s.tasks.lock().unwrap()).unwrap();
         restore(&s).unwrap();
         assert_eq!(
             page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
-            "codex"
+            "openai"
         );
         std::fs::remove_dir_all(&s.data).unwrap();
     }

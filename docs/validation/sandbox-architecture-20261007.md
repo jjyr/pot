@@ -13,8 +13,5 @@ Validation:
 - Manager contract suite: 6 passed, including concurrent duplicate dispatch, durable epochs, worker/session boundaries, unknown cleanup quarantine, registration/migration and failed persistence rollback.
 - Clippy on all targets of Sandbox, Linux Provider, Runtime and Server with `-D warnings`: passed.
 - Linux OCI image rebuilt from the migrated recipe; reference `pot.local/sandbox:026f1eea024aed72883e`.
-- Real Linux VM regression: passed (two VMs, Pot/Codex main and workers, skill mappings/helpers, session/task binding, cgroup cancellation and busy-stop, Host/worker restart, independent stop/artifact persistence and optional desktop shutdown; 47 local mock model requests).
-
-The VM validation uses isolated HOME/CODEX_HOME, local deterministic model responses, freshly built Server/CLI binaries and the rebuilt guest image. No paid model calls or owner credentials. Helper requires signing with the existing virtualization entitlement and execution outside the tool filesystem sandbox to create vmnet networking. Validation skills must be copied rather than linked because Agent discovery intentionally rejects symlink roots. The regression checks desktop transport through private Helper IPC rather than exposing Provider addresses in Agent inventory.
 
 Limits: no macOS execution yet. Installed template catalog, allocation reservations, cross-environment artifacts and display arbitration remain design work. Storage remains atomic private JSON rather than the proposed injected SQLite store. This stage does not add Linux-host VM support or mutual isolation between workers sharing one Linux VM.

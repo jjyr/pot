@@ -115,7 +115,7 @@ Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent b
 
 Unconfigured Chat links to AI Configuration; first-time setup and Settings use the same page. The Pot Terminal page, side-rail button, xterm assets and native renderer have been removed. Sandbox remains independently accessible. API setup never requires a Terminal.
 
-AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: Codex, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing API connections remain editable. Removed native CLI configurations are unsupported and require fresh configuration; no compatibility migration is provided. Main-Agent changes stay in AI Configuration, not the Chat header.
+AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: OpenAI API, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing API connections remain editable. Removed native CLI configurations are unsupported and require fresh configuration; no compatibility migration is provided. Main-Agent changes stay in AI Configuration, not the Chat header.
 
 Preset API forms show only key/model and a Get API Key link. Endpoint/protocol are supplied by Pot. Claude has no account/API mode selector. Custom API shows endpoint and four explicit formats: OpenAI Chat Completions, OpenAI Responses, Claude Messages and Gemini. Model-list results appear in a picker alongside the editable model field.
 
@@ -125,8 +125,6 @@ OpenCode uses a maintained per-plan, per-model route table in `app/swift/APIInte
 
 For an empty main configuration, the final connection action also sets the Main Agent through the existing migration boundary. Entry from Chat uses Save and start chatting and restores its draft without sending. Settings explains Save and set as Main Agent. Existing main configurations are not replaced by ordinary additions. Save retains a stable draft connection identity and reconciles partially completed saves before retrying.
 
-Account authorization uses official Host Codex App Server interfaces. The panel opens the official browser URL; the official Codex process owns its Host loopback callback and credentials. Pot runs no callback listener or VM relay. Only the matching official login-completed event followed by account verification establishes success; Pot then reads model options. Native-only start/status/cancel APIs reject browser Origins and worker tokens. Cancellation, timeout and shutdown settle the official login attempt. The backend also supports official device-code authorization. Real-account acceptance must be renewed after this Host change.
-
 The existing Runtime PTY subsystem is retained; removal of this separate subsystem was also rejected by automatic review. This is separate from the deleted product Terminal UI and from Agent shell/tool execution.
 
 Main Save reuses Runtime migration. Pending operations disable duplicate submission and explain current-turn/paused-session waits; only a confirmed active binding is displayed as effective. Existing task bindings remain pinned. New tasks following Chat use its active snapshot rather than an unapplied profile edit.
@@ -135,7 +133,7 @@ Task Configuration preserves existing explicit worker defaults/routing and allow
 
 Unconfigured Chat offers AI Configuration; the user can keep browsing without configuring an Agent. There is no environment/tool installation wizard. Status refresh never selects an Agent or makes paid model probes. Real-account/engine matrices are recorded separately in dated acceptance reports.
 
-Global/session usage both show Agent / model usage grouped by Pot/Codex and model (historical rows retain their original labels),
+Global/session usage both show Agent / model usage grouped by model,
 including input/output/input-cache/incomplete records; missing attribution shows Unknown Agent.
 Global categories follow selected ranges; details use session totals, 20/page with previous/next.
 Category pages do not change totals/trends/allowances; range/session/zone changes reset pages.

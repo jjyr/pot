@@ -226,18 +226,6 @@ impl ExecutionFeedback for RunFeedback {
     fn input_streaming(&self, _request: &str) -> Result<()> {
         Ok(())
     }
-    fn begin_usage(&self, _ledger: &str, _spec: &ResolvedSpec, _epoch: u64) -> Result<()> {
-        anyhow::bail!("Native usage collection not implemented")
-    }
-    fn initialize_usage(&self, _native: &str) -> Result<()> {
-        anyhow::bail!("Native usage collection not implemented")
-    }
-    fn cumulative_usage(&self, _ledger: &str, _native: &str, _usage: &Value) -> Result<()> {
-        anyhow::bail!("Native usage collection not implemented")
-    }
-    fn incomplete_usage(&self, _ledger: &str) -> Result<()> {
-        anyhow::bail!("Native usage collection not implemented")
-    }
 }
 /// Generic Driver runner. Caller chooses a host; no second Agent adapter contract.
 pub async fn run_driver(

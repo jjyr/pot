@@ -6,9 +6,9 @@ Updated: 2026-10-08. Implemented boundaries; dated acceptance is recorded separa
 
 Pot runs Agent loops and the persistent product control plane on the Host. Sandboxes are separately managed execution resources. The main Agent can control multiple Sandboxes; a task worker executes Sandbox tools within one assigned environment and cannot control Sandbox lifecycle or select another Sandbox. pot-agent workers may separately request owner-authorized Host access.
 
-- Pot and Codex are the supported Drivers.
+- pot-agent is the single supported Agent engine.
 - Host-side Agent execution does not mean local model inference. Model connections remain a separate configuration concern.
-- pot-agent uses shared execution tools with an explicit environment target through its [Agent-owned permission layer](permissions.md), with environment-local policy (Host defaults to ask; Sandbox defaults to allow). Codex remains Sandbox-only; no Driver falls back to Host when a Sandbox is unavailable.
+- pot-agent uses shared execution tools with an explicit environment target through its [Agent-owned permission layer](permissions.md), with environment-local policy (Host defaults to ask; Sandbox defaults to allow). No execution falls back to Host when a Sandbox is unavailable.
 - Multiple Sandbox instances are part of the target model. Linux is implemented. The minimum provider redesign targets Linux default/isolated tasks and macOS development; Android, iOS and Windows remain later extensions. Providers expose qualified capabilities rather than assuming every environment has a shell or POSIX workspace.
 - Host Runtime, Storage, Gateway and native Agent sessions remain available when every Sandbox is stopped. Sandbox shutdown does not delete a conversation or product task record.
 
@@ -22,7 +22,7 @@ Pot runs Agent loops and the persistent product control plane on the Host. Sandb
 | Execute environment tools | In an explicitly selected Sandbox | Only in its assigned Sandbox | Route and enforce target scope |
 | Assign a Sandbox to a task | Yes | No | Persist immutable task environment binding |
 | Operate another task's environment | Only with main-authorized scope | No | Reject unauthorized operations |
-| Execute tools targeting Host | pot-agent, with owner authorization | pot-agent, with owner authorization | Owner services; Codex remains Sandbox-only |
+| Execute tools targeting Host | pot-agent, with owner authorization | pot-agent, with owner authorization | Owner services |
 
 Workers may inspect execution metadata for their own environment, such as OS, cwd and tool availability. That does not grant Sandbox inventory, provisioning or lifecycle capabilities. A worker reports a missing dependency or unavailable environment to the main Agent/Runtime instead of creating, restarting or changing a Sandbox.
 
@@ -58,7 +58,7 @@ Recommended initial policy:
 
 - Separate creating a persistent Sandbox definition from starting its execution instance. A requested start is complete only when the authenticated executor is ready.
 - Start when the main Agent explicitly requests it, or when Runtime prepares an assigned environment for authorized execution. Coalesce simultaneous start requests.
-- Pure conversation and product task/status operations do not require a Sandbox. Codex environment discovery and context loading need validation before promising startup only at the first tool call.
+- Pure conversation and product task/status operations do not require a Sandbox.
 - Hold leases for active operations and task turns. Desktop follows explicit environment start/stop; managed process sessions survive normal turns; cancellation/failure drains the owner, and idle expiry reclaims sessions. Idle runners retain initialization caches without active execution leases. Idle recovery/reclamation is Runtime-owned and does not require a worker management tool.
 - Ordinary stop/delete requests against an occupied environment return its dependencies and a busy result. A separately explicit destructive stop must settle or mark interrupted all affected operations; never report affected tasks as successful.
 - Stopping one Sandbox leaves the Host control plane and unrelated environments available. Preserve declared workspace/artifact storage independently of disposable VM state.
@@ -67,7 +67,7 @@ Cancellation of a task targets its operations and waits for executor cleanup. It
 
 The provider redesign permits a declared VM-stop cancellation fallback only for an exclusively held instance. macOS starts with exclusive execution ownership; the main Agent, workers and manual input must queue or explicitly hand off control. A stopped VM confirms execution ended, not that prior UI/network effects were rolled back. See [ownership and cancellation](sandbox-providers.md#ownership-gui-arbitration-and-cancellation).
 
-## Driver integration
+## Agent integration
 
 pot-agent runs on Host with injected Runtime execution and owner services. Main
 and Worker authority follows [Agent permissions](permissions.md); shared tools and
@@ -76,9 +76,7 @@ assignments, scoped sessions, leases and capabilities independently of prompts.
 Guest execution uses a credential-free runner behind the authenticated root broker.
 Sessions remain in their original environment; see [command execution](executor.md).
 
-The shared command/patch tools describe current Linux execution. The first provider redesign preserves Linux/macOS command tools and derives both Drivers' loadouts from assignment capabilities. Device observation/input/app operations remain future capabilities; lifecycle authority remains main-only.
-
-Codex App Server stays on the Host. Pot disables native environment tools, supplies an empty native environment list, and exposes the same Sandbox execution API through lane-scoped MCP. Inherited MCP servers, plugins/apps and native subagent tools are disabled. The implementation uses Pot's execution-only HTTP service rather than `codex exec-server`, keeping one environment protocol for both Drivers.
+The shared command/patch tools describe current Linux execution. The first provider redesign preserves Linux/macOS command tools and derives pot-agent' loadouts from assignment capabilities. Device observation/input/app operations remain future capabilities; lifecycle authority remains main-only.
 
 Qualification covers native tool loadouts, real CLI execution, resume, cancellation and routing restrictions. See [acceptance](validation/host-pot-agent-20261006.md) for tested scope.
 
@@ -88,15 +86,15 @@ Skills use filesystem catalogs and a unified home-relative mapping; see [Agent s
 
 ## Product surfaces
 
-Chat is the persistent main-assistant entry point, independent of VM readiness. AI settings choose Driver/model connections separately from Sandbox configuration.
+Chat is the persistent main-assistant entry point, independent of VM readiness. AI settings choose provider/model connections separately from Sandbox configuration.
 
 The environment surface presents multiple Sandboxes, their state, resources, associated tasks, workspace/artifacts and optional desktop. The task surface shows its fixed execution environment beside Agent selection and execution status. VM preparation, resource queueing, execution failure and cleanup uncertainty are visible states rather than generic chat failures.
 
-The UI should use one environment vocabulary for both Drivers. pot-agent backend injection and Codex MCP transport are implementation details.
+The UI uses one environment vocabulary. pot-agent receives its execution backend from Runtime.
 
 ## Acceptance priorities
 
-1. Host Pot and Codex sessions and the product backend work independently of Linux VM startup/shutdown.
+1. Host pot-agent sessions and the product backend work independently of Linux VM startup/shutdown.
 2. Main Agent can manage two Linux Sandbox instances through policy-checked tools, select a target for its own operations and assign tasks to each.
 3. Worker attempts to manage Sandboxes, select another target, access another target's credentials or invoke Host tools without owner authorization fail at the execution boundary, including after native-session resume.
 4. Stopping/crashing one environment does not stop chat, corrupt native sessions or interrupt tasks in another environment. Busy-stop, task cancellation and shared-environment behavior follow the distinct contracts above.

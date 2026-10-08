@@ -186,7 +186,7 @@ Runtime object cache/prompt freeze/provider prefix cache differ; invalidating on
 | Gateway hygiene | Before Agent | 85%/hard message guard | Avoid oversized history overflow |
 | Agent compressor | Model/tools | Usage+new-message estimates/config | Routine management |
 
-Default threshold0.50 but <512000 windows floor0.75, CodexOAuth85% cases/absolute caps/helper feasibility.**Resolved model/window/config determines actual threshold, not uniform50%**; Gateway85% distinct.[S9][S10]
+Default threshold0.50 but <512000 windows floor0.75, absolute caps/helper feasibility.**Resolved model/window/config determines actual threshold, not uniform50%**; Gateway85% distinct.[S9][S10]
 
 Usage anchor provider prompt-completion+later estimates, persistent/validated. Without reliable anchor some prechecks wait usage; Gateway coarse fallback/overflow bounded retries.
 
@@ -217,7 +217,6 @@ Cooldown/bounded retries/commit guards; failure keeps history/aborts or determin
 
 ContextEngine judges/runs compaction/token counts, explicit context.engine plugins; native paths also exist: [S9]
 
-- Codex App Server owns real thread, request native compact; local mirror edits insufficient.
 - Supported Responses opt-in server compaction retains opaque replay checkpoints.
 
 Identify actual context owner first.

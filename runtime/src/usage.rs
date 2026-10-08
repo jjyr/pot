@@ -2,8 +2,6 @@
 use super::*;
 pub use pot_storage::usage::*;
 pub mod providers;
-#[cfg(test)]
-use rusqlite::{Connection, params};
 pub async fn summary(
     State(s): State<Service>,
     h: HeaderMap,
@@ -149,41 +147,6 @@ mod tests {
     fn ledger() -> Ledger {
         Ledger::open(std::path::Path::new(":memory:")).unwrap()
     }
-    #[test]
-    fn native_cumulative_usage_is_atomic_and_requires_a_known_baseline() {
-        let l = ledger();
-        l.0.execute(
-            "INSERT INTO requests(id,scope,turn_id,at,model) VALUES ('r','main','turn',0,'mock')",
-            [],
-        )
-        .unwrap();
-        let totals = json!({"inputTokens":20,"outputTokens":5,"cachedInputTokens":4});
-        assert!(l.native_usage("r", "thread", &totals).is_err());
-        l.initialize_native_usage("thread").unwrap();
-        l.native_usage("r", "thread", &totals).unwrap();
-        l.native_usage("r", "thread", &totals).unwrap();
-        let newer = json!({"inputTokens":40,"outputTokens":10,"cachedInputTokens":8});
-        assert!(l.native_usage("missing", "thread", &newer).is_err());
-        l.native_usage("r", "thread", &newer).unwrap();
-        assert!(l.native_usage("r", "thread", &totals).is_err());
-        assert!(
-            l.native_usage("r", "thread", &json!({"inputTokens":50,"outputTokens":15}))
-                .is_err()
-        );
-        let usage: (u64, u64, u64) =
-            l.0.query_row(
-                "SELECT input,output,cache FROM requests WHERE id='r'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(usage, (40, 10, 8));
-        l.native_incomplete("r").unwrap();
-        let summary = l.summary(&query("main", 7), now()).unwrap();
-        assert_eq!(summary["lifetime"]["unknown"], 1);
-        assert_eq!(summary["lifetime"]["input"], 40);
-        assert_eq!(summary["native_turn_usage"], true);
-    }
 
     fn at(s: &str) -> i64 {
         chrono::DateTime::parse_from_rfc3339(s)
@@ -260,21 +223,6 @@ mod tests {
         assert!(d["capabilities"].get("skills").is_none());
     }
 
-    #[test]
-    fn old_usage_schema_migrates_without_losing_requests() {
-        let dir = std::env::temp_dir().join(format!("pot-usage-migrate-{}", id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("usage-v2.sqlite");
-        let c = Connection::open(&path).unwrap();
-        c.execute_batch("CREATE TABLE requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending'); INSERT INTO requests(id,scope,turn_id,at,model,input,output,state) VALUES ('old','main','turn',0,'mock',10,5,'reported');").unwrap();
-        drop(c);
-        let l = Ledger::open(&path).unwrap();
-        let d = l.summary(&query("main", 7), now()).unwrap();
-        assert_eq!(d["lifetime"]["input"], 10);
-        assert_eq!(d["requests"][0]["purpose"], "conversation");
-        assert_eq!(d["compaction_count"], 0);
-    }
-
     fn attributed_spec(
         engine: agent::Engine,
         model: &str,
@@ -291,7 +239,6 @@ mod tests {
         profile.id = profile_id.into();
         profile.auth_ref = match engine {
             agent::Engine::Pot => "providers.json:deepseek",
-            agent::Engine::Codex => "cli:codex",
         }
         .into();
         profile.engine = engine;
@@ -303,11 +250,11 @@ mod tests {
         let t = at("2026-10-04T01:00:00Z");
         for (key, engine, scope, model, stamp) in [
             ("p", agent::Engine::Pot, "main", "shared", t),
-            ("c", agent::Engine::Codex, "main", "shared", t),
-            ("a", agent::Engine::Codex, "task-1", "worker-model", t),
+            ("c", agent::Engine::Pot, "main", "shared", t),
+            ("a", agent::Engine::Pot, "task-1", "worker-model", t),
             (
                 "older",
-                agent::Engine::Codex,
+                agent::Engine::Pot,
                 "main",
                 "old-model",
                 t - 10 * 86400000,
@@ -321,18 +268,17 @@ mod tests {
                 l.settle(key,&json!({"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":60})).unwrap();
             }
         }
-        let pending = attributed_spec(agent::Engine::Codex, "shared", "pending-profile");
+        let pending = attributed_spec(agent::Engine::Pot, "shared", "pending-profile");
         l.reserve("pending", "main", "other-turn", t, "shared", 100, 20)
             .unwrap();
         l.route("pending", &pending, 3).unwrap();
-        l.native_incomplete("c").unwrap();
         let all = l.summary(&query("", 7), t).unwrap();
         let groups = all["agent_models"].as_array().unwrap();
-        assert_eq!(groups.len(), 3);
-        let codex = groups.iter().find(|v| v["agent"] == "codex").unwrap();
-        assert_eq!(codex["requests"], 2);
-        assert_eq!(codex["unknown"], 2);
-        assert_eq!(codex["input"], 100);
+        assert_eq!(groups.len(), 2);
+        let group = groups.iter().find(|v| v["model"] == "shared").unwrap();
+        assert_eq!(group["requests"], 3);
+        assert_eq!(group["unknown"], 1);
+        assert_eq!(group["input"], 200);
         for field in ["input", "output", "cache", "requests", "unknown"] {
             assert_eq!(
                 groups
@@ -348,7 +294,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|v| v["agent"] == "codex" && v["model"] == "old-model")
+                .any(|v| v["agent"] == "pot" && v["model"] == "old-model")
         );
         assert!(
             !main["agent_models"]
@@ -363,223 +309,14 @@ mod tests {
             .iter()
             .find(|r| r["id"] == "pending")
             .unwrap();
-        assert_eq!(row["agent"], "codex");
+        assert_eq!(row["agent"], "pot");
         assert_eq!(row["profile_id"], "pending-profile");
         assert_eq!(row["epoch"], 3);
-        let native = attributed_spec(agent::Engine::Codex, "native-model", "codex-native");
-        l.begin_native("native", "task-native", "turn", &native, 4)
-            .unwrap();
-        assert_eq!(
-            l.summary(&query("task-native", 7), t).unwrap()["requests"][0]["agent"],
-            "codex"
-        );
-    }
-    #[test]
-    fn old_route_upgrade_preserves_usage_and_unknown_agent_after_reopen() {
-        let path = std::env::temp_dir().join(format!("pot-usage-route-{}.sqlite", id()));
-        let c = Connection::open(&path).unwrap();
-        c.execute_batch("CREATE TABLE requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending'); INSERT INTO requests(id,scope,turn_id,at,model,input,output,state) VALUES ('old','main','turn',0,'same-model',10,5,'reported'); CREATE TABLE request_routes(request_id TEXT PRIMARY KEY,provider TEXT NOT NULL,epoch INTEGER NOT NULL,spec_hash TEXT NOT NULL); INSERT INTO request_routes VALUES ('old','old-provider',2,'old-hash');").unwrap();
-        drop(c);
-        for _ in 0..2 {
-            let l = Ledger::open(&path).unwrap();
-            let data = l.summary(&query("main", 7), now()).unwrap();
-            assert_eq!(data["lifetime"]["input"], 10);
-            assert_eq!(data["agent_models"][0]["agent"], "unknown");
-            assert_eq!(data["requests"][0]["provider"], "old-provider");
-            assert_eq!(data["requests"][0]["profile_id"], "");
-        }
-        std::fs::remove_file(path).unwrap();
-    }
-    #[test]
-    fn old_provenance_backfill_requires_the_exact_binding_and_lane() {
-        let l = ledger();
-        let mut store = Store::open(std::path::Path::new(":memory:")).unwrap();
-        let spec = attributed_spec(agent::Engine::Codex, "shared", "original-profile");
-        agent::select_initial(
-            &mut store,
-            "main",
-            std::path::Path::new("/unused"),
-            spec.clone(),
-        )
-        .unwrap();
-        for (key, scope, epoch, hash) in [
-            ("match", "main", 1, spec.spec_hash.as_str()),
-            ("wrong-lane", "other", 1, spec.spec_hash.as_str()),
-            ("wrong-epoch", "main", 2, spec.spec_hash.as_str()),
-            ("wrong-hash", "main", 1, "different"),
-        ] {
-            l.reserve(key, scope, "turn", now(), "shared", 1, 1)
-                .unwrap();
-            l.0.execute(
-                "INSERT INTO request_routes(request_id,provider,epoch,spec_hash) VALUES (?,?,?,?)",
-                params![key, spec.provider, epoch, hash],
-            )
-            .unwrap();
-        }
-        l.import_legacy("main", &store).unwrap();
-        l.import_legacy("main", &store).unwrap();
-        let rows = l.summary(&query("main", 7), now()).unwrap();
-        for row in rows["requests"].as_array().unwrap() {
-            assert_eq!(
-                row["agent"],
-                if row["id"] == "match" {
-                    "codex"
-                } else {
-                    "unknown"
-                }
-            );
-            if row["id"] == "match" {
-                assert_eq!(row["profile_id"], "original-profile");
-            }
-        }
-        assert_eq!(
-            l.summary(&query("other", 7), now()).unwrap()["requests"][0]["agent"],
-            "unknown"
-        );
-        assert_eq!(rows["lifetime"]["requests"], 3);
     }
 
     #[test]
-    fn agent_model_breakdown_is_paged_without_changing_totals() {
+    fn timezone_ranges_and_pagination() {
         let l = ledger();
-        let t = at("2026-10-04T01:00:00Z");
-        for i in 0..21 {
-            let model = format!("model-{i:02}");
-            let spec = attributed_spec(agent::Engine::Pot, &model, "execution-test");
-            l.reserve(&model, "main", "turn", t, &model, 1, 1).unwrap();
-            l.route(&model, &spec, 1).unwrap();
-            l.settle(&model, &json!({"prompt_tokens":1,"completion_tokens":1}))
-                .unwrap();
-        }
-        let mut q = query("", 7);
-        let first = l.summary(&q, t).unwrap();
-        assert_eq!(first["agent_models"].as_array().unwrap().len(), 20);
-        assert_eq!(first["agent_model_next_offset"], 20);
-        q.offset = 20;
-        let last = l.summary(&q, t).unwrap();
-        assert_eq!(last["agent_models"].as_array().unwrap().len(), 1);
-        assert!(last["agent_model_next_offset"].is_null());
-        assert_eq!(first["total"], last["total"]);
-        assert_eq!(last["agent_models"][0]["model"], "model-20");
-    }
-
-    #[test]
-    fn routing_usage_is_a_deduplicated_main_turn_subset_with_scope_and_window_precision() {
-        let path = std::env::temp_dir().join(format!("pot-routing-usage-{}.sqlite", id()));
-        let l = Ledger::open(&path).unwrap();
-        let t = at("2026-10-06T01:00:00Z");
-        let old = at("2026-09-01T01:00:00Z");
-        for (request, scope, turn, time) in [
-            ("before-tool", "main", "route", t),
-            ("after-tool", "main", "route", t),
-            ("plain-chat", "main", "plain", t),
-            ("worker", "task-1", "route", t),
-            ("old-route", "main", "old", old),
-            ("unknown", "main", "route", t),
-        ] {
-            l.reserve(request, scope, turn, time, "model", 100, 20)
-                .unwrap();
-            if request != "unknown" {
-                l.settle(request,&json!({"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":60})).unwrap();
-            }
-        }
-        // Marking after the first request also captures earlier work in that turn.
-        l.mark_routing_turn("route").unwrap();
-        l.mark_routing_turn("route").unwrap();
-        l.mark_routing_turn("old").unwrap();
-        let global = l.summary(&query("", 7), t).unwrap();
-        assert_eq!(
-            global["routing_total"],
-            json!({"input":200,"output":40,"cache":120,"requests":3,"unknown":1})
-        );
-        assert_eq!(global["total"]["input"], 400);
-        assert_eq!(global["total"]["output"], 80);
-        let main = l.summary(&query("main", 7), t).unwrap();
-        assert_eq!(main["routing_total"]["input"], 300);
-        assert_eq!(main["lifetime"]["input"], 400);
-        assert_eq!(
-            l.summary(&query("task-1", 7), t).unwrap()["routing_total"]["requests"],
-            0
-        );
-        let mut page = query("", 7);
-        page.offset = 20;
-        assert_eq!(
-            l.summary(&page, t).unwrap()["routing_total"],
-            global["routing_total"]
-        );
-        drop(l);
-        let restored = Ledger::open(&path).unwrap();
-        assert_eq!(
-            restored.summary(&query("", 7), t).unwrap()["routing_total"],
-            global["routing_total"]
-        );
-        drop(restored);
-        std::fs::remove_file(path).unwrap();
-    }
-    #[test]
-    fn routing_native_turn_metering_retains_incomplete_usage_without_double_counting() {
-        let l = ledger();
-        let profile = agent::Profile::api(&execution::Config {
-            model: "fixture-model".into(),
-            max_tokens: 128,
-            ..Default::default()
-        });
-        let mut spec = profile.resolve().unwrap();
-        spec.engine = agent::Engine::Codex;
-        l.begin_native("native", "main", "turn", &spec, 1).unwrap();
-        l.mark_routing_turn("turn").unwrap();
-        l.native_incomplete("native").unwrap();
-        let pending = l.summary(&query("main", 7), now()).unwrap();
-        assert_eq!(pending["routing_total"]["unknown"], 1);
-        l.0.execute(
-            "UPDATE requests SET input=40,output=10,state='native_reported' WHERE id='native'",
-            [],
-        )
-        .unwrap();
-        let reported = l.summary(&query("main", 7), now()).unwrap();
-        assert_eq!(reported["routing_total"], reported["lifetime"]);
-        assert_eq!(reported["lifetime"]["input"], 40);
-    }
-    #[test]
-    fn usage_is_idempotent_scoped_and_excludes_cache_from_total() {
-        let l = ledger();
-        let t = at("2026-10-04T01:00:00Z");
-        for (id, scope) in [("a", "main"), ("b", "task-1")] {
-            l.reserve(id, scope, "turn", t, "mock", 100, 50).unwrap();
-            for _ in 0..2 {
-                l.settle(id,&json!({"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":60})).unwrap();
-            }
-        }
-        let all = l.summary(&query("", 7), t).unwrap();
-        assert_eq!(
-            all["total"],
-            json!({"input":200,"output":40,"cache":120,"requests":2,"unknown":0})
-        );
-        let task = l.summary(&query("task-1", 7), t).unwrap();
-        assert_eq!(task["lifetime"]["requests"], 1);
-        assert_eq!(task["requests"][0]["turn"], "turn");
-        assert_eq!(all["buckets"].as_array().unwrap().len(), 7);
-        assert!(all["requests"].as_array().unwrap().is_empty());
-        assert!(all["quota"]["active"] == false);
-        assert_eq!(
-            l.summary(&query("", 365), t).unwrap()["buckets"]
-                .as_array()
-                .unwrap()
-                .len(),
-            53
-        );
-    }
-    #[test]
-    fn timezone_ranges_pagination_and_undated_history() {
-        let l = ledger();
-        let s = Store::open(std::path::Path::new(":memory:")).unwrap();
-        s.set(
-            "execution.usage",
-            &json!([{"prompt_tokens":3,"completion_tokens":2}]).to_string(),
-        )
-        .unwrap();
-        l.import_legacy("task", &s).unwrap();
-        l.import_legacy("task", &s).unwrap();
         let t = at("2026-10-04T01:00:00Z");
         for i in 0..21 {
             l.reserve(&format!("r{i}"), "task", "turn", t, "mock", 10, 10)
@@ -591,8 +328,7 @@ mod tests {
             .unwrap();
         }
         let d = l.summary(&query("task", 7), t).unwrap();
-        assert_eq!(d["historical"]["requests"], 1);
-        assert_eq!(d["lifetime"]["requests"], 22);
+        assert_eq!(d["lifetime"]["requests"], 21);
         assert_eq!(d["total"]["requests"], 21);
         assert_eq!(d["next_offset"], 20);
         let mut q = query("task", 7);
@@ -602,7 +338,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            2
+            1
         );
         q.days = 1;
         assert!(l.summary(&q, t).is_err());

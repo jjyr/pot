@@ -6,12 +6,12 @@ Computer use (2026-10-08): a default-enabled plugin provides persistent `cua_rep
 
 ## Delivered
 
-- Host Runtime, product storage and Pot/Codex Agent loops run independently of Sandbox readiness.
-- Main chat configures API/Pot or official Codex through one AI Configuration page. pot-agent is compiled into Server; pinned Codex and Node ship in the App; no guest Agent installer or configuration importer exists.
+- Host Runtime, product storage and pot-agent Agent loops run independently of Sandbox readiness.
+- Main chat configures API connections through one AI Configuration page. pot-agent is compiled into Server; Node ships in the App; no guest Agent installer or configuration importer exists.
 - Main Agent manages up to 16 Linux Sandbox definitions. Task creation saves one immutable environment assignment; workers cannot manage or switch environments.
 - Environment tools use the authenticated guest executor. Active leases, cgroup cancellation, durable receipts and explicit recovery protect operation outcomes. Artifacts survive environment shutdown.
 - Tasks support independent sessions, bounded concurrency, persistent guidance, cancellation, summaries and archive/search. Schedules save their environment assignment and resolve Agent profiles per occurrence.
-- API gateway supports Chat, Responses, Messages and Gemini, with request/usage accounting and allowances. Native Codex reports turn usage separately.
+- API gateway supports Chat, Responses, Messages and Gemini, with request/usage accounting and allowances.
 - GPUI/Swift provides Chat, Tasks, Usage, AI/Task/Environment settings and optional Sandbox desktop.
 - Shared `pot-ui` Chat/Tasks/Sandbox/Usage components, page transitions, allowance parsing, request/receipt/draft policy and locale-explicit catalogs are used by native App and WASM; native composer and navigation remain unchanged. See [shared UI](shared-ui.md).
 
@@ -25,7 +25,7 @@ execution tools and turn-scoped `exec`/`wait` composition retain role checks and
 owner review. Main can coordinate Tasks with reference messages and bounded waits,
 interrupt while preserving guidance, or cancel and discard it.
 
-Automated checks passed; live guest/UI qualification and Codex integration remain
+Automated checks passed; live guest/UI qualification remains
 open. Independent archive state and inactivity rules are deferred. See
 [permissions](permissions.md), [tools](tool-composition.md),
 [Task coordination](task-coordination.md) and the
@@ -42,9 +42,9 @@ retained HTTP options.
 
 Mobile physical iOS/Android input, accessibility, startup performance, production relay deployment, actual vendor push delivery and complete App bundle boot remain unqualified. Paired owner browser desktop viewing/control is implemented with login-bound tickets; physical mobile input remains unqualified; notification links open main chat but do not yet scroll to the matching message.
 
-Real-provider login/inference must be requalified after the Host deployment changes. Full native appearance, IME, weak-network and sleep/wake matrices are not established by mock-model tests. Public release requires cold-install validation and distribution signing/notarization.
+Real-provider API inference must be requalified after the Host deployment changes. Full native appearance, IME, weak-network and sleep/wake matrices are not established by mock-model tests. Public release requires cold-install validation and distribution signing/notarization.
 
-Qualified macOS execution, Android/iOS/Windows Sandbox providers, Codex Host tools, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
+Qualified macOS execution, Android/iOS/Windows Sandbox providers, stronger isolation between tasks sharing one VM, persistent background services and cross-environment artifact transfer are not delivered. Browser takeover permissions and full report/source workflows remain scenario-level work; see [Product design](product-design.md#product-acceptance-scenarios).
 
 ## Sandbox redesign — 2026-10-07
 
@@ -97,3 +97,12 @@ browser storage automatically. Rotation invalidates every browser/stream/desktop
 Go source and dependency graph are pinned, and linked dependency notices are packaged.
 Local Server/CLI/TLS and multi-client tests cover Token behavior. Real tailnet login,
 certificate issuance, physical phones and complete App bundle acceptance remain live gates.
+
+## Single Agent engine (2026-10-09)
+
+Production execution uses only the in-process pot-agent with API model connections.
+The CLI adapter crate, native authorization/discovery routes, process launch
+contracts, native thread bindings and native usage accounting are removed.
+No legacy conversation or usage migration is provided. Core execution contracts
+remain shared by Runtime and evaluation; Sandbox Manager/Provider boundaries and
+Agent tool interfaces remain intact.

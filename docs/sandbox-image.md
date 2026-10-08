@@ -4,7 +4,7 @@ Updated: 2026-10-06. The separately distributed Linux ARM64 OCI image contains t
 
 ## Build and startup
 
-`scripts/pot prepare` downloads checksum-verified kernel, noVNC 1.7.0 and Host Node 24.21.0. `build` compiles Host App, Server and Helper. `bundle` packages Host binaries and installs pinned Host Codex 0.160.1 dependencies from npm locks, with lifecycle scripts disabled.
+`scripts/pot prepare` downloads checksum-verified kernel, noVNC 1.7.0 and Host Node 24.21.0. `build` compiles Host App, Server and Helper. `bundle` packages Host binaries and the Node runtime for JavaScript tools/plugins.
 
 The image builder uses a separate Apple VM with no user workspace or credentials, pinned Alpine/system packages, and `/opt/pot` executor/desktop resources. The guest Rust binary is cross-compiled for Linux ARM64 musl. Build hashes include guest sources and that binary; identical inputs reuse the immutable image. The image builder is invoked separately with `mise run build:sandbox-image`. Client bundles contain Host binaries; kernel/vminit/image are separate checksum-pinned Release assets. See [Sandbox resource delivery](sandbox-resources.md). VM networking requires Apple Virtualization permissions.
 

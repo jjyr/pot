@@ -1,6 +1,6 @@
 # Pot evaluation CLI
 
-`pot-eval` runs the real Pot Agent through `DriverHost` with injected execution services. It is a separate workspace crate with no dependency on Runtime, Storage, App, Pi or Codex internals. The CLI supports deterministic contract runs and bounded live Pot runs against **DeepSeek Flash only**, using local Pi configuration. Native Codex and cross-runtime statistical comparisons remain pending. See the [framework design](../docs/token-evaluation.md) for the remaining modes.
+`pot-eval` runs the real Pot Agent through `DriverHost` with injected execution services. It is a separate workspace crate with no dependency on Runtime, Storage or App internals. The CLI supports deterministic contract runs and bounded live Pot runs against **DeepSeek Flash only**, using local Pi configuration. Cross-runtime statistical comparisons remain pending. See the [framework design](../docs/token-evaluation.md) for the remaining modes.
 
 ## Run and inspect
 
@@ -83,4 +83,4 @@ The validator checks manifest/configuration consistency, envelope and Driver seq
 
 Core declares `DriverDescription`, `ExecutionObservation` and `ExecutionServices`. Pot's existing `AgentHost` can accept services through `with_services`, alongside its existing extension hooks. The normal product host continues to call its authenticated HTTP services and settle usage through Runtime. Observations do not authorize requests or replace reservations.
 
-`run_driver` is the runner entry point for service-injectable hosts. The CLI selects the Pot host with scripted transport or the DeepSeek Flash live service. Native Codex declares cumulative usage observation support, but native feedback collection, standalone tool endpoints and native-policy runner support are not implemented here. Other live models, paired repeats, verified price tables, statistical regression budgets and HTML reports are also pending. Paid DeepSeek calls occur only through the explicit `live` entry point; no scheduled evaluations are enabled.
+`run_driver` is the runner entry point for service-injectable hosts. The CLI selects the Pot host with scripted transport or the DeepSeek Flash live service. Other live models, paired repeats, verified price tables, statistical regression budgets and HTML reports are also pending. Paid DeepSeek calls occur only through the explicit `live` entry point; no scheduled evaluations are enabled.

@@ -39,7 +39,7 @@ pub fn bindings(store: &Store) -> Result<Vec<Binding>> {
         ensure!(
             matches!(
                 (&b.spec.engine, &b.native_ref),
-                (Engine::Pot, NativeRef::Pot { .. }) | (Engine::Codex, NativeRef::Codex { .. })
+                (Engine::Pot, NativeRef::Pot { .. })
             ),
             "Engine and native session identity mismatch"
         );
@@ -122,9 +122,7 @@ pub fn validate_agent_session(file: &Path, expected: &str) -> Result<()> {
 }
 pub fn load_context(store: &Store) -> Result<Option<serde_json::Value>> {
     let binding = current(store)?.ok_or_else(|| anyhow!("Binding missing"))?;
-    let NativeRef::Pot { file, session_id } = binding.native_ref else {
-        anyhow::bail!("Expected Pot binding");
-    };
+    let NativeRef::Pot { file, session_id } = binding.native_ref;
     if !file.exists() {
         ensure!(session_id.is_none(), "Execution context missing");
         return Ok(None);
@@ -138,9 +136,7 @@ pub fn save_context(store: &Store, value: &serde_json::Value) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let binding = current(store)?.ok_or_else(|| anyhow!("Binding missing"))?;
-    let NativeRef::Pot { file, session_id } = binding.native_ref else {
-        anyhow::bail!("Expected Pot binding");
-    };
+    let NativeRef::Pot { file, session_id } = binding.native_ref;
     ensure!(
         value["type"] == "session"
             && value["version"] == 1
@@ -187,7 +183,6 @@ pub fn save_agent_session(store: &mut Store, session_id: &str) -> Result<()> {
             validate_agent_session(file, session_id)?;
             *previous = Some(session_id.into());
         }
-        _ => anyhow::bail!("Expected Pot binding"),
     }
     let tx = store.0.transaction()?;
     set(&tx, BINDINGS, &serde_json::to_string(&all)?)?;
@@ -214,12 +209,9 @@ pub fn select_initial(
 ) -> Result<()> {
     ensure!(current(store)?.is_none(), "Initial binding already exists");
     spec.validate()?;
-    let native_ref = match spec.engine {
-        Engine::Codex => NativeRef::Codex { thread_id: None },
-        Engine::Pot => NativeRef::Pot {
-            file: data.join("agent-context.json"),
-            session_id: None,
-        },
+    let native_ref = NativeRef::Pot {
+        file: data.join("agent-context.json"),
+        session_id: None,
     };
     let binding = Binding {
         pot_owner: owner.into(),
@@ -251,32 +243,6 @@ pub fn assign_new(store: &mut Store, spec: ResolvedSpec) -> Result<()> {
             ),
         "Cannot change an existing binding snapshot"
     );
-    if spec.engine == Engine::Codex {
-        all[0].native_ref = NativeRef::Codex { thread_id: None };
-    }
     all[0].spec = spec;
-    store.set(BINDINGS, &serde_json::to_string(&all)?)
-}
-
-pub fn save_codex_thread(store: &mut Store, thread: &str) -> Result<()> {
-    ensure!(
-        uuid::Uuid::parse_str(thread).is_ok(),
-        "Invalid Codex thread identity"
-    );
-    let mut all = bindings(store)?;
-    let binding = all
-        .iter_mut()
-        .find(|b| b.state == BindingState::Active)
-        .ok_or_else(|| anyhow!("No active binding"))?;
-    match &mut binding.native_ref {
-        NativeRef::Codex { thread_id } => {
-            ensure!(
-                thread_id.as_deref().is_none_or(|old| old == thread),
-                "Codex native thread changed unexpectedly"
-            );
-            *thread_id = Some(thread.into());
-        }
-        _ => anyhow::bail!("Expected a Codex binding"),
-    }
     store.set(BINDINGS, &serde_json::to_string(&all)?)
 }

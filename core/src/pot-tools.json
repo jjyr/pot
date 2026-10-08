@@ -155,7 +155,7 @@
   },
   {
     "name": "send_message",
-    "description": "Send reference information from Main to a pot-agent task. Delivered at a safe model boundary if running, or retained for its next explicit guide_task continuation. Does not create a work turn, interrupt current work, resume stopped tasks or authorize new permissions. Sender identity is trusted Runtime metadata, not caller supplied. Codex task delivery is currently unsupported.",
+    "description": "Send reference information from Main to a pot-agent task. Delivered at a safe model boundary if running, or retained for its next explicit guide_task continuation. Does not create a work turn, interrupt current work, resume stopped tasks or authorize new permissions. Sender identity is trusted Runtime metadata, not caller supplied.",
     "inputSchema": {
       "type": "object",
       "properties": {

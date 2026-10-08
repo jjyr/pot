@@ -41,8 +41,6 @@ mise exec -- python scripts/tests/sandbox-runtime.py \
 
 The client resource directory contained Host executables, Host dependencies, skills and web assets, **no `vmlinux`, `init-image`, `sandbox-image` or `sandbox-image.json`**. The fixture used the embedded-catalog importer to verify and provision three Release assets into a private temporary shared cache before starting Helper. This exercises cached provisioning and the new Provider binding/Helper import contract; it does not bypass hashes or substitute bundled paths.
 
-All 18 regression flags passed: scoped settings without starting, lazy boot, two Linux environments, readonly skill mappings/helpers, skill management, sessions retaining assignment across default changes, fixed worker assignment, Host Codex without a Sandbox, Codex resume/loadouts, cgroup cancellation and busy-stop protection, Host/worker restart, independent stop and persistent artifacts, managed desktop RFB/input controls with persistent VM state, and optional desktop/shutdown. Local model fixtures handled 47 requests and 4 summaries; no paid model calls were made.
-
 ## Scope and publication limits
 
 - Native UI compiled and presentation/state/localization tests passed. No manual native visual acceptance or online GitHub download through the UI is claimed.

@@ -282,17 +282,6 @@ var bridge: PotBridge?
         localRuntime = LocalRuntime(view: rootView, web: web)
         localRuntime?.onState = { [weak self] state in self?.environmentChanged(state) }
         settings.load()
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                if self?.settings.loginVisible == true {
-                    self?.settings.refreshAgents()
-                }
-            }
-        }
         animation = Timer
             .scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateIcon() }
@@ -922,7 +911,6 @@ var bridge: PotBridge?
     }
 
     func cleanup() {
-        settings.cancelLogin()
         animation?
             .invalidate(); animation = nil; if let keyMonitor
         {
@@ -1041,7 +1029,7 @@ var bridge: PotBridge?
             let failedIDs = Set(messages.filter { $0["status"] as? String == "failed" }
                 .compactMap { $0["id"] as? String })
             if !failedIDs.subtracting(previous).isEmpty {
-                settings.refreshAgents()
+                settings.refreshAI()
             }
             if !unreadTracker.initialized {
                 savedSeen = UserDefaults.standard.stringArray(forKey: seenKey)
@@ -1062,11 +1050,6 @@ var bridge: PotBridge?
             }
         }
         settings.refreshStatus()
-        if snapshot["connected"] as? Bool == true, settings.agentStates.isEmpty,
-           !settings.discovering
-        {
-            settings.refreshAgents()
-        }
         layout()
     }
 
@@ -1219,7 +1202,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "section": settings.section = v["value"] as? Int ?? 0; settings
             .result = ""; settings.returnToChat = false; if settings.section == 1 {
                 settings.routingOwner = "main"; settings.aiScreen = "main"
-                settings.refreshAgents()
+                settings.refreshAI()
             } else if settings.section == 4 {
                 settings.routingOwner = "main"; settings.routingOwnerName = L
                     .text("routing.main-conversation"); settings.refreshRouting()
@@ -1244,17 +1227,11 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
         case "ai-open": settings.routingOwner = "main"; settings.openAI(fromChat: true)
         case "ai-back":
-            if settings.loginVisible {
-                settings.cancelLogin()
-            }
             settings.aiScreen = "main"
             if settings.routingOwner != "main" {
                 settings.section = 4
             }
         case "ai-screen": if !settings.aiBusy {
-                if settings.loginVisible {
-                    settings.cancelLogin()
-                }
                 settings.aiScreen = v["screen"] as? String ?? "main"
             }
         case "ai-new": settings.newConnection(v["kind"] as? String ?? "custom")
@@ -1268,14 +1245,6 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 key: v["key"] as? String ?? ""
             )
         case "ai-save-main": settings.saveMain(model: v["model"] as? String ?? "")
-        case "login-open": settings.openLogin(v["engine"] as? String ?? "")
-        case "login-cancel": settings.cancelLogin()
-        case "login-reopen": settings.reopenLogin()
-        case "agent-refresh": settings.refreshAgents()
-        case "save-invocation": settings.saveInvocation(
-                executable: v["executable"] as? String ?? "",
-                arguments: v["argv"] as? String ?? ""
-            )
         case "viewer":
             if let id = v["id"] as? String, ["take", "info", "more", "connect"].contains(id) {
                 if id == "more" {

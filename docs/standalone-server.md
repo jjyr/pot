@@ -42,7 +42,7 @@ product directory. CLI injects no user-entered credentials and never prints the
 internal bearer. OS access to this socket is full owner authority. Requests
 carrying browser Origin headers are rejected. The App has no such socket.
 There is still an authenticated loopback integration listener for external
-Codex/MCP/model subprocesses. In App mode its routes are restricted to these
+tool/model clients. In App mode its routes are restricted to these
 integrations; the App UI cannot use it to access snapshots/settings.
 
 ## Configure and operate without App
@@ -94,7 +94,7 @@ No DNS, certificates, public ports or relay deployment is provisioned for you.
 Backend/Web UI installation is independent of App. Actual environment execution
 requires a supported provider. On macOS, an optional distribution may include
 `lib/pot/PotHelper` and `lib/pot/runtime` (signed/entitled Helper, kernel, Sandbox
-images and optional Node/Codex runtime). `pot serve` discovers this package and
+images and optional Node runtime). `pot serve` discovers this package and
 starts Helper with `--sandbox-only`; Helper does not launch another Server.
 Backend shutdown settles operations before terminating Helper.
 
@@ -102,7 +102,7 @@ Build with `scripts/build-cli --runtime-resources DIR --helper FILE`, or install
 with the corresponding `scripts/install-cli` options. The release provider
 resources must be built and qualified separately; a binary-only release does
 not claim VM execution. `POT_RUNTIME_RESOURCES` and `POT_HELPER` are development
-overrides. Codex requires its native runtime; pot-agent is built into Server.
+overrides. pot-agent is built into Server.
 There is no direct Host execution fallback. Linux uses the Podman Provider
 described below; Windows support is not delivered.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real Host Pot/Codex + two Linux VMs; loopback models, isolated data, no paid calls."""
+"""Real Host pot-agent + two Linux VMs; loopback models, isolated data, no paid calls."""
 
 import argparse
 import base64
@@ -21,7 +21,6 @@ class Model:
         self.errors = []
         self.worker_loadouts = 0
         self.summary_requests = 0
-        self.codex_summary_requests = 0
 
     async def handle(self, reader, writer):
         try:
@@ -29,7 +28,6 @@ class Model:
             lines = head.decode().split("\r\n")
             headers = dict(line.lower().split(":", 1) for line in lines[1:] if ":" in line)
             body = json.loads(await reader.readexactly(int(headers["content-length"])))
-            codex = lines[0].split()[1] == "/v1/responses"
             inputs = body.get("input", body.get("messages", []))
             user_index = max(
                 (i for i, item in enumerate(inputs) if item.get("role") == "user"), default=0
@@ -75,27 +73,14 @@ class Model:
             }
             assert not any(t.rsplit("__", 1)[-1] in forbidden for t in tools), tools
             assert not any("unmanaged" in t for t in tools), tools
-            if codex:
-                assert not any(
-                    t.rsplit("__", 1)[-1] in {"exec_command", "write_stdin", "apply_patch"}
-                    and not t.rsplit("__", 1)[0].endswith("pot")
-                    for t in tools
-                ), tools
             if "Pot task completion notification." in text:
                 pot_names = {t.rsplit("__", 1)[-1] for t in tools}
                 assert pot_names == {"list_tasks", "get_task"}, pot_names
                 self.summary_requests += 1
-                if codex:
-                    self.codex_summary_requests += 1
             if worker:
                 expected = {"exec_command", "write_stdin", "apply_patch"}
-                if not codex:
-                    expected |= {"exec", "wait"}
-                names = {
-                    t.rsplit("__", 1)[-1]
-                    for t in tools
-                    if not codex or t.rsplit("__", 1)[0].endswith("pot")
-                }
+                expected |= {"exec", "wait"}
+                names = {t.rsplit("__", 1)[-1] for t in tools}
                 assert names == expected, names
                 self.worker_loadouts += 1
             system = json.dumps(
@@ -105,7 +90,7 @@ class Model:
             if marker is not None:
                 assert "<name>skill-creator</name>" in system, system
                 assert "<name>skill-installer</name>" in system, system
-            self.requests.append({"codex": codex, "tools": tools, "worker": worker})
+            self.requests.append({"tools": tools, "worker": worker})
             for output in current:
                 if output.get("role") == "tool" or output.get("type") == "function_call_output":
                     raw = output.get("output", output.get("content", ""))
@@ -121,10 +106,7 @@ class Model:
                             )
                     except ValueError:
                         pass
-            count = sum(
-                item.get("type") == "function_call_output" if codex else item.get("role") == "tool"
-                for item in current
-            )
+            count = sum(item.get("role") == "tool" for item in current)
             action = actions[count] if count < len(actions) else None
 
             if action and action["args"].get("session_id") == "$last_session":
@@ -153,106 +135,44 @@ class Model:
                 action["args"]["session_id"] = ids[-1]
 
             call_id = "probe-" + str(count)
-            if codex:
-                if action:
-                    name = next((t for t in tools if t.rsplit("__", 1)[-1] == action["name"]), None)
-                    assert name is not None, {
-                        "action": action["name"],
-                        "tools": tools,
-                        "user": current[0],
-                    }
-                    item = {
-                        "type": "function_call",
-                        "id": "fc_" + call_id,
-                        "call_id": call_id,
-                        "name": name.rsplit("__", 1)[-1],
-                        "arguments": json.dumps(action["args"]),
-                    }
-                    if "__" in name:
-                        item["namespace"] = name.rsplit("__", 1)[0]
-                else:
-                    item = {
-                        "type": "message",
-                        "id": "msg_" + call_id,
-                        "role": "assistant",
-                        "status": "completed",
-                        "content": [{"type": "output_text", "text": "VERIFIED", "annotations": []}],
-                    }
-                complete = {
-                    "id": "resp-" + str(len(self.requests)),
-                    "object": "response",
-                    "status": "completed",
-                    "output": [item],
-                    "usage": {
-                        "input_tokens": 20,
-                        "output_tokens": 5,
-                        "total_tokens": 25,
-                        "input_tokens_details": {"cached_tokens": 0},
-                    },
-                }
-                events = [
-                    {
-                        "type": "response.created",
-                        "response": {"id": complete["id"], "status": "in_progress", "output": []},
-                    },
-                    {"type": "response.output_item.added", "output_index": 0, "item": item},
-                ]
-                if not action:
-                    events.append(
+            delta = {"role": "assistant", "content": "VERIFIED"}
+            if action:
+                assert action["name"] in tools, tools
+                delta = {
+                    "role": "assistant",
+                    "tool_calls": [
                         {
-                            "type": "response.output_text.delta",
-                            "item_id": item["id"],
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": "VERIFIED",
+                            "index": 0,
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": action["name"],
+                                "arguments": json.dumps(action["args"]),
+                            },
                         }
-                    )
-                events += [
-                    {"type": "response.output_item.done", "output_index": 0, "item": item},
-                    {"type": "response.completed", "response": complete},
-                ]
-                response = "".join(
-                    f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events
-                ).encode()
-            else:
-                delta = {"role": "assistant", "content": "VERIFIED"}
-                if action:
-                    assert action["name"] in tools, tools
-                    delta = {
-                        "role": "assistant",
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": action["name"],
-                                    "arguments": json.dumps(action["args"]),
-                                },
-                            }
-                        ],
-                    }
+                    ],
+                }
 
-                def chunk(delta, finish=None):
-                    return {
-                        "id": "chat-" + str(len(self.requests)),
-                        "object": "chat.completion.chunk",
-                        "created": 1,
-                        "model": body["model"],
-                        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-                    }
+            def chunk(delta, finish=None):
+                return {
+                    "id": "chat-" + str(len(self.requests)),
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": body["model"],
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                }
 
-                events = [
-                    chunk(delta),
-                    chunk({}, "tool_calls" if action else "stop"),
-                    {
-                        "choices": [],
-                        "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25},
-                    },
-                ]
-                response = (
-                    "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
-                ).encode()
+            events = [
+                chunk(delta),
+                chunk({}, "tool_calls" if action else "stop"),
+                {
+                    "choices": [],
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25},
+                },
+            ]
+            response = (
+                "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+            ).encode()
             writer.write(
                 f"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {len(response)}\r\nConnection: close\r\n\r\n".encode()
                 + response
@@ -271,6 +191,13 @@ def action(tool, **args):
 
 
 def prompt(actions, worker=False):
+    if not worker:
+        actions = json.loads(json.dumps(actions))
+        for action in actions:
+            if action["name"] in {"exec_command", "write_stdin", "apply_patch"}:
+                action["args"].setdefault(
+                    "environment", "sandbox:" + action["args"].get("sandbox_id", "default")
+                )
     return "PROBE:" + json.dumps({"actions": actions, "worker": worker})
 
 
@@ -291,24 +218,14 @@ async def run(args):
             str(importer), str(root / "resource-cache"), str(assets)
         )
         assert await seed.wait() == 0, "Verified offline provisioning failed"
-        native = root / "native"
-        native.mkdir()
-        (native / "config.toml").write_text(
-            'model = "pot-mock"\nmodel_provider = "pot_mock"\n[model_providers.pot_mock]\nname = "Pot mock"\n'
-            + f'base_url = "http://127.0.0.1:{port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[mcp_servers.unmanaged]\nurl = "http://127.0.0.1:1/mcp"\n'
-        )
         for sandbox_id in ("default", "linux-b"):
             config_path = root / "sandboxes" / sandbox_id / "sandbox.json"
             config_path.parent.mkdir(parents=True, exist_ok=True)
             config_path.write_text(json.dumps({"cpus": 2, "memory_gib": 2, "disk_gib": 8}))
         environment = {
-            "PATH": str(resources / "node/bin")
-            + ":"
-            + str(resources / "host-tools/node_modules/.bin")
-            + ":/usr/bin:/bin:/opt/homebrew/bin",
+            "PATH": str(resources / "node/bin") + ":" + "/usr/bin:/bin:/opt/homebrew/bin",
             "HOME": temp,
             "POT_AGENT_SKILLS_DIR": str(root / "skills-user"),
-            "CODEX_HOME": str(native),
         }
         log_path = Path(args.output).resolve().with_suffix(".helper.log")
         log = log_path.open("wb")
@@ -656,33 +573,17 @@ SKILLS""",
             await reject("sandboxes", {"action": "delete", "sandbox_id": "linux-b"})
             await api("sandboxes", {"action": "stop", "sandbox_id": "default"})
             await api("sandboxes", {"action": "stop", "sandbox_id": "linux-b"})
-            profile = {
-                "id": "codex-test",
-                "revision": 1,
-                "name": "Codex fixture",
-                "engine": "codex",
-                "provider": "pot_mock",
-                "model": "pot-mock",
-                "auth_ref": "cli:codex",
-                "launch_spec": {
-                    "transport": "codex_app_server",
-                    "executable": str(resources / "host-tools/node_modules/.bin/codex"),
-                    "cwd_policy": "workspace",
-                    "argv": [{"kind": "runtime_arguments"}],
-                },
-                "params": {"max_output_tokens": 256, "reasoning_effort": None},
-                "tool_policy": {
-                    "worker_orchestration": False,
-                    "summary_read_only": True,
-                    "unattended": "guest_vm",
-                },
-            }
             await api(
-                "agent",
+                "providers",
                 {
-                    "profile": profile,
+                    "profile_id": "api-fixture",
+                    "name": "Second API fixture",
+                    "model": "pot-mock",
+                    "endpoint": f"http://127.0.0.1:{port}/v1/chat/completions",
+                    "api_key": "test-only",
+                    "protocol": "openai_chat",
                     "expected_revision": 0,
-                    "request_id": "codex-setup",
+                    "request_id": "api-fixture-setup",
                     "follow_main": True,
                 },
             )
@@ -690,27 +591,29 @@ SKILLS""",
             assert all(
                 item["state"]["phase"] == "stopped" for item in (await api("sandboxes"))["items"]
             )
-            report["codex_chat_without_sandbox"] = True
+            report["api_profile_chat_without_sandbox"] = True
             await turn(
                 [
                     action("list_sandboxes"),
                     action("manage_sandbox", action="select", sandbox_id="default"),
                     action(
                         "apply_patch",
-                        patch="*** Begin Patch\n*** Add File: codex.txt\n+CODEX_DEFAULT\n*** End Patch",
+                        patch="*** Begin Patch\n*** Add File: api-fixture.txt\n+API_DEFAULT\n*** End Patch",
                     ),
-                    action("exec_command", cmd="cat codex.txt"),
+                    action("exec_command", cmd="cat api-fixture.txt"),
                     action(
-                        "exec_command", cmd="echo CODEX_SECOND > codex.txt", sandbox_id="linux-b"
+                        "exec_command",
+                        cmd="echo API_SECOND > api-fixture.txt",
+                        sandbox_id="linux-b",
                     ),
                 ]
             )
             before = (await api("agent"))["bindings"][0]["native_ref"]
-            await turn([action("exec_command", cmd="echo RESUMED >> codex.txt")])
-            assert (default / "codex.txt").read_text() == "CODEX_DEFAULT\nRESUMED\n"
-            assert (second / "codex.txt").read_text().strip() == "CODEX_SECOND"
-            report["codex_main_and_resume"] = True
-            await exercise_shell_sessions("codex")
+            await turn([action("exec_command", cmd="echo RESUMED >> api-fixture.txt")])
+            assert (default / "api-fixture.txt").read_text() == "API_DEFAULT\nRESUMED\n"
+            assert (second / "api-fixture.txt").read_text().strip() == "API_SECOND"
+            report["api_profile_main_and_resume"] = True
+            await exercise_shell_sessions("api_fixture")
             task2 = await api(
                 "tasks",
                 {
@@ -719,12 +622,12 @@ SKILLS""",
                         [
                             action(
                                 "apply_patch",
-                                patch="*** Begin Patch\n*** Add File: codex-worker.txt\n+CODEX_WORKER\n*** End Patch",
+                                patch="*** Begin Patch\n*** Add File: api-worker.txt\n+API_WORKER\n*** End Patch",
                             )
                         ],
                         True,
                     ),
-                    "profile": "codex-test",
+                    "profile": "api-fixture",
                     "sandbox_id": "default",
                 },
             )
@@ -742,13 +645,11 @@ SKILLS""",
                 await asyncio.sleep(0.05)
             else:
                 raise AssertionError(info)
-            assert (
-                default / "tasks" / task2_id / "codex-worker.txt"
-            ).read_text() == "CODEX_WORKER\n"
-            report["codex_worker_loadout"] = True
+            assert (default / "tasks" / task2_id / "api-worker.txt").read_text() == "API_WORKER\n"
+            report["api_profile_worker_loadout"] = True
             # Exercise the real read-only summary before restoring main environment tools.
             for _ in range(400):
-                if model.codex_summary_requests and (await api("snapshot"))["turn"] is None:
+                if model.summary_requests and (await api("snapshot"))["turn"] is None:
                     break
                 await asyncio.sleep(0.05)
             else:
@@ -794,7 +695,7 @@ SKILLS""",
             boot = (await api("snapshot"))["boot_id"]
             await ipc("backend-restart")
             await wait_endpoint(boot)
-            await turn([action("exec_command", cmd="cat codex.txt")])
+            await turn([action("exec_command", cmd="cat api-fixture.txt")])
             after = (await api("agent"))["bindings"][0]["native_ref"]
             assert before == after, (before, after)
             report["host_restart_native_resume"] = True
@@ -843,7 +744,7 @@ SKILLS""",
                         ],
                         True,
                     ),
-                    "profile": "codex-test",
+                    "profile": "api-fixture",
                     "sandbox_id": "linux-b",
                 },
             )
@@ -877,7 +778,7 @@ SKILLS""",
                 long_token,
             )
             await api("sandboxes", {"action": "stop", "sandbox_id": "default"})
-            await turn([action("exec_command", cmd="cat codex.txt", sandbox_id="linux-b")])
+            await turn([action("exec_command", cmd="cat api-fixture.txt", sandbox_id="linux-b")])
             for _ in range(400):
                 if (long_workspace / "done.txt").exists():
                     break
@@ -889,7 +790,7 @@ SKILLS""",
                 next(i for i in inventory["items"] if i["id"] == "default")["state"]["phase"]
                 == "stopped"
             ), inventory
-            assert (default / "codex.txt").exists()
+            assert (default / "api-fixture.txt").exists()
             report["stop_independence_artifacts"] = True
             # Desktop is separate from Agent execution; static HTTP must never expose executor credentials.
             desktop = await api("sandboxes", {"action": "desktop", "sandbox_id": "default"})
@@ -1030,15 +931,6 @@ SKILLS""",
             assert model.worker_loadouts >= 4, model.worker_loadouts
             report["model_requests"] = len(model.requests)
             report["summary_requests"] = model.summary_requests
-            report["native_versions"] = {}
-            for cli in ["codex"]:
-                version = await asyncio.create_subprocess_exec(
-                    str(resources / "host-tools/node_modules/.bin" / cli),
-                    "--version",
-                    env=environment,
-                    stdout=asyncio.subprocess.PIPE,
-                )
-                report["native_versions"][cli] = (await version.communicate())[0].decode().strip()
             Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
             print(json.dumps(report, indent=2), flush=True)
         finally:

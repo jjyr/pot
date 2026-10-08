@@ -45,7 +45,6 @@ pub struct Settings {
     pub advanced: bool,
     web_show_token: bool,
     web_qr_origin: String,
-    commands_open: bool,
     api_advanced: bool,
 }
 impl Settings {
@@ -298,7 +297,6 @@ impl Settings {
             advanced: false,
             web_show_token: false,
             web_qr_origin: String::new(),
-            commands_open: false,
             api_advanced: false,
         }
     }
@@ -335,7 +333,6 @@ impl Settings {
         self.secret_revision = secret_revision;
         if clear_secrets {
             self.api_advanced = false;
-            self.commands_open = false;
         }
         let reset_model = self.draft_revision != state["draft_revision"].as_i64();
         self.draft_revision = state["draft_revision"].as_i64();
@@ -348,9 +345,9 @@ impl Settings {
             "memory",
             "disk",
             "parallel",
-            "executable",
-            "argv",
-            "codex_model",
+            "",
+            "",
+            "",
             "",
             "",
             "",
@@ -378,11 +375,7 @@ impl Settings {
             }
         }
         if clear_secrets && state["ai_screen"] == "manage" {
-            let native = matches!(state["connection_kind"].as_str(), Some("codex"));
-            self.fields[if native { 16 } else { 15 }]
-                .read(cx)
-                .focus_handle(cx)
-                .focus(window, cx);
+            self.fields[15].read(cx).focus_handle(cx).focus(window, cx);
         }
     }
     pub fn render(

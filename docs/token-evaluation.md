@@ -4,7 +4,7 @@ Status: architecture accepted; deterministic foundation and DeepSeek Flash live 
 
 ## Objective
 
-Measure the tokens, cost, latency and work required to complete reproducible scenarios across runtime versions and implementations. Comparisons must retain task quality, failures and observation precision: a cheap incomplete task is not an efficiency improvement. The same framework should compare Pot against an earlier Pot revision, Pi, Codex or a future Agent without changing scenarios or aggregation rules.
+Measure the tokens, cost, latency and work required to complete reproducible scenarios across runtime versions and implementations. Comparisons must retain task quality, failures and observation precision: a cheap incomplete task is not an efficiency improvement. The same framework should compare Pot against an earlier Pot revision, Pi or a future Agent without changing scenarios or aggregation rules.
 
 ## Components and boundaries
 
@@ -18,9 +18,9 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 | Normalizer/validator | Convert observations into a versioned schema, resolve cumulative snapshots and duplicate sources, preserve missing fields and raw provenance |
 | Evaluator/reporter | Evaluate artifacts/answers, compute comparable metrics, compare baselines and explain regressions by trace |
 
-The runner is a separate workspace crate, `pot-eval`, under `eval/`. It depends on shared contracts in `pot-core` and composes hosts from `pot-agent` and `pot-driver`, with `pot-gateway` where direct transport or collection is needed. It does not depend on `pot-runtime`, product Storage or App. The crate owns scenario execution, immutable run records, validation, scoring, comparison and the CLI. The initial crate and scripted Pot runner are implemented; the remaining delivery sequence is listed below.
+The runner is a separate workspace crate, `pot-eval`, under `eval/`. It depends on shared contracts in `pot-core` and uses the host from `pot-agent`, with `pot-gateway` where direct transport or collection is needed. It does not depend on `pot-runtime`, product Storage or App. The crate owns scenario execution, immutable run records, validation, scoring, comparison and the CLI. The initial crate and scripted Pot runner are implemented; the remaining delivery sequence is listed below.
 
-Use the existing `DriverHost`/`SessionHandle` contract rather than creating a second Agent adapter layer. Pot already implements this contract; native Codex execution uses it too. A future Pi baseline would implement the same Driver contract as an optional evaluation integration, without restoring Pi as a production engine. Vendor protocol translation remains inside each Driver implementation. Scenario definitions and aggregation do not depend on those protocols.
+Use the existing `DriverHost`/`SessionHandle` contract rather than creating a second Agent adapter layer. Pot already implements this contract. A future Pi baseline would implement the same Driver contract as an optional evaluation integration, without restoring Pi as a production engine. Vendor protocol translation remains inside each Driver implementation. Scenario definitions and aggregation do not depend on those protocols.
 
 Execution and usage observation remain separate concerns: several Drivers may share a gateway collector, and one Driver may expose different observations depending on its transport. Environment preparation is replaceable, allowing local fixtures or an existing Sandbox without requiring product UI.
 
@@ -32,8 +32,6 @@ Capability description declares control capabilities separately from observation
 
 - Control: configurable prompt/model/output cap/context window, custom tools, deterministic response replay, forced compaction, context retention, fresh session, restart/checkpoint.
 - Observation: complete run/turn/request usage, request bodies, tool arguments/results, compaction lifecycle and usage, reasoning/cache fields, request IDs, cumulative counters.
-
-A comparison declaring identical tools or compaction thresholds requires Drivers that can enforce those controls. A Driver lacking them can participate in a native-policy comparison, not an aligned-policy claim. Codex native cumulative turn usage can be a valid total measurement while request count and compaction allocation remain unavailable. A configured API-backed Codex variant may expose request usage through a collector; do not assume its subscription-backed variant permits the same observation.
 
 ### Standalone execution services
 
@@ -122,11 +120,11 @@ The [small-budget suite](token-evaluation-next-suite.md) delivers at most five c
 1. Create the separate `pot-eval` crate, stabilize manifests/events/usage validation and implement a scripted Driver plus fixtures for duplicate snapshots, partial usage, counter resets, interrupted tools and compaction retries.
 2. Extend Core Driver capabilities/observation and inject standalone execution services; run the existing Pot host directly with a request collector. Deliver CLI commands to run cases, validate records and compare two run sets; JSONL/raw artifacts first, compact HTML report second.
 3. Add short-chat, single/multiple tool rounds, large output, forced/automatic repeated compaction and post-compaction continuation cases with machine-checkable outcomes.
-4. Run the existing native Codex Driver with explicit observation limits, then add another baseline through the same Driver contract. Driver-specific compatibility tests do not change benchmark scenarios or scoring rules.
+4. Add comparison baselines through the same execution contract. Baseline-specific tests do not change benchmark scenarios or scoring rules.
 5. Establish live baselines and regression budgets once comparable real-provider measurements exist. Keep baseline runtime revisions and case versions pinned; version report formulas separately from raw observations.
 
 The schema and aggregation validator should be the first concrete implementation. They are what make longitudinal results comparable; Driver implementations are replaceable inputs to that contract.
 
-Current delivery: steps 1 and the Pot standalone/CLI portion of step 2 are implemented. Step 3 has short-chat, tool batch, shell-output-limit and repeated automatic-compaction scenarios/tests, including continuation assertions. Native Codex only declares its observation capability; its evaluation feedback/runner, forced compaction controls, other live transports, repeat statistics and HTML reporting remain future work. The initial Core change adds opt-in observation to existing feedback and standalone services to the Pot host; a full decomposition of product feedback responsibilities is not claimed.
+Current delivery: steps 1 and the Pot standalone/CLI portion of step 2 are implemented. Step 3 has short-chat, tool batch, shell-output-limit and repeated automatic-compaction scenarios/tests, including continuation assertions. Other live transports, repeat statistics and HTML reporting remain future work. The initial Core change adds opt-in observation to existing feedback and standalone services to the Pot host; a full decomposition of product feedback responsibilities is not claimed.
 
-DeepSeek Flash live follow-up: the CLI reads the local Pi model configuration and runs only the selected Flash model through injected services. Native request/response streams are captured, and all three live task assertions and usage reconciliation passed. This is a single-runtime smoke baseline, not a Pi/Codex efficiency comparison. See the [dated live acceptance](validation/token-evaluation.md#deepseek-flash-live-follow-up-2026-10-06).
+DeepSeek Flash live follow-up: the CLI reads the local Pi model configuration and runs only the selected Flash model through injected services. Native request/response streams are captured, and all three live task assertions and usage reconciliation passed. This is a single-runtime smoke baseline, not a multi-runtime efficiency comparison. See the [dated live acceptance](validation/token-evaluation.md#deepseek-flash-live-follow-up-2026-10-06).

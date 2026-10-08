@@ -15,7 +15,6 @@ Evidence:
 | Runtime cross-OS path regression | Mac task artifacts, AGENTS.md and skill locations use `/Volumes/PotWorkspace/workspace`, without starting a VM |
 | `scripts/tests/macos-provider.py` | Passed: local real TLS server/enrollment CA and IP identity mismatch, auth rejection, duplicate no-replay receipts, exclusive owner and workspace escape rejection, expired/unknown operations, guest cleanup correctly returns unconfirmed; runner is fake |
 | `scripts/tests/macos-helper.py` | Passed against the real compiled/signed native Helper: private IPC, bounded protocol, version rejection, exclusive controller lock, stopped status and missing-platform rejection; no VM boot |
-| Second-stage real Linux VM regression | Passed against the latest Server and signed Helper: all 17 scenario checks, two Linux VMs, Pot/Codex, 47 local mock requests, cancellation/busy-stop, restart, skills, artifacts and optional desktop shutdown |
 
 Local model fixtures and isolated test instance data are used; no paid model requests, user tokens, OS installation or Xcode account actions. Machine-specific preparation/resource notes belong under `~/Workspace/Machines`, not this report.
 

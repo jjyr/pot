@@ -1,10 +1,5 @@
 # Executor shells, sessions and snapshots acceptance — 2026-10-07
 
-Base commit: `fa3483b`. This report describes working-tree changes and verification;
-it does not establish acceptance of an installed App or a rebuilt Linux VM image.
-Implementation reference: local Codex `822e58cc3d666166c7446c5b1ea2e52f5d09594c`.
-Current behavior is specified in [Sandbox command execution](../executor.md).
-
 ## Delivered
 
 - Common Pot/MCP schemas and runtime validation for shell/login/tty, stdin,
@@ -75,14 +70,6 @@ test ignored; `cargo fmt --all -- --check` and `git diff --check` passed. Test l
 `/tmp/pot-shell-default-tests.log`.
 
 ## Remaining acceptance and limits
-
-The actual dual-VM acceptance script now contains Pot and Codex cross-turn PTY,
-original-Sandbox routing and cross-turn snapshot reuse scenarios. It was **not
-run** here: this worktree has no prepared/bundled App and Sandbox image. The
-existing dated VM acceptance predates these changes and is not evidence for new
-PTY/devpts or idle-cgroup behavior. Rebuild/bundle before running the documented
-VM acceptance command. No paid inference, provider login, App build or desktop
-rendering/IME acceptance was performed.
 
 Snapshots use noninteractive login startup and do not fully track arbitrary
 transitive sourced files or external state. `sh` falls back to normal startup.

@@ -357,8 +357,8 @@ mod tests {
         let mut unauthorized = profiles[0].clone();
         unauthorized.id = "unauthorized".into();
         unauthorized.name = "Unauthorized".into();
-        unauthorized.engine = Engine::Codex;
-        unauthorized.auth_ref = "cli:codex".into();
+        unauthorized.provider = "missing".into();
+        unauthorized.auth_ref = "providers.json:missing".into();
         profiles.push(unauthorized);
         s.inner
             .lock()

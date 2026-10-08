@@ -53,7 +53,7 @@ pub fn execution_config(mut base: Config, data: &std::path::Path) -> Result<Conf
     }
     Ok(base)
 }
-pub use pot_driver::private_json;
+pub use pot_sandbox::private_json;
 pub const MAX_MODEL_BODY: usize = 16 * 1024 * 1024;
 
 pub async fn compaction_event(

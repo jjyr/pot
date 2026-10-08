@@ -1,9 +1,9 @@
 # Sandbox command execution
 
-The Host Agent (Pot or Codex) calls the same role-scoped tools. Runtime validates
+The Host Agent (pot-agent) calls the same role-scoped tools. Runtime validates
 arguments and routes them to a credential-free guest runner. Agent processes and
 model connections remain on Host. pot-agent also routes these same tool names to
-Host after its [permission gate](permissions.md); Codex remains Sandbox-only.
+Host after its [permission gate](permissions.md).
 `environment` selects Host or a Sandbox for pot-agent. Main defaults to Host and
 tasks default to their fixed Sandbox. File tools share the same runner implementation.
 
@@ -31,7 +31,7 @@ execution home, independent of a command's `workdir`.
 writable stdin support. PTY mode attaches all three streams to a controlling
 terminal, returns merged output in stdout, and defaults to 24 rows by 80 columns.
 Terminal control bytes are returned as output; the protocol does not render a
-full terminal screen. This is shared by both Drivers through Pot tools.
+full terminal screen. This is shared by pot-agent through Pot tools.
 
 `write_stdin` accepts `chars` or an empty poll, `close_stdin`, `interrupt`,
 `terminate`, and PTY-only `rows`/`cols` (1–1000). `interrupt` sends SIGINT to the

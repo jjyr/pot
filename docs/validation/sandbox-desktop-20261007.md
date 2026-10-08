@@ -24,8 +24,6 @@ Logs are under `.local/validation/desktop-*`; they include the complete test/che
 
 The first two-VM run reached the optional desktop step after task/command scenarios passed, then failed because readiness cached an empty token before Guest broker startup. Provider now rereads private Helper state on each readiness probe. A regression test covers that sequence. The subsequent VM run uses fresh debug Server binaries, the signed Helper and existing Linux OCI image, with the new authenticated gateway/RFB handshake and control-return checks added to `scripts/tests/sandbox-runtime.py`.
 
-Result: **passed**. `.local/validation/desktop-linux-regression.json` records all 18 scenarios true, including `managed_desktop_gateway_rfb_and_persistent_vm`, with 47 local mock model requests. Native Codex was `0.160.1`. The gateway connected to the real Linux Guest RFB server, completed version/security/ServerInit negotiation, took/returned control, revoked the ticket and verified that the VM remained running. Existing two-environment Pot/Codex tasks, cancellation, Host/worker restart, fixed assignments, skills and artifact persistence passed.
-
 The final follow-up adds a conservative error if a viewer disconnects while awaiting control-return acknowledgement; its Manager/Runtime tests pass. That disconnected-return branch is covered by automated protocol behavior rather than claimed as a real VM fault injection.
 
 ## Untested scope and limits

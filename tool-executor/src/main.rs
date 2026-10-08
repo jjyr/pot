@@ -32,18 +32,6 @@ impl ExecutionFeedback for Feedback {
     fn input_streaming(&self, _: &str) -> Result<()> {
         Ok(())
     }
-    fn begin_usage(&self, _: &str, _: &ResolvedSpec, _: u64) -> Result<()> {
-        Ok(())
-    }
-    fn initialize_usage(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
-    fn cumulative_usage(&self, _: &str, _: &str, _: &Value) -> Result<()> {
-        Ok(())
-    }
-    fn incomplete_usage(&self, _: &str) -> Result<()> {
-        Ok(())
-    }
 }
 #[tokio::main]
 async fn main() -> Result<()> {

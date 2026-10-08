@@ -1,10 +1,6 @@
 # Host pot-agent and Sandbox execution acceptance
 
-Date: 2026-10-06. Supersedes the deployment conclusions of the earlier Pi/Codex acceptance; previous observations remain historical.
-
 ## Implementation
-
-Rebased onto upstream `48e3358` (native Agent, token evaluation and CI), preserving execution preferences from `74df9ba`. Product engines are Pot and Codex. Pot runs in-process in Host Server; Codex runs Host App Server. Pi/Grok product adapters and distributions are removed. Optional Pi comparison/configuration code remains evaluation tooling, not a product integration.
 
 Core defines the injected ToolExecutor contract and shared exec_command/write_stdin/apply_patch schemas and validation. Runtime controls roles and Sandbox routing; the guest Rust executor implements patch and pipe sessions behind the authenticated root broker. Product code has no implicit local execution backend. Eval and isolated unit/model tests explicitly inject LocalTools.
 
@@ -19,18 +15,12 @@ Concurrent calls durably initialize one scope before dispatch. Sessions remain b
 - `mise run test:app`: **14 passed**.
 - `mise run test:eval`: deterministic suite, short-chat/tool-round/compaction records, validation and repeat comparison passed.
 - `mise run clippy`: every workspace target passed with warnings treated as errors. Final Runtime refinements were rebuilt/retested and formatting/script lint passed.
-- `mise run build` and `mise run bundle`: passed. Guest image `pot.local/sandbox:681c9a19424721263ed5`, Codex `0.159.1`.
-
-The final `scripts/tests/sandbox-runtime.py` run used isolated temporary Host data/homes, two real Linux VMs (2 CPUs, 2 GiB memory, 8 GiB disk each), in-process pot-agent, the actual bundled Codex binary and local deterministic Chat/Responses HTTP models. It completed **41 model requests and four read-only summaries**, and exited successfully after stopping the test Helper/VMs.
 
 Verified behaviors:
 
-1. Host backend, configuration/settings and Pot/Codex chat remain available with all Sandboxes stopped.
 2. Main patch/command tools execute in two selected/explicit environments, never the Host Agent directory.
 3. Changing the default moves subsequent commands/patches; an existing live stdin session continues in its original Sandbox.
-4. Pot and Codex workers use their fixed environments/loadouts; management and active-turn target-override attempts fail.
 5. Busy stop/settings changes are rejected. Cancellation kills detached setsid descendants before reporting settlement.
-6. Host restart preserves Codex native identity and worker environment bindings without replaying earlier side effects.
 7. Stopping environment A does not stop worker B; artifacts persist.
 8. Optional desktop startup/shutdown succeeds; shell code cannot read the root broker ledger/token, and desktop HTTP cannot expose executor credentials.
 
@@ -48,7 +38,6 @@ Date: 2026-10-06. Five additional regression tests cover the requested injection
 
 - `main_and_worker_model_loadouts_and_dispatch_use_injected_tools` inspects actual model requests for Chat, Responses and Anthropic protocols. Main receives product control tools plus exactly one copy of each execution tool; workers receive execution tools only. It checks target-selector schemas, policy-derived limits, exact executor arguments/role/owner/call IDs, control-tool dispatch, worker management/delegation rejection, and absence of Host file effects.
 - `configured_loadout_restricts_model_tools_and_dispatch` checks that configured builtins and the allow-list narrow both model-visible tools and actual dispatch, even when MCP advertises execution tools.
-- `mcp_lists_distinct_main_worker_and_summary_loadouts` exercises authenticated MCP initialization/listing and verifies main, worker and read-only summary tools, including target-selector restrictions. This is the shared MCP surface used by Codex; no Codex binary is launched by this unit test.
 - `main_context_routes_commands_patch_and_sessions_through_sandbox` uses the default Runtime context injection, an isolated Unix Helper double and two independent authenticated HTTP executor doubles. It verifies lazy preparation, default/explicit routing, command/patch arguments and policy, target-selector removal, guest cwd, output ID remapping and result unwrapping, receipt deduplication, stdin routing after default changes, scope reuse, cleanup and expired-session rejection. Host workspaces receive no command or patch effects.
 - `task_context_keeps_assigned_sandbox_and_rejects_control_calls` creates and claims a real Runtime task, checks Worker role injection and task cwd, verifies its persisted environment after main changes the default, and rejects management/inventory/retarget calls before Helper or guest dispatch.
 
@@ -70,9 +59,6 @@ Verification:
 - `mise run test:skills`: **3 passed**, covering role mount views, readonly remount policy, traversable view parents and fail-closed syscall behavior.
 - `mise run test:app`: **14 passed**.
 - Clippy, source/script lint, deterministic evaluation, Rust/App/Swift build and bundle passed.
-- Final real dual-VM acceptance passed using image `pot.local/sandbox:3bb69f0eedb7a69f955c` and Codex `0.159.1`. It used **47 local mock model requests and four read-only summaries**, without paid inference.
-
-Real VM checks confirmed that main-generated shared/main/task bundles persisted on Host; a task in the second VM read the shared/task bundles, received **EROFS** when modifying either, could not see main user/builtin paths or raw source shares, and ran with a distinct UID, no_new_privs and zero effective capabilities. Mock model inspection checked that worker prompts omitted skill-manager/main-only skills. Existing Pot/Codex scope routing, pipe sessions, cancellation, busy-stop, native restart/resume, artifact persistence and desktop/shutdown checks also passed.
 
 Initial real runs exposed missing broker mount capabilities and umask-restricted view parent directories. Both were corrected before the final successful run. The final acceptance stopped its test VMs/Helper and used isolated user/data directories.
 
@@ -95,8 +81,6 @@ Local evidence: `/tmp/pot-skills-extra-{targeted,test,clippy,lint}.log`.
 
 ## Builtin creator/installer and readonly mapping follow-up
 
-Date: 2026-10-06. Replaced skill-manager with main-only skill-creator and skill-installer. Their instructions describe Agent-visible locations, format, audience, validation and next-turn discovery; they omit Host persistence and product source layout. Runtime reserves both builtin names. The creator's Python validator follows Codex's YAML/metadata/unfinished-scaffold checks, adapted to Pot, and additionally validates ordinary resource files and inline local resource links. Authored bundles require explicit names and matching directories. The installer handles local/GitHub sources, preserves resources and executable scripts, validates before publication, rejects implicit replacement, and restores a previous directory on publication failure. Imported scripts are not executed during installation.
-
 A shared JSON corpus exercises Rust discovery and Python validation. It exposed acceptance of a closing delimiter prefix such as `---suffix`; the loader now requires a complete delimiter line. Guest PyYAML is pinned through Alpine packages, local tests pin the same version, and CI runs the authoring and mount suites. Packaging excludes Python bytecode caches.
 
 Verification:
@@ -105,7 +89,6 @@ Verification:
 - Authoring/installer: **13 passed**, including CLI exit codes, valid packaged skills, resource checks, metadata limits, conflicting/invalid updates, rollback, preserved permissions, mocked GitHub download, archive traversal/symlink rejection and download failure.
 - Mount policy: **8 passed**, including actual syscall-argument inspection for main builtin readonly remounts and writable user mounts. These unit tests use syscall doubles.
 - Backend Clippy, source/script lint, Rust/App/Swift build and bundle passed.
-- Real dual-VM acceptance passed with image `pot.local/sandbox:8cfc1117bfcff16f330d` and Codex `0.159.1`, **47 local mock model requests and four summaries**. Main attempted writes to both builtin SKILL.md files and received **EROFS**. Both packaged bundles passed the packaged validator; the packaged installer installed a local bundle into shared user skills. Worker readonly shared/task mapping, hidden main directories and existing routing/restart/cancellation/desktop checks passed. Test VMs and Helper were stopped afterward.
 
 Evidence: `/tmp/pot-skill-tools-acceptance.json`, `/tmp/pot-skill-tools-acceptance.helper.log`, `/tmp/pot-skill-tools-{test,clippy,lint,build,bundle,e2e}.log`, `/tmp/pot-skill-authoring.log` and `/tmp/pot-skill-format-test.log`.
 
@@ -123,7 +106,6 @@ Verification:
 - Authoring/installer: **14 passed**, including a default-destination regression that changes HOME and checks direct installation into `.pot/agent/skills` without category directories.
 - Mount policy: **9 passed**, covering identical bundle sets for both roles, readonly builtin binds, task user-root readonly remount, missing sources, failed syscalls, symlink sources/mountpoints/home paths and restrictive umask handling.
 - Backend Clippy, source/script lint, Rust/App/Swift build and bundle passed.
-- Real dual-VM acceptance passed with image `pot.local/sandbox:ca7bc86b80ad909747c8`, Codex `0.159.1`, **47 local mock model requests and four summaries**. Packaged helpers ran using Path.home's unified directory; installer publication used its default destination. Main created global user bundles and builtin writes returned EROFS. Task read the same user and builtin bundles, all attempted writes returned EROFS, and creating a new global directory returned EROFS. Both roles' model contexts advertised the builtin creator/installer. Existing routing, cancellation, restart, artifacts and desktop/stop checks passed. All test VMs and Helper were stopped.
 
 Evidence: `/tmp/pot-flat-skills-acceptance.json`, `/tmp/pot-flat-skills-acceptance.helper.log` and `/tmp/pot-flat-skills-{test,authoring,discovery,clippy,lint,build,bundle,e2e}.log`.
 
