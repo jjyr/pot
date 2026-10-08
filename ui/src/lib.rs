@@ -22,6 +22,7 @@ pub mod usage;
 pub mod usage_state;
 
 pub mod page_state;
+pub mod permission_display;
 
 #[cfg(feature = "presentation")]
 pub mod resources;

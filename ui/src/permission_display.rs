@@ -1,0 +1,138 @@
+//! Human-readable approval content; absent plugin metadata falls back to raw arguments.
+use crate::localization::Catalog;
+use serde_json::Value;
+
+fn localized(value: &Value, catalog: Catalog) -> Option<&str> {
+    value[catalog.locale()]
+        .as_str()
+        .or_else(|| value["en"].as_str())
+}
+
+pub fn description(request: &Value, catalog: Catalog) -> Option<String> {
+    let tool = request["tool"].as_str()?;
+    let builtin = match tool {
+        "exec_command" => Some("permissions.run-command"),
+        "apply_patch" => Some("permissions.edit-files"),
+        "set_sandbox_mappings" => Some("permissions.map-directories"),
+        "manage_sandbox" => Some(match request["args"]["action"].as_str()? {
+            "create" => "permissions.create-sandbox",
+            "delete" => "permissions.delete-sandbox",
+            "start" => "permissions.start-sandbox",
+            "stop" => "permissions.stop-sandbox",
+            _ => "permissions.manage-sandbox",
+        }),
+        _ => None,
+    };
+    let summary = match builtin {
+        Some(key) => catalog.text(key),
+        None => localized(&request["display"]["summary"], catalog)?,
+    };
+    let mut text = summary.to_owned();
+    for (key, value) in request["args"].as_object()? {
+        let label = if builtin.is_some() {
+            match key.as_str() {
+                "cmd" => catalog.text("permissions.command"),
+                "workdir" => catalog.text("permissions.workdir"),
+                "patch" => catalog.text("permissions.patch"),
+                "sandbox_id" => catalog.text("permissions.sandbox"),
+                "mappings" => catalog.text("permissions.mappings"),
+                "name" => catalog.text("permissions.name"),
+                "action" => catalog.text("permissions.action"),
+                "shell" => catalog.text("permissions.shell"),
+                "login" => catalog.text("permissions.login"),
+                "tty" => catalog.text("permissions.tty"),
+                "timeout_ms" => catalog.text("permissions.timeout"),
+                "yield_time_ms" => catalog.text("permissions.yield"),
+                "max_output_chars" => catalog.text("permissions.output-limit"),
+                _ => key,
+            }
+        } else {
+            localized(&request["display"]["labels"][key], catalog).unwrap_or(key)
+        };
+        let mapping_text = if tool == "set_sandbox_mappings" && key == "mappings" {
+            value
+                .as_array()
+                .and_then(|mappings| {
+                    mappings
+                        .iter()
+                        .map(|m| {
+                            if m.as_object()?.len() != 3 {
+                                return None;
+                            }
+                            Some(format!(
+                                "{} → {} ({})",
+                                m["source"].as_str()?,
+                                m["destination"].as_str()?,
+                                catalog.text(if m["read_only"].as_bool()? {
+                                    "permissions.read-only"
+                                } else {
+                                    "permissions.read-write"
+                                })
+                            ))
+                        })
+                        .collect::<Option<Vec<_>>>()
+                })
+                .map(|lines| {
+                    if lines.is_empty() {
+                        catalog.text("permissions.no-mappings").into()
+                    } else {
+                        lines.join("\n")
+                    }
+                })
+        } else {
+            None
+        };
+        let value = match value {
+            Value::String(s) => s.clone(),
+            Value::Bool(true) => catalog.text("permissions.yes").into(),
+            Value::Bool(false) => catalog.text("permissions.no").into(),
+            other => mapping_text
+                .unwrap_or_else(|| serde_json::to_string_pretty(other).unwrap_or_default()),
+        };
+        text.push_str(&format!("\n\n{label}:\n{value}"));
+    }
+    Some(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn descriptions_preserve_arguments_and_use_plugin_localization_or_raw_fallback() {
+        let zh = Catalog::new("zh-CN");
+        let shell = json!({"tool":"exec_command","args":{"cmd":"echo '$HOME'","workdir":"/tmp","tty":false}});
+        let text = description(&shell, zh).unwrap();
+        assert!(text.contains("是否允许运行以下命令"));
+        assert!(text.contains("echo '$HOME'"));
+        assert!(text.contains("工作目录:\n/tmp"));
+        let mut plugin = json!({"tool":"external_tool","args":{"code":"await tab.click()"}});
+        assert!(description(&plugin, zh).is_none());
+        plugin["display"] = json!({"summary":{"en":"Allow browser use?","zh-CN":"是否允许使用浏览器？"},"labels":{"code":{"en":"JavaScript","zh-CN":"执行代码"}}});
+        assert_eq!(
+            description(&plugin, zh).unwrap(),
+            "是否允许使用浏览器？\n\n执行代码:\nawait tab.click()"
+        );
+        plugin["display"]["summary"]
+            .as_object_mut()
+            .unwrap()
+            .remove("zh-CN");
+        assert!(
+            description(&plugin, zh)
+                .unwrap()
+                .starts_with("Allow browser use?")
+        );
+        let mut mapping = json!({"tool":"set_sandbox_mappings","args":{"sandbox_id":"dev","mappings":[{"source":"/work","destination":"/mnt/host/work","read_only":true}]}});
+        assert!(
+            description(&mapping, zh)
+                .unwrap()
+                .contains("/work → /mnt/host/work (只读)")
+        );
+        mapping["args"]["mappings"] = json!([]);
+        assert!(
+            description(&mapping, zh)
+                .unwrap()
+                .contains("移除所有目录映射")
+        );
+    }
+}

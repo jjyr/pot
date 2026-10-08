@@ -1711,6 +1711,7 @@ async fn host_write_waits_for_owner_and_denial_has_no_effect() {
         assert_eq!(request["owner"], "unit");
         assert_eq!(request["environment"], "host");
         assert!(request["args"].get("environment").is_none());
+        assert!(request.get("suggested_scope").is_none());
         assert_eq!(
             request["args"]["cmd"],
             "printf 'approved content' > owner-file.txt"

@@ -40,10 +40,15 @@ See [Agent tools](tool-composition.md) for tool visibility and composition, and
 
 ## Owner decisions
 
-Approval cards identify the Agent, environment, tool, full arguments and scope.
+Approval cards identify the Agent, environment and operation. Built-in execution
+tools use localized questions and labeled arguments. Plugins may provide declarative
+`approval_display` text; without it, cards show raw arguments. Display text does not
+change execution or authorization, and plugin code never runs to prepare a prompt.
 The request's outer `environment` identifies the target; `args` excludes this routing field.
 Actions are **Always allow**, **Allow once**, **Deny** (永久允许、允许一次、拒绝).
-Always allow saves the displayed scope; there is no extra directory-grant action.
+`suggested_scope` is optional and normally omitted. Always allow derives the exact
+scope from the reviewed tool and arguments unless an explicit scope is supplied;
+there is no extra directory-grant action.
 Only authenticated owners can approve or revoke grants; Agents cannot self-approve.
 
 One-time approval belongs to the concrete call and is consumed before execution.

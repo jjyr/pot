@@ -759,7 +759,8 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
         turn: turn.request_id.clone(),
         call_id: "guest-read".into(),
         tool: "exec_command".into(),
-        suggested_scope: pot_agent::permissions::scope("exec_command", &args).unwrap(),
+        suggested_scope: None,
+        display: None,
         args: args.clone(),
     };
     let wait_service = s.clone();

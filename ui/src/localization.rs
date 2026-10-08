@@ -30,6 +30,9 @@ pub fn resolve(languages: &[&str]) -> &'static str {
     "en"
 }
 impl Catalog {
+    pub fn locale(&self) -> &'static str {
+        self.locale
+    }
     pub fn new(locale: &str) -> Self {
         Self {
             locale: resolve(&[locale]),

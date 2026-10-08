@@ -72,6 +72,8 @@ Packages own their instructions, tool schemas and implementation. See the [bundl
 
 Runtime resolves the environment, checks permission, and sends the pinned bundle and model-derived mode to its runner. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, environment and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
 
+Tools may include optional `approval_display` metadata with localized `summary` text and `labels` keyed by argument name (each uses locale-to-text maps with an English fallback). Pot shows these plain-text labels with actual arguments; tools without metadata use raw JSON. Metadata is pinned with the bundle, validated on import, and excluded from model tool schemas. Changing display text requires re-import/rebind.
+
 Host needs Node and an installed Chrome/Chromium; the App supplies Node. Standard Linux and macOS browser paths are discovered automatically, or set `POT_BROWSER_EXECUTABLE`. Host uses temporary profiles, process-group cleanup and Chrome's native sandbox. Plugin children receive a restricted environment without inherited model credentials. Host approval authorizes code execution with the user's OS privileges; the JS context is not an isolation boundary.
 
 Linux Sandbox execution uses the unprivileged Guest scope/cgroup and `--no-sandbox` inside the managed boundary. It requires a qualified image with Node/Chromium. Both paths use inherited CDP pipes, temporary files and idle expiry. Browser sessions are separate from existing user profiles and noVNC, without manual takeover or persistent logins.
