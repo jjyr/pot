@@ -225,7 +225,20 @@ pub struct Request {
     pub call_id: String,
     pub tool: String,
     pub args: Value,
-    pub suggested_scope: Scope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_scope: Option<Scope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<pot_core::plugins::ApprovalDisplay>,
+}
+impl Request {
+    pub fn operation_scope(&self) -> Result<Scope> {
+        scope(&self.tool, &self.args)
+    }
+    pub fn grant_scope(&self) -> Result<Scope> {
+        self.suggested_scope
+            .clone()
+            .map_or_else(|| self.operation_scope(), Ok)
+    }
 }
 
 /// Resolve before review, then execute this exact path without following links.
@@ -353,6 +366,15 @@ pub async fn authorize(
     if policy.default == DefaultDecision::Allow && tool != "set_sandbox_mappings" {
         return Ok(());
     }
+    let operation_scope = scope(tool, args)?;
+    let display = binding
+        .spec
+        .params
+        .agent
+        .plugin_for_tool(tool)?
+        .map(|plugin| plugin.approval_display(tool))
+        .transpose()?
+        .flatten();
     let request = Request {
         owner: context.owner.clone(),
         environment: environment.into(),
@@ -361,12 +383,13 @@ pub async fn authorize(
         call_id: call_id.into(),
         tool: tool.into(),
         args: operation_args(args),
-        suggested_scope: scope(tool, args)?,
+        suggested_scope: None,
+        display,
     };
     let grants: Vec<Grant> = serde_json::from_value(grants)?;
     if grants
         .iter()
-        .any(|g| g.owner == request.owner && g.scope.covers(&request.suggested_scope))
+        .any(|g| g.owner == request.owner && g.scope.covers(&operation_scope))
     {
         return Ok(());
     }

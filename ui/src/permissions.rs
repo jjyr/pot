@@ -30,16 +30,24 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
                 ),
                 cx,
             ))
-            .child(
-                div()
-                    .text_sm()
-                    .whitespace_normal()
-                    .child(serde_json::to_string_pretty(&request["args"]).unwrap_or_default()),
-            )
-            .child(pages::hint(catalog.text("permissions.scope"), cx))
             .child(div().text_sm().whitespace_normal().child(
-                serde_json::to_string_pretty(&request["suggested_scope"]).unwrap_or_default(),
+                crate::permission_display::description(request, catalog).unwrap_or_else(|| {
+                    serde_json::to_string_pretty(&request["args"]).unwrap_or_default()
+                }),
             ));
+        if let Some(scope) = request.get("suggested_scope").filter(|v| !v.is_null()) {
+            card = card
+                .child(pages::hint(catalog.text("permissions.scope"), cx))
+                .child(
+                    div()
+                        .text_sm()
+                        .whitespace_normal()
+                        .child(serde_json::to_string_pretty(scope).unwrap_or_default()),
+                );
+        }
+        if request.get("suggested_scope").is_none_or(Value::is_null) {
+            card = card.child(pages::hint(catalog.text("permissions.exact-grant"), cx));
+        }
         if request["tool"] == "exec_command" && request["environment"] == "host" {
             card = card.child(pages::hint(catalog.text("permissions.shell-effects"), cx));
         }

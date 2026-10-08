@@ -1104,6 +1104,11 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                     assert_eq!(card["request"]["tool"], "cua_repl");
                     assert_eq!(card["request"]["environment"], "host");
                     assert!(card["request"]["args"].get("environment").is_none());
+                    assert!(card["request"].get("suggested_scope").is_none());
+                    assert_eq!(
+                        card["request"]["display"]["summary"]["zh-CN"],
+                        "是否允许使用或管理浏览器自动化会话？"
+                    );
                     if approvals == 0 {
                         assert_eq!(captured.lock().unwrap().len(), 1);
                         assert!(

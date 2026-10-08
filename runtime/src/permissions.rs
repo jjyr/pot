@@ -264,11 +264,11 @@ impl Hub {
             let p = &mut next.requests[index];
             if p.decision == action && p.phase == "approved" {
                 if action == "allow_persistent" {
-                    let expected = scope.as_ref().unwrap_or(&p.request.suggested_scope);
+                    let expected = scope.clone().unwrap_or(p.request.grant_scope()?);
                     anyhow::ensure!(
                         next.grants
                             .iter()
-                            .any(|g| g.id == key && &g.scope == expected),
+                            .any(|g| g.id == key && g.scope == expected),
                         "Conflicting repeated grant scope"
                     );
                 }
@@ -284,9 +284,9 @@ impl Hub {
                 p.decision = action.into();
                 p.phase = "approved".into();
                 if action == "allow_persistent" {
-                    let scope = scope.unwrap_or_else(|| p.request.suggested_scope.clone());
+                    let scope = scope.unwrap_or(p.request.grant_scope()?);
                     anyhow::ensure!(
-                        scope.covers(&p.request.suggested_scope),
+                        scope.covers(&p.request.operation_scope()?),
                         "Grant must cover the reviewed operation"
                     );
                     let grant = Grant {
@@ -631,8 +631,24 @@ pub(crate) async fn request(s: &Service, epoch: u64, turn: &str, value: Value) -
         "Invalid permission request"
     );
     anyhow::ensure!(
-        request.suggested_scope == pot_agent::permissions::scope(&request.tool, &request.args)?,
+        request.suggested_scope.as_ref().is_none_or(|suggested| {
+            request
+                .operation_scope()
+                .is_ok_and(|actual| suggested.covers(&actual))
+        }),
         "Permission scope does not match operation"
+    );
+    let expected_display = agent::binding(s)?
+        .spec
+        .params
+        .agent
+        .plugin_for_tool(&request.tool)?
+        .map(|plugin| plugin.approval_display(&request.tool))
+        .transpose()?
+        .flatten();
+    anyhow::ensure!(
+        request.display == expected_display,
+        "Permission display does not match bound tool"
     );
     let hub = s.permissions.environment(&request.environment)?;
     let key = hub.enqueue(request.clone())?;
@@ -804,16 +820,33 @@ mod tests {
             call_id: "call".into(),
             tool: "exec_command".into(),
             args: json!({"cmd":"true","workdir":"/","timeout_ms":60000,"shell":"/bin/bash","login":true,"tty":false}),
-            suggested_scope: Scope::Exact {
-                tool: "exec_command".into(),
-                args: json!({"cmd":"true","workdir":"/","timeout_ms":60000,"shell":"/bin/bash","login":true,"tty":false}),
-            },
+            suggested_scope: None,
+            display: None,
         }
     }
     fn directory() -> PathBuf {
         let path = std::env::temp_dir().join(format!("pot-permissions-{}", id()));
         std::fs::create_dir(&path).unwrap();
         path
+    }
+    #[test]
+    fn optional_scope_uses_reviewed_operation_for_permanent_grants() {
+        for explicit in [false, true] {
+            let hub = Hub::memory();
+            let mut request = operation();
+            if explicit {
+                request.suggested_scope = Some(request.operation_scope().unwrap());
+            }
+            let serialized = serde_json::to_value(&request).unwrap();
+            assert_eq!(serialized.get("suggested_scope").is_some(), explicit);
+            let key = hub.enqueue(request.clone()).unwrap();
+            hub.decide(&key, "allow_persistent", None).unwrap();
+            hub.decide(&key, "allow_persistent", None).unwrap();
+            assert_eq!(
+                hub.grants("main")[0]["scope"],
+                serde_json::to_value(request.operation_scope().unwrap()).unwrap()
+            );
+        }
     }
     #[tokio::test]
     async fn plugin_environment_defaults_and_session_ownership_match_execution_tools() {
@@ -1028,8 +1061,8 @@ mod tests {
             .set(
                 "permissions.v1",
                 &json!({"requests":[{"request":r}], "grants":[
-                    {"id":"old","owner":"main","epoch":1,"scope":r.suggested_scope},
-                    {"id":"latest","owner":"main","epoch":2,"scope":r.suggested_scope}
+                    {"id":"old","owner":"main","epoch":1,"scope":r.operation_scope().unwrap()},
+                    {"id":"latest","owner":"main","epoch":2,"scope":r.operation_scope().unwrap()}
                 ]})
                 .to_string(),
             )

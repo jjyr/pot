@@ -1,12 +1,19 @@
 {
   "schema_version": 1,
   "id": "computer-use",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "runtime": "node",
   "execution": "environment",
   "entrypoint": "index.mjs",
-  "files": ["index.mjs", "browser.mjs", "instructions.md"],
-  "requirements": ["node", "chromium"],
+  "files": [
+    "index.mjs",
+    "browser.mjs",
+    "instructions.md"
+  ],
+  "requirements": [
+    "node",
+    "chromium"
+  ],
   "tools": [
     {
       "name": "cua_repl",
@@ -14,11 +21,39 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "code": {"type": "string", "maxLength": 32768},
-          "session_id": {"type": "string", "maxLength": 64},
-          "reset": {"type": "boolean"}
+          "code": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "reset": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
+      },
+      "approval_display": {
+        "summary": {
+          "en": "Allow using or managing a browser automation session?",
+          "zh-CN": "是否允许使用或管理浏览器自动化会话？"
+        },
+        "labels": {
+          "code": {
+            "en": "Browser operation code",
+            "zh-CN": "浏览器操作代码"
+          },
+          "session_id": {
+            "en": "Existing session",
+            "zh-CN": "已有会话"
+          },
+          "reset": {
+            "en": "End this session",
+            "zh-CN": "结束此会话"
+          }
+        }
       }
     }
   ]
