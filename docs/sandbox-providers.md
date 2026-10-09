@@ -87,9 +87,9 @@ Each concrete Provider is a separate workspace crate implementing the public con
 
 | Crate / directory | Responsibility | Dependencies |
 |---|---|---|
-| `pot-sandbox` / `sandbox/` | Manager, registry, provider/capability traits, domain types, store interface, policy enforcement and recovery | General infrastructure; no concrete Providers or Runtime |
-| `pot-sandbox-macos-apple-container` / `sandbox-providers/macos-apple-container/` | Existing Apple Containerization helper/client and Linux guest adapters | `pot-sandbox`; platform/helper dependencies |
-| `pot-sandbox-macos-apple-vm` / `sandbox-providers/macos-apple-vm/` | Public Virtualization.framework helper/client and native guest adapters | `pot-sandbox`; platform/helper dependencies |
+| `pot-sandbox` / `crates/sandbox/` | Manager, registry, provider/capability traits, domain types, store interface, policy enforcement and recovery | General infrastructure; no concrete Providers or Runtime |
+| `pot-sandbox-macos-apple-container` / `crates/sandbox-providers/macos-apple-container/` | Existing Apple Containerization helper/client and Linux guest adapters | `pot-sandbox`; platform/helper dependencies |
+| `pot-sandbox-macos-apple-vm` / `crates/sandbox-providers/macos-apple-vm/` | Public Virtualization.framework helper/client and native guest adapters | `pot-sandbox`; platform/helper dependencies |
 | Existing App/Server composition root | Construct enabled Providers, register them, inject Manager into Runtime | `pot-sandbox`, selected Provider crates and Runtime |
 
 Crate names group the initial OS integrations; the stable registry ID identifies the actual engine (`macos.apple-containerization`, `macos.apple-virtualization`). A future Linux engine can use its own crate and ID without changing existing definitions. Do not turn OS names into routing switches in Runtime or Manager.
@@ -116,12 +116,12 @@ Use Manager contract checks with a fake Provider and run the same relevant confo
 
 ## Image/template descriptions and storage
 
-Keep image definitions separate from Provider Rust implementation. Put maintained source recipes under a top-level `sandbox-images/` tree; Providers consume descriptors and implement build/import/prepare mechanics, while Manager maintains the installed template catalog. The Linux inputs have moved to `sandbox-images/linux/default/`; `scripts/build-image` consumes the descriptor and fingerprints it with the recipe inputs.
+Keep image definitions separate from Provider Rust implementation. Put maintained source recipes under a top-level `crates/sandbox-images/` tree; Providers consume descriptors and implement build/import/prepare mechanics, while Manager maintains the installed template catalog. The Linux inputs have moved to `crates/sandbox-images/linux/default/`; `scripts/build-image` consumes the descriptor and fingerprints it with the recipe inputs.
 
 Source layout (both created; macOS is a bootstrap recipe, not a ready VM):
 
 ```text
-sandbox-images/
+crates/sandbox-images/
   linux/default/
     template.toml          # portable template metadata / recipe references
     build.sh               # existing OCI builder inputs, or a future Dockerfile
@@ -142,7 +142,7 @@ Large/downloaded artifacts stay outside Git. Under the injected Sandbox storage 
 
 Distinguish a frozen template from an instance: templates contain no owner sessions/signing keys/control credentials; macOS instances have separate platform/disk state and fresh enrollment credentials. A macOS bundle manifest covers hardware model, machine identity policy, auxiliary storage and disk together. Linux instances need private writable state according to allocation policy. Provider-qualified clone/import implements those differences. Catalog/template IDs are separate from `sandbox_id`; environment definitions pin a template version/digest, while capabilities and lifecycle state belong to the actual instance.
 
-Execution profiles remain a separate Manager concept (`linux.default`, `linux.isolated`, `macos.development`): a profile selects a template plus policy/resource defaults. Two profiles can use the same immutable Linux image but allocate different writable state. Capacity/leases, project bindings and instance resources do not belong in a baked image. Build recipes live in `sandbox-images/`; provider schema/validation/lifecycle code lives in `sandbox-providers/`; public types and catalog logic live in `sandbox/`; Runtime retains only authorized profile/template references and product bindings.
+Execution profiles remain a separate Manager concept (`linux.default`, `linux.isolated`, `macos.development`): a profile selects a template plus policy/resource defaults. Two profiles can use the same immutable Linux image but allocate different writable state. Capacity/leases, project bindings and instance resources do not belong in a baked image. Build recipes live in `crates/sandbox-images/`; provider schema/validation/lifecycle code lives in `crates/sandbox-providers/`; public types and catalog logic live in `crates/sandbox/`; Runtime retains only authorized profile/template references and product bindings.
 
 ## Task placement and environment profiles
 
@@ -290,7 +290,7 @@ Implement a Rust `pot-sandbox` crate with `manager`, `inventory`, `allocation`, 
 
 App/Server composition explicitly registers the enabled Provider crates and injects the resulting Manager into Runtime. Split Swift helper code into Linux and public macOS engine adapters. No dynamically loaded provider plugins are required. The Manager is created once per backend instance and shut down explicitly: drain/reconcile scopes, persist unknown results, then apply declared VM retention policy. Manager failure does not disable chat; environment tools become unavailable until recovery.
 
-Update `runtime/src/tool_bridge.rs`, `agent/src/lib.rs` tool registration, `core` execution contracts and model image results together. Replace hard-coded OS/path/status/viewer assumptions in inventory, skills and App/shared UI. Packaging registers only installed providers; backend chat remains available with none.
+Update `crates/runtime/src/tool_bridge.rs`, `crates/agent/src/lib.rs` tool registration, `core` execution contracts and model image results together. Replace hard-coded OS/path/status/viewer assumptions in inventory, skills and App/shared UI. Packaging registers only installed providers; backend chat remains available with none.
 
 | Milestone | Required result |
 |---|---|

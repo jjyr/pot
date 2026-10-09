@@ -4,7 +4,7 @@ import AppKit
 import Foundation
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-let assets = root.appendingPathComponent("app/assets")
+let assets = root.appendingPathComponent("crates/app/assets")
 func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
     NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
             green: CGFloat((value >> 8) & 255) / 255,

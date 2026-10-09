@@ -9,9 +9,9 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-en = json.loads((ROOT / "app/locales/en.json").read_text())
+en = json.loads((ROOT / "crates/app/locales/en.json").read_text())
 catalogs = {
-    path.stem: json.loads(path.read_text()) for path in (ROOT / "app/locales").glob("*.json")
+    path.stem: json.loads(path.read_text()) for path in (ROOT / "crates/app/locales").glob("*.json")
 }
 
 
@@ -28,20 +28,23 @@ for locale, values in catalogs.items():
         )
 for key in en:
     assert not re.search(r"[\u4e00-\u9fff]", en[key]), f"Chinese in English translation: {key}"
-for path in [*(ROOT / "app/src").rglob("*.rs"), *(ROOT / "ui/src").rglob("*.rs")]:
+for path in [*(ROOT / "crates/app/src").rglob("*.rs"), *(ROOT / "crates/ui/src").rglob("*.rs")]:
     source = path.read_text()
     keys = re.findall(r'(?:i18n::text|i18n::tr!)\(\s*"([^"]+)"', source)
     keys += re.findall(r'(?:catalog\.(?:text|format)\(|tr!\(\s*catalog,)\s*"([^"]+)"', source)
     keys += re.findall(r'rejection_detail\([^,]+,\s*"([^"]+)"', source)
     for key in keys:
         assert key in en, f"Missing Rust translation: {key}"
-for path in (ROOT / "app/swift").glob("*.swift"):
+for path in (ROOT / "crates/app/swift").glob("*.swift"):
     for key in re.findall(r'L\.(?:text|format)\(\s*"([^"]+)"', path.read_text()):
         if key.endswith("."):
             continue
         assert key in en, f"Missing native translation: {key}"
 subprocess.run(["python3", ROOT / "scripts/localize-web", "--check"], check=True)
-for name in ["sandbox-images/linux/default/index.template.html", "desktop/index.template.html"]:
+for name in [
+    "crates/sandbox-images/linux/default/index.template.html",
+    "desktop/index.template.html",
+]:
     text = (ROOT / name).read_text()
     keys = re.findall(r'(?:data-pot-(?:i18n|title|aria-label)="|potT\(")([^"]+)', text)
     assert all(key in en for key in keys), f"Missing web translation: {name}"
@@ -67,8 +70,8 @@ with tempfile.TemporaryDirectory(prefix="pot-localization-") as directory:
             "-module-cache-path",
             temp / "modules",
             temp / "Translations.swift",
-            ROOT / "app/swift/Localization.swift",
-            ROOT / "app/tests/language-preferences.swift",
+            ROOT / "crates/app/swift/Localization.swift",
+            ROOT / "crates/app/tests/language-preferences.swift",
             "-o",
             temp / "test",
         ],
@@ -109,7 +112,7 @@ with tempfile.TemporaryDirectory(prefix="pot-localization-") as directory:
             "-module-cache-path",
             temp / "modules",
             temp / "Translations.swift",
-            ROOT / "app/swift/Localization.swift",
+            ROOT / "crates/app/swift/Localization.swift",
             temp / "ThirdLanguage.swift",
             "-o",
             temp / "third-test",
@@ -120,10 +123,10 @@ with tempfile.TemporaryDirectory(prefix="pot-localization-") as directory:
 with tempfile.TemporaryDirectory(prefix="pot-web-build-") as directory:
     temp = Path(directory)
     fixture = temp / "source"
-    for name in ["app/locales", "desktop", "sandbox-images/linux/default"]:
+    for name in ["crates/app/locales", "desktop", "crates/sandbox-images/linux/default"]:
         shutil.copytree(ROOT / name, fixture / name)
     third = dict(en, **{"language.name": "Français", "web.take-over": "Prendre le contrôle"})
-    (fixture / "app/locales/fr.json").write_text(json.dumps(third))
+    (fixture / "crates/app/locales/fr.json").write_text(json.dumps(third))
     output = temp / "assets"
     command = ["python3", ROOT / "scripts/localize-web", "--root", fixture, "--output", output]
     subprocess.run(command, check=True)
@@ -138,7 +141,7 @@ with tempfile.TemporaryDirectory(prefix="pot-web-build-") as directory:
             ["node", ROOT / "scripts/tests/localization-web.js", output / page], check=True
         )
     third["web.configured-memory"] = "invalid {wrong}"
-    (fixture / "app/locales/fr.json").write_text(json.dumps(third))
+    (fixture / "crates/app/locales/fr.json").write_text(json.dumps(third))
     result = subprocess.run(command, capture_output=True, text=True)
     assert result.returncode != 0 and "Parameter mismatch" in result.stderr
 subprocess.run(["python3", ROOT / "scripts/tests/localization-broker.py"], check=True)

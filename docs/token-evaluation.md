@@ -1,6 +1,6 @@
 # Long-term Agent token evaluation (design proposal)
 
-Status: architecture accepted; deterministic foundation and DeepSeek Flash live tests delivered, 2026-10-06. This document defines the long-term framework. The standalone `pot-eval` crate implements the initial deterministic runner and usage validator; bounded DeepSeek Flash live execution is available; native baseline execution and broader comparisons remain planned. See the [CLI guide](../eval/README.md). It has no Pi-specific data model and does not change product execution or billing. The [runtime contract](../runtime/README.md) describes current Pot behavior.
+Status: architecture accepted; deterministic foundation and DeepSeek Flash live tests delivered, 2026-10-06. This document defines the long-term framework. The standalone `pot-eval` crate implements the initial deterministic runner and usage validator; bounded DeepSeek Flash live execution is available; native baseline execution and broader comparisons remain planned. See the [CLI guide](../crates/eval/README.md). It has no Pi-specific data model and does not change product execution or billing. The [runtime contract](../crates/runtime/README.md) describes current Pot behavior.
 
 ## Objective
 
@@ -18,7 +18,7 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 | Normalizer/validator | Convert observations into a versioned schema, resolve cumulative snapshots and duplicate sources, preserve missing fields and raw provenance |
 | Evaluator/reporter | Evaluate artifacts/answers, compute comparable metrics, compare baselines and explain regressions by trace |
 
-The runner is a separate workspace crate, `pot-eval`, under `eval/`. It depends on shared contracts in `pot-core` and uses the host from `pot-agent`, with `pot-gateway` where direct transport or collection is needed. It does not depend on `pot-runtime`, product Storage or App. The crate owns scenario execution, immutable run records, validation, scoring, comparison and the CLI. The initial crate and scripted Pot runner are implemented; the remaining delivery sequence is listed below.
+The runner is a separate workspace crate, `pot-eval`, under `crates/eval/`. It depends on shared contracts in `pot-core` and uses the host from `pot-agent`, with `pot-gateway` where direct transport or collection is needed. It does not depend on `pot-runtime`, product Storage or App. The crate owns scenario execution, immutable run records, validation, scoring, comparison and the CLI. The initial crate and scripted Pot runner are implemented; the remaining delivery sequence is listed below.
 
 Runtime and eval directly invoke the concrete `pot_agent::Agent::execute` entry point. Thread context belongs to the caller's Store, not to an external engine session. The Engine/Binding/NativeRef and DriverHost/SessionHandle abstractions have been removed. A future external baseline belongs in a separate evaluation command; it must not restore adapters to production execution.
 

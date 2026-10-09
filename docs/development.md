@@ -123,21 +123,23 @@ Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk r
 
 ## Code entry points
 
+Rust workspace members and their bundled assets live under `crates/`. The browser client is `crates/web-ui/` (Cargo package `pot-mobile`); build task and deployed asset names remain unchanged. Shared localization build code lives in `crates/localization/`. Swift Helper, plugins, skills, scripts and release packaging remain outside the Cargo workspace.
+
 | Directory | Responsibility |
 |---|---|
-| `app/` | Native GPUI shell, Swift bridge, configuration |
-| `ui/` | Shared Chat/Tasks/Sandbox/Usage components, page/chat state, Markdown, tokens and localization |
-| `mobile/` | WASM/browser shell, authenticated transport, PWA and push |
+| `crates/app/` | Native GPUI shell, Swift bridge, configuration |
+| `crates/ui/` | Shared Chat/Tasks/Sandbox/Usage components, page/chat state, Markdown, tokens and localization |
+| `crates/web-ui/` | WASM/browser shell, authenticated transport, PWA and push |
 | `helper/` | Swift Containerization, VM lifecycle |
-| `server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
-| `runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
-| `core/` | Immutable Agent models, execution contracts, shared tool schema |
-| `storage/` | SQLite, Thread context/configuration, usage/file-request ledgers, transactions |
-| `agent/` | In-process pot-agent |
-| `tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for eval/tests |
-| `gateway/` | Provider HTTP transport and model protocol codecs |
-| `protocol/` | Shared message and control types |
-| `sandbox-images/linux/default/` | Guest desktop, browser, broker/viewer resources |
+| `crates/server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
+| `crates/runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
+| `crates/core/` | Immutable Agent models, execution contracts, shared tool schema |
+| `crates/storage/` | SQLite, Thread context/configuration, usage/file-request ledgers, transactions |
+| `crates/agent/` | In-process pot-agent |
+| `crates/tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for crates/eval/tests |
+| `crates/gateway/` | Provider HTTP transport and model protocol codecs |
+| `crates/protocol/` | Shared message and control types |
+| `crates/sandbox-images/linux/default/` | Guest desktop, browser, broker/viewer resources |
 | `scripts/` | Build, bundle, icon generation |
 
 `poc/` is removed; experiment code/evidence remain in Git history. `.local/poc/` is a retained local build/download cache path without dependencies on old experiment sources.
@@ -175,8 +177,8 @@ manual on an explicitly selected Linux host; no Podman integration CI was added.
 
 ### Desktop web assets
 
-Edit `desktop/index.template.html`, `sandbox-images/linux/default/index.template.html`,
-and the shared `desktop/i18n.js`; translations belong in `app/locales/*.json`.
+Edit `desktop/index.template.html`, `crates/sandbox-images/linux/default/index.template.html`,
+and the shared `desktop/i18n.js`; translations belong in `crates/app/locales/*.json`.
 Run `mise run build:web` to inspect generated assets under `.local/web/`.
 Runtime Cargo builds generate and embed their own fresh assets automatically.
 Image/prepare entry points also run the generator and copy the Sandbox output.

@@ -60,7 +60,7 @@ The helper requires `com.apple.security.virtualization` and distribution signing
 
 ## VM bundle and preparation
 
-Maintain the macOS source description under proposed `sandbox-images/macos/xcode/` (template metadata, versioned VZ recipe and bootstrap assets). Installed stopped templates and per-project writable VM bundles live under the injected private Sandbox storage root, not inside the Rust Provider crate or Git. Common catalog types are owned by Manager; `pot-sandbox-macos` validates VZ-specific fields. See [template storage](../sandbox-providers.md#imagetemplate-descriptions-and-storage).
+Maintain the macOS source description under proposed `crates/sandbox-images/macos/xcode/` (template metadata, versioned VZ recipe and bootstrap assets). Installed stopped templates and per-project writable VM bundles live under the injected private Sandbox storage root, not inside the Rust Provider crate or Git. Common catalog types are owned by Manager; `pot-sandbox-macos` validates VZ-specific fields. See [template storage](../sandbox-providers.md#imagetemplate-descriptions-and-storage).
 
 Proposed private bundle:
 

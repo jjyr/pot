@@ -14,7 +14,7 @@ the application language.
 
 ## Shared layout
 
-Tasks, settings, and Sandbox use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared layout lives in `app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
+Tasks, settings, and Sandbox use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared layout lives in `crates/app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
 
 | Element | Specification |
 | --- | --- |
@@ -121,7 +121,7 @@ Preset API forms show only key/model and a Get API Key link. Endpoint/protocol a
 
 Check and Save are separate adjacent buttons. Check performs supported model-list GETs without inference or saving. Save validates configuration through the existing Runtime API; it does not force a separate Check click or claim successful inference. Unsupported model discovery permits manual input. Provider errors preserve drafts; secrets are masked and excluded from public state. Switching connection forms clears secret fields.
 
-OpenCode uses a maintained per-plan, per-model route table in `app/swift/APIIntegration.swift`, checked against official documentation on 2026-10-06. Go and Zen may serve the same model through different formats. Unknown formats/models are excluded from discovered options and require a catalog update or explicit Custom API configuration; names alone do not determine the adapter.
+OpenCode uses a maintained per-plan, per-model route table in `crates/app/swift/APIIntegration.swift`, checked against official documentation on 2026-10-06. Go and Zen may serve the same model through different formats. Unknown formats/models are excluded from discovered options and require a catalog update or explicit Custom API configuration; names alone do not determine the adapter.
 
 For an empty main configuration, the final connection action also sets the Main Agent at a safe turn boundary. Entry from Chat uses Save and start chatting and restores its draft without sending. Settings explains Save and set as Main Agent. Existing main configurations are not replaced by ordinary additions. Save retains a stable draft connection identity and reconciles partially completed saves before retrying.
 

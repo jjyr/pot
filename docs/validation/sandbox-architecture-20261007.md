@@ -4,7 +4,7 @@ Date: 2026-10-07. Architecture stage, before adding macOS.
 
 `pot-sandbox` now owns inventory, lifecycle/readiness, leases, owner/turn/epoch scopes, session ownership, private execution receipts and quarantine/recovery. `pot-sandbox-linux` owns Apple Containerization IPC and authenticated guest HTTP. Server registers Providers and injects them into Runtime. Runtime retains product authorization, tasks/schedules and Agent instructions/skills. Production Runtime and Manager have no concrete Provider dependency; Runtime unit fixtures use a dev dependency.
 
-Legacy definitions migrate to the Linux Provider without changing IDs or task assignments. Legacy product receipts import into Manager storage; unknown outcomes cannot replay. Manager epochs persist and advance on reopen or Helper generation change. Source recipes moved to `sandbox-images/linux/default/`; descriptor metadata participates in the build fingerprint.
+Legacy definitions migrate to the Linux Provider without changing IDs or task assignments. Legacy product receipts import into Manager storage; unknown outcomes cannot replay. Manager epochs persist and advance on reopen or Helper generation change. Source recipes moved to `crates/sandbox-images/linux/default/`; descriptor metadata participates in the build fingerprint.
 
 Validation:
 

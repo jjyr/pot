@@ -37,7 +37,7 @@ required `--systemd=always`, so the Provider invokes the image's init explicitly
 - Web/WASM build and macOS native release CLI/archive passed. Linux x86_64 release
   CLI with embedded Web assets compiled and ran on the validation host.
 
-`server/tests/multi_clients.rs` exercises production Runtime, Access, durable
+`crates/server/tests/multi_clients.rs` exercises production Runtime, Access, durable
 storage and real HTTP/SSE listeners with independent signing keys/cookies and a
 local mock model. It covers the former browser authentication, login/logout/revocation and
 Server restart; concurrent same-ID deduplication, conflicting payload rejection,

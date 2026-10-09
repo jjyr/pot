@@ -21,7 +21,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Understand backend crate and standalone Server boundaries | [Backend crate split](backend-crates.md) |
 | Understand AGENTS.md discovery and injection | [Agent instructions](agent-instructions.md) |
 | Inject skills into main and task pot-agent sessions | [Agent skill injection](agent-skills.md) |
-| Change APIs, pot-agent, task state, or recovery | [Runtime contract](../runtime/README.md) |
+| Change APIs, pot-agent, task state, or recovery | [Runtime contract](../crates/runtime/README.md) |
 | Understand approved downloads, progress, cache and embedded hashes | [Sandbox resource delivery](sandbox-resources.md) |
 | Build the Linux Sandbox image, or review target Linux/macOS template layout | [Sandbox image](sandbox-image.md) |
 | Understand command shells, PTY, background sessions and initialization snapshots | [Sandbox command execution](executor.md) |

@@ -6,7 +6,7 @@ import gzip, hashlib, json, os, pathlib, shutil, subprocess, tomllib
 R = pathlib.Path(__file__).resolve().parents[1]
 subprocess.run(["python3", R / "scripts/localize-web"], check=True)
 resources = R / ".local/d1/resources"
-template_path = R / "sandbox-images/linux/default/template.toml"
+template_path = R / "crates/sandbox-images/linux/default/template.toml"
 template = tomllib.loads(template_path.read_text())
 assert template["schema_version"] == 1 and template["format"] == "oci"
 assets = [
@@ -36,7 +36,7 @@ for n in assets:
     source = (
         R / ".local/web/sandbox"
         if n in {"index.html", "i18n.js", "locales.json"}
-        else R / "sandbox-images/linux/default"
+        else R / "crates/sandbox-images/linux/default"
     ) / n
     if n == "pot-tool-executor":
         source = resources / n
@@ -45,7 +45,7 @@ for n in assets:
 fingerprint = hashlib.sha256()
 for source in [
     template_path,
-    R / "sandbox-images/linux/default/build.sh",
+    R / "crates/sandbox-images/linux/default/build.sh",
     R / "helper/Sources/PotImageBuilder/main.swift",
     pathlib.Path(__file__),
 ]:
@@ -71,7 +71,7 @@ inputs.mkdir(exist_ok=True)
 (inputs / "assets").mkdir(exist_ok=True)
 for n in assets:
     shutil.copy2(resources / n, inputs / "assets" / n)
-shutil.copy2(R / "sandbox-images/linux/default/build.sh", inputs / "build.sh")
+shutil.copy2(R / "crates/sandbox-images/linux/default/build.sh", inputs / "build.sh")
 helper = R / ".local/d1/helper-build/release/PotImageBuilder"
 subprocess.run(
     [

@@ -60,5 +60,5 @@ Archive is currently a phase-derived list grouping. It does not delete data or
 reclaim storage. Long-inactive unfinished Tasks are not automatically archived.
 An independent archive flag and inactivity rules remain deferred.
 
-Schemas and lifecycle code: `core/src/pot-tools.json`, `runtime/src/tasks.rs`.
+Schemas and lifecycle code: `crates/core/src/pot-tools.json`, `crates/runtime/src/tasks.rs`.
 Checks and live qualification limits: [validation](validation/agent-permissions-20261008.md).

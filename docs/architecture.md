@@ -25,13 +25,13 @@ flowchart TB
 
 | Component | Responsibility | Entry points |
 |---|---|---|
-| App / Swift bridge | Persistent chat, immutable task environments, settings, environment selector and optional noVNC desktop | `app/src/`, `app/swift/` |
+| App / Swift bridge | Persistent chat, immutable task environments, settings, environment selector and optional noVNC desktop | `crates/app/src/`, `crates/app/swift/` |
 | Helper | Start Host Server; separate VM instances and mounts; graceful product/VM shutdown | `helper/Sources/PotHelper/main.swift` |
-| Server / Runtime | HTTP/SSE/MCP/PTY hosting, authoritative messages, scheduling, sessions, cancellations | `server/src/`, `runtime/src/` |
-| Sandbox manager | Inventory, selection, lifecycle serialization, scoped execution, leases, durable operation receipts/quarantine | `sandbox/src/manager.rs`; Runtime authorization bridge in `runtime/src/sandbox.rs` |
-| Agent | Host in-process pot-agent; injected execution backend | `agent/src/lib.rs` |
-| Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite threads, contexts and usage | `gateway/src/`, `storage/src/` |
-| Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `sandbox-images/linux/default/executor.py`, `tool-executor/src/`, `sandbox-images/linux/default/sandbox.sh` |
+| Server / Runtime | HTTP/SSE/MCP/PTY hosting, authoritative messages, scheduling, sessions, cancellations | `crates/server/src/`, `crates/runtime/src/` |
+| Sandbox manager | Inventory, selection, lifecycle serialization, scoped execution, leases, durable operation receipts/quarantine | `crates/sandbox/src/manager.rs`; Runtime authorization bridge in `crates/runtime/src/sandbox.rs` |
+| Agent | Host in-process pot-agent; injected execution backend | `crates/agent/src/lib.rs` |
+| Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite threads, contexts and usage | `crates/gateway/src/`, `crates/storage/src/` |
+| Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `crates/sandbox-images/linux/default/executor.py`, `crates/tool-executor/src/`, `crates/sandbox-images/linux/default/sandbox.sh` |
 
 The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` carries authenticated tool/model integration metadata, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects worker management and switching Sandboxes.
 
@@ -58,4 +58,4 @@ Background concurrency defaults to 8, with profile/provider limits, FIFO runnabl
 
 Thread configuration and Agent context live directly in the owner SQLite Store. Runtime calls the concrete pot-agent executor; there is no Engine selector, Binding history, native session mapping or Driver host/session layer. Agent status contains only model, phase and detail; external-engine installation/version/auth-method states are removed. Profiles are reusable configuration templates: creation copies a resolved snapshot into the Thread. Explicit configuration changes apply atomically at a safe turn boundary without replacing context or writing a handoff summary. Owner/generation/turn checks reject stale execution updates. Existing tasks keep their snapshots when global profiles change. Model requests reserve allowance before networking, including tool continuations and failures. pot-agent uses a gateway token rather than provider secrets; product execution limits remain separate from credentials.
 
-Runtime exposes HTTP/SSE; App uses cached snapshots and paginated polling with stale-result rejection. SQLite uses DELETE journal and synchronous=EXTRA. Query live state through the API. [Runtime contract](../runtime/README.md) documents the API, and [validation](validation/host-pot-agent-20261006.md) records current acceptance.
+Runtime exposes HTTP/SSE; App uses cached snapshots and paginated polling with stale-result rejection. SQLite uses DELETE journal and synchronous=EXTRA. Query live state through the API. [Runtime contract](../crates/runtime/README.md) documents the API, and [validation](validation/host-pot-agent-20261006.md) records current acceptance.

@@ -57,7 +57,7 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    This generates a dedicated CA, guest certificate/key and token; it deletes the temporary CA signing key. It neither starts a VM nor accepts OS/Xcode terms.
 
-2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `sandbox-images/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `permission_state.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
+2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `crates/sandbox-images/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `permission_state.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
 
    ```sh
    sudo ./provision.sh STANDARD_ACCOUNT /PRIVATE/GUEST_ENROLLMENT

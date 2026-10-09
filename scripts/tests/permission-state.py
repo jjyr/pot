@@ -8,7 +8,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SOURCE = Path(__file__).resolve().parents[2] / "sandbox-images/linux/default/permission_state.py"
+SOURCE = (
+    Path(__file__).resolve().parents[2] / "crates/sandbox-images/linux/default/permission_state.py"
+)
 spec = importlib.util.spec_from_file_location("permission_state", SOURCE)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
