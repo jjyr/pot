@@ -58,7 +58,7 @@ def export(source, output, tag, update):
             unpacked_bytes=total,
             format="oci-tar-gzip" if path.is_dir() else "raw",
         )
-    catalog_path = REPO / "sandbox-images/catalog.toml"
+    catalog_path = REPO / "crates/sandbox-images/catalog.toml"
     if update:
         old = (
             tomllib.loads(catalog_path.read_text())

@@ -15,7 +15,7 @@ Computer use (2026-10-08): a default-enabled plugin provides persistent `cua_rep
 - GPUI/Swift provides Chat, Tasks, Usage, AI/Task/Environment settings and optional Sandbox desktop.
 - Shared `pot-ui` Chat/Tasks/Sandbox/Usage components, page transitions, allowance parsing, request/receipt/draft policy and locale-explicit catalogs are used by native App and WASM; native composer and navigation remain unchanged. See [shared UI](shared-ui.md).
 
-See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
+See [architecture](architecture.md), [Agent/Sandbox design](agent-sandbox-design.md), [Runtime contract](../crates/runtime/README.md) and [dated acceptance](validation/host-pot-agent-20261006.md).
 
 ## Agent permissions and tools — 2026-10-08
 
@@ -48,7 +48,7 @@ Qualified macOS execution, Android/iOS/Windows Sandbox providers, stronger isola
 
 ## Sandbox redesign — 2026-10-07
 
-The first-phase targets are Linux for default and isolated tasks and macOS for native application development. Android, iOS/vphone and Windows are deferred. [Sandbox providers](sandbox-providers.md) defines Manager/Provider contracts, crate boundaries and allocation profiles. The Manager and Linux Provider extraction is implemented, with source image descriptions under `sandbox-images/linux/default/`. Prepared-instance macOS integration is implemented with a separate VZ Helper and guest bootstrap, pending real VM/Xcode qualification. Broader allocation/catalog/artifact contracts remain pending. See [macOS setup and limits](macos-sandbox.md).
+The first-phase targets are Linux for default and isolated tasks and macOS for native application development. Android, iOS/vphone and Windows are deferred. [Sandbox providers](sandbox-providers.md) defines Manager/Provider contracts, crate boundaries and allocation profiles. The Manager and Linux Provider extraction is implemented, with source image descriptions under `crates/sandbox-images/linux/default/`. Prepared-instance macOS integration is implemented with a separate VZ Helper and guest bootstrap, pending real VM/Xcode qualification. Broader allocation/catalog/artifact contracts remain pending. See [macOS setup and limits](macos-sandbox.md).
 
 First extract `pot-sandbox` between Runtime and separate Linux/macOS Provider crates, registered by App/Server assembly. Move environment lifecycle/scopes/receipts behind its facade while retaining product permissions and task bindings in Runtime. Qualify Linux migration, then one prepared macOS VM with signed Swift helper, authenticated guest broker, Xcode build/test and durable artifacts. macOS initially has exclusive ownership and verified cleanup or VM-stop fallback. Installation/clone/desktop improvements follow a working prepared-guest slice. See [concrete macOS research](research/macos-provider.md#minimum-delivery-plan-after-scope-reduction).
 

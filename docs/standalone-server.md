@@ -64,7 +64,7 @@ pot api /api/v1/snapshot
 ```
 
 Configuration files use the existing Runtime API request schemas; see
-[Runtime contract](../runtime/README.md). Secrets stay in private files, not
+[Runtime contract](../crates/runtime/README.md). Secrets stay in private files, not
 command arguments. `chat` prints the accepted message receipt, not an invented
 model result; query snapshots/tasks for subsequent output. `pot api PATH
 [JSON_FILE]` supports existing local queries and mutations. Browser route

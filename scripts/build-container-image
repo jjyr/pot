@@ -24,7 +24,7 @@ if args.arch is None:
 context = ROOT / ".local/container-image" / args.arch
 assets = context / "assets"
 assets.mkdir(parents=True, exist_ok=True)
-recipe = ROOT / "sandbox-images/linux/default"
+recipe = ROOT / "crates/sandbox-images/linux/default"
 subprocess.run(["python", ROOT / "scripts/localize-web"], check=True, cwd=ROOT)
 for path in recipe.iterdir():
     if path.suffix in {".sh", ".py", ".html", ".svg", ".lock"} and not path.name.endswith(

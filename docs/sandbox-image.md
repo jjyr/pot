@@ -26,15 +26,15 @@ UTF-8 locale with Noto Sans, SC/TC/JP/KR Noto CJK glyphs, and emoji fallback cov
 
 ## Linux/macOS template layout
 
-The [image/template design](sandbox-providers.md#imagetemplate-descriptions-and-storage) separates source recipes, installed templates and writable instances. Maintained recipes live under `sandbox-images/linux/default/` and `sandbox-images/macos/xcode/`; macOS has a prepared-instance bootstrap recipe rather than an installable image (see [macOS enrollment](macos-sandbox.md)); common descriptor/catalog types belong to `pot-sandbox-images`, and each Provider validates its own recipe and image format. Linux uses OCI content; macOS uses a complete stopped VM bundle prepared from IPSW plus Xcode/bootstrap provisioning. A Dockerfile is not required by the current Linux OCI builder.
+The [image/template design](sandbox-providers.md#imagetemplate-descriptions-and-storage) separates source recipes, installed templates and writable instances. Maintained recipes live under `crates/sandbox-images/linux/default/` and `crates/sandbox-images/macos/xcode/`; macOS has a prepared-instance bootstrap recipe rather than an installable image (see [macOS enrollment](macos-sandbox.md)); common descriptor/catalog types belong to `pot-sandbox-images`, and each Provider validates its own recipe and image format. Linux uses OCI content; macOS uses a complete stopped VM bundle prepared from IPSW plus Xcode/bootstrap provisioning. A Dockerfile is not required by the current Linux OCI builder.
 
-Linux recipes have moved from `image/` to `sandbox-images/linux/default/`. `scripts/build-image` reads `template.toml`, fingerprints it with the recipe, and emits resolved version/digest metadata. `.local/d1/` holds developer build caches; end-user prepared resources use a private shared digest cache. Actual OCI layers, IPSWs and VM disks do not go into Git. Templates have pinned content identity and no credentials; project instances keep separate writable state.
+Linux recipes have moved from `image/` to `crates/sandbox-images/linux/default/`. `scripts/build-image` reads `template.toml`, fingerprints it with the recipe, and emits resolved version/digest metadata. `.local/d1/` holds developer build caches; end-user prepared resources use a private shared digest cache. Actual OCI layers, IPSWs and VM disks do not go into Git. Templates have pinned content identity and no credentials; project instances keep separate writable state.
 
 ## Daemonless Linux OCI build
 
 `scripts/build-container-image` prepares the target executor and checksum-pinned
 noVNC assets, then invokes `podman build` with
-`sandbox-images/linux/default/Dockerfile`. `install.sh` is the shared package/user/
+`crates/sandbox-images/linux/default/Dockerfile`. `install.sh` is the shared package/user/
 asset installation recipe also used by the Apple image builder's `build.sh`.
 The Dockerfile uses the same pinned Alpine base and emits an OCI image with the
 executor bootstrap label. It builds ARM64 or AMD64; package availability for each

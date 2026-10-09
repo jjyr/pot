@@ -54,7 +54,7 @@ The isolate has no direct filesystem, network, Node or process APIs. Its tools a
 limited to the current role/profile, with recursive `exec`/`wait` excluded. Each
 child call uses the ordinary dispatcher and its own concrete approval. Composition
 cannot broaden authority. Code, memory, output, concurrency and execution time
-are bounded; exact limits and schemas live in `agent/src/orchestration.rs`.
+are bounded; exact limits and schemas live in `crates/agent/src/orchestration.rs`.
 
 Old `pot_` names are not aliases. Update explicit tool filters and custom prompts.
 Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable composition.

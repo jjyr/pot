@@ -147,6 +147,6 @@ Revoking a grant does not remove an existing mapping; removing it requires anoth
 configuration change. An approved Task-specific Host operation provides access
 without sharing the path with other Tasks.
 
-Owner API: `GET/POST /api/v1/permissions`. Sources: `agent/src/permissions.rs`,
-`runtime/src/permissions.rs`. Dated checks and untested scope:
+Owner API: `GET/POST /api/v1/permissions`. Sources: `crates/agent/src/permissions.rs`,
+`crates/runtime/src/permissions.rs`. Dated checks and untested scope:
 [validation](validation/agent-permissions-20261008.md).

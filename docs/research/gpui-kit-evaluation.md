@@ -68,7 +68,7 @@ Remove Open/Hide menu; left release calls showWindow/activates, preserves page/d
 - [Workspace versions/optimization](https://github.com/longbridge/gpui-kit/blob/3a39e9dfc97d8b12cf3c116708ada36bee02220b/Cargo.toml)
 - [Streaming Markdown example](https://github.com/longbridge/gpui-kit/blob/3a39e9dfc97d8b12cf3c116708ada36bee02220b/examples/stream-markdown/src/main.rs)
 - [WebView constraints](https://github.com/longbridge/gpui-kit/blob/3a39e9dfc97d8b12cf3c116708ada36bee02220b/crates/webview/README.md)
-- Local `app/src/main.rs`, client.rs, markdown.rs, Bridge.swift, scripts/pot, GPUI0.2.2 macOS sources.
+- Local `crates/app/src/main.rs`, client.rs, markdown.rs, Bridge.swift, scripts/pot, GPUI0.2.2 macOS sources.
 
 ## Validation this round
 

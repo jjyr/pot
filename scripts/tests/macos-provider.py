@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "sandbox-images/linux/default"))
+sys.path.insert(0, str(ROOT / "crates/sandbox-images/linux/default"))
 spec = importlib.util.spec_from_file_location(
-    "macos_executor", ROOT / "sandbox-images/macos/xcode/executor.py"
+    "macos_executor", ROOT / "crates/sandbox-images/macos/xcode/executor.py"
 )
 broker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(broker)

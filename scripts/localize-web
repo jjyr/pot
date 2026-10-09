@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def catalogs(root):
     values = {
         path.stem: json.loads(path.read_text())
-        for path in sorted((root / "app/locales").glob("*.json"))
+        for path in sorted((root / "crates/app/locales").glob("*.json"))
     }
     english = values["en"]
     for locale, translations in values.items():
@@ -30,7 +30,10 @@ def catalogs(root):
 
 def build(root, output, check=False):
     translations = catalogs(root)
-    for page, directory in [("desktop", "desktop"), ("sandbox", "sandbox-images/linux/default")]:
+    for page, directory in [
+        ("desktop", "desktop"),
+        ("sandbox", "crates/sandbox-images/linux/default"),
+    ]:
         template = root / directory / "index.template.html"
         source = template.read_text()
         keys = set(re.findall(r'data-pot-(?:i18n|title|aria-label)="([^"]+)"', source))

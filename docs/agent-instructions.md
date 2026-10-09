@@ -20,7 +20,7 @@ pot-agent appends the injected text for Main and Worker, including custom system
 
 ## Reference and tests
 
-Main's built-in delegation prompt is `MAIN_PROMPT` in `runtime/src/orchestration.rs`,
+Main's built-in delegation prompt is `MAIN_PROMPT` in `crates/runtime/src/orchestration.rs`,
 injected by Runtime. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default pot-agent prompt.
 

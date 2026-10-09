@@ -38,7 +38,7 @@ No paid inference, real-provider account acceptance, new Sandbox image build/boo
 
 Commands are synchronous/bounded; persistent interactive Agent shell sessions, live steering and parallel tool dispatch are not implemented. Context estimation is conservative UTF-8 bytes with a 32,768 window; oversized first-turn context can fail explicitly. Individual patch replacements are atomic, but multi-file commits and external shell effects are not a transaction. Host isolation continues to rely on the Sandbox; guest-user filesystem isolation remains separate work.
 
-See the [current runtime contract](../../runtime/README.md) for the supported configuration and recovery semantics.
+See the [current runtime contract](../../crates/runtime/README.md) for the supported configuration and recovery semantics.
 
 ## Follow-up: configurable loop and execution control (2026-10-06)
 

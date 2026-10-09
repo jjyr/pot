@@ -87,7 +87,7 @@ if cmd == "prepare":
             (
                 REPO / ".local/web/sandbox"
                 if name in {"index.html", "i18n.js", "locales.json"}
-                else REPO / "sandbox-images/linux/default"
+                else REPO / "crates/sandbox-images/linux/default"
             )
             / name,
             RES / name,
@@ -163,7 +163,7 @@ elif cmd == "bundle":
     )
     call(["cargo", "build", "--locked", "--release", "-p", "pot-tool-executor", "-j", "4"], env=env)
     shutil.copytree(
-        REPO / "sandbox-images/macos/xcode",
+        REPO / "crates/sandbox-images/macos/xcode",
         APP / "Contents/Resources/runtime/macos-bootstrap",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
@@ -186,14 +186,14 @@ elif cmd == "bundle":
         REPO / ".local/tailscale/TailscaleDependencyLicenses.txt",
         APP / "Contents/Resources/TailscaleDependencyLicenses.txt",
     )
-    shutil.copytree(REPO / "mobile/dist", APP / "Contents/Resources/runtime/mobile")
+    shutil.copytree(REPO / "crates/web-ui/dist", APP / "Contents/Resources/runtime/mobile")
     shutil.copytree(
         REPO / "skills",
         APP / "Contents/Resources/runtime/skills",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     for name in ["Pot.icns"]:
-        shutil.copy2(REPO / "app/assets" / name, APP / "Contents/Resources" / name)
+        shutil.copy2(REPO / "crates/app/assets" / name, APP / "Contents/Resources" / name)
     shutil.copy2(REPO / "LICENSE", APP / "Contents/Resources/LICENSE.txt")
     shutil.copy2(
         REPO / ".local/licenses/rust-dependencies.html",

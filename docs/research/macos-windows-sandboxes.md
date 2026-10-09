@@ -26,15 +26,15 @@ The execution authority split is already useful; the infrastructure is not yet a
 
 | Area | Current source / assumption | Required extension |
 |---|---|---|
-| Inventory | `runtime/src/sandbox.rs`: Sandbox contains only `id` and `name` | Persist provider, guest OS/architecture, image identity, placement and capabilities; migrate old entries to Linux |
+| Inventory | `crates/runtime/src/sandbox.rs`: Sandbox contains only `id` and `name` | Persist provider, guest OS/architecture, image identity, placement and capabilities; migrate old entries to Linux |
 | Lifecycle | `Manager::helper` calls one Unix socket; Swift `Runtime` owns `LinuxContainer` / `ContainerManager` | Dispatch lifecycle to typed provider adapters without exposing raw management to workers |
 | Readiness | `Manager::ready` assumes guest IP and HTTP port 17701; preparation polls for roughly 120 seconds, excluding request latency | Return transport descriptor, authenticated executor handshake and boot identity; separate installation from boot |
 | Guest broker | `image/executor.py`: Linux cgroup v2, `pwd`, `prctl`, `/proc`, root-private `/run` | Platform-specific privilege separation, scope containment and cleanup confirmation |
-| Process runner | `tool-executor/src/processes.rs`: Unix `process_group`, `libc::kill`, shell `-c` | Separate Unix/Windows process backends; define supported shell arguments explicitly |
-| Files / patch | `tool-executor/src/tools.rs`: Unix modes, rename and directory fsync | Windows ACL/replace semantics and native path validation |
-| Workspace / skills | `runtime/src/sandbox.rs`, `runtime/src/skills.rs`: `/data/workspace`, locally readable host mirror; `image/skill_mounts.py`: mount namespaces | Provider-owned path mapping, skill views and managed artifact transport |
-| Desktop | Swift Helper returns a noVNC URL; `app/swift/LocalRuntime.swift` loads a WebView | Typed desktop descriptors for native VM view, external viewer and authenticated remote stream |
-| Packaging | `scripts/pot`: Linux ARM64 musl runner; `core/src/agent.rs`: default `/bin/sh` | macOS ARM64 and Windows ARM64/x64 runners plus OS-compatible shell policy |
+| Process runner | `crates/tool-executor/src/processes.rs`: Unix `process_group`, `libc::kill`, shell `-c` | Separate Unix/Windows process backends; define supported shell arguments explicitly |
+| Files / patch | `crates/tool-executor/src/tools.rs`: Unix modes, rename and directory fsync | Windows ACL/replace semantics and native path validation |
+| Workspace / skills | `crates/runtime/src/sandbox.rs`, `crates/runtime/src/skills.rs`: `/data/workspace`, locally readable host mirror; `image/skill_mounts.py`: mount namespaces | Provider-owned path mapping, skill views and managed artifact transport |
+| Desktop | Swift Helper returns a noVNC URL; `crates/app/swift/LocalRuntime.swift` loads a WebView | Typed desktop descriptors for native VM view, external viewer and authenticated remote stream |
+| Packaging | `scripts/pot`: Linux ARM64 musl runner; `crates/core/src/agent.rs`: default `/bin/sh` | macOS ARM64 and Windows ARM64/x64 runners plus OS-compatible shell policy |
 
 Do not merely extend a UI OS dropdown. Windows execution currently encounters unguarded Unix APIs, and the Python broker intentionally refuses to operate without Linux containment. Remote providers also break the assumption that Runtime can read every guest workspace and skill file through a local mount.
 

@@ -40,12 +40,12 @@ size, locale, OS version or physical display.
 
 | Scene | Before | After |
 | --- | --- | --- |
-| Tasks | [Before](../../output/playwright/shared-pages/pot-pages-tasks-before.png) | [After](../../output/playwright/shared-pages/pot-pages-tasks-after.png) |
-| Long title | [Before](../../output/playwright/shared-pages/pot-pages-task-long-before.png) | [After](../../output/playwright/shared-pages/pot-pages-task-long-after.png) |
-| Usage | [Before](../../output/playwright/shared-pages/pot-pages-usage-before.png) | [After](../../output/playwright/shared-pages/pot-pages-usage-after.png) |
-| Allowance | [Before](../../output/playwright/shared-pages/pot-pages-quota-before.png) | [After](../../output/playwright/shared-pages/pot-pages-quota-after.png) |
-| Sandbox | [Before](../../output/playwright/shared-pages/pot-pages-sandbox-before.png) | [After](../../output/playwright/shared-pages/pot-pages-sandbox-after.png) |
-| Other environment | [Before](../../output/playwright/shared-pages/pot-pages-sandbox-other-before.png) | [After](../../output/playwright/shared-pages/pot-pages-sandbox-other-after.png) |
+| Tasks | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-tasks-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-tasks-after.png) |
+| Long title | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-task-long-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-task-long-after.png) |
+| Usage | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-usage-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-usage-after.png) |
+| Allowance | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-quota-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-quota-after.png) |
+| Sandbox | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-after.png) |
+| Other environment | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-other-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-other-after.png) |
 
 Actual native allowance input/save controls were exercised. Entering `0` and
 immediately saving displayed an error and generated no policy HTTP request.
@@ -55,8 +55,8 @@ from an earlier render cannot be submitted. Tests caught and repaired parameter
 formatting, English singular/plural selection, decimal precision, relative-unit
 spacing and stale render-time input capture before acceptance.
 
-Evidence: [invalid allowance](../../output/playwright/shared-pages/pot-pages-quota-invalid.png),
-[valid allowance](../../output/playwright/shared-pages/pot-pages-quota-valid.png).
+Evidence: [invalid allowance](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-quota-invalid.png),
+[valid allowance](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-quota-valid.png).
 
 ## Browser integration
 
@@ -80,13 +80,13 @@ qualify actual Passkey/TLS/push security.
   successful recovery clears the transient connection error while preserving
   the last good page. No production endpoint was contacted.
 
-Evidence: [Tasks](../../output/playwright/shared-pages/pot-pages-mobile-tasks.png),
-[search](../../output/playwright/shared-pages/pot-pages-mobile-task-search.png),
-[Sandbox](../../output/playwright/shared-pages/pot-pages-mobile-sandbox.png),
-[another environment](../../output/playwright/shared-pages/pot-pages-mobile-sandbox-other.png),
-[Usage](../../output/playwright/shared-pages/pot-pages-mobile-usage.png),
-[chart](../../output/playwright/shared-pages/pot-pages-mobile-usage-chart.png),
-[360 px Chinese/dark Tasks](../../output/playwright/shared-pages/pot-pages-mobile-dark.png).
+Evidence: [Tasks](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-tasks.png),
+[search](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-task-search.png),
+[Sandbox](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-sandbox.png),
+[another environment](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-sandbox-other.png),
+[Usage](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-usage.png),
+[chart](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-usage-chart.png),
+[360 px Chinese/dark Tasks](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-dark.png).
 
 ## Automated checks
 
@@ -109,7 +109,7 @@ Runtime endpoint. Use only a disposable root and isolated App bundle:
 
 ```sh
 mise exec -- python scripts/tests/shared-ui-fixture.py \
-  --root .local/ui-check --port 17903 --mobile-assets mobile/dist --pages
+  --root .local/ui-check --port 17903 --mobile-assets crates/web-ui/dist --pages
 ```
 
 For native Sandbox inventory, copy `scripts/tests/shared-ui-helper.py` as
@@ -123,3 +123,5 @@ Physical phone installation, IME, accessibility, performance, real vendor push,
 live desktop/RFB interaction and exhaustive state/layout qualification remain
 open as recorded in the mobile acceptance report. No merge or deployment is
 included in these results.
+
+The screenshot artifacts were removed from the working tree during the 2026-10-09 repository layout migration. Evidence links above point to the historical Git revision.

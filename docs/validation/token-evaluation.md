@@ -1,6 +1,6 @@
 # Token evaluation foundation acceptance
 
-Date: 2026-10-06. Scope: standalone deterministic evaluation and Driver service/observation extensions. The [CLI guide](../../eval/README.md) defines the delivered contract; the [framework design](../token-evaluation.md) lists future modes.
+Date: 2026-10-06. Scope: standalone deterministic evaluation and Driver service/observation extensions. The [CLI guide](../../crates/eval/README.md) defines the delivered contract; the [framework design](../token-evaluation.md) lists future modes.
 
 ## Delivered
 
@@ -38,7 +38,7 @@ The compaction request consumed **5,162 input and 218 output tokens**. The other
 
 All runs reported complete usage. Independently decoded raw response chunks and last usage snapshots reconciled with report totals for each run. A credential scan using the configured key verified its absence from every recorded file, without printing the key. The source Pi configuration was not changed. Credential-free manifests capture effective compatibility/limits and the configured price snapshot with `price_verified: false`; no claim of actual billed currency cost is made.
 
-Run records are preserved under `.local/eval/deepseek-flash-20261006/{chat,tools,compact}` with `summary.json`; this directory is ignored by Git. Initial execution directories were `/tmp/pot-deepseek-live-20261006-{chat,tools,compact}`. Supplied scenarios under `eval/scenarios/deepseek-*.json` reproduce the workload, but outputs, caching and usage are not deterministic.
+Run records are preserved under `.local/eval/deepseek-flash-20261006/{chat,tools,compact}` with `summary.json`; this directory is ignored by Git. Initial execution directories were `/tmp/pot-deepseek-live-20261006-{chat,tools,compact}`. Supplied scenarios under `crates/eval/scenarios/deepseek-*.json` reproduce the workload, but outputs, caching and usage are not deterministic.
 
 ## Same-command Pi CLI comparison follow-up (2026-10-06)
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-source = Path(__file__).resolve().parents[2] / "sandbox-images/linux/default/skill_mounts.py"
+source = Path(__file__).resolve().parents[2] / "crates/sandbox-images/linux/default/skill_mounts.py"
 spec = importlib.util.spec_from_file_location("skill_mounts", source)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -42,7 +42,7 @@ class SkillMounts(unittest.TestCase):
 
     def test_permission_backing_and_home_are_readonly_before_skill_mounts(self):
         backing = self.base / "permission-state"
-        (backing / "agent/skills").mkdir(parents=True)
+        (backing / "crates/agent/skills").mkdir(parents=True)
         module.skill_namespace(
             "task",
             self.home,
