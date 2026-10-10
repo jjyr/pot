@@ -11,6 +11,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Publish a macOS release or update the Homebrew cask | [Releases and Homebrew](development.md#releases-and-homebrew) |
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
+| Review optional Runtime components and distributed Agent/Task/Environment composition | [Composable runtimes](runtime-composition.md) (design proposal; not implemented) |
 | Understand task messaging, interruption, resume and archive rules | [Task coordination](task-coordination.md) |
 | Understand direct tools, JavaScript composition and waiting | [Agent tool composition](tool-composition.md) |
 | Understand pot-agent approvals, persistent grants and environment-local access | [Agent permissions](permissions.md) |
