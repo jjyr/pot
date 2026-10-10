@@ -1,8 +1,109 @@
 # Development plan and current scope
 
-Updated: 2026-10-08.
+Updated: 2026-10-10.
 
 Computer use (2026-10-08): a default-enabled plugin provides persistent `cua_repl` sessions on Host and Linux Sandboxes under environment permissions, with pinned packages and model-configured text/image observations. Native desktop automation and manual takeover remain pending. See [configuration and contract](computer-use.md).
+
+## Composable Runtime roadmap — proposed, 2026-10-10
+
+Track phase status, acceptance evidence and pre-phase review gates in [Issue #39](https://github.com/jjyr/pot/issues/39). Before implementing a phase's UI changes or behavior dependent on its interaction design, discuss the concrete interaction with the user and obtain confirmation. This applies at execution time; agreement to the roadmap does not approve later UI designs. Independent backend work can proceed without that UI decision. Add newly discovered UI changes to the same tracking table before implementing them.
+
+This is a planning proposal, not an implementation status report or authorization to change model-visible tools. Architecture and internal boundaries are in [Composable runtimes](runtime-composition.md). The user has confirmed Agent-local default dispatch and explicit capability grants between Runtimes. P0 completed on 2026-10-10: the user additionally confirmed stopping new effects on owner disconnection and preserving current data through versioned upgrades. P1 can proceed with the existing App interaction; future UI/tool changes remain subject to their phase review.
+
+```text
+P0  Contracts, scope and rollout decisions
+ | 
+P1  Optional services, local composition
+ |
+P2  Multiple conversations and connection-aware clients
+ |
+P3  Direct peers and remote Environments
+ |
+P4  Remote Agent + co-located Sandbox
+ |
+P5  General placement, preferences, artifacts and schedules
+ |
+P6  Product/deployment qualification
+```
+
+Every phase includes its necessary client/operator interaction, documentation and scoped verification. UI, permissions, cancellation and recovery are not postponed to the final phase. Complete each exit gate before expanding distributed behavior. There are no time estimates until P0 resolves scope and identifies the storage/protocol rollout work.
+
+### P0 — contracts and review
+
+- Resolve service ownership, independent enablement, stable IDs, assignment records and the local/remote port contracts. Specify dispatch/context/Environment generations separately.
+- Define the task state transitions, idempotency receipts, bounded leases, checkpoint acknowledgements and disconnect/cancel semantics. Specify deployment presets and a minimal two-machine reference scenario.
+- Inventory hard-coded main assumptions, existing persistent data and client protocol consumers. Decide current-root conversion versus an explicitly documented fresh-root requirement; never clear or reinterpret existing data silently. Retired engine importers remain outside scope.
+- Prepare concrete model-visible tool/prompt/default proposals for multiple conversational owners and remote selection, plus wire/schema version changes. Obtain explicit user agreement before implementing each affected tool contract.
+- Resolve first-release boundaries and autonomous continuation policy. Proposed default: stop new effects on owner disconnection, reconcile current work; no live migration or automatic failover.
+
+Exit gate: reviewed service/record contracts, phase scenarios, storage rollout choice and a concrete list of approved or pending tool changes. Architecture agreement alone is not tool-interface agreement.
+
+### P1 — independent local composition
+
+- Replace the monolithic Service with Runtime host and independent Conversation, Task, Agent and Environment service state. Use local port adapters; stop copying the entire Service to create workers.
+- Enable services explicitly, validate their dependency references, open only relevant stores/routes and start only relevant coordinators. Register Providers only for enabled Environment services.
+- Separate Agent instructions/skills/home resources from the Sandbox Manager wrapper. Keep concrete pot-agent and existing Thread contexts/configurations.
+- Deliver bare, Environment-only and App assistant presets. CLI/operator inspection reports actual enabled capabilities; existing App behavior is exercised through its preset.
+- Establish local scoped identities/assignments and durable dispatch records needed by subsequent phases. Introduce the async-capable port shape; remote journaling is qualified in P4.
+
+Exit gate: bare Runtime makes no model calls/task dispatch/image downloads or Environment startup; Environment-only execution works without AI configuration; App chat/task/steering/cancellation/context continuity still work. Stopping a service does not implicitly shut down unrelated components. Apply the P0 storage rollout strategy.
+
+### P2 — multiple conversations and client foundations
+
+- Persist Agent definitions, independent conversations/Threads, owner references and per-Agent preference records. Eliminate global-main identity assumptions in routing, permissions, usage and projections.
+- Bind each conversational Agent to an explicit Task/control scope. Preserve worker restrictions and each Thread's turn serialization/configuration snapshots.
+- Add App/shared-UI assistant selection and creation/configuration flows, with clear conversation/Task ownership. Agent definition reuse does not merge Thread contexts.
+- Introduce client transport and connection identity abstractions: local embedded dispatch plus a remote client backend. Cache keys and event cursors include Runtime/owner identity; pages consume capability projections. Peer enrollment is delivered in P3.
+- Preserve existing local routing while implementing only the approved multiple-owner tool changes.
+
+Exit gate: two conversational Agents maintain independent context/preferences/permissions, each can dispatch and follow up its own tasks; switching conversations/connections does not mix state or cancel unrelated work. Local behavior and supported frontend protocol consumers pass regression checks.
+
+### P3 — direct connections and remote Environment execution
+
+- Implement stable peer identity, direct endpoint configuration, authenticated encrypted transport, compatibility negotiation, caller-visible discovery, directional grants and revocation.
+- Add remote Environment execution and separate management adapters: capabilities, scopes, leases, operation receipts, sessions, polling, cancellation and reconciliation. Preserve concrete Provider containment.
+- Deliver connection/grant management through operator controls and the minimum App UI; remote Environment lists/details expose location and grant-limited actions.
+- Add authorized artifact listing/reading, and desktop observation/control forwarding only for already supported Provider capabilities, retaining controller grants. Cross-node artifact copying follows in P5.
+- Complete authenticated remote UI access to existing services using UI-specific credentials. Demonstrate that a UI on A selecting an Agent on B does not make A its default execution location.
+- Implement only the agreed remote Environment tool selection contract. New privileges are never inferred from a connection or from remote prompt text.
+
+Exit gate: `Task A + Agent A -> Environment B` works while B has no Agent/Task service; remote tools, sessions, cancel/restart reconciliation and permission rejection are qualified. UI-only access works without a local assistant. Disconnect or an unavailable target never triggers Host fallback or duplicate operations.
+
+### P4 — remote Agent and Sandbox dispatch
+
+- Add remote RunnerPort and a durable receiving run journal, paired with the owner's transactional dispatch outbox and replayable execution-event outbox.
+- Complete async context/control/event acknowledgements, checkpoint revision checks and run-generation fencing without network waits under database/state locks.
+- Run pot-agent on B with its assigned Sandbox B; use explicitly selected owner or peer model gateway, with scoped budget grants and attributable usage receipts.
+- Forward ordered guidance/interrupt/cancel and concrete approvals; show the Agent and Environment locations, run progress and cleanup-pending state in Task details.
+- Enforce bounded grants/leases at destination services. Qualify duplicate dispatch, response loss after acceptance, owner/Agent restart, grant revocation and owner disconnection.
+
+Exit gate: `Task A -> Agent B -> Sandbox B` completes and can continue with preserved context; duplicates/stale events do not cause repeated effects; uncertain results and cleanup remain visible; inference usage is accounted once. The approved owner-disconnection policy is demonstrated on real peers.
+
+### P5 — general composition and routing workflows
+
+- Support `Task A -> Agent B -> Environment C` with explicit usable grants on every service edge; independent gateway/context locations use the same contracts.
+- Connect per-Agent saved prompt rules to the authorized Runtime/Agent/Environment catalog. Apply explicit choice, saved rule and Agent-local default precedence; persist revision/reason and fixed placement before dispatch.
+- Deliver bounded authorized artifact transfer with destination validation, integrity checks, durable receipts and interrupted-transfer recovery. Expose artifact locations and explicit export/copy actions.
+- Integrate schedule owner, dispatch origin, fixed Environment references, model/profile resolution and occurrence deduplication; unavailable peers produce explicit wait/failure rather than retargeting.
+- Complete multi-Runtime views for conversations, tasks and Environments, filtered by scope. Queue by selected peer capacity without implicit load balancing or assignment migration.
+
+Exit gate: three-Runtime execution and artifact handoff work; routing prompts choose the intended permitted targets and cannot elevate privileges; schedule placement is independent of the current UI; edits do not rewrite existing Task bindings. Multi-client operation and shared-Environment cancellation remain isolated by authority.
+
+### P6 — deployment and complete product qualification
+
+- Package/install the selected presets on supported hosts; document enabling installed capabilities, connection setup, grants, upgrades, storage handling and shutdown behavior.
+- Qualify real supported Host/Sandbox paths on macOS and Linux, plus App and Web clients. Do not claim pending macOS VM qualification or deferred mobile/device Providers merely because remote routing works.
+- Run cold-start/upgrade, weak-network, sleep/wake, reconnect, multi-client, resource exhaustion, cleanup and credential-isolation scenarios. Scope new tests to the actual behavior changed in each earlier phase; this phase closes remaining end-to-end gaps.
+- Demonstrate real model inference for local, remote-Environment and remote-Agent workflows, with separate accounting and paid-call authorization where required. Record tested platforms and remaining limitations in dated acceptance reports.
+- Complete the user journey: connect a node, grant capabilities, select an assistant, save a routing prompt, dispatch, guide, cancel, inspect artifacts and continue after restart. Public distribution has its existing signing/release gates.
+
+Exit gate: the supported deployment matrix and complete workflows have verifiable acceptance evidence. CLI/backend checks alone do not establish App/Provider/UI qualification.
+
+### Scope to align before implementation
+
+Recommended first-release scope is P0–P6 with direct configured peers, installed modules, one authoritative owner per Task, fixed Agent/Environment assignment and visible outage handling. Dynamic remote module installation, live Task/owner migration, automatic failover, distributed consensus, recursive worker delegation, transitive control and new device Providers remain separate projects.
+
+Confirmed on 2026-10-10: owner disconnection pauses new model/tool actions and requires reconciliation; current chat, Tasks, configuration and artifacts are preserved through versioned upgrades, without importing retired engines. The user authorized implementing P0–P6 and committing/updating Issue #39 after each completed phase. UI confirmation remains required at execution time for the affected phases.
 
 ## Delivered
 
