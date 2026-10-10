@@ -106,7 +106,7 @@ pub struct Access {
     pub root_token: String,
     pub runtime: axum::Router,
     pub inner: Arc<Mutex<Inner>>,
-    pub notifications: Option<pot_runtime::Service>,
+    pub notifications: Arc<Mutex<Option<pot_runtime::Service>>>,
     pub push: Option<Arc<super::push::Push>>,
     pub policy: tokio::sync::watch::Sender<bool>,
     pub desktop_open: Arc<tokio::sync::Mutex<()>>,
@@ -133,7 +133,7 @@ impl Access {
         ensure!(credentials.token.len() == 43, "Invalid saved access token");
         let enabled = !credentials.disabled;
         let access = Self {
-            notifications: None,
+            notifications: Arc::new(Mutex::new(None)),
             push: super::push::Push::from_env()?.map(Arc::new),
             policy: tokio::sync::watch::channel(enabled).0,
             desktop_open: Arc::new(tokio::sync::Mutex::new(())),

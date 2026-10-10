@@ -23,7 +23,7 @@ impl SandboxFixture {
         service.workspace = service.data.join("workspace");
         service.conversation.inner.lock().unwrap().store =
             Store::open(&service.data.join("pot-v2.sqlite")).unwrap();
-        service.environment_service.manager =
+        service.environment_service.sandboxes =
             Arc::new(crate::sandbox::Manager::open(&service.data).unwrap());
         assert!(service.test_tool_executor.is_none());
         let http = Arc::new(Mutex::new(vec![]));
@@ -305,7 +305,7 @@ async fn main_context_routes_commands_patch_and_sessions_through_sandbox() {
     );
     assert!(!context.workspace.join("effects.txt").exists());
     assert!(!s.workspace.join("effects.txt").exists());
-    crate::sandbox::finish(s).await.unwrap();
+    crate::environment::finish(s).await.unwrap();
     let finishes = fixture.requests("/finish");
     assert_eq!(finishes.len(), 2);
     for index in [0, 2] {
@@ -394,7 +394,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
             "manage_sandbox",
             json!({"action":"start","sandbox_id":"linux-b"}),
         ),
-        ("list_sandboxes", json!({})),
+        ("list_environments", json!({})),
     ] {
         let before = fixture.helper_calls.lock().unwrap().len();
         let error = context
@@ -408,7 +408,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
         assert_eq!(fixture.helper_calls.lock().unwrap().len(), before);
         assert_eq!(fixture.requests("/execute").len(), 1);
     }
-    crate::sandbox::finish(&worker).await.unwrap();
+    crate::environment::finish(&worker).await.unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
 }
 
@@ -416,7 +416,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
 async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary() {
     let fixture = SandboxFixture::new().await;
     let main = &fixture.service;
-    let base = main.environment_service.manager.workspace("default");
+    let base = main.environment_service.sandboxes.workspace("default");
     std::fs::create_dir_all(&base).unwrap();
     std::fs::write(base.join(".git"), "gitdir").unwrap();
     std::fs::write(base.join("AGENTS.md"), "PROJECT_FIRST").unwrap();
@@ -490,7 +490,7 @@ async fn sessions_survive_turns_keep_original_environment_and_cancel_explicitly(
         .await
         .unwrap();
     assert!(fixture.requests("/finish").is_empty());
-    crate::sandbox::drain(s).await.unwrap();
+    crate::environment::drain(s).await.unwrap();
     s.turn(None);
     let mut next = request.clone();
     next.request_id = "second-turn".into();
@@ -536,7 +536,7 @@ async fn sessions_survive_turns_keep_original_environment_and_cancel_explicitly(
         .await
         .unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
-    crate::sandbox::drain(s).await.unwrap();
+    crate::environment::drain(s).await.unwrap();
 }
 
 #[tokio::test]
@@ -555,8 +555,8 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     let initial = fixture.requests("/execute")[0]["body"]["scope"].clone();
-    crate::sandbox::finish_turn(s).await.unwrap();
-    let inventory = crate::sandbox::tool(s, "list_sandboxes", "inventory", &json!({}))
+    crate::environment::finish_turn(s).await.unwrap();
+    let inventory = crate::sandbox::tool(s, "list_environments", "inventory", &json!({}))
         .await
         .unwrap();
     let rows = inventory["items"].as_array().unwrap();
@@ -572,11 +572,11 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     assert_eq!(fixture.requests("/execute")[1]["body"]["scope"], initial);
-    crate::sandbox::finish_turn(s).await.unwrap();
+    crate::environment::finish_turn(s).await.unwrap();
     fixture
         .generation
         .store(2, std::sync::atomic::Ordering::SeqCst);
-    crate::sandbox::refresh(s).await.unwrap();
+    crate::environment::refresh(s).await.unwrap();
     let error = crate::sandbox::tool(
         s,
         "write_stdin",
@@ -590,11 +590,11 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     assert_ne!(fixture.requests("/execute")[2]["body"]["scope"], initial);
-    crate::sandbox::finish_stale(s, thread.generation + 1)
+    crate::environment::finish_stale(s, thread.generation + 1)
         .await
         .unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
-    crate::sandbox::drain(s).await.unwrap();
+    crate::environment::drain(s).await.unwrap();
 }
 
 #[tokio::test]
@@ -614,7 +614,7 @@ async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
         "default".into(),
         json!({"sessions":[],"active":false,"ended":true}),
     );
-    crate::sandbox::reap_idle(s).await.unwrap();
+    crate::environment::reap_idle(s).await.unwrap();
     let error = crate::sandbox::tool(
         s,
         "write_stdin",
@@ -634,7 +634,7 @@ async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
     .await
     .unwrap();
     let mut restarted = s.clone();
-    restarted.environment_service.manager =
+    restarted.environment_service.sandboxes =
         Arc::new(crate::sandbox::Manager::open(&s.data).unwrap());
     assert!(
         crate::sandbox::tool(
@@ -656,7 +656,7 @@ async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
             .to_string()
             .contains("unsettled")
     );
-    crate::sandbox::finish(s).await.unwrap();
+    crate::environment::finish(s).await.unwrap();
 }
 
 #[tokio::test]
@@ -677,16 +677,16 @@ async fn malformed_session_inspection_quarantines_active_effects() {
         json!({"sessions":[],"active":"false","ended":false}),
     );
     assert!(
-        crate::sandbox::finish_turn(s)
+        crate::environment::finish_turn(s)
             .await
             .unwrap_err()
             .to_string()
             .contains("stop unconfirmed")
     );
-    assert!(crate::sandbox::drain(s).await.is_err());
+    assert!(crate::environment::drain(s).await.is_err());
     assert!(
         s.environment_service
-            .manager
+            .sandboxes
             .acquire("default")
             .await
             .is_err()
@@ -718,7 +718,7 @@ async fn completed_task_cancellation_closes_retained_resources_without_rewriting
     )
     .await
     .unwrap();
-    crate::sandbox::finish_turn(&worker).await.unwrap();
+    crate::environment::finish_turn(&worker).await.unwrap();
     tasks::tests::succeed(root, &task.id, &worker, &request);
     let reply = tasks::cancel(
         State(root.clone()),
@@ -853,6 +853,10 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     let mut worker = s.clone();
     worker.is_worker = true;
     worker.sandbox_id = Some("default".into());
+    worker.environment_ref = Some(pot_core::EnvironmentRef::sandbox(
+        &worker.runtime_id,
+        "default",
+    ));
     assert!(
         crate::permissions::prepare(
             &worker,
@@ -862,14 +866,15 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
         .await
         .is_err()
     );
-    let host = crate::permissions::prepare(
-        &worker,
-        "exec_command",
-        json!({"cmd":"cat notes.txt","environment":"host"}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(host["environment"], "host");
+    assert!(
+        crate::permissions::prepare(
+            &worker,
+            "exec_command",
+            json!({"cmd":"cat notes.txt","environment":"host"}),
+        )
+        .await
+        .is_err()
+    );
 }
 
 #[tokio::test]

@@ -1,100 +1,13 @@
-//! Host-owned Sandbox inventory and the only environment execution boundary.
+//! Sandbox inventory, management and contained execution adapter.
 use super::*;
 
-/// In-process Agent calls use the same Runtime authorization as MCP calls.
-pub struct Tools {
-    pub service: Service,
-    pub generation: u64,
-}
-impl pot_core::ToolExecutor for Tools {
-    fn execute<'a>(
-        &'a self,
-        context: &'a pot_core::ExecutionContext,
-        policy: &'a pot_core::ShellSettings,
-        name: &'a str,
-        args: &'a Value,
-        call: &'a str,
-        emit: &'a mut (dyn FnMut(pot_core::Update) -> Result<()> + Send),
-    ) -> futures::future::BoxFuture<'a, Result<Value>> {
-        Box::pin(async move {
-            anyhow::ensure!(
-                agent::thread(&self.service)?.generation == self.generation,
-                "Execution thread changed"
-            );
-            let environment = args["environment"].as_str().unwrap_or("");
-            let mut execution_args = args.clone();
-            if let Some(object) = execution_args.as_object_mut() {
-                object.remove("environment");
-            }
-            if environment == "host" {
-                let thread = agent::thread(&self.service)?;
-                if let Some(plugin) = thread.config.params.agent.plugin_for_tool(name)? {
-                    anyhow::ensure!(
-                        plugin.manifest.execution == "environment",
-                        "This plugin supports Sandbox execution only"
-                    );
-                    let descriptor = thread
-                        .config
-                        .params
-                        .agent
-                        .model_descriptor(&thread.config.provider, &thread.config.model)?;
-                    execution_args =
-                        pot_core::plugins::call(plugin, name, execution_args, descriptor.vision())?;
-                } else {
-                    anyhow::ensure!(
-                        name != "plugin_call",
-                        "Internal plugin envelopes cannot be called directly"
-                    );
-                }
-                let executor = self
-                    .service
-                    .environment_service
-                    .permissions
-                    .host_executor(&self.service.usage_scope, self.generation);
-                return pot_core::ToolExecutor::execute(
-                    &*executor,
-                    context,
-                    policy,
-                    if thread.config.params.agent.plugin_for_tool(name)?.is_some() {
-                        "plugin_call"
-                    } else {
-                        name
-                    },
-                    &execution_args,
-                    call,
-                    emit,
-                )
-                .await;
-            }
-            if let Some(target) = environment.strip_prefix("sandbox:") {
-                execution_args["sandbox_id"] = json!(target);
-            }
-            let mut value = tool(&self.service, name, call, &execution_args).await?;
-            if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
-                let mut remaining = policy.max_output_bytes.saturating_mul(2);
-                for event in events.drain(..) {
-                    emit(guest_output(event, call, &mut remaining)?)?;
-                }
-            }
-            Ok(value.get("result").cloned().unwrap_or(value))
-        })
-    }
-    fn abort<'a>(
-        &'a self,
-        _: &'a pot_core::ExecutionContext,
-    ) -> futures::future::BoxFuture<'a, Result<()>> {
-        Box::pin(finish(&self.service))
-    }
-    fn finish<'a>(
-        &'a self,
-        _: &'a pot_core::ExecutionContext,
-    ) -> futures::future::BoxFuture<'a, Result<()>> {
-        Box::pin(finish_turn(&self.service))
-    }
-}
 // Guest output cannot manufacture Agent lifecycle/control events. IDs are
 // remapped from the execution receipt to the caller's model tool invocation.
-fn guest_output(value: Value, call: &str, remaining: &mut usize) -> Result<pot_core::Update> {
+pub(crate) fn guest_output(
+    value: Value,
+    call: &str,
+    remaining: &mut usize,
+) -> Result<pot_core::Update> {
     let pot_core::Update::ToolOutput { stream, text, .. } = serde_json::from_value(value)? else {
         bail!("Guest sent a non-output execution event");
     };
@@ -145,6 +58,16 @@ impl Manager {
         }
         Ok(())
     }
+    /// Register installed Providers without creating or starting a Sandbox.
+    pub fn empty(
+        data: &std::path::Path,
+        providers: Vec<Arc<dyn pot_sandbox::Provider>>,
+    ) -> Result<Self> {
+        Ok(Self {
+            environment: Arc::new(pot_sandbox::Manager::open_empty(data, providers)?),
+            resources: Some(crate::sandbox_resources::Hub::open(data)?),
+        })
+    }
     pub fn with_providers(
         data: &std::path::Path,
         providers: Vec<Arc<dyn pot_sandbox::Provider>>,
@@ -159,13 +82,19 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     s.authorized(&h)?;
     Ok(Json(inventory(&s).await))
 }
-async fn inventory(s: &Service) -> Value {
-    let mut value = s.environment_service.manager.inventory().await;
+pub(crate) async fn inventory(s: &Service) -> Value {
+    let mut value = s.environment_service.sandboxes.inventory().await;
     let tasks = tasks::sandbox_tasks(s);
     if let Some(rows) = value["items"].as_array_mut() {
         for row in rows {
             let id = row["id"].as_str().unwrap_or("").to_owned();
-            let assigned: Vec<_> = tasks.iter().filter(|task| task.sandbox_id == id).collect();
+            let assigned: Vec<_> = tasks
+                .iter()
+                .filter(|task| {
+                    task.environment_ref.as_ref()
+                        == Some(&pot_core::EnvironmentRef::sandbox(&s.runtime_id, &id))
+                })
+                .collect();
             row["running_tasks"] = json!(
                 assigned
                     .iter()
@@ -176,7 +105,7 @@ async fn inventory(s: &Service) -> Value {
             row["referenced"] = json!(tasks::uses_sandbox(s, &id));
             row["resource_request"] = s
                 .environment_service
-                .manager
+                .sandboxes
                 .resources
                 .as_ref()
                 .map(|hub| hub.pending(&id))
@@ -185,7 +114,7 @@ async fn inventory(s: &Service) -> Value {
     }
     value["resource_requests"] = s
         .environment_service
-        .manager
+        .sandboxes
         .resources
         .as_ref()
         .map(|hub| hub.requests())
@@ -202,12 +131,45 @@ pub async fn manage(
         error(StatusCode::CONFLICT, "sandbox_management", &e.to_string())
     })?))
 }
+pub(crate) fn remote_management_target(
+    s: &Service,
+    args: &Value,
+) -> Result<Option<pot_core::EnvironmentRef>> {
+    let Some(runtime) = args.get("runtime_id") else {
+        return Ok(None);
+    };
+    let runtime = runtime
+        .as_str()
+        .ok_or_else(|| anyhow!("Invalid Runtime identity"))?;
+    if runtime == s.runtime_id {
+        return Ok(None);
+    }
+    anyhow::ensure!(!s.is_worker, "Workers cannot manage Sandboxes");
+    anyhow::ensure!(
+        matches!(
+            args["action"].as_str(),
+            Some("start" | "stop" | "recover" | "update" | "delete")
+        ),
+        "Remote management supports existing Sandbox lifecycle only; create/select are local and desktop needs separate authority"
+    );
+    let id = args["sandbox_id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Explicit remote Sandbox identity required"))?;
+    let target = pot_core::EnvironmentRef::sandbox(runtime, id);
+    target.validate()?;
+    remote_environment::port(s)?.validate_management(&target)?;
+    Ok(Some(target))
+}
 pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     anyhow::ensure!(!s.is_worker, "Workers cannot manage Sandboxes");
+    anyhow::ensure!(
+        remote_management_target(s, args)?.is_none(),
+        "Remote management requires a tool invocation identity"
+    );
     if args["action"] == "delete" {
         let id = s
             .environment_service
-            .manager
+            .sandboxes
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
         anyhow::ensure!(
             !tasks::uses_sandbox(s, &id),
@@ -218,11 +180,11 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     if matches!(action, "start" | "desktop") {
         let id = s
             .environment_service
-            .manager
+            .sandboxes
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
-        if let Some(hub) = &s.environment_service.manager.resources
+        if let Some(hub) = &s.environment_service.sandboxes.resources
             && let Some(key) = hub
-                .inspect(&s.environment_service.manager, &id, &s.usage_scope, None)
+                .inspect(&s.environment_service.sandboxes, &id, &s.usage_scope, None)
                 .await?
         {
             return Ok(
@@ -232,7 +194,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     }
     let mut result = s
         .environment_service
-        .manager
+        .sandboxes
         .environment
         .management(
             args,
@@ -243,9 +205,9 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         .await?;
     if action == "create" {
         let id = result["sandbox_id"].as_str().unwrap_or("").to_owned();
-        if let Some(hub) = &s.environment_service.manager.resources
+        if let Some(hub) = &s.environment_service.sandboxes.resources
             && let Some(key) = hub
-                .inspect(&s.environment_service.manager, &id, &s.usage_scope, None)
+                .inspect(&s.environment_service.sandboxes, &id, &s.usage_scope, None)
                 .await?
         {
             result["resource_request_id"] = json!(key);
@@ -253,7 +215,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         }
     }
     if action == "delete"
-        && let Some(hub) = &s.environment_service.manager.resources
+        && let Some(hub) = &s.environment_service.sandboxes.resources
     {
         hub.forget(args["sandbox_id"].as_str().unwrap_or(""))?;
     }
@@ -281,15 +243,23 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         !turn.starts_with(orchestration::RESULT_PREFIX),
         "Summary is read-only"
     );
-    if name == "list_sandboxes" {
+    if name == "list_environments" {
         anyhow::ensure!(!s.is_worker, "Workers cannot list Sandbox inventory");
-        return Ok(inventory(s).await);
+        return Ok(crate::environment::inventory(s).await);
     }
     if name == "manage_sandbox" {
         anyhow::ensure!(
             args["action"] != "set_mounts",
             "Host mappings require the pot-agent permission flow"
         );
+        if let Some(target) = remote_management_target(s, args)? {
+            let binding = remote_environment::binding(s, target)?;
+            let service = s.clone();
+            let cancelled = Arc::new(move || agent::cancelled(&service) || service.stopping());
+            return remote_environment::port(s)?
+                .manage(binding, call_id.to_owned(), args.clone(), cancelled)
+                .await;
+        }
         let result = management(s, args).await?;
         if matches!(
             args["action"].as_str(),
@@ -297,10 +267,10 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         ) {
             let id = s
                 .environment_service
-                .manager
+                .sandboxes
                 .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
             s.environment_service
-                .manager
+                .sandboxes
                 .prepare(&id, &s.usage_scope, Some(&turn), &|| {
                     !turn_alive(s, &turn) || s.stopping()
                 })
@@ -315,6 +285,17 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             .as_object_mut()
             .map(|v| v.remove("resource_request_id"));
         return Ok(result);
+    }
+    if s.is_worker {
+        let reference = s
+            .environment_ref
+            .as_ref()
+            .ok_or_else(|| anyhow!("Worker Environment binding missing"))?;
+        anyhow::ensure!(
+            reference.is_local_to(&s.runtime_id)
+                && matches!(&reference.target, pot_core::EnvironmentTarget::Sandbox { sandbox_id } if Some(sandbox_id.as_str()) == s.sandbox_id.as_deref()),
+            "Workers cannot switch Environment targets"
+        );
     }
     let thread = agent::thread(s)?;
     let settings = &thread.config.params.agent;
@@ -351,13 +332,13 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
                 "Workers cannot switch Sandboxes"
             );
         }
-        let id = s.environment_service.manager.assignment(if s.is_worker {
+        let id = s.environment_service.sandboxes.assignment(if s.is_worker {
             s.sandbox_id.as_deref().unwrap_or("")
         } else {
             requested
         })?;
         s.environment_service
-            .manager
+            .sandboxes
             .prepare(&id, &s.usage_scope, Some(&turn), &|| {
                 !turn_alive(s, &turn) || s.stopping()
             })
@@ -388,6 +369,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         .map(|text| serde_json::from_str(&text))
         .transpose()?;
     let grant = pot_sandbox::AccessGrant {
+        workspace_owner: None,
         owner: s.usage_scope.clone(),
         turn: turn.clone(),
         thread_generation: thread.generation,
@@ -396,7 +378,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         policy: thread.config.params.agent.shell.clone(),
     };
     s.environment_service
-        .manager
+        .sandboxes
         .environment
         .execute(
             &grant,
@@ -406,65 +388,6 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             &|| !turn_alive(s, &turn) || s.stopping(),
             legacy,
         )
-        .await
-}
-pub async fn finish_turn(s: &Service) -> Result<()> {
-    if agent::cancelled(s) || s.stopping() {
-        finish(s).await
-    } else {
-        s.environment_service
-            .manager
-            .environment
-            .finish_turn(&s.usage_scope)
-            .await
-    }
-}
-pub async fn refresh(s: &Service) -> Result<()> {
-    finish_turn(s).await
-}
-pub async fn reap_idle(s: &Service) -> Result<()> {
-    s.environment_service
-        .permissions
-        .reap_host_plugins()
-        .await?;
-    s.environment_service.manager.environment.reap_idle().await
-}
-pub async fn finish_stale(s: &Service, generation: u64) -> Result<()> {
-    s.environment_service
-        .permissions
-        .finish_stale_host(&s.usage_scope, generation)
-        .await?;
-    s.environment_service
-        .manager
-        .environment
-        .finish_stale(&s.usage_scope, generation)
-        .await
-}
-pub async fn shutdown(s: &Service) -> Result<()> {
-    s.environment_service.permissions.shutdown_host().await?;
-    s.environment_service.manager.environment.shutdown().await
-}
-pub async fn finish_idle(s: &Service) -> Result<()> {
-    s.environment_service
-        .manager
-        .environment
-        .finish_idle(&s.usage_scope)
-        .await
-}
-pub async fn finish(s: &Service) -> Result<()> {
-    s.environment_service.permissions.finish_host(s).await?;
-    s.environment_service
-        .manager
-        .environment
-        .finish(&s.usage_scope)
-        .await
-}
-pub async fn drain(s: &Service) -> Result<()> {
-    s.environment_service.permissions.finish_host(s).await?;
-    s.environment_service
-        .manager
-        .environment
-        .drain(&s.usage_scope)
         .await
 }
 pub async fn execute(
@@ -543,6 +466,10 @@ mod tests {
         let mut worker = s.clone();
         worker.is_worker = true;
         worker.sandbox_id = Some("default".into());
+        worker.environment_ref = Some(pot_core::EnvironmentRef::sandbox(
+            &worker.runtime_id,
+            "default",
+        ));
         active(&worker);
         assert!(
             management(&worker, &json!({"action":"create","sandbox_id":"escape"}))
@@ -550,7 +477,7 @@ mod tests {
                 .is_err()
         );
         assert!(
-            tool(&worker, "list_sandboxes", "list", &json!({}))
+            tool(&worker, "list_environments", "list", &json!({}))
                 .await
                 .is_err()
         );
@@ -602,7 +529,7 @@ mod tests {
         );
         let lease = s
             .environment_service
-            .manager
+            .sandboxes
             .acquire("default")
             .await
             .unwrap();

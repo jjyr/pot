@@ -9,7 +9,7 @@ Updated: 2026-10-10. See [architecture](architecture.md) for deployment and [Age
 | `pot-tool-executor` | Shared patch and pipe-session implementation; credential-free guest binary. Local execution is explicitly injected only in eval and isolated tests |
 | `pot-storage` | Host product SQLite, Thread contexts/configuration, request/usage ledgers and durable transactions |
 | `pot-gateway` | Provider transport and Chat/Responses/Messages/Gemini codecs |
-| `pot-runtime` | Product tool authorization/routing, tasks/schedules, execution preferences, accounting and recovery |
+| `pot-runtime` | Product tool authorization/routing, tasks/schedules, assistant routing rules, accounting and recovery |
 | `pot-resource` | Generic HTTPS downloads, byte count/SHA-256 checks, safe extraction, digest cache, shared progress/cancellation |
 | `pot-sandbox-images` | Embedded resource catalog, compatible bundles, template descriptions and Linux/macOS recipes; uses pot-resource |
 | `pot-sandbox` | Inventory, lifecycle/readiness, leases, execution scopes, receipts and recovery; no concrete Provider dependencies |
@@ -29,6 +29,6 @@ Model requests run on the Server machine. Remote deployment, endpoint identity/T
 
 ## Sandbox extraction
 
-The [Sandbox Manager and Provider crate design](sandbox-providers.md#provider-crates-and-explicit-registration) moves environment inventory/lifecycle, scopes, receipts/recovery, artifacts and display arbitration into `pot-sandbox`. Runtime retains product permissions, task/schedule bindings and tool schema integration. Separate `pot-sandbox-macos-apple-container` and `pot-sandbox-macos-apple-vm` crates implement its contracts; Server's shared backend assembly registers enabled Providers and injects the Manager. `pot-sandbox` depends on neither concrete Providers nor Runtime. The inventory/lifecycle/scope/receipt extraction and Linux Provider are delivered. Template catalogs and artifact services remain pending. The prepared-instance macOS integration is implemented but awaits real VM qualification.
+The [Sandbox Manager and Provider crate design](sandbox-providers.md#provider-crates-and-explicit-registration) moves environment inventory/lifecycle, scopes, receipts/recovery, artifacts and display arbitration into `pot-sandbox`. Runtime retains product permissions, task/schedule bindings and tool schema integration. P3 internal preparation separates Host executor/session state into HostEnvironment; EnvironmentService explicitly composes Host and Sandbox members. The Sandbox Manager remains responsible only for contained environments. Separate `pot-sandbox-macos-apple-container` and `pot-sandbox-macos-apple-vm` crates implement its contracts; Server's shared backend assembly registers enabled Providers and injects the Manager. `pot-sandbox` depends on neither concrete Providers nor Runtime. The inventory/lifecycle/scope/receipt extraction and Linux Provider are delivered. Template catalogs and artifact services remain pending. The prepared-instance macOS integration is implemented but awaits real VM qualification.
 
 Runtime owns resource approval and passes prepared paths to the environment Manager/Providers. `pot-sandbox` does not depend on the image/resource crates. See [resource delivery](sandbox-resources.md).

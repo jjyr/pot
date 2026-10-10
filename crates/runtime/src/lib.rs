@@ -1,13 +1,16 @@
 //! Reusable backend application services. The executable and route assembly live in pot-server.
 pub mod agent;
+mod assistant_instructions;
 mod budget;
 pub mod control;
+pub mod environment;
 pub mod execution;
 pub mod gateway;
 pub mod host;
 mod instructions;
 pub mod orchestration;
 pub mod permissions;
+pub mod remote_environment;
 pub mod sandbox;
 pub mod sandbox_resources;
 pub mod schedules;
@@ -81,15 +84,6 @@ impl Service {
     pub fn owner_id(&self) -> &str {
         &self.usage_scope
     }
-    pub(crate) fn assistant_rules_path(&self) -> PathBuf {
-        self.agent_service
-            .resources
-            .home
-            .join("assistants")
-            .join(&self.runtime_id)
-            .join(&self.assistant_id)
-            .join("AGENTS.md")
-    }
     pub(crate) fn conversation_id(&self) -> String {
         if self.is_worker {
             "main".into()
@@ -146,6 +140,11 @@ impl Service {
                     .is_some_and(|v| !v.is_empty())
                 {
                     agent.detail = Some("等待 Pot 额度恢复".into());
+                }
+                if s.turn.is_some()
+                    && let Some(reason) = crate::remote_environment::waiting_reason(self)
+                {
+                    agent.detail = Some(reason);
                 }
                 agent
             },
@@ -485,8 +484,10 @@ mod tests {
                 runtime_id: id(),
                 assistant_id: "main".into(),
                 skill_selection: None,
+                remote_context: Default::default(),
                 test_tool_executor: None,
                 sandbox_id: None,
+                environment_ref: None,
                 usage: Arc::new(Mutex::new(
                     usage::Ledger::open(std::path::Path::new(":memory:")).unwrap(),
                 )),
@@ -521,8 +522,11 @@ mod tests {
                 resources: Arc::new(AgentResources::paths(&data)),
             },
             environment_service: EnvironmentService {
+                remote: Default::default(),
+                host_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                host: Arc::new(environment::HostEnvironment::default()),
                 permissions: Arc::new(permissions::Hub::memory()),
-                manager: Arc::new(sandbox::Manager::open(&data).unwrap()),
+                sandboxes: Arc::new(sandbox::Manager::open(&data).unwrap()),
                 terminals: Arc::new(Mutex::new(terminal::Hub::default())),
             },
             tasks: TaskService {

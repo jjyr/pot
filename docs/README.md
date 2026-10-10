@@ -11,7 +11,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Publish a macOS release or update the Homebrew cask | [Releases and Homebrew](development.md#releases-and-homebrew) |
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
-| Review optional Runtime components and distributed Agent/Task/Environment composition | [Composable runtimes](runtime-composition.md) (local presets delivered; distributed phases planned) |
+| Review Control and Agent/Task/Environment composition | [Composable runtimes](runtime-composition.md) (Control membership delivered; client and later distributed phases tracked in #39) |
 | Understand task messaging, interruption, resume and archive rules | [Task coordination](task-coordination.md) |
 | Understand direct tools, JavaScript composition and waiting | [Agent tool composition](tool-composition.md) |
 | Understand pot-agent approvals, persistent grants and environment-local access | [Agent permissions](permissions.md) |
@@ -70,6 +70,16 @@ Local Runtime composition: [Presets, identity and upgrade preservation, 2026-10-
 
 Multiple assistants: [Owner isolation, rule drafts and grouped Tasks, 2026-10-10](validation/multiple-assistants-20261010.md).
 
+Environment foundations (partial P3): [Typed targets, Host-only execution and receipts, 2026-10-10](validation/environment-foundations-20261010.md).
+
+Assistant instructions: [DB ownership, self-scoped tools and approvals, 2026-10-10](validation/assistant-instructions-db-20261010.md).
+
+Caller-created resources (partial P3): [API lifecycle and rule boundaries, 2026-10-10](validation/runtime-resources-20261010.md).
+
+Local Machines UI (partial P3): [Merged machine/environment navigation and discovery, 2026-10-10](validation/machines-ui-20261010.md).
+
+Historical peer authority (superseded): [HTTPS pairing, grants, leases and receipts, 2026-10-11](validation/peer-authority-20261011.md).
+
 ## Research on demand
 
 `research/` contains dated background material, not current implementation specifications:
@@ -86,3 +96,7 @@ Multiple assistants: [Owner isolation, rule drafts and grouped Tasks, 2026-10-10
 ## Maintenance rules
 
 Maintain documentation in English. Keep documentation consistent with the overall architecture; implementation details are determined by the code and do not require corresponding documentation updates. Keep one architecture overview per topic, progress in the development plan, and commands in the relevant entry-point document. Acceptance reports record the date, method, results, and untested scope; append later changes without rewriting old observations as new conclusions. Keep superseded recommendations in Git history or label them historical.
+
+Remote Environment adapter (partial P3): [Owner approvals, destination rules, workspace continuity and connection UI, 2026-10-11](validation/remote-environment-20261011.md).
+
+Control membership (P3a): [Outward connection, sole Control and receipt recovery, 2026-10-11](validation/control-membership-20261011.md).

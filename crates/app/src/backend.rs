@@ -67,6 +67,9 @@ fn request(path: &str, body: Option<Value>, timeout: Duration) -> Result<Respons
         && path.starts_with("/api/v1/")
         && !path.starts_with("/api/v1/assistants")
         && !path.starts_with("/api/v1/assistant-tasks")
+        && path != "/api/v1/runtime"
+        && path != "/api/v1/machines"
+        && path != "/api/v1/machine-connections"
     {
         format!("/api/v1/assistants/{selected}/{}", &path[8..])
     } else {
@@ -185,6 +188,8 @@ impl Requests {
         if path.starts_with("/api/v1/assistants")
             || path.starts_with("/api/v1/assistant-tasks")
             || path == "/api/v1/runtime"
+            || path == "/api/v1/machines"
+            || path == "/api/v1/machine-connections"
         {
             return path.into();
         }

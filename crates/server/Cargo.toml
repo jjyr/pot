@@ -13,6 +13,7 @@ pot-sandbox-linux-podman.workspace = true
 pot-sandbox-macos-apple-container.workspace = true
 pot-sandbox-macos-apple-vm.workspace = true
 pot-runtime.workspace = true
+pot-core.workspace = true
 pot-protocol.workspace = true
 anyhow = "1"
 serde_json.workspace = true

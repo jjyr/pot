@@ -1,3 +1,4 @@
+let machineReply=null,machinePending=false;
 import {createInstaller, isInstalled} from '/install.js';
 let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
 let scope='active', query='', offset=0, nextOffset=null, usageDays=7, usageOffset=0, pushStatus;
@@ -7,7 +8,7 @@ let pageData={}, connectionNotice=false, accessToken='', authenticated=false;
 const incomingToken=new URLSearchParams(location.hash.slice(1)).get('access_token');
 if(incomingToken!==null)history.replaceState(history.state,'',location.pathname+location.search);
 const initialRoute=new URLSearchParams(location.search);
-task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','sandbox','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
+task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','machines','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
 function navigate(){history.pushState({page,task,scope,query,offset,assistantId},'',(task?'/?task='+encodeURIComponent(task):'/?page='+page)+'&assistant='+encodeURIComponent(assistantId));}
 
 const el=id=>document.getElementById(id);
@@ -34,11 +35,11 @@ function configureNotice(message=''){
   if(module)module.update_view(JSON.stringify({...pageData,connected:false,notice:message}));
 }
 async function api(path,value,owner=assistantId){
-  if(path.startsWith('/api/v1/')&&!path.startsWith('/api/v1/assistants')&&!path.startsWith('/api/v1/assistant-tasks')&&path!=='/api/v1/runtime')path='/api/v1/assistants/'+encodeURIComponent(owner)+'/'+path.slice(8);
+  if(path.startsWith('/api/v1/')&&!path.startsWith('/api/v1/assistants')&&!path.startsWith('/api/v1/assistant-tasks')&&path!=='/api/v1/runtime'&&path!=='/api/v1/machines'&&path!=='/api/v1/machine-connections')path='/api/v1/assistants/'+encodeURIComponent(owner)+'/'+path.slice(8);
 
   const r=await fetch(path,{credentials:'same-origin',cache:'no-store',headers:{...(value===undefined?{}:{'Content-Type':'application/json'}),...(accessToken?{Authorization:'Bearer '+accessToken}:{})},...(value===undefined?{}:{method:'POST',body:JSON.stringify(value)})});
   if(r.status===401){configureNotice(t('web.token-invalid'));throw Error(t('web.token-invalid'));}
-  const body=await r.json();if(!r.ok)throw Error(body.message||body.code||String(r.status));return body;
+  const body=await r.json();if(!r.ok)throw Error(body.error||body.message||body.code||String(r.status));return body;
 }
 async function configure(token){
   accessToken=token.trim();if(!/^[A-Za-z0-9_-]{43}$/.test(accessToken))throw Error(t('web.token-invalid'));
@@ -49,8 +50,17 @@ async function refresh(){
   const requestedAssistant=assistantId, route=task, requestedPage=page, requestedQuery=`${scope}:${query}:${offset}:${usageDays}:${usageOffset}`;
   try{
     const directory=await api('/api/v1/runtime');
-    const required={chat:'conversation',task:'tasks',tasks:'tasks',sandbox:'sandbox_management',usage:'accounting',schedules:'schedules'}[requestedPage];
+    const required={chat:'conversation',task:'tasks',tasks:'tasks',machines:'runtime',usage:'accounting',schedules:'schedules'}[requestedPage];
     if(required&&!directory.capabilities?.includes(required))throw Error('Runtime capability unavailable: '+required);
+    if(requestedPage==='machines'){
+      const machines=await api('/api/v1/machines');
+      if(requestedAssistant!==assistantId||requestedPage!==page)return;
+      const local=machines.machines.find(m=>m.local);
+      const data={connected:true,page,locale:language,runtime:directory,machines,machine_reply:machineReply,machine_pending:machinePending,
+        sandbox_inventory:{items:local?.environments.filter(e=>e.environment_ref?.target.kind==='sandbox')||[],selected:local?.default},
+        dark:matchMedia('(prefers-color-scheme: dark)').matches,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches};
+      pageData=data;module.update_view(JSON.stringify(data));return;
+    }
     const current=await api(route?`/api/v1/tasks/${encodeURIComponent(route)}`:'/api/v1/snapshot',undefined,requestedAssistant);
     if(requestedAssistant!==assistantId||route!==task||requestedPage!==page)return;
     snapshot=current;
@@ -61,7 +71,6 @@ async function refresh(){
     if(page==='chat'){data.assistant_rules=await api(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await api('/api/v1/agent',undefined,requestedAssistant);}
     if(page==='chat'||page==='task')data.permissions=await api('/api/v1/permissions',undefined,requestedAssistant);
     if(page==='tasks'){const result=await api(`/api/v1/assistant-tasks?scope=${scope}&q=${encodeURIComponent(query)}&offset=${offset}&limit=20`);data.task_page=result;data.task_query={scope,q:query,offset,limit:20,selected:''};nextOffset=result.next_offset;}
-    if(page==='sandbox'){const result=await api('/api/v1/sandboxes',undefined,requestedAssistant);data.sandbox_inventory=result;}
     if(page==='usage'){data.usage=await api('/api/v1/usage/summary?days='+usageDays+'&offset='+usageOffset+'&timezone='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone),undefined,requestedAssistant);}
     if(page==='schedules'){data.schedules=await api('/api/v1/schedules',undefined,requestedAssistant);}
     if(requestedAssistant!==assistantId||route!==task||requestedPage!==page||requestedQuery!==`${scope}:${query}:${offset}:${usageDays}:${usageOffset}`)return;
@@ -88,6 +97,15 @@ async function sendPending(){
   if(receipt)accepted=receipt;notice=t('mobile.shell.received');
 }
 window.potAction=async(action,value)=>{
+  if(action==='machine-command'){
+    if(machinePending)return;
+    machinePending=true;
+    const intent=JSON.parse(value);
+    try{machineReply={intent,result:await api('/api/v1/machine-connections',intent.command)};}
+    catch(e){machineReply={intent,error:e.message};}
+    finally{machinePending=false;await refresh();}
+    return;
+  }
   const write=action==='send'||action==='retry';
   if(write&&sending)return;
   if(action==='assistant-save'&&assistantSaving)return;

@@ -12,6 +12,9 @@ use std::{
     },
     path::Path,
 };
+mod control_execution;
+mod host_execution;
+pub use control_execution::ControlOperation;
 #[cfg(test)]
 mod tests;
 
@@ -21,6 +24,7 @@ pub enum Composition {
     #[default]
     Bare,
     Environment,
+    Host,
     Assistant,
 }
 impl Composition {
@@ -53,10 +57,15 @@ impl Composition {
     pub fn has_environments(self) -> bool {
         self != Self::Bare
     }
+    pub fn has_sandboxes(self) -> bool {
+        matches!(self, Self::Environment | Self::Assistant)
+    }
     pub fn capabilities(self) -> &'static [&'static str] {
         match self {
             Self::Bare => &["runtime"],
+            Self::Host => &["runtime", "host_execution"],
             Self::Environment => &[
+                "host_execution",
                 "runtime",
                 "sandbox_execution",
                 "sandbox_management",
@@ -73,6 +82,7 @@ impl Composition {
                 "sandbox_execution",
                 "sandbox_management",
                 "resources",
+                "host_execution",
                 "host_approval",
             ],
         }
@@ -84,8 +94,11 @@ impl std::str::FromStr for Composition {
         match value {
             "bare" => Ok(Self::Bare),
             "environment" => Ok(Self::Environment),
+            "host" => Ok(Self::Host),
             "assistant" => Ok(Self::Assistant),
-            _ => bail!("Unknown Runtime composition: expected bare, environment or assistant"),
+            _ => {
+                bail!("Unknown Runtime composition: expected bare, host, environment or assistant")
+            }
         }
     }
 }
@@ -106,8 +119,11 @@ pub struct Host {
     pub(crate) lock: Arc<std::fs::File>,
     runtime_id: String,
     composition: Composition,
+    pub(crate) host_enabled: bool,
     stop: tokio::sync::watch::Sender<bool>,
-    environment: Option<Arc<sandbox::Manager>>,
+    sandboxes: Option<Arc<sandbox::Manager>>,
+    host_operations: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) host_environment: Option<Arc<environment::HostEnvironment>>,
 }
 impl Host {
     pub(crate) fn open(data: &Path, composition: Composition) -> Result<Self> {
@@ -147,12 +163,38 @@ impl Host {
             lock: Arc::new(file),
             runtime_id: identity.runtime_id,
             composition,
+            host_enabled: composition.has_environments(),
             stop: tokio::sync::watch::channel(false).0,
-            environment: None,
+            sandboxes: None,
+            host_operations: Arc::new(tokio::sync::Mutex::new(())),
+            host_environment: None,
         })
     }
-    pub(crate) fn attach_environment(&mut self, manager: Arc<sandbox::Manager>) {
-        self.environment = Some(manager);
+    pub(crate) fn attach_host_environment(&mut self) {
+        self.host_environment = Some(Arc::new(environment::HostEnvironment::default()));
+    }
+    pub(crate) fn attach_sandboxes(&mut self, manager: Arc<sandbox::Manager>) {
+        self.sandboxes = Some(manager);
+    }
+    pub(crate) fn sandbox_manager(&self) -> Option<Arc<sandbox::Manager>> {
+        self.sandboxes.clone()
+    }
+    pub(crate) fn resource_capabilities(&mut self, assistant: bool) {
+        self.composition = if assistant {
+            Composition::Assistant
+        } else if self.sandboxes.is_some() {
+            Composition::Environment
+        } else if self.host_environment.is_some() {
+            Composition::Host
+        } else {
+            Composition::Bare
+        };
+    }
+    pub fn instance_lock(&self) -> Arc<std::fs::File> {
+        self.lock.clone()
+    }
+    pub fn data_dir(&self) -> &Path {
+        &self.data
     }
     pub fn composition(&self) -> Composition {
         self.composition
@@ -161,9 +203,17 @@ impl Host {
         &self.runtime_id
     }
     pub fn describe(&self) -> Value {
-        json!({"schema_version":1,"runtime_id":self.runtime_id,"boot_id":self.boot,"composition":self.composition,"capabilities":self.composition.capabilities()})
+        {
+            let capabilities: Vec<_> = self
+                .composition
+                .capabilities()
+                .iter()
+                .filter(|c| self.host_enabled || !["host_execution", "host_approval"].contains(c))
+                .collect();
+            json!({"schema_version":1,"runtime_id":self.runtime_id,"boot_id":self.boot,"composition":self.composition,"capabilities":capabilities})
+        }
     }
-    pub(crate) fn endpoint(&self, port: u16) -> RuntimeEndpoint {
+    pub fn endpoint(&self, port: u16) -> RuntimeEndpoint {
         RuntimeEndpoint {
             api_version: API_VERSION,
             port,
@@ -184,32 +234,43 @@ impl Host {
         }
         Ok(())
     }
-    fn environment(&self) -> ApiResult<&Arc<sandbox::Manager>> {
-        self.environment.as_ref().ok_or_else(|| {
+    fn sandboxes(&self) -> ApiResult<&Arc<sandbox::Manager>> {
+        self.sandboxes.as_ref().ok_or_else(|| {
             error(
                 StatusCode::CONFLICT,
                 "capability_unavailable",
-                "Environment service is disabled",
+                "Sandbox service is disabled",
             )
         })
     }
     pub fn router(&self) -> Router {
         let mut routes = Router::new().route("/api/v1/runtime", get(describe));
+        if matches!(
+            self.composition,
+            Composition::Host | Composition::Environment
+        ) {
+            routes = routes
+                .route("/api/v1/environments", get(environment_inventory))
+                .route("/api/v1/execution", post(execute))
+                .route("/api/v1/environment/cancel", post(cancel))
+                .route("/api/v1/environment/operations", get(host_execution::query));
+        }
         if self.composition == Composition::Environment {
             routes = routes
                 .route("/api/v1/sandboxes", get(inventory).post(manage))
                 .route(
                     "/api/v1/sandbox-resources",
                     get(resources).post(resource_command),
-                )
-                .route("/api/v1/execution", post(execute))
-                .route("/api/v1/environment/cancel", post(cancel));
+                );
         }
         routes.with_state(self.clone())
     }
     pub(crate) async fn shutdown(&self) -> Result<()> {
         self.stop.send_replace(true);
-        if let Some(environment) = &self.environment {
+        if let Some(host) = &self.host_environment {
+            host.shutdown_host().await?;
+        }
+        if let Some(environment) = &self.sandboxes {
             environment.shutdown().await?;
         }
         Ok(())
@@ -225,7 +286,24 @@ async fn describe(State(host): State<Host>, h: HeaderMap) -> ApiResult<Json<Valu
 }
 async fn inventory(State(host): State<Host>, h: HeaderMap) -> ApiResult<Json<Value>> {
     host.authorize(&h)?;
-    Ok(Json(host.environment()?.inventory().await))
+    Ok(Json(host.sandboxes()?.inventory().await))
+}
+async fn environment_inventory(State(host): State<Host>, h: HeaderMap) -> ApiResult<Json<Value>> {
+    host.authorize(&h)?;
+    let mut items = vec![];
+    if host.host_enabled && host.host_environment.is_some() {
+        items.push(json!({"environment_ref":pot_core::EnvironmentRef::host(&host.runtime_id),"kind":"host","management":false,"workspace":host.data.join("host-runs"),"execution_authority":"native_operator"}));
+    }
+    if let Some(manager) = &host.sandboxes {
+        let inventory = manager.inventory().await;
+        for mut item in inventory["items"].as_array().cloned().unwrap_or_default() {
+            let target = item["id"].as_str().unwrap_or("");
+            item["environment_ref"] =
+                json!(pot_core::EnvironmentRef::sandbox(&host.runtime_id, target));
+            items.push(item);
+        }
+    }
+    Ok(Json(json!({"runtime_id":host.runtime_id,"items":items})))
 }
 async fn manage(
     State(host): State<Host>,
@@ -233,7 +311,7 @@ async fn manage(
     Json(args): Json<Value>,
 ) -> ApiResult<Json<Value>> {
     host.authorize(&h)?;
-    let manager = host.environment()?;
+    let manager = host.sandboxes()?;
     // Host mapping approval needs an explicit owner approval service, absent here.
     if args["action"] == "set_mounts" {
         return Err(error(
@@ -277,7 +355,7 @@ async fn manage(
 }
 async fn resources(State(host): State<Host>, h: HeaderMap) -> ApiResult<Json<Value>> {
     host.authorize(&h)?;
-    let hub = host.environment()?.resources.as_ref();
+    let hub = host.sandboxes()?.resources.as_ref();
     Ok(Json(
         json!({"requests":hub.map(|h|h.requests()),"cache":hub.map(|h|h.cache()).transpose().map_err(internal)?}),
     ))
@@ -288,7 +366,7 @@ async fn resource_command(
     Json(args): Json<Value>,
 ) -> ApiResult<Json<Value>> {
     host.authorize(&h)?;
-    let hub = host.environment()?.resources.as_ref().ok_or_else(|| {
+    let hub = host.sandboxes()?.resources.as_ref().ok_or_else(|| {
         error(
             StatusCode::CONFLICT,
             "resources",
@@ -314,7 +392,10 @@ async fn resource_command(
 struct Operation {
     run_id: String,
     call_id: String,
+    #[serde(default)]
     sandbox_id: String,
+    #[serde(default)]
+    environment_ref: Option<pot_core::EnvironmentRef>,
     name: String,
     args: Value,
 }
@@ -345,8 +426,34 @@ async fn execute(
             "Unsupported Environment operation",
         ));
     }
-    let manager = host.environment()?;
-    let target = manager.assignment(&request.sandbox_id).map_err(internal)?;
+    if let Some(reference) = &request.environment_ref {
+        reference
+            .validate()
+            .map_err(|e| error(StatusCode::BAD_REQUEST, "environment", &e.to_string()))?;
+        if !reference.is_local_to(&host.runtime_id) || !request.sandbox_id.is_empty() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "environment",
+                "Conflicting or nonlocal Environment target",
+            ));
+        }
+        if matches!(reference.target, pot_core::EnvironmentTarget::Host {}) {
+            return host_execution::execute(&host, request)
+                .await
+                .map(Json)
+                .map_err(|e| error(StatusCode::CONFLICT, "host_execution", &e.to_string()));
+        }
+    }
+    let sandbox_id = request
+        .environment_ref
+        .as_ref()
+        .and_then(|reference| match &reference.target {
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => Some(sandbox_id.as_str()),
+            _ => None,
+        })
+        .unwrap_or(&request.sandbox_id);
+    let manager = host.sandboxes()?;
+    let target = manager.assignment(sandbox_id).map_err(internal)?;
     if request.args.get("sandbox_id").is_some() {
         return Err(error(
             StatusCode::BAD_REQUEST,
@@ -378,6 +485,7 @@ async fn execute(
     let mut args = request.args;
     args["sandbox_id"] = json!(target);
     let grant = pot_sandbox::AccessGrant {
+        workspace_owner: None,
         owner,
         turn: request.run_id,
         thread_generation: 1,
@@ -422,7 +530,6 @@ async fn cancel(
             "A UUID run identity is required",
         )
     })?;
-    let manager = host.environment()?;
     let owner = format!("operator:{}", request.run_id);
     let directory = host.data.join("environment-cancellations");
     std::fs::create_dir_all(&directory).map_err(|e| internal(e.into()))?;
@@ -431,7 +538,12 @@ async fn cancel(
         &json!({"run_id":request.run_id,"cancel_requested":true}),
     )
     .map_err(internal)?;
-    manager.finish(&owner).await.map_err(internal)?;
-    manager.drain(&owner).await.map_err(internal)?;
+    if let Some(executor) = &host.host_environment {
+        executor.finish_host(&owner).await.map_err(internal)?;
+    }
+    if let Some(manager) = &host.sandboxes {
+        manager.finish(&owner).await.map_err(internal)?;
+        manager.drain(&owner).await.map_err(internal)?;
+    }
     Ok(Json(json!({"run_id":request.run_id,"cleanup":"confirmed"})))
 }

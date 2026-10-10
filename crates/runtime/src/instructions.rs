@@ -194,51 +194,71 @@ fn project(
     Ok(catalog)
 }
 pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
-    let target = if s.is_worker {
-        s.sandbox_id
-            .clone()
-            .ok_or_else(|| anyhow!("Worker Sandbox missing"))?
-    } else {
-        s.environment_service.manager.assignment("")?
-    };
-    let filesystem = WorkspaceFileSystem {
-        source: s.environment_service.manager.workspace(&target),
-        mount: s
-            .environment_service
-            .manager
-            .guest_workspace(&target)?
-            .into(),
-    };
-    let cwd = if s.is_worker {
-        filesystem.mount.join("tasks").join(&s.usage_scope)
-    } else {
-        filesystem.mount.clone()
-    };
-    let (global, warning) = s
-        .agent_service
-        .resources
-        .global_instructions
-        .lock()
-        .unwrap()
-        .refresh(&s.agent_service.resources.home.join("AGENTS.md"));
-    let mut catalog = project(&filesystem, &cwd, &filesystem.mount)?;
-    let rules_path = s.assistant_rules_path();
-    let rules = match fs::read_to_string(&rules_path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(e.into()),
-    };
-    if !rules.trim().is_empty() {
-        catalog.text.insert_str(
-            0,
-            &format!(
-                "\n\nAssistant AGENTS.md instructions ({}):\n{rules}",
-                rules_path.display()
+    if crate::remote_environment::is_remote(s) {
+        let contexts = s.remote_context.lock().unwrap();
+        let context = contexts
+            .get(s.environment_ref.as_ref().unwrap())
+            .ok_or_else(|| anyhow!("Remote project instructions have not been prepared"))?;
+        let mut skills: Vec<pot_agent::Skill> = serde_json::from_value(
+            context
+                .context
+                .get("skills")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )?;
+        if let Some(selection) = &s.skill_selection {
+            anyhow::ensure!(
+                selection
+                    .iter()
+                    .all(|name| skills.iter().any(|skill| &skill.name == name)),
+                "Selected skill is not installed on the destination machine"
+            );
+            skills.retain(|skill| selection.contains(&skill.name));
+        }
+        let skill_prompt = pot_agent::format_skills_for_prompt(&skills)?;
+        return Ok(InstructionCatalog {
+            text: format!(
+                "Follow applicable directory instructions on the destination machine. Before editing descendants, inspect their AGENTS.md files. Destination workspace: {}\n{}{}",
+                context.context["workspace"].as_str().unwrap_or(""),
+                context.context["instructions"].as_str().unwrap_or(""),
+                skill_prompt
             ),
-        );
+            diagnostics: ["diagnostics", "skill_diagnostics"]
+                .iter()
+                .flat_map(|key| context.context[*key].as_array().into_iter().flatten())
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+        });
     }
+    let (source, mount, _, cwd) = crate::environment::workspace_view(s)?;
+    let filesystem = WorkspaceFileSystem { source, mount };
+    let (global, warning) = if s.is_worker {
+        (String::new(), None)
+    } else {
+        s.agent_service
+            .resources
+            .global_instructions
+            .lock()
+            .unwrap()
+            .refresh(&s.agent_service.resources.home.join("AGENTS.md"))
+    };
+    let mut catalog = project(&filesystem, &cwd, &filesystem.mount)?;
     if !s.is_worker {
-        catalog.text.insert_str(0, &format!("\n\nThis assistant's persistent rules file is {}. For lasting rule changes, use apply_patch with this exact absolute path and request owner permission before writing this file. Saving rules does not grant execution permissions.\n", rules_path.display()));
+        let rules = crate::assistant_instructions::read(s)?;
+        let text = rules["text"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Assistant instructions missing"))?;
+        if !text.trim().is_empty() {
+            catalog.text.insert_str(
+                0,
+                &format!(
+                    "\n\nThis assistant's AGENTS.md instructions (revision {}):\n{text}",
+                    rules["revision"].as_str().unwrap()
+                ),
+            );
+        }
+        catalog.text.insert_str(0, "\n\nYour AGENTS.md belongs to this assistant, independently of execution environment. Use read_agent_instructions to read its current content/revision and update_agent_instructions to propose a full replacement. Updates require owner approval. Include applicable rules in delegated task briefs; workers do not inherit this assistant's AGENTS.md.\n");
     }
 
     if let Some(warning) = warning {
@@ -253,6 +273,16 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
         catalog.text.insert_str(0, "\n\nFollow applicable directory instructions; deeper directory guidance takes precedence on conflicts, and the user's explicit instructions take precedence over these files. Before editing below the current directory, inspect additional AGENTS.md files along the target directory path.\n");
     }
     Ok(catalog)
+}
+
+/// Destination-owned project rules only: no assistant DB or global Agent home.
+pub(crate) fn project_workspace(
+    source: PathBuf,
+    mount: PathBuf,
+    cwd: PathBuf,
+) -> Result<InstructionCatalog> {
+    let filesystem = WorkspaceFileSystem { source, mount };
+    project(&filesystem, &cwd, &filesystem.mount)
 }
 
 #[cfg(test)]
@@ -437,7 +467,7 @@ mod tests {
                     .await
                     .unwrap();
             }
-            let base = root.environment_service.manager.workspace(target);
+            let base = root.environment_service.sandboxes.workspace(target);
             fs::create_dir_all(&base).unwrap();
             fs::write(base.join(".git"), "gitdir").unwrap();
             fs::write(base.join("AGENTS.md"), text).unwrap();
@@ -479,7 +509,8 @@ mod tests {
                 && !main.contains("WRONG_OVERRIDE")
         );
         let child = load(&worker).unwrap().text;
-        assert!(child.contains("FIRST") && child.contains("TASK") && child.contains("GLOBAL"));
+        assert!(child.contains("FIRST") && child.contains("TASK"));
+        assert!(!child.contains("GLOBAL"));
         assert!(!child.contains("SECOND"));
         assert!(child.contains(&format!("/data/workspace/tasks/{}", task.id)));
         assert!(!root.data.parent().unwrap().join("helper.sock").exists());
@@ -488,7 +519,7 @@ mod tests {
     #[tokio::test]
     async fn macos_worker_instructions_skills_and_artifacts_use_provider_paths() {
         let mut root = tasks::tests::fixture();
-        root.environment_service.manager = Arc::new(
+        root.environment_service.sandboxes = Arc::new(
             sandbox::Manager::with_providers(
                 &root.data,
                 vec![
@@ -507,7 +538,7 @@ mod tests {
         sandbox::management(&root, &json!({"action":"select","sandbox_id":"mac-dev"}))
             .await
             .unwrap();
-        let base = root.environment_service.manager.workspace("mac-dev");
+        let base = root.environment_service.sandboxes.workspace("mac-dev");
         fs::create_dir_all(&base).unwrap();
         fs::write(base.join("AGENTS.md"), "MAC_PROJECT").unwrap();
         fs::write(base.join(".git"), "gitdir").unwrap();

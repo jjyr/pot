@@ -680,6 +680,8 @@ async fn run(
                     | "write_stdin"
                     | "apply_patch"
                     | "set_sandbox_mappings"
+                    | "read_agent_instructions"
+                    | "update_agent_instructions"
                     | "exec"
                     | "wait"
             )
@@ -694,13 +696,17 @@ async fn run(
                 .filter(|t| s.role == ExecutionRole::Main || t["name"] != "set_sandbox_mappings"),
         );
     }
+    if s.role == ExecutionRole::Main && s.feedback.permission_grants()?.is_some() {
+        available.extend(environment_tools::instruction_schemas());
+    }
     if s.feedback.permission_grants()?.is_some() {
         for tool in &mut available {
             if tool["name"].as_str().is_some_and(|name| {
                 permissions::is_execution_tool(name)
                     || settings.plugin_for_tool(name).is_ok_and(|p| p.is_some())
             }) {
-                tool["inputSchema"]["properties"]["environment"] = json!({"type":"string","description":"Execution target: host or sandbox:ID. Omitted uses this Agent's environment. Permissions are checked in that environment."});
+                tool["inputSchema"]["properties"]["environment"] =
+                    pot_core::environment_tools::selector_schema();
             }
         }
     }
@@ -745,6 +751,15 @@ async fn run(
     }
     if s.role != ExecutionRole::Summary {
         descriptor.apply_tools(&mut available)?;
+    }
+    if let Some(supported) = s.feedback.supported_execution_tools() {
+        available.retain(|tool| {
+            tool["name"].as_str().is_some_and(|name| {
+                let execution = permissions::is_execution_tool(name)
+                    || settings.plugin_for_tool(name).is_ok_and(|p| p.is_some());
+                !execution || supported.iter().any(|n| n == name)
+            })
+        });
     }
     let mut names = std::collections::HashSet::new();
     ensure!(
@@ -1036,6 +1051,12 @@ impl Dispatcher<'_> {
                 }
                 Ok(())
             })
+        } else if environment_tools::instructions_tool(&call.name) {
+            s.feedback
+                .prepare_permission_operation(&call.name, call.arguments.clone())
+                .map(|args| {
+                    call.arguments = args;
+                })
         } else if call.name == "set_sandbox_mappings" {
             environment_tools::normalize_mapping(&mut call.arguments).map(|()| {
                 call.arguments["environment"] = json!("host");
@@ -1059,7 +1080,7 @@ impl Dispatcher<'_> {
         let result = async {
             prepared?;
             permissions::authorize(s, thread, request, &call.id, &call.name, &call.arguments).await?;
-            if call.name == "set_sandbox_mappings" {
+            if call.name == "set_sandbox_mappings" || environment_tools::instructions_tool(&call.name) {
                 s.feedback
                     .execute_authorized_host(&call.name, call.arguments.clone())
                     .await

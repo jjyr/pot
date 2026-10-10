@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     path::PathBuf,
     process::{Command, Stdio},
@@ -38,7 +38,7 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
     let port = socket.local_addr().unwrap().port();
     drop(socket);
     let child = command(&root)
-        .args(["serve", "--composition", "assistant"])
+        .arg("serve")
         .env("POT_RUNTIME_BIND", "127.0.0.1:0")
         .env("POT_ACCESS_BIND", format!("127.0.0.1:{port}"))
         .env("POT_ACCESS_ORIGIN", format!("http://localhost:{port}"))
@@ -57,6 +57,24 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+    assert!(!process.root.join("product/pot-v2.sqlite").exists());
+    let resource_file = process.root.join("create-assistant.json");
+    std::fs::write(
+        &resource_file,
+        json!({"request_id":"cli-assistant","resource":{"kind":"assistant","name":"CLI"}})
+            .to_string(),
+    )
+    .unwrap();
+    let output = command(&process.root)
+        .args(["api", "/api/v1/runtime/resources"])
+        .arg(&resource_file)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     for args in [
         vec!["status"],
         vec!["tasks", "list"],

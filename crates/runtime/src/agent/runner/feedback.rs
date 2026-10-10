@@ -6,6 +6,7 @@ struct Feedback {
     service: Service,
     generation: u64,
     request: Option<String>,
+    instruction_reviews: Mutex<std::collections::BTreeMap<String, String>>,
 }
 impl Feedback {
     fn check(&self) -> Result<()> {
@@ -31,6 +32,21 @@ impl Feedback {
     }
 }
 impl ExecutionFeedback for Feedback {
+    fn supported_execution_tools(&self) -> Option<Vec<String>> {
+        if !crate::remote_environment::is_remote(&self.service) {
+            return None;
+        }
+        let contexts = self.service.remote_context.lock().unwrap();
+        let context = contexts.get(self.service.environment_ref.as_ref()?)?;
+        Some(
+            context.context["supported_operations"]
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
     fn requires_owner_review(&self, tool: &str, args: &Value) -> bool {
         crate::permissions::rules_edit_requires_review(&self.service, tool, args)
     }
@@ -39,6 +55,19 @@ impl ExecutionFeedback for Feedback {
         let name = name.to_owned();
         Box::pin(async move {
             self.check()?;
+            if ["read_agent_instructions", "update_agent_instructions"].contains(&name.as_str()) {
+                let revision = self
+                    .instruction_reviews
+                    .lock()
+                    .unwrap()
+                    .remove(&args.to_string());
+                return crate::assistant_instructions::execute(
+                    &self.service,
+                    &name,
+                    &args,
+                    revision.as_deref(),
+                );
+            }
             anyhow::ensure!(
                 !self.cancelled() && !self.service.is_worker && name == "set_sandbox_mappings",
                 "Host operation unavailable"
@@ -48,11 +77,27 @@ impl ExecutionFeedback for Feedback {
     }
     fn prepare_permission_operation(&self, name: &str, mut args: Value) -> Result<Value> {
         self.check()?;
+        if ["read_agent_instructions", "update_agent_instructions"].contains(&name) {
+            crate::assistant_instructions::validate_tool(&self.service, name, &args)?;
+            if name == "update_agent_instructions" {
+                let current = crate::assistant_instructions::read(&self.service)?;
+                self.instruction_reviews.lock().unwrap().insert(
+                    args.to_string(),
+                    current["revision"].as_str().unwrap().to_owned(),
+                );
+            }
+            return Ok(args);
+        }
+        if name == "manage_sandbox"
+            && crate::sandbox::remote_management_target(&self.service, &args)?.is_some()
+        {
+            return Ok(args);
+        }
         if name == "manage_sandbox" && args["action"] != "create" {
             args["sandbox_id"] = json!(
                 self.service
                     .environment_service
-                    .manager
+                    .sandboxes
                     .assignment(args["sandbox_id"].as_str().unwrap_or(""))?
             );
         }
@@ -125,6 +170,7 @@ impl ExecutionFeedback for Feedback {
     fn ready(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async {
             self.check()?;
+            crate::remote_environment::ready(&self.service).await?;
             crate::control::ready(&self.service).await
         })
     }
@@ -209,7 +255,7 @@ fn make_context(
         orchestration::MAIN_PROMPT.into()
     };
     {
-        main_prompt = main_prompt.replace("Environment tools execute in the current default Sandbox unless you pass an explicit sandbox_id.", "Main execution defaults to Host; use environment=sandbox:ID for explicit Sandbox execution.").replace("Direct Host tool execution is unavailable.", "You normally chat on the Host. exec_command, write_stdin and apply_patch operate in the selected execution environment. Main defaults to host; task agents default to their assigned Sandbox. environment=host explicitly requests Host execution; environment=sandbox:ID selects a Sandbox. Each environment loads its own ~/.pot/agent/permissions.json. Host policy defaults to ask: execution needs a matching grant or owner approval. Sandbox policy defaults to allow: ordinary Sandbox execution does not need approval, unless the owner configures ask. Task and Sandbox management do not require permission approval. write_stdin continues an authorized process session without asking again. Role and assignment boundaries still apply. Use set_sandbox_mappings only for an owner-reviewed mapping change. Never claim permanent permission exists before approval.");
+        main_prompt = main_prompt.replace("Environment tools execute in the current default Sandbox unless you pass an explicit sandbox_id.", "Main execution defaults to Host; use environment=sandbox:ID for explicit Sandbox execution.").replace("Direct Host tool execution is unavailable.", "You normally chat on the Host. exec_command, write_stdin and apply_patch operate in the selected execution environment. Main defaults to host; task agents default to their fixed Host or Sandbox target. environment=host explicitly requests Host execution; environment=sandbox:ID selects a Sandbox. Each environment loads its own ~/.pot/agent/permissions.json. Host policy defaults to ask: execution needs a matching grant or owner approval. Sandbox policy defaults to allow: ordinary Sandbox execution does not need approval, unless the owner configures ask. Task and Sandbox management do not require permission approval. write_stdin continues an authorized process session without asking again. Role and assignment boundaries still apply. Use set_sandbox_mappings only for an owner-reviewed mapping change. Never claim permanent permission exists before approval.");
     }
     let instructions = if role == ExecutionRole::Summary {
         String::new()
@@ -230,29 +276,47 @@ fn make_context(
             {
                 Some(executor.clone())
             } else {
-                Some(Arc::new(crate::sandbox::Tools {
+                Some(Arc::new(crate::environment::Tools {
                     service: s.clone(),
                     generation: thread.generation,
                 }))
             }
             #[cfg(not(test))]
             {
-                Some(Arc::new(crate::sandbox::Tools {
+                Some(Arc::new(crate::environment::Tools {
                     service: s.clone(),
                     generation: thread.generation,
                 }))
             }
         },
         data: s.data.clone(),
-        workspace: {
+        workspace: if crate::remote_environment::is_remote(s) {
+            let contexts = s.remote_context.lock().unwrap();
+            let context = contexts
+                .get(s.environment_ref.as_ref().unwrap())
+                .ok_or_else(|| anyhow!("Remote context missing"))?;
+            PathBuf::from(
+                context.context["workspace"]
+                    .as_str()
+                    .ok_or_else(|| anyhow!("Destination workspace missing"))?,
+            )
+        } else {
             #[cfg(test)]
             let path = if s.test_tool_executor.is_some() {
                 s.workspace.clone()
             } else {
-                s.data.join("agent-workspace")
+                if s.is_worker || s.environment_service.sandboxes.assignment("").is_err() {
+                    s.workspace.clone()
+                } else {
+                    s.data.join("agent-workspace")
+                }
             };
             #[cfg(not(test))]
-            let path = s.data.join("agent-workspace");
+            let path = if s.is_worker || s.environment_service.sandboxes.assignment("").is_err() {
+                s.workspace.clone()
+            } else {
+                s.data.join("agent-workspace")
+            };
             std::fs::create_dir_all(&path)?;
             path
         },
@@ -265,6 +329,7 @@ fn make_context(
             service: s.clone(),
             generation: thread.generation,
             request: request.map(|r| r.request_id.clone()),
+            instruction_reviews: Default::default(),
         }),
     })
 }
@@ -301,6 +366,7 @@ mod tests {
             service: s.clone(),
             generation: thread.generation,
             request: Some(request.request_id.clone()),
+            instruction_reviews: Default::default(),
         };
         assert!(!feedback.cancelled());
         assert!(feedback.record_turn("other").is_err());
@@ -322,6 +388,7 @@ mod tests {
             service: s.clone(),
             generation: next.generation,
             request: Some(request.request_id),
+            instruction_reviews: Default::default(),
         };
         s.turn(None);
         assert!(current_feedback.check().is_err());

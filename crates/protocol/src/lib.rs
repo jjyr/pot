@@ -186,6 +186,11 @@ pub enum TaskPhase {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskInfo {
+    /// Active remote work is awaiting connectivity, authority or its original receipt.
+    #[serde(default)]
+    pub remote_waiting: bool,
+    #[serde(default)]
+    pub environment_ref: Option<pot_core::EnvironmentRef>,
     #[serde(default)]
     pub assistant_id: String,
     pub sandbox_id: String,
@@ -227,6 +232,8 @@ pub struct TaskRequirements {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CreateTask {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_ref: Option<pot_core::EnvironmentRef>,
     #[serde(default)]
     pub skills: Option<Vec<String>>,
     #[serde(default)]

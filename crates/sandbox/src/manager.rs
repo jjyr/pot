@@ -15,6 +15,7 @@ fn id() -> String {
 }
 /// Product-authorized execution context, never accepted from model arguments.
 pub struct AccessGrant {
+    pub workspace_owner: Option<String>,
     pub owner: String,
     pub turn: String,
     pub thread_generation: u64,
@@ -80,7 +81,7 @@ pub struct Manager {
     gates: Mutex<BTreeMap<String, Arc<tokio::sync::RwLock<()>>>>,
     sessions: Mutex<BTreeMap<String, String>>,
     lifecycle: tokio::sync::Mutex<()>,
-    providers: BTreeMap<String, Arc<dyn Provider>>,
+    providers: Mutex<BTreeMap<String, Arc<dyn Provider>>>,
     default_provider: String,
     call_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     instance_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -100,6 +101,17 @@ impl Drop for Lease {
 }
 impl Manager {
     pub fn open(data: &std::path::Path, providers: Vec<Arc<dyn Provider>>) -> Result<Self> {
+        Self::open_inventory(data, providers, true)
+    }
+    /// Resource-driven callers restore definitions but never invent a default instance.
+    pub fn open_empty(data: &std::path::Path, providers: Vec<Arc<dyn Provider>>) -> Result<Self> {
+        Self::open_inventory(data, providers, false)
+    }
+    fn open_inventory(
+        data: &std::path::Path,
+        providers: Vec<Arc<dyn Provider>>,
+        seed_default: bool,
+    ) -> Result<Self> {
         let default_provider = providers
             .first()
             .map(|p| p.descriptor().id)
@@ -117,7 +129,7 @@ impl Manager {
         let path = data.join("sandboxes.json");
         let book = if path.exists() {
             serde_json::from_slice(&std::fs::read(path)?)?
-        } else {
+        } else if seed_default {
             let item = Sandbox {
                 id: "default".into(),
                 name: "Linux".into(),
@@ -126,6 +138,12 @@ impl Manager {
             Inventory {
                 selected: item.id.clone(),
                 items: BTreeMap::from([(item.id.clone(), item)]),
+                retired: Default::default(),
+            }
+        } else {
+            Inventory {
+                selected: String::new(),
+                items: BTreeMap::new(),
                 retired: Default::default(),
             }
         };
@@ -160,12 +178,21 @@ impl Manager {
             gates: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(BTreeMap::new()),
             lifecycle: tokio::sync::Mutex::new(()),
-            providers: registered,
+            providers: Mutex::new(registered),
             default_provider,
             call_locks: Mutex::new(BTreeMap::new()),
             instance_locks: Mutex::new(BTreeMap::new()),
             generations: Mutex::new(generations),
         })
+    }
+    /// Register installed code independently from instance definitions.
+    pub fn register_provider(&self, provider: Arc<dyn Provider>) {
+        let name = provider.descriptor().id;
+        self.providers
+            .lock()
+            .unwrap()
+            .entry(name)
+            .or_insert(provider);
     }
     fn provider(&self, target: &str) -> Result<Arc<dyn Provider>> {
         let book = self.book.lock().unwrap();
@@ -174,6 +201,8 @@ impl Manager {
             .get(target)
             .ok_or_else(|| anyhow!("Unknown Sandbox"))?;
         self.providers
+            .lock()
+            .unwrap()
             .get(&definition.provider)
             .cloned()
             .ok_or_else(|| anyhow!("Sandbox Provider unavailable"))
@@ -381,6 +410,14 @@ impl Manager {
             .request(&self.context(target), route, body, timeout)
             .await
     }
+    /// Explicit execution preparation; inventory/permission inspection never invokes this.
+    pub async fn ready_for_execution(
+        &self,
+        target: &str,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<()> {
+        self.ready(target, cancelled).await
+    }
     async fn ready(
         &self,
         target: &str,
@@ -394,6 +431,7 @@ impl Manager {
             .or_default()
             .clone();
         let _lock = lock.lock().await;
+        anyhow::ensure!(!cancelled(), "Sandbox preparation cancelled");
         let mut state = self.helper(target, "start").await?;
         for _ in 0..1200 {
             anyhow::ensure!(!cancelled(), "Sandbox preparation cancelled");
@@ -475,6 +513,7 @@ impl Manager {
         delete_guard: &DeleteGuard<'_>,
     ) -> Result<Value> {
         anyhow::ensure!(!worker, "Workers cannot manage Sandboxes");
+        anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
         if args["action"] == "desktop" {
             let id = self.assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
             let _lease = self.acquire(&id).await?;
@@ -504,6 +543,7 @@ impl Manager {
             );
         }
         let _lock = self.lifecycle.lock().await;
+        anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
         if action == "create" {
             let id = args["sandbox_id"].as_str().unwrap_or("");
             anyhow::ensure!(
@@ -521,7 +561,7 @@ impl Manager {
             );
             let provider_id = args["provider"].as_str().unwrap_or(&self.default_provider);
             anyhow::ensure!(
-                self.providers.contains_key(provider_id),
+                self.providers.lock().unwrap().contains_key(provider_id),
                 "Sandbox Provider unavailable"
             );
             {
@@ -585,6 +625,7 @@ impl Manager {
                 "Sandbox busy; finish or recover operations first"
             );
             let state = self.helper(&id, "status").await?;
+            anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
             anyhow::ensure!(
                 state["phase"] == "stopped" || state["phase"] == "failed",
                 "Stop the environment before changing mappings"
@@ -621,6 +662,7 @@ impl Manager {
                 "Sandbox busy; finish or recover operations first"
             );
             let state = self.helper(&id, "status").await?;
+            anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
             anyhow::ensure!(
                 state["phase"] == "stopped" || state["phase"] == "failed",
                 "Stop the environment before changing settings"
@@ -647,6 +689,7 @@ impl Manager {
                 "Sandbox busy"
             );
             let state = self.helper(&id, "status").await?;
+            anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
             let pending: Vec<_> = self
                 .pending
                 .lock()
@@ -656,6 +699,7 @@ impl Manager {
                 .map(|(op, _)| op.clone())
                 .collect();
             for op in &pending {
+                anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
                 if state["phase"] != "stopped" {
                     let result = self
                         .request(&id, "cancel", &json!({"id":op}), Duration::from_secs(15))
@@ -705,6 +749,7 @@ impl Manager {
         if action != "start" {
             self.revoke_desktops(&id);
         }
+        anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
         let state = self
             .helper(&id, if action == "delete" { "stop" } else { action })
             .await?;
@@ -928,7 +973,7 @@ impl Manager {
             format!(
                 "{}/tasks/{}",
                 self.provider(&target)?.guest_workspace(),
-                grant.owner
+                grant.workspace_owner.as_deref().unwrap_or(&grant.owner)
             )
         } else {
             self.provider(&target)?.guest_workspace().into()
@@ -1091,7 +1136,8 @@ impl Manager {
                 errors.push(error.to_string());
             }
         }
-        for provider in self.providers.values() {
+        let providers: Vec<_> = self.providers.lock().unwrap().values().cloned().collect();
+        for provider in providers {
             if let Err(error) = provider.shutdown(&self.root).await {
                 errors.push(error.to_string());
             }

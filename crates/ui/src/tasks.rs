@@ -13,6 +13,7 @@ use gpui_kit::component::{
 };
 use serde_json::{Value, json};
 pub struct TasksView<'a> {
+    pub local_runtime: &'a str,
     pub search: &'a Entity<InputState>,
     pub scroll: &'a ScrollHandle,
     pub navigation: Div,
@@ -227,8 +228,19 @@ pub fn render(
                                             } else {
                                                 cx.theme().muted_foreground
                                             })
-                                            .child(phase(&task.phase, catalog))
-                                            .child(format!(" · Sandbox: {}", task.sandbox_id)),
+                                            .child(if task.remote_waiting {
+                                                catalog.text("main.waiting-for-remote-machine")
+                                            } else {
+                                                phase(&task.phase, catalog)
+                                            })
+                                            .child(format!(
+                                                " · {}",
+                                                crate::machine_state::task_location(
+                                                    task,
+                                                    catalog,
+                                                    view.local_runtime
+                                                )
+                                            )),
                                     )
                                     .when(task.pending > 0, |el| {
                                         el.child(

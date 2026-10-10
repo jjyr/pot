@@ -68,5 +68,21 @@ content revisions. Shared task rows carry assistant identity and group matching
 Tasks beneath assistant names. Native and browser transports capture the owner
 before asynchronous writes; late snapshots are discarded on owner changes.
 App navigation history includes Runtime and owner identity. The Server exposes
-bounded in-process and HTTPS client adapters; peer enrollment and connection
+bounded in-process and HTTPS client adapters; Control membership and connection
 management UI remain P3 work.
+
+## Machines (2026-10-10)
+
+`pot-ui::machines` replaces the standalone Sandbox destination in native and Web
+navigation. `machine_state` resolves typed view selections independently from
+execution defaults and retains targets present in offline cached inventory.
+The local Sandbox detail reuses `pot-ui::sandbox` without its old sidebar;
+Host and machine details use the common page components. Native desktop overlay
+visibility follows the selected detail, including navigation-history restoration.
+Web discovery works without a conversation capability. Native resource creation
+remains separate from read-only machine discovery and Web permissions.
+
+`machine_connections` displays Control membership and supports machine invitations
+and member removal. The former pairing and per-target grant controls are removed.
+Resource creation remains API-only. App connection setup and its local/remote icon
+are tracked in #39; Web stays connected to its configured Control.

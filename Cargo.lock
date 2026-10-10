@@ -6077,6 +6077,7 @@ dependencies = [
 name = "pot-protocol"
 version = "0.1.0"
 dependencies = [
+ "pot-core",
  "serde",
  "serde_json",
 ]
@@ -6220,6 +6221,7 @@ dependencies = [
  "hyper",
  "libc",
  "openssl",
+ "pot-core",
  "pot-protocol",
  "pot-runtime",
  "pot-sandbox",
@@ -6274,6 +6276,7 @@ name = "pot-ui"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "pot-core",
  "pot-protocol",
  "serde",
  "serde_json",

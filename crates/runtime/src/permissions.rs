@@ -28,7 +28,6 @@ pub(crate) struct Hub {
     path: Option<PathBuf>,
     changed: tokio::sync::Notify,
     remotes: Mutex<BTreeMap<String, Arc<Hub>>>,
-    executors: Mutex<BTreeMap<String, (u64, Arc<pot_tool_executor::LocalTools>)>>,
     decisions: tokio::sync::Mutex<()>,
 }
 fn read(path: &std::path::Path) -> Result<Option<Vec<u8>>> {
@@ -46,7 +45,6 @@ impl Hub {
             path: None,
             changed: Default::default(),
             remotes: Default::default(),
-            executors: Default::default(),
             decisions: Default::default(),
         }
     }
@@ -69,7 +67,6 @@ impl Hub {
             path: Some(path.into()),
             changed: Default::default(),
             remotes: Default::default(),
-            executors: Default::default(),
             decisions: Default::default(),
         };
         // Absence means no grants. Do not create or rewrite user configuration on startup.
@@ -116,7 +113,6 @@ impl Hub {
             path: Some(path.into()),
             changed: Default::default(),
             remotes: Default::default(),
-            executors: Default::default(),
             decisions: Default::default(),
         };
         {
@@ -317,90 +313,6 @@ impl Hub {
     pub fn configured(&self) -> bool {
         self.path.is_some()
     }
-    pub fn host_executor(
-        &self,
-        owner: &str,
-        generation: u64,
-    ) -> Arc<pot_tool_executor::LocalTools> {
-        let mut executors = self.executors.lock().unwrap();
-        if executors
-            .get(owner)
-            .is_some_and(|(old, _)| *old != generation)
-        {
-            executors.remove(owner);
-        }
-        executors
-            .entry(owner.into())
-            .or_insert_with(|| (generation, Arc::new(pot_tool_executor::LocalTools::host())))
-            .1
-            .clone()
-    }
-    async fn host_plugin_session(&self, owner: &str, generation: u64, session: &str) -> bool {
-        let executor = self
-            .executors
-            .lock()
-            .unwrap()
-            .get(owner)
-            .filter(|(bound, _)| *bound == generation)
-            .map(|(_, e)| e.clone());
-        match executor {
-            Some(e) => e.has_plugin_session(session).await,
-            None => false,
-        }
-    }
-    pub async fn reap_host_plugins(&self) -> Result<()> {
-        let executors: Vec<_> = self
-            .executors
-            .lock()
-            .unwrap()
-            .values()
-            .map(|(_, e)| e.clone())
-            .collect();
-        for executor in executors {
-            executor.reap_plugins().await?;
-        }
-        Ok(())
-    }
-    pub async fn finish_stale_host(&self, owner: &str, generation: u64) -> Result<()> {
-        let executor = {
-            let mut executors = self.executors.lock().unwrap();
-            if executors
-                .get(owner)
-                .is_some_and(|(bound, _)| *bound != generation)
-            {
-                executors.remove(owner).map(|(_, e)| e)
-            } else {
-                None
-            }
-        };
-        if let Some(executor) = executor {
-            executor.shutdown().await?;
-        }
-        Ok(())
-    }
-    pub async fn shutdown_host(&self) -> Result<()> {
-        let executors = std::mem::take(&mut *self.executors.lock().unwrap());
-        let mut errors = vec![];
-        for (_, (_, executor)) in executors {
-            if let Err(error) = executor.shutdown().await {
-                errors.push(error.to_string());
-            }
-        }
-        anyhow::ensure!(errors.is_empty(), "{}", errors.join("; "));
-        Ok(())
-    }
-    pub async fn finish_host(&self, s: &Service) -> Result<()> {
-        let executor = self
-            .executors
-            .lock()
-            .unwrap()
-            .remove(&s.usage_scope)
-            .map(|(_, e)| e);
-        if let Some(executor) = executor {
-            executor.shutdown().await?;
-        }
-        Ok(())
-    }
     pub fn environment(self: &Arc<Self>, environment: &str) -> Result<Arc<Self>> {
         if environment == "host" {
             return Ok(self.clone());
@@ -423,6 +335,28 @@ impl Hub {
         );
         all
     }
+    fn remote_hub(self: &Arc<Self>, environment: &str) -> Result<Arc<Self>> {
+        if let Some(hub) = self.remotes.lock().unwrap().get(environment).cloned() {
+            return Ok(hub);
+        }
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(environment.as_bytes());
+        let name = digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let path = self
+            .path
+            .as_ref()
+            .ok_or_else(|| anyhow!("Remote owner approval storage is unavailable"))?
+            .parent()
+            .unwrap()
+            .join("remote-permissions")
+            .join(format!("{name}.json"));
+        let hub = Arc::new(Self::open(&path)?);
+        let mut remotes = self.remotes.lock().unwrap();
+        Ok(remotes.entry(environment.into()).or_insert(hub).clone())
+    }
     fn guest_hub(&self, environment: &str) -> Arc<Hub> {
         self.remotes
             .lock()
@@ -434,7 +368,6 @@ impl Hub {
                     path: None,
                     changed: Default::default(),
                     remotes: Default::default(),
-                    executors: Default::default(),
                     decisions: Default::default(),
                 })
             })
@@ -452,7 +385,7 @@ impl Hub {
     }
 }
 fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
-    let base = s.environment_service.manager.guest_workspace(target)?;
+    let base = s.environment_service.sandboxes.guest_workspace(target)?;
     let cwd = if owner == "main" {
         base
     } else {
@@ -466,19 +399,24 @@ async fn execution_environment(
     plugin: bool,
     args: &Value,
 ) -> Result<String> {
-    let requested = args["environment"].as_str().map(str::to_owned).or_else(|| {
-        args["sandbox_id"]
-            .as_str()
-            .map(|id| format!("sandbox:{id}"))
-    });
     anyhow::ensure!(
-        args.get("environment").is_none_or(Value::is_string),
-        "Invalid environment"
+        args.get("environment").is_none() || args.get("sandbox_id").is_none(),
+        "Use environment or sandbox_id"
     );
+    let requested = if let Some(value) = args.get("environment") {
+        Some(crate::environment::resolve(s, value)?)
+    } else if let Some(value) = args.get("sandbox_id") {
+        let id = value
+            .as_str()
+            .ok_or_else(|| anyhow!("Invalid sandbox_id"))?;
+        Some(pot_core::EnvironmentRef::sandbox(&s.runtime_id, id))
+    } else {
+        None
+    };
     let session_environment = if plugin {
         if let Some(session) = args["session_id"].as_str() {
             if s.environment_service
-                .permissions
+                .host
                 .host_plugin_session(&s.usage_scope, generation, session)
                 .await
             {
@@ -486,7 +424,7 @@ async fn execution_environment(
             } else {
                 Some(format!(
                     "sandbox:{}",
-                    s.environment_service.manager.session_target(
+                    s.environment_service.sandboxes.session_target(
                         &s.usage_scope,
                         generation,
                         session
@@ -499,15 +437,24 @@ async fn execution_environment(
     } else {
         None
     };
-    let environment = requested.unwrap_or_else(|| {
-        session_environment.clone().unwrap_or_else(|| {
-            if s.is_worker {
-                format!("sandbox:{}", s.sandbox_id.as_deref().unwrap_or("default"))
-            } else {
-                "host".into()
-            }
-        })
-    });
+    let reference = if let Some(reference) = requested {
+        reference
+    } else if let Some(value) = &session_environment {
+        crate::environment::resolve(s, &json!(value))?
+    } else if s.is_worker {
+        s.environment_ref
+            .clone()
+            .ok_or_else(|| anyhow!("Worker Environment binding missing"))?
+    } else {
+        pot_core::EnvironmentRef::host(&s.runtime_id)
+    };
+    crate::environment::check_binding(s, &reference)?;
+    let environment = if reference.is_local_to(&s.runtime_id) {
+        crate::environment::local_key(s, &reference)?
+    } else {
+        crate::remote_environment::port(s)?.validate(&reference)?;
+        crate::remote_environment::key(&reference)?
+    };
     if let Some(original) = &session_environment {
         anyhow::ensure!(
             &environment == original,
@@ -530,8 +477,31 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
     } else {
         pot_core::environment_tools::validate(name, &args)?;
     }
+    if environment.starts_with("remote:") {
+        anyhow::ensure!(
+            plugin.is_none(),
+            "Remote destination does not support this installed plugin"
+        );
+        let reference = crate::remote_environment::from_key(&environment)?;
+        let binding = crate::remote_environment::binding(s, reference)?;
+        crate::remote_environment::open(s, binding.clone()).await?;
+        args = crate::remote_environment::port(s)?
+            .prepare(binding, name.into(), args)
+            .await?;
+        s.environment_service.permissions.remote_hub(&environment)?;
+        args["environment"] = json!(environment);
+        return Ok(args);
+    }
     if environment == "host" {
-        let workspace = s.data.join("agent-workspace");
+        let workspace = if s.is_worker {
+            s.workspace.clone()
+        } else {
+            if s.environment_service.sandboxes.assignment("").is_err() {
+                s.workspace.clone()
+            } else {
+                s.data.join("agent-workspace")
+            }
+        };
         std::fs::create_dir_all(&workspace)?;
         if let Some(plugin) = &plugin {
             anyhow::ensure!(
@@ -551,7 +521,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
             .strip_prefix("sandbox:")
             .filter(|s| !s.is_empty())
             .ok_or_else(|| anyhow!("Use host or sandbox:ID"))?;
-        let target = s.environment_service.manager.assignment(target)?;
+        let target = s.environment_service.sandboxes.assignment(target)?;
         anyhow::ensure!(
             !s.is_worker || s.sandbox_id.as_deref() == Some(target.as_str()),
             "Workers cannot switch Sandboxes"
@@ -575,7 +545,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
                 .ok_or_else(|| anyhow!("Turn identity missing"))?
         };
         s.environment_service
-            .manager
+            .sandboxes
             .prepare(&target, &s.usage_scope, Some(&turn), &|| {
                 agent::cancelled(s) || s.stopping()
             })
@@ -589,7 +559,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         body["policy"] = json!(thread.config.params.agent.shell);
         let prepared = s
             .environment_service
-            .manager
+            .sandboxes
             .permissions(&target, &body)
             .await?;
         hub.load_guest(prepared["config"].clone())?;
@@ -606,19 +576,8 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
 }
 
 pub(crate) fn rules_edit_requires_review(s: &Service, tool: &str, args: &Value) -> bool {
-    if s.is_worker || args["environment"].as_str().unwrap_or("host") != "host" {
-        return false;
-    }
-    let path = s.assistant_rules_path();
-    let text = match tool {
-        "apply_patch" => args["patch"].as_str(),
-        "exec_command" => args["cmd"].as_str(),
-        _ => None,
-    }
-    .unwrap_or_default();
-    text.contains(path.to_string_lossy().as_ref())
-        || (args["workdir"].as_str().map(std::path::Path::new) == path.parent()
-            && text.contains("AGENTS.md"))
+    let _ = args;
+    !s.is_worker && tool == "update_agent_instructions"
 }
 
 fn live(s: &Service, r: &Request) -> bool {
@@ -753,11 +712,27 @@ pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Jso
             .strip_prefix("sandbox:")
             .map(|target| {
                 root.environment_service
-                    .manager
+                    .sandboxes
                     .display_name(target)
                     .unwrap_or_else(|_| target.into())
             })
-            .unwrap_or_else(|| "Host".into());
+            .unwrap_or_else(|| {
+                if environment.starts_with("remote:") {
+                    crate::remote_environment::from_key(&environment)
+                        .map(|reference| {
+                            let target = match reference.target {
+                                pot_core::EnvironmentTarget::Host {} => "Host".to_owned(),
+                                pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+                                    format!("Sandbox {sandbox_id}")
+                                }
+                            };
+                            format!("{} / {target}", reference.runtime_id)
+                        })
+                        .unwrap_or_else(|_| environment.clone())
+                } else {
+                    "Host".into()
+                }
+            });
         let book = hub.book.lock().unwrap();
         requests.extend(
             book.requests
@@ -825,7 +800,10 @@ pub async fn decide(
             )
         })?;
     let _decision = hub.decisions.lock().await;
-    if environment == "host" || !["allow_persistent", "revoke"].contains(&body.action.as_str()) {
+    if environment == "host"
+        || environment.starts_with("remote:")
+        || !["allow_persistent", "revoke"].contains(&body.action.as_str())
+    {
         hub.decide(&body.id, &body.action, body.scope)
             .map_err(|e| error(StatusCode::CONFLICT, "permission_decision", &e.to_string()))?;
     } else {
@@ -854,7 +832,7 @@ pub async fn decide(
         write["expected"] = expected;
         write["config"] = config.clone();
         root.environment_service
-            .manager
+            .sandboxes
             .permissions(target, &write)
             .await
             .map_err(internal)?;
@@ -880,13 +858,15 @@ mod tests {
     #[test]
     fn own_instruction_edits_require_review_in_host_environment() {
         let s = crate::tasks::tests::fixture();
-        let path = s.assistant_rules_path();
-        let args = json!({"environment":"host","patch":format!("*** Begin Patch\n*** Add File: {}\n+rules\n*** End Patch", path.display())});
-        assert!(rules_edit_requires_review(&s, "apply_patch", &args));
+        assert!(rules_edit_requires_review(
+            &s,
+            "update_agent_instructions",
+            &json!({"text":"rules"})
+        ));
         assert!(!rules_edit_requires_review(
             &s,
-            "apply_patch",
-            &json!({"patch":"*** Add File: notes.txt\n+note"})
+            "read_agent_instructions",
+            &json!({})
         ));
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
@@ -966,17 +946,20 @@ mod tests {
         let mut worker = s.clone();
         worker.is_worker = true;
         worker.sandbox_id = Some("default".into());
+        worker.environment_ref = Some(pot_core::EnvironmentRef::sandbox(
+            &worker.runtime_id,
+            "default",
+        ));
         assert_eq!(
             execution_environment(&worker, 1, true, &json!({}))
                 .await
                 .unwrap(),
             "sandbox:default"
         );
-        assert_eq!(
+        assert!(
             execution_environment(&worker, 1, true, &json!({"environment":"host"}))
                 .await
-                .unwrap(),
-            "host"
+                .is_err()
         );
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }

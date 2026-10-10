@@ -32,7 +32,6 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
     let port = reservation.local_addr().unwrap().port();
     drop(reservation);
     let child = Command::new(env!("CARGO_BIN_EXE_pot-server"))
-        .env("POT_RUNTIME_COMPOSITION", "assistant")
         .env("POT_DATA_DIR", root.join("product"))
         .env("POT_WORKSPACE", root.join("workspace"))
         .env("POT_AGENT_HOME", root.join("agent-home"))
@@ -59,6 +58,18 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
     })
     .await
     .unwrap();
+    reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/api/v1/runtime/resources",
+            endpoint.port
+        ))
+        .bearer_auth(&endpoint.token)
+        .json(&json!({"request_id":"tls-assistant","resource":{"kind":"assistant","name":"TLS"}}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
     let client = reqwest::Client::builder()
         .no_proxy()
         .add_root_certificate(reqwest::Certificate::from_pem(certificate.as_bytes()).unwrap())

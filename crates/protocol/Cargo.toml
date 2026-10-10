@@ -8,5 +8,6 @@ repository.workspace = true
 description = "Control API and event types shared by the pot client and runtime"
 
 [dependencies]
+pot-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

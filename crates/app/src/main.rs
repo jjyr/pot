@@ -69,6 +69,8 @@ struct Shell {
     settings: ui::Settings,
     task_search: Entity<InputState>,
     assistants_ui: pot_ui::assistants::Editor,
+    machine_connections: pot_ui::machine_connections::Editor,
+    machine_selection: serde_json::Value,
     schedule_tab: bool,
     schedules_ui: schedules_ui::SchedulesUI,
     usage_ui: usage_ui::UsageUI,
@@ -90,10 +92,21 @@ impl Shell {
                     "assistant-select" => { this.client.select_assistant(event.value.as_str().unwrap_or("main").into()); this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
                     "assistant-reload" => this.assistants_ui.reload(event.value.as_str().unwrap_or("main")),
                     "assistant-close" => this.assistants_ui.open = false,
+                    "machine-connections-toggle" => this.machine_connections.open = !this.machine_connections.open,
+                    "machine-command" => this.client.machine_command(event.value),
                     "assistant-save" => this.client.assistant_save(event.value),
                     "assistant-model" => ui::command(serde_json::json!({"action":"ai-open","owner":event.value,"return_to_chat":true})),
                     "permission-decision" => this.client.permission_decision(event.value),
                     "native" => ui::command(event.value),
+                    "machine-select" => {
+                        this.machine_selection = event.value.clone();
+                        let sandbox = event.value["target"]["kind"] == "sandbox"
+                            && this.client.view.lock().unwrap().runtime["runtime_id"] == event.value["runtime_id"];
+                        ui::command(serde_json::json!({"action":"machines-detail","value":!sandbox}));
+                        if sandbox {
+                            ui::command(serde_json::json!({"action":"sandbox-view","id":event.value["target"]["sandbox_id"]}));
+                        }
+                    }
                     "sandbox-select" => {
                         ui::command(serde_json::json!({"action":"sandbox-view","id":event.value}))
                     }
@@ -397,13 +410,33 @@ impl Shell {
                     );
             }
             Some(1) => {
-                return pot_ui::sandbox::render(
-                    &self.native,
-                    pot_ui::pages::Layout::NATIVE,
-                    true,
-                    self.catalog(),
-                    self.page_handler(cx),
+                let catalog = self.catalog();
+                let handler = self.page_handler(cx);
+                let connections = self.machine_connections.render(
+                    pot_ui::machine_connections::View {
+                        directory: &view.machines,
+                        selected: &self.machine_selection,
+                        reply: &view.machine_reply,
+                        pending: view.machine_pending,
+                    },
+                    catalog,
+                    handler.clone(),
+                    window,
                     cx,
+                );
+                return div().h_full().flex().flex_col().child(connections).child(
+                    pot_ui::machines::render(
+                        pot_ui::machines::MachinesView {
+                            directory: &view.machines,
+                            preferred: &self.machine_selection,
+                            sandbox_state: &self.native,
+                            controls: true,
+                        },
+                        pot_ui::pages::Layout::NATIVE,
+                        self.catalog(),
+                        handler,
+                        cx,
+                    ),
                 );
             }
             _ => {}
@@ -481,6 +514,7 @@ impl Shell {
             let navigation = schedules_ui::navigation(false, cx);
             return pot_ui::tasks::render(
                 pot_ui::tasks::TasksView {
+                    local_runtime: view.runtime["runtime_id"].as_str().unwrap_or_default(),
                     assistant_names: &view.assistants,
                     search: &self.task_search,
                     scroll: &self.tasks_scroll,
@@ -560,8 +594,8 @@ impl Shell {
                                                     )
                                                     .size(px(13.)),
                                                 )
-                                                .child(task_phase(&task.phase))
-                                                .child(format!(" · Sandbox: {}", task.sandbox_id)),
+                                                .child(if task.remote_waiting { crate::i18n::text("main.waiting-for-remote-machine") } else { task_phase(&task.phase) })
+                                                .child(format!(" · {}", pot_ui::machine_state::task_location(task, self.catalog(), view.runtime["runtime_id"].as_str().unwrap_or_default()))),
                                         )
                                         .when(
                                             task.phase.scope() == "archived",
@@ -831,6 +865,15 @@ fn main() {
             std::env::set_var("POT_RUNTIME_RESOURCES", &resources);
             std::env::set_var("POT_BUILTIN_SKILLS_DIR", resources.join("skills"));
             std::env::set_var("POT_MACOS_HELPER", resources.join("PotMacOSHelper"));
+            std::env::set_var(
+                "POT_CONTAINER_HELPER",
+                resources
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("Helpers/PotHelper"),
+            );
             if std::env::var_os("POT_ACCESS_ASSETS").is_none() {
                 std::env::set_var("POT_ACCESS_ASSETS", resources.join("mobile"));
             }
@@ -912,6 +955,8 @@ fn main() {
                         Shell {
                             client: client::Client::start(),
                             assistants_ui: Default::default(),
+                            machine_connections: Default::default(),
+                            machine_selection: serde_json::Value::Null,
                             scroll: ScrollHandle::new(),
                             tasks_scroll: ScrollHandle::new(),
                             history: navigation::History::default(),

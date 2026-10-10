@@ -11,6 +11,7 @@ pub struct Backend {
     state: Option<Service>,
     activated: std::sync::atomic::AtomicBool,
     main: Option<tokio::task::JoinHandle<()>>,
+    owns_lifecycle: bool,
     coordinator: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 impl Backend {
@@ -74,7 +75,7 @@ impl Backend {
             settle(&mut main).await;
         }
         if let Some(state) = &self.state {
-            if let Err(error) = sandbox::shutdown(state).await {
+            if let Err(error) = environment::shutdown(state).await {
                 eprintln!("{error}");
             }
         } else if let Err(error) = self.host.shutdown().await {
@@ -106,7 +107,7 @@ async fn initialize_with_providers_and_agent(
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
 ) -> Result<Backend> {
     let mut host = host::Host::open(&config.data, host::Composition::Assistant)?;
-    initialize_assistant(config, agent_executor, providers, &mut host).await
+    initialize_assistant(config, agent_executor, providers, &mut host, false).await
 }
 
 async fn initialize_assistant(
@@ -114,6 +115,7 @@ async fn initialize_assistant(
     agent_executor: Arc<pot_agent::Agent>,
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
     host: &mut host::Host,
+    resource_driven: bool,
 ) -> Result<Backend> {
     let data = config.data;
     std::fs::create_dir_all(&data)?;
@@ -129,8 +131,18 @@ async fn initialize_assistant(
     let (events, _) = broadcast::channel(256);
     let (commands, rx) = mpsc::unbounded_channel();
     let resources = AgentResources::paths(&data);
-    let sandboxes = Arc::new(sandbox::Manager::with_providers(&data, providers)?);
-    host.attach_environment(sandboxes.clone());
+    let sandboxes = if resource_driven {
+        match host.sandbox_manager() {
+            Some(manager) => manager,
+            None => Arc::new(sandbox::Manager::empty(&data, providers)?),
+        }
+    } else {
+        Arc::new(sandbox::Manager::with_providers(&data, providers)?)
+    };
+    if host.host_environment.is_none() {
+        host.attach_host_environment();
+    }
+    host.attach_sandboxes(sandboxes.clone());
     let permissions = Arc::new(permissions::Hub::open_with_legacy(
         &resources.home.join("permissions.json"),
         &data.join("permissions-v1.sqlite"),
@@ -140,9 +152,11 @@ async fn initialize_assistant(
             runtime_id: host.runtime_id().into(),
             assistant_id: "main".into(),
             skill_selection: None,
+            remote_context: Default::default(),
             #[cfg(test)]
             test_tool_executor: None,
             sandbox_id: None,
+            environment_ref: None,
             usage: Arc::new(Mutex::new(usage::Ledger::open(
                 &data.join("usage-v2.sqlite"),
             )?)),
@@ -177,8 +191,14 @@ async fn initialize_assistant(
             resources: Arc::new(AgentResources::paths(&data)),
         },
         environment_service: EnvironmentService {
+            remote: Default::default(),
+            host_enabled: Arc::new(std::sync::atomic::AtomicBool::new(!resource_driven)),
+            host: host
+                .host_environment
+                .clone()
+                .ok_or_else(|| anyhow!("Host Environment not assembled"))?,
             permissions,
-            manager: sandboxes,
+            sandboxes,
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),
         },
         tasks: TaskService {
@@ -212,8 +232,74 @@ async fn initialize_assistant(
         state: Some(s),
         activated: Default::default(),
         main: Some(main),
+        owns_lifecycle: true,
         coordinator: Mutex::new(None),
     })
+}
+
+impl Backend {
+    /// Enable Host execution explicitly. Assistant construction alone does not grant it.
+    pub fn enable_host_resource(&mut self) {
+        self.host.host_enabled = true;
+        if self.host.host_environment.is_none() {
+            self.host.attach_host_environment();
+        }
+        if let Some(s) = &self.state {
+            s.environment_service
+                .host_enabled
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        self.host.resource_capabilities(self.state.is_some());
+    }
+    pub fn environment_manager(&self) -> Option<Arc<sandbox::Manager>> {
+        self.host.sandbox_manager()
+    }
+    pub fn register_environment_providers(
+        &mut self,
+        providers: Vec<Arc<dyn pot_sandbox::Provider>>,
+    ) -> Result<Arc<sandbox::Manager>> {
+        let manager = match self.host.sandbox_manager() {
+            Some(manager) => manager,
+            None => {
+                let manager = Arc::new(sandbox::Manager::empty(&self.host.data, vec![])?);
+                self.host.attach_sandboxes(manager.clone());
+                manager
+            }
+        };
+        for provider in providers {
+            manager.register_provider(provider);
+        }
+        self.host.resource_capabilities(self.state.is_some());
+        Ok(manager)
+    }
+    pub async fn enable_assistant_resources(&mut self, config: RuntimeConfig) -> Result<()> {
+        if self.state.is_some() {
+            return Ok(());
+        }
+        let host_enabled = self.host.host_enabled;
+        let mut next = initialize_assistant(
+            config,
+            Arc::new(pot_agent::Agent::default()),
+            vec![],
+            &mut self.host,
+            true,
+        )
+        .await?;
+        next.state
+            .as_ref()
+            .unwrap()
+            .environment_service
+            .host_enabled
+            .store(host_enabled, std::sync::atomic::Ordering::SeqCst);
+        next.host.host_enabled = host_enabled;
+        next.host.resource_capabilities(true);
+        if self.activated.load(std::sync::atomic::Ordering::SeqCst) {
+            next.activate()?;
+        }
+        self.owns_lifecycle = false;
+        *self = next;
+        Ok(())
+    }
 }
 
 async fn settle(handle: &mut tokio::task::JoinHandle<()>) {
@@ -227,6 +313,9 @@ async fn settle(handle: &mut tokio::task::JoinHandle<()>) {
 }
 impl Drop for Backend {
     fn drop(&mut self) {
+        if !self.owns_lifecycle {
+            return;
+        }
         self.host.request_stop();
         if let Some(state) = &self.state {
             state.stop.send_replace(true);
@@ -247,8 +336,8 @@ pub async fn initialize_composition(
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
 ) -> Result<Backend> {
     anyhow::ensure!(
-        composition.has_environments() || providers.is_empty(),
-        "Bare Runtime cannot register Sandbox Providers"
+        composition.has_sandboxes() || providers.is_empty(),
+        "This Runtime composition cannot register Sandbox Providers"
     );
     let mut host = host::Host::open(&config.data, composition)?;
     if composition == host::Composition::Assistant {
@@ -257,11 +346,15 @@ pub async fn initialize_composition(
             Arc::new(pot_agent::Agent::default()),
             providers,
             &mut host,
+            false,
         )
         .await;
     }
+    if composition.has_environments() {
+        host.attach_host_environment();
+    }
     if composition == host::Composition::Environment {
-        host.attach_environment(Arc::new(sandbox::Manager::with_providers(
+        host.attach_sandboxes(Arc::new(sandbox::Manager::with_providers(
             &config.data,
             providers,
         )?));
@@ -272,6 +365,7 @@ pub async fn initialize_composition(
         state: None,
         activated: Default::default(),
         main: None,
+        owns_lifecycle: true,
         coordinator: Mutex::new(None),
     })
 }

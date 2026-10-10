@@ -14,6 +14,7 @@ use tokio::sync::Notify;
 
 #[derive(Default)]
 struct Feedback {
+    supported_execution: Mutex<Option<Vec<String>>>,
     grants: Mutex<Option<Value>>,
     prepared_environment: Mutex<Option<String>>,
     permission_requests: Mutex<Vec<Value>>,
@@ -32,6 +33,9 @@ enum SaveFault {
     Receipt,
 }
 impl ExecutionFeedback for Feedback {
+    fn supported_execution_tools(&self) -> Option<Vec<String>> {
+        self.supported_execution.lock().unwrap().clone()
+    }
     fn prepare_execution_operation(
         &self,
         _: &str,
@@ -2106,6 +2110,70 @@ impl ToolExecutor for CountPluginExecutor {
 }
 
 #[tokio::test]
+async fn assistant_instruction_updates_always_review_and_are_main_only() {
+    let mut f = Fixture::new("openai_chat");
+    f.context.role = ExecutionRole::Main;
+    let args = json!({"text":"Rules"});
+    let request = TurnRequest {
+        request_id: "rules".into(),
+        text: "Update my rules".into(),
+    };
+    // Even an exact grant and allow-by-default policy cannot skip this approval.
+    *f.feedback.grants.lock().unwrap() = Some(
+        json!({"policy":{"default":"allow"},"grants":[{"id":"existing","owner":f.context.owner,"scope":permissions::scope("update_agent_instructions", &args).unwrap()}]}),
+    );
+    *f.feedback.permission_decision.lock().unwrap() = Some(false);
+    assert!(
+        permissions::authorize(
+            &f.context,
+            &f.thread,
+            &request,
+            "denied",
+            "update_agent_instructions",
+            &args
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 1);
+    *f.feedback.permission_decision.lock().unwrap() = Some(true);
+    for call in ["approved-one", "approved-two"] {
+        permissions::authorize(
+            &f.context,
+            &f.thread,
+            &request,
+            call,
+            "update_agent_instructions",
+            &args,
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 3);
+    permissions::authorize(
+        &f.context,
+        &f.thread,
+        &request,
+        "read",
+        "read_agent_instructions",
+        &json!({}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 3);
+    for role in [ExecutionRole::Worker, ExecutionRole::Summary] {
+        f.context.role = role;
+        for tool in ["read_agent_instructions", "update_agent_instructions"] {
+            assert!(
+                permissions::authorize(&f.context, &f.thread, &request, "forbidden", tool, &args)
+                    .await
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
     for role in [ExecutionRole::Main, ExecutionRole::Worker] {
         for composed in [false, true] {
@@ -2156,7 +2224,24 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
                 );
                 let schemas = f.services.requests.lock().unwrap()[0]["body"]["tools"].to_string();
                 assert!(schemas.contains("cua_repl"));
-                assert_eq!(schemas.contains("sandbox_id"), role == ExecutionRole::Main);
+                let sent = f.services.requests.lock().unwrap();
+                let plugin = sent[0]["body"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|tool| tool["function"]["name"] == "cua_repl")
+                    .unwrap();
+                assert_eq!(
+                    plugin["function"]["parameters"]["properties"]
+                        .get("sandbox_id")
+                        .is_some(),
+                    role == ExecutionRole::Main
+                );
+                assert!(
+                    plugin["function"]["parameters"]["properties"]
+                        .get("environment")
+                        .is_some()
+                );
             }
         }
     }
@@ -2281,6 +2366,33 @@ async fn thread_switches_between_all_protocols_without_losing_tool_history_or_re
                 &saved["messages"].as_array().unwrap()[..n],
                 original["messages"].as_array().unwrap()
             );
+        }
+    }
+}
+
+#[tokio::test]
+async fn destination_capabilities_narrow_tools_without_mutating_thread_config() {
+    for role in [ExecutionRole::Main, ExecutionRole::Worker] {
+        let mut f = Fixture::new("openai_chat");
+        full_loadout(&mut f);
+        f.context.role = role;
+        *f.feedback.supported_execution.lock().unwrap() = Some(vec!["exec_command".into()]);
+        let config = f.thread.config.clone();
+        f.services.queue(wire("openai_chat", "done", &[]));
+        f.turn(false).await.unwrap();
+        assert_eq!(f.thread.config, config);
+        let requests = f.services.requests.lock().unwrap();
+        let tools = model_tools(&requests[0], "openai_chat");
+        let names = tools
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"exec_command"));
+        assert!(!names.contains(&"write_stdin"));
+        assert!(!names.contains(&"apply_patch"));
+        assert!(!names.contains(&"cua_repl"));
+        if role == ExecutionRole::Main {
+            assert!(names.contains(&"create_task"));
         }
     }
 }

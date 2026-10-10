@@ -141,6 +141,7 @@ impl Provider for Fake {
 }
 fn grant(owner: &str, worker: bool) -> AccessGrant {
     AccessGrant {
+        workspace_owner: None,
         owner: owner.into(),
         turn: "turn".into(),
         thread_generation: 1,
@@ -648,4 +649,58 @@ fn plugin_args(input: Value) -> Value {
         false,
     )
     .unwrap()
+}
+
+#[tokio::test]
+async fn resource_inventory_is_empty_until_explicit_creation_and_restores_without_starting() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("product");
+    let provider = Arc::new(Fake::new());
+    let manager = Arc::new(Manager::open_empty(&data, vec![provider.clone()]).unwrap());
+    assert!(
+        manager.inventory().await["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(manager.assignment("").is_err());
+    manager
+        .management(
+            &json!({"action":"create","sandbox_id":"build","name":"Build"}),
+            false,
+            &|| false,
+            &|_, action| action(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        manager.inventory().await["items"].as_array().unwrap().len(),
+        1
+    );
+    assert!(!provider.running.load(Ordering::SeqCst));
+    assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+    drop(manager);
+    let restored = Manager::open_empty(&data, vec![provider.clone()]).unwrap();
+    assert_eq!(restored.inventory().await["items"][0]["id"], "build");
+    assert!(restored.assignment("").is_err());
+    assert!(!provider.running.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn cancelled_execution_preparation_never_starts_a_guest() {
+    let (_dir, manager, provider) = fixture();
+    assert!(
+        manager
+            .ready_for_execution("default", &|| true)
+            .await
+            .is_err()
+    );
+    assert!(!provider.running.load(Ordering::SeqCst));
+    assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+    manager
+        .ready_for_execution("default", &|| false)
+        .await
+        .unwrap();
+    assert!(provider.running.load(Ordering::SeqCst));
+    assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
 }
