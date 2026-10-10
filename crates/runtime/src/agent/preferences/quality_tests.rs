@@ -112,7 +112,9 @@ async fn real_model_execution_preferences_quality() {
         main.max_requests_per_turn = 8;
         s.agent_upstream = "https://api.deepseek.com/chat/completions".into();
         initialize(&s).unwrap();
-        let base = profiles(&s.inner.lock().unwrap().store).unwrap().remove(0);
+        let base = profiles(&s.conversation.inner.lock().unwrap().store)
+            .unwrap()
+            .remove(0);
         let mut claude = base.clone();
         claude.id = "claude-coding".into();
         claude.name = "Claude Coding".into();
@@ -125,7 +127,8 @@ async fn real_model_execution_preferences_quality() {
         gemini.provider = "eval-gemini".into();
         gemini.auth_ref = "providers.json:eval-gemini".into();
         gemini.model = "gemini-evaluation-fixture".into();
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -176,7 +179,7 @@ async fn real_model_execution_preferences_quality() {
             .with_state(s.clone());
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
+        s.conversation.commands = tx;
         let _ = crate::send(
             State(s.clone()),
             tasks::tests::headers(),

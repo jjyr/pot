@@ -12,7 +12,8 @@ pub async fn execute(
 ) -> Result<()> {
     let _lease = if s.is_worker {
         Some(
-            s.sandboxes
+            s.environment_service
+                .manager
                 .acquire(
                     s.sandbox_id
                         .as_deref()
@@ -35,7 +36,8 @@ pub async fn execute(
     let context = context(s, request, &thread)?;
     let mut gate = EventGate::new(generation, &request.request_id);
     let result = s
-        .agent_executor
+        .agent_service
+        .executor
         .execute(
             &context,
             &thread,

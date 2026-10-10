@@ -19,6 +19,7 @@ impl Fixture {
     }
     fn config(&self) -> ServerConfig {
         ServerConfig {
+            composition: Some(pot_runtime::host::Composition::Assistant),
             runtime: RuntimeConfig {
                 data: self.0.join("data"),
                 workspace: self.0.join("workspace"),
@@ -342,4 +343,32 @@ async fn local_socket_authorizes_without_tokens_and_refuses_browser_origin() {
     stop.send(()).unwrap();
     task.await.unwrap().unwrap();
     assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn bare_server_exposes_identity_without_assistant_or_environment_storage() {
+    let fixture = Fixture::new();
+    let mut config = fixture.config();
+    config.composition = Some(pot_runtime::host::Composition::Bare);
+    let server = Server::bind(config).await.unwrap();
+    assert_eq!(server.composition(), pot_runtime::host::Composition::Bare);
+    let client = server.local_client();
+    let response = client.request("/api/v1/runtime", None).await.unwrap();
+    assert_eq!(response.status.as_u16(), 200);
+    let identity: Value = serde_json::from_slice(&response.body).unwrap();
+    assert_eq!(identity["capabilities"], json!(["runtime"]));
+    assert_eq!(
+        client
+            .request(PATH_SNAPSHOT, None)
+            .await
+            .unwrap()
+            .status
+            .as_u16(),
+        404
+    );
+    assert!(!fixture.0.join("data/pot-v2.sqlite").exists());
+    assert!(!fixture.0.join("workspace").exists());
+    assert!(!fixture.0.join("data/sandboxes.json").exists());
+    drop(client);
+    server.serve(async {}).await.unwrap();
 }

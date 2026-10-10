@@ -54,7 +54,7 @@ fn mcp_content(mut value: Value) -> Vec<Value> {
     content
 }
 fn current_turn(s: &Service) -> ApiResult<String> {
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let turn = inner
         .turn
         .as_ref()
@@ -96,6 +96,7 @@ pub async fn mcp(
                 )
             })?;
         let identity = s
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -120,20 +121,20 @@ pub async fn mcp(
     let response = match method {
         "initialize" => {
             let key = id();
-            s.inner.lock().unwrap().store.set(&format!("mcp.session:{key}"),&turn).map_err(internal)?;
+            s.conversation.inner.lock().unwrap().store.set(&format!("mcp.session:{key}"),&turn).map_err(internal)?;
             session = Some(key);
             json!({"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"pot","version":env!("CARGO_PKG_VERSION")}})
         }
         "ping" => json!({}),
         "tools/list" => {
-            let settings = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?
+            let settings = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?
                 .map(|thread| thread.config.params.agent).unwrap_or_default();
             let tools = configured_schemas(turn.starts_with(orchestration::RESULT_PREFIX), s.is_worker, &settings).map_err(internal)?;
             json!({"tools":tools})
         },
         "tools/call" => {
             let name = call["params"]["name"].as_str().unwrap_or("");
-            let settings = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?.map(|b| b.config.params.agent).unwrap_or_default();
+            let settings = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?.map(|b| b.config.params.agent).unwrap_or_default();
             if !configured_schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker,&settings).map_err(internal)?.iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
             if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || matches!(name,"list_sandboxes" | "manage_sandbox") {
                 let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));

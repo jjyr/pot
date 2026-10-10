@@ -28,12 +28,13 @@ pub async fn open(
         ));
     }
     let id = s
-        .sandboxes
+        .environment_service
+        .manager
         .assignment(args["sandbox_id"].as_str().unwrap_or(""))
         .map_err(internal)?;
-    if let Some(hub) = &s.sandboxes.resources
+    if let Some(hub) = &s.environment_service.manager.resources
         && let Some(key) = hub
-            .inspect(&s.sandboxes, &id, &s.usage_scope, None)
+            .inspect(&s.environment_service.manager, &id, &s.usage_scope, None)
             .await
             .map_err(internal)?
     {
@@ -42,7 +43,8 @@ pub async fn open(
         ));
     }
     let session = s
-        .sandboxes
+        .environment_service
+        .manager
         .open_desktop(args["sandbox_id"].as_str().unwrap_or(""))
         .await
         .map_err(internal)?;
@@ -63,8 +65,9 @@ pub async fn close(
             "Owner access required",
         ));
     }
-    let _guard = s.sandboxes.desktop_serialization().await;
-    s.sandboxes
+    let _guard = s.environment_service.manager.desktop_serialization().await;
+    s.environment_service
+        .manager
         .close_desktop(args["session_id"].as_str().unwrap_or(""));
     Ok(Json(json!({"closed":true})))
 }
@@ -85,13 +88,16 @@ fn origin(h: &HeaderMap) -> ApiResult<()> {
 }
 fn ticket(s: &Service, h: &HeaderMap, id: &str) -> ApiResult<pot_sandbox::DesktopSession> {
     origin(h)?;
-    s.sandboxes.desktop_session(id).map_err(|_| {
-        error(
-            StatusCode::FORBIDDEN,
-            "desktop_session",
-            "Desktop session expired or revoked",
-        )
-    })
+    s.environment_service
+        .manager
+        .desktop_session(id)
+        .map_err(|_| {
+            error(
+                StatusCode::FORBIDDEN,
+                "desktop_session",
+                "Desktop session expired or revoked",
+            )
+        })
 }
 fn private_response(body: impl IntoResponse) -> Response {
     let mut response = body.into_response();
@@ -147,9 +153,13 @@ pub async fn status(
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
     let session = ticket(&s, &h, &id)?;
-    let human = s.sandboxes.desktop_has_control(&id).map_err(internal)?;
+    let human = s
+        .environment_service
+        .manager
+        .desktop_has_control(&id)
+        .map_err(internal)?;
     Ok(private_response(Json(
-        json!({"owner":if human {"human"} else {"none"},"epoch":s.sandboxes.desktop_revision(&id).map_err(internal)?,"capabilities":session.capabilities,"sandbox_id":session.sandbox_id}),
+        json!({"owner":if human {"human"} else {"none"},"epoch":s.environment_service.manager.desktop_revision(&id).map_err(internal)?,"capabilities":session.capabilities,"sandbox_id":session.sandbox_id}),
     )))
 }
 pub async fn control(
@@ -168,10 +178,11 @@ pub async fn control(
         ));
     }
     if action == "close" {
-        let _guard = s.sandboxes.desktop_serialization().await;
-        s.sandboxes.close_desktop(&id);
+        let _guard = s.environment_service.manager.desktop_serialization().await;
+        s.environment_service.manager.close_desktop(&id);
     } else {
-        s.sandboxes
+        s.environment_service
+            .manager
             .desktop_control(&id, action == "take")
             .await
             .map_err(|e| error(StatusCode::CONFLICT, "desktop_control", &e.to_string()))?;
@@ -184,7 +195,8 @@ pub async fn browser(
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
     ticket(&s, &h, &id)?;
-    s.sandboxes
+    s.environment_service
+        .manager
         .desktop_browser(&id)
         .await
         .map_err(|e| error(StatusCode::CONFLICT, "desktop_browser", &e.to_string()))?;
@@ -197,7 +209,11 @@ pub async fn metrics(
 ) -> ApiResult<Response> {
     ticket(&s, &h, &id)?;
     Ok(private_response(Json(
-        s.sandboxes.desktop_metrics(&id).await.map_err(internal)?,
+        s.environment_service
+            .manager
+            .desktop_metrics(&id)
+            .await
+            .map_err(internal)?,
     )))
 }
 pub async fn connect(
@@ -208,17 +224,27 @@ pub async fn connect(
     guard: Option<axum::Extension<DesktopAccessGuard>>,
 ) -> ApiResult<Response> {
     ticket(&s, &h, &id)?;
-    let upstream = s.sandboxes.desktop_stream(&id).await.map_err(|_| {
-        error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "desktop_transport",
-            "Guest desktop unavailable; verify its configured RFB service",
-        )
-    })?;
+    let upstream = s
+        .environment_service
+        .manager
+        .desktop_stream(&id)
+        .await
+        .map_err(|_| {
+            error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "desktop_transport",
+                "Guest desktop unavailable; verify its configured RFB service",
+            )
+        })?;
     let failed_service = s.clone();
     let failed_id = id.clone();
     Ok(ws
-        .on_failed_upgrade(move |_| failed_service.sandboxes.desktop_disconnected(&failed_id))
+        .on_failed_upgrade(move |_| {
+            failed_service
+                .environment_service
+                .manager
+                .desktop_disconnected(&failed_id)
+        })
         .protocols(["binary"])
         .max_message_size(4 * 1024 * 1024)
         .on_upgrade(move |socket| relay(s, id, socket, upstream, guard.map(|g| g.0))))
@@ -231,19 +257,23 @@ async fn relay(
     access: Option<DesktopAccessGuard>,
 ) {
     let mut gate = pot_sandbox::RfbGate::default();
-    let mut revision = s.sandboxes.desktop_revision(&id).unwrap_or(0);
+    let mut revision = s
+        .environment_service
+        .manager
+        .desktop_revision(&id)
+        .unwrap_or(0);
     let mut buf = [0; 65536];
     let mut poll = tokio::time::interval(Duration::from_secs(1));
     loop {
         tokio::select! {
             _ = poll.tick() => {
-                if access.as_ref().is_some_and(|g| !(g.0)()) || s.stopping() || s.sandboxes.desktop_validate(&id).await.is_err() { break; }
-                let _guard = s.sandboxes.desktop_serialization().await;
-                let Ok(current) = s.sandboxes.desktop_revision(&id) else { break; };
+                if access.as_ref().is_some_and(|g| !(g.0)()) || s.stopping() || s.environment_service.manager.desktop_validate(&id).await.is_err() { break; }
+                let _guard = s.environment_service.manager.desktop_serialization().await;
+                let Ok(current) = s.environment_service.manager.desktop_revision(&id) else { break; };
                 if current != revision {
                     if gate.control_changed().is_err() { break; }
                     if !matches!(tokio::time::timeout(Duration::from_secs(5),upstream.write_all(&gate.release_input())).await,Ok(Ok(()))) { break; }
-                    s.sandboxes.desktop_released(&id,current);
+                    s.environment_service.manager.desktop_released(&id,current);
                     revision = current;
                 }
             }
@@ -253,16 +283,16 @@ async fn relay(
             message = socket.recv() => {
                 if access.as_ref().is_some_and(|g| !(g.0)()) { break; }
                 let data = match message { Some(Ok(WsMessage::Binary(data)))=>data, Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_)))=>continue, _=>break };
-                let _guard = s.sandboxes.desktop_serialization().await;
-                let Ok(current) = s.sandboxes.desktop_revision(&id) else { break; };
+                let _guard = s.environment_service.manager.desktop_serialization().await;
+                let Ok(current) = s.environment_service.manager.desktop_revision(&id) else { break; };
                 if current != revision {
                     if gate.control_changed().is_err() { break; }
                     if !matches!(tokio::time::timeout(Duration::from_secs(5),upstream.write_all(&gate.release_input())).await,Ok(Ok(()))) { break; }
-                    s.sandboxes.desktop_released(&id,current);
+                    s.environment_service.manager.desktop_released(&id,current);
                     revision = current;
                 }
-                let Ok(control) = s.sandboxes.desktop_has_control(&id) else { break; };
-                let Ok(session) = s.sandboxes.desktop_session(&id) else { break; };
+                let Ok(control) = s.environment_service.manager.desktop_has_control(&id) else { break; };
+                let Ok(session) = s.environment_service.manager.desktop_session(&id) else { break; };
                 let Ok(bytes) = gate.push(&data,control,session.capabilities.clipboard) else { break; };
                 if !matches!(tokio::time::timeout(Duration::from_secs(5),upstream.write_all(&bytes)).await,Ok(Ok(()))) { break; }
             }
@@ -273,7 +303,7 @@ async fn relay(
         upstream.write_all(&gate.release_input()),
     )
     .await;
-    s.sandboxes.desktop_disconnected(&id);
+    s.environment_service.manager.desktop_disconnected(&id);
     let _ = socket.close().await;
 }
 /// noVNC is a pinned packaging resource; requests cannot select arbitrary host paths.
@@ -415,7 +445,7 @@ mod tests {
     async fn real_websocket_enforces_view_only_control_origin_and_revocation() {
         let mut s = tasks::tests::fixture();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        s.sandboxes = Arc::new(
+        s.environment_service.manager = Arc::new(
             sandbox::Manager::with_providers(&s.data, vec![Arc::new(Display(tx))]).unwrap(),
         );
         let routes = Router::new()
@@ -518,7 +548,12 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_none() || matches!(result, Some(Ok(Message::Close(_)))));
-        assert!(s.sandboxes.desktop_session(session).is_err());
+        assert!(
+            s.environment_service
+                .manager
+                .desktop_session(session)
+                .is_err()
+        );
         server.abort();
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }

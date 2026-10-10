@@ -29,7 +29,8 @@ pub enum Source {
     Tool,
 }
 pub fn policy(root: &Service) -> Result<Policy> {
-    root.inner
+    root.conversation
+        .inner
         .lock()
         .unwrap()
         .store
@@ -42,6 +43,7 @@ pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Jso
     let mut effective = policy(&root).map_err(internal)?;
     if !effective.follow_chat && effective.worker_profile.is_none() {
         effective.worker_profile = root
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -58,7 +60,7 @@ pub async fn configure(
 ) -> ApiResult<Json<Policy>> {
     root.authorized(&h)?;
     initialize(&root).map_err(internal)?;
-    let inner = root.inner.lock().unwrap();
+    let inner = root.conversation.inner.lock().unwrap();
     let old: Policy = inner
         .store
         .get(POLICY)
@@ -137,7 +139,7 @@ pub fn resolve(
     }
     if profile.is_none() {
         let policy = policy(root)?;
-        let inner = root.inner.lock().unwrap();
+        let inner = root.conversation.inner.lock().unwrap();
         if (policy.follow_chat
             || (policy.worker_profile.is_none()
                 && inner.store.get("agent.default.worker")?.is_none()))
@@ -167,13 +169,13 @@ pub fn resolve(
         ),
         None => (
             if policy(root)?.follow_chat {
-                current(&root.inner.lock().unwrap().store)?
+                current(&root.conversation.inner.lock().unwrap().store)?
                     .ok_or_else(|| anyhow!("Chat Agent is not configured"))?
                     .config
                     .source_profile_id
             } else {
                 policy(root)?.worker_profile.unwrap_or({
-                    let inner = root.inner.lock().unwrap();
+                    let inner = root.conversation.inner.lock().unwrap();
                     inner.store.get("agent.default.worker")?.unwrap_or_else(|| {
                         current(&inner.store)
                             .ok()
@@ -186,7 +188,7 @@ pub fn resolve(
             "worker_default",
         ),
     };
-    let profile = profiles(&root.inner.lock().unwrap().store)?
+    let profile = profiles(&root.conversation.inner.lock().unwrap().store)?
         .into_iter()
         .find(|p| p.id == selected)
         .ok_or_else(|| anyhow!("Selected worker profile is missing"))?;
@@ -245,7 +247,8 @@ mod tests {
     #[tokio::test]
     async fn inspection_exposes_legacy_worker_default_without_rewriting_policy() {
         let s = crate::tests::service();
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -256,7 +259,8 @@ mod tests {
         let Json(visible) = inspect(State(s.clone()), headers.clone()).await.unwrap();
         assert_eq!(visible.worker_profile.as_deref(), Some("legacy-worker"));
         assert!(policy(&s).unwrap().worker_profile.is_none());
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store

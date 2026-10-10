@@ -8,7 +8,7 @@ Computer use (2026-10-08): a default-enabled plugin provides persistent `cua_rep
 
 Track phase status, acceptance evidence and pre-phase review gates in [Issue #39](https://github.com/jjyr/pot/issues/39). Before implementing a phase's UI changes or behavior dependent on its interaction design, discuss the concrete interaction with the user and obtain confirmation. This applies at execution time; agreement to the roadmap does not approve later UI designs. Independent backend work can proceed without that UI decision. Add newly discovered UI changes to the same tracking table before implementing them.
 
-This is a planning proposal, not an implementation status report or authorization to change model-visible tools. Architecture and internal boundaries are in [Composable runtimes](runtime-composition.md). The user has confirmed Agent-local default dispatch and explicit capability grants between Runtimes. P0 completed on 2026-10-10: the user additionally confirmed stopping new effects on owner disconnection and preserving current data through versioned upgrades. P1 can proceed with the existing App interaction; future UI/tool changes remain subject to their phase review.
+This is a planning proposal, not an implementation status report or authorization to change model-visible tools. Architecture and internal boundaries are in [Composable runtimes](runtime-composition.md). The user has confirmed Agent-local default dispatch and explicit capability grants between Runtimes. P0 completed on 2026-10-10: the user additionally confirmed stopping new effects on owner disconnection and preserving current data through versioned upgrades. P1 local composition is delivered with the existing App interaction; future UI/tool changes remain subject to their phase review.
 
 ```text
 P0  Contracts, scope and rollout decisions
@@ -39,6 +39,8 @@ Every phase includes its necessary client/operator interaction, documentation an
 Exit gate: reviewed service/record contracts, phase scenarios, storage rollout choice and a concrete list of approved or pending tool changes. Architecture agreement alone is not tool-interface agreement.
 
 ### P1 — independent local composition
+
+Delivered 2026-10-10: separate local service state, scoped Runner adapter, stable identity and versioned Assignments, bare/environment/assistant presets and CLI capability discovery. The local owner facade remains for existing tools; remote acceptance/replay and arbitrary dependency graphs are later work. See [acceptance](validation/runtime-composition-20261010.md) for automated coverage and untested platform/UI scope.
 
 - Replace the monolithic Service with Runtime host and independent Conversation, Task, Agent and Environment service state. Use local port adapters; stop copying the entire Service to create workers.
 - Enable services explicitly, validate their dependency references, open only relevant stores/routes and start only relevant coordinators. Register Providers only for enabled Environment services.

@@ -4,13 +4,19 @@ mod budget;
 pub mod control;
 pub mod execution;
 pub mod gateway;
+pub mod host;
 mod instructions;
 pub mod orchestration;
 pub mod permissions;
 pub mod sandbox;
 pub mod sandbox_resources;
 pub mod schedules;
+mod services;
 mod skills;
+pub use services::OwnerScope;
+use services::{
+    AgentResources, AgentService, ConversationService, EnvironmentService, TaskService,
+};
 mod store;
 pub mod tasks;
 pub mod terminal;
@@ -29,7 +35,8 @@ use axum::{
 use pot_protocol::*;
 mod bootstrap;
 pub use bootstrap::{
-    Backend, RuntimeConfig, initialize, initialize_with_agent_executor, initialize_with_providers,
+    Backend, RuntimeConfig, initialize, initialize_composition, initialize_with_agent_executor,
+    initialize_with_providers,
 };
 pub mod desktop;
 pub mod api {
@@ -63,41 +70,32 @@ struct Inner {
 }
 #[derive(Clone)]
 pub struct Service {
-    permissions: Arc<permissions::Hub>,
-    skill_selection: Option<Vec<String>>,
-    #[cfg(test)]
-    test_tool_executor: Option<Arc<dyn pot_core::ToolExecutor>>,
-    sandboxes: Arc<sandbox::Manager>,
-    sandbox_id: Option<String>,
-    usage: Arc<Mutex<usage::Ledger>>,
-    usage_scope: String,
-    inner: Arc<Mutex<Inner>>,
-    events: broadcast::Sender<Event>,
-    commands: mpsc::UnboundedSender<SendMessage>,
-    token: String,
-    boot: String,
-    workspace: PathBuf,
-    api_budget: Option<budget::BudgetSettings>,
-    execution: Option<execution::Config>,
-    agent_upstream: String,
-    is_worker: bool,
-    data: PathBuf,
-    cancel_notify: Arc<tokio::sync::Notify>,
-    stop: tokio::sync::watch::Sender<bool>,
-    tasks: Arc<Mutex<tasks::Hub>>,
-    terminals: Arc<Mutex<terminal::Hub>>,
-    agent_executor: Arc<pot_agent::Agent>,
+    scope: OwnerScope,
+    conversation: ConversationService,
+    agent_service: AgentService,
+    environment_service: EnvironmentService,
+    tasks: TaskService,
 }
 impl Service {
     /// Trusted in-process notification adapter. Only the owner main Store is eligible.
     pub fn notification_sequence(&self) -> Result<i64> {
-        self.inner.lock().unwrap().store.notification_sequence()
+        self.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .notification_sequence()
     }
     pub fn notifications(&self, after: i64) -> Result<Vec<(i64, Message)>> {
         if self.is_worker {
             return Ok(Vec::new());
         }
-        self.inner.lock().unwrap().store.notifications(after)
+        self.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .notifications(after)
     }
 
     fn stopping(&self) -> bool {
@@ -109,7 +107,7 @@ impl Service {
     }
 
     fn snapshot(&self) -> Result<Snapshot> {
-        let s = self.inner.lock().unwrap();
+        let s = self.conversation.inner.lock().unwrap();
         self.snapshot_locked(&s)
     }
     fn snapshot_locked(&self, s: &Inner) -> Result<Snapshot> {
@@ -137,7 +135,7 @@ impl Service {
         })
     }
     fn budget(&self) -> Result<Option<RequestBudget>> {
-        self.budget_for(&self.inner.lock().unwrap().store)
+        self.budget_for(&self.conversation.inner.lock().unwrap().store)
     }
     fn budget_for(&self, store: &Store) -> Result<Option<RequestBudget>> {
         if let Some(thread) = agent::current(store)? {
@@ -148,9 +146,9 @@ impl Service {
         self.api_budget.as_ref().map(|b| b.status()).transpose()
     }
     fn publish_budget(&self) -> Result<()> {
-        let _inner = self.inner.lock().unwrap();
+        let _inner = self.conversation.inner.lock().unwrap();
         if let Some(budget) = self.budget_for(&_inner.store)? {
-            let _ = self.events.send(Event {
+            let _ = self.conversation.events.send(Event {
                 event_id: id(),
                 cursor: None,
                 kind: EventKind::Budget { budget },
@@ -160,25 +158,26 @@ impl Service {
     }
     fn save_non_notifying(&self, message: Message) -> Result<()> {
         let event = self
+            .conversation
             .inner
             .lock()
             .unwrap()
             .store
             .save_non_notifying(message)?;
-        let _ = self.events.send(event);
+        let _ = self.conversation.events.send(event);
         Ok(())
     }
     fn save(&self, message: Message) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.conversation.inner.lock().unwrap();
         let event = inner.store.save(message)?;
-        let _ = self.events.send(event);
+        let _ = self.conversation.events.send(event);
         Ok(())
     }
     fn phase(&self, phase: AgentPhase, detail: Option<String>) {
-        let mut s = self.inner.lock().unwrap();
+        let mut s = self.conversation.inner.lock().unwrap();
         s.agent.phase = phase;
         s.agent.detail = detail;
-        let _ = self.events.send(Event {
+        let _ = self.conversation.events.send(Event {
             event_id: id(),
             cursor: None,
             kind: EventKind::Agent {
@@ -187,9 +186,9 @@ impl Service {
         });
     }
     fn turn(&self, turn: Option<TurnState>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.conversation.inner.lock().unwrap();
         inner.turn = turn.clone();
-        let _ = self.events.send(Event {
+        let _ = self.conversation.events.send(Event {
             event_id: id(),
             cursor: None,
             kind: EventKind::Turn { turn },
@@ -247,14 +246,14 @@ pub async fn send(
             "Invalid conversation, request ID or message",
         ));
     }
-    if s.stopping() || s.commands.is_closed() {
+    if s.stopping() || s.conversation.commands.is_closed() {
         return Err(error(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_exited",
             "Restart environment",
         ));
     }
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     if let Some(old) = inner.store.duplicate(&req.request_id).map_err(internal)? {
         if old.text != req.text || old.conversation_id != req.conversation_id {
             return Err(error(
@@ -336,15 +335,15 @@ pub async fn send(
         user_message_id: mid.clone(),
         cancelling: false,
     });
-    let _ = s.events.send(event);
-    let _ = s.events.send(Event {
+    let _ = s.conversation.events.send(event);
+    let _ = s.conversation.events.send(Event {
         event_id: id(),
         cursor: None,
         kind: EventKind::Turn {
             turn: inner.turn.clone(),
         },
     });
-    s.commands.send(req).map_err(|_| {
+    s.conversation.commands.send(req).map_err(|_| {
         error(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_exited",
@@ -370,8 +369,8 @@ pub async fn events(
     // Subscribe and capture replay/snapshot under the same lock as publishers.
     // This closes the snapshot-to-subscription gap for ephemeral turn state too.
     let (mut rx, history, initial) = {
-        let inner = s.inner.lock().unwrap();
-        let rx = s.events.subscribe();
+        let inner = s.conversation.inner.lock().unwrap();
+        let rx = s.conversation.events.subscribe();
         let initial = s.snapshot_locked(&inner).map_err(internal)?;
         if q.after < 0 || q.after > initial.cursor {
             return Err(error(
@@ -409,7 +408,7 @@ pub async fn cancel(
             "Cancellation requires an Agent thread",
         ));
     }
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     if let Some(turn) = inner.turn.as_mut() {
         if turn.user_message_id != req.user_message_id {
             return Err(error(
@@ -420,7 +419,7 @@ pub async fn cancel(
         }
         turn.cancelling = true;
     }
-    let _ = s.events.send(Event {
+    let _ = s.conversation.events.send(Event {
         event_id: id(),
         cursor: None,
         kind: EventKind::Turn {
@@ -432,7 +431,7 @@ pub async fn cancel(
 }
 pub async fn usage(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let budget = s.budget_for(&inner.store).map_err(internal)?;
     let usage = inner
         .store
@@ -456,57 +455,65 @@ pub async fn events_handler(
 mod tests {
     use super::*;
     pub(super) fn service() -> Service {
+        let data = std::env::temp_dir()
+            .join(format!("pot-inventory-{}", id()))
+            .join("product");
         let (events, _) = broadcast::channel(8);
         let (commands, _rx) = mpsc::unbounded_channel();
         Service {
-            permissions: Arc::new(permissions::Hub::memory()),
-            skill_selection: None,
-            test_tool_executor: None,
-            sandboxes: Arc::new(
-                sandbox::Manager::open(
-                    &std::env::temp_dir()
-                        .join(format!("pot-inventory-{}", id()))
-                        .join("product"),
-                )
-                .unwrap(),
-            ),
-            sandbox_id: None,
-            usage: Arc::new(Mutex::new(
-                usage::Ledger::open(std::path::Path::new(":memory:")).unwrap(),
-            )),
-            usage_scope: "main".into(),
-            inner: Arc::new(Mutex::new(Inner {
-                store: Store::open(std::path::Path::new(":memory:")).unwrap(),
-                agent: AgentStatus {
-                    model: "test".into(),
-                    phase: AgentPhase::Ready,
-                    detail: None,
-                },
-                turn: None,
-                model_requests: 0,
-            })),
-            events,
-            commands,
-            token: "test-token".into(),
-            boot: id(),
-            workspace: PathBuf::new(),
-            api_budget: None,
-            execution: None,
-            agent_upstream: String::new(),
-            is_worker: false,
-            data: PathBuf::new(),
-            cancel_notify: Arc::new(tokio::sync::Notify::new()),
-            stop: tokio::sync::watch::channel(false).0,
-            tasks: Arc::new(Mutex::new(tasks::Hub::default())),
-            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-            agent_executor: Arc::new(pot_agent::Agent::default()),
+            scope: OwnerScope {
+                runtime_id: id(),
+                skill_selection: None,
+                test_tool_executor: None,
+                sandbox_id: None,
+                usage: Arc::new(Mutex::new(
+                    usage::Ledger::open(std::path::Path::new(":memory:")).unwrap(),
+                )),
+                usage_scope: "main".into(),
+                token: "test-token".into(),
+                boot: id(),
+                workspace: PathBuf::new(),
+                api_budget: None,
+                execution: None,
+                agent_upstream: String::new(),
+                is_worker: false,
+                data: PathBuf::new(),
+                cancel_notify: Arc::new(tokio::sync::Notify::new()),
+                stop: tokio::sync::watch::channel(false).0,
+            },
+            conversation: ConversationService {
+                inner: Arc::new(Mutex::new(Inner {
+                    store: Store::open(std::path::Path::new(":memory:")).unwrap(),
+                    agent: AgentStatus {
+                        model: "test".into(),
+                        phase: AgentPhase::Ready,
+                        detail: None,
+                    },
+                    turn: None,
+                    model_requests: 0,
+                })),
+                events,
+                commands,
+            },
+            agent_service: AgentService {
+                executor: Arc::new(pot_agent::Agent::default()),
+                resources: Arc::new(AgentResources::paths(&data)),
+            },
+            environment_service: EnvironmentService {
+                permissions: Arc::new(permissions::Hub::memory()),
+                manager: Arc::new(sandbox::Manager::open(&data).unwrap()),
+                terminals: Arc::new(Mutex::new(terminal::Hub::default())),
+            },
+            tasks: TaskService {
+                hub: Arc::new(Mutex::new(tasks::Hub::default())),
+            },
         }
     }
     #[test]
     fn snapshot_reports_thread_configuration_before_first_turn() {
         let s = service();
         agent::initialize_store(
-            &mut s.inner.lock().unwrap().store,
+            &mut s.conversation.inner.lock().unwrap().store,
             "main",
             &execution::Config {
                 model: "deepseek-v4-flash".into(),
@@ -514,7 +521,7 @@ mod tests {
             },
         )
         .unwrap();
-        let thread = agent::current(&s.inner.lock().unwrap().store)
+        let thread = agent::current(&s.conversation.inner.lock().unwrap().store)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -526,7 +533,7 @@ mod tests {
     async fn request_retry_is_idempotent_and_conflicting_reuse_is_rejected() {
         let mut s = service();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
+        s.conversation.commands = tx;
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
         let req = SendMessage {
@@ -577,7 +584,7 @@ mod tests {
     async fn exhausted_ledger_rejects_without_writes_but_allows_deduplication() {
         let mut s = service();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
+        s.conversation.commands = tx;
         let data = std::env::temp_dir().join(format!("pot-budget-{}", id()));
         std::fs::create_dir_all(data.join("deepseek-attempts")).unwrap();
         s.api_budget = Some(budget::BudgetSettings {

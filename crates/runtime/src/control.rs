@@ -36,7 +36,7 @@ fn change_control(s: &Service, req: TurnControl) -> ApiResult<Json<Value>> {
             "Expected pause or resume",
         ));
     }
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let turn = inner
         .turn
         .as_ref()
@@ -79,7 +79,7 @@ pub(crate) async fn ready(s: &Service) -> Result<()> {
     let mut observed = false;
     loop {
         let paused = {
-            let inner = s.inner.lock().unwrap();
+            let inner = s.conversation.inner.lock().unwrap();
             let target = inner
                 .turn
                 .as_ref()
@@ -161,7 +161,7 @@ fn enqueue(s: &Service, req: Steer) -> ApiResult<Json<SendMessageAccepted>> {
             "Invalid steering input",
         ));
     }
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let turn = inner
         .turn
         .as_ref()
@@ -278,7 +278,7 @@ pub(crate) fn send_reference(
             "Invalid message",
         ));
     }
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     if agent::current(&inner.store).map_err(internal)?.is_none() {
         return Err(error(
             StatusCode::CONFLICT,
@@ -341,7 +341,7 @@ pub(crate) fn pending(
     generation: u64,
     finalizing: bool,
 ) -> Result<Vec<(String, String)>> {
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let turn = inner
         .turn
         .as_ref()
@@ -365,7 +365,7 @@ pub(crate) fn pending(
     Ok(pending)
 }
 pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Result<()> {
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     let target = inner
         .turn
         .as_ref()
@@ -388,7 +388,7 @@ pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Resul
                 created_at_ms: now(),
                 request_id: None,
             })?;
-            let _ = s.events.send(event);
+            let _ = s.conversation.events.send(event);
             entry.consumed = true;
         }
     }
@@ -407,14 +407,14 @@ pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Resul
                 created_at_ms: mail.created,
                 request_id: None,
             })?;
-            let _ = s.events.send(event);
+            let _ = s.conversation.events.send(event);
             mail.consumed = true;
         }
     }
     inner.store.set(MAILBOX, &serde_json::to_string(&mails)?)
 }
 pub(crate) fn record(s: &Service, generation: u64, metadata: &Value) -> Result<()> {
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let mut entries: Vec<Value> = inner
         .store
         .get(DIAGNOSTICS)?
@@ -464,7 +464,7 @@ pub async fn diagnostics(
     } else {
         root
     };
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let entries: Value = inner
         .store
         .get(DIAGNOSTICS)

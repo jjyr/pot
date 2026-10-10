@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Server and Web UI in this process\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|interrupt ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
+const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve [--composition PRESET]  Run bare, environment or assistant Runtime\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|interrupt ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--version") {
@@ -139,11 +139,22 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
             print(api(root,"/api/v1/sandboxes",Some(json!({"action":"create","sandbox_id":id,"provider":pot_sandbox_macos_apple_vm::PROVIDER_ID}))).await?)
         }
         "serve" => {
-            let server = pot_server::Server::bind(pot_server::ServerConfig::from_env()).await?;
+            let mut config = pot_server::ServerConfig::from_env();
+            if args.len() > 1 {
+                ensure!(
+                    args.len() == 3 && argument(args, 1)? == "--composition",
+                    "Usage: pot serve [--composition bare|environment|assistant]"
+                );
+                config.composition = Some(argument(args, 2)?.parse()?);
+            }
+            let server = pot_server::Server::bind(config).await?;
+            let composition = server.composition();
             println!(
                 "Pot instance: {}\nWeb: {}\nAccess Token: pot --root '{}' access token",
                 root.display(),
-                if std::env::var_os("POT_TAILSCALE_HOSTNAME").is_some() {
+                if composition != pot_runtime::host::Composition::Assistant {
+                    "disabled (Runtime management only)".into()
+                } else if std::env::var_os("POT_TAILSCALE_HOSTNAME").is_some() {
                     "embedded Tailscale (pot access connect, then pot access enable)".into()
                 } else {
                     std::env::var("POT_ACCESS_ORIGIN")?
@@ -151,7 +162,11 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
                 root.display()
             );
             let _ownership = server.local_client();
-            let mut helper = start_helper(root).await?;
+            let mut helper = if composition.has_environments() {
+                start_helper(root).await?
+            } else {
+                None
+            };
             let result = server
                 .serve_local(async {
                     let mut term =
@@ -175,9 +190,9 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
             }
             result
         }
-        "status" => print(api(root, "/api/v1/snapshot", None).await?),
+        "status" => print(api(root, "/api/v1/runtime", None).await?),
         "doctor" => {
-            let state = api(root, "/api/v1/snapshot", None).await;
+            let state = api(root, "/api/v1/runtime", None).await;
             let assets = std::env::var_os("POT_ACCESS_ASSETS").map(PathBuf::from);
             print(
                 json!({"instance":root,"server_running":state.is_ok(),"web_origin":std::env::var("POT_ACCESS_ORIGIN")?,"web_embedded":cfg!(feature="embedded-web"),"assets_directory":assets,"sandbox_helper_running":root.join("helper.sock").exists(),"note":"Sandbox execution requires a supported provider; no host execution fallback"}),

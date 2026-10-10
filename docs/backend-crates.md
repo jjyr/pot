@@ -1,6 +1,6 @@
 # Backend crate boundaries
 
-Updated: 2026-10-09. See [architecture](architecture.md) for deployment and [Agent/Sandbox design](agent-sandbox-design.md) for authority.
+Updated: 2026-10-10. See [architecture](architecture.md) for deployment and [Agent/Sandbox design](agent-sandbox-design.md) for authority.
 
 | Crate | Responsibility |
 |---|---|
@@ -21,7 +21,7 @@ Updated: 2026-10-09. See [architecture](architecture.md) for deployment and [Age
 | `pot-app` | GPUI/native UI, protocol client and cached projections |
 | `pot-eval` | Standalone deterministic and explicitly selected live evaluation |
 
-App depends on Protocol and embeds Server through its local service adapter. Server composes Runtime without App or GPUI. Runtime owns Storage, Gateway and Agent integration, and injects its Sandbox ToolExecutor into pot-agent. Core carries execution values and feedback/service contracts without depending on Runtime. Runtime and eval directly call the concrete pot-agent executor; there is no engine adapter or external session mapping. The guest executor knows neither Runtime, model providers nor Host product credentials.
+App depends on Protocol and embeds Server through its local service adapter. Server composes Runtime without App or GPUI. Runtime Host owns stable identity and process authority; bare, environment and assistant presets explicitly select service assembly. Conversation, Task, Agent and Environment hold separate local state, and task execution enters a scoped local Runner adapter. Agent resource paths are independent of Sandbox Manager. Runtime owns Storage, Gateway and Agent integration, and injects its Sandbox ToolExecutor into pot-agent. Core carries execution values and feedback/service contracts without depending on Runtime. Runtime and eval directly call the concrete pot-agent executor; there is no engine adapter or external session mapping. The guest executor knows neither Runtime, model providers nor Host product credentials.
 
 App embeds Host Server; standalone CLI hosts it independently. Helper owns local VM lifecycle and supports Sandbox-only hosting. Execution tools run in assigned guest scopes; shell code cannot access unmounted Host product state. Tasks sharing a Sandbox use the same guest account, so separate directories are organizational rather than mutual filesystem/process isolation.
 

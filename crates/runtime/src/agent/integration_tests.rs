@@ -100,7 +100,7 @@ async fn fixture(
     profile.provider = "mock".into();
     profile.auth_ref = "providers.json:mock".into();
     let spec = gateway::resolve(&s, &profile).unwrap();
-    assign_new(&mut s.inner.lock().unwrap().store, spec).unwrap();
+    assign_new(&mut s.conversation.inner.lock().unwrap().store, spec).unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let captured = Arc::new(Mutex::new(vec![]));
     let requests = captured.clone();
@@ -196,7 +196,7 @@ async fn fixture(
         .route("/models/fixture:streamGenerateContent", post(handler));
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let (tx, rx) = mpsc::unbounded_channel();
-    s.commands = tx;
+    s.conversation.commands = tx;
     (s, rx, server, captured)
 }
 async fn turn(s: &Service, rx: &mut mpsc::UnboundedReceiver<SendMessage>, id: &str) {
@@ -247,7 +247,8 @@ async fn native_agent_four_protocols_tools_usage_and_reopen() {
             "{:?}",
             s.snapshot().unwrap().messages
         );
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+        s.conversation.inner.lock().unwrap().store =
+            Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         turn(&s, &mut rx, "reopen").await;
         assert_eq!(
             std::fs::read_to_string(s.workspace.join("effects.txt")).unwrap(),
@@ -274,12 +275,12 @@ async fn native_agent_four_protocols_tools_usage_and_reopen() {
         assert_eq!(tokens, 45);
         drop(ledger);
         drop(captured);
-        let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
+        let state = pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
             .unwrap()
             .unwrap();
         assert!(!state.to_string().contains("upstream-secret"));
         server.abort();
-        std::fs::remove_dir_all(s.data).unwrap();
+        std::fs::remove_dir_all(&s.data).unwrap();
     }
 }
 #[tokio::test]
@@ -337,7 +338,7 @@ async fn native_agent_cancel_kills_shell_descendants() {
     turn(&s, &mut rx, "after-cancel").await;
     assert!(!s.workspace.join("after-cancel.txt").exists());
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -354,7 +355,8 @@ async fn native_agent_allowance_checkpoint_resumes_without_tool_replay() {
     );
     assert!(usage::paused(&s).unwrap().is_some());
     assert_eq!(captured.lock().unwrap().len(), 1);
-    s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+    s.conversation.inner.lock().unwrap().store =
+        Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
     s.usage
         .lock()
         .unwrap()
@@ -370,7 +372,7 @@ async fn native_agent_allowance_checkpoint_resumes_without_tool_replay() {
         "APRICOT\n"
     );
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 #[tokio::test]
 async fn native_agent_compaction_is_persisted_and_metered() {
@@ -379,7 +381,7 @@ async fn native_agent_compaction_is_persisted_and_metered() {
     ];
     let (s, mut rx, server, captured) = fixture("openai_chat", calls).await;
     turn(&s, &mut rx, "seed").await;
-    let mut value = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
+    let mut value = pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     let last = value["messages"]
@@ -389,7 +391,8 @@ async fn native_agent_compaction_is_persisted_and_metered() {
         .unwrap();
     last["text"] = json!("old context ".repeat(6000));
     last["replay"]["content"] = last["text"].clone();
-    pot_storage::threads::save_context(&s.inner.lock().unwrap().store, &value).unwrap();
+    pot_storage::threads::save_context(&s.conversation.inner.lock().unwrap().store, &value)
+        .unwrap();
     turn(&s, &mut rx, "compact").await;
     assert_eq!(captured.lock().unwrap().len(), 4);
     let ledger = s.usage.lock().unwrap();
@@ -409,19 +412,19 @@ async fn native_agent_compaction_is_persisted_and_metered() {
         std::fs::read_to_string(s.workspace.join("once.txt")).unwrap(),
         "APRICOT\n"
     );
-    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert!(state.to_string().contains("Previous context summary"));
     assert!(!state.to_string().contains("old context old context"));
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 #[tokio::test]
 async fn native_agent_interrupted_tool_receipt_is_not_replayed() {
     let (s, mut rx, server, _) = fixture("openai_chat", vec![]).await;
     turn(&s, &mut rx, "seed").await;
-    let mut value = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
+    let mut value = pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     let call =
@@ -429,10 +432,11 @@ async fn native_agent_interrupted_tool_receipt_is_not_replayed() {
     value["pending"] = json!([call]);
     value["started"] = json!("unknown");
     value["messages"].as_array_mut().unwrap().push(json!({"role":"assistant","text":"","calls":[call],"call_id":"","replay":{"role":"assistant","content":null,"tool_calls":[{"id":"unknown","type":"function","function":{"name":"exec_command","arguments":call["arguments"].to_string()}}]}}));
-    pot_storage::threads::save_context(&s.inner.lock().unwrap().store, &value).unwrap();
+    pot_storage::threads::save_context(&s.conversation.inner.lock().unwrap().store, &value)
+        .unwrap();
     turn(&s, &mut rx, "recover").await;
     assert!(!s.workspace.join("replayed.txt").exists());
-    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert!(
@@ -441,7 +445,7 @@ async fn native_agent_interrupted_tool_receipt_is_not_replayed() {
             .contains("external effects may have occurred")
     );
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -468,7 +472,7 @@ async fn native_agent_duplicate_tool_ids_reuse_receipts_and_reject_conflicts() {
         }
         drop(requests);
         server.abort();
-        std::fs::remove_dir_all(s.data).unwrap();
+        std::fs::remove_dir_all(&s.data).unwrap();
     }
 }
 #[tokio::test]
@@ -486,7 +490,7 @@ async fn native_agent_dispatches_pot_task_tools_through_shared_authorization() {
     assert!(tasks[0].title.contains("APRICOT"));
     assert!(captured.lock().unwrap()[1].to_string().contains("task"));
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -512,7 +516,7 @@ async fn native_agent_shell_timeout_cleans_process_and_returns_tool_error() {
             .any(|m| m.role == Role::Tool && m.status == MessageStatus::Failed)
     );
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 fn configure_agent(s: &Service, settings: pot_core::AgentSettings, cap: u64) {
@@ -525,7 +529,7 @@ fn configure_agent(s: &Service, settings: pot_core::AgentSettings, cap: u64) {
     profile.auth_ref = "providers.json:mock".into();
     profile.params.agent = settings;
     let spec = gateway::resolve(s, &profile).unwrap();
-    assign_new(&mut s.inner.lock().unwrap().store, spec).unwrap();
+    assign_new(&mut s.conversation.inner.lock().unwrap().store, spec).unwrap();
 }
 
 #[tokio::test]
@@ -544,6 +548,7 @@ async fn native_agent_pipe_session_input_output_and_turn_cleanup() {
     assert!(bodies[2].to_string().contains("DONE"));
     drop(bodies);
     let diag = s
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -554,7 +559,7 @@ async fn native_agent_pipe_session_input_output_and_turn_cleanup() {
     assert!(diag.contains("write_stdin"));
     assert!(!diag.contains("printf"));
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -572,7 +577,7 @@ async fn native_agent_yielded_process_is_killed_at_turn_end() {
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
     assert!(!s.workspace.join("leaked.txt").exists());
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -606,7 +611,7 @@ async fn native_agent_profile_limits_prompt_and_tool_filter_are_effective() {
     assert!(bodies[1].to_string().contains("Tool unavailable"));
     drop(bodies);
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 struct CustomAgent {
@@ -661,7 +666,7 @@ async fn native_agent_code_extensions_tools_context_and_token_estimation() {
     )
     .await;
     let estimates = Arc::new(AtomicUsize::new(0));
-    s.agent_executor = Arc::new(pot_agent::Agent::with_extensions(Arc::new(CustomAgent {
+    s.agent_service.executor = Arc::new(pot_agent::Agent::with_extensions(Arc::new(CustomAgent {
         estimates: estimates.clone(),
     })));
     configure_agent(
@@ -686,12 +691,12 @@ async fn native_agent_code_extensions_tools_context_and_token_estimation() {
             .contains("CODE CONTEXT HOOK")
     );
     assert!(estimates.load(Ordering::SeqCst) >= 2);
-    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert!(!state.to_string().contains("CODE CONTEXT HOOK"));
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -712,6 +717,7 @@ async fn native_agent_pause_steering_resume_and_cancellation_are_scoped() {
     .await
     .unwrap();
     let target = s
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -779,10 +785,13 @@ async fn native_agent_pause_steering_resume_and_cancellation_are_scoped() {
         StatusCode::CONFLICT
     );
     // Reopen the durable queue while the turn is active, then wait for actual pause.
-    s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+    s.conversation.inner.lock().unwrap().store =
+        Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            if s.inner.lock().unwrap().agent.detail.as_deref() == Some("已暂停，等待继续") {
+            if s.conversation.inner.lock().unwrap().agent.detail.as_deref()
+                == Some("已暂停，等待继续")
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -811,7 +820,7 @@ async fn native_agent_pause_steering_resume_and_cancellation_are_scoped() {
             .to_string()
             .contains("Include the guidance APRICOT")
     );
-    let state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
+    let state = pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
         .unwrap()
         .unwrap();
     assert_eq!(
@@ -830,7 +839,7 @@ async fn native_agent_pause_steering_resume_and_cancellation_are_scoped() {
     );
     s.turn(None);
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -870,7 +879,7 @@ async fn native_agent_oversized_context_stops_before_network_when_compaction_dis
     assert!(captured.lock().unwrap().is_empty());
     s.turn(None);
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -888,6 +897,7 @@ async fn native_agent_cancel_while_manually_paused_settles_without_sampling() {
     .await
     .unwrap();
     let target = s
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -911,7 +921,9 @@ async fn native_agent_cancel_while_manually_paused_settles_without_sampling() {
     let job = tokio::spawn(async move { run(&running, req).await });
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            if s.inner.lock().unwrap().agent.detail.as_deref() == Some("已暂停，等待继续") {
+            if s.conversation.inner.lock().unwrap().agent.detail.as_deref()
+                == Some("已暂停，等待继续")
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -953,7 +965,7 @@ async fn native_agent_cancel_while_manually_paused_settles_without_sampling() {
     assert!(captured.lock().unwrap().is_empty());
     s.turn(None);
     server.abort();
-    std::fs::remove_dir_all(s.data).unwrap();
+    std::fs::remove_dir_all(&s.data).unwrap();
 }
 
 #[tokio::test]
@@ -968,9 +980,10 @@ async fn native_agent_display_duplicates_do_not_trigger_compaction_or_extra_usag
             vec![json!({"id":"once","name":"exec_command","arguments":{"cmd":"echo APRICOT"}})];
         let (s, mut rx, server, captured) = fixture(protocol, calls).await;
         turn(&s, &mut rx, "seed-meter").await;
-        let mut state = pot_storage::threads::load_context(&s.inner.lock().unwrap().store)
-            .unwrap()
-            .unwrap();
+        let mut state =
+            pot_storage::threads::load_context(&s.conversation.inner.lock().unwrap().store)
+                .unwrap()
+                .unwrap();
         assert!(state["usage_anchor"].is_object());
         for message in state["messages"].as_array_mut().unwrap() {
             if message["role"] == "assistant" {
@@ -978,8 +991,10 @@ async fn native_agent_display_duplicates_do_not_trigger_compaction_or_extra_usag
                 message["text"] = json!("DISPLAY_ONLY_DUPLICATE ".repeat(6000));
             }
         }
-        pot_storage::threads::save_context(&s.inner.lock().unwrap().store, &state).unwrap();
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+        pot_storage::threads::save_context(&s.conversation.inner.lock().unwrap().store, &state)
+            .unwrap();
+        s.conversation.inner.lock().unwrap().store =
+            Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         turn(&s, &mut rx, "after-meter-reopen").await;
         let requests = captured.lock().unwrap();
         assert_eq!(
@@ -1008,7 +1023,7 @@ async fn native_agent_display_duplicates_do_not_trigger_compaction_or_extra_usag
         assert_eq!(compactions, 0);
         drop(ledger);
         server.abort();
-        std::fs::remove_dir_all(s.data).unwrap();
+        std::fs::remove_dir_all(&s.data).unwrap();
     }
 }
 
@@ -1019,8 +1034,9 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
         std::fs::create_dir(&directory).unwrap();
         let path = directory.canonicalize().unwrap().join("file.txt");
         let (mut s, mut rx, server, captured) = fixture("openai_chat", vec![json!({"id":"host","name":"exec_command","arguments":{"cmd":"printf owner-approved > file.txt","workdir":directory}})]).await;
-        let permissions_file = s.sandboxes.agent_home.join("permissions.json");
-        s.permissions = Arc::new(crate::permissions::Hub::open(&permissions_file).unwrap());
+        let permissions_file = s.agent_service.resources.home.join("permissions.json");
+        s.environment_service.permissions =
+            Arc::new(crate::permissions::Hub::open(&permissions_file).unwrap());
         let owner = async {
             let record = tokio::time::timeout(std::time::Duration::from_secs(3), async {
                 loop {
@@ -1121,7 +1137,8 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                     if approvals == 0 {
                         assert_eq!(captured.lock().unwrap().len(), 1);
                         assert!(
-                            s.permissions
+                            s.environment_service
+                                .permissions
                                 .host_executor("main", thread(&s).unwrap().generation)
                                 .plugin_sessions()
                                 .await
@@ -1160,7 +1177,11 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                 assert!(requests[2].to_string().contains("43"));
             }
         }
-        s.permissions.finish_host(&s).await.unwrap();
+        s.environment_service
+            .permissions
+            .finish_host(&s)
+            .await
+            .unwrap();
         server.abort();
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }

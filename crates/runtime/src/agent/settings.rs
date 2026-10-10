@@ -31,7 +31,7 @@ fn queue(store: &mut Store, request_id: &str, config: ResolvedSpec) -> Result<()
     )
 }
 pub fn apply_pending(s: &Service, at_turn_boundary: bool) -> Result<()> {
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     if inner.agent.phase == AgentPhase::Failed
         || (!at_turn_boundary
             && (inner.turn.is_some()
@@ -81,7 +81,7 @@ pub async fn select(
         ));
     }
     initialize(&root).map_err(internal)?;
-    let profile = profiles(&root.inner.lock().unwrap().store)
+    let profile = profiles(&root.conversation.inner.lock().unwrap().store)
         .map_err(internal)?
         .into_iter()
         .find(|p| p.id == request.profile)
@@ -99,7 +99,7 @@ pub async fn select(
     let owner = crate::tasks::owner(&root, &request.owner)?;
     initialize(&owner).map_err(internal)?;
     {
-        let mut inner = owner.inner.lock().unwrap();
+        let mut inner = owner.conversation.inner.lock().unwrap();
         let key = format!("thread.config_request:{}", request.request_id);
         let fingerprint = serde_json::to_string(&config).map_err(|e| internal(e.into()))?;
         if let Some(old) = inner.store.get(&key).map_err(internal)? {
@@ -139,7 +139,7 @@ pub async fn select(
     }
     apply_pending(&owner, false).map_err(internal)?;
     Ok(Json(
-        json!({"saved":true,"pending":pending(&owner.inner.lock().unwrap().store).map_err(internal)?.is_some()}),
+        json!({"saved":true,"pending":pending(&owner.conversation.inner.lock().unwrap().store).map_err(internal)?.is_some()}),
     ))
 }
 
@@ -175,6 +175,7 @@ pub async fn settings(
     gateway::validate_spec(&s, &spec).map_err(internal)?;
     let key = format!("agent.settings:{}", settings.request_id);
     let already_saved = s
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -190,7 +191,7 @@ pub async fn settings(
         ));
     }
     if !already_saved {
-        let inner = s.inner.lock().unwrap();
+        let inner = s.conversation.inner.lock().unwrap();
         let revision = profiles(&inner.store)
             .map_err(internal)?
             .iter()
@@ -207,7 +208,7 @@ pub async fn settings(
             ));
         }
     }
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     let mut fingerprint = json!({"profile":settings.profile,"expected_revision":settings.expected_revision,"follow_main":settings.follow_main});
     if !settings.follow_worker {
         fingerprint["follow_worker"] = json!(false);
@@ -284,7 +285,9 @@ pub async fn settings(
     .map_err(|e| internal(e.into()))?;
     drop(inner);
     apply_pending(&s, false).map_err(internal)?;
-    if s.inner.lock().unwrap().agent.phase == AgentPhase::NeedsConfiguration && configured(&s) {
+    if s.conversation.inner.lock().unwrap().agent.phase == AgentPhase::NeedsConfiguration
+        && configured(&s)
+    {
         s.phase(AgentPhase::Ready, None);
     }
     Ok(Json(json!({"saved":true,"existing_tasks":"pinned"})))
@@ -320,12 +323,13 @@ mod tests {
         s.data = dir.clone();
         s.workspace = dir.clone();
         s.execution = Some(config());
-        s.inner.lock().unwrap().store = store;
+        s.conversation.inner.lock().unwrap().store = store;
         let active = thread(&s).unwrap();
         let mut edited = Profile::api(&config());
         edited.revision = 2;
         edited.model = "edited-only".into();
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -334,7 +338,8 @@ mod tests {
                 &serde_json::to_string(&vec![edited]).unwrap(),
             )
             .unwrap();
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -357,7 +362,7 @@ mod tests {
         s.data = dir.clone();
         s.workspace = dir.clone();
         s.execution = Some(config());
-        s.inner.lock().unwrap().store = store;
+        s.conversation.inner.lock().unwrap().store = store;
         let original = thread(&s).unwrap();
         let mut profile = Profile::api(&config());
         profile.id = "separate-worker".into();
@@ -420,7 +425,8 @@ mod tests {
         .unwrap();
         assert_eq!(spec.source_profile_id, profile.id);
         // Later connection saves may change the legacy fallback, but not an explicit role choice.
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -479,11 +485,11 @@ mod tests {
         let mut s = crate::tests::service();
         s.data = dir.clone();
         s.execution = Some(config());
-        s.inner.lock().unwrap().store = store;
+        s.conversation.inner.lock().unwrap().store = store;
         let before = thread(&s).unwrap();
         let context = json!({"type":"context","version":1,"messages":[{"role":"user","text":"original goal"},{"role":"assistant","text":"working","calls":[{"id":"effect","name":"exec_command","arguments":{"cmd":"touch file"}}]},{"role":"tool","call_id":"effect","text":"done"}],"pending":[],"last_request":"first","receipts":[{"id":"effect","result":"done"}],"usage_anchor":{"tokens":123},"steering_ids":["guidance"]});
         {
-            let inner = s.inner.lock().unwrap();
+            let inner = s.conversation.inner.lock().unwrap();
             save_context(&inner.store, &context).unwrap();
             inner.store.set("tasks.v2", "pending tasks").unwrap();
             inner.store.set("execution.paused", "checkpoint").unwrap();
@@ -492,18 +498,24 @@ mod tests {
             user_message_id: "running".into(),
             cancelling: false,
         }));
-        queue(&mut s.inner.lock().unwrap().store, "change", target.clone()).unwrap();
+        queue(
+            &mut s.conversation.inner.lock().unwrap().store,
+            "change",
+            target.clone(),
+        )
+        .unwrap();
         apply_pending(&s, false).unwrap();
         assert_eq!(thread(&s).unwrap(), before);
         s.turn(None);
         apply_pending(&s, false).unwrap();
         assert_eq!(thread(&s).unwrap(), before); // Paused continuation still owns its configuration.
-        s.inner.lock().unwrap().store = Store::open(&dir.join("pot-v2.sqlite")).unwrap();
+        s.conversation.inner.lock().unwrap().store =
+            Store::open(&dir.join("pot-v2.sqlite")).unwrap();
         apply_pending(&s, true).unwrap();
         let after = thread(&s).unwrap();
         assert_eq!(after.generation, before.generation + 1);
         assert_eq!(after.config, target);
-        let inner = s.inner.lock().unwrap();
+        let inner = s.conversation.inner.lock().unwrap();
         assert_eq!(load_context(&inner.store).unwrap(), Some(context));
         assert_eq!(
             inner.store.get("tasks.v2").unwrap().as_deref(),
@@ -526,7 +538,7 @@ mod tests {
         let mut s = crate::tests::service();
         s.data = dir.clone();
         s.execution = Some(config());
-        s.inner.lock().unwrap().store = store;
+        s.conversation.inner.lock().unwrap().store = store;
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
         let mut p = Profile::api(&config());

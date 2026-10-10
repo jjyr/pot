@@ -34,7 +34,8 @@ fn output_limit() -> u64 {
 
 pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
+    let profiles =
+        agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
     let mut connections = Vec::new();
     for profile in profiles {
         let spec = profile.resolve().map_err(internal)?;
@@ -45,7 +46,7 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
                     "model":spec.model,"protocol":p.protocol,"has_key":!p.api_key.is_empty()}));
         }
     }
-    let thread = agent::current(&s.inner.lock().unwrap().store).map_err(internal)?;
+    let thread = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
     let connection = thread.and_then(|b| {
         connections
             .iter()
@@ -107,7 +108,8 @@ pub async fn save(
     }
     let mut key = input.api_key;
     if key.is_empty() {
-        let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
+        let profiles =
+            agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
         if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
             && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
             && previous.endpoint == input.endpoint
@@ -196,11 +198,11 @@ mod tests {
         let s = crate::tests::service();
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let before = agent::profiles(&s.inner.lock().unwrap().store).unwrap();
+        let before = agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap();
         let response=check(State(s.clone()),h,Json(serde_json::from_value(json!({"endpoint":format!("http://{address}/v1/responses"),"api_key":"check-only","protocol":"openai_responses"})).unwrap())).await.unwrap().0;
         assert_eq!(response["models"], json!(["available-model"]));
         assert_eq!(
-            agent::profiles(&s.inner.lock().unwrap().store).unwrap(),
+            agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap(),
             before
         );
         assert!(!response.to_string().contains("check-only"));
@@ -226,7 +228,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            agent::current(&s.inner.lock().unwrap().store)
+            agent::current(&s.conversation.inner.lock().unwrap().store)
                 .unwrap()
                 .is_none()
         );
@@ -247,7 +249,8 @@ mod tests {
         .unwrap();
         assert_eq!(agent::thread(&s).unwrap(), active);
         assert!(
-            s.inner
+            s.conversation
+                .inner
                 .lock()
                 .unwrap()
                 .store
@@ -259,7 +262,7 @@ mod tests {
         assert_eq!(public["connections"].as_array().unwrap().len(), 2);
         assert_eq!(public["connection"]["profile_id"], "second");
         assert!(!public.to_string().contains("private-"));
-        let first = agent::profiles(&s.inner.lock().unwrap().store)
+        let first = agent::profiles(&s.conversation.inner.lock().unwrap().store)
             .unwrap()
             .into_iter()
             .find(|p| p.id == "first")
@@ -439,7 +442,8 @@ pub async fn check(
     }
     let mut key = input.api_key;
     if key.is_empty() {
-        let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
+        let profiles =
+            agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
         if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
             && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
             && previous.endpoint == input.endpoint

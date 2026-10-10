@@ -21,9 +21,10 @@ impl SandboxFixture {
         std::fs::rename(service.data.parent().unwrap(), &root).unwrap();
         service.data = root.join("product");
         service.workspace = service.data.join("workspace");
-        service.inner.lock().unwrap().store =
+        service.conversation.inner.lock().unwrap().store =
             Store::open(&service.data.join("pot-v2.sqlite")).unwrap();
-        service.sandboxes = Arc::new(crate::sandbox::Manager::open(&service.data).unwrap());
+        service.environment_service.manager =
+            Arc::new(crate::sandbox::Manager::open(&service.data).unwrap());
         assert!(service.test_tool_executor.is_none());
         let http = Arc::new(Mutex::new(vec![]));
         let mut servers = vec![];
@@ -415,7 +416,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
 async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary() {
     let fixture = SandboxFixture::new().await;
     let main = &fixture.service;
-    let base = main.sandboxes.workspace("default");
+    let base = main.environment_service.manager.workspace("default");
     std::fs::create_dir_all(&base).unwrap();
     std::fs::write(base.join(".git"), "gitdir").unwrap();
     std::fs::write(base.join("AGENTS.md"), "PROJECT_FIRST").unwrap();
@@ -633,7 +634,8 @@ async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
     .await
     .unwrap();
     let mut restarted = s.clone();
-    restarted.sandboxes = Arc::new(crate::sandbox::Manager::open(&s.data).unwrap());
+    restarted.environment_service.manager =
+        Arc::new(crate::sandbox::Manager::open(&s.data).unwrap());
     assert!(
         crate::sandbox::tool(
             &restarted,
@@ -682,7 +684,13 @@ async fn malformed_session_inspection_quarantines_active_effects() {
             .contains("stop unconfirmed")
     );
     assert!(crate::sandbox::drain(s).await.is_err());
-    assert!(s.sandboxes.acquire("default").await.is_err());
+    assert!(
+        s.environment_service
+            .manager
+            .acquire("default")
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -723,7 +731,7 @@ async fn completed_task_cancellation_closes_retained_resources_without_rewriting
     assert_eq!(reply["sessions_stopped"], true);
     assert_eq!(fixture.requests("/finish").len(), 1);
     assert_eq!(
-        tasks::task_phase(&root.tasks.lock().unwrap(), &task.id),
+        tasks::task_phase(&root.tasks.hub.lock().unwrap(), &task.id),
         Some(TaskPhase::Complete)
     );
 }
@@ -791,8 +799,19 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     .await
     .unwrap();
     assert_eq!(waiter.await.unwrap().unwrap()["approved"], true);
-    assert!(s.permissions.grants("main").as_array().unwrap().is_empty());
-    let guest = s.permissions.environment("sandbox:linux-b").unwrap();
+    assert!(
+        s.environment_service
+            .permissions
+            .grants("main")
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let guest = s
+        .environment_service
+        .permissions
+        .environment("sandbox:linux-b")
+        .unwrap();
     assert_eq!(guest.grants("main").as_array().unwrap().len(), 1);
     crate::permissions::prepare(
         s,
@@ -802,7 +821,8 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     .await
     .unwrap();
     assert!(
-        s.permissions
+        s.environment_service
+            .permissions
             .environment("sandbox:default")
             .unwrap()
             .grants("main")
@@ -868,6 +888,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
     assert!(
         fixture
             .service
+            .environment_service
             .permissions
             .environment("sandbox:linux-b")
             .is_err()

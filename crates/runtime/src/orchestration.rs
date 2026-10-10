@@ -34,7 +34,7 @@ pub async fn invoke(
         ));
     }
     let (request, turn_id) = {
-        let inner = s.inner.lock().unwrap();
+        let inner = s.conversation.inner.lock().unwrap();
         let turn = inner
             .turn
             .as_ref()
@@ -71,7 +71,7 @@ pub async fn invoke(
     // Task APIs bound IDs to 128 bytes, so derive a stable UUID via SQLite receipt.
     let receipt = format!("orchestration.receipt:{key}");
     let request_id = {
-        let inner = s.inner.lock().unwrap();
+        let inner = s.conversation.inner.lock().unwrap();
         match inner.store.get(&receipt).map_err(internal)? {
             Some(v) => {
                 let old: Value = serde_json::from_str(&v).map_err(|e| internal(e.into()))?;
@@ -279,10 +279,10 @@ pub(super) fn deliver(s: &Service) -> Result<()> {
     if usage::paused(s)?.is_some() {
         return Ok(());
     }
-    if !agent::configured(s) || s.commands.is_closed() {
+    if !agent::configured(s) || s.conversation.commands.is_closed() {
         return Ok(());
     }
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     if inner.turn.is_some()
         || inner.agent.phase != AgentPhase::Ready
         || s.budget_for(&inner.store)?
@@ -336,15 +336,16 @@ pub(super) fn deliver(s: &Service) -> Result<()> {
         user_message_id: mid,
         cancelling: false,
     });
-    let _ = s.events.send(event);
-    let _ = s.events.send(Event {
+    let _ = s.conversation.events.send(event);
+    let _ = s.conversation.events.send(Event {
         event_id: id(),
         cursor: None,
         kind: EventKind::Turn {
             turn: inner.turn.clone(),
         },
     });
-    s.commands
+    s.conversation
+        .commands
         .send(req)
         .map_err(|_| anyhow!("Main worker exited"))?;
     Ok(())
@@ -353,7 +354,7 @@ pub(super) fn deliver(s: &Service) -> Result<()> {
 /// On first upgrade, historical report cards remain visible but do not cause
 /// unsolicited model calls. Subsequent boots retain the existing delivery ledger.
 pub(super) fn initialize(s: &Service) -> Result<()> {
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     if inner.store.get("orchestration.delivered")?.is_none() {
         let historical: BTreeSet<_> = inner
             .store

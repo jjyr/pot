@@ -19,10 +19,10 @@ Building a release from source uses the pinned toolchains:
 mise exec -- python scripts/build-cli
 mise exec -- python scripts/install-cli .local/poc/cargo-target/release/pot --prefix ~/.local
 pot init
-pot serve
+pot serve --composition assistant
 ```
 
-`pot serve` runs in the foreground and serves local Web UI at
+`pot serve --composition assistant` runs in the foreground and serves local Web UI at
 `http://localhost:17701`. Run `pot open` for automatic browser configuration,
 or `pot access token` to configure the browser manually. `pot access qr` prints
 a connection QR containing the Token; do not share it.
@@ -44,6 +44,52 @@ carrying browser Origin headers are rejected. The App has no such socket.
 There is still an authenticated loopback integration listener for external
 tool/model clients. In App mode its routes are restricted to these
 integrations; the App UI cannot use it to access snapshots/settings.
+
+## Runtime composition
+
+Fresh standalone data roots default to `bare`: only Runtime identity, authority,
+capability discovery and lifecycle are initialized. No conversation/model/task
+loops, Sandbox Provider or Web listener starts. Existing roots containing
+`product/pot-v2.sqlite` retain the assistant composition unless explicitly
+configured otherwise. App always selects `assistant`.
+
+```sh
+pot serve --composition bare
+pot serve --composition environment
+pot serve --composition assistant
+pot status
+pot doctor
+pot api /api/v1/runtime
+```
+
+The presets are local assemblies. `environment` registers Providers and exposes
+native-authorized environment management/execution without AI configuration,
+Conversation or Task stores. `assistant` includes the existing product services
+and optional Web access. Disabling services preserves their data; switching
+presets requires a restart. Peer grants and remote execution are later phases.
+
+The command-line choice overrides `POT_RUNTIME_COMPOSITION`; otherwise that
+environment setting overrides `product/runtime-composition.json`:
+
+```json
+{"schema_version":1,"preset":"environment"}
+```
+
+Unknown presets/schema versions fail startup. The stable UUID in
+`product/runtime-identity.json` survives restart, while bearer and boot identity
+rotate. Preserve this identity with the instance data; do not copy it to an
+independent simultaneously active Runtime.
+
+Environment-only operations use `pot api /api/v1/execution FILE` with an envelope
+containing `run_id` (UUID), `call_id`, `sandbox_id`, `name` and `args`. Supported
+names are `exec_command`, `write_stdin` and `apply_patch`; arguments use existing
+environment operation schemas. The target belongs in the envelope. Receipts
+reject conflicting call IDs and reuse completed results. Send `{"run_id":"UUID"}`
+to `/api/v1/environment/cancel` to persist cancellation before cleanup; subsequent
+operations for that run are rejected. These are operator endpoints under full
+local authority, not peer authorization or model-visible tools. Host path grants
+require the assistant approval service and are unavailable in environment-only
+mode.
 
 ## Configure and operate without App
 
@@ -72,7 +118,7 @@ permissions remain restricted; changing authentication does not enable remote
 provider administration or Terminal access. Paired owner clients can open a
 qualified Sandbox desktop through login-bound viewer tickets.
 
-`pot config server /secure/listener-settings.json` saves supported `POT_ACCESS_*`
+`pot config server /secure/listener-settings.json` saves supported `POT_ACCESS_*` and `POT_RUNTIME_COMPOSITION`
 settings in `server.json` for both hosts. Environment overrides this file.
 Restart the host to apply changed listeners/certificates. Remote example:
 
@@ -153,7 +199,7 @@ no Podman API socket/service is used. Host execution is never a fallback.
 mise run build:container-image
 mise run build:cli
 pot init
-pot serve
+pot serve --composition assistant
 ```
 
 The image build compiles a target musl executor and uses the shared Dockerfile.

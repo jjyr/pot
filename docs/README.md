@@ -11,7 +11,7 @@ Choose a page for your question; reading everything is unnecessary. Code defines
 | Publish a macOS release or update the Homebrew cask | [Releases and Homebrew](development.md#releases-and-homebrew) |
 | Understand delivered and remaining work | [Development plan](development-plan.md) |
 | Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
-| Review optional Runtime components and distributed Agent/Task/Environment composition | [Composable runtimes](runtime-composition.md) (design proposal; not implemented) |
+| Review optional Runtime components and distributed Agent/Task/Environment composition | [Composable runtimes](runtime-composition.md) (local presets delivered; distributed phases planned) |
 | Understand task messaging, interruption, resume and archive rules | [Task coordination](task-coordination.md) |
 | Understand direct tools, JavaScript composition and waiting | [Agent tool composition](tool-composition.md) |
 | Understand pot-agent approvals, persistent grants and environment-local access | [Agent permissions](permissions.md) |
@@ -65,6 +65,8 @@ Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](va
 Single Agent engine: [Removal and automated validation, 2026-10-09](validation/single-agent-20261009.md).
 
 Product-owned Threads: [Direct execution and context continuity, 2026-10-09](validation/thread-execution-20261009.md).
+
+Local Runtime composition: [Presets, identity and upgrade preservation, 2026-10-10](validation/runtime-composition-20261010.md).
 
 ## Research on demand
 

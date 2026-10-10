@@ -14,14 +14,14 @@ pub fn initialize(s: &Service) -> Result<()> {
     let Some(config) = s.execution.as_ref().filter(|c| !c.model.is_empty()) else {
         return Ok(());
     };
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     initialize_store(&mut inner.store, &s.usage_scope, config)?;
     Ok(())
 }
 
 pub fn configured(s: &Service) -> bool {
     s.execution.as_ref().is_some_and(|c| !c.model.is_empty())
-        || current(&s.inner.lock().unwrap().store)
+        || current(&s.conversation.inner.lock().unwrap().store)
             .ok()
             .flatten()
             .is_some()
@@ -29,7 +29,8 @@ pub fn configured(s: &Service) -> bool {
 
 pub fn thread(s: &Service) -> Result<Thread> {
     initialize(s)?;
-    current(&s.inner.lock().unwrap().store)?.ok_or_else(|| anyhow!("Thread configuration missing"))
+    current(&s.conversation.inner.lock().unwrap().store)?
+        .ok_or_else(|| anyhow!("Thread configuration missing"))
 }
 pub fn execution_config_for(s: &Service) -> Result<execution::Config> {
     let thread = thread(s)?;
@@ -49,7 +50,7 @@ pub fn execution_config_for(s: &Service) -> Result<execution::Config> {
 
 pub fn record_turn(s: &Service, turn: &str) -> Result<()> {
     let thread = thread(s)?;
-    s.inner.lock().unwrap().store.set(
+    s.conversation.inner.lock().unwrap().store.set(
         &format!("agent.turn:{turn}"),
         &json!({"generation":thread.generation,"spec_hash":thread.config.spec_hash,"provider":thread.config.provider,"model":thread.config.model}).to_string(),
     )
@@ -70,10 +71,10 @@ pub async fn inspect(
 ) -> ApiResult<Json<Value>> {
     root.authorized(&h)?;
     initialize(&root).map_err(internal)?;
-    let profiles = profiles(&root.inner.lock().unwrap().store).map_err(internal)?;
+    let profiles = profiles(&root.conversation.inner.lock().unwrap().store).map_err(internal)?;
     let s = tasks::owner(&root, &query.owner)?;
     initialize(&s).map_err(internal)?;
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let pending = settings::pending(&inner.store).map_err(internal)?;
     Ok(Json(
         json!({"profiles":profiles,"thread":current(&inner.store).map_err(internal)?,"pending_config":pending}),
@@ -81,7 +82,8 @@ pub async fn inspect(
 }
 
 pub(super) fn cancelled(s: &Service) -> bool {
-    s.inner
+    s.conversation
+        .inner
         .lock()
         .unwrap()
         .turn
@@ -91,16 +93,17 @@ pub(super) fn cancelled(s: &Service) -> bool {
 
 pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     anyhow::ensure!(
-        s.inner.lock().unwrap().agent.phase != AgentPhase::Failed,
+        s.conversation.inner.lock().unwrap().agent.phase != AgentPhase::Failed,
         "Agent stop was not confirmed; restart the environment before another turn"
     );
     settings::apply_pending(s, true)?;
     let spec = thread(s)?.config;
     {
-        let mut inner = s.inner.lock().unwrap();
+        let mut inner = s.conversation.inner.lock().unwrap();
         inner.agent.model = spec.model.clone();
     }
     let mut user = s
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -111,7 +114,12 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     if resuming {
         req.text = "Pot allowance is available again. Continue the unfinished user request from the saved session. Preserve completed tool results; do not repeat completed external actions.".into();
     }
-    s.inner.lock().unwrap().store.set("execution.paused", "")?;
+    s.conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .set("execution.paused", "")?;
     s.usage.lock().unwrap().clear_wait(&s.usage_scope)?;
     s.usage
         .lock()
@@ -140,7 +148,8 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
         }
         user.status = MessageStatus::Accepted;
         s.save(user)?;
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store

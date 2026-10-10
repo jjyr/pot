@@ -149,7 +149,7 @@ impl Hub {
             .read(true)
             .write(true)
             .mode(0o600)
-            .open(parent.join(".permissions.lock"))?;
+            .open(parent.join(".environment_service.permissions.lock"))?;
         anyhow::ensure!(
             unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0,
             "Permission file lock unavailable"
@@ -162,7 +162,7 @@ impl Hub {
         config.policy = Some(policy);
         let mut bytes = serde_json::to_vec_pretty(&config)?;
         bytes.push(b'\n');
-        let temporary = parent.join(format!(".permissions-{}.tmp", id()));
+        let temporary = parent.join(format!(".environment_service.permissions-{}.tmp", id()));
         let result = (|| -> Result<()> {
             let mut file = std::fs::OpenOptions::new()
                 .create_new(true)
@@ -452,7 +452,7 @@ impl Hub {
     }
 }
 fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
-    let base = s.sandboxes.guest_workspace(target)?;
+    let base = s.environment_service.manager.guest_workspace(target)?;
     let cwd = if owner == "main" {
         base
     } else {
@@ -477,7 +477,8 @@ async fn execution_environment(
     );
     let session_environment = if plugin {
         if let Some(session) = args["session_id"].as_str() {
-            if s.permissions
+            if s.environment_service
+                .permissions
                 .host_plugin_session(&s.usage_scope, generation, session)
                 .await
             {
@@ -485,8 +486,11 @@ async fn execution_environment(
             } else {
                 Some(format!(
                     "sandbox:{}",
-                    s.sandboxes
-                        .session_target(&s.usage_scope, generation, session)?
+                    s.environment_service.manager.session_target(
+                        &s.usage_scope,
+                        generation,
+                        session
+                    )?
                 ))
             }
         } else {
@@ -547,7 +551,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
             .strip_prefix("sandbox:")
             .filter(|s| !s.is_empty())
             .ok_or_else(|| anyhow!("Use host or sandbox:ID"))?;
-        let target = s.sandboxes.assignment(target)?;
+        let target = s.environment_service.manager.assignment(target)?;
         anyhow::ensure!(
             !s.is_worker || s.sandbox_id.as_deref() == Some(target.as_str()),
             "Workers cannot switch Sandboxes"
@@ -559,7 +563,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
             return Ok(args);
         }
         let turn = {
-            let inner = s.inner.lock().unwrap();
+            let inner = s.conversation.inner.lock().unwrap();
             let turn = inner
                 .turn
                 .as_ref()
@@ -570,19 +574,24 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
                 .and_then(|m| m.request_id)
                 .ok_or_else(|| anyhow!("Turn identity missing"))?
         };
-        s.sandboxes
+        s.environment_service
+            .manager
             .prepare(&target, &s.usage_scope, Some(&turn), &|| {
                 agent::cancelled(s) || s.stopping()
             })
             .await?;
-        let hub = s.permissions.guest_hub(&environment);
+        let hub = s.environment_service.permissions.guest_hub(&environment);
         let _decision = hub.decisions.lock().await;
         let mut body = guest_body(s, &target, &s.usage_scope)?;
         body["action"] = json!("prepare");
         body["tool"] = json!(name);
         body["args"] = args;
         body["policy"] = json!(thread.config.params.agent.shell);
-        let prepared = s.sandboxes.permissions(&target, &body).await?;
+        let prepared = s
+            .environment_service
+            .manager
+            .permissions(&target, &body)
+            .await?;
         hub.load_guest(prepared["config"].clone())?;
         args = prepared["args"].clone();
         if let Some(plugin) = &plugin {
@@ -600,7 +609,7 @@ fn live(s: &Service, r: &Request) -> bool {
     if s.stopping() {
         return false;
     }
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     agent::current(&inner.store)
         .ok()
         .flatten()
@@ -667,7 +676,10 @@ pub(crate) async fn request(
         request.plugin == plugin.map(|plugin| plugin.identity()),
         "Permission plugin identity does not match bound package"
     );
-    let hub = s.permissions.environment(&request.environment)?;
+    let hub = s
+        .environment_service
+        .permissions
+        .environment(&request.environment)?;
     let key = hub.enqueue(request.clone())?;
     let _waiting = WaitingRequest {
         hub: &hub,
@@ -698,7 +710,7 @@ fn lane(root: &Service, owner: &str) -> Option<Service> {
     }
 }
 fn refresh(root: &Service) -> Result<()> {
-    for (_, hub) in root.permissions.all() {
+    for (_, hub) in root.environment_service.permissions.all() {
         let records = hub.book.lock().unwrap().requests.clone();
         for p in records {
             if lane(root, &p.request.owner).is_none_or(|s| !live(&s, &p.request)) {
@@ -720,11 +732,12 @@ pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Jso
     refresh(&root).map_err(internal)?;
     let mut requests = vec![];
     let mut grants = vec![];
-    for (environment, hub) in root.permissions.all() {
+    for (environment, hub) in root.environment_service.permissions.all() {
         let environment_name = environment
             .strip_prefix("sandbox:")
             .map(|target| {
-                root.sandboxes
+                root.environment_service
+                    .manager
                     .display_name(target)
                     .unwrap_or_else(|_| target.into())
             })
@@ -766,6 +779,7 @@ pub async fn decide(
     }
     refresh(&root).map_err(internal)?;
     let (environment, hub) = root
+        .environment_service
         .permissions
         .all()
         .into_iter()
@@ -810,7 +824,8 @@ pub async fn decide(
         write["action"] = json!("write");
         write["expected"] = expected;
         write["config"] = config.clone();
-        root.sandboxes
+        root.environment_service
+            .manager
             .permissions(target, &write)
             .await
             .map_err(internal)?;
@@ -1114,7 +1129,7 @@ mod tests {
         s.is_worker = false;
         let mut r = operation();
         r.generation = agent::thread(&s).unwrap().generation;
-        let key = s.permissions.enqueue(r).unwrap();
+        let key = s.environment_service.permissions.enqueue(r).unwrap();
         let body = serde_json::from_value(json!({"id":key,"action":"allow_once"})).unwrap();
         assert_eq!(
             decide(State(s.clone()), tasks::tests::headers(), Json(body))
@@ -1123,8 +1138,19 @@ mod tests {
                 .0,
             StatusCode::CONFLICT
         );
-        assert_eq!(s.permissions.consume(&key).unwrap(), Some(false));
-        assert!(s.permissions.book.lock().unwrap().requests.is_empty());
+        assert_eq!(
+            s.environment_service.permissions.consume(&key).unwrap(),
+            Some(false)
+        );
+        assert!(
+            s.environment_service
+                .permissions
+                .book
+                .lock()
+                .unwrap()
+                .requests
+                .is_empty()
+        );
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
 }
