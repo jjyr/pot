@@ -16,6 +16,7 @@ pub struct TasksView<'a> {
     pub search: &'a Entity<InputState>,
     pub scroll: &'a ScrollHandle,
     pub navigation: Div,
+    pub assistant_names: &'a Value,
     pub tasks: &'a [pot_protocol::TaskInfo],
     pub task_page: &'a pot_protocol::TaskPage,
     pub task_query: &'a pot_protocol::TaskQuery,
@@ -148,7 +149,7 @@ pub fn render(
                             )
                         })
                     })
-                    .children(view.tasks.iter().map(|task| {
+                    .children(view.tasks.iter().enumerate().map(|(index, task)| {
                         let id = task.id.clone();
                         let active = matches!(
                             task.phase,
@@ -156,7 +157,7 @@ pub fn render(
                                 | pot_protocol::TaskPhase::Queued
                                 | pot_protocol::TaskPhase::Waiting
                         );
-                        ListItem::new(SharedString::from(format!("task-{id}")))
+                        let row = ListItem::new(SharedString::from(format!("task-{id}")))
                             .accessibility_label(task.title.clone())
                             .flex_col()
                             .items_start()
@@ -242,7 +243,28 @@ pub fn render(
                                         )
                                     }),
                             )
-                            .on_click(pages::on(&handler, "task-open", json!(id)))
+                            .on_click(pages::on(
+                                &handler,
+                                "task-open",
+                                json!({"id":id,"assistant_id":task.assistant_id}),
+                            ));
+                        let first =
+                            index == 0 || view.tasks[index - 1].assistant_id != task.assistant_id;
+                        let name = view.assistant_names["assistants"]
+                            .as_array()
+                            .and_then(|items| items.iter().find(|d| d["id"] == task.assistant_id))
+                            .and_then(|d| d["name"].as_str())
+                            .unwrap_or("Pot");
+                        div()
+                            .when(first, |el| {
+                                el.child(
+                                    div()
+                                        .p_4()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(name.to_owned()),
+                                )
+                            })
+                            .child(row)
                     })),
             )
             .child(

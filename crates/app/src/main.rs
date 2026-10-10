@@ -68,6 +68,7 @@ struct Shell {
     native: serde_json::Value,
     settings: ui::Settings,
     task_search: Entity<InputState>,
+    assistants_ui: pot_ui::assistants::Editor,
     schedule_tab: bool,
     schedules_ui: schedules_ui::SchedulesUI,
     usage_ui: usage_ui::UsageUI,
@@ -84,6 +85,13 @@ impl Shell {
                     return;
                 };
                 match event.kind {
+                    "assistant-edit" => this.assistants_ui.select(event.value.as_str().unwrap_or("main")),
+                    "assistant-new" => this.assistants_ui.select("new"),
+                    "assistant-select" => { this.client.select_assistant(event.value.as_str().unwrap_or("main").into()); this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
+                    "assistant-reload" => this.assistants_ui.reload(event.value.as_str().unwrap_or("main")),
+                    "assistant-close" => this.assistants_ui.open = false,
+                    "assistant-save" => this.client.assistant_save(event.value),
+                    "assistant-model" => ui::command(serde_json::json!({"action":"ai-open","owner":event.value,"return_to_chat":true})),
                     "permission-decision" => this.client.permission_decision(event.value),
                     "native" => ui::command(event.value),
                     "sandbox-select" => {
@@ -109,7 +117,7 @@ impl Shell {
                     "task-open" => {
                         this.show_tasks = false;
                         this.client
-                            .select(event.value.as_str().unwrap_or("").into());
+                            .select(event.value["id"].as_str().or(event.value.as_str()).unwrap_or("").into());
                         this.first = true;
                     }
                     "usage-page" => {
@@ -132,6 +140,16 @@ impl Shell {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(owner) = self
+            .client
+            .view
+            .lock()
+            .unwrap()
+            .assistant_saved_owner
+            .take()
+        {
+            self.assistants_ui.saved(&owner);
+        }
         let old_tasks = self.show_tasks;
         {
             let mut v = self.client.view.lock().unwrap();
@@ -198,7 +216,7 @@ impl Shell {
             let scope = if page == 4 {
                 String::new()
             } else if v.selected.is_empty() {
-                "main".into()
+                v.assistant_id().to_owned()
             } else {
                 v.selected.clone()
             };
@@ -294,7 +312,7 @@ impl Shell {
         }
         self.last_content = content;
         let state = serde_json::json!({
-            "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
+            "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"conversation":if view.selected.is_empty() {view.assistant_id()} else {&view.selected},"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
             "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),
             "model":snapshot.map(|s|s.agent.model.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
@@ -463,6 +481,7 @@ impl Shell {
             let navigation = schedules_ui::navigation(false, cx);
             return pot_ui::tasks::render(
                 pot_ui::tasks::TasksView {
+                    assistant_names: &view.assistants,
                     search: &self.task_search,
                     scroll: &self.tasks_scroll,
                     navigation,
@@ -481,6 +500,16 @@ impl Shell {
                 cx,
             );
         }
+        let assistant_handler = self.page_handler(cx);
+        let assistant_header = self.assistants_ui.render(
+            &view.assistants,
+            view.assistant_id(),
+            &view.assistant_rules,
+            self.catalog(),
+            assistant_handler,
+            window,
+            cx,
+        );
         let latest_assistant = messages.iter().rposition(|m| m.role == Role::Assistant);
         div()
             .size_full()
@@ -491,6 +520,7 @@ impl Shell {
             .text_color(rgb(ink))
             .text_size(px(15.))
             .font_family(".AppleSystemUIFont")
+            .when(view.selected.is_empty(), |el| el.child(assistant_header))
             .when(!view.selected.is_empty(), |el| {
                 let task = view
                     .selected_task
@@ -594,7 +624,7 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap_5()
-                    .child(pot_ui::permissions::cards(&view.permissions, if view.selected.is_empty() { "main" } else { &view.selected }, self.catalog(), self.page_handler(cx), cx))
+                    .child(pot_ui::permissions::cards(&view.permissions, if view.selected.is_empty() { view.assistant_id() } else { &view.selected }, self.catalog(), self.page_handler(cx), cx))
                     .child(pot_ui::resources::cards(&self.native["resource_requests"],self.catalog(),self.page_handler(cx),cx))
                     .when(messages.is_empty(), |el| {
                         el.child(
@@ -881,6 +911,7 @@ fn main() {
                         .detach();
                         Shell {
                             client: client::Client::start(),
+                            assistants_ui: Default::default(),
                             scroll: ScrollHandle::new(),
                             tasks_scroll: ScrollHandle::new(),
                             history: navigation::History::default(),

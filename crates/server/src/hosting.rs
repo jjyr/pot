@@ -400,7 +400,27 @@ fn macos_helper_path() -> std::path::PathBuf {
 fn backend_router(backend: &Backend) -> axum::Router {
     let routes = backend.host().router();
     match backend.optional_state() {
-        Some(service) => routes.merge(router(service)),
+        Some(service) => {
+            let hub = backend.assistants().unwrap();
+            let integration = hub.clone();
+            let product = router(service).layer(axum::middleware::from_fn(
+                move |request: axum::extract::Request, next: axum::middleware::Next| {
+                    let hub = integration.clone();
+                    async move {
+                        if let Some(service) = hub.service_for(request.headers()) {
+                            if service.owner_id() != "main" {
+                                use tower::ServiceExt;
+                                return router(service).oneshot(request).await.unwrap();
+                            }
+                        }
+                        next.run(request).await
+                    }
+                },
+            ));
+            routes
+                .merge(product)
+                .merge(crate::routes::assistant_routes(hub))
+        }
         None => routes,
     }
 }

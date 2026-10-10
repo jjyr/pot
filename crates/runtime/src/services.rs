@@ -6,6 +6,7 @@ use futures::future::BoxFuture;
 #[derive(Clone)]
 pub struct OwnerScope {
     pub(crate) runtime_id: String,
+    pub(crate) assistant_id: String,
     pub(crate) skill_selection: Option<Vec<String>>,
     #[cfg(test)]
     pub(crate) test_tool_executor: Option<Arc<dyn pot_core::ToolExecutor>>,
@@ -34,6 +35,7 @@ pub(crate) struct ConversationService {
 #[derive(Clone)]
 pub(crate) struct TaskService {
     pub(crate) hub: Arc<Mutex<tasks::Hub>>,
+    pub(crate) capacity: Arc<Mutex<tasks::Capacity>>,
 }
 
 #[derive(Clone)]

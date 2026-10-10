@@ -34,6 +34,11 @@ struct Lane {
     service: Service,
 }
 #[derive(Default)]
+pub(crate) struct Capacity {
+    // Shared across all assistant hubs, held until the run finishes cleanup.
+    active: BTreeMap<String, (agent::ResolvedSpec, Option<String>)>,
+}
+#[derive(Default)]
 pub(super) struct Hub {
     lanes: BTreeMap<String, Lane>,
     pub(super) schedules: schedules::Book,
@@ -107,6 +112,7 @@ fn child(
     let service = Service {
         scope: OwnerScope {
             runtime_id: root.runtime_id.clone(),
+            assistant_id: root.assistant_id.clone(),
             skill_selection: skills,
             #[cfg(test)]
             test_tool_executor: root.test_tool_executor.clone(),
@@ -145,6 +151,7 @@ fn child(
         },
         tasks: TaskService {
             hub: Arc::new(Mutex::new(Hub::default())),
+            capacity: root.tasks.capacity.clone(),
         },
     };
     agent::initialize(&service)?;
@@ -172,12 +179,25 @@ pub(super) fn restore(root: &Service) -> Result<()> {
     };
     schedules::validate_bindings(root, &book)?;
     for record in &mut records {
+        if record.info.assistant_id.is_empty() {
+            record.info.assistant_id = root.assistant_id.clone();
+        }
+        anyhow::ensure!(
+            record.info.assistant_id == root.assistant_id,
+            "Task assistant ownership mismatch"
+        );
         let assignment = record.assignment.get_or_insert_with(|| {
             pot_core::Assignment::local(&root.runtime_id, &record.info.id, &record.info.sandbox_id)
         });
         assignment.validate_local(&root.runtime_id, &record.info.id, &record.info.sandbox_id)?;
     }
     let mut current_hub = root.tasks.hub.lock().unwrap();
+    {
+        let mut capacity = root.tasks.capacity.lock().unwrap();
+        for task in current_hub.lanes.keys() {
+            capacity.active.remove(task);
+        }
+    }
     let mut hub = Hub {
         schedules: book,
         ..Hub::default()
@@ -458,22 +478,11 @@ fn enqueue_from(
             "任务数量达到上限",
         ));
     }
-    if source == agent::routing::Source::Tool {
-        let prefs = agent::preferences::read(root).map_err(internal)?;
-        if req.preference_revision.is_some_and(|r| r != prefs.revision)
-            || (!prefs.text.is_empty() && req.preference_revision != Some(prefs.revision))
-        {
-            return Err(error(
-                StatusCode::CONFLICT,
-                "preference_revision",
-                "Execution preferences changed or were not supplied; refresh before delegating",
-            ));
-        }
-    } else if req.preference_revision.is_some() || req.selection_reason.is_some() {
+    if source != agent::routing::Source::Tool && req.selection_reason.is_some() {
         return Err(error(
             StatusCode::BAD_REQUEST,
-            "preference_source",
-            "Preference metadata is only accepted from main-agent delegation",
+            "selection_source",
+            "Selection metadata requires assistant delegation",
         ));
     }
     if req
@@ -490,7 +499,6 @@ fn enqueue_from(
     let (spec, mut routing) =
         agent::routing::resolve(root, req.profile.as_deref(), source, &req.requirements)
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
-    routing.preference_revision = req.preference_revision;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
     let sandbox_id = root
@@ -507,6 +515,7 @@ fn enqueue_from(
             &sandbox_id,
         )),
         info: TaskInfo {
+            assistant_id: root.assistant_id.clone(),
             sandbox_id: sandbox_id.clone(),
             id: task_id.clone(),
             title: task_title(&req.text),
@@ -974,6 +983,7 @@ pub(super) fn execution_service(root: &Service, h: &HeaderMap) -> ApiResult<Serv
 /// exclusive cooperative lease against other shared-resource tasks.
 pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessage)>> {
     let mut hub = root.tasks.hub.lock().unwrap();
+    let mut capacity = root.tasks.capacity.lock().unwrap();
     for lane in hub.lanes.values().filter(|l| l.record.active.is_none()) {
         agent::settings::apply_pending(&lane.service, false)?;
     }
@@ -982,17 +992,18 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         .values()
         .filter(|l| l.record.active.is_some())
         .collect();
-    if active.len()
+    if capacity.active.len()
         >= execution::execution_config(root.execution.clone().unwrap_or_default(), &root.data)?
             .max_parallel_tasks
     {
         return Ok(None);
     }
     let policy = agent::routing::policy(root)?;
-    let active_specs = active
-        .iter()
-        .map(|l| agent::thread(&l.service).map(|b| b.config))
-        .collect::<Result<Vec<_>>>()?;
+    let active_specs: Vec<_> = capacity
+        .active
+        .values()
+        .map(|(spec, _)| spec.clone())
+        .collect();
     let shared = active.iter().any(|l| l.record.info.resource == "shared");
     let candidate = hub
         .lanes
@@ -1012,6 +1023,7 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
                 && agent::thread(&l.service)
                     .map(|b| policy.admits(&b.config, &active_specs)).unwrap_or(true)
                 && !(shared && l.record.info.resource == "shared")
+                && !(l.record.info.resource == "shared" && capacity.active.values().any(|(_, target)| target.as_deref() == Some(l.record.info.sandbox_id.as_str())))
         })
         .min_by_key(|(_, l)| l.record.queue.front().unwrap().order)
         .map(|(id, _)| id.clone());
@@ -1038,6 +1050,13 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
             cancelling: false,
         });
     }
+    capacity.active.insert(
+        task_id.clone(),
+        (
+            agent::thread(&lane.service)?.config,
+            (lane.record.info.resource == "shared").then(|| lane.record.info.sandbox_id.clone()),
+        ),
+    );
     Ok(Some((
         task_id,
         lane.service.clone(),
@@ -1076,7 +1095,9 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
         lane.record.queue.push_front(job);
         lane.record.info.phase = TaskPhase::Waiting;
         lane.record.info.updated_at_ms = now();
-        return persist(root, &hub);
+        persist(root, &hub)?;
+        root.tasks.capacity.lock().unwrap().active.remove(task_id);
+        return Ok(());
     }
     if let Err(ref e) = result {
         let message = lane
@@ -1171,7 +1192,7 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     // Stable report ID makes recovery/repeated event delivery idempotent.
     let report = Message {
         id: format!("task-report-{}", job.message_id),
-        conversation_id: "main".into(),
+        conversation_id: root.conversation_id(),
         role: Role::Assistant,
         text: format!(
             "任务「{}」{}\n{}\n任务编号：{}",
@@ -1197,6 +1218,7 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
             .unwrap()
             .store
             .set("tasks.v2", &serialized)?;
+        root.tasks.capacity.lock().unwrap().active.remove(task_id);
         return Ok(());
     }
     let mut report = report;
@@ -1211,10 +1233,11 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
         .store
         .save_with_metadata(report, Some(("tasks.v2", &serialized)))?;
     let _ = root.conversation.events.send(event);
+    root.tasks.capacity.lock().unwrap().active.remove(task_id);
     Ok(())
 }
 pub(super) fn owner(root: &Service, owner: &str) -> ApiResult<Service> {
-    if owner == "main" {
+    if owner == root.usage_scope {
         return Ok(root.clone());
     }
     root.tasks
@@ -1231,7 +1254,7 @@ pub(super) fn validate_configuration(
     owner: &str,
     spec: &agent::ResolvedSpec,
 ) -> Result<()> {
-    if owner == "main" {
+    if owner == root.usage_scope {
         return Ok(());
     }
     let hub = root.tasks.hub.lock().unwrap();

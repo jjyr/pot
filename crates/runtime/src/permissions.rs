@@ -149,7 +149,7 @@ impl Hub {
             .read(true)
             .write(true)
             .mode(0o600)
-            .open(parent.join(".environment_service.permissions.lock"))?;
+            .open(parent.join(".permissions.lock"))?;
         anyhow::ensure!(
             unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0,
             "Permission file lock unavailable"
@@ -162,7 +162,7 @@ impl Hub {
         config.policy = Some(policy);
         let mut bytes = serde_json::to_vec_pretty(&config)?;
         bytes.push(b'\n');
-        let temporary = parent.join(format!(".environment_service.permissions-{}.tmp", id()));
+        let temporary = parent.join(format!(".permissions-{}.tmp", id()));
         let result = (|| -> Result<()> {
             let mut file = std::fs::OpenOptions::new()
                 .create_new(true)
@@ -204,7 +204,7 @@ impl Hub {
         let book = self.book.lock().unwrap();
         json!({"policy":book.policy,"grants":book.grants.iter().filter(|g|g.owner==owner).collect::<Vec<_>>()})
     }
-    fn enqueue(&self, request: Request) -> Result<String> {
+    pub(crate) fn enqueue(&self, request: Request) -> Result<String> {
         let mut book = self.book.lock().unwrap();
         if let Some(old) = book.requests.iter().find(|p| {
             p.request.owner == request.owner
@@ -605,6 +605,22 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
     Ok(args)
 }
 
+pub(crate) fn rules_edit_requires_review(s: &Service, tool: &str, args: &Value) -> bool {
+    if s.is_worker || args["environment"].as_str().unwrap_or("host") != "host" {
+        return false;
+    }
+    let path = s.assistant_rules_path();
+    let text = match tool {
+        "apply_patch" => args["patch"].as_str(),
+        "exec_command" => args["cmd"].as_str(),
+        _ => None,
+    }
+    .unwrap_or_default();
+    text.contains(path.to_string_lossy().as_ref())
+        || (args["workdir"].as_str().map(std::path::Path::new) == path.parent()
+            && text.contains("AGENTS.md"))
+}
+
 fn live(s: &Service, r: &Request) -> bool {
     if s.stopping() {
         return false;
@@ -703,7 +719,7 @@ pub(crate) async fn request(
     }
 }
 fn lane(root: &Service, owner: &str) -> Option<Service> {
-    if owner == "main" {
+    if owner == root.usage_scope {
         Some(root.clone())
     } else {
         tasks::permission_lane(root, owner)
@@ -713,7 +729,7 @@ fn refresh(root: &Service) -> Result<()> {
     for (_, hub) in root.environment_service.permissions.all() {
         let records = hub.book.lock().unwrap().requests.clone();
         for p in records {
-            if lane(root, &p.request.owner).is_none_or(|s| !live(&s, &p.request)) {
+            if lane(root, &p.request.owner).is_some_and(|s| !live(&s, &p.request)) {
                 hub.cancel(&p.id)?;
             }
         }
@@ -744,15 +760,23 @@ pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Jso
             .unwrap_or_else(|| "Host".into());
         let book = hub.book.lock().unwrap();
         requests.extend(
-            book.requests.iter().filter(|p| p.phase == "pending").map(
-                |p| json!({"id":p.id,"request":p.request,"environment_name":environment_name}),
-            ),
+            book.requests
+                .iter()
+                .filter(|p| p.phase == "pending" && lane(&root, &p.request.owner).is_some())
+                .map(
+                    |p| json!({"id":p.id,"request":p.request,"environment_name":environment_name}),
+                ),
         );
-        grants.extend(book.grants.iter().map(|g| {
-            let mut value = json!(g);
-            value["environment"] = json!(environment);
-            value
-        }));
+        grants.extend(
+            book.grants
+                .iter()
+                .filter(|g| lane(&root, &g.owner).is_some())
+                .map(|g| {
+                    let mut value = json!(g);
+                    value["environment"] = json!(environment);
+                    value
+                }),
+        );
     }
     Ok(Json(json!({"requests":requests,"grants":grants})))
 }
@@ -785,8 +809,13 @@ pub async fn decide(
         .into_iter()
         .find(|(_, hub)| {
             let book = hub.book.lock().unwrap();
-            book.requests.iter().any(|p| p.id == body.id)
-                || book.grants.iter().any(|g| g.id == body.id)
+            book.requests
+                .iter()
+                .any(|p| p.id == body.id && lane(&root, &p.request.owner).is_some())
+                || book
+                    .grants
+                    .iter()
+                    .any(|g| g.id == body.id && lane(&root, &g.owner).is_some())
         })
         .ok_or_else(|| {
             error(
@@ -848,6 +877,20 @@ pub async fn decide(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn own_instruction_edits_require_review_in_host_environment() {
+        let s = crate::tasks::tests::fixture();
+        let path = s.assistant_rules_path();
+        let args = json!({"environment":"host","patch":format!("*** Begin Patch\n*** Add File: {}\n+rules\n*** End Patch", path.display())});
+        assert!(rules_edit_requires_review(&s, "apply_patch", &args));
+        assert!(!rules_edit_requires_review(
+            &s,
+            "apply_patch",
+            &json!({"patch":"*** Add File: notes.txt\n+note"})
+        ));
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     fn operation() -> Request {

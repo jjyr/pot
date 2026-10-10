@@ -33,6 +33,7 @@ use axum::{
     },
 };
 use pot_protocol::*;
+pub mod assistants;
 mod bootstrap;
 pub use bootstrap::{
     Backend, RuntimeConfig, initialize, initialize_composition, initialize_with_agent_executor,
@@ -77,6 +78,25 @@ pub struct Service {
     tasks: TaskService,
 }
 impl Service {
+    pub fn owner_id(&self) -> &str {
+        &self.usage_scope
+    }
+    pub(crate) fn assistant_rules_path(&self) -> PathBuf {
+        self.agent_service
+            .resources
+            .home
+            .join("assistants")
+            .join(&self.runtime_id)
+            .join(&self.assistant_id)
+            .join("AGENTS.md")
+    }
+    pub(crate) fn conversation_id(&self) -> String {
+        if self.is_worker {
+            "main".into()
+        } else {
+            self.usage_scope.clone()
+        }
+    }
     /// Trusted in-process notification adapter. Only the owner main Store is eligible.
     pub fn notification_sequence(&self) -> Result<i64> {
         self.conversation
@@ -129,7 +149,7 @@ impl Service {
                 }
                 agent
             },
-            conversation_id: "main".into(),
+            conversation_id: self.conversation_id(),
             messages: s.store.messages()?,
             turn: s.turn.clone(),
         })
@@ -235,7 +255,7 @@ pub async fn send(
     Json(req): Json<SendMessage>,
 ) -> ApiResult<Json<SendMessageAccepted>> {
     s.authorized(&h)?;
-    if req.conversation_id != "main"
+    if req.conversation_id != s.conversation_id()
         || req.request_id.is_empty()
         || req.text.trim().is_empty()
         || req.text.len() > 65536
@@ -463,6 +483,7 @@ mod tests {
         Service {
             scope: OwnerScope {
                 runtime_id: id(),
+                assistant_id: "main".into(),
                 skill_selection: None,
                 test_tool_executor: None,
                 sandbox_id: None,
@@ -506,6 +527,7 @@ mod tests {
             },
             tasks: TaskService {
                 hub: Arc::new(Mutex::new(tasks::Hub::default())),
+                capacity: Arc::new(Mutex::new(tasks::Capacity::default())),
             },
         }
     }

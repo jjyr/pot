@@ -108,3 +108,198 @@ pub fn router(s: Service) -> Router {
         .route("/api/v1/agent/diagnostics", get(control::diagnostics))
         .with_state(s)
 }
+
+/// Owner clients explicitly select a conversational owner; private integration tokens
+/// resolve to their originating assistant without granting access to another owner.
+pub fn assistant_routes(hub: std::sync::Arc<pot_runtime::assistants::Hub>) -> Router {
+    Router::new()
+        .route("/api/v1/assistant-tasks", get(assistant_tasks))
+        .route(
+            "/api/v1/assistants",
+            get(assistant_list).post(assistant_create),
+        )
+        .route(
+            "/api/v1/assistants/{owner}/definition",
+            post(assistant_rename),
+        )
+        .route(
+            "/api/v1/assistants/{owner}/instructions",
+            get(assistant_rules).post(assistant_save_rules),
+        )
+        .route(
+            "/api/v1/assistants/{owner}/{*path}",
+            axum::routing::any(assistant_dispatch),
+        )
+        .with_state(hub)
+}
+type AssistantState = axum::extract::State<std::sync::Arc<pot_runtime::assistants::Hub>>;
+fn rejected(status: axum::http::StatusCode, message: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        status,
+        axum::Json(serde_json::json!({"code":"assistant","message":message})),
+    )
+        .into_response()
+}
+async fn assistant_list(
+    axum::extract::State(hub): AssistantState,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    axum::Json(serde_json::json!({"assistants":hub.definitions()})).into_response()
+}
+async fn assistant_create(
+    axum::extract::State(hub): AssistantState,
+    headers: axum::http::HeaderMap,
+    axum::Json(args): axum::Json<serde_json::Value>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    match hub.create(
+        args["request_id"].as_str().unwrap_or(""),
+        args["name"].as_str().unwrap_or(""),
+    ) {
+        Ok(d) => axum::Json(d).into_response(),
+        Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),
+    }
+}
+async fn assistant_rename(
+    axum::extract::State(hub): AssistantState,
+    axum::extract::Path(owner): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    axum::Json(args): axum::Json<serde_json::Value>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    if let Some(text) = args["text"].as_str() {
+        return match hub.edit(
+            &owner,
+            args["name"].as_str().unwrap_or_default(),
+            args["expected_revision"].as_u64().unwrap_or(0),
+            text,
+            args["rules_revision"].as_str().unwrap_or_default(),
+        ) {
+            Ok(v) => axum::Json(v).into_response(),
+            Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),
+        };
+    }
+    match hub.rename(
+        &owner,
+        args["name"].as_str().unwrap_or(""),
+        args["expected_revision"].as_u64().unwrap_or(0),
+    ) {
+        Ok(d) => axum::Json(d).into_response(),
+        Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),
+    }
+}
+async fn assistant_dispatch(
+    axum::extract::State(hub): AssistantState,
+    axum::extract::Path((owner, path)): axum::extract::Path<(String, String)>,
+    mut request: axum::extract::Request,
+) -> axum::response::Response {
+    use tower::ServiceExt;
+    if !hub.authorize(request.headers()) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    let service = match hub.service(&owner) {
+        Ok(s) => s,
+        Err(e) => return rejected(axum::http::StatusCode::NOT_FOUND, &e.to_string()),
+    };
+    let query = request
+        .uri()
+        .query()
+        .map(|q| format!("?{q}"))
+        .unwrap_or_default();
+    *request.uri_mut() = format!("/api/v1/{path}{query}").parse().unwrap();
+    hub.operator_headers(&service, request.headers_mut());
+    // A fresh router must extract only its own path parameters. Preserve the
+    // underlying HTTP upgrade for scoped terminal/desktop WebSockets.
+    let upgrade = request
+        .extensions_mut()
+        .remove::<hyper::upgrade::OnUpgrade>();
+    request.extensions_mut().clear();
+    if let Some(upgrade) = upgrade {
+        request.extensions_mut().insert(upgrade);
+    }
+    router(service).oneshot(request).await.unwrap()
+}
+
+async fn assistant_rules(
+    axum::extract::State(hub): AssistantState,
+    axum::extract::Path(owner): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    match hub.rules(&owner) {
+        Ok(v) => axum::Json(v).into_response(),
+        Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),
+    }
+}
+async fn assistant_save_rules(
+    axum::extract::State(hub): AssistantState,
+    axum::extract::Path(owner): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    axum::Json(args): axum::Json<serde_json::Value>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    let Some(text) = args["text"].as_str() else {
+        return rejected(axum::http::StatusCode::BAD_REQUEST, "Text is required");
+    };
+    match hub.save_rules(
+        &owner,
+        text,
+        args["expected_revision"].as_str().unwrap_or(""),
+    ) {
+        Ok(v) => axum::Json(v).into_response(),
+        Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),
+    }
+}
+
+async fn assistant_tasks(
+    axum::extract::State(hub): AssistantState,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<TaskQuery>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    match hub.tasks_page(&query) {
+        Ok(v) => axum::Json(v).into_response(),
+        Err(e) => rejected(axum::http::StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}

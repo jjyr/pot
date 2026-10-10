@@ -137,6 +137,7 @@ var bridge: PotBridge?
     var snapshot: [String: Any] = [:]
     var selectedRunning = false
     var selected = ""
+    var draftKey = ""
     var drafts: [String: String] = [:]
     var running = false
     var ready = false
@@ -970,6 +971,7 @@ var bridge: PotBridge?
     }
 
     func update(_ value: [String: Any]) {
+        runtime.assistantID = value["assistant_id"] as? String ?? "main"
         lastUIState = value
         snapshot = value
         running = value["running"] as? Bool ?? false
@@ -978,7 +980,7 @@ var bridge: PotBridge?
            let conversation = value["accepted_conversation"] as? String
         {
             var text = composer.string
-            if DraftReceipt.apply(accepted: accepted, conversation: conversation, selected: selected,
+            if DraftReceipt.apply(accepted: accepted, conversation: conversation, selected: draftKey,
                                   text: &text, drafts: &drafts)
             {
                 composer.string = text
@@ -988,9 +990,11 @@ var bridge: PotBridge?
         backMenuItem?.isEnabled = value["can_back"] as? Bool ?? false
         forwardMenuItem?.isEnabled = value["can_forward"] as? Bool ?? false
         let next = value["selected"] as? String ?? ""
-        if next != selected {
-            drafts[selected] = composer.string
-            selected = next; composer.string = drafts[next] ?? ""
+        let conversationKey = value["conversation"] as? String ?? next
+        let nextDraft = conversationKey == "main" ? "" : conversationKey
+        if nextDraft != draftKey {
+            drafts[draftKey] = composer.string
+            draftKey = nextDraft; selected = next; composer.string = drafts[nextDraft] ?? ""
             if page == 0, !next.isEmpty {
                 page = 3
             }
@@ -1225,7 +1229,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
             }
         case "start": bridge.startSandbox()
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
-        case "ai-open": settings.routingOwner = "main"; settings.openAI(fromChat: true)
+        case "ai-open": settings.routingOwner = "main"; settings.openAI(fromChat: true, owner: v["owner"] as? String)
         case "ai-back":
             settings.aiScreen = "main"
             if settings.routingOwner != "main" {

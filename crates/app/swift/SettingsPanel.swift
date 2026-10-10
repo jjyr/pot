@@ -4,6 +4,25 @@ import Foundation
 /// Configuration service only. GPUI Kit owns the settings interface.
 @MainActor final class SettingsPanel: NSObject {
     weak var bridge: PotBridge?
+    var configurationRuntime: RuntimeClient?
+    var aiDrafts: [String: (String, String, Bool)] = [:]
+    func bindAssistant(owner explicitOwner: String? = nil) {
+        guard let bridge, !aiBusy, !routingBusy else { return }
+        let owner = explicitOwner ?? bridge.runtime.assistantID
+        if configurationRuntime?.assistantID == owner {
+            return
+        }
+        if let previous = configurationRuntime?.assistantID {
+            aiDrafts[previous] = (draftProfile, draftModel, draftInitialized)
+        }
+        configurationRuntime = bridge.runtime.scopedCopy()
+        configurationRuntime?.assistantID = owner
+        let draft = aiDrafts[owner]
+        draftProfile = draft?.0 ?? ""; draftModel = draft?.1 ?? ""; draftInitialized = draft?.2 ?? false
+        savedProfiles = []; activeSpec = [:]; routingPolicy = [:]; connections = []
+        aiScreen = "main"; profile = [:]; result = ""; revision += 1
+    }
+
     var aiScreen = "main", draftProfile = "", draftModel = "", connectionKind = "", connectionName = "",
         connectionModel = ""
     var secretRevision = 0, draftRevision = 0
@@ -82,7 +101,8 @@ import Foundation
          "locale": L.locale, "appearance": UserDefaults.standard.integer(forKey: "appearance"), "result": result]
     }
 
-    func refreshAI() {
+    func refreshAI(owner: String? = nil) {
+        bindAssistant(owner: owner)
         guard bridge?.snapshot["connected"] as? Bool == true else { return }
         Task {
             do { try await reloadAI() }
@@ -148,15 +168,16 @@ import Foundation
     }
 
     func refreshRouting() {
+        bindAssistant()
         guard let bridge, !routingBusy else { return }
         routingBusy = true
         Task {
             defer { routingBusy = false }
             do {
-                let state = try await bridge.runtime.request("api/v1/agent")
+                let state = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent")
                 savedProfiles = state["profiles"] as? [[String: Any]] ?? []
-                routingPolicy = try await bridge.runtime.request("api/v1/agent/routing")
-                providerAllowances = try await bridge.runtime
+                routingPolicy = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent/routing")
+                providerAllowances = try await (configurationRuntime ?? bridge.runtime)
                     .request("api/v1/usage/providers")["providers"] as? [[String: Any]] ?? []
                 if !savedProfiles.contains(where: { $0["id"] as? String == routingProfile }) {
                     routingProfile = savedProfiles.first?["id"] as? String ?? ""
@@ -230,7 +251,10 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                routingPolicy = try await bridge.runtime.request("api/v1/agent/routing", body: update)
+                routingPolicy = try await (configurationRuntime ?? bridge.runtime).request(
+                    "api/v1/agent/routing",
+                    body: update
+                )
                 result = L.text("settingspanel.routing-saved-new-tasks-use-the-new")
             } catch { result = L.format(
                 "settingspanel.routing-not-saved-0-refresh-and-retry",
@@ -252,7 +276,7 @@ import Foundation
         routingBusy = true
         Task {
             do {
-                _ = try await bridge.runtime.request("api/v1/agent", body: [
+                _ = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent", body: [
                     "profile": selected, "expected_revision": expected,
                     "request_id": UUID().uuidString, "follow_main": false,
                     "follow_worker": false,
@@ -274,12 +298,13 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                _ = try await bridge.runtime.request("api/v1/agent/config", body: [
+                _ = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent/config", body: [
                     "request_id": UUID().uuidString, "profile": target,
                     "owner": owner,
                 ])
                 while true {
-                    let response = try await bridge.runtime.request("api/v1/agent?owner=" + owner)
+                    let response = try await (configurationRuntime ?? bridge.runtime)
+                        .request("api/v1/agent?owner=" + owner)
                     if response["pending_config"] is NSNull || response["pending_config"] == nil {
                         break
                     }
@@ -313,7 +338,10 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                providerAllowance = try await bridge.runtime.request("api/v1/usage/providers", body: update)
+                providerAllowance = try await (configurationRuntime ?? bridge.runtime).request(
+                    "api/v1/usage/providers",
+                    body: update
+                )
                 providerAllowance["enforcement"] = "pre_request"
                 providerAllowances.removeAll { $0["provider"] as? String == provider }
                 providerAllowances.append(providerAllowance)

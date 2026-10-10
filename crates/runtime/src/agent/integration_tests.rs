@@ -602,10 +602,10 @@ async fn native_agent_profile_limits_prompt_and_tool_filter_are_effective() {
     assert!(!s.workspace.join("forbidden.txt").exists());
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies[0]["max_tokens"], 128);
-    assert_eq!(
-        bodies[0]["messages"][0]["content"],
-        "A configurable system prompt."
-    );
+    let system = bodies[0]["messages"][0]["content"].as_str().unwrap();
+    assert!(system.starts_with("A configurable system prompt."));
+    assert!(system.contains("persistent rules file"));
+    assert!(system.contains("permission before writing"));
     assert_eq!(bodies[0]["tools"].as_array().unwrap().len(), 1);
     assert_eq!(bodies[0]["tools"][0]["function"]["name"], "apply_patch");
     assert!(bodies[1].to_string().contains("Tool unavailable"));

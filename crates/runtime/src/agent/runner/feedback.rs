@@ -31,6 +31,10 @@ impl Feedback {
     }
 }
 impl ExecutionFeedback for Feedback {
+    fn requires_owner_review(&self, tool: &str, args: &Value) -> bool {
+        crate::permissions::rules_edit_requires_review(&self.service, tool, args)
+    }
+
     fn execute_authorized_host(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
         let name = name.to_owned();
         Box::pin(async move {

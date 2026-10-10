@@ -53,6 +53,12 @@ fn task_progress(snapshot: &Snapshot) -> String {
 
 #[derive(Default, Clone, PartialEq)]
 pub struct View {
+    pub runtime: Value,
+    pub assistants: Value,
+    pub selected_assistant: String,
+    pub assistant_rules: Value,
+    pub assistant_saved_owner: Option<String>,
+    pub assistant_pending: bool,
     pub permissions: Value,
     pub access: Value,
     pub access_notice: String,
@@ -93,6 +99,13 @@ pub struct View {
     cached_tasks: HashMap<String, Arc<Snapshot>>,
 }
 impl View {
+    pub fn assistant_id(&self) -> &str {
+        if self.selected_assistant.is_empty() {
+            "main"
+        } else {
+            &self.selected_assistant
+        }
+    }
     pub fn is_cooking(&self) -> bool {
         self.running_total > 0
             || self.main_snapshot.as_ref().is_some_and(|s| {
@@ -202,6 +215,7 @@ impl View {
         self.sending.accept(&req.request_id);
         self.accepted_text = Some(pot_ui::state::Receipt::from_request(req).text);
         self.accepted_conversation = Some(req.conversation_id.clone());
+        let assistant_id = self.assistant_id().to_owned();
         if let Some(s) = self
             .snapshot
             .as_mut()
@@ -211,7 +225,7 @@ impl View {
                 m.request_id.as_deref() == Some(&req.request_id)
                     && !matches!(m.status, MessageStatus::Accepted | MessageStatus::Streaming)
             });
-            if !settled && s.turn.is_none() && req.conversation_id == "main" {
+            if !settled && s.turn.is_none() && req.conversation_id == assistant_id {
                 s.turn = Some(TurnState {
                     user_message_id: result.message_id,
                     cancelling: false,
@@ -222,7 +236,7 @@ impl View {
 }
 pub struct Client {
     pub view: Arc<Mutex<View>>,
-    tx: mpsc::Sender<SendMessage>,
+    tx: mpsc::Sender<(String, SendMessage)>,
     running: Arc<AtomicBool>,
     refresh: mpsc::SyncSender<()>,
 }
@@ -240,9 +254,13 @@ pub fn root() -> PathBuf {
 }
 fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String> {
     crate::backend::ready()?;
-    let (selected, query) = {
+    let (selected, query, assistant_id) = {
         let v = view.lock().unwrap();
-        (v.selected.clone(), v.task_query.clone())
+        (
+            v.selected.clone(),
+            v.task_query.clone(),
+            v.assistant_id().to_owned(),
+        )
     };
     let sq = {
         let v = view.lock().unwrap();
@@ -257,8 +275,38 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .timeout_global(Some(Duration::from_secs(3)))
         .build()
         .new_agent();
+    let directory: Value = agent
+        .get("/api/v1/runtime")
+        .call()?
+        .body_mut()
+        .read_json()
+        .map_err(|e| e.to_string())?;
+    if !directory["capabilities"]
+        .as_array()
+        .is_some_and(|caps| caps.iter().any(|c| c == "conversation"))
+    {
+        let mut v = view.lock().unwrap();
+        if v.assistant_id() == assistant_id {
+            v.runtime = directory;
+            v.permissions = Value::Null;
+            v.snapshot = None;
+        }
+        return Err("Runtime conversation capability unavailable".into());
+    }
+    let assistants: Value = agent
+        .get("/api/v1/assistants")
+        .call()?
+        .body_mut()
+        .read_json()
+        .map_err(|e| e.to_string())?;
+    let assistant_rules: Value = agent
+        .get(&format!("/api/v1/assistants/{assistant_id}/instructions"))
+        .call()?
+        .body_mut()
+        .read_json()
+        .map_err(|e| e.to_string())?;
     let task_page: TaskPage = agent
-        .get(&format!("{PATH_TASKS}/query"))
+        .get("/api/v1/assistant-tasks")
         .query("scope", &query.scope)
         .query("q", &query.q)
         .query("offset", query.offset.to_string())
@@ -269,6 +317,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .body_mut()
         .read_json()
         .map_err(|e| e.to_string())?;
+    let agent = agent.scope(&assistant_id);
     // Independent of the visible task filter and page. Only executing lanes
     // count as activity; queued and budget/user waits do not.
     let executing: TaskPage = agent
@@ -343,7 +392,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
                 .map_err(|e| e.to_string())
         })();
         let mut v = view.lock().unwrap();
-        if v.usage_query.as_ref() == Some(&q) {
+        if v.assistant_id() == assistant_id && v.usage_query.as_ref() == Some(&q) {
             v.usage_fetched = Some(std::time::Instant::now());
             v.usage_loaded = Some(q);
             match result {
@@ -361,7 +410,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .ok()
         .and_then(|mut r| r.body_mut().read_json::<Value>().ok())
         .unwrap_or(Value::Null);
-    view.lock().unwrap().access = access;
+
     let permissions: Value = agent
         .get("/api/v1/permissions")
         .call()
@@ -369,7 +418,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .body_mut()
         .read_json()
         .map_err(|e| e.to_string())?;
-    view.lock().unwrap().permissions = permissions;
+
     let main: Snapshot = agent
         .get(PATH_SNAPSHOT)
         .call()
@@ -394,6 +443,17 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             .map_err(|e| e.to_string())?
     };
     let mut v = view.lock().unwrap();
+    if v.assistant_id() != assistant_id {
+        return Ok(());
+    }
+    if v.runtime["runtime_id"] != directory["runtime_id"] {
+        v.cached_tasks.clear();
+    }
+    v.runtime = directory;
+    v.access = access;
+    v.permissions = permissions;
+    v.assistants = assistants;
+    v.assistant_rules = assistant_rules;
     if main.api_version != API_VERSION || snapshot.api_version != API_VERSION {
         return Err(crate::i18n::text("client.incompatible-runtime-protocol-version").into());
     }
@@ -435,14 +495,18 @@ impl Client {
             ..Default::default()
         }));
         let running = Arc::new(AtomicBool::new(true));
-        let (tx, rx) = mpsc::channel::<SendMessage>();
+        let (tx, rx) = mpsc::channel::<(String, SendMessage)>();
         let (refresh, refresh_rx) = mpsc::sync_channel(1);
         let v = view.clone();
         let active = running.clone();
         std::thread::spawn(move || {
             while active.load(Ordering::Relaxed) {
+                let owner = v.lock().unwrap().assistant_id().to_owned();
                 if let Err(e) = receive(&v, &active) {
-                    v.lock().unwrap().error = e;
+                    let mut state = v.lock().unwrap();
+                    if state.assistant_id() == owner {
+                        state.error = e;
+                    }
                 }
                 crate::wake_ui();
                 let _ = refresh_rx.recv_timeout(Duration::from_millis(500));
@@ -452,11 +516,7 @@ impl Client {
         let v = view.clone();
         let active = running.clone();
         std::thread::spawn(move || {
-            let agent = crate::backend::Requests::config_builder()
-                .timeout_global(Some(Duration::from_secs(3)))
-                .build()
-                .new_agent();
-            while let Ok(req) = rx.recv() {
+            while let Ok((assistant_id, req)) = rx.recv() {
                 while active.load(Ordering::Relaxed) {
                     if let Err(error) = crate::backend::ready() {
                         v.lock().unwrap().command_error = error;
@@ -464,11 +524,12 @@ impl Client {
                         continue;
                     }
                     let path = match req.conversation_id.as_str() {
-                        "main" => PATH_MESSAGES.to_string(),
+                        id if id == assistant_id => PATH_MESSAGES.to_string(),
                         "new" => PATH_TASKS.to_string(),
                         id => format!("{PATH_TASKS}/{id}/messages"),
                     };
-                    match agent
+                    match crate::backend::Requests::config_builder()
+                        .scope(&assistant_id)
                         .post(&path)
                         .config()
                         .http_status_as_error(false)
@@ -545,6 +606,7 @@ impl Client {
         }
     }
     pub fn cancel(&self) {
+        let owner = self.view.lock().unwrap().assistant_id().to_owned();
         let selected = self.view.lock().unwrap().selected.clone();
         let message_id = {
             let mut state = self.view.lock().unwrap();
@@ -564,7 +626,7 @@ impl Client {
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
                 crate::backend::ready()?;
-                crate::backend::Requests::config_builder()
+                crate::backend::Requests::config_builder().scope(&owner)
                     .timeout_global(Some(Duration::from_secs(3)))
                     .build()
                     .new_agent()
@@ -575,6 +637,9 @@ impl Client {
             })();
             if let Err(e) = result {
                 let mut state = view.lock().unwrap();
+                if state.assistant_id() != owner {
+                    return;
+                }
                 state.command_error =
                     crate::i18n::tr!("client.stop-request-not-confirmed-e", e = e);
                 if let Some(turn) = state.snapshot.as_mut().and_then(|s| s.turn.as_mut()) {
@@ -584,11 +649,13 @@ impl Client {
         });
     }
     pub fn permission_decision(&self, body: Value) {
+        let owner = self.view.lock().unwrap().assistant_id().to_owned();
         let view = self.view.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
                 let mut response = crate::backend::Requests::config_builder()
+                    .scope(&owner)
                     .timeout_global(Some(Duration::from_secs(10)))
                     .build()
                     .new_agent()
@@ -606,11 +673,17 @@ impl Client {
                 }
                 Ok(())
             })();
-            view.lock().unwrap().command_error = result.err().unwrap_or_default();
+            {
+                let mut state = view.lock().unwrap();
+                if state.assistant_id() == owner {
+                    state.command_error = result.err().unwrap_or_default();
+                }
+            }
             let _ = refresh.try_send(());
         });
     }
     pub fn usage_action(&self, path: &'static str, body: Value) {
+        let owner = self.view.lock().unwrap().assistant_id().to_owned();
         {
             let mut v = self.view.lock().unwrap();
             if v.usage_pending {
@@ -626,6 +699,7 @@ impl Client {
             let result = (|| -> Result<(), String> {
                 crate::backend::ready()?;
                 let mut response = crate::backend::Requests::config_builder()
+                    .scope(&owner)
                     .timeout_global(Some(Duration::from_secs(90)))
                     .build()
                     .new_agent()
@@ -644,6 +718,9 @@ impl Client {
                 Ok(())
             })();
             let mut v = view.lock().unwrap();
+            if v.assistant_id() != owner {
+                return;
+            }
             v.usage_pending = false;
             v.usage_fetched = None;
             if let Err(e) = result {
@@ -665,6 +742,7 @@ impl Client {
         let _ = self.refresh.try_send(());
     }
     pub fn schedule_action(&self, mut req: Value) {
+        let owner = self.view.lock().unwrap().assistant_id().to_owned();
         {
             let mut v = self.view.lock().unwrap();
             if v.schedule_pending {
@@ -679,6 +757,7 @@ impl Client {
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let agent = crate::backend::Requests::config_builder()
+                .scope(&owner)
                 .timeout_global(Some(Duration::from_secs(90)))
                 .build()
                 .new_agent();
@@ -708,6 +787,9 @@ impl Client {
                 match result {
                     Ok(reply) => {
                         let mut v = view.lock().unwrap();
+                        if v.assistant_id() != owner {
+                            return;
+                        }
                         v.schedule_pending = false;
                         if let Some(detail) = reply["rejected"].as_str() {
                             v.schedule_error = detail.into();
@@ -724,7 +806,11 @@ impl Client {
                         break;
                     }
                     Err(_) => {
-                        view.lock().unwrap().schedule_error = crate::i18n::text(
+                        let mut state = view.lock().unwrap();
+                        if state.assistant_id() != owner {
+                            break;
+                        }
+                        state.schedule_error = crate::i18n::text(
                             "client.connection-interrupted-retrying-with-the-same-request",
                         )
                         .into();
@@ -782,7 +868,96 @@ impl Client {
         v.tasks_loading = true;
         let _ = self.refresh.try_send(());
     }
+    pub fn assistant_save(&self, value: Value) {
+        {
+            let mut state = self.view.lock().unwrap();
+            if state.assistant_pending {
+                return;
+            }
+            state.assistant_pending = true;
+        }
+        let view = self.view.clone();
+        let refresh = self.refresh.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<Value, String> {
+                let requests = crate::backend::Requests::config_builder();
+                let owner = value["owner"].as_str().unwrap_or_default();
+                if owner == "new" {
+                    return requests
+                        .post("/api/v1/assistants")
+                        .send_json(json!({"request_id":value["request_id"],"name":value["name"]}))?
+                        .body_mut()
+                        .read_json()
+                        .map_err(|e| e.to_string());
+                }
+                requests
+                    .post(&format!("/api/v1/assistants/{owner}/definition"))
+                    .send_json(value.clone())?
+                    .body_mut()
+                    .read_json()
+                    .map_err(|e| e.to_string())
+            })();
+            let mut v = view.lock().unwrap();
+            v.assistant_pending = false;
+            match result {
+                Ok(reply) => {
+                    let definition = reply.get("definition").unwrap_or(&reply);
+                    if let Some(list) = v.assistants["assistants"].as_array_mut() {
+                        if let Some(old) = list.iter_mut().find(|d| d["id"] == definition["id"]) {
+                            *old = definition.clone();
+                        } else if !definition["id"].is_null() {
+                            list.push(definition.clone());
+                        }
+                    }
+                    if value["owner"] == v.assistant_id() && !reply["rules"].is_null() {
+                        v.assistant_rules = reply["rules"].clone();
+                    }
+                    v.command_error.clear();
+                    v.assistant_saved_owner = value["owner"].as_str().map(str::to_owned);
+                }
+                Err(e) => v.command_error = e,
+            }
+            drop(v);
+            let _ = refresh.try_send(());
+            crate::wake_ui();
+        });
+    }
+    pub fn select_assistant(&self, id: String) {
+        let mut v = self.view.lock().unwrap();
+        if v.assistant_id() == id || v.pending {
+            return;
+        }
+        v.selected_assistant = id.clone();
+        v.selected.clear();
+        v.snapshot = None;
+        v.main_snapshot = None;
+        v.cached_tasks.clear();
+        v.permissions = Value::Null;
+        v.usage_pending = false;
+        v.usage_loaded = None;
+        v.usage_fetched = None;
+        v.schedule_pending = false;
+        v.schedules = SchedulePage::default();
+        v.schedule_selected.clear();
+        v.usage = Value::Null;
+        v.assistant_rules = Value::Null;
+        crate::backend::select_assistant(&id);
+        drop(v);
+        let _ = self.refresh.try_send(());
+        crate::wake_ui();
+    }
     pub fn select(&self, id: String) {
+        let owner = self
+            .view
+            .lock()
+            .unwrap()
+            .tasks
+            .iter()
+            .find(|task| task.id == id)
+            .map(|t| t.assistant_id.clone());
+        if let Some(owner) = owner {
+            self.select_assistant(owner);
+        }
         if self.view.lock().unwrap().select(id) {
             let _ = self.refresh.try_send(());
             crate::wake_ui();
@@ -794,7 +969,7 @@ impl Client {
             return false;
         }
         let conversation = if state.selected.is_empty() {
-            "main".into()
+            state.assistant_id().to_owned()
         } else {
             state.selected.clone()
         };
@@ -806,7 +981,11 @@ impl Client {
         };
         state.pending = true;
         state.command_error.clear();
-        if self.tx.send(request.clone()).is_err() {
+        if self
+            .tx
+            .send((state.assistant_id().to_owned(), request.clone()))
+            .is_err()
+        {
             state.pending = false;
             state.sending.reject(&request.request_id);
             state.command_error =

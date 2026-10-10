@@ -188,6 +188,37 @@ async fn logout(State(a): State<Access>, h: HeaderMap) -> Response {
     )
 }
 fn allowed(method: &Method, path: &str) -> bool {
+    if path == "/api/v1/runtime" {
+        return *method == Method::GET;
+    }
+    if path == "/api/v1/assistants" {
+        return *method == Method::GET || *method == Method::POST;
+    }
+    if path == "/api/v1/assistant-tasks" {
+        return *method == Method::GET;
+    }
+    if let Some(rest) = path.strip_prefix("/api/v1/assistants/") {
+        let Some((owner, operation)) = rest.split_once('/') else {
+            return false;
+        };
+        if owner != "main" && uuid::Uuid::parse_str(owner).is_err() {
+            return false;
+        }
+        if operation == "instructions" {
+            return *method == Method::GET || *method == Method::POST;
+        }
+        if operation == "definition" || operation == "agent/config" {
+            return *method == Method::POST;
+        }
+        if operation == "agent" {
+            return *method == Method::GET;
+        }
+        if operation.starts_with("assistants") || operation == "assistant-tasks" {
+            return false;
+        }
+        return allowed(method, &format!("/api/v1/{operation}"));
+    }
+
     if *method == Method::POST && path == "/api/v1/permissions" {
         return true;
     }
@@ -483,6 +514,25 @@ mod tests {
             "/api/v1/sandboxes",
         ] {
             assert!(!allowed(&Method::POST, p), "{p}");
+        }
+        assert!(allowed(
+            &Method::POST,
+            "/api/v1/assistants/00000000-0000-0000-0000-000000000001/messages"
+        ));
+        assert!(allowed(
+            &Method::GET,
+            "/api/v1/assistants/00000000-0000-0000-0000-000000000001/agent"
+        ));
+        for suffix in [
+            "providers",
+            "execution",
+            "terminals",
+            "assistants/b/messages",
+        ] {
+            assert!(!allowed(
+                &Method::POST,
+                &format!("/api/v1/assistants/00000000-0000-0000-0000-000000000001/{suffix}")
+            ));
         }
         assert!(!allowed(&Method::GET, "/api/v1/terminals"));
         assert!(!allowed(&Method::POST, "/api/v1/tasks/id/steer"));

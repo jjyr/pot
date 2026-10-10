@@ -1,6 +1,6 @@
 # Composable runtimes and distributed task dispatch
 
-Updated: 2026-10-10. Composition and federation design. Local service state separation, stable identity, local Assignments and bare/environment/assistant presets are implemented; multiple owners and remote composition remain planned. No model-visible tool changes are included. [Current architecture](architecture.md), [Runtime contract](../crates/runtime/README.md), and [Agent/Sandbox design](agent-sandbox-design.md) continue to describe delivered behavior.
+Updated: 2026-10-10. Composition and federation design. Local service state separation, stable identity, local Assignments and bare/environment/assistant presets are implemented; multiple owners and P2 client foundations are delivered; remote composition remains planned. P2 removes the dedicated preference tools and create_task.preference_revision with user agreement. [Current architecture](architecture.md), [Runtime contract](../crates/runtime/README.md), and [Agent/Sandbox design](agent-sandbox-design.md) continue to describe delivered behavior.
 
 ## Direction and agreed decisions
 
@@ -129,7 +129,7 @@ Local placement does not mean unrestricted Host execution. The App composition c
 
 Saved preferences remain revisioned plain text rather than a new classifier or rules DSL. Examples include “Run builds on the Linux runtime”, “Use the Mac development Sandbox for Xcode”, or “Keep private source execution local”. The Agent receives safe names, IDs, capabilities and availability for authorized candidates. Names are resolved and references validated before dispatch. Ambiguous/unavailable required choices require clarification or a visible wait/failure. A prompt cannot grant access or enable an absent capability.
 
-Routing preferences default to the dispatching Agent definition, with explicit shared preference records possible in the App composition. Independent conversational Agents need not share one global rule document. Snapshot the revision/reason per Task; edits affect new assignments, not running Tasks. Workers receive applicable execution instructions but cannot rewrite routing policy.
+Routing rules belong in the dispatching assistant’s AGENTS.md, alongside applicable global/project instructions. Independent conversational Agents need not share one global rule document. Record the selection reason per Task; edits affect new assignments, not running Tasks. Workers receive applicable execution instructions but cannot rewrite routing policy.
 
 First scope fixes the Environment assignment across Task follow-ups and fixes Agent Runtime for the Task. Configuration updates can still occur at safe turn boundaries. Reassignment/migration is separate future work; cancellation or disconnect never implies migration. Schedules resolve and save explicit Runtime/Environment references and use their recorded dispatch origin for local defaults, rather than whichever UI is open when they fire.
 
@@ -326,7 +326,7 @@ Assignment
   agent_definition_ref, agent_runtime_id, resolved_config_snapshot
   environment_ref?, environment_generation?, workspace_scope?
   gateway_ref, artifact_scope?, granted_service_refs
-  preference_revision?, selection_reason
+  selection_reason
 
 RunRef
   owner_ref, thread_id, dispatch_generation, turn_id
@@ -415,7 +415,7 @@ Concrete future model-visible proposals to review at their phase, not implementa
 | Phase | Candidate change | Agreement status |
 |---|---|---|
 | P1 | None: existing App tool names/arguments/behavior are retained | No tool-interface change proposed |
-| P2 | Existing task/preference/management tools become scoped to the selected conversational owner instead of a global main owner; worker authority stays fixed | Pending concrete scoped behavior and UI review |
+| P2 | Existing task/preference/management tools become scoped to the selected conversational owner instead of a global main owner; worker authority stays fixed | Approved and implemented in P2; see multiple-assistant acceptance |
 | P3 | Add an explicit remote Environment reference to task placement/Environment selection; expose granted Runtime/Environment metadata; preserve existing local arguments | Pending concrete tool/schema review |
 | P4 | Add an explicit Agent Runtime to task placement and run inspection; distinguish its location from Environment location | Pending concrete tool/schema review |
 | P5 | Extend preference candidate metadata to Runtime placement and add scoped cross-node artifact actions | Pending concrete tool/schema review |
@@ -428,7 +428,7 @@ P1 needs no new App UI interaction if it keeps the current preset and exposes de
 
 The [phase roadmap](development-plan.md#composable-runtime-roadmap--proposed-2026-10-10) expands this sequence into P0–P6 deliverables and exit gates, including design review and deployment qualification. That roadmap is proposed rather than an implementation status claim.
 
-Current code already provides injected `ToolExecutor`, `ExecutionServices`, `ExecutionFeedback`, concrete pot-agent execution and a separate Sandbox Manager/Provider boundary. However, Runtime `Service` holds a mandatory Agent executor, Task hub, Sandbox manager and hard-coded main conversation. Bootstrap starts the main loop and Task coordinator; Server registers platform Providers automatically. These are the composition seams to change, rather than reasons to introduce another Agent engine.
+Current code already provides injected `ToolExecutor`, `ExecutionServices`, `ExecutionFeedback`, concrete pot-agent execution and a separate Sandbox Manager/Provider boundary. P1 introduced independent local service state and explicit presets; P2 adds scoped assistant owners and shared Runtime capacity. The owner facade composes local services, while remote ports and peer authorization remain subsequent phases.
 
 Recommended sequence:
 

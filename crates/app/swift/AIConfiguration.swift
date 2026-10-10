@@ -3,18 +3,20 @@ import Foundation
 
 /// One configuration model shared by Chat setup and ordinary Settings.
 @MainActor extension SettingsPanel {
-    func openAI(fromChat: Bool = false) {
+    func openAI(fromChat: Bool = false, owner: String? = nil) {
+        guard !aiBusy, !routingBusy else { return }
+        bindAssistant(owner: owner)
         section = 1; returnToChat = fromChat
-        bridge?.selectPage(2); refreshAI()
+        bridge?.selectPage(2); refreshAI(owner: owner)
     }
 
     func reloadAI() async throws {
         guard let bridge else { return }
-        let state = try await bridge.runtime.request("api/v1/agent")
+        let state = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent")
         savedProfiles = state["profiles"] as? [[String: Any]] ?? []
         let thread = state["thread"] as? [String: Any] ?? [:]
         activeSpec = thread["config"] as? [String: Any] ?? [:]
-        let providerState = try await bridge.runtime.request("api/v1/providers")
+        let providerState = try await (configurationRuntime ?? bridge.runtime).request("api/v1/providers")
         connections = providerState["connections"] as? [[String: Any]] ?? []
         if !draftInitialized {
             draftProfile = activeSpec["source_profile_id"] as? String ?? ""
@@ -107,10 +109,13 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                let response = try await bridge.runtime.request("api/v1/providers/check", body: [
-                    "endpoint": connectionEndpoint(endpoint), "api_key": key,
-                    "protocol": apiProtocol, "profile_id": profile["id"] as? String ?? "",
-                ])
+                let response = try await (configurationRuntime ?? bridge.runtime).request(
+                    "api/v1/providers/check",
+                    body: [
+                        "endpoint": connectionEndpoint(endpoint), "api_key": key,
+                        "protocol": apiProtocol, "profile_id": profile["id"] as? String ?? "",
+                    ]
+                )
                 modelOptions = response["models"] as? [String] ?? []
                 if connectionKind
                     .hasPrefix("opencode-")
@@ -147,7 +152,7 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                _ = try await bridge.runtime.request(
+                _ = try await (configurationRuntime ?? bridge.runtime).request(
                     "api/v1/providers",
                     body: [
                         "profile_id": target,
@@ -166,7 +171,7 @@ import Foundation
                 profile = savedProfiles.first { $0["id"] as? String == target } ?? [:]
                 if firstMain {
                     while true {
-                        let state = try await bridge.runtime.request("api/v1/agent")
+                        let state = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent")
                         if state["pending_config"] is NSNull || state["pending_config"] == nil {
                             break
                         }
@@ -217,7 +222,7 @@ import Foundation
         Task {
             defer { aiBusy = false }
             do {
-                _ = try await bridge.runtime.request(
+                _ = try await (configurationRuntime ?? bridge.runtime).request(
                     "api/v1/agent",
                     body: [
                         "profile": selected,
@@ -228,7 +233,7 @@ import Foundation
                     ]
                 )
                 while true {
-                    let state = try await bridge.runtime.request("api/v1/agent")
+                    let state = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent")
                     if state["pending_config"] is NSNull || state["pending_config"] == nil {
                         break
                     }

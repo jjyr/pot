@@ -52,13 +52,15 @@ Exit gate: bare Runtime makes no model calls/task dispatch/image downloads or En
 
 ### P2 — multiple conversations and client foundations
 
-- Persist Agent definitions, independent conversations/Threads, owner references and per-Agent preference records. Eliminate global-main identity assumptions in routing, permissions, usage and projections.
+Delivered 2026-10-10: independent assistant owners, scoped controls/approvals, per-assistant AGENTS.md, grouped Tasks, shared capacity and client transport foundations. Chrome agent-profile acceptance and automated regressions passed; native interaction and real model/VM requalification are recorded as limits in [acceptance](validation/multiple-assistants-20261010.md). Peer connection UI and remote execution follow in P3.
+
+- Persist Agent definitions, independent conversations/Threads, owner references and per-Agent AGENTS.md files. Eliminate global-main identity assumptions in routing, permissions, usage and projections.
 - Bind each conversational Agent to an explicit Task/control scope. Preserve worker restrictions and each Thread's turn serialization/configuration snapshots.
 - Add App/shared-UI assistant selection and creation/configuration flows, with clear conversation/Task ownership. Agent definition reuse does not merge Thread contexts.
 - Introduce client transport and connection identity abstractions: local embedded dispatch plus a remote client backend. Cache keys and event cursors include Runtime/owner identity; pages consume capability projections. Peer enrollment is delivered in P3.
 - Preserve existing local routing while implementing only the approved multiple-owner tool changes.
 
-Exit gate: two conversational Agents maintain independent context/preferences/permissions, each can dispatch and follow up its own tasks; switching conversations/connections does not mix state or cancel unrelated work. Local behavior and supported frontend protocol consumers pass regression checks.
+Exit gate: two conversational Agents maintain independent context/rules/permissions, each can dispatch and follow up its own tasks; switching conversations/connections does not mix state or cancel unrelated work. Local behavior and supported frontend protocol consumers pass regression checks.
 
 ### P3 — direct connections and remote Environment execution
 

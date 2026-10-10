@@ -132,6 +132,11 @@ pub struct ExecutionContext {
 /// Synchronous acknowledgements preserve persistence-before-network ordering.
 /// Runtime validates owner/generation/turn before applying these observations.
 pub trait ExecutionFeedback: Send + Sync {
+    /// Protected user instruction edits can require a fresh review even with a grant.
+    fn requires_owner_review(&self, _tool: &str, _args: &Value) -> bool {
+        false
+    }
+
     /// Prepare execution-visible arguments and fix the environment before approval.
     fn prepare_execution_operation(
         &self,

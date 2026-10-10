@@ -1,4 +1,4 @@
-pub mod preferences;
+pub mod catalog;
 pub mod routing;
 pub(super) mod runner;
 pub mod settings;
@@ -58,11 +58,8 @@ pub fn record_turn(s: &Service, turn: &str) -> Result<()> {
 
 #[derive(Deserialize)]
 pub struct InspectOwner {
-    #[serde(default = "inspect_main")]
-    owner: String,
-}
-fn inspect_main() -> String {
-    "main".into()
+    #[serde(default)]
+    owner: Option<String>,
 }
 pub async fn inspect(
     State(root): State<Service>,
@@ -72,7 +69,7 @@ pub async fn inspect(
     root.authorized(&h)?;
     initialize(&root).map_err(internal)?;
     let profiles = profiles(&root.conversation.inner.lock().unwrap().store).map_err(internal)?;
-    let s = tasks::owner(&root, &query.owner)?;
+    let s = tasks::owner(&root, query.owner.as_deref().unwrap_or(&root.usage_scope))?;
     initialize(&s).map_err(internal)?;
     let inner = s.conversation.inner.lock().unwrap();
     let pending = settings::pending(&inner.store).map_err(internal)?;
@@ -187,7 +184,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     if let Err(e) = result {
         s.save(Message {
             id: id(),
-            conversation_id: "main".into(),
+            conversation_id: s.conversation_id(),
             role: Role::System,
             text: format!("任务未完成：{e}"),
             status,

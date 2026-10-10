@@ -152,7 +152,6 @@ pub fn resolve(
                 revision: spec.source_profile_revision,
                 provider: spec.provider.clone(),
                 reason: "chat_default".into(),
-                preference_revision: None,
                 selection_reason: None,
             };
             return Ok((spec, routing));
@@ -199,7 +198,6 @@ pub fn resolve(
         revision: profile.revision,
         provider: spec.provider.clone(),
         reason: reason.into(),
-        preference_revision: None,
         selection_reason: None,
     };
     Ok((spec, routing))

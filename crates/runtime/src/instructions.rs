@@ -222,6 +222,25 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
         .unwrap()
         .refresh(&s.agent_service.resources.home.join("AGENTS.md"));
     let mut catalog = project(&filesystem, &cwd, &filesystem.mount)?;
+    let rules_path = s.assistant_rules_path();
+    let rules = match fs::read_to_string(&rules_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    if !rules.trim().is_empty() {
+        catalog.text.insert_str(
+            0,
+            &format!(
+                "\n\nAssistant AGENTS.md instructions ({}):\n{rules}",
+                rules_path.display()
+            ),
+        );
+    }
+    if !s.is_worker {
+        catalog.text.insert_str(0, &format!("\n\nThis assistant's persistent rules file is {}. For lasting rule changes, use apply_patch with this exact absolute path and request owner permission before writing this file. Saving rules does not grant execution permissions.\n", rules_path.display()));
+    }
+
     if let Some(warning) = warning {
         catalog.diagnostics.push(warning);
     }

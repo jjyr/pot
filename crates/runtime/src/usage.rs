@@ -63,7 +63,7 @@ pub fn resume_main(s: &Service) -> Result<()> {
         return Ok(());
     }
     let Some(req) = paused(s)? else { return Ok(()) };
-    if !s.usage.lock().unwrap().ready("main", now())? {
+    if !s.usage.lock().unwrap().ready(&s.usage_scope, now())? {
         return Ok(());
     }
     let mut inner = s.conversation.inner.lock().unwrap();
@@ -114,7 +114,7 @@ pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Js
         s.usage
             .lock()
             .unwrap()
-            .clear_wait("main")
+            .clear_wait(&s.usage_scope)
             .map_err(internal)?;
     }
     Ok(Json(json!({"cancelled":true})))
