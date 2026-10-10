@@ -4,7 +4,8 @@ use pot_protocol::{RUNTIME_ENDPOINT_FILE, RuntimeEndpoint};
 use pot_runtime::Backend;
 use std::sync::Arc;
 pub struct Server {
-    backend: Backend,
+    backend: Arc<crate::resources::Resources>,
+    host: pot_runtime::host::Host,
     embedded: bool,
     listener: tokio::net::TcpListener,
     access: Option<(
@@ -20,18 +21,18 @@ impl Server {
     /// App requests dispatch in memory. TCP is restricted to subprocess model/MCP integration.
     pub async fn embedded(mut config: ServerConfig) -> Result<Self> {
         config.bind = "127.0.0.1:0".into();
-        config.composition = Some(pot_runtime::host::Composition::Assistant);
+        config.composition = None;
         Self::bind_mode(config, true).await
     }
     pub fn local_client(&self) -> crate::LocalClient {
-        let mut routes = backend_router(&self.backend);
+        let mut routes = self.backend.router();
         if let Some((a, _, _)) = &self.access {
             routes = routes.merge(crate::access::admin_router(a.clone()));
         }
         crate::LocalClient::new(
             routes,
-            self.backend.endpoint(0).token,
-            self.backend.instance_lock(),
+            self.host.endpoint(0).token,
+            self.host.instance_lock(),
         )
     }
     async fn bind_mode(config: ServerConfig, embedded: bool) -> Result<Self> {
@@ -39,11 +40,20 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(&config.bind).await?;
         let composition = match config.composition {
             Some(composition) => composition,
-            None => pot_runtime::host::Composition::load(&config.runtime.data)?,
+            None if config.runtime.data.join("runtime-resources.json").exists() => {
+                pot_runtime::host::Composition::Bare
+            }
+            None if config.runtime.data.join("pot-v2.sqlite").exists() => {
+                pot_runtime::host::Composition::Assistant
+            }
+            None => pot_runtime::host::Composition::Bare,
         };
         let ts_hostname = std::env::var("POT_TAILSCALE_HOSTNAME").ok();
         let use_ts = embedded || ts_hostname.is_some();
-        let access_config = if composition != pot_runtime::host::Composition::Assistant {
+        let access_config = if !embedded
+            && std::env::var_os("POT_ACCESS_ORIGIN").is_none()
+            && composition != pot_runtime::host::Composition::Assistant
+        {
             None
         } else if use_ts {
             Some(crate::access::AccessConfig {
@@ -92,7 +102,7 @@ impl Server {
         } else {
             None
         };
-        let providers: Vec<Arc<dyn pot_sandbox::Provider>> = if !composition.has_environments() {
+        let providers: Vec<Arc<dyn pot_sandbox::Provider>> = if !composition.has_sandboxes() {
             vec![]
         } else if cfg!(target_os = "linux") {
             vec![Arc::new(
@@ -107,10 +117,11 @@ impl Server {
             ]
         };
         let mut backend =
-            pot_runtime::initialize_composition(config.runtime, composition, providers).await?;
+            pot_runtime::initialize_composition(config.runtime.clone(), composition, providers)
+                .await?;
         let endpoint = backend.endpoint(listener.local_addr()?.port());
 
-        let access = if let Some(cfg) = access_config {
+        let mut access = if let Some(cfg) = access_config {
             let mut access = match crate::access::Access::new(
                 &cfg,
                 backend.data_dir().to_path_buf(),
@@ -123,7 +134,7 @@ impl Server {
                     return Err(error);
                 }
             };
-            access.notifications = backend.optional_state();
+            *access.notifications.lock().unwrap() = backend.optional_state();
             let (listener, tls) = access_listener.unwrap();
             if use_ts {
                 access.tailscale = Some(crate::access::tailscale::Tailscale::new(
@@ -164,8 +175,19 @@ impl Server {
             backend.shutdown().await;
             return Err(error);
         }
+        let host = backend.host().clone();
+        let backend =
+            crate::resources::Resources::open_policy(backend, config.runtime, !embedded).await?;
+        if embedded {
+            backend.ensure_app_assistant().await?;
+        }
+        if let Some((access, _, _)) = &mut access {
+            access.runtime = backend.router();
+            access.notifications = backend.notification_source();
+        }
         Ok(Self {
             backend,
+            host,
             embedded,
             listener,
             access,
@@ -175,27 +197,27 @@ impl Server {
         Ok(self.listener.local_addr()?)
     }
     pub fn composition(&self) -> pot_runtime::host::Composition {
-        self.backend.host().composition()
+        self.host.composition()
     }
     pub fn endpoint(&self) -> Result<RuntimeEndpoint> {
-        Ok(self.backend.endpoint(self.local_addr()?.port()))
+        Ok(self.host.endpoint(self.local_addr()?.port()))
     }
     /// Standalone CLI entry point: management is protected by OS socket permissions.
     pub async fn serve_local(
         self,
         shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     ) -> Result<()> {
-        let _guard = self.backend.instance_lock();
+        let _guard = self.host.instance_lock();
         use std::os::unix::fs::PermissionsExt;
-        let path = self.backend.data_dir().join("control.sock");
+        let path = self.host.data_dir().join("control.sock");
         // The Backend owns the directory lock; any previous socket is stale.
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
         let listener = tokio::net::UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        let token = self.backend.endpoint(0).token;
-        let mut local = backend_router(&self.backend);
+        let token = self.host.endpoint(0).token;
+        let mut local = self.backend.router();
         if let Some((a, _, _)) = &self.access {
             local = local.merge(crate::access::admin_router(a.clone()));
         }
@@ -234,8 +256,8 @@ impl Server {
         self,
         shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     ) -> Result<()> {
-        let _guard = self.backend.instance_lock();
-        let mut router = backend_router(&self.backend);
+        let _guard = self.host.instance_lock();
+        let mut router = self.backend.router();
         let (public_stop, stop_rx) = tokio::sync::watch::channel(false);
         let (public_failed, mut failure_rx) = tokio::sync::watch::channel(false);
         let mut public_task = None;
@@ -288,7 +310,7 @@ impl Server {
                 },
             ));
         }
-        let mut backend = self.backend;
+        let backend = self.backend;
         axum::serve(self.listener, router)
             .with_graceful_shutdown(async move {
                 tokio::select! { _=shutdown=>{}, _=failure_rx.changed()=>{} }
@@ -397,7 +419,7 @@ fn macos_helper_path() -> std::path::PathBuf {
         .unwrap_or_default()
 }
 
-fn backend_router(backend: &Backend) -> axum::Router {
+pub(crate) fn backend_router(backend: &Backend) -> axum::Router {
     let routes = backend.host().router();
     match backend.optional_state() {
         Some(service) => {
@@ -407,11 +429,11 @@ fn backend_router(backend: &Backend) -> axum::Router {
                 move |request: axum::extract::Request, next: axum::middleware::Next| {
                     let hub = integration.clone();
                     async move {
-                        if let Some(service) = hub.service_for(request.headers()) {
-                            if service.owner_id() != "main" {
-                                use tower::ServiceExt;
-                                return router(service).oneshot(request).await.unwrap();
-                            }
+                        if let Some(service) = hub.service_for(request.headers())
+                            && service.owner_id() != "main"
+                        {
+                            use tower::ServiceExt;
+                            return router(service).oneshot(request).await.unwrap();
                         }
                         next.run(request).await
                     }
@@ -422,5 +444,21 @@ fn backend_router(backend: &Backend) -> axum::Router {
                 .merge(crate::routes::assistant_routes(hub))
         }
         None => routes,
+    }
+}
+
+/// Installed Provider code can be registered after neutral Runtime startup.
+pub(crate) fn installed_providers() -> Result<Vec<Arc<dyn pot_sandbox::Provider>>> {
+    if cfg!(target_os = "linux") {
+        Ok(vec![Arc::new(
+            pot_sandbox_linux_podman::LinuxPodmanProvider::new()?,
+        )])
+    } else {
+        Ok(vec![
+            Arc::new(pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new()?),
+            Arc::new(pot_sandbox_macos_apple_vm::MacOSAppleVMProvider::new(
+                macos_helper_path(),
+            )),
+        ])
     }
 }

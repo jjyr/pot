@@ -32,3 +32,10 @@ pub mod permissions;
 
 #[cfg(feature = "presentation")]
 pub mod assistants;
+
+pub mod machine_state;
+#[cfg(feature = "presentation")]
+pub mod machines;
+
+#[cfg(feature = "presentation")]
+pub mod machine_connections;

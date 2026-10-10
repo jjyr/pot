@@ -136,7 +136,7 @@ pub async fn mcp(
             let name = call["params"]["name"].as_str().unwrap_or("");
             let settings = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?.map(|b| b.config.params.agent).unwrap_or_default();
             if !configured_schemas(turn.starts_with(orchestration::RESULT_PREFIX),s.is_worker,&settings).map_err(internal)?.iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
-            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || matches!(name,"list_sandboxes" | "manage_sandbox") {
+            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || matches!(name,"list_environments" | "manage_sandbox") {
                 let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));
                 let operation = tokio::spawn(async move { sandbox::tool(&s,&name,&id,&args).await });
                 let result = operation.await.map_err(|e|internal(e.into()))?;
@@ -236,7 +236,7 @@ mod tests {
                 );
             } else {
                 assert!(names.contains("manage_sandbox"));
-                assert!(names.contains("list_sandboxes"));
+                assert!(names.contains("list_environments"));
                 assert!(names.contains("create_task"));
             }
             if !summary {

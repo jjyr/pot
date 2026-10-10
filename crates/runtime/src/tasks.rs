@@ -36,7 +36,7 @@ struct Lane {
 #[derive(Default)]
 pub(crate) struct Capacity {
     // Shared across all assistant hubs, held until the run finishes cleanup.
-    active: BTreeMap<String, (agent::ResolvedSpec, Option<String>)>,
+    active: BTreeMap<String, (agent::ResolvedSpec, Option<pot_core::EnvironmentRef>)>,
 }
 #[derive(Default)]
 pub(super) struct Hub {
@@ -76,25 +76,40 @@ pub(super) fn remove_uncommitted(hub: &mut Hub, task_id: &str) {
 fn child(
     root: &Service,
     task_id: &str,
-    sandbox_id: &str,
+    environment: &pot_core::EnvironmentRef,
     skills: Option<Vec<String>>,
 ) -> Result<Service> {
     anyhow::ensure!(
         uuid::Uuid::parse_str(task_id).is_ok(),
         "Invalid persisted task ID"
     );
-    anyhow::ensure!(
-        !sandbox_id.is_empty(),
-        "Persisted task Sandbox assignment missing"
-    );
-    root.environment_service.manager.assignment(sandbox_id)?;
+    environment.validate()?;
+
     let data = root.data.join("tasks").join(task_id);
-    let workspace = root
-        .environment_service
-        .manager
-        .workspace(sandbox_id)
-        .join("tasks")
-        .join(task_id);
+    let (sandbox_id, workspace) = if !environment.is_local_to(&root.runtime_id) {
+        (
+            match &environment.target {
+                pot_core::EnvironmentTarget::Host {} => None,
+                pot_core::EnvironmentTarget::Sandbox { sandbox_id } => Some(sandbox_id.clone()),
+            },
+            data.join("agent-cache"),
+        )
+    } else {
+        match &environment.target {
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+                root.environment_service.sandboxes.assignment(sandbox_id)?;
+                (
+                    Some(sandbox_id.clone()),
+                    root.environment_service
+                        .sandboxes
+                        .workspace(sandbox_id)
+                        .join("tasks")
+                        .join(task_id),
+                )
+            }
+            pot_core::EnvironmentTarget::Host {} => (None, data.join("agent-workspace")),
+        }
+    };
     std::fs::create_dir_all(&data)?;
     std::fs::create_dir_all(&workspace)?;
     let endpoint: RuntimeEndpoint =
@@ -114,9 +129,11 @@ fn child(
             runtime_id: root.runtime_id.clone(),
             assistant_id: root.assistant_id.clone(),
             skill_selection: skills,
+            remote_context: Default::default(),
             #[cfg(test)]
             test_tool_executor: root.test_tool_executor.clone(),
-            sandbox_id: Some(sandbox_id.into()),
+            sandbox_id,
+            environment_ref: Some(environment.clone()),
             usage: root.usage.clone(),
             usage_scope: task_id.into(),
             token,
@@ -145,8 +162,11 @@ fn child(
             resources: root.agent_service.resources.clone(),
         },
         environment_service: EnvironmentService {
+            remote: root.environment_service.remote.clone(),
+            host_enabled: root.environment_service.host_enabled.clone(),
+            host: root.environment_service.host.clone(),
             permissions: root.environment_service.permissions.clone(),
-            manager: root.environment_service.manager.clone(),
+            sandboxes: root.environment_service.sandboxes.clone(),
             terminals: root.environment_service.terminals.clone(),
         },
         tasks: TaskService {
@@ -186,10 +206,42 @@ pub(super) fn restore(root: &Service) -> Result<()> {
             record.info.assistant_id == root.assistant_id,
             "Task assistant ownership mismatch"
         );
+        let environment = record
+            .info
+            .environment_ref
+            .clone()
+            .or_else(|| {
+                record
+                    .assignment
+                    .as_ref()
+                    .and_then(|a| a.environment.clone())
+            })
+            .unwrap_or_else(|| {
+                pot_core::EnvironmentRef::sandbox(&root.runtime_id, &record.info.sandbox_id)
+            });
+        let projected = match &environment.target {
+            pot_core::EnvironmentTarget::Host {} => "",
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.as_str(),
+        };
+        anyhow::ensure!(
+            record.info.sandbox_id == projected,
+            "Task Environment projection mismatch"
+        );
         let assignment = record.assignment.get_or_insert_with(|| {
-            pot_core::Assignment::local(&root.runtime_id, &record.info.id, &record.info.sandbox_id)
+            pot_core::Assignment::on_environment(
+                &root.runtime_id,
+                &record.info.id,
+                environment.clone(),
+            )
         });
-        assignment.validate_local(&root.runtime_id, &record.info.id, &record.info.sandbox_id)?;
+        assignment.validate_binding(&root.runtime_id, &record.info.id, &environment)?;
+        if let Some(requested) = &record.create_request.environment_ref {
+            anyhow::ensure!(
+                requested == &environment && record.create_request.sandbox_id.is_empty(),
+                "Task request Environment mismatch"
+            );
+        }
+        record.info.environment_ref = Some(environment);
     }
     let mut current_hub = root.tasks.hub.lock().unwrap();
     {
@@ -207,7 +259,11 @@ pub(super) fn restore(root: &Service) -> Result<()> {
         let service = child(
             root,
             &record.info.id,
-            &record.info.sandbox_id,
+            record
+                .info
+                .environment_ref
+                .as_ref()
+                .expect("validated binding"),
             record.create_request.skills.clone(),
         )?;
         if let Some(job) = record.active.take() {
@@ -269,6 +325,13 @@ fn info(record: &Record) -> TaskInfo {
 }
 fn lane_info(lane: &Lane) -> TaskInfo {
     let mut task = info(&lane.record);
+    if lane.record.active.is_some()
+        && task.phase == TaskPhase::Running
+        && crate::remote_environment::waiting_reason(&lane.service).is_some()
+    {
+        task.phase = TaskPhase::Waiting;
+        task.remote_waiting = true;
+    }
     if let Ok(Some(thread)) = agent::current(&lane.service.conversation.inner.lock().unwrap().store)
     {
         let icon = crate::gateway::executor_icon(&lane.service, &thread.config);
@@ -345,7 +408,7 @@ pub(super) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
         .lanes
         .values()
         .filter(|l| {
-            let i = &l.record.info;
+            let i = lane_info(l);
             query
                 .phase
                 .as_ref()
@@ -355,7 +418,7 @@ pub(super) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
                     || i.title.to_lowercase().contains(&needle)
                     || i.id.to_lowercase().contains(&needle))
         })
-        .map(|lane| info(&lane.record))
+        .map(lane_info)
         .collect();
     sort_tasks(&mut items);
     let total = items.len();
@@ -501,20 +564,86 @@ fn enqueue_from(
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
-    let sandbox_id = root
-        .environment_service
-        .manager
-        .assignment(&req.sandbox_id)
-        .map_err(internal)?;
+    let environment = if let Some(environment) = &req.environment_ref {
+        if !req.sandbox_id.is_empty() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "environment_conflict",
+                "Use environment_ref or sandbox_id",
+            ));
+        }
+        environment
+            .validate()
+            .map_err(|e| error(StatusCode::BAD_REQUEST, "environment", &e.to_string()))?;
+        if !environment.is_local_to(&root.runtime_id) {
+            crate::remote_environment::port(root)
+                .and_then(|port| port.validate(environment))
+                .map_err(|e| {
+                    error(
+                        StatusCode::CONFLICT,
+                        "environment_unavailable",
+                        &e.to_string(),
+                    )
+                })?;
+        }
+        environment.clone()
+    } else if req.sandbox_id.is_empty()
+        && root.environment_service.sandboxes.assignment("").is_err()
+        && root
+            .environment_service
+            .host_enabled
+            .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        pot_core::EnvironmentRef::host(&root.runtime_id)
+    } else {
+        pot_core::EnvironmentRef::sandbox(
+            &root.runtime_id,
+            &root
+                .environment_service
+                .sandboxes
+                .assignment(&req.sandbox_id)
+                .map_err(internal)?,
+        )
+    };
+    let sandbox_id = if !environment.is_local_to(&root.runtime_id) {
+        match &environment.target {
+            pot_core::EnvironmentTarget::Host {} => String::new(),
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.clone(),
+        }
+    } else {
+        match &environment.target {
+            pot_core::EnvironmentTarget::Host {} => {
+                if !root
+                    .environment_service
+                    .host_enabled
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    return Err(error(
+                        StatusCode::CONFLICT,
+                        "environment_unavailable",
+                        "Host execution resource is disabled",
+                    ));
+                }
+                String::new()
+            }
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => root
+                .environment_service
+                .sandboxes
+                .assignment(sandbox_id)
+                .map_err(internal)?,
+        }
+    };
     let task_id = id();
     let first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
     let record = Record {
-        assignment: Some(pot_core::Assignment::local(
+        assignment: Some(pot_core::Assignment::on_environment(
             &root.runtime_id,
             &task_id,
-            &sandbox_id,
+            environment.clone(),
         )),
         info: TaskInfo {
+            remote_waiting: false,
+            environment_ref: Some(environment.clone()),
             assistant_id: root.assistant_id.clone(),
             sandbox_id: sandbox_id.clone(),
             id: task_id.clone(),
@@ -537,7 +666,7 @@ fn enqueue_from(
     let service = child(
         root,
         &task_id,
-        &sandbox_id,
+        &environment,
         record.create_request.skills.clone(),
     )
     .map_err(internal)?;
@@ -694,7 +823,7 @@ async fn stop_task(
     if let Some((service, phase)) = idle_service {
         // A completed task can still own background sessions. Preserve its result
         // while explicitly closing those resources instead of silently doing nothing.
-        sandbox::finish_idle(&service).await.map_err(internal)?;
+        environment::finish_idle(&service).await.map_err(internal)?;
         return Ok(Json(
             json!({"stopping":false,"phase":phase,"sessions_stopped":true}),
         ));
@@ -761,7 +890,7 @@ async fn stop_task(
         cleanup
     };
     if let Some(service) = cleanup {
-        let result = sandbox::finish_idle(&service).await;
+        let result = environment::finish_idle(&service).await;
         {
             let mut hub = root.tasks.hub.lock().unwrap();
             let lane = hub.lanes.get_mut(&task_id).ok_or_else(missing)?;
@@ -987,11 +1116,6 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
     for lane in hub.lanes.values().filter(|l| l.record.active.is_none()) {
         agent::settings::apply_pending(&lane.service, false)?;
     }
-    let active: Vec<_> = hub
-        .lanes
-        .values()
-        .filter(|l| l.record.active.is_some())
-        .collect();
     if capacity.active.len()
         >= execution::execution_config(root.execution.clone().unwrap_or_default(), &root.data)?
             .max_parallel_tasks
@@ -1004,7 +1128,6 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         .values()
         .map(|(spec, _)| spec.clone())
         .collect();
-    let shared = active.iter().any(|l| l.record.info.resource == "shared");
     let candidate = hub
         .lanes
         .iter()
@@ -1022,8 +1145,7 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
                 // Let the normal execution path report a corrupt thread visibly.
                 && agent::thread(&l.service)
                     .map(|b| policy.admits(&b.config, &active_specs)).unwrap_or(true)
-                && !(shared && l.record.info.resource == "shared")
-                && !(l.record.info.resource == "shared" && capacity.active.values().any(|(_, target)| target.as_deref() == Some(l.record.info.sandbox_id.as_str())))
+                && !(l.record.info.resource == "shared" && capacity.active.values().any(|(_, target)| target.as_ref() == l.record.info.environment_ref.as_ref()))
         })
         .min_by_key(|(_, l)| l.record.queue.front().unwrap().order)
         .map(|(id, _)| id.clone());
@@ -1054,7 +1176,9 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         task_id.clone(),
         (
             agent::thread(&lane.service)?.config,
-            (lane.record.info.resource == "shared").then(|| lane.record.info.sandbox_id.clone()),
+            (lane.record.info.resource == "shared")
+                .then(|| lane.record.info.environment_ref.clone())
+                .flatten(),
         ),
     );
     Ok(Some((
@@ -1286,7 +1410,7 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
                     }
                     let service = root.clone();
                     executor_reaper = Some(tokio::spawn(async move {
-                        if let Err(error) = sandbox::reap_idle(&service).await {
+                        if let Err(error) = environment::reap_idle(&service).await {
                             eprintln!("{error}");
                         }
                     }));
@@ -1370,10 +1494,13 @@ pub(super) fn request_shutdown(root: &Service) {
 
 pub(super) fn uses_sandbox(root: &Service, sandbox_id: &str) -> bool {
     let hub = root.tasks.hub.lock().unwrap();
-    hub.lanes
-        .values()
-        .any(|lane| lane.record.info.sandbox_id == sandbox_id)
-        || schedules::uses_sandbox(&hub.schedules, sandbox_id)
+    hub.lanes.values().any(|lane| {
+        lane.record.info.environment_ref.as_ref()
+            == Some(&pot_core::EnvironmentRef::sandbox(
+                &root.runtime_id,
+                sandbox_id,
+            ))
+    }) || schedules::uses_sandbox(&hub.schedules, sandbox_id)
 }
 
 /// Serialize the final identity removal with task/schedule assignment.
@@ -1386,7 +1513,11 @@ pub(super) fn guard_sandbox_delete(
     anyhow::ensure!(
         !hub.lanes
             .values()
-            .any(|lane| lane.record.info.sandbox_id == sandbox_id)
+            .any(|lane| lane.record.info.environment_ref.as_ref()
+                == Some(&pot_core::EnvironmentRef::sandbox(
+                    &root.runtime_id,
+                    sandbox_id
+                )))
             && !schedules::uses_sandbox(&hub.schedules, sandbox_id),
         "Sandbox is assigned to a persisted task or schedule"
     );
@@ -2466,7 +2597,7 @@ pub(super) mod tests {
         s.data = std::env::temp_dir()
             .join(format!("pot-tasks-{}", id()))
             .join("product");
-        s.environment_service.manager = Arc::new(sandbox::Manager::open(&s.data).unwrap());
+        s.environment_service.sandboxes = Arc::new(sandbox::Manager::open(&s.data).unwrap());
         s.agent_service.resources = Arc::new(AgentResources::paths(&s.data));
         s.workspace = s.data.join("workspace");
         std::fs::create_dir_all(&s.workspace).unwrap();
@@ -2517,6 +2648,10 @@ pub(super) mod tests {
             .as_object_mut()
             .unwrap()
             .remove("assignment");
+        legacy["tasks"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("environment_ref");
         root.conversation
             .inner
             .lock()
@@ -2550,6 +2685,83 @@ pub(super) mod tests {
         assert!(restore(&wrong).is_err());
         assert!(owner(&root, &task.id).is_ok());
         std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
+    #[tokio::test]
+    async fn host_task_binding_restores_and_conflicts_fail_before_creation() {
+        let root = fixture();
+        let environment = pot_core::EnvironmentRef::host(&root.runtime_id);
+        let request = CreateTask {
+            environment_ref: Some(environment.clone()),
+            request_id: id(),
+            text: "Host task".into(),
+            ..Default::default()
+        };
+        let task = create(State(root.clone()), headers(), Json(request.clone()))
+            .await
+            .unwrap()
+            .0;
+        assert!(task.sandbox_id.is_empty());
+        assert_eq!(task.environment_ref.as_ref(), Some(&environment));
+        let worker = owner(&root, &task.id).unwrap();
+        assert!(worker.sandbox_id.is_none());
+        assert_eq!(worker.workspace, worker.data.join("agent-workspace"));
+        assert!(!uses_sandbox(&root, "default"));
+        std::fs::write(
+            worker.workspace.join("AGENTS.md"),
+            "Host task directory rules",
+        )
+        .unwrap();
+        assert!(
+            crate::instructions::load(&worker)
+                .unwrap()
+                .text
+                .contains("Host task directory rules")
+        );
+        let _ = crate::skills::resources(&worker).unwrap();
+        restore(&root).unwrap();
+        assert_eq!(
+            owner(&root, &task.id).unwrap().environment_ref,
+            Some(environment)
+        );
+        let mut conflict = request.clone();
+        conflict.request_id = id();
+        conflict.sandbox_id = "default".into();
+        assert!(
+            create(State(root.clone()), headers(), Json(conflict))
+                .await
+                .is_err()
+        );
+        let mut remote = request;
+        remote.request_id = id();
+        remote.environment_ref = Some(pot_core::EnvironmentRef::host("remote"));
+        assert!(
+            create(State(root.clone()), headers(), Json(remote))
+                .await
+                .is_err()
+        );
+        assert_eq!(root.tasks.hub.lock().unwrap().lanes.len(), 1);
+    }
+    #[tokio::test]
+    async fn shared_capacity_is_scoped_to_full_environment_target() {
+        let root = fixture();
+        let sandbox = add(&root, "Sandbox shared work", "shared").await;
+        let host = create(
+            State(root.clone()),
+            headers(),
+            Json(CreateTask {
+                environment_ref: Some(pot_core::EnvironmentRef::host(&root.runtime_id)),
+                request_id: id(),
+                text: "Host shared work".into(),
+                resource: "shared".into(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(claim(&root).unwrap().unwrap().0, sandbox.id);
+        assert_eq!(claim(&root).unwrap().unwrap().0, host.id);
+        assert!(claim(&root).unwrap().is_none());
     }
     async fn add(s: &Service, text: &str, resource: &str) -> TaskInfo {
         create(

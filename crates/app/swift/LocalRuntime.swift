@@ -1,11 +1,9 @@
 import AppKit
-import Darwin
 import Foundation
 import WebKit
 
-/// App-owned user process; bundle-relative executable/resources, private Unix IPC.
+/// Native desktop session projection; Sandbox Provider owns process lifecycle.
 @MainActor final class LocalRuntime {
-    let process = Process()
     let root: URL
     weak var web: WKWebView?
     let label = NSTextField(wrappingLabelWithString: L.text("native.runtime-starting"))
@@ -46,70 +44,12 @@ import WebKit
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             label.frame = NSRect(x: 16, y: 120, width: 300, height: 110); label
                 .textColor = .white // Native chat presents status
-            let start = NSButton(title: "Start local desktop", target: self, action: #selector(startVM)); start
-                .bezelStyle = .rounded; start.appearance = NSAppearance(named: .darkAqua); start.frame = NSRect(
-                    x: 16,
-                    y: 70,
-                    width: 160,
-                    height: 32
-                ) // Start is automatic
-            let stop = NSButton(title: "Stop", target: self, action: #selector(stopVM)); stop
-                .bezelStyle = .rounded; stop.appearance = NSAppearance(named: .darkAqua); stop.frame = NSRect(
-                    x: 185,
-                    y: 70,
-                    width: 100,
-                    height: 32
-                ) // Stop via Quit
-            process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/PotHelper")
-            process.arguments = [
-                root.path,
-                Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/runtime").path,
-                "--sandbox-only",
-            ]
-            let log = root.appendingPathComponent("helper.log"); FileManager.default.createFile(
-                atPath: log.path,
-                contents: nil
-            )
-            let handle = try FileHandle(forWritingTo: log); process.standardOutput = handle; process
-                .standardError = handle
-            try process.run()
+            // The Sandbox Provider owns its Helper and starts it only for explicit lifecycle work.
             timer = Timer
                 .scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.poll() }
                 }
         } catch { label.stringValue = "Helper failed: \(error)" }
-    }
-
-    nonisolated static func request(path: String, method: String, sandboxID: String = "default") -> [String: Any] {
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0); defer { close(fd) }
-        var timeout = timeval(tv_sec: 15, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-        var addr = sockaddr_un(); addr.sun_family = sa_family_t(AF_UNIX)
-        guard path.utf8.count < 104 else { return ["error": "Socket path too long"] }
-        withUnsafeMutableBytes(of: &addr.sun_path) { dest in
-            path.utf8CString.withUnsafeBytes { dest.copyBytes(from: $0) }
-        }
-        let result = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(
-            fd,
-            $0,
-            socklen_t(MemoryLayout<sockaddr_un>.size)
-        ) }}
-        guard result == 0 else { return ["error": "Helper IPC unavailable"] }
-        var data = try! JSONSerialization.data(withJSONObject: [
-            "id": UUID().uuidString,
-            "method": method,
-            "sandbox_id": sandboxID,
-        ]); data
-            .append(10)
-        data.withUnsafeBytes { _ = Darwin.write(fd, $0.baseAddress, data.count) }
-        var response = Data(); var byte: UInt8 = 0
-        while response.count < 65536, read(fd, &byte, 1) == 1 {
-            if byte == 10 {
-                break
-            }; response.append(byte)
-        }
-        return (try? JSONSerialization.jsonObject(with: response)) as? [String: Any] ??
-            ["error": "Invalid helper response"]
     }
 
     func send(_ method: String, completion: (([String: Any]) -> Void)? = nil) {
@@ -134,26 +74,10 @@ import WebKit
             }
             return
         }
-        let path = root.appendingPathComponent("helper.sock").path
-        DispatchQueue.global().async {
-            let response = Self.request(path: path, method: method, sandboxID: target)
-            DispatchQueue.main
-                .async {
-                    if target == self.sandboxID,
-                       generation == self.viewGeneration
-                    {
-                        self.render(response)
-                    }; completion?(response)
-                }
-        }
+        completion?(["error": "Unsupported desktop lifecycle action"])
     }
 
     func poll() {
-        guard process.isRunning
-        else {
-            label.stringValue = HelperStatus.failure(process); timer?
-                .invalidate(); return
-        }
         if polling {
             return
         }; polling = true
@@ -233,9 +157,6 @@ import WebKit
 
     func cleanup() {
         closeDesktop()
-        timer?.invalidate(); timer = nil; if process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
+        timer?.invalidate(); timer = nil
     }
 }

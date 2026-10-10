@@ -19,11 +19,12 @@ Building a release from source uses the pinned toolchains:
 mise exec -- python scripts/build-cli
 mise exec -- python scripts/install-cli .local/poc/cargo-target/release/pot --prefix ~/.local
 pot init
-pot serve --composition assistant
+pot serve
 ```
 
-`pot serve --composition assistant` runs in the foreground and serves local Web UI at
-`http://localhost:17701`. Run `pot open` for automatic browser configuration,
+`pot serve` runs in the foreground. Web access uses the separately configured
+`POT_ACCESS_ORIGIN` and listener settings; it is absent by default. With Web
+access configured, run `pot open` for automatic browser configuration,
 or `pot access token` to configure the browser manually. `pot access qr` prints
 a connection QR containing the Token; do not share it.
 Localhost HTTP is a local secure-context
@@ -45,211 +46,90 @@ There is still an authenticated loopback integration listener for external
 tool/model clients. In App mode its routes are restricted to these
 integrations; the App UI cannot use it to access snapshots/settings.
 
-## Runtime composition
+## Runtime resources
 
-Fresh standalone data roots default to `bare`: only Runtime identity, authority,
-capability discovery and lifecycle are initialized. No conversation/model/task
-loops, Sandbox Provider or Web listener starts. Existing roots containing
-`product/pot-v2.sqlite` retain the assistant composition unless explicitly
-configured otherwise. App always selects `assistant`.
+`pot serve` starts Runtime infrastructure. Fresh roots have no assistant, Host
+execution resource or Sandbox definition. Startup accepts no `--composition`
+option and does not use `POT_RUNTIME_COMPOSITION` to select services. Internal
+preset constructors remain while the resource/federation refactor is underway.
 
-```sh
-pot serve --composition bare
-pot serve --composition environment
-pot serve --composition assistant
-pot status
-pot doctor
-pot api /api/v1/runtime
-```
-
-The presets are local assemblies. `environment` registers Providers and exposes
-native-authorized environment management/execution without AI configuration,
-Conversation or Task stores. `assistant` includes the existing product services
-and optional Web access. Disabling services preserves their data; switching
-presets requires a restart. Peer grants and remote execution are later phases.
-
-The command-line choice overrides `POT_RUNTIME_COMPOSITION`; otherwise that
-environment setting overrides `product/runtime-composition.json`:
+Native callers list/create resources at `/api/v1/runtime/resources`. CLI `api`
+uses the private management socket; callers do not need to handle its bearer.
+Create requests use a stable request ID and exactly one typed resource:
 
 ```json
-{"schema_version":1,"preset":"environment"}
+{"request_id":"assistant-1","resource":{"kind":"assistant","name":"Research"}}
 ```
-
-Unknown presets/schema versions fail startup. The stable UUID in
-`product/runtime-identity.json` survives restart, while bearer and boot identity
-rotate. Preserve this identity with the instance data; do not copy it to an
-independent simultaneously active Runtime.
-
-Environment-only operations use `pot api /api/v1/execution FILE` with an envelope
-containing `run_id` (UUID), `call_id`, `sandbox_id`, `name` and `args`. Supported
-names are `exec_command`, `write_stdin` and `apply_patch`; arguments use existing
-environment operation schemas. The target belongs in the envelope. Receipts
-reject conflicting call IDs and reuse completed results. Send `{"run_id":"UUID"}`
-to `/api/v1/environment/cancel` to persist cancellation before cleanup; subsequent
-operations for that run are rejected. These are operator endpoints under full
-local authority, not peer authorization or model-visible tools. Host path grants
-require the assistant approval service and are unavailable in environment-only
-mode.
-
-## Configure and operate without App
-
-```sh
-pot status
-pot doctor
-pot config get providers
-pot config set providers /secure/provider-request.json
-pot config set agent /secure/agent-request.json
-pot config get routing
-pot config set routing /secure/routing-request.json
-pot chat "Inspect the project"
-pot tasks list
-pot tasks show TASK_ID
-pot tasks interrupt TASK_ID
-pot tasks cancel TASK_ID
-pot api /api/v1/snapshot
-```
-
-Configuration files use the existing Runtime API request schemas; see
-[Runtime contract](../crates/runtime/README.md). Secrets stay in private files, not
-command arguments. `chat` prints the accepted message receipt, not an invented
-model result; query snapshots/tasks for subsequent output. `pot api PATH
-[JSON_FILE]` supports existing local queries and mutations. Browser route
-permissions remain restricted; changing authentication does not enable remote
-provider administration or Terminal access. Paired owner clients can open a
-qualified Sandbox desktop through login-bound viewer tickets.
-
-`pot config server /secure/listener-settings.json` saves supported `POT_ACCESS_*` and `POT_RUNTIME_COMPOSITION`
-settings in `server.json` for both hosts. Environment overrides this file.
-Restart the host to apply changed listeners/certificates. Remote example:
 
 ```json
-{
-  "POT_ACCESS_ORIGIN": "https://pot.example.com",
-  "POT_ACCESS_BIND": "127.0.0.1:17701",
-  "POT_ACCESS_CERT": "/secure/fullchain.pem",
-  "POT_ACCESS_KEY": "/secure/private.key"
-}
+{"request_id":"host-1","resource":{"kind":"host"}}
 ```
 
-Keep private keys mode 0600. A relay must pass TLS bytes through unchanged;
-third-party TLS termination does not meet the owner-endpoint encryption model.
-No DNS, certificates, public ports or relay deployment is provisioned for you.
+```json
+{"request_id":"sandbox-1","resource":{"kind":"sandbox","sandbox_id":"build","name":"Build","provider":"linux.podman"}}
+```
 
-## Sandbox provider and optional engines
-
-Backend/Web UI installation is independent of App. Actual environment execution
-requires a supported provider. On macOS, an optional distribution may include
-`lib/pot/PotHelper` and `lib/pot/runtime` (signed/entitled Helper, kernel, Sandbox
-images and optional Node runtime). `pot serve` discovers this package and
-starts Helper with `--sandbox-only`; Helper does not launch another Server.
-Backend shutdown settles operations before terminating Helper.
-
-Build with `scripts/build-cli --runtime-resources DIR --helper FILE`, or install
-with the corresponding `scripts/install-cli` options. The release provider
-resources must be built and qualified separately; a binary-only release does
-not claim VM execution. `POT_RUNTIME_RESOURCES` and `POT_HELPER` are development
-overrides. pot-agent is built into Server.
-There is no direct Host execution fallback. Linux uses the Podman Provider
-described below; Windows support is not delivered.
-
-## Background service
-
-On macOS, `pot service install` writes a per-user LaunchAgent definition;
-`pot service start` starts it, and `stop`/`uninstall` manage it. Installation does
-not auto-start, requires no root, and does not overwrite an existing service
-configuration. This is an optional independent CLI host, not an App dependency.
-App owns its own backend lifecycle and never starts this service.
-
-## Authorization
-
-See [Browser access](mobile-access.md). One persistent random Token authorizes
-all browsers. Browsers save it locally and send it on API requests. The owner CLI
-can show/regenerate it. Regeneration invalidates all browsers and active streams/desktops.
-There is no individual browser authorization list.
-
-## Optional embedded Tailscale
-
-Release archives include libtailscale. Save `{"POT_TAILSCALE_HOSTNAME":"pot-server"}`
-with `pot config server FILE`, then restart. Without that setting, existing
-localhost and manual HTTPS modes retain their behavior. Run `pot access connect`,
-inspect `pot access status` for the login URL/device approval state, complete login,
-and run `pot access enable`. Enable MagicDNS and HTTPS certificates in the tailnet
-DNS settings. The actual node DNS name is served on HTTPS port 443. Certificate
-issuance/renewal is automatic; access is tailnet-only, without Funnel.
-`pot access disconnect` closes access and retains the node identity.
-
-Source builds use `mise run build:tailscale`. Binary-only installations still support
-localhost/manual HTTPS. `scripts/install-cli --tailscale-library FILE` adds the
-built `.local/tailscale/libpot_tailscale.dylib` (Linux: `.so`).
-
-## Linux host and Podman
-
-Linux Server registers `linux.podman` (`LinuxPodmanProvider`). macOS registers
-`macos.apple-containerization` (`MacOSAppleContainerProvider`, Linux guest) and
-`macos.apple-virtualization` (`MacOSAppleVMProvider`, macOS guest). Provider
-names identify the **host** OS and engine; `os` identifies the guest. No legacy
-Provider IDs are accepted. Existing definitions must be edited while Server is
-stopped; changing the Apple Containerization ID does not change task IDs or data.
-
-Linux execution requires rootless Podman, cgroup v2 with systemd delegation,
-subordinate UID/GID ranges, and pasta (passt). Pot invokes the local Podman CLI;
-no Podman API socket/service is used. Host execution is never a fallback.
+Use an installed Provider ID from the deployment's Provider documentation.
+Save a request to a JSON file and call:
 
 ```sh
-mise run build:container-image
-mise run build:cli
-pot init
-pot serve --composition assistant
+pot api /api/v1/runtime/resources
+pot api /api/v1/runtime/resources /absolute/path/create-resource.json
 ```
 
-The image build compiles a target musl executor and uses the shared Dockerfile.
-Use `scripts/build-container-image --arch amd64|arm64 --tag IMAGE` through mise
-for another target/tag. Cross-platform image RUN steps require an appropriate
-native builder or configured emulation. `POT_PODMAN_IMAGE` selects an already
-installed image (default `localhost/pot-sandbox:0.1.0`); first preparation pins
-its local immutable image ID per environment. Starting an environment never
-pulls an image or follows a changed tag. Install/build images as the same user
-running Server. Updating an environment's pinned image requires a new Sandbox.
+Creating an assistant does not call a model or enable Host execution. Creating
+a Sandbox defines it without starting a VM and does not select it as the default.
+Existing Sandbox management APIs configure/select/start explicit instances.
+Resource creation is serialized and recorded durably before assembly. Identical
+request retries return the recorded result; conflicting retries fail. Restart
+restores definitions without replaying shell/model/VM-start effects. Current
+product definitions are adopted during versioned resource upgrade; this does
+not import assistant instruction files or saved routing preferences.
 
-The root broker runs as root **inside the user namespace**, with SYS_ADMIN for
-private skill mounts; execution children drop privileges and set no_new_privs.
-Only that environment's `/data` workspace, global user skills and read-only
-builtin skills are mounted. Host product state and Podman sockets are not mounted.
-The executor port is published only on loopback with a private per-boot token;
-pasta disables gateway-to-host mapping, and `--no-hosts` prevents Podman from
-adding a host-loopback alias. Container cgroups expose only
-the private delegated subtree; writable containment is checked before readiness.
-Stopping or orderly Server shutdown removes containers, preserving workspace.
-The image's pinned tini init reaps orphan descendants after cgroup cancellation.
-Unexpected restarts change the observed boot generation and invalidate sessions;
-commands with unknown outcomes are not replayed. Podman desktop viewing, exclusive
-input takeover, clipboard, browser launch and cgroup metrics use the private
-broker behind the Server gateway. Its port is published only on loopback, and
-no broker credentials reach the browser. The Web Sandbox page opens a separate
-viewer tab; closing it releases its ticket and keeps the container running.
-CPU/memory limits are enforced; disk quotas are unavailable and
-`disk_gib` must be `0` (unlimited), rather than claiming a working quota.
+App creates its default assistant through the same resource API. New resource
+creation UI is deferred by user choice. Native management authority and
+Control membership remains separate; this endpoint is not a member execution
+authorization mechanism. Peer transport is partial P3 work; local task Agents
+can use remote Host/Sandbox execution, and Control membership controls are shared
+by App and Web. Broader capability transports remain pending in Issue #39.
 
-For a user service, save a unit such as this under
-`~/.config/systemd/user/pot.service`, replacing both absolute paths:
+Web listener configuration remains separately explicit. Resource creation does
+not automatically start Web access. Lazy macOS Helper lifecycle and real VM
+qualification remain part of the outstanding environment deployment work.
 
-```ini
-[Unit]
-Description=Pot Server
-After=network-online.target
+## Peer listener and enrollment (partial P3)
 
-[Service]
-ExecStart=/absolute/prefix/bin/pot --root /absolute/instance serve
-Restart=on-failure
-Delegate=yes
+Use native operator `pot api /api/v1/runtime/control` for Control identity and
+membership. POST exact JSON commands with `pot api PATH /absolute/path/request.json`.
 
-[Install]
-WantedBy=default.target
+Enable Control on a standalone Runtime (never the embedded App Runtime):
+
+```json
+{"action":"enable_control","config":{"address":"0.0.0.0:19443","certificate":"/absolute/control.crt","private_key":"/absolute/control.key"}}
 ```
 
-Use `systemctl --user daemon-reload` and `systemctl --user enable --now pot`.
-`pot service` still manages macOS LaunchAgents only. Do not add service restrictions
-that disable user namespaces or mount/cgroup operations needed by rootless Podman.
-Configure browsers with `pot access token` or scan `pot access qr`. For access from another machine,
-use the documented owner-terminated HTTPS endpoint or an SSH local tunnel to
-localhost; raw remote HTTP is refused. Model configuration remains owner CLI-only.
+Control exposes `/control/v1/identity`, `/control/v1/join`, and
+`/control/v1/poll`, plus authenticated product APIs. There is no inbound execution
+RPC on members. HTTPS certificates must match the Control hostname.
+
+Create an invitation on Control with `{"action":"create_invitation"}`. Preview
+its identity from the joining machine with `{"action":"preview","url":"https://control.example:19443","ca_pem":null}`.
+Then submit the confirmed identity and invitation on the execution machine:
+
+```json
+{"action":"join","request":{"request_id":"UUID","url":"https://control.example:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
+```
+
+The machine opens an outward authenticated connection and restores it on restart.
+Use the original request for an uncertain join retry. A machine binds one Control.
+On Control, `{"action":"remove_member","runtime_id":"MEMBER-ID"}` invalidates
+membership; on a member, `{"action":"leave"}` fences leases and stops polling.
+Joining gives Control all configured resources, with no machine grants. Agent
+behavior approvals remain enforced. Do not distribute member tokens as UI tokens.
+
+`{"action":"disable_control"}` stops the listener; restart with its explicit
+configuration to reconnect members. Native diagnostic `action:call` uses `runtime_id`
+and a protocol `body`; it is excluded from browser-facing machine commands.
+
+See [Control architecture](runtime-composition.md) and #39 for App mode switching,
+explicit fixed-Control Web startup, and remaining remote transports.

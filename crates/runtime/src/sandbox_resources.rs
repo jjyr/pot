@@ -389,7 +389,7 @@ impl Hub {
 pub async fn status(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     Ok(Json(
-        json!({"requests":s.environment_service.manager.resources.as_ref().map(|hub|hub.requests()),"cache":s.environment_service.manager.resources.as_ref().map(|hub|hub.cache()).transpose().map_err(internal)?}),
+        json!({"requests":s.environment_service.sandboxes.resources.as_ref().map(|hub|hub.requests()),"cache":s.environment_service.sandboxes.resources.as_ref().map(|hub|hub.cache()).transpose().map_err(internal)?}),
     ))
 }
 pub async fn command(
@@ -400,7 +400,7 @@ pub async fn command(
     s.authorized(&h)?;
     let hub = s
         .environment_service
-        .manager
+        .sandboxes
         .resources
         .as_ref()
         .ok_or_else(|| {
@@ -429,7 +429,7 @@ mod tests {
     use super::*;
     fn fixture() -> Service {
         let mut s = tasks::tests::fixture();
-        s.environment_service.manager = Arc::new(
+        s.environment_service.sandboxes = Arc::new(
             sandbox::Manager::with_providers(
                 &s.data,
                 vec![Arc::new(
@@ -443,7 +443,7 @@ mod tests {
     #[tokio::test]
     async fn legacy_bundle_is_preserved_and_rejected_before_download_or_dispatch() {
         let s = fixture();
-        let hub = s.environment_service.manager.resources.as_ref().unwrap();
+        let hub = s.environment_service.sandboxes.resources.as_ref().unwrap();
         let legacy = hub
             .images
             .catalog
@@ -460,7 +460,7 @@ mod tests {
             .insert("default".into(), legacy.clone());
         hub.save(&hub.book.lock().unwrap()).unwrap();
         let error = hub
-            .inspect(&s.environment_service.manager, "default", "main", None)
+            .inspect(&s.environment_service.sandboxes, "default", "main", None)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("legacy executor"));
@@ -478,7 +478,7 @@ mod tests {
         let s = fixture();
         let response=sandbox::management(&s,&json!({"action":"create","sandbox_id":"approval-test","download":true,"authorize":true})).await.unwrap();
         assert_eq!(response["phase"], "awaiting-resources");
-        let hub = s.environment_service.manager.resources.as_ref().unwrap();
+        let hub = s.environment_service.sandboxes.resources.as_ref().unwrap();
         assert!(hub.jobs.lock().unwrap().is_empty());
         assert_eq!(hub.requests()[0]["phase"], "awaiting-authorization");
         assert!(!s.data.parent().unwrap().join("helper.sock").exists());
@@ -525,7 +525,7 @@ mod tests {
             )
             .await
         });
-        let hub = s.environment_service.manager.resources.as_ref().unwrap();
+        let hub = s.environment_service.sandboxes.resources.as_ref().unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(3), async {
             while hub.requests().as_array().unwrap().is_empty() {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -550,9 +550,9 @@ mod tests {
     #[tokio::test]
     async fn restart_marks_inflight_interrupted_without_reauthorization_or_replay() {
         let s = fixture();
-        let hub = s.environment_service.manager.resources.as_ref().unwrap();
+        let hub = s.environment_service.sandboxes.resources.as_ref().unwrap();
         let key = hub
-            .inspect(&s.environment_service.manager, "default", "owner", None)
+            .inspect(&s.environment_service.sandboxes, "default", "owner", None)
             .await
             .unwrap()
             .unwrap();
@@ -572,10 +572,10 @@ mod tests {
     #[tokio::test]
     async fn cancelling_one_bundle_waiter_does_not_cancel_other_authorized_waiters() {
         let s = fixture();
-        let hub = s.environment_service.manager.resources.as_ref().unwrap();
+        let hub = s.environment_service.sandboxes.resources.as_ref().unwrap();
         let a = hub
             .inspect(
-                &s.environment_service.manager,
+                &s.environment_service.sandboxes,
                 "default",
                 "owner",
                 Some("a"),
@@ -585,7 +585,7 @@ mod tests {
             .unwrap();
         let b = hub
             .inspect(
-                &s.environment_service.manager,
+                &s.environment_service.sandboxes,
                 "default",
                 "owner",
                 Some("b"),

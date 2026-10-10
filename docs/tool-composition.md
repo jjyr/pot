@@ -13,7 +13,8 @@ user agreement; see the repository `AGENTS.md`.
 | Composition | `exec`, `wait` | Main, Worker |
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
-| Sandboxes | `list_sandboxes`, `manage_sandbox`, `set_sandbox_mappings` | Main |
+| Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
+| Environments | `list_environments`; Sandbox-only `manage_sandbox`, `set_sandbox_mappings` | Main |
 
 Profile filters can narrow visibility. Execution tools accept `environment: "host"`
 or `"sandbox:ID"`; defaults and approval rules are in [Agent permissions](permissions.md).
@@ -59,3 +60,9 @@ Old `pot_` names are not aliases. Update explicit tool filters and custom prompt
 Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable composition.
 Expanded schemas count toward context limits. Validation and qualification limits:
 [acceptance report](validation/agent-permissions-20261008.md).
+
+Remote `manage_sandbox` requires an explicit Runtime and existing Sandbox ID with
+a separate target management grant. Main may start, stop, recover, update, or delete
+that target; create/select remain local, and desktop access uses separate authority.
+Management cannot acquire execution privileges. Lost operations are inspected by
+original identity and never resent; unresolved receipts block new effects.

@@ -46,7 +46,7 @@
         },
         "sandbox_id": {
           "type": "string",
-          "description": "Immutable worker Sandbox assignment; omitted snapshots the execution default."
+          "description": "Local Sandbox selection; use environment_ref for a full Host or Sandbox destination. Cannot combine both. Omitted snapshots the Agent Runtime execution default."
         },
         "skills": {
           "type": "array",
@@ -54,6 +54,51 @@
             "type": "string"
           },
           "description": "Optional skill names restricting this task. Omitted automatically discovers global task/shared and project skills."
+        },
+        "environment_ref": {
+          "type": "object",
+          "properties": {
+            "runtime_id": {
+              "type": "string"
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "host"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "sandbox"
+                    },
+                    "sandbox_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "sandbox_id"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "runtime_id",
+            "target"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -422,8 +467,8 @@
     }
   },
   {
-    "name": "list_sandboxes",
-    "description": "Inspect managed Linux Sandboxes and their state; does not start a VM.",
+    "name": "list_environments",
+    "description": "Inspect authorized Host and Sandbox environments grouped by Runtime; does not start an environment.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -490,6 +535,10 @@
             "macos.apple-virtualization"
           ],
           "description": "Engine for create only; defaults to Linux. macOS requires an owner-enrolled prepared VM."
+        },
+        "runtime_id": {
+          "type": "string",
+          "description": "Destination Runtime; omitted uses this Agent Runtime. Host is not a Sandbox management target."
         }
       },
       "required": [

@@ -323,6 +323,43 @@ pub async fn authorize(
     tool: &str,
     args: &Value,
 ) -> Result<()> {
+    if super::environment_tools::instructions_tool(tool) {
+        ensure!(
+            context.role == ExecutionRole::Main,
+            "Only the owning chat assistant can access its instructions"
+        );
+        if tool == "read_agent_instructions" {
+            return Ok(());
+        }
+        ensure!(
+            !context.feedback.cancelled(),
+            "Permission request cancelled"
+        );
+        let request = Request {
+            owner: context.owner.clone(),
+            environment: "host".into(),
+            generation: thread.generation,
+            turn: turn.request_id.clone(),
+            call_id: call_id.into(),
+            tool: tool.into(),
+            args: operation_args(args),
+            proposed_grant: None,
+            display: None,
+            plugin: None,
+        };
+        let expected = serde_json::to_value(&request)?;
+        let decision = tokio::select! {
+            result = context.feedback.request_permission(expected.clone()) => result?,
+            _ = context.feedback.cancellation() => anyhow::bail!("Permission request cancelled"),
+        };
+        ensure!(
+            !context.feedback.cancelled()
+                && decision["request"] == expected
+                && decision["approved"] == true,
+            "Owner denied permission"
+        );
+        return Ok(());
+    }
     let execution =
         is_execution_tool(tool) || thread.config.params.agent.plugin_for_tool(tool)?.is_some();
     if context.role == ExecutionRole::Summary {

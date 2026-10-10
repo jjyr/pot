@@ -155,7 +155,7 @@ async fn status(State(a): State<Access>, h: HeaderMap) -> Json<Value> {
     let authenticated = a.authorization(&h).is_some();
     let i = a.inner.lock().unwrap();
     Json(
-        json!({"authenticated":authenticated,"scope":"owner_instance","desktop_available":true,"push_available":a.push.is_some() && a.notifications.is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":true,"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
+        json!({"authenticated":authenticated,"scope":"owner_instance","desktop_available":true,"push_available":a.push.is_some() && a.notifications.lock().unwrap().is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":true,"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
     )
 }
 async fn configure_token(State(a): State<Access>, h: HeaderMap) -> Result<Response, Failure> {
@@ -188,8 +188,11 @@ async fn logout(State(a): State<Access>, h: HeaderMap) -> Response {
     )
 }
 fn allowed(method: &Method, path: &str) -> bool {
-    if path == "/api/v1/runtime" {
+    if matches!(path, "/api/v1/runtime" | "/api/v1/machines") {
         return *method == Method::GET;
+    }
+    if path == "/api/v1/machine-connections" {
+        return *method == Method::GET || *method == Method::POST;
     }
     if path == "/api/v1/assistants" {
         return *method == Method::GET || *method == Method::POST;
@@ -213,7 +216,10 @@ fn allowed(method: &Method, path: &str) -> bool {
         if operation == "agent" {
             return *method == Method::GET;
         }
-        if operation.starts_with("assistants") || operation == "assistant-tasks" {
+        if operation.starts_with("assistants")
+            || operation == "assistant-tasks"
+            || operation == "machine-connections"
+        {
             return false;
         }
         return allowed(method, &format!("/api/v1/{operation}"));
@@ -504,6 +510,12 @@ mod tests {
     #[test]
     fn allowlist_excludes_management_and_terminal() {
         assert!(allowed(&Method::POST, "/api/v1/messages"));
+        assert!(allowed(&Method::POST, "/api/v1/machine-connections"));
+        assert!(!allowed(&Method::POST, "/api/v1/runtime/control"));
+        assert!(!allowed(
+            &Method::POST,
+            "/api/v1/assistants/main/machine-connections"
+        ));
         assert!(allowed(&Method::GET, "/api/v1/tasks/id"));
         for p in [
             "/api/v1/execution",

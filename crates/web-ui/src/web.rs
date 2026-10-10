@@ -34,6 +34,7 @@ extern "C" {
 }
 struct Mobile {
     assistants_ui: pot_ui::assistants::Editor,
+    machine_connections: pot_ui::machine_connections::Editor,
     assistant_model_open: bool,
     assistant_save_sequence: u64,
     brand_icon: Arc<Image>,
@@ -47,6 +48,7 @@ struct Mobile {
     tasks_scroll: ScrollHandle,
     usage_ui: pot_ui::usage::UsageUI,
     sandbox_selection: String,
+    machine_selection: Value,
     locale: String,
     search: Entity<InputState>,
 }
@@ -81,6 +83,10 @@ impl Mobile {
                         this.assistant_model_open = false;
                         action("assistant-select", event.value.as_str().unwrap_or("main"));
                     }
+                    "machine-connections-toggle" => {
+                        this.machine_connections.open = !this.machine_connections.open
+                    }
+                    "machine-command" => action("machine-command", &event.value.to_string()),
                     "assistant-save" => action("assistant-save", &event.value.to_string()),
                     "assistant-model" => this.assistant_model_open = !this.assistant_model_open,
                     "assistant-profile" => action(
@@ -109,6 +115,15 @@ impl Mobile {
                         action("permission-decision", &event.value.to_string())
                     }
                     "task-open" => action("task", &event.value.to_string()),
+                    "machine-select" => {
+                        this.machine_selection = event.value.clone();
+                        if event.value["target"]["kind"] == "sandbox" {
+                            this.sandbox_selection = event.value["target"]["sandbox_id"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .into();
+                        }
+                    }
                     "sandbox-select" => {
                         this.sandbox_selection = event.value.as_str().unwrap_or("").into()
                     }
@@ -329,6 +344,9 @@ impl Render for Mobile {
             );
             content = content.p_0().gap_0().child(pot_ui::tasks::render(
                 pot_ui::tasks::TasksView {
+                    local_runtime: self.data["runtime"]["runtime_id"]
+                        .as_str()
+                        .unwrap_or_default(),
                     assistant_names: &self.data["assistants"],
                     search: &self.search,
                     scroll: &self.tasks_scroll,
@@ -350,23 +368,45 @@ impl Render for Mobile {
                 window,
                 cx,
             ));
-        } else if self.page == "sandbox" {
+        } else if self.page == "machines" {
             let inventory = &self.data["sandbox_inventory"];
             let selected =
                 pot_ui::page_state::sandbox_selection(inventory, &self.sandbox_selection);
             let mut state = pot_ui::page_state::sandbox_view(inventory, &selected);
             state["desktop_access"] = serde_json::json!(true);
-            content = content.p_0().gap_0().child(pot_ui::sandbox::render(
-                &state,
-                pot_ui::pages::Layout {
-                    native: false,
-                    compact: true,
+            let catalog = self.catalog();
+            let handler = self.page_handler(cx);
+            let connections = self.machine_connections.render(
+                pot_ui::machine_connections::View {
+                    directory: &self.data["machines"],
+                    selected: &self.machine_selection,
+                    reply: &self.data["machine_reply"],
+                    pending: self.data["machine_pending"] == true,
                 },
-                false,
-                self.catalog(),
-                self.page_handler(cx),
+                catalog,
+                handler.clone(),
+                window,
                 cx,
-            ));
+            );
+            content = content
+                .p_0()
+                .gap_0()
+                .child(connections)
+                .child(pot_ui::machines::render(
+                    pot_ui::machines::MachinesView {
+                        directory: &self.data["machines"],
+                        preferred: &self.machine_selection,
+                        sandbox_state: &state,
+                        controls: false,
+                    },
+                    pot_ui::pages::Layout {
+                        native: false,
+                        compact: window.viewport_size().width < px(900.),
+                    },
+                    self.catalog(),
+                    self.page_handler(cx),
+                    cx,
+                ));
         } else if self.page == "usage" {
             let handler = self.page_handler(cx);
             content = content.p_0().gap_0().child(self.usage_ui.render(
@@ -555,7 +595,7 @@ impl Render for Mobile {
         for (name, key) in [
             ("chat", "mobile.chat"),
             ("tasks", "mobile.tasks"),
-            ("sandbox", "mobile.sandbox"),
+            ("machines", "machines.title"),
             ("more", "mobile.more"),
         ] {
             nav = nav.child(
@@ -622,6 +662,7 @@ pub fn run() {
             let composer = cx.new(|cx| TextareaState::new(window, cx));
             cx.new(|cx| Mobile {
                 assistants_ui: Default::default(),
+                machine_connections: Default::default(),
                 assistant_model_open: false,
                 assistant_save_sequence: 0,
                 brand_icon: Arc::new(Image::from_bytes(
@@ -643,6 +684,7 @@ pub fn run() {
                     cx,
                 ),
                 sandbox_selection: String::new(),
+                machine_selection: Value::Null,
                 locale: String::new(),
             })
         })

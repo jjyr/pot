@@ -16,7 +16,7 @@ pub enum Route {
     Tasks,
     Task(String),
     Schedule(String),
-    Sandbox,
+    Machines(serde_json::Value),
     Settings,
     Usage,
     ConversationUsage(String),
@@ -38,6 +38,7 @@ pub struct State {
     settings_section: u64,
     offsets: [Point<Pixels>; 5],
     task_anchor: Option<(String, f32)>,
+    machine_selection: serde_json::Value,
 }
 pub struct History<S> {
     entries: Vec<(Route, S)>,
@@ -85,7 +86,10 @@ impl<S: Clone> History<S> {
 impl Shell {
     pub fn route(&self, view: &client::View) -> Route {
         match self.native["page"].as_u64().unwrap_or(0) {
-            1 => Route::Sandbox,
+            1 => Route::Machines(pot_ui::machine_state::selection(
+                &view.machines,
+                &self.machine_selection,
+            )),
             2 => Route::Settings,
             4 => Route::Usage,
             5 => Route::ConversationUsage(view.selected.clone()),
@@ -123,6 +127,10 @@ impl Shell {
                 page: self.native["page"].as_u64().unwrap_or(0),
                 selected: v.selected,
                 show_tasks: self.show_tasks,
+                machine_selection: pot_ui::machine_state::selection(
+                    &v.machines,
+                    &self.machine_selection,
+                ),
                 schedule_tab: self.schedule_tab,
                 query: v.task_query,
                 schedule_selected: v.schedule_selected,
@@ -150,6 +158,19 @@ impl Shell {
         self.client.select_assistant(state.assistant_id);
         self.client.select(state.selected);
         self.show_tasks = state.show_tasks;
+        self.machine_selection = pot_ui::machine_state::selection(
+            &self.client.view.lock().unwrap().machines,
+            &state.machine_selection,
+        );
+        let local = self.client.view.lock().unwrap().runtime["runtime_id"].clone();
+        let sandbox = self.machine_selection["target"]["kind"] == "sandbox"
+            && self.machine_selection["runtime_id"] == local;
+        ui::command(serde_json::json!({"action":"machines-detail","value":!sandbox}));
+        if sandbox {
+            ui::command(
+                serde_json::json!({"action":"sandbox-view","id":self.machine_selection["target"]["sandbox_id"]}),
+            );
+        }
         self.schedule_tab = state.schedule_tab;
         self.task_search
             .update(cx, |f, cx| f.set_value(state.query.q.clone(), window, cx));
@@ -236,7 +257,7 @@ impl Shell {
                     .unwrap_or(crate::i18n::text("navigation.schedule-details").into()),
             ),
             Route::Settings => ("", crate::i18n::text("ui.settings").into()),
-            Route::Sandbox => ("", "Sandbox".into()),
+            Route::Machines(_) => ("", crate::i18n::text("machines.title").into()),
             Route::Usage => ("", crate::i18n::text("navigation.usage").into()),
             Route::Quota => (
                 crate::i18n::text("navigation.usage"),
@@ -339,6 +360,22 @@ impl Shell {
 #[cfg(test)]
 mod tests {
     use super::{History, Route};
+    use serde_json::json;
+    #[test]
+    fn machine_details_are_distinct_history_destinations() {
+        let machine = Route::Machines(serde_json::json!({"runtime_id":"a"}));
+        let host = Route::Machines(serde_json::json!({"runtime_id":"a","target":{"kind":"host"}}));
+        let sandbox = Route::Machines(
+            json!({"runtime_id":"a","target":{"kind":"sandbox","sandbox_id":"host"}}),
+        );
+        let mut history = History::default();
+        history.observe(machine, 0);
+        history.observe(host, 1);
+        history.observe(sandbox, 2);
+        assert_eq!(history.travel(false), Some(1));
+        assert_eq!(history.travel(false), Some(0));
+        assert_eq!(history.travel(true), Some(1));
+    }
     #[test]
     fn assistant_and_runtime_are_distinct_navigation_destinations() {
         let mut history = History::default();

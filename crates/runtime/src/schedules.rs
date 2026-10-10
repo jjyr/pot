@@ -279,7 +279,7 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                 serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
             spec.sandbox_id = root
                 .environment_service
-                .manager
+                .sandboxes
                 .assignment(&spec.sandbox_id)
                 .map_err(invalid)?;
             validate(&spec).map_err(invalid)?;
@@ -351,7 +351,7 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                     plan.info.spec.sandbox_id.clone()
                 } else {
                     root.environment_service
-                        .manager
+                        .sandboxes
                         .assignment(&spec.sandbox_id)
                         .map_err(invalid)?
                 };
@@ -746,7 +746,7 @@ pub(super) fn validate_bindings(root: &Service, book: &Book) -> Result<()> {
             "Persisted schedule Sandbox assignment missing"
         );
         root.environment_service
-            .manager
+            .sandboxes
             .assignment(&plan.info.spec.sandbox_id)?;
     }
     Ok(())

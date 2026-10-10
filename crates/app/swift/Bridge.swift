@@ -185,7 +185,7 @@ var bridge: PotBridge?
         for (index, symbol, title) in [
             (0, "bubble.left", L.text("navigation.chat")),
             (3, "list.bullet.rectangle", L.text("navigation.tasks")),
-            (1, "desktopcomputer", "Sandbox"),
+            (1, "desktopcomputer", L.text("machines.title")),
             (4, "chart.bar.xaxis", L.text("navigation.usage")),
             (2, "gearshape", L.text("ui.settings")),
         ] {
@@ -298,13 +298,13 @@ var bridge: PotBridge?
         let labels = [
             0: "navigation.chat",
             3: "navigation.tasks",
-            1: "Sandbox",
+            1: "machines.title",
             4: "navigation.usage",
             2: "ui.settings",
         ]
         for button in navigation {
-            let key = labels[button.tag] ?? "Sandbox"
-            let title = key == "Sandbox" ? key : L.text(key)
+            let key = labels[button.tag] ?? "machines.title"
+            let title = L.text(key)
             button.toolTip = title; button.setAccessibilityLabel(title)
         }
         localizeComposer()
@@ -335,7 +335,7 @@ var bridge: PotBridge?
         for (title, action, key) in [
             (L.text("menu.open-pot"), #selector(showWindow), ""),
             (L.text("menu.hide-pot"), #selector(hideWindow), "h"),
-            ("Sandbox", #selector(toggleDesktop), "d"),
+            (L.text("machines.title"), #selector(toggleDesktop), "d"),
             (L.text("bridge.settings"), #selector(openSettings), ","),
             (L.text("bridge.open-workspace"), #selector(openWorkspace), ""),
             (L.text("menu.quit-pot"), #selector(quitApp), "q"),
@@ -527,7 +527,7 @@ var bridge: PotBridge?
     }
 
     func selectPage(_ value: Int) {
-        page = value; bridgeWake?(); web.isHidden = value != 1 || localRuntime?.displayReady != true
+        page = value; bridgeWake?(); web.isHidden = value != 1 || machinesDetail || localRuntime?.displayReady != true
         gpuiView.isHidden = false; composerBox.isHidden = value != 0 && value != 3
         if value == 0 {
             host.makeFirstResponder(composer)
@@ -553,6 +553,8 @@ var bridge: PotBridge?
 
     /// The toolbar is GPUI, above WKWebView. A web menu cannot extend into
     /// that header, so use an AppKit popup in the same window coordinate space.
+    var machinesDetail = true
+
     func selectedSandbox() -> [String: Any]? {
         sandboxItems.first { $0["id"] as? String == localRuntime?.sandboxID }
     }
@@ -929,7 +931,7 @@ var bridge: PotBridge?
         }
         guestIP = state["ip"] as? String ?? ""
         if page == 1 {
-            web.isHidden = localRuntime?.displayReady != true
+            web.isHidden = machinesDetail || localRuntime?.displayReady != true
         }
         settings.environment = state; settings.refreshStatus()
         runtime.root = localRuntime?.root; runtime.ip = "127.0.0.1"
@@ -951,7 +953,7 @@ var bridge: PotBridge?
            web.url?.port == expected.port, web.url?.path == expected.path, web.url?.fragment == expected.fragment
         {
             localRuntime?.displayReady = true
-            web.isHidden = page != 1
+            web.isHidden = page != 1 || machinesDetail
         }
     }
 
@@ -1224,6 +1226,8 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage", "sandbox-settings": bridge.editSandbox(create: false)
         case "sandbox-new": bridge.editSandbox(create: true)
+        case "machines-detail": bridge.machinesDetail = v["value"] as? Bool ?? true; bridge.web.isHidden = bridge
+            .machinesDetail || bridge.page != 1 || bridge.localRuntime?.displayReady != true
         case "sandbox-view": if let id = v["id"] as? String {
                 bridge.chooseSandbox(id)
             }

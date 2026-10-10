@@ -118,10 +118,10 @@ pub async fn subscribe(
     Json(v): Json<Value>,
 ) -> Result<Response, super::routes::Failure> {
     let credential = authorized(&a, &h, true)?;
-    let source = a
-        .notifications
-        .as_ref()
-        .ok_or_else(|| super::routes::fail(StatusCode::SERVICE_UNAVAILABLE, "push_unavailable"))?;
+    let source =
+        a.notifications.lock().unwrap().clone().ok_or_else(|| {
+            super::routes::fail(StatusCode::SERVICE_UNAVAILABLE, "push_unavailable")
+        })?;
     if a.push.is_none() {
         return Err(super::routes::fail(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -308,11 +308,14 @@ fn payload(sub: &Subscription, msg: &pot_protocol::Message) -> Vec<u8> {
     }
 }
 pub async fn dispatch(a: Access) {
-    let (Some(push), Some(source)) = (a.push.clone(), a.notifications.clone()) else {
+    let Some(push) = a.push.clone() else {
         return;
     };
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
+        let Some(source) = a.notifications.lock().unwrap().clone() else {
+            continue;
+        };
         let subs = {
             let i = a.inner.lock().unwrap();
             if !i.enabled {

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve [--composition PRESET]  Run bare, environment or assistant Runtime\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|interrupt ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
+const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Runtime; callers create resources\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|interrupt ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--version") {
@@ -139,20 +139,15 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
             print(api(root,"/api/v1/sandboxes",Some(json!({"action":"create","sandbox_id":id,"provider":pot_sandbox_macos_apple_vm::PROVIDER_ID}))).await?)
         }
         "serve" => {
-            let mut config = pot_server::ServerConfig::from_env();
-            if args.len() > 1 {
-                ensure!(
-                    args.len() == 3 && argument(args, 1)? == "--composition",
-                    "Usage: pot serve [--composition bare|environment|assistant]"
-                );
-                config.composition = Some(argument(args, 2)?.parse()?);
-            }
+            ensure!(args.len() == 1, "Usage: pot serve");
+            let config = pot_server::ServerConfig::from_env();
             let server = pot_server::Server::bind(config).await?;
-            let composition = server.composition();
             println!(
                 "Pot instance: {}\nWeb: {}\nAccess Token: pot --root '{}' access token",
                 root.display(),
-                if composition != pot_runtime::host::Composition::Assistant {
+                if std::env::var_os("POT_ACCESS_ORIGIN").is_none()
+                    && std::env::var_os("POT_TAILSCALE_HOSTNAME").is_none()
+                {
                     "disabled (Runtime management only)".into()
                 } else if std::env::var_os("POT_TAILSCALE_HOSTNAME").is_some() {
                     "embedded Tailscale (pot access connect, then pot access enable)".into()
@@ -162,33 +157,14 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
                 root.display()
             );
             let _ownership = server.local_client();
-            let mut helper = if composition.has_environments() {
-                start_helper(root).await?
-            } else {
-                None
-            };
-            let result = server
+            server
                 .serve_local(async {
                     let mut term =
                         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                             .expect("signal handler");
                     tokio::select! {_=tokio::signal::ctrl_c()=>{},_=term.recv()=>{}}
                 })
-                .await;
-            if let Some(ref mut child) = helper {
-                if let Some(id) = child.id() {
-                    unsafe {
-                        libc::kill(id as i32, libc::SIGTERM);
-                    }
-                }
-                if tokio::time::timeout(Duration::from_secs(240), child.wait())
-                    .await
-                    .is_err()
-                {
-                    child.kill().await?;
-                }
-            }
-            result
+                .await
         }
         "status" => print(api(root, "/api/v1/runtime", None).await?),
         "doctor" => {
@@ -435,35 +411,4 @@ fn runtime_resources() -> Option<PathBuf> {
                 })
                 .filter(|p| p.is_dir())
         })
-}
-async fn start_helper(root: &Path) -> Result<Option<tokio::process::Child>> {
-    let Some(resources) = runtime_resources() else {
-        return Ok(None);
-    };
-    let helper = std::env::var_os("POT_HELPER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| resources.parent().unwrap().join("PotHelper"));
-    ensure!(
-        cfg!(target_os = "macos") && helper.is_file(),
-        "Sandbox resources require the macOS PotHelper provider"
-    );
-    ensure!(
-        !root.join("helper.sock").exists(),
-        "A Helper socket already exists; confirm the previous provider stopped"
-    );
-    use std::os::unix::fs::OpenOptionsExt;
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(root.join("helper.log"))?;
-    let child = tokio::process::Command::new(helper)
-        .arg(root)
-        .arg(resources)
-        .arg("--sandbox-only")
-        .stdout(std::process::Stdio::from(log.try_clone()?))
-        .stderr(std::process::Stdio::from(log))
-        .kill_on_drop(true)
-        .spawn()?;
-    Ok(Some(child))
 }

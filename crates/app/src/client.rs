@@ -54,6 +54,9 @@ fn task_progress(snapshot: &Snapshot) -> String {
 #[derive(Default, Clone, PartialEq)]
 pub struct View {
     pub runtime: Value,
+    pub machines: Value,
+    pub machine_reply: Value,
+    pub machine_pending: bool,
     pub assistants: Value,
     pub selected_assistant: String,
     pub assistant_rules: Value,
@@ -281,6 +284,13 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .body_mut()
         .read_json()
         .map_err(|e| e.to_string())?;
+    let machines: Value = agent
+        .get("/api/v1/machines")
+        .call()?
+        .body_mut()
+        .read_json()
+        .map_err(|e| e.to_string())?;
+    view.lock().unwrap().machines = machines;
     if !directory["capabilities"]
         .as_array()
         .is_some_and(|caps| caps.iter().any(|c| c == "conversation"))
@@ -867,6 +877,36 @@ impl Client {
         v.tasks.clear();
         v.tasks_loading = true;
         let _ = self.refresh.try_send(());
+    }
+    pub fn machine_command(&self, value: Value) {
+        {
+            let mut state = self.view.lock().unwrap();
+            if state.machine_pending {
+                return;
+            }
+            state.machine_pending = true;
+        }
+        let view = self.view.clone();
+        let refresh = self.refresh.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<Value, String> {
+                crate::backend::Requests::config_builder()
+                    .post("/api/v1/machine-connections")
+                    .send_json(value["command"].clone())?
+                    .body_mut()
+                    .read_json()
+                    .map_err(|e| e.to_string())
+            })();
+            let mut state = view.lock().unwrap();
+            state.machine_pending = false;
+            state.machine_reply = match result {
+                Ok(result) => json!({"intent":value,"result":result}),
+                Err(error) => json!({"intent":value,"error":error}),
+            };
+            drop(state);
+            let _ = refresh.try_send(());
+            crate::wake_ui();
+        });
     }
     pub fn assistant_save(&self, value: Value) {
         {

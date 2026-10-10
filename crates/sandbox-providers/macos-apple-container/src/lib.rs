@@ -6,6 +6,7 @@ use pot_sandbox::{
 };
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -13,10 +14,14 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 pub struct MacOSAppleContainerProvider {
     client: reqwest::Client,
+    helper: Option<PathBuf>,
+    children: tokio::sync::Mutex<BTreeMap<PathBuf, tokio::process::Child>>,
 }
 impl MacOSAppleContainerProvider {
     pub fn new() -> Result<Self> {
         Ok(Self {
+            helper: std::env::var_os("POT_CONTAINER_HELPER").map(PathBuf::from),
+            children: Default::default(),
             client: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
@@ -247,8 +252,66 @@ impl Provider for MacOSAppleContainerProvider {
                 ["prepare", "start", "status", "stop"].contains(&method),
                 "Unsupported lifecycle operation"
             );
-            let mut socket =
-                tokio::net::UnixStream::connect(context.root.join("helper.sock")).await?;
+            let socket_path = context.root.join("helper.sock");
+            let mut children = self.children.lock().await;
+            if let Some(child) = children.get_mut(&context.root) {
+                ensure!(
+                    child.try_wait()?.is_none(),
+                    "Sandbox Helper exited; restart Runtime to reconcile"
+                );
+            } else if let Some(helper) = &self.helper {
+                ensure!(
+                    !socket_path.exists(),
+                    "Unowned Sandbox Helper socket; reconciliation required"
+                );
+                if method == "status" || method == "stop" {
+                    return Ok(
+                        json!({"phase":if helper.is_file() {"stopped"} else {"unavailable"},"generation":0}),
+                    );
+                }
+                ensure!(helper.is_file(), "PotHelper is not installed");
+                std::fs::create_dir_all(&context.root)?;
+                use std::os::unix::fs::OpenOptionsExt;
+                let log = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .mode(0o600)
+                    .open(context.root.join("helper.log"))?;
+                let resources = std::env::var_os("POT_RUNTIME_RESOURCES")
+                    .map(PathBuf::from)
+                    .ok_or_else(|| anyhow::anyhow!("Runtime resources are unavailable"))?;
+                let child = tokio::process::Command::new(helper)
+                    .arg(&context.root)
+                    .arg(resources)
+                    .arg("--sandbox-only")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::from(log.try_clone()?))
+                    .stderr(std::process::Stdio::from(log))
+                    .kill_on_drop(true)
+                    .spawn()?;
+                children.insert(context.root.clone(), child);
+                for _ in 0..100 {
+                    ensure!(
+                        children
+                            .get_mut(&context.root)
+                            .unwrap()
+                            .try_wait()?
+                            .is_none(),
+                        "Sandbox Helper exited during startup"
+                    );
+                    if socket_path.exists() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            } else if !socket_path.exists() {
+                if method == "status" || method == "stop" {
+                    return Ok(json!({"phase":"unavailable","generation":0}));
+                }
+                anyhow::bail!("PotHelper is not configured");
+            }
+            let mut socket = tokio::net::UnixStream::connect(&socket_path).await?;
+            drop(children);
             socket.write_all(format!("{}\n",json!({"id":uuid::Uuid::new_v4().to_string(),"method":method,"sandbox_id":context.sandbox_id})).as_bytes()).await?;
             let mut line = String::new();
             let mut reader = BufReader::new(socket).take(65537);
@@ -263,6 +326,41 @@ impl Provider for MacOSAppleContainerProvider {
                 "Sandbox Helper rejected operation"
             );
             Ok(response["result"].clone())
+        })
+    }
+    fn shutdown<'a>(&'a self, root: &'a Path) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let mut children = self.children.lock().await;
+            if let Some(mut child) = children.remove(root) {
+                // Helper owns all instances. SIGTERM invokes its stop-all path before exit.
+                if let Some(pid) = child.id() {
+                    let status = tokio::process::Command::new("/bin/kill")
+                        .arg("-TERM")
+                        .arg(pid.to_string())
+                        .status()
+                        .await?;
+                    ensure!(
+                        status.success(),
+                        "Sandbox Helper termination request failed"
+                    );
+                }
+                match tokio::time::timeout(Duration::from_secs(240), child.wait()).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(error)) => {
+                        children.insert(root.to_path_buf(), child);
+                        return Err(error.into());
+                    }
+                    Err(_) => {
+                        children.insert(root.to_path_buf(), child);
+                        anyhow::bail!("Sandbox Helper shutdown unconfirmed");
+                    }
+                }
+                let socket = root.join("helper.sock");
+                if socket.exists() {
+                    std::fs::remove_file(socket)?;
+                }
+            }
+            Ok(())
         })
     }
     fn health<'a>(&'a self, context: &'a ProviderContext) -> BoxFuture<'a, Result<bool>> {
@@ -327,6 +425,80 @@ impl Provider for MacOSAppleContainerProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn optional_helper_is_lazy_and_missing_installation_is_explicit() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = ProviderContext {
+            root: dir.path().join("runtime"),
+            sandbox_id: "default".into(),
+        };
+        let mut provider = MacOSAppleContainerProvider::new().unwrap();
+        provider.helper = Some(dir.path().join("missing-helper"));
+        assert_eq!(
+            provider.lifecycle(&context, "status").await.unwrap()["phase"],
+            "unavailable"
+        );
+        assert_eq!(
+            provider.lifecycle(&context, "stop").await.unwrap()["phase"],
+            "unavailable"
+        );
+        assert!(provider.children.lock().await.is_empty());
+        assert!(!context.root.exists());
+        assert!(
+            provider
+                .lifecycle(&context, "start")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("not installed")
+        );
+        provider.shutdown(&context.root).await.unwrap();
+    }
+    #[tokio::test]
+    async fn owned_helper_shutdown_waits_for_graceful_stop_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("helper.py");
+        std::fs::write(
+            &script,
+            r#"
+import signal, sys, time
+from pathlib import Path
+root=Path(sys.argv[1])
+def stop(*_):
+    (root/'stopped').write_text('all instances stopped')
+    sys.exit(0)
+signal.signal(signal.SIGTERM,stop)
+(root/'ready').write_text('ready')
+while True: time.sleep(0.05)
+"#,
+        )
+        .unwrap();
+        let child = tokio::process::Command::new("python")
+            .arg(script)
+            .arg(dir.path())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let provider = MacOSAppleContainerProvider::new().unwrap();
+        provider
+            .children
+            .lock()
+            .await
+            .insert(dir.path().into(), child);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !dir.path().join("ready").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        provider.shutdown(dir.path()).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("stopped")).unwrap(),
+            "all instances stopped"
+        );
+        assert!(provider.children.lock().await.is_empty());
+    }
     #[tokio::test]
     async fn desktop_readiness_refreshes_credentials_published_after_start() {
         let dir = tempfile::tempdir().unwrap();

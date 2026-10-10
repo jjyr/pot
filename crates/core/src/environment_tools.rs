@@ -1,6 +1,14 @@
 use anyhow::{Result, anyhow, bail, ensure};
 use serde_json::{Value, json};
 
+/// Public destination shape shared by built-in and plugin execution tools.
+pub fn reference_schema() -> Value {
+    json!({"type":"object","properties":{"runtime_id":{"type":"string"},"target":{"oneOf":[{"type":"object","properties":{"kind":{"const":"host"}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"sandbox"},"sandbox_id":{"type":"string"}},"required":["kind","sandbox_id"],"additionalProperties":false}]}},"required":["runtime_id","target"],"additionalProperties":false})
+}
+pub fn selector_schema() -> Value {
+    json!({"oneOf":[{"type":"string","description":"Local host or sandbox:ID."}, reference_schema()],"description":"Execution destination. Omitted uses this Agent's bound environment; workers cannot switch targets."})
+}
+
 pub fn schemas(policy: &crate::ShellSettings) -> Vec<Value> {
     let shared = json!({"workdir":{"type":"string"},"timeout_ms":{"type":"integer","minimum":1,"maximum":policy.max_timeout_ms},"max_output_chars":{"type":"integer","minimum":1,"maximum":policy.max_output_bytes},"yield_time_ms":{"type":"integer","minimum":1,"maximum":policy.max_yield_ms}});
     let mut properties = shared;

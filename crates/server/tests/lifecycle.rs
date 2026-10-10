@@ -436,3 +436,292 @@ async fn assistant_clients_select_owners_and_edit_rules_without_model_calls() {
     drop(client);
     server.serve(async {}).await.unwrap();
 }
+
+#[tokio::test]
+async fn caller_created_resources_are_idle_idempotent_isolated_and_restored() {
+    let fixture = Fixture::new();
+    let mut config = fixture.config();
+    config.composition = None;
+    let client = reqwest::Client::new();
+    let mut original = Value::Null;
+    for restarting in [false, true] {
+        let server = Server::bind(config.clone()).await.unwrap();
+        let endpoint = server.endpoint().unwrap();
+        let base = format!("http://{}", server.local_addr().unwrap());
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let serving = tokio::spawn(server.serve(async {
+            let _ = shutdown.await;
+        }));
+        let path = format!("{base}/api/v1/runtime/resources");
+        assert_eq!(
+            client
+                .post(&path)
+                .json(&json!({"request_id":"intruder","resource":{"kind":"host"}}))
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16(),
+            401
+        );
+        let before: Value = client
+            .get(&path)
+            .bearer_auth(&endpoint.token)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if !restarting {
+            assert!(before["resources"].as_array().unwrap().is_empty());
+            assert!(!fixture.0.join("data/pot-v2.sqlite").exists());
+            assert!(!fixture.0.join("data/sandboxes.json").exists());
+            assert_eq!(client.post(&path).bearer_auth(&endpoint.token).json(&json!({"request_id":"invalid-assistant","resource":{"kind":"assistant","name":"\n"}})).send().await.unwrap().status().as_u16(), 400);
+            assert!(!fixture.0.join("data/pot-v2.sqlite").exists());
+            let request = json!({"request_id":"create-assistant","resource":{"kind":"assistant","name":"Research"}});
+            original = client
+                .post(&path)
+                .bearer_auth(&endpoint.token)
+                .json(&request)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(original["definition"]["id"], "main");
+            let environments: Value = client
+                .get(format!("{base}/api/v1/environments"))
+                .bearer_auth(&endpoint.token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(environments["items"].as_array().unwrap().is_empty());
+            assert!(!fixture.0.join("data/sandboxes.json").exists());
+            let runtime: Value = client
+                .get(format!("{base}/api/v1/runtime"))
+                .bearer_auth(&endpoint.token)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(
+                !runtime["capabilities"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|c| c == "host_execution")
+            );
+            let conflict = client.post(&path).bearer_auth(&endpoint.token).json(&json!({"request_id":"create-assistant","resource":{"kind":"assistant","name":"Different"}})).send().await.unwrap();
+            assert_eq!(conflict.status().as_u16(), 409);
+            client
+                .post(&path)
+                .bearer_auth(&endpoint.token)
+                .json(&json!({"request_id":"enable-host","resource":{"kind":"host"}}))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        } else {
+            assert_eq!(before["resources"].as_array().unwrap().len(), 2);
+        }
+        let duplicate: Value = client.post(&path).bearer_auth(&endpoint.token).json(&json!({"request_id":"create-assistant","resource":{"kind":"assistant","name":"Research"}})).send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
+        assert_eq!(duplicate, original);
+        let assistants: Value = client
+            .get(format!("{base}/api/v1/assistants"))
+            .bearer_auth(&endpoint.token)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(assistants["assistants"].as_array().unwrap().len(), 1);
+        let environments: Value = client
+            .get(format!("{base}/api/v1/environments"))
+            .bearer_auth(&endpoint.token)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(environments["items"].as_array().unwrap().len(), 1);
+        assert_eq!(environments["items"][0]["kind"], "host");
+        assert!(!fixture.0.join("data/sandboxes.json").exists());
+        let snapshot: Snapshot = client
+            .get(format!("{base}{PATH_SNAPSHOT}"))
+            .bearer_auth(&endpoint.token)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(snapshot.messages.is_empty() && snapshot.turn.is_none());
+        stop.send(()).unwrap();
+        serving.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn resource_upgrade_preserves_current_assistants_rules_and_sandbox_definitions() {
+    let fixture = Fixture::new();
+    let client = reqwest::Client::new();
+    let mut original_rules = Value::Null;
+    for upgraded in [false, true] {
+        let mut config = fixture.config();
+        if upgraded {
+            config.composition = None;
+        }
+        let server = Server::bind(config).await.unwrap();
+        let endpoint = server.endpoint().unwrap();
+        let base = format!("http://{}", server.local_addr().unwrap());
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let serving = tokio::spawn(server.serve(async {
+            let _ = shutdown.await;
+        }));
+        let path = format!("{base}/api/v1/assistants/main/instructions");
+        let rules: Value = client
+            .get(&path)
+            .bearer_auth(&endpoint.token)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if !upgraded {
+            original_rules = client
+                .post(&path)
+                .bearer_auth(&endpoint.token)
+                .json(&json!({"text":"CURRENT_DB_RULE","expected_revision":rules["revision"]}))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+        } else {
+            assert_eq!(rules, original_rules);
+            let environments: Value = client
+                .get(format!("{base}/api/v1/environments"))
+                .bearer_auth(&endpoint.token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(
+                environments["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|e| e["kind"] == "host")
+            );
+            assert!(
+                environments["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|e| e["id"] == "default")
+            );
+            let assistants: Value = client
+                .get(format!("{base}/api/v1/assistants"))
+                .bearer_auth(&endpoint.token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(assistants["assistants"].as_array().unwrap().len(), 1);
+        }
+        stop.send(()).unwrap();
+        serving.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn sandbox_creation_receipts_do_not_undo_later_inventory_changes() {
+    let fixture = Fixture::new();
+    let client = reqwest::Client::new();
+    let mut config = fixture.config();
+    config.composition = None;
+    let provider = if cfg!(target_os = "linux") {
+        pot_sandbox::LINUX_PODMAN_PROVIDER
+    } else {
+        pot_sandbox::MACOS_APPLE_CONTAINER_PROVIDER
+    };
+    for stage in 0..3 {
+        let server = Server::bind(config.clone()).await.unwrap();
+        let endpoint = server.endpoint().unwrap();
+        let base = format!("http://{}", server.local_addr().unwrap());
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let serving = tokio::spawn(server.serve(async {
+            let _ = shutdown.await;
+        }));
+        if stage == 0 {
+            client.post(format!("{base}/api/v1/runtime/resources")).bearer_auth(&endpoint.token).json(&json!({"request_id":"build-definition","resource":{"kind":"sandbox","sandbox_id":"build","name":"Build","provider":provider}})).send().await.unwrap().error_for_status().unwrap();
+        } else {
+            let inventory: Value = client
+                .get(format!("{base}/api/v1/sandboxes"))
+                .bearer_auth(&endpoint.token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if stage == 1 {
+                assert_eq!(inventory["items"][0]["name"], "Renamed");
+            } else {
+                assert!(inventory["items"].as_array().unwrap().is_empty());
+            }
+        }
+        assert!(!fixture.0.join("data/pot-v2.sqlite").exists());
+        stop.send(()).unwrap();
+        serving.await.unwrap().unwrap();
+        // Represent current persisted management results independently from old creation receipts.
+        let path = fixture.0.join("data/sandboxes.json");
+        let mut inventory: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        if stage == 0 {
+            inventory["items"]["build"]["name"] = json!("Renamed");
+        }
+        if stage == 1 {
+            inventory["items"] = json!({});
+            inventory["retired"] = json!(["build"]);
+        }
+        std::fs::write(path, serde_json::to_vec(&inventory).unwrap()).unwrap();
+    }
+}

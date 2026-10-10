@@ -113,6 +113,8 @@ pub fn is_plugin_tool_name(name: &str) -> bool {
                 | "exec"
                 | "wait"
                 | "set_sandbox_mappings"
+                | "read_agent_instructions"
+                | "update_agent_instructions"
         )
         && !name.starts_with("pot_")
         && !serde_json::from_str::<Vec<Value>>(crate::TOOL_SCHEMA)

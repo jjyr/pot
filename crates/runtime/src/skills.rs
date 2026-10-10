@@ -2,24 +2,75 @@
 use super::*;
 use pot_core::{SkillResources, SkillRoot};
 
+/// Discover installed resources on the execution machine without creating an Agent.
+/// Only catalog metadata crosses the peer connection; bundles stay at destination paths.
+pub(crate) fn destination_catalog(
+    data: &std::path::Path,
+    source: &std::path::Path,
+    mount: &std::path::Path,
+    cwd: &std::path::Path,
+    host: bool,
+) -> Result<pot_agent::SkillCatalog> {
+    let resources = crate::services::AgentResources::paths(data);
+    let relative = cwd.strip_prefix(mount)?;
+    let mut project = source.join(relative);
+    let mut location = cwd.to_path_buf();
+    let mut roots = vec![];
+    loop {
+        roots.push(SkillRoot {
+            path: project.join(".agents/skills"),
+            location: location.join(".agents/skills"),
+            builtin: false,
+        });
+        if project.join(".git").exists() || project == source {
+            break;
+        }
+        project = project
+            .parent()
+            .ok_or_else(|| anyhow!("Invalid destination skill root"))?
+            .to_path_buf();
+        location = location
+            .parent()
+            .ok_or_else(|| anyhow!("Invalid destination skill location"))?
+            .to_path_buf();
+    }
+    let guest = cwd.join(".pot/agent/skills");
+    let builtin = SkillRoot {
+        path: resources.skill_builtin.clone(),
+        location: if host {
+            resources.skill_builtin.clone()
+        } else {
+            guest.clone()
+        },
+        builtin: true,
+    };
+    let reserved_names = pot_agent::discover_skills(&SkillResources {
+        roots: vec![builtin.clone()],
+        ..Default::default()
+    })?
+    .skills
+    .into_iter()
+    .map(|skill| skill.name)
+    .collect();
+    roots.push(SkillRoot {
+        path: resources.skill_user.clone(),
+        location: if host { resources.skill_user } else { guest },
+        builtin: false,
+    });
+    roots.push(builtin);
+    pot_agent::discover_skills(&SkillResources {
+        roots,
+        reserved_names,
+        selection: None,
+    })
+}
+
 pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
-    let target = if s.is_worker {
-        s.sandbox_id
-            .clone()
-            .ok_or_else(|| anyhow!("Worker Sandbox missing"))?
-    } else {
-        s.environment_service.manager.assignment("")?
-    };
-    let base = s.environment_service.manager.workspace(&target);
-    let guest_base = PathBuf::from(s.environment_service.manager.guest_workspace(&target)?);
-    let (cwd, visible) = if s.is_worker {
-        (
-            base.join("tasks").join(&s.usage_scope),
-            guest_base.join("tasks").join(&s.usage_scope),
-        )
-    } else {
-        (base.clone(), guest_base)
-    };
+    if crate::remote_environment::is_remote(s) {
+        return Ok(SkillResources::default());
+    }
+    let (base, _, cwd, visible) = crate::environment::workspace_view(s)?;
+    let host = s.is_worker && s.sandbox_id.is_none();
     let mut roots = vec![];
     let mut project = cwd.as_path();
     let mut location = visible.as_path();
@@ -41,7 +92,11 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
     let global_location = visible.join(".pot/agent/skills");
     let builtin_root = SkillRoot {
         path: s.agent_service.resources.skill_builtin.clone(),
-        location: global_location.clone(),
+        location: if host {
+            s.agent_service.resources.skill_builtin.clone()
+        } else {
+            global_location.clone()
+        },
         builtin: true,
     };
     let reserved_names = pot_agent::discover_skills(&SkillResources {
@@ -54,7 +109,11 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
     .collect();
     roots.push(SkillRoot {
         path: s.agent_service.resources.skill_user.clone(),
-        location: global_location,
+        location: if host {
+            s.agent_service.resources.skill_user.clone()
+        } else {
+            global_location
+        },
         builtin: false,
     });
     roots.push(builtin_root);
@@ -83,7 +142,7 @@ mod tests {
             bundle(
                 &root
                     .environment_service
-                    .manager
+                    .sandboxes
                     .workspace("default")
                     .join(".agents/skills"),
                 name,
@@ -130,7 +189,7 @@ mod tests {
             let worker = tasks::owner(&root, &task.id).unwrap();
             let base = root
                 .environment_service
-                .manager
+                .sandboxes
                 .workspace(worker.sandbox_id.as_ref().unwrap());
             bundle(&base.join(".agents/skills"), "outside", "sandbox ancestor");
             bundle(
@@ -180,7 +239,7 @@ mod tests {
         bundle(
             &root
                 .environment_service
-                .manager
+                .sandboxes
                 .workspace("default")
                 .join(".agents/skills"),
             "environment",
@@ -192,7 +251,7 @@ mod tests {
         bundle(
             &root
                 .environment_service
-                .manager
+                .sandboxes
                 .workspace("second")
                 .join(".agents/skills"),
             "environment",

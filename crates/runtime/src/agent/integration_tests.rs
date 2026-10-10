@@ -57,6 +57,85 @@ fn wire(protocol: &str, calls: Vec<Value>, text: &str) -> Vec<Value> {
         _ => panic!(),
     }
 }
+
+#[tokio::test]
+async fn assistant_rules_tools_read_review_and_recheck_db_revision() {
+    for (scenario, composed) in ["approve", "deny", "conflict"]
+        .into_iter()
+        .flat_map(|s| [(s, false), (s, true)])
+    {
+        let calls = if composed {
+            vec![
+                json!({"id":"rules-js","name":"exec","arguments":{"code":"const r = await tools.read_agent_instructions({}); text(r.text); text(await tools.update_agent_instructions({text: 'New assistant rule'}));","yield_time_ms":1000}}),
+            ]
+        } else {
+            vec![
+                json!({"id":"read-rules","name":"read_agent_instructions","arguments":{}}),
+                json!({"id":"write-rules","name":"update_agent_instructions","arguments":{"text":"New assistant rule"}}),
+            ]
+        };
+        let (mut s, mut rx, server, captured) = fixture("openai_chat", calls).await;
+        s.test_tool_executor = None;
+        s.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set(
+                "assistant.instructions.v1",
+                &json!({"schema_version":1,"text":"Initial assistant rule","revision":"seed"})
+                    .to_string(),
+            )
+            .unwrap();
+        let runner = s.clone();
+        let job = tokio::spawn(async move {
+            turn(&runner, &mut rx, "edit-rules").await;
+        });
+        let mut approvals = 0;
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            while !job.is_finished() {
+                let pending = crate::permissions::inspect(State(s.clone()), tasks::tests::headers()).await.unwrap().0;
+                for card in pending["requests"].as_array().unwrap() {
+                    assert_eq!(card["request"]["tool"], "update_agent_instructions");
+                    assert_eq!(card["request"]["owner"], "main");
+                    assert_eq!(crate::assistant_instructions::read(&s).unwrap()["text"], "Initial assistant rule");
+                    if scenario == "conflict" {
+                        crate::assistant_instructions::save(&s, "Concurrent UI edit", "seed").unwrap();
+                    }
+                    let decision = serde_json::from_value(json!({"id":card["id"],"action":if scenario == "deny" {"deny"} else {"allow_once"}})).unwrap();
+                    let _ = crate::permissions::decide(State(s.clone()), tasks::tests::headers(), Json(decision)).await.unwrap();
+                    approvals += 1;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        job.await.unwrap();
+        assert_eq!(approvals, 1);
+        let saved = crate::assistant_instructions::read(&s).unwrap();
+        assert_eq!(
+            saved["text"],
+            match scenario {
+                "approve" => "New assistant rule",
+                "deny" => "Initial assistant rule",
+                _ => "Concurrent UI edit",
+            }
+        );
+        let requests = captured.lock().unwrap();
+        assert!(
+            requests[0]["tools"]
+                .to_string()
+                .contains("read_agent_instructions")
+        );
+        let continuation = requests[1].to_string();
+        assert!(continuation.contains("Initial assistant rule"));
+        if scenario != "approve" {
+            assert!(continuation.contains("isError"));
+        }
+        drop(requests);
+        server.abort();
+        std::fs::remove_dir_all(&s.data).unwrap();
+    }
+}
 async fn fixture(
     protocol: &str,
     first: Vec<Value>,
@@ -604,8 +683,8 @@ async fn native_agent_profile_limits_prompt_and_tool_filter_are_effective() {
     assert_eq!(bodies[0]["max_tokens"], 128);
     let system = bodies[0]["messages"][0]["content"].as_str().unwrap();
     assert!(system.starts_with("A configurable system prompt."));
-    assert!(system.contains("persistent rules file"));
-    assert!(system.contains("permission before writing"));
+    assert!(system.contains("AGENTS.md belongs to this assistant"));
+    assert!(system.contains("Updates require owner approval"));
     assert_eq!(bodies[0]["tools"].as_array().unwrap().len(), 1);
     assert_eq!(bodies[0]["tools"][0]["function"]["name"], "apply_patch");
     assert!(bodies[1].to_string().contains("Tool unavailable"));
@@ -1138,7 +1217,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                         assert_eq!(captured.lock().unwrap().len(), 1);
                         assert!(
                             s.environment_service
-                                .permissions
+                                .host
                                 .host_executor("main", thread(&s).unwrap().generation)
                                 .plugin_sessions()
                                 .await
@@ -1178,8 +1257,8 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
             }
         }
         s.environment_service
-            .permissions
-            .finish_host(&s)
+            .host
+            .finish_host(&s.usage_scope)
             .await
             .unwrap();
         server.abort();

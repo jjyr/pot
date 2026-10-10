@@ -22,6 +22,11 @@ impl LocalTools {
             tokio::sync::Mutex::new(plugins::Plugins::host()),
         )
     }
+    /// Read-only operator metadata; outputs, command text and credentials are excluded.
+    pub async fn session_inventory(&self) -> Value {
+        serde_json::json!({"processes":self.0.lock().await.inspect(),
+            "plugins":self.1.lock().await.sessions()})
+    }
     pub async fn has_plugin_session(&self, session: &str) -> bool {
         self.plugin_sessions().await.iter().any(|id| id == session)
     }

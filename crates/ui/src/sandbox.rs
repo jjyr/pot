@@ -20,7 +20,7 @@ pub fn render(
     cx: &mut App,
 ) -> Div {
     let selected = state["sandbox_view"].as_str().unwrap_or("default");
-    let default = state["sandbox_default"].as_str().unwrap_or("default");
+    let default = state["sandbox_default"].as_str().unwrap_or("");
     let items = state["sandboxes"].as_array().cloned().unwrap_or_default();
     let current = items.iter().find(|item| item["id"] == selected);
     let name = current
@@ -294,6 +294,8 @@ pub fn render(
                             } else {
                                 "ui.desktop-disconnected"
                             })
+                        } else if phase == "unavailable" {
+                            catalog.text("machines.sandbox-unavailable")
                         } else {
                             catalog.text("ui.this-environment-is-stopped-start-the-desktop")
                         },
@@ -313,6 +315,9 @@ pub fn render(
                     ),
             )
         });
+    if state["machines_embedded"] == true {
+        return desktop;
+    }
     page(layout, cx)
         .flex()
         .when(layout.compact, |el| el.flex_col())

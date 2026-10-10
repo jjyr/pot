@@ -132,11 +132,23 @@ struct Frontmatter {
 /// the catalog must not advertise files outside a mapped resource directory.
 pub fn discover_skills(resources: &pot_core::SkillResources) -> Result<SkillCatalog> {
     use std::{collections::BTreeMap, path::Path};
-    fn files(path: &Path, depth: usize, output: &mut Vec<std::path::PathBuf>) -> Result<()> {
+    fn files(
+        path: &Path,
+        depth: usize,
+        output: &mut Vec<std::path::PathBuf>,
+        diagnostics: &mut Vec<String>,
+    ) -> Result<()> {
         ensure!(depth <= 32, "Skill directory nesting limit exceeded");
         let metadata = match std::fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                diagnostics.push(format!(
+                    "{}: {e}; skipping unreadable skill directory",
+                    path.display()
+                ));
+                return Ok(());
+            }
             Err(e) => return Err(e.into()),
         };
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -150,11 +162,22 @@ pub fn discover_skills(resources: &pot_core::SkillResources) -> Result<SkillCata
             // A skill bundle's references/assets are not additional skills.
             return Ok(());
         }
-        let mut children = std::fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+        let children = match std::fs::read_dir(path) {
+            Ok(children) => children,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                diagnostics.push(format!(
+                    "{}: {e}; skipping unreadable skill directory",
+                    path.display()
+                ));
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let mut children = children.collect::<std::io::Result<Vec<_>>>()?;
         children.sort_by_key(|entry| entry.file_name());
         for child in children {
             if !child.file_name().to_string_lossy().starts_with('.') {
-                files(&child.path(), depth + 1, output)?;
+                files(&child.path(), depth + 1, output, diagnostics)?;
             }
         }
         Ok(())
@@ -163,7 +186,7 @@ pub fn discover_skills(resources: &pot_core::SkillResources) -> Result<SkillCata
     let mut selected = BTreeMap::<String, Skill>::new();
     for root in &resources.roots {
         let mut paths = vec![];
-        files(&root.path, 0, &mut paths)?;
+        files(&root.path, 0, &mut paths, &mut catalog.diagnostics)?;
         ensure!(paths.len() <= 1024, "Too many skills in a directory");
         for path in paths {
             let parsed = (|| -> Result<Skill> {
@@ -243,6 +266,37 @@ pub fn discover_skills(resources: &pot_core::SkillResources) -> Result<SkillCata
 mod discovery_tests {
     use super::*;
     use pot_core::{SkillResources, SkillRoot};
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_bundle_does_not_hide_readable_skills_or_abort_discovery() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = Fixture::new();
+        f.write(
+            "readable",
+            "---\nname: readable\ndescription: Available\n---\nBody\n",
+        );
+        f.write(
+            "private",
+            "---\nname: private\ndescription: Unavailable\n---\nBody\n",
+        );
+        let path = f.0.join("private");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = std::fs::read_dir(&path).is_err();
+        let result = discover_skills(&f.resources());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let catalog = result.unwrap();
+        assert!(catalog.skills.iter().any(|skill| skill.name == "readable"));
+        if denied {
+            // Root-run CI can read mode-000 directories.
+            assert!(!catalog.skills.iter().any(|skill| skill.name == "private"));
+            assert!(
+                catalog
+                    .diagnostics
+                    .iter()
+                    .any(|message| message.contains("unreadable"))
+            );
+        }
+    }
     struct Fixture(std::path::PathBuf);
     impl Fixture {
         fn new() -> Self {

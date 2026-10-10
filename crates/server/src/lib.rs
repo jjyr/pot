@@ -1,7 +1,9 @@
 //! Standalone backend hosting; no frontend, Helper or platform UI dependencies.
 pub mod access;
 mod config;
+mod control;
 mod hosting;
+mod resources;
 mod routes;
 pub use config::{ServerConfig, default_root};
 pub use hosting::Server;

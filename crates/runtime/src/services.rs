@@ -10,7 +10,16 @@ pub struct OwnerScope {
     pub(crate) skill_selection: Option<Vec<String>>,
     #[cfg(test)]
     pub(crate) test_tool_executor: Option<Arc<dyn pot_core::ToolExecutor>>,
+    pub(crate) remote_context: Arc<
+        Mutex<
+            std::collections::BTreeMap<
+                pot_core::EnvironmentRef,
+                crate::remote_environment::RemoteContext,
+            >,
+        >,
+    >,
     pub(crate) sandbox_id: Option<String>,
+    pub(crate) environment_ref: Option<pot_core::EnvironmentRef>,
     pub(crate) usage: Arc<Mutex<usage::Ledger>>,
     pub(crate) usage_scope: String,
     pub(crate) token: String,
@@ -83,7 +92,11 @@ impl AgentResources {
 
 #[derive(Clone)]
 pub(crate) struct EnvironmentService {
-    pub(crate) manager: Arc<sandbox::Manager>,
+    pub(crate) remote:
+        Arc<std::sync::RwLock<Option<Arc<dyn crate::remote_environment::RemoteEnvironment>>>>,
+    pub(crate) host: Arc<environment::HostEnvironment>,
+    pub(crate) host_enabled: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) sandboxes: Arc<sandbox::Manager>,
     pub(crate) permissions: Arc<permissions::Hub>,
     pub(crate) terminals: Arc<Mutex<terminal::Hub>>,
 }
