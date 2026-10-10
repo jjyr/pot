@@ -8,7 +8,8 @@ pub struct ProviderPolicyRequest {
 pub async fn inspect(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
     agent::initialize(&s).map_err(internal)?;
-    let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
+    let profiles =
+        agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
     let ids: std::collections::BTreeSet<_> = profiles.iter().map(|p| p.provider.clone()).collect();
     let ledger = s.usage.lock().unwrap();
     let mut entries = vec![];
@@ -25,7 +26,8 @@ pub async fn configure(
     Json(r): Json<ProviderPolicyRequest>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    let profiles = agent::profiles(&s.inner.lock().unwrap().store).map_err(internal)?;
+    let profiles =
+        agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
     if !profiles.iter().any(|p| p.provider == r.provider) {
         return Err(error(
             StatusCode::BAD_REQUEST,

@@ -32,6 +32,7 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
     let port = reservation.local_addr().unwrap().port();
     drop(reservation);
     let child = Command::new(env!("CARGO_BIN_EXE_pot-server"))
+        .env("POT_RUNTIME_COMPOSITION", "assistant")
         .env("POT_DATA_DIR", root.join("product"))
         .env("POT_WORKSPACE", root.join("workspace"))
         .env("POT_AGENT_HOME", root.join("agent-home"))

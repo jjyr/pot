@@ -45,7 +45,7 @@ impl Host {
             private_key: root.join("key"),
             assets: root.to_path_buf(),
         };
-        let routes = pot_server::router(backend.state());
+        let routes = pot_server::router(backend.state().unwrap());
         let access =
             Access::new(&cfg, root.join("product"), token.clone(), routes.clone()).unwrap();
         backend.activate().unwrap();

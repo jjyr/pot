@@ -16,6 +16,8 @@ struct Job {
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Record {
+    #[serde(default)]
+    assignment: Option<pot_core::Assignment>,
     info: TaskInfo,
     create_request: CreateTask,
     #[serde(default)]
@@ -53,7 +55,8 @@ pub(super) fn serialized(hub: &Hub) -> Result<String> {
     )?)
 }
 pub(super) fn persist(root: &Service, hub: &Hub) -> Result<()> {
-    root.inner
+    root.conversation
+        .inner
         .lock()
         .unwrap()
         .store
@@ -79,10 +82,11 @@ fn child(
         !sandbox_id.is_empty(),
         "Persisted task Sandbox assignment missing"
     );
-    root.sandboxes.assignment(sandbox_id)?;
+    root.environment_service.manager.assignment(sandbox_id)?;
     let data = root.data.join("tasks").join(task_id);
     let workspace = root
-        .sandboxes
+        .environment_service
+        .manager
         .workspace(sandbox_id)
         .join("tasks")
         .join(task_id);
@@ -101,45 +105,57 @@ fn child(
     let (events, _) = broadcast::channel(256);
     let (commands, _) = mpsc::unbounded_channel();
     let service = Service {
-        permissions: root.permissions.clone(),
-        skill_selection: skills,
-        #[cfg(test)]
-        test_tool_executor: root.test_tool_executor.clone(),
-        sandboxes: root.sandboxes.clone(),
-        sandbox_id: Some(sandbox_id.into()),
-        terminals: root.terminals.clone(),
-        agent_executor: root.agent_executor.clone(),
-        usage: root.usage.clone(),
-        usage_scope: task_id.into(),
-        inner: Arc::new(Mutex::new(Inner {
-            store: Store::open(&data.join("pot-v2.sqlite"))?,
-            agent: root.inner.lock().unwrap().agent.clone(),
-            turn: None,
-            model_requests: 0,
-        })),
-        events,
-        commands,
-        token,
-        boot: root.boot.clone(),
-        workspace,
-        api_budget: root.api_budget.clone(),
-        execution: root.execution.clone(),
-        agent_upstream: root.agent_upstream.clone(),
-        is_worker: true,
-        data,
-        cancel_notify: Arc::new(tokio::sync::Notify::new()),
-        stop: root.stop.clone(),
-        tasks: Arc::new(Mutex::new(Hub::default())),
+        scope: OwnerScope {
+            runtime_id: root.runtime_id.clone(),
+            skill_selection: skills,
+            #[cfg(test)]
+            test_tool_executor: root.test_tool_executor.clone(),
+            sandbox_id: Some(sandbox_id.into()),
+            usage: root.usage.clone(),
+            usage_scope: task_id.into(),
+            token,
+            boot: root.boot.clone(),
+            workspace,
+            api_budget: root.api_budget.clone(),
+            execution: root.execution.clone(),
+            agent_upstream: root.agent_upstream.clone(),
+            is_worker: true,
+            data: data.clone(),
+            cancel_notify: Arc::new(tokio::sync::Notify::new()),
+            stop: root.stop.clone(),
+        },
+        conversation: ConversationService {
+            inner: Arc::new(Mutex::new(Inner {
+                store: Store::open(&data.join("pot-v2.sqlite"))?,
+                agent: root.conversation.inner.lock().unwrap().agent.clone(),
+                turn: None,
+                model_requests: 0,
+            })),
+            events,
+            commands,
+        },
+        agent_service: AgentService {
+            executor: root.agent_service.executor.clone(),
+            resources: root.agent_service.resources.clone(),
+        },
+        environment_service: EnvironmentService {
+            permissions: root.environment_service.permissions.clone(),
+            manager: root.environment_service.manager.clone(),
+            terminals: root.environment_service.terminals.clone(),
+        },
+        tasks: TaskService {
+            hub: Arc::new(Mutex::new(Hub::default())),
+        },
     };
     agent::initialize(&service)?;
     Ok(service)
 }
 pub(super) fn restore(root: &Service) -> Result<()> {
-    let inner = root.inner.lock().unwrap();
+    let inner = root.conversation.inner.lock().unwrap();
     let current = inner.store.get("tasks.v2")?;
     let legacy = inner.store.get("tasks.v1")?;
     drop(inner);
-    let (records, book): (Vec<Record>, schedules::Book) = if let Some(v) = current {
+    let (mut records, book): (Vec<Record>, schedules::Book) = if let Some(v) = current {
         let v: Value = serde_json::from_str(&v)?;
         (
             serde_json::from_value(v["tasks"].clone())?,
@@ -154,9 +170,18 @@ pub(super) fn restore(root: &Service) -> Result<()> {
             schedules::Book::default(),
         )
     };
-    let mut hub = root.tasks.lock().unwrap();
     schedules::validate_bindings(root, &book)?;
-    hub.schedules = book;
+    for record in &mut records {
+        let assignment = record.assignment.get_or_insert_with(|| {
+            pot_core::Assignment::local(&root.runtime_id, &record.info.id, &record.info.sandbox_id)
+        });
+        assignment.validate_local(&root.runtime_id, &record.info.id, &record.info.sandbox_id)?;
+    }
+    let mut current_hub = root.tasks.hub.lock().unwrap();
+    let mut hub = Hub {
+        schedules: book,
+        ..Hub::default()
+    };
     for mut record in records {
         restore_title(&mut record);
         let service = child(
@@ -186,7 +211,9 @@ pub(super) fn restore(root: &Service) -> Result<()> {
         hub.lanes
             .insert(record.info.id.clone(), Lane { record, service });
     }
-    persist(root, &hub)
+    persist(root, &hub)?;
+    *current_hub = hub;
+    Ok(())
 }
 fn validate(text: &str, request: &str) -> ApiResult<()> {
     if text.trim().is_empty() || text.len() > 65536 || request.is_empty() || request.len() > 128 {
@@ -222,7 +249,8 @@ fn info(record: &Record) -> TaskInfo {
 }
 fn lane_info(lane: &Lane) -> TaskInfo {
     let mut task = info(&lane.record);
-    if let Ok(Some(thread)) = agent::current(&lane.service.inner.lock().unwrap().store) {
+    if let Ok(Some(thread)) = agent::current(&lane.service.conversation.inner.lock().unwrap().store)
+    {
         let icon = crate::gateway::executor_icon(&lane.service, &thread.config);
         // Missing old provider configuration must not erase a known historical icon.
         if icon != "custom"
@@ -291,7 +319,7 @@ pub(super) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
             "Invalid scope, query or page size (1–50)",
         ));
     }
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     let needle = query.q.trim().to_lowercase();
     let mut items: Vec<_> = hub
         .lanes
@@ -338,7 +366,7 @@ pub async fn query(
 
 pub async fn list(State(root): State<Service>, h: HeaderMap) -> ApiResult<Json<Vec<TaskInfo>>> {
     root.authorized(&h)?;
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     let mut list: Vec<_> = hub.lanes.values().map(lane_info).collect();
     list.sort_by_key(|i| i.created_at_ms);
     Ok(Json(list))
@@ -357,7 +385,7 @@ pub(super) async fn create_from(
     source: agent::routing::Source,
 ) -> ApiResult<Json<TaskInfo>> {
     root.authorized(&h)?;
-    let mut hub = root.tasks.lock().unwrap();
+    let mut hub = root.tasks.hub.lock().unwrap();
     let existing: std::collections::BTreeSet<_> = hub.lanes.keys().cloned().collect();
     let result = enqueue_from(&root, &mut hub, req, source)?;
     if let Err(e) = persist(&root, &hub) {
@@ -466,12 +494,18 @@ fn enqueue_from(
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
     let sandbox_id = root
-        .sandboxes
+        .environment_service
+        .manager
         .assignment(&req.sandbox_id)
         .map_err(internal)?;
     let task_id = id();
     let first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
     let record = Record {
+        assignment: Some(pot_core::Assignment::local(
+            &root.runtime_id,
+            &task_id,
+            &sandbox_id,
+        )),
         info: TaskInfo {
             sandbox_id: sandbox_id.clone(),
             id: task_id.clone(),
@@ -499,7 +533,7 @@ fn enqueue_from(
     )
     .map_err(internal)?;
     {
-        let mut inner = service.inner.lock().unwrap();
+        let mut inner = service.conversation.inner.lock().unwrap();
         if agent::current(&inner.store).map_err(internal)?.is_none() {
             agent::select_initial(&mut inner.store, &task_id, spec).map_err(internal)?;
         } else {
@@ -516,7 +550,7 @@ pub async fn snapshot(
     Path(task_id): Path<String>,
 ) -> ApiResult<Json<Snapshot>> {
     root.authorized(&h)?;
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     let lane = hub.lanes.get(&task_id).ok_or_else(missing)?;
     let mut snapshot = lane.service.snapshot().map_err(internal)?;
     for job in &lane.record.queue {
@@ -538,7 +572,7 @@ pub async fn input(
 ) -> ApiResult<Json<SendMessageAccepted>> {
     root.authorized(&h)?;
     validate(&req.text, &req.request_id)?;
-    let mut hub = root.tasks.lock().unwrap();
+    let mut hub = root.tasks.hub.lock().unwrap();
     let order = next_order(&hub);
     let lane = hub.lanes.get_mut(&task_id).ok_or_else(missing)?;
     if let Some(old) = lane
@@ -559,7 +593,7 @@ pub async fn input(
             duplicate: true,
         }));
     }
-    if lane.service.inner.lock().unwrap().agent.phase == AgentPhase::Failed {
+    if lane.service.conversation.inner.lock().unwrap().agent.phase == AgentPhase::Failed {
         return Err(error(
             StatusCode::CONFLICT,
             "engine_uncertain",
@@ -571,6 +605,7 @@ pub async fn input(
             || lane.record.active.is_none()
             || lane
                 .service
+                .conversation
                 .inner
                 .lock()
                 .unwrap()
@@ -636,7 +671,7 @@ async fn stop_task(
 ) -> ApiResult<Json<Value>> {
     root.authorized(&h)?;
     let idle_service = {
-        let hub = root.tasks.lock().unwrap();
+        let hub = root.tasks.hub.lock().unwrap();
         let lane = hub.lanes.get(&task_id).ok_or_else(missing)?;
         (lane.record.active.is_none()
             && lane.record.queue.is_empty()
@@ -656,7 +691,7 @@ async fn stop_task(
         ));
     }
     let cleanup = {
-        let mut hub = root.tasks.lock().unwrap();
+        let mut hub = root.tasks.hub.lock().unwrap();
         let lane = hub.lanes.get_mut(&task_id).ok_or_else(missing)?;
         if lane.record.active.is_none()
             && lane.record.queue.is_empty()
@@ -689,6 +724,7 @@ async fn stop_task(
         }
         lane.record.interrupt_requested = preserve;
         lane.service
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -702,7 +738,7 @@ async fn stop_task(
             .clear_wait(&task_id)
             .map_err(internal)?;
         if lane.record.active.is_some() {
-            let mut inner = lane.service.inner.lock().unwrap();
+            let mut inner = lane.service.conversation.inner.lock().unwrap();
             if let Some(t) = inner.turn.as_mut() {
                 t.cancelling = true;
             }
@@ -718,7 +754,7 @@ async fn stop_task(
     if let Some(service) = cleanup {
         let result = sandbox::finish_idle(&service).await;
         {
-            let mut hub = root.tasks.lock().unwrap();
+            let mut hub = root.tasks.hub.lock().unwrap();
             let lane = hub.lanes.get_mut(&task_id).ok_or_else(missing)?;
             lane.record.info.phase = if result.is_ok() {
                 if preserve {
@@ -751,7 +787,7 @@ pub(super) fn send_reference(
 ) -> ApiResult<Value> {
     let service = control_service(root, task_id)?;
     let reply = crate::control::send_reference(&service, "main", request_id, text)?;
-    let phase = task_phase(&root.tasks.lock().unwrap(), task_id).ok_or_else(missing)?;
+    let phase = task_phase(&root.tasks.hub.lock().unwrap(), task_id).ok_or_else(missing)?;
     Ok(
         json!({"message_id":reply.message_id,"duplicate":reply.duplicate,"task_id":task_id,"phase":phase,"delivery":"model_boundary_or_next_guidance"}),
     )
@@ -823,6 +859,7 @@ pub(super) async fn wait_tasks(root: &Service, args: &Value) -> ApiResult<Value>
         .transpose()?
         .unwrap_or(10000);
     let caller_turn = root
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -842,6 +879,7 @@ pub(super) async fn wait_tasks(root: &Service, args: &Value) -> ApiResult<Value>
         if root.stopping()
             || agent::cancelled(root)
             || root
+                .conversation
                 .inner
                 .lock()
                 .unwrap()
@@ -856,7 +894,7 @@ pub(super) async fn wait_tasks(root: &Service, args: &Value) -> ApiResult<Value>
             ));
         }
         let (tasks, cursors, ready) = {
-            let hub = root.tasks.lock().unwrap();
+            let hub = root.tasks.hub.lock().unwrap();
             let mut tasks = vec![];
             let mut cursors = BTreeMap::new();
             let mut ready = false;
@@ -901,6 +939,7 @@ pub async fn gateway(
 
 pub(crate) fn control_service(root: &Service, task_id: &str) -> ApiResult<Service> {
     root.tasks
+        .hub
         .lock()
         .unwrap()
         .lanes
@@ -913,6 +952,7 @@ pub(super) fn execution_service(root: &Service, h: &HeaderMap) -> ApiResult<Serv
         Ok(root.clone())
     } else {
         root.tasks
+            .hub
             .lock()
             .unwrap()
             .lanes
@@ -933,7 +973,7 @@ pub(super) fn execution_service(root: &Service, h: &HeaderMap) -> ApiResult<Serv
 /// per lane. FIFO among eligible lanes. A shared-resource task holds an
 /// exclusive cooperative lease against other shared-resource tasks.
 pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessage)>> {
-    let mut hub = root.tasks.lock().unwrap();
+    let mut hub = root.tasks.hub.lock().unwrap();
     for lane in hub.lanes.values().filter(|l| l.record.active.is_none()) {
         agent::settings::apply_pending(&lane.service, false)?;
     }
@@ -991,7 +1031,7 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
     let lane = hub.lanes.get_mut(&task_id).unwrap();
     lane.service.save(user(&job))?;
     {
-        let mut inner = lane.service.inner.lock().unwrap();
+        let mut inner = lane.service.conversation.inner.lock().unwrap();
         inner.model_requests = 0;
         inner.turn = Some(TurnState {
             user_message_id: job.message_id.clone(),
@@ -1009,7 +1049,7 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
     )))
 }
 pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Result<()> {
-    let mut hub = root.tasks.lock().unwrap();
+    let mut hub = root.tasks.hub.lock().unwrap();
     let lane = hub
         .lanes
         .get_mut(task_id)
@@ -1023,6 +1063,7 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     if usage::paused(&lane.service)?.is_some()
         && !lane
             .service
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -1040,6 +1081,7 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     if let Err(ref e) = result {
         let message = lane
             .service
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -1083,6 +1125,7 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     // Once stopping is requested, queued follow-ups are never auto-started.
     if stopped {
         lane.service
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -1148,7 +1191,8 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
     };
     let serialized = serialized(&hub)?;
     if notice.as_ref().is_some_and(|v| v.is_none()) {
-        root.inner
+        root.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -1160,12 +1204,13 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
         report.text = format!("{}\n任务编号：{}", text, task_id);
     }
     let event = root
+        .conversation
         .inner
         .lock()
         .unwrap()
         .store
         .save_with_metadata(report, Some(("tasks.v2", &serialized)))?;
-    let _ = root.events.send(event);
+    let _ = root.conversation.events.send(event);
     Ok(())
 }
 pub(super) fn owner(root: &Service, owner: &str) -> ApiResult<Service> {
@@ -1173,6 +1218,7 @@ pub(super) fn owner(root: &Service, owner: &str) -> ApiResult<Service> {
         return Ok(root.clone());
     }
     root.tasks
+        .hub
         .lock()
         .unwrap()
         .lanes
@@ -1188,7 +1234,7 @@ pub(super) fn validate_configuration(
     if owner == "main" {
         return Ok(());
     }
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     let lane = hub
         .lanes
         .get(owner)
@@ -1244,7 +1290,7 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
                 Ok(Some((task_id, service, req))) => {
                     let root = root.clone();
                     workers.spawn(async move {
-                        let result = agent::run(&service, req).await;
+                        let result = service.runner().run(req).await;
                         if let Err(e) = finish(&root, &task_id, result) {
                             eprintln!("task completion: {e}");
                         }
@@ -1266,7 +1312,7 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
 /// Only compact active/attention metadata enters main prompts. Archive results
 /// are retrieved explicitly via filtered tools, never by reading all transcripts.
 pub(super) fn context(root: &Service) -> String {
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
 
     let counts = counts(&hub);
     let mut open: Vec<_> = hub
@@ -1289,9 +1335,9 @@ pub(super) fn context(root: &Service) -> String {
 }
 
 pub(super) fn request_shutdown(root: &Service) {
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     for s in std::iter::once(root).chain(hub.lanes.values().map(|lane| &lane.service)) {
-        let mut inner = s.inner.lock().unwrap();
+        let mut inner = s.conversation.inner.lock().unwrap();
         if let Some(turn) = &mut inner.turn {
             turn.cancelling = true;
         }
@@ -1300,7 +1346,7 @@ pub(super) fn request_shutdown(root: &Service) {
 }
 
 pub(super) fn uses_sandbox(root: &Service, sandbox_id: &str) -> bool {
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     hub.lanes
         .values()
         .any(|lane| lane.record.info.sandbox_id == sandbox_id)
@@ -1313,7 +1359,7 @@ pub(super) fn guard_sandbox_delete(
     sandbox_id: &str,
     delete: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     anyhow::ensure!(
         !hub.lanes
             .values()
@@ -1327,6 +1373,7 @@ pub(super) fn guard_sandbox_delete(
 /// Snapshot task attribution without retaining the task lock during Helper I/O.
 pub(super) fn sandbox_tasks(root: &Service) -> Vec<TaskInfo> {
     root.tasks
+        .hub
         .lock()
         .unwrap()
         .lanes
@@ -1337,6 +1384,7 @@ pub(super) fn sandbox_tasks(root: &Service) -> Vec<TaskInfo> {
 
 pub(super) fn permission_lane(root: &Service, owner: &str) -> Option<Service> {
     root.tasks
+        .hub
         .lock()
         .unwrap()
         .lanes
@@ -1392,6 +1440,7 @@ pub(super) mod tests {
             .is_err()
         );
         worker
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -1452,13 +1501,13 @@ pub(super) mod tests {
         .0;
         assert_eq!(task.title, title);
         {
-            let mut hub = s.tasks.lock().unwrap();
+            let mut hub = s.tasks.hub.lock().unwrap();
             let record = &mut hub.lanes.get_mut(&task.id).unwrap().record;
             record.info.title = title.chars().take(48).collect();
         }
-        persist(&s, &s.tasks.lock().unwrap()).unwrap();
+        persist(&s, &s.tasks.hub.lock().unwrap()).unwrap();
         restore(&s).unwrap();
-        let mut hub = s.tasks.lock().unwrap();
+        let mut hub = s.tasks.hub.lock().unwrap();
         let record = &mut hub.lanes.get_mut(&task.id).unwrap().record;
         assert_eq!(record.info.title, title);
         record.info.title = "用户自定义标题".into();
@@ -1547,7 +1596,7 @@ pub(super) mod tests {
             tool(&s, "guide_task", "guide", guidance).await.unwrap().0["duplicate"],
             true
         );
-        assert_eq!(s.tasks.lock().unwrap().lanes[tid].record.queue.len(), 1);
+        assert_eq!(s.tasks.hub.lock().unwrap().lanes[tid].record.queue.len(), 1);
         assert!(
             tool(&s, "get_task", "get", json!({"task_id":tid}))
                 .await
@@ -1561,7 +1610,7 @@ pub(super) mod tests {
         assert!(worker.snapshot().unwrap().turn.unwrap().cancelling);
         finish(&s, tid, Ok(())).unwrap();
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[tid].record.info.phase,
+            s.tasks.hub.lock().unwrap().lanes[tid].record.info.phase,
             TaskPhase::Interrupted
         );
         main_turn(&s, "main-two");
@@ -1590,7 +1639,7 @@ pub(super) mod tests {
         let mut s = fixture();
         orchestration::initialize(&s).unwrap();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
+        s.conversation.commands = tx;
         add(&s, "GOOG", "").await;
         add(&s, "MSFT", "").await;
         let a = claim(&s).unwrap().unwrap();
@@ -1601,7 +1650,8 @@ pub(super) mod tests {
         orchestration::deliver(&s).unwrap();
         assert!(rx.try_recv().is_err());
         // Reopen the durable state before delivery, as on Runtime restart.
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+        s.conversation.inner.lock().unwrap().store =
+            Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         s.turn(None);
         orchestration::initialize(&s).unwrap();
         orchestration::deliver(&s).unwrap();
@@ -1609,7 +1659,8 @@ pub(super) mod tests {
         assert!(req.request_id.starts_with(orchestration::RESULT_PREFIX));
         assert!(req.text.contains("Result GOOG") && req.text.contains("Result MSFT"));
         assert_eq!(
-            s.inner
+            s.conversation
+                .inner
                 .lock()
                 .unwrap()
                 .store
@@ -1622,11 +1673,13 @@ pub(super) mod tests {
         orchestration::deliver(&s).unwrap();
         assert!(rx.try_recv().is_err());
         s.turn(None);
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+        s.conversation.inner.lock().unwrap().store =
+            Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         orchestration::deliver(&s).unwrap();
         assert!(rx.try_recv().is_err());
         assert_eq!(
-            s.inner
+            s.conversation
+                .inner
                 .lock()
                 .unwrap()
                 .store
@@ -1641,7 +1694,7 @@ pub(super) mod tests {
     async fn upgrade_does_not_summarize_old_reports_and_budget_defers_new_results() {
         let mut s = fixture();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
+        s.conversation.commands = tx;
         add(&s, "historical", "").await;
         let a = claim(&s).unwrap().unwrap();
         succeed(&s, &a.0, &a.1, &a.2);
@@ -1671,7 +1724,7 @@ pub(super) mod tests {
         let s = fixture();
         for n in 0..27 {
             let task = add(&s, &format!("GOOG 财报 {n:02}"), "").await;
-            let mut hub = s.tasks.lock().unwrap();
+            let mut hub = s.tasks.hub.lock().unwrap();
             let i = &mut hub.lanes.get_mut(&task.id).unwrap().record.info;
             i.phase = match n % 6 {
                 0 => TaskPhase::Queued,
@@ -1818,7 +1871,7 @@ pub(super) mod tests {
         let s = fixture();
         let initial = add(&s, "historical report", "").await;
         {
-            let mut hub = s.tasks.lock().unwrap();
+            let mut hub = s.tasks.hub.lock().unwrap();
             let lane = hub.lanes.get(&initial.id).unwrap();
             let template = lane.record.clone();
             let worker = lane.service.clone();
@@ -1932,7 +1985,7 @@ pub(super) mod tests {
         assert_eq!(detail["task"]["phase"], "cancelled");
         // Persistence retains the actual execution phase, not an ambiguous archive flag.
         let mut reopened = s.clone();
-        reopened.tasks = Arc::new(Mutex::new(Hub::default()));
+        reopened.tasks.hub = Arc::new(Mutex::new(Hub::default()));
         restore(&reopened).unwrap();
         assert_eq!(
             page(
@@ -1956,6 +2009,7 @@ pub(super) mod tests {
         let a = add(&s, "waits", "").await;
         let (_, lane, req) = claim(&s).unwrap().unwrap();
         let mid = lane
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -1964,7 +2018,8 @@ pub(super) mod tests {
             .unwrap()
             .user_message_id
             .clone();
-        lane.inner
+        lane.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -1986,25 +2041,25 @@ pub(super) mod tests {
             .unwrap();
         finish(&s, &a.id, Ok(())).unwrap();
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &a.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &a.id),
             Some(TaskPhase::Waiting)
         );
         assert!(claim(&s).unwrap().is_none());
         let b = add(&s, "can use the freed slot", "").await;
         assert_eq!(claim(&s).unwrap().unwrap().0, b.id);
-        s.tasks = Arc::new(Mutex::new(Hub::default()));
+        s.tasks.hub = Arc::new(Mutex::new(Hub::default()));
         restore(&s).unwrap();
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &a.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &a.id),
             Some(TaskPhase::Waiting)
         );
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &b.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &b.id),
             Some(TaskPhase::Interrupted)
         );
         let _ = guide(&s, &a.id, "queued-guidance", "extra guidance").await;
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &a.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &a.id),
             Some(TaskPhase::Waiting)
         );
         let _ = cancel(State(s.clone()), headers(), Path(a.id.clone()))
@@ -2033,7 +2088,8 @@ pub(super) mod tests {
         other.id = "other".into();
         other.provider = "other".into();
         other.auth_ref = "providers.json:other".into();
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -2056,7 +2112,8 @@ pub(super) mod tests {
         replacement.auth_ref = "providers.json:openai".into();
         execution::private_json(&s.data.join("providers.json"), &json!([{"id":"openai","endpoint":"https://api.openai.com/v1/chat/completions","allowed_hosts":["api.openai.com"],"api_key":"test-only","protocol":"openai_chat"}])).unwrap();
         replacement.revision = 2;
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -2069,9 +2126,9 @@ pub(super) mod tests {
             page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
             "deepseek"
         );
-        let worker = s.tasks.lock().unwrap().lanes[&task.id].service.clone();
+        let worker = s.tasks.hub.lock().unwrap().lanes[&task.id].service.clone();
         agent::assign_new(
-            &mut worker.inner.lock().unwrap().store,
+            &mut worker.conversation.inner.lock().unwrap().store,
             replacement.resolve().unwrap(),
         )
         .unwrap();
@@ -2079,7 +2136,7 @@ pub(super) mod tests {
             page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
             "openai"
         );
-        persist(&s, &s.tasks.lock().unwrap()).unwrap();
+        persist(&s, &s.tasks.hub.lock().unwrap()).unwrap();
         restore(&s).unwrap();
         assert_eq!(
             page(&s, &TaskQuery::default()).unwrap().items[0].executor_icon,
@@ -2108,7 +2165,7 @@ pub(super) mod tests {
             .await
             .is_err()
         );
-        assert!(s.tasks.lock().unwrap().lanes.is_empty());
+        assert!(s.tasks.hub.lock().unwrap().lanes.is_empty());
         let policy = agent::routing::Policy {
             allowed_tool_profiles: ["alternate".into()].into(),
             ..Default::default()
@@ -2163,10 +2220,11 @@ pub(super) mod tests {
             .0,
             StatusCode::CONFLICT
         );
-        let mut profiles = agent::profiles(&s.inner.lock().unwrap().store).unwrap();
+        let mut profiles = agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap();
         profiles[1].revision = 2;
         profiles[1].model = "new-model".into();
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -2185,7 +2243,10 @@ pub(super) mod tests {
             1
         );
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&task.id].record.info.routing,
+            s.tasks.hub.lock().unwrap().lanes[&task.id]
+                .record
+                .info
+                .routing,
             task.routing
         );
         for requirements in [TaskRequirements {
@@ -2303,7 +2364,7 @@ pub(super) mod tests {
             "alternate"
         );
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[tid]
+            s.tasks.hub.lock().unwrap().lanes[tid]
                 .record
                 .info
                 .routing
@@ -2315,10 +2376,11 @@ pub(super) mod tests {
         let _ = cancel(State(s.clone()), headers(), Path(tid.into()))
             .await
             .unwrap();
-        let mut profiles = agent::profiles(&s.inner.lock().unwrap().store).unwrap();
+        let mut profiles = agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap();
         profiles[1].revision = 2;
         profiles[1].model = "later".into();
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -2359,13 +2421,19 @@ pub(super) mod tests {
         worker.phase(AgentPhase::Failed, Some("stop unconfirmed".into()));
         finish(&s, &first.id, Ok(())).unwrap();
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&first.id].record.info.phase,
+            s.tasks.hub.lock().unwrap().lanes[&first.id]
+                .record
+                .info
+                .phase,
             TaskPhase::Failed
         );
         assert!(claim(&s).unwrap().is_none());
         restore(&s).unwrap();
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&first.id].record.info.phase,
+            s.tasks.hub.lock().unwrap().lanes[&first.id]
+                .record
+                .info
+                .phase,
             TaskPhase::Interrupted
         );
         assert_eq!(claim(&s).unwrap().unwrap().0, second.id);
@@ -2375,10 +2443,12 @@ pub(super) mod tests {
         s.data = std::env::temp_dir()
             .join(format!("pot-tasks-{}", id()))
             .join("product");
-        s.sandboxes = Arc::new(sandbox::Manager::open(&s.data).unwrap());
+        s.environment_service.manager = Arc::new(sandbox::Manager::open(&s.data).unwrap());
+        s.agent_service.resources = Arc::new(AgentResources::paths(&s.data));
         s.workspace = s.data.join("workspace");
         std::fs::create_dir_all(&s.workspace).unwrap();
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+        s.conversation.inner.lock().unwrap().store =
+            Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         s.execution = Some(execution::Config {
             api_key: "fixture".into(),
             model: "deepseek-v4-flash".into(),
@@ -2398,6 +2468,65 @@ pub(super) mod tests {
         )
         .unwrap();
         s
+    }
+    #[tokio::test]
+    async fn legacy_assignment_upgrade_preserves_task_context_and_is_idempotent() {
+        let root = fixture();
+        let task = add(&root, "persist this task", "").await;
+        let worker = owner(&root, &task.id).unwrap();
+        let context = json!({"type":"context","version":1,"messages":[],"marker":"preserved"});
+        pot_storage::threads::save_context(
+            &worker.conversation.inner.lock().unwrap().store,
+            &context,
+        )
+        .unwrap();
+        let old = root
+            .conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .get("tasks.v2")
+            .unwrap()
+            .unwrap();
+        let mut legacy: Value = serde_json::from_str(&old).unwrap();
+        legacy["tasks"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("assignment");
+        root.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set("tasks.v2", &legacy.to_string())
+            .unwrap();
+        for _ in 0..2 {
+            restore(&root).unwrap();
+            let worker = owner(&root, &task.id).unwrap();
+            assert_eq!(
+                pot_storage::threads::load_context(
+                    &worker.conversation.inner.lock().unwrap().store
+                )
+                .unwrap(),
+                Some(context.clone())
+            );
+            let hub = root.tasks.hub.lock().unwrap();
+            let record = &hub.lanes[&task.id].record;
+            assert_eq!(record.info.id, task.id);
+            assert_eq!(record.info.phase, TaskPhase::Queued);
+            record
+                .assignment
+                .as_ref()
+                .unwrap()
+                .validate_local(&root.runtime_id, &task.id, &task.sandbox_id)
+                .unwrap();
+        }
+        let mut wrong = root.clone();
+        wrong.runtime_id = id();
+        assert!(restore(&wrong).is_err());
+        assert!(owner(&root, &task.id).is_ok());
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }
     async fn add(s: &Service, text: &str, resource: &str) -> TaskInfo {
         create(
@@ -2431,6 +2560,7 @@ pub(super) mod tests {
     }
     pub(crate) fn succeed(root: &Service, task: &str, child: &Service, req: &SendMessage) {
         let mut m = child
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -2504,7 +2634,7 @@ pub(super) mod tests {
         assert!(s.snapshot().unwrap().turn.is_none());
         let mut front = s.clone();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        front.commands = tx;
+        front.conversation.commands = tx;
         let accepted = super::super::send(
             State(front.clone()),
             headers(),
@@ -2547,7 +2677,8 @@ pub(super) mod tests {
         );
         assert!(claim(&s).unwrap().is_none());
         assert!(
-            s.inner
+            s.conversation
+                .inner
                 .lock()
                 .unwrap()
                 .store
@@ -2581,7 +2712,10 @@ pub(super) mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.0, StatusCode::CONFLICT);
-        assert_eq!(s.tasks.lock().unwrap().lanes[&a.id].record.queue.len(), 2);
+        assert_eq!(
+            s.tasks.hub.lock().unwrap().lanes[&a.id].record.queue.len(),
+            2
+        );
         assert!(!ack.duplicate);
         let (tid, worker, req) = claim(&s).unwrap().unwrap();
         succeed(&s, &tid, &worker, &req);
@@ -2607,9 +2741,14 @@ pub(super) mod tests {
         assert!(a_worker.snapshot().unwrap().turn.unwrap().cancelling);
         assert!(!b_worker.snapshot().unwrap().turn.unwrap().cancelling);
         finish(&s, &a.id, Ok(())).unwrap();
-        assert!(s.tasks.lock().unwrap().lanes[&a.id].record.queue.is_empty());
+        assert!(
+            s.tasks.hub.lock().unwrap().lanes[&a.id]
+                .record
+                .queue
+                .is_empty()
+        );
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&a.id].record.info.phase,
+            s.tasks.hub.lock().unwrap().lanes[&a.id].record.info.phase,
             TaskPhase::Cancelled
         );
     }
@@ -2621,15 +2760,21 @@ pub(super) mod tests {
         guide(&s, &a.id, "g", "later").await;
         let b = add(&s, "not started", "").await;
         let path = s.data.clone();
+        let runtime_id = s.runtime_id.clone();
         drop(worker);
         drop(s);
         let mut next = crate::tests::service();
         next.data = path.clone();
+        next.runtime_id = runtime_id;
         next.workspace = path.join("workspace");
-        next.inner.lock().unwrap().store = Store::open(&path.join("pot-v2.sqlite")).unwrap();
+        next.conversation.inner.lock().unwrap().store =
+            Store::open(&path.join("pot-v2.sqlite")).unwrap();
         restore(&next).unwrap();
         assert_eq!(
-            next.tasks.lock().unwrap().lanes[&a.id].record.info.phase,
+            next.tasks.hub.lock().unwrap().lanes[&a.id]
+                .record
+                .info
+                .phase,
             TaskPhase::Interrupted
         );
         let (id, _, req) = claim(&next).unwrap().unwrap();
@@ -2697,7 +2842,7 @@ pub(super) mod tests {
             .0;
         assert_eq!(cancelled["stopping"], false);
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&first].record.info.phase,
+            s.tasks.hub.lock().unwrap().lanes[&first].record.info.phase,
             TaskPhase::Complete
         );
     }
@@ -2720,7 +2865,10 @@ pub(super) mod tests {
         let s = fixture();
         let a = add(&s, "A", "").await;
         let b = add(&s, "B", "").await;
-        let token = s.tasks.lock().unwrap().lanes[&a.id].service.token.clone();
+        let token = s.tasks.hub.lock().unwrap().lanes[&a.id]
+            .service
+            .token
+            .clone();
         let mut h = HeaderMap::new();
         h.insert("authorization", format!("Bearer {token}").parse().unwrap());
         assert_eq!(
@@ -2802,7 +2950,7 @@ pub(super) mod tests {
             .0;
         assert_eq!(response["stopping"], true);
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &task.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
             Some(TaskPhase::Running)
         );
         assert!(worker.snapshot().unwrap().turn.unwrap().cancelling);
@@ -2824,11 +2972,14 @@ pub(super) mod tests {
         );
         finish(&s, &task.id, Ok(())).unwrap();
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &task.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
             Some(TaskPhase::Interrupted)
         );
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&task.id].record.queue.len(),
+            s.tasks.hub.lock().unwrap().lanes[&task.id]
+                .record
+                .queue
+                .len(),
             1
         );
         assert!(claim(&s).unwrap().is_none());
@@ -2867,13 +3018,13 @@ pub(super) mod tests {
                 response
             );
             assert!(
-                s.tasks.lock().unwrap().lanes[&task.id]
+                s.tasks.hub.lock().unwrap().lanes[&task.id]
                     .record
                     .queue
                     .is_empty()
             );
             assert_eq!(
-                task_phase(&s.tasks.lock().unwrap(), &task.id),
+                task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
                 Some(TaskPhase::Cancelled)
             );
             assert_eq!(
@@ -2897,7 +3048,7 @@ pub(super) mod tests {
             restore(&s).unwrap();
             assert!(claim(&s).unwrap().is_none());
             assert_eq!(
-                task_phase(&s.tasks.lock().unwrap(), &task.id),
+                task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
                 Some(TaskPhase::Cancelled)
             );
             guide(&s, &task.id, "restart", "new work").await;
@@ -2932,14 +3083,14 @@ pub(super) mod tests {
             .is_err()
         );
         assert!(
-            s.tasks.lock().unwrap().lanes[&task.id]
+            s.tasks.hub.lock().unwrap().lanes[&task.id]
                 .record
                 .queue
                 .is_empty()
         );
         finish(&s, &task.id, Ok(())).unwrap();
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &task.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
             Some(TaskPhase::Cancelled)
         );
         assert!(claim(&s).unwrap().is_none());
@@ -2952,6 +3103,7 @@ pub(super) mod tests {
         let (_, worker, req) = claim(&s).unwrap().unwrap();
         let mid = worker.snapshot().unwrap().turn.unwrap().user_message_id;
         worker
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -2978,11 +3130,14 @@ pub(super) mod tests {
             .await
             .unwrap();
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &task.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
             Some(TaskPhase::Interrupted)
         );
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&task.id].record.queue.len(),
+            s.tasks.hub.lock().unwrap().lanes[&task.id]
+                .record
+                .queue
+                .len(),
             1
         );
         assert!(s.usage.lock().unwrap().waiting(&task.id).unwrap().is_none());
@@ -3007,15 +3162,18 @@ pub(super) mod tests {
             .0;
         assert_eq!(response["stopping"], false);
         assert_eq!(
-            task_phase(&s.tasks.lock().unwrap(), &task.id),
+            task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
             Some(TaskPhase::Interrupted)
         );
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&task.id].record.queue.len(),
+            s.tasks.hub.lock().unwrap().lanes[&task.id]
+                .record
+                .queue
+                .len(),
             1
         );
         {
-            let mut hub = s.tasks.lock().unwrap();
+            let mut hub = s.tasks.hub.lock().unwrap();
             hub.lanes
                 .get_mut(&task.id)
                 .unwrap()
@@ -3065,7 +3223,10 @@ pub(super) mod tests {
             true
         );
         assert_eq!(
-            s.tasks.lock().unwrap().lanes[&task.id].record.queue.len(),
+            s.tasks.hub.lock().unwrap().lanes[&task.id]
+                .record
+                .queue
+                .len(),
             1
         );
         let (_, worker, request) = claim(&s).unwrap().unwrap();
@@ -3089,11 +3250,11 @@ pub(super) mod tests {
                 .any(|m| m.id == first["message_id"] && m.role == Role::System)
         );
         succeed(&s, &task.id, &worker, &request);
-        let saved = task_phase(&s.tasks.lock().unwrap(), &task.id);
+        let saved = task_phase(&s.tasks.hub.lock().unwrap(), &task.id);
         let _ = tool(&s, "send_message", "idle-message", args)
             .await
             .unwrap();
-        assert_eq!(task_phase(&s.tasks.lock().unwrap(), &task.id), saved);
+        assert_eq!(task_phase(&s.tasks.hub.lock().unwrap(), &task.id), saved);
         assert!(claim(&s).unwrap().is_none());
         restore(&s).unwrap();
         guide(&s, &task.id, "resume", "review new reference").await;
@@ -3158,7 +3319,14 @@ pub(super) mod tests {
         let task = add(&s, "wait target", "").await;
         let stop = async {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            s.inner.lock().unwrap().turn.as_mut().unwrap().cancelling = true;
+            s.conversation
+                .inner
+                .lock()
+                .unwrap()
+                .turn
+                .as_mut()
+                .unwrap()
+                .cancelling = true;
             s.cancel_notify.notify_waiters();
         };
         let wait_args = json!({"task_ids":[task.id],"timeout_ms":60000});

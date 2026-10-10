@@ -164,7 +164,7 @@ pub(super) fn page(root: &Service, q: QueryPage) -> ApiResult<SchedulePage> {
     if !(1..=50).contains(&limit) || !["", "all", "enabled", "paused"].contains(&q.scope.as_str()) {
         return Err(invalid("无效的计划查询"));
     }
-    let hub = root.tasks.lock().unwrap();
+    let hub = root.tasks.hub.lock().unwrap();
     let plans: Vec<_> = hub
         .schedules
         .plans
@@ -247,7 +247,7 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
         .filter(|s| !s.is_empty() && s.len() <= 128)
         .ok_or_else(|| invalid("缺少请求编号"))?;
     let action = req["action"].as_str().ok_or_else(|| invalid("缺少操作"))?;
-    let mut hub = root.tasks.lock().unwrap();
+    let mut hub = root.tasks.hub.lock().unwrap();
     if let Some((old, result)) = hub.schedules.receipts.get(key) {
         if old != &req {
             return Err(error(
@@ -278,7 +278,8 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             let mut spec: ScheduleSpec =
                 serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
             spec.sandbox_id = root
-                .sandboxes
+                .environment_service
+                .manager
                 .assignment(&spec.sandbox_id)
                 .map_err(invalid)?;
             validate(&spec).map_err(invalid)?;
@@ -349,7 +350,8 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                 spec.sandbox_id = if spec.sandbox_id.is_empty() {
                     plan.info.spec.sandbox_id.clone()
                 } else {
-                    root.sandboxes
+                    root.environment_service
+                        .manager
                         .assignment(&spec.sandbox_id)
                         .map_err(invalid)?
                 };
@@ -500,7 +502,7 @@ fn report(sid: &str, run: &ScheduleRun, title: &str) -> Message {
     }
 }
 pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
-    let mut hub = root.tasks.lock().unwrap();
+    let mut hub = root.tasks.hub.lock().unwrap();
     // Reconcile a cancelled queued task or a worker interrupted across restart.
     let recovery_before = hub.schedules.clone();
     let mut changed = false;
@@ -547,6 +549,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
         hub.schedules.outbox.remove(0);
         let serialized = tasks::serialized(&hub)?;
         let saved = root
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -554,7 +557,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
             .save_with_metadata(message.clone(), Some(("tasks.v2", &serialized)));
         match saved {
             Ok(e) => {
-                let _ = root.events.send(e);
+                let _ = root.conversation.events.send(e);
             }
             Err(e) => {
                 hub.schedules.outbox.insert(0, message);
@@ -563,7 +566,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
         }
     }
     if !agent::configured(root)
-        || root.inner.lock().unwrap().agent.phase != AgentPhase::Ready
+        || root.conversation.inner.lock().unwrap().agent.phase != AgentPhase::Ready
         || root.budget()?.is_some_and(|b| b.remaining() == 0)
     {
         return Ok(());
@@ -742,7 +745,9 @@ pub(super) fn validate_bindings(root: &Service, book: &Book) -> Result<()> {
             !plan.info.spec.sandbox_id.is_empty(),
             "Persisted schedule Sandbox assignment missing"
         );
-        root.sandboxes.assignment(&plan.info.spec.sandbox_id)?;
+        root.environment_service
+            .manager
+            .assignment(&plan.info.spec.sandbox_id)?;
     }
     Ok(())
 }
@@ -833,11 +838,14 @@ mod tests {
         let sid = create(&s, spec(), 0);
         tick(&s, 600000).unwrap();
         tick(&s, 600000).unwrap();
-        assert_eq!(s.tasks.lock().unwrap().schedules.plans[&sid].runs.len(), 1);
+        assert_eq!(
+            s.tasks.hub.lock().unwrap().schedules.plans[&sid].runs.len(),
+            1
+        );
         assert_eq!(tasks::page(&s, &TaskQuery::default()).unwrap().total, 1);
         tick(&s, 660000).unwrap();
         assert_eq!(
-            s.tasks.lock().unwrap().schedules.plans[&sid].runs[1].state,
+            s.tasks.hub.lock().unwrap().schedules.plans[&sid].runs[1].state,
             "skipped_overlap"
         );
         let a = tasks::claim(&s).unwrap().unwrap();
@@ -853,10 +861,10 @@ mod tests {
         );
         // Restart marks the active task interrupted; scheduler reconciles and does not replay it.
         let mut reopened = s.clone();
-        reopened.tasks = Arc::new(Mutex::new(tasks::Hub::default()));
+        reopened.tasks.hub = Arc::new(Mutex::new(tasks::Hub::default()));
         tasks::restore(&reopened).unwrap();
         tick(&reopened, 900000).unwrap();
-        let hub = reopened.tasks.lock().unwrap();
+        let hub = reopened.tasks.hub.lock().unwrap();
         assert_eq!(hub.schedules.plans[&sid].runs[0].state, "interrupted");
         assert!(hub.schedules.plans[&sid].runs[0].finished_at_ms.is_some());
         drop(hub);
@@ -875,7 +883,7 @@ mod tests {
         assert_eq!(reopened.snapshot().unwrap().messages.len(), 1);
         action(&reopened, &sid, "resume", 900000);
         assert_eq!(
-            reopened.tasks.lock().unwrap().schedules.plans[&sid]
+            reopened.tasks.hub.lock().unwrap().schedules.plans[&sid]
                 .info
                 .next_at_ms,
             Some(960000)
@@ -896,7 +904,7 @@ mod tests {
         let sid = create(&s, p, 0);
         tick(&s, 600000).unwrap();
         assert_eq!(
-            s.tasks.lock().unwrap().schedules.plans[&sid].runs[0].state,
+            s.tasks.hub.lock().unwrap().schedules.plans[&sid].runs[0].state,
             "skipped_missed"
         );
         assert_eq!(tasks::page(&s, &TaskQuery::default()).unwrap().total, 0);
@@ -920,14 +928,20 @@ mod tests {
         let id = create(&s, once, at);
         tick(&s, ms("2026-10-05T01:00:01Z")).unwrap();
         assert!(
-            !s.tasks.lock().unwrap().schedules.plans[&id]
+            !s.tasks.hub.lock().unwrap().schedules.plans[&id]
                 .info
                 .spec
                 .enabled
         );
-        assert_eq!(s.tasks.lock().unwrap().schedules.plans[&id].runs.len(), 1);
+        assert_eq!(
+            s.tasks.hub.lock().unwrap().schedules.plans[&id].runs.len(),
+            1
+        );
         tick(&s, ms("2026-10-06T01:00:00Z")).unwrap();
-        assert_eq!(s.tasks.lock().unwrap().schedules.plans[&id].runs.len(), 1);
+        assert_eq!(
+            s.tasks.hub.lock().unwrap().schedules.plans[&id].runs.len(),
+            1
+        );
     }
     #[test]
     fn changes_are_quiet_and_failures_are_visible_without_advancing_baseline() {
@@ -944,11 +958,11 @@ mod tests {
         let a = tasks::claim(&s).unwrap().unwrap();
         tasks::tests::succeed(&s, &a.0, &a.1, &a.2); // Missing report is not silently "no change".
         assert_eq!(
-            tasks::task_phase(&s.tasks.lock().unwrap(), &a.0),
+            tasks::task_phase(&s.tasks.hub.lock().unwrap(), &a.0),
             Some(TaskPhase::Failed)
         );
         assert_eq!(s.snapshot().unwrap().messages.len(), 3);
-        let hub = s.tasks.lock().unwrap();
+        let hub = s.tasks.hub.lock().unwrap();
         assert_eq!(
             hub.schedules.plans[&sid].info.baseline.as_deref(),
             Some("b")
@@ -972,12 +986,13 @@ mod tests {
         result(&a.1, "old-goal");
         tasks::tests::succeed(&s, &a.0, &a.1, &a.2);
         assert!(
-            s.tasks.lock().unwrap().schedules.plans[&sid]
+            s.tasks.hub.lock().unwrap().schedules.plans[&sid]
                 .info
                 .baseline
                 .is_none()
         );
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -987,7 +1002,7 @@ mod tests {
         assert!(tick(&s, 130000).is_err());
         assert!(tasks::claim(&s).unwrap().is_none());
         assert_eq!(
-            s.tasks.lock().unwrap().schedules.plans[&sid]
+            s.tasks.hub.lock().unwrap().schedules.plans[&sid]
                 .info
                 .next_at_ms,
             Some(130000)
@@ -996,10 +1011,17 @@ mod tests {
     #[test]
     fn legacy_task_metadata_survives_schedule_migration() {
         let s = tasks::tests::fixture();
-        s.inner.lock().unwrap().store.set("tasks.v1", "[]").unwrap();
+        s.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set("tasks.v1", "[]")
+            .unwrap();
         tasks::restore(&s).unwrap();
         assert!(
-            s.inner
+            s.conversation
+                .inner
                 .lock()
                 .unwrap()
                 .store
@@ -1009,7 +1031,7 @@ mod tests {
         );
         create(&s, spec(), 0);
         let mut next = s.clone();
-        next.tasks = Arc::new(Mutex::new(tasks::Hub::default()));
+        next.tasks.hub = Arc::new(Mutex::new(tasks::Hub::default()));
         tasks::restore(&next).unwrap();
         assert_eq!(page(&next, QueryPage::default()).unwrap().total, 1);
     }
@@ -1030,14 +1052,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            s.tasks.lock().unwrap().schedules.plans[&sid]
+            s.tasks.hub.lock().unwrap().schedules.plans[&sid]
                 .info
                 .spec
                 .sandbox_id,
             "default"
         );
         let mut reopened = s.clone();
-        reopened.tasks = Arc::new(Mutex::new(tasks::Hub::default()));
+        reopened.tasks.hub = Arc::new(Mutex::new(tasks::Hub::default()));
         tasks::restore(&reopened).unwrap();
         apply(
             &reopened,

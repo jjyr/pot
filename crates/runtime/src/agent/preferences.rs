@@ -17,7 +17,7 @@ fn stored(store: &Store) -> Result<Preferences> {
         .unwrap_or_else(|| Ok(Preferences::default()))
 }
 pub fn read(s: &Service) -> Result<Preferences> {
-    stored(&s.inner.lock().unwrap().store)
+    stored(&s.conversation.inner.lock().unwrap().store)
 }
 
 /// Save both the mutation and its result receipt in one transaction. Retries
@@ -39,8 +39,8 @@ pub fn replace(s: &Service, request: &str, text: &str, revision: u64) -> ApiResu
     }
     // Serialize with task creation so a preference edit cannot race between
     // revision validation and persisting the task's immutable decision.
-    let _hub = s.tasks.lock().unwrap();
-    let mut inner = s.inner.lock().unwrap();
+    let _hub = s.tasks.hub.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     let receipt = format!("execution_preferences.receipt:{request}");
     if let Some(raw) = inner.store.get(&receipt).map_err(internal)? {
         let old: Value = serde_json::from_str(&raw).map_err(|e| internal(e.into()))?;
@@ -95,7 +95,7 @@ pub fn inspect(s: &Service) -> Result<Value> {
     initialize(s)?;
     let prefs = read(s)?;
     let policy = routing::policy(s)?;
-    let profiles = profiles(&s.inner.lock().unwrap().store)?;
+    let profiles = profiles(&s.conversation.inner.lock().unwrap().store)?;
     let catalog: Vec<_> = profiles
         .iter()
         .map(|p| {
@@ -175,7 +175,8 @@ mod tests {
             replace(&s, "save", "different", 0).unwrap_err().0,
             StatusCode::CONFLICT
         );
-        s.inner.lock().unwrap().store = Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
+        s.conversation.inner.lock().unwrap().store =
+            Store::open(&s.data.join("pot-v2.sqlite")).unwrap();
         assert_eq!(read(&s).unwrap(), edited);
         assert_eq!(replace(&s, "save", text, 0).unwrap(), first);
         assert_eq!(read(&s).unwrap(), edited);
@@ -353,14 +354,15 @@ mod tests {
     async fn catalog_is_credential_free_and_excludes_unauthorized_profiles() {
         let s = tasks::tests::fixture();
         initialize(&s).unwrap();
-        let mut profiles = profiles(&s.inner.lock().unwrap().store).unwrap();
+        let mut profiles = profiles(&s.conversation.inner.lock().unwrap().store).unwrap();
         let mut unauthorized = profiles[0].clone();
         unauthorized.id = "unauthorized".into();
         unauthorized.name = "Unauthorized".into();
         unauthorized.provider = "missing".into();
         unauthorized.auth_ref = "providers.json:missing".into();
         profiles.push(unauthorized);
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store
@@ -468,7 +470,7 @@ mod integration_tests {
             }));
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let (tx, mut rx) = mpsc::unbounded_channel();
-        s.commands = tx;
+        s.conversation.commands = tx;
         let _ = crate::send(
             State(s.clone()),
             tasks::tests::headers(),

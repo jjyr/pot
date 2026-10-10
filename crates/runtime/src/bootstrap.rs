@@ -6,45 +6,56 @@ pub struct RuntimeConfig {
     pub workspace: PathBuf,
 }
 pub struct Backend {
-    lock: Arc<std::fs::File>,
-    state: Service,
+    host: host::Host,
+    state: Option<Service>,
+    activated: std::sync::atomic::AtomicBool,
     main: Option<tokio::task::JoinHandle<()>>,
     coordinator: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 impl Backend {
     pub fn instance_lock(&self) -> Arc<std::fs::File> {
-        self.lock.clone()
+        self.host.lock.clone()
     }
-    pub fn state(&self) -> Service {
+    pub fn state(&self) -> Result<Service> {
+        self.state
+            .clone()
+            .ok_or_else(|| anyhow!("Assistant service is disabled"))
+    }
+    pub fn optional_state(&self) -> Option<Service> {
         self.state.clone()
     }
+    pub fn host(&self) -> &host::Host {
+        &self.host
+    }
     pub fn data_dir(&self) -> &std::path::Path {
-        &self.state.data
+        &self.host.data
     }
     pub fn endpoint(&self, port: u16) -> RuntimeEndpoint {
-        RuntimeEndpoint {
-            api_version: API_VERSION,
-            port,
-            token: self.state.token.clone(),
-            boot_id: self.state.boot.clone(),
-        }
+        self.host.endpoint(port)
     }
     /// Called after the Server has published its authenticated internal endpoint.
     pub fn activate(&self) -> Result<()> {
-        let mut coordinator = self.coordinator.lock().unwrap();
         anyhow::ensure!(
-            coordinator.is_none() && !self.state.stopping(),
-            "Backend already activated or stopped"
+            !self
+                .activated
+                .swap(true, std::sync::atomic::Ordering::SeqCst),
+            "Backend already activated"
         );
-        orchestration::initialize(&self.state)?;
-        tasks::restore(&self.state)?;
-        *coordinator = Some(tasks::start(self.state.clone()));
+        if let Some(state) = &self.state {
+            orchestration::initialize(state)?;
+            tasks::restore(state)?;
+            *self.coordinator.lock().unwrap() = Some(tasks::start(state.clone()));
+        }
         Ok(())
     }
+
     pub async fn shutdown(&mut self) {
-        self.state.stop.send_replace(true);
-        tasks::request_shutdown(&self.state);
-        terminal::shutdown(&self.state).await;
+        self.host.request_stop();
+        if let Some(state) = &self.state {
+            state.stop.send_replace(true);
+            tasks::request_shutdown(state);
+            terminal::shutdown(state).await;
+        }
         let coordinator = self.coordinator.lock().unwrap().take();
         if let Some(mut coordinator) = coordinator {
             settle(&mut coordinator).await;
@@ -52,13 +63,18 @@ impl Backend {
         if let Some(mut main) = self.main.take() {
             settle(&mut main).await;
         }
-        if let Err(error) = sandbox::shutdown(&self.state).await {
+        if let Some(state) = &self.state {
+            if let Err(error) = sandbox::shutdown(state).await {
+                eprintln!("{error}");
+            }
+        } else if let Err(error) = self.host.shutdown().await {
             eprintln!("{error}");
         }
     }
 }
 pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
-    initialize_with_agent_executor(config, Arc::new(pot_agent::Agent::default())).await
+    let composition = host::Composition::load(&config.data)?;
+    initialize_composition(config, composition, vec![]).await
 }
 /// Embedders can install code-level tools, context transforms and token estimation.
 pub async fn initialize_with_agent_executor(
@@ -79,25 +95,18 @@ async fn initialize_with_providers_and_agent(
     agent_executor: Arc<pot_agent::Agent>,
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
 ) -> Result<Backend> {
+    let mut host = host::Host::open(&config.data, host::Composition::Assistant)?;
+    initialize_assistant(config, agent_executor, providers, &mut host).await
+}
+
+async fn initialize_assistant(
+    config: RuntimeConfig,
+    agent_executor: Arc<pot_agent::Agent>,
+    providers: Vec<Arc<dyn pot_sandbox::Provider>>,
+    host: &mut host::Host,
+) -> Result<Backend> {
     let data = config.data;
     std::fs::create_dir_all(&data)?;
-    use std::os::{
-        fd::AsRawFd,
-        unix::fs::{OpenOptionsExt, PermissionsExt},
-    };
-    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700))?;
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .mode(0o600)
-        .open(data.join("instance.lock"))?;
-    anyhow::ensure!(
-        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
-        "This data directory is already owned by another Pot instance"
-    );
-    let lock = Arc::new(lock);
     let workspace = config.workspace;
     std::fs::create_dir_all(&workspace)?;
     let execution_config = execution::execution_config(execution::Config::default(), &data)?;
@@ -109,50 +118,64 @@ async fn initialize_with_providers_and_agent(
     });
     let (events, _) = broadcast::channel(256);
     let (commands, mut rx) = mpsc::unbounded_channel();
+    let resources = AgentResources::paths(&data);
     let sandboxes = Arc::new(sandbox::Manager::with_providers(&data, providers)?);
+    host.attach_environment(sandboxes.clone());
     let permissions = Arc::new(permissions::Hub::open_with_legacy(
-        &sandboxes.agent_home.join("permissions.json"),
+        &resources.home.join("permissions.json"),
         &data.join("permissions-v1.sqlite"),
     )?);
     let s = Service {
-        permissions,
-        skill_selection: None,
-        #[cfg(test)]
-        test_tool_executor: None,
-        sandboxes,
-        sandbox_id: None,
-        usage: Arc::new(Mutex::new(usage::Ledger::open(
-            &data.join("usage-v2.sqlite"),
-        )?)),
-        usage_scope: "main".into(),
-        inner: Arc::new(Mutex::new(Inner {
-            store: Store::open(&data.join("pot-v2.sqlite"))?,
-            agent: AgentStatus {
-                model: String::new(),
-                phase: AgentPhase::NeedsConfiguration,
-                detail: Some("Open AI Configuration to select an Agent and model".into()),
-            },
-            turn: None,
-            model_requests: 0,
-        })),
-        events,
-        commands,
-        token: id(),
-        boot: id(),
-        workspace,
-        api_budget,
-        execution: Some(execution_config),
-        agent_upstream: "https://api.deepseek.com/chat/completions".into(),
-        is_worker: false,
-        data,
-        cancel_notify: Arc::new(tokio::sync::Notify::new()),
-        stop: tokio::sync::watch::channel(false).0,
-        tasks: Arc::new(Mutex::new(tasks::Hub::default())),
-        terminals: Arc::new(Mutex::new(terminal::Hub::default())),
-        agent_executor,
+        scope: OwnerScope {
+            runtime_id: host.runtime_id().into(),
+            skill_selection: None,
+            #[cfg(test)]
+            test_tool_executor: None,
+            sandbox_id: None,
+            usage: Arc::new(Mutex::new(usage::Ledger::open(
+                &data.join("usage-v2.sqlite"),
+            )?)),
+            usage_scope: "main".into(),
+            token: host.token.clone(),
+            boot: host.boot.clone(),
+            workspace,
+            api_budget,
+            execution: Some(execution_config),
+            agent_upstream: "https://api.deepseek.com/chat/completions".into(),
+            is_worker: false,
+            data: data.clone(),
+            cancel_notify: Arc::new(tokio::sync::Notify::new()),
+            stop: tokio::sync::watch::channel(false).0,
+        },
+        conversation: ConversationService {
+            inner: Arc::new(Mutex::new(Inner {
+                store: Store::open(&data.join("pot-v2.sqlite"))?,
+                agent: AgentStatus {
+                    model: String::new(),
+                    phase: AgentPhase::NeedsConfiguration,
+                    detail: Some("Open AI Configuration to select an Agent and model".into()),
+                },
+                turn: None,
+                model_requests: 0,
+            })),
+            events,
+            commands,
+        },
+        agent_service: AgentService {
+            executor: agent_executor,
+            resources: Arc::new(AgentResources::paths(&data)),
+        },
+        environment_service: EnvironmentService {
+            permissions,
+            manager: sandboxes,
+            terminals: Arc::new(Mutex::new(terminal::Hub::default())),
+        },
+        tasks: TaskService {
+            hub: Arc::new(Mutex::new(tasks::Hub::default())),
+        },
     };
     let configured = agent::configured(&s);
-    s.inner.lock().unwrap().store.set(
+    s.conversation.inner.lock().unwrap().store.set(
         "agent.setup.pending",
         if configured { "false" } else { "true" },
     )?;
@@ -189,7 +212,7 @@ async fn initialize_with_providers_and_agent(
                 }
             }
             let result = if use_agent {
-                agent::run(&worker, req).await
+                worker.runner().run(req).await
             } else {
                 Err(anyhow!("Configure a main Agent before sending messages"))
             };
@@ -203,8 +226,9 @@ async fn initialize_with_providers_and_agent(
         }
     });
     Ok(Backend {
-        lock,
-        state: s,
+        host: host.clone(),
+        state: Some(s),
+        activated: Default::default(),
         main: Some(main),
         coordinator: Mutex::new(None),
     })
@@ -221,7 +245,10 @@ async fn settle(handle: &mut tokio::task::JoinHandle<()>) {
 }
 impl Drop for Backend {
     fn drop(&mut self) {
-        self.state.stop.send_replace(true);
+        self.host.request_stop();
+        if let Some(state) = &self.state {
+            state.stop.send_replace(true);
+        }
         if let Some(main) = self.main.take() {
             main.abort();
         }
@@ -229,4 +256,39 @@ impl Drop for Backend {
             coordinator.abort();
         }
     }
+}
+
+/// Explicit capability assembly; disabled compositions never open assistant stores.
+pub async fn initialize_composition(
+    config: RuntimeConfig,
+    composition: host::Composition,
+    providers: Vec<Arc<dyn pot_sandbox::Provider>>,
+) -> Result<Backend> {
+    anyhow::ensure!(
+        composition.has_environments() || providers.is_empty(),
+        "Bare Runtime cannot register Sandbox Providers"
+    );
+    let mut host = host::Host::open(&config.data, composition)?;
+    if composition == host::Composition::Assistant {
+        return initialize_assistant(
+            config,
+            Arc::new(pot_agent::Agent::default()),
+            providers,
+            &mut host,
+        )
+        .await;
+    }
+    if composition == host::Composition::Environment {
+        host.attach_environment(Arc::new(sandbox::Manager::with_providers(
+            &config.data,
+            providers,
+        )?));
+    }
+    Ok(Backend {
+        host,
+        state: None,
+        activated: Default::default(),
+        main: None,
+        coordinator: Mutex::new(None),
+    })
 }

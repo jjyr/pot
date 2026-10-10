@@ -84,7 +84,7 @@ fn authorize(s: &Service, headers: &HeaderMap) -> ApiResult<()> {
 }
 pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     authorize(&s, &h)?;
-    let hub = s.terminals.lock().unwrap();
+    let hub = s.environment_service.terminals.lock().unwrap();
     Ok(Json(
         json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow(),"attached":p.attached.load(Ordering::SeqCst),"purpose":*p.purpose.lock().unwrap()})).collect::<Vec<_>>()}),
     ))
@@ -113,7 +113,7 @@ pub async fn create(
             "Invalid terminal purpose",
         ));
     }
-    let mut hub = s.terminals.lock().unwrap();
+    let mut hub = s.environment_service.terminals.lock().unwrap();
     if hub.sessions.len() >= MAX_SESSIONS {
         return Err(error(
             StatusCode::CONFLICT,
@@ -134,6 +134,7 @@ pub async fn close(
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h)?;
     let session = s
+        .environment_service
         .terminals
         .lock()
         .unwrap()
@@ -154,7 +155,12 @@ pub async fn close(
             break;
         }
     }
-    s.terminals.lock().unwrap().sessions.remove(&id);
+    s.environment_service
+        .terminals
+        .lock()
+        .unwrap()
+        .sessions
+        .remove(&id);
     Ok(Json(json!({"closed":true})))
 }
 pub async fn connect(
@@ -165,6 +171,7 @@ pub async fn connect(
 ) -> ApiResult<impl IntoResponse> {
     authorize(&s, &h)?;
     let session = s
+        .environment_service
         .terminals
         .lock()
         .unwrap()
@@ -229,6 +236,7 @@ fn kill_groups(pid: i32, fd: i32) {
 }
 pub async fn shutdown(s: &Service) {
     let sessions: Vec<_> = s
+        .environment_service
         .terminals
         .lock()
         .unwrap()
@@ -507,7 +515,8 @@ mod lifecycle_tests {
         .await
         .unwrap();
         assert!(
-            s.terminals
+            s.environment_service
+                .terminals
                 .lock()
                 .unwrap()
                 .sessions
@@ -536,7 +545,9 @@ mod lifecycle_tests {
             .await
             .unwrap()
             .0;
-        let session = s.terminals.lock().unwrap().sessions[shell["id"].as_str().unwrap()].clone();
+        let session = s.environment_service.terminals.lock().unwrap().sessions
+            [shell["id"].as_str().unwrap()]
+        .clone();
         assert!(
             create(
                 State(s.clone()),
@@ -546,7 +557,15 @@ mod lifecycle_tests {
             .await
             .is_err()
         );
-        assert_eq!(s.terminals.lock().unwrap().sessions.len(), 1);
+        assert_eq!(
+            s.environment_service
+                .terminals
+                .lock()
+                .unwrap()
+                .sessions
+                .len(),
+            1
+        );
         // A rejected command-injection request never creates another process or writes PTY input.
         shutdown(&s).await;
         assert!(session.exit.borrow().is_some());
@@ -572,6 +591,7 @@ mod lifecycle_tests {
         }
         assert!(create(State(s.clone()), auth(&s), request()).await.is_err());
         let id = s
+            .environment_service
             .terminals
             .lock()
             .unwrap()
@@ -583,7 +603,14 @@ mod lifecycle_tests {
         let _ = close(State(s.clone()), auth(&s), Path(id.clone()))
             .await
             .unwrap();
-        assert!(!s.terminals.lock().unwrap().sessions.contains_key(&id));
+        assert!(
+            !s.environment_service
+                .terminals
+                .lock()
+                .unwrap()
+                .sessions
+                .contains_key(&id)
+        );
         let _ = create(State(s.clone()), auth(&s), request()).await.unwrap();
         shutdown(&s).await;
     }
@@ -602,7 +629,8 @@ mod websocket_tests {
         let mut s = crate::tests::service();
         s.workspace = std::env::temp_dir();
         let session = spawn(&s.workspace, &Size { cols: 80, rows: 24 }).unwrap();
-        s.terminals
+        s.environment_service
+            .terminals
             .lock()
             .unwrap()
             .sessions

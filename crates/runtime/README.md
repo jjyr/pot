@@ -94,3 +94,20 @@ mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/
 Real CLI/VM tests use isolated Host homes and local mock models, require Apple Virtualization privileges, and make no paid model calls. See [dated acceptance](../../docs/validation/host-pot-agent-20261006.md) for tested scope. Real-provider login/inference and full interactive UI matrices require separate acceptance.
 
 Sandbox management also supports `update` with `name` and `config` (`cpus`, `memory_gib`, `disk_gib`). Updates require a stopped/failed environment without active leases or unsettled operations; resources apply on the next start. Inventory exposes per-environment configuration, running-task counts, associated tasks and durable-reference status for the native UI.
+
+## Local Runtime composition
+
+Host identity and process authority exist without product services. Fresh standalone
+roots default to `bare`; existing product databases retain `assistant`, and App
+explicitly selects `assistant`. `environment` provides native-authorized Sandbox
+operations without model, Conversation or Task initialization. See
+[Standalone Server](../../docs/standalone-server.md#runtime-composition) for selection
+and operator endpoints.
+
+Conversation, Task, Agent and Environment service state is separated locally.
+Task dispatch enters `RunnerPort`; the current adapter is local and retains an
+owner service facade for existing tool/control integration. Versioned local
+Assignments persist Runtime/Task/environment/workspace references. Restore
+backfills missing assignments without relocating contexts/artifacts, rejects
+conflicting/future assignments, and swaps in-memory task state after successful
+validation and persistence. Remote Runner acceptance/replay is future work.

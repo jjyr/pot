@@ -48,6 +48,7 @@ impl pot_core::ToolExecutor for Tools {
                 }
                 let executor = self
                     .service
+                    .environment_service
                     .permissions
                     .host_executor(&self.service.usage_scope, self.generation);
                 return pot_core::ToolExecutor::execute(
@@ -110,10 +111,6 @@ fn guest_output(value: Value, call: &str, remaining: &mut usize) -> Result<pot_c
 }
 /// Product context is kept outside the environment Manager.
 pub struct Manager {
-    pub(crate) agent_home: PathBuf,
-    pub(crate) global_instructions: Mutex<crate::instructions::GlobalInstructions>,
-    pub(crate) skill_user: PathBuf,
-    pub(crate) skill_builtin: PathBuf,
     pub(crate) resources: Option<Arc<crate::sandbox_resources::Hub>>,
     environment: Arc<pot_sandbox::Manager>,
 }
@@ -152,31 +149,7 @@ impl Manager {
         data: &std::path::Path,
         providers: Vec<Arc<dyn pot_sandbox::Provider>>,
     ) -> Result<Self> {
-        let root = data.parent().unwrap_or(data);
-        #[cfg(test)]
-        let agent_home = root.join("agent-home");
-        #[cfg(not(test))]
-        let agent_home = std::env::var_os("POT_AGENT_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".pot/agent")
-            });
-        #[cfg(test)]
-        let skill_user = root.join("skills-user");
-        #[cfg(not(test))]
-        let skill_user = std::env::var_os("POT_AGENT_SKILLS_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| agent_home.join("skills"));
-        #[cfg(not(test))]
-        let _ = root;
-        let skill_builtin = std::env::var_os("POT_BUILTIN_SKILLS_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../skills"));
         Ok(Self {
-            agent_home,
-            global_instructions: Mutex::new(Default::default()),
-            skill_user,
-            skill_builtin,
             environment: Arc::new(pot_sandbox::Manager::open(data, providers)?),
             resources: Some(crate::sandbox_resources::Hub::open(data)?),
         })
@@ -187,7 +160,7 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     Ok(Json(inventory(&s).await))
 }
 async fn inventory(s: &Service) -> Value {
-    let mut value = s.sandboxes.inventory().await;
+    let mut value = s.environment_service.manager.inventory().await;
     let tasks = tasks::sandbox_tasks(s);
     if let Some(rows) = value["items"].as_array_mut() {
         for row in rows {
@@ -202,7 +175,8 @@ async fn inventory(s: &Service) -> Value {
             row["tasks"] = json!(assigned);
             row["referenced"] = json!(tasks::uses_sandbox(s, &id));
             row["resource_request"] = s
-                .sandboxes
+                .environment_service
+                .manager
                 .resources
                 .as_ref()
                 .map(|hub| hub.pending(&id))
@@ -210,7 +184,8 @@ async fn inventory(s: &Service) -> Value {
         }
     }
     value["resource_requests"] = s
-        .sandboxes
+        .environment_service
+        .manager
         .resources
         .as_ref()
         .map(|hub| hub.requests())
@@ -231,7 +206,8 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     anyhow::ensure!(!s.is_worker, "Workers cannot manage Sandboxes");
     if args["action"] == "delete" {
         let id = s
-            .sandboxes
+            .environment_service
+            .manager
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
         anyhow::ensure!(
             !tasks::uses_sandbox(s, &id),
@@ -241,10 +217,13 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     let action = args["action"].as_str().unwrap_or("");
     if matches!(action, "start" | "desktop") {
         let id = s
-            .sandboxes
+            .environment_service
+            .manager
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
-        if let Some(hub) = &s.sandboxes.resources
-            && let Some(key) = hub.inspect(&s.sandboxes, &id, &s.usage_scope, None).await?
+        if let Some(hub) = &s.environment_service.manager.resources
+            && let Some(key) = hub
+                .inspect(&s.environment_service.manager, &id, &s.usage_scope, None)
+                .await?
         {
             return Ok(
                 json!({"sandbox_id":id,"resource_request_id":key,"phase":"awaiting-resources"}),
@@ -252,7 +231,8 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         }
     }
     let mut result = s
-        .sandboxes
+        .environment_service
+        .manager
         .environment
         .management(
             args,
@@ -263,15 +243,17 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         .await?;
     if action == "create" {
         let id = result["sandbox_id"].as_str().unwrap_or("").to_owned();
-        if let Some(hub) = &s.sandboxes.resources
-            && let Some(key) = hub.inspect(&s.sandboxes, &id, &s.usage_scope, None).await?
+        if let Some(hub) = &s.environment_service.manager.resources
+            && let Some(key) = hub
+                .inspect(&s.environment_service.manager, &id, &s.usage_scope, None)
+                .await?
         {
             result["resource_request_id"] = json!(key);
             result["phase"] = json!("awaiting-resources");
         }
     }
     if action == "delete"
-        && let Some(hub) = &s.sandboxes.resources
+        && let Some(hub) = &s.environment_service.manager.resources
     {
         hub.forget(args["sandbox_id"].as_str().unwrap_or(""))?;
     }
@@ -283,7 +265,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         "Invalid execution call ID"
     );
     let turn = {
-        let inner = s.inner.lock().unwrap();
+        let inner = s.conversation.inner.lock().unwrap();
         let turn = inner
             .turn
             .as_ref()
@@ -314,9 +296,11 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             Some("create" | "start" | "desktop")
         ) {
             let id = s
-                .sandboxes
+                .environment_service
+                .manager
                 .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
-            s.sandboxes
+            s.environment_service
+                .manager
                 .prepare(&id, &s.usage_scope, Some(&turn), &|| {
                     !turn_alive(s, &turn) || s.stopping()
                 })
@@ -367,12 +351,13 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
                 "Workers cannot switch Sandboxes"
             );
         }
-        let id = s.sandboxes.assignment(if s.is_worker {
+        let id = s.environment_service.manager.assignment(if s.is_worker {
             s.sandbox_id.as_deref().unwrap_or("")
         } else {
             requested
         })?;
-        s.sandboxes
+        s.environment_service
+            .manager
             .prepare(&id, &s.usage_scope, Some(&turn), &|| {
                 !turn_alive(s, &turn) || s.stopping()
             })
@@ -394,6 +379,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     let args = &args;
     let legacy_key = format!("sandbox.operation:{turn}:{call_id}");
     let legacy = s
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -409,7 +395,8 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         worker: s.is_worker,
         policy: thread.config.params.agent.shell.clone(),
     };
-    s.sandboxes
+    s.environment_service
+        .manager
         .environment
         .execute(
             &grant,
@@ -425,39 +412,60 @@ pub async fn finish_turn(s: &Service) -> Result<()> {
     if agent::cancelled(s) || s.stopping() {
         finish(s).await
     } else {
-        s.sandboxes.environment.finish_turn(&s.usage_scope).await
+        s.environment_service
+            .manager
+            .environment
+            .finish_turn(&s.usage_scope)
+            .await
     }
 }
 pub async fn refresh(s: &Service) -> Result<()> {
     finish_turn(s).await
 }
 pub async fn reap_idle(s: &Service) -> Result<()> {
-    s.permissions.reap_host_plugins().await?;
-    s.sandboxes.environment.reap_idle().await
+    s.environment_service
+        .permissions
+        .reap_host_plugins()
+        .await?;
+    s.environment_service.manager.environment.reap_idle().await
 }
 pub async fn finish_stale(s: &Service, generation: u64) -> Result<()> {
-    s.permissions
+    s.environment_service
+        .permissions
         .finish_stale_host(&s.usage_scope, generation)
         .await?;
-    s.sandboxes
+    s.environment_service
+        .manager
         .environment
         .finish_stale(&s.usage_scope, generation)
         .await
 }
 pub async fn shutdown(s: &Service) -> Result<()> {
-    s.permissions.shutdown_host().await?;
-    s.sandboxes.environment.shutdown().await
+    s.environment_service.permissions.shutdown_host().await?;
+    s.environment_service.manager.environment.shutdown().await
 }
 pub async fn finish_idle(s: &Service) -> Result<()> {
-    s.sandboxes.environment.finish_idle(&s.usage_scope).await
+    s.environment_service
+        .manager
+        .environment
+        .finish_idle(&s.usage_scope)
+        .await
 }
 pub async fn finish(s: &Service) -> Result<()> {
-    s.permissions.finish_host(s).await?;
-    s.sandboxes.environment.finish(&s.usage_scope).await
+    s.environment_service.permissions.finish_host(s).await?;
+    s.environment_service
+        .manager
+        .environment
+        .finish(&s.usage_scope)
+        .await
 }
 pub async fn drain(s: &Service) -> Result<()> {
-    s.permissions.finish_host(s).await?;
-    s.sandboxes.environment.drain(&s.usage_scope).await
+    s.environment_service.permissions.finish_host(s).await?;
+    s.environment_service
+        .manager
+        .environment
+        .drain(&s.usage_scope)
+        .await
 }
 pub async fn execute(
     State(root): State<Service>,
@@ -483,7 +491,7 @@ pub async fn execute(
 }
 
 fn turn_alive(s: &Service, request: &str) -> bool {
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     inner
         .turn
         .as_ref()
@@ -592,7 +600,12 @@ mod tests {
                 .to_string()
                 .contains("Name")
         );
-        let lease = s.sandboxes.acquire("default").await.unwrap();
+        let lease = s
+            .environment_service
+            .manager
+            .acquire("default")
+            .await
+            .unwrap();
         assert!(
             management(&s, &args)
                 .await

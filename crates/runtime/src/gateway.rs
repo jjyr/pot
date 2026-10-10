@@ -249,7 +249,7 @@ pub async fn forward(
         body["thinking"] = json!({"type":"disabled"});
     }
     {
-        let inner = s.inner.lock().unwrap();
+        let inner = s.conversation.inner.lock().unwrap();
         let turn = inner
             .turn
             .as_ref()
@@ -270,6 +270,7 @@ pub async fn forward(
         }
     }
     let turn_id = s
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -336,7 +337,7 @@ pub async fn forward(
         .clamp(&mut body, output)
         .map_err(internal)?;
     {
-        let mut inner = s.inner.lock().unwrap();
+        let mut inner = s.conversation.inner.lock().unwrap();
         if inner
             .turn
             .as_ref()

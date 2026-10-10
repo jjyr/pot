@@ -60,10 +60,10 @@ Build and start the backend without App/Helper. Paths belong to the Server machi
 
 ```sh
 mise exec -- cargo build --locked -p pot-server
-POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
+POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 POT_RUNTIME_COMPOSITION=assistant mise run server
 ```
 
-Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots default to bare; select `assistant` for chat/Web or `environment` for environment-only execution. In the assistant preset, without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
 
 App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](standalone-server.md) for CLI installation, local OS authority and packaging.
 

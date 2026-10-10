@@ -1,6 +1,6 @@
 # Composable runtimes and distributed task dispatch
 
-Updated: 2026-10-10. Design proposal for review; no implementation or model-visible tool changes are included. This page defines the proposed composition and federation architecture. [Current architecture](architecture.md), [Runtime contract](../crates/runtime/README.md), and [Agent/Sandbox design](agent-sandbox-design.md) continue to describe delivered behavior.
+Updated: 2026-10-10. Composition and federation design. Local service state separation, stable identity, local Assignments and bare/environment/assistant presets are implemented; multiple owners and remote composition remain planned. No model-visible tool changes are included. [Current architecture](architecture.md), [Runtime contract](../crates/runtime/README.md), and [Agent/Sandbox design](agent-sandbox-design.md) continue to describe delivered behavior.
 
 ## Direction and agreed decisions
 
@@ -453,3 +453,21 @@ Acceptance must cover:
 - Task owner and gateway usage do not double count inference; unavailable peers/defaults do not cause silent Host fallback or migration.
 
 The first federation milestone ends with direct peers and a single authoritative owner per Task. Dynamic module installation, recursive worker delegation, live Task/owner migration, automatic peer failover, consensus scheduling and transitive peer relays remain outside that milestone.
+
+## P1 local delivery (2026-10-10)
+
+The local host initializes identity/authority independently of assistant services.
+Composition selection controls storage, routes, Provider registration and loops.
+Conversation, Task, Agent and Environment own separate state; workers explicitly
+construct a scoped owner facade referencing shared Agent/Environment services,
+rather than copying the root Service. Existing local tools still use this facade.
+A scoped `RunnerPort::run` bridges local dispatch into pot-agent. Remote accept,
+query, event replay and cancellation journals are P4 contracts, not delivered by
+this adapter. Current task input/queue/active receipts remain durable; schema-1
+Assignments add fixed Runtime/object/environment references without moving data.
+
+The three preset dependency graphs are explicit. Arbitrary per-service graphs,
+Agent-only remote hosting and dynamic UI clients are later phases. Composition
+changes require restart and leave inactive service data intact. Environment-only
+operator execution requires native local authority and cannot grant Host paths.
+See [Standalone Server](standalone-server.md#runtime-composition) for configuration.

@@ -199,11 +199,15 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
             .clone()
             .ok_or_else(|| anyhow!("Worker Sandbox missing"))?
     } else {
-        s.sandboxes.assignment("")?
+        s.environment_service.manager.assignment("")?
     };
     let filesystem = WorkspaceFileSystem {
-        source: s.sandboxes.workspace(&target),
-        mount: s.sandboxes.guest_workspace(&target)?.into(),
+        source: s.environment_service.manager.workspace(&target),
+        mount: s
+            .environment_service
+            .manager
+            .guest_workspace(&target)?
+            .into(),
     };
     let cwd = if s.is_worker {
         filesystem.mount.join("tasks").join(&s.usage_scope)
@@ -211,11 +215,12 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
         filesystem.mount.clone()
     };
     let (global, warning) = s
-        .sandboxes
+        .agent_service
+        .resources
         .global_instructions
         .lock()
         .unwrap()
-        .refresh(&s.sandboxes.agent_home.join("AGENTS.md"));
+        .refresh(&s.agent_service.resources.home.join("AGENTS.md"));
     let mut catalog = project(&filesystem, &cwd, &filesystem.mount)?;
     if let Some(warning) = warning {
         catalog.diagnostics.push(warning);
@@ -413,15 +418,19 @@ mod tests {
                     .await
                     .unwrap();
             }
-            let base = root.sandboxes.workspace(target);
+            let base = root.environment_service.manager.workspace(target);
             fs::create_dir_all(&base).unwrap();
             fs::write(base.join(".git"), "gitdir").unwrap();
             fs::write(base.join("AGENTS.md"), text).unwrap();
         }
-        fs::create_dir_all(&root.sandboxes.agent_home).unwrap();
-        fs::write(root.sandboxes.agent_home.join("AGENTS.md"), "GLOBAL").unwrap();
+        fs::create_dir_all(&root.agent_service.resources.home).unwrap();
         fs::write(
-            root.sandboxes.agent_home.join("AGENTS.override.md"),
+            root.agent_service.resources.home.join("AGENTS.md"),
+            "GLOBAL",
+        )
+        .unwrap();
+        fs::write(
+            root.agent_service.resources.home.join("AGENTS.override.md"),
             "WRONG_OVERRIDE",
         )
         .unwrap();
@@ -460,7 +469,7 @@ mod tests {
     #[tokio::test]
     async fn macos_worker_instructions_skills_and_artifacts_use_provider_paths() {
         let mut root = tasks::tests::fixture();
-        root.sandboxes = Arc::new(
+        root.environment_service.manager = Arc::new(
             sandbox::Manager::with_providers(
                 &root.data,
                 vec![
@@ -479,7 +488,7 @@ mod tests {
         sandbox::management(&root, &json!({"action":"select","sandbox_id":"mac-dev"}))
             .await
             .unwrap();
-        let base = root.sandboxes.workspace("mac-dev");
+        let base = root.environment_service.manager.workspace("mac-dev");
         fs::create_dir_all(&base).unwrap();
         fs::write(base.join("AGENTS.md"), "MAC_PROJECT").unwrap();
         fs::write(base.join(".git"), "gitdir").unwrap();

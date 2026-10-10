@@ -8,10 +8,10 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
             .clone()
             .ok_or_else(|| anyhow!("Worker Sandbox missing"))?
     } else {
-        s.sandboxes.assignment("")?
+        s.environment_service.manager.assignment("")?
     };
-    let base = s.sandboxes.workspace(&target);
-    let guest_base = PathBuf::from(s.sandboxes.guest_workspace(&target)?);
+    let base = s.environment_service.manager.workspace(&target);
+    let guest_base = PathBuf::from(s.environment_service.manager.guest_workspace(&target)?);
     let (cwd, visible) = if s.is_worker {
         (
             base.join("tasks").join(&s.usage_scope),
@@ -40,7 +40,7 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
     }
     let global_location = visible.join(".pot/agent/skills");
     let builtin_root = SkillRoot {
-        path: s.sandboxes.skill_builtin.clone(),
+        path: s.agent_service.resources.skill_builtin.clone(),
         location: global_location.clone(),
         builtin: true,
     };
@@ -53,7 +53,7 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
     .map(|skill| skill.name)
     .collect();
     roots.push(SkillRoot {
-        path: s.sandboxes.skill_user.clone(),
+        path: s.agent_service.resources.skill_user.clone(),
         location: global_location,
         builtin: false,
     });
@@ -81,11 +81,19 @@ mod tests {
         let root = tasks::tests::fixture();
         for name in ["skill-creator", "skill-installer"] {
             bundle(
-                &root.sandboxes.workspace("default").join(".agents/skills"),
+                &root
+                    .environment_service
+                    .manager
+                    .workspace("default")
+                    .join(".agents/skills"),
                 name,
                 "forged project override",
             );
-            bundle(&root.sandboxes.skill_user, name, "forged user override");
+            bundle(
+                &root.agent_service.resources.skill_user,
+                name,
+                "forged user override",
+            );
         }
         let catalog = pot_agent::discover_skills(&resources(&root).unwrap()).unwrap();
         for name in ["skill-creator", "skill-installer"] {
@@ -121,7 +129,8 @@ mod tests {
             .0;
             let worker = tasks::owner(&root, &task.id).unwrap();
             let base = root
-                .sandboxes
+                .environment_service
+                .manager
                 .workspace(worker.sandbox_id.as_ref().unwrap());
             bundle(&base.join(".agents/skills"), "outside", "sandbox ancestor");
             bundle(
@@ -169,7 +178,11 @@ mod tests {
         .0;
         let worker = tasks::owner(&root, &task.id).unwrap();
         bundle(
-            &root.sandboxes.workspace("default").join(".agents/skills"),
+            &root
+                .environment_service
+                .manager
+                .workspace("default")
+                .join(".agents/skills"),
             "environment",
             "original sandbox",
         );
@@ -177,7 +190,11 @@ mod tests {
             .await
             .unwrap();
         bundle(
-            &root.sandboxes.workspace("second").join(".agents/skills"),
+            &root
+                .environment_service
+                .manager
+                .workspace("second")
+                .join(".agents/skills"),
             "environment",
             "new default",
         );
@@ -202,11 +219,15 @@ mod tests {
     async fn runtime_shares_flat_skills_project_priority_and_restores_task_filter() {
         let root = tasks::tests::fixture();
         bundle(
-            &root.sandboxes.skill_user,
+            &root.agent_service.resources.skill_user,
             "user-skill",
             "same for every agent",
         );
-        bundle(&root.sandboxes.skill_user, "collision", "user");
+        bundle(
+            &root.agent_service.resources.skill_user,
+            "collision",
+            "user",
+        );
         let main = resources(&root).unwrap();
         let catalog = pot_agent::discover_skills(&main).unwrap();
         for name in ["skill-creator", "skill-installer"] {

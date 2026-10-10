@@ -10,7 +10,7 @@ struct Feedback {
 impl Feedback {
     fn check(&self) -> Result<()> {
         let s = &self.service;
-        let inner = s.inner.lock().unwrap();
+        let inner = s.conversation.inner.lock().unwrap();
         let thread = current(&inner.store)?.ok_or_else(|| anyhow!("Thread missing"))?;
         anyhow::ensure!(
             thread.generation == self.generation && thread.owner == s.usage_scope,
@@ -47,7 +47,8 @@ impl ExecutionFeedback for Feedback {
         if name == "manage_sandbox" && args["action"] != "create" {
             args["sandbox_id"] = json!(
                 self.service
-                    .sandboxes
+                    .environment_service
+                    .manager
                     .assignment(args["sandbox_id"].as_str().unwrap_or(""))?
             );
         }
@@ -61,7 +62,9 @@ impl ExecutionFeedback for Feedback {
         Box::pin(async move {
             self.check()?;
             #[cfg(test)]
-            if self.service.test_tool_executor.is_some() && !self.service.permissions.configured() {
+            if self.service.test_tool_executor.is_some()
+                && !self.service.environment_service.permissions.configured()
+            {
                 return Ok(args);
             }
             crate::permissions::prepare(&self.service, &name, args).await
@@ -72,11 +75,14 @@ impl ExecutionFeedback for Feedback {
         Box::pin(async move {
             self.check()?;
             #[cfg(test)]
-            if self.service.test_tool_executor.is_some() && !self.service.permissions.configured() {
+            if self.service.test_tool_executor.is_some()
+                && !self.service.environment_service.permissions.configured()
+            {
                 return Ok(None);
             }
             Ok(Some(
                 self.service
+                    .environment_service
                     .permissions
                     .environment(&environment)?
                     .state(&self.service.usage_scope),
@@ -86,11 +92,16 @@ impl ExecutionFeedback for Feedback {
     fn permission_grants(&self) -> Result<Option<Value>> {
         self.check()?;
         #[cfg(test)]
-        if self.service.test_tool_executor.is_some() && !self.service.permissions.configured() {
+        if self.service.test_tool_executor.is_some()
+            && !self.service.environment_service.permissions.configured()
+        {
             return Ok(None);
         }
         Ok(Some(
-            self.service.permissions.grants(&self.service.usage_scope),
+            self.service
+                .environment_service
+                .permissions
+                .grants(&self.service.usage_scope),
         ))
     }
     fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
@@ -127,11 +138,14 @@ impl ExecutionFeedback for Feedback {
     }
     fn load_context(&self) -> Result<Option<Value>> {
         self.check()?;
-        pot_storage::threads::load_context(&self.service.inner.lock().unwrap().store)
+        pot_storage::threads::load_context(&self.service.conversation.inner.lock().unwrap().store)
     }
     fn save_context(&self, value: &Value) -> Result<()> {
         self.check()?;
-        pot_storage::threads::save_context(&self.service.inner.lock().unwrap().store, value)
+        pot_storage::threads::save_context(
+            &self.service.conversation.inner.lock().unwrap().store,
+            value,
+        )
     }
     fn cancelled(&self) -> bool {
         self.service.stopping() || self.check().is_err() || cancelled(&self.service)
@@ -155,6 +169,7 @@ impl ExecutionFeedback for Feedback {
         );
         let mut message = self
             .service
+            .conversation
             .inner
             .lock()
             .unwrap()
@@ -207,7 +222,7 @@ fn make_context(
         tool_executor: {
             #[cfg(test)]
             if let Some(executor) = &s.test_tool_executor
-                && !s.permissions.configured()
+                && !s.environment_service.permissions.configured()
             {
                 Some(executor.clone())
             } else {
@@ -264,7 +279,7 @@ mod tests {
     async fn feedback_rejects_foreign_requests_old_turns_and_generations() {
         let mut s = tasks::tests::fixture();
         let (commands, _receiver) = mpsc::unbounded_channel();
-        s.commands = commands;
+        s.conversation.commands = commands;
         let request = SendMessage {
             request_id: "feedback-turn".into(),
             conversation_id: "main".into(),
@@ -286,9 +301,12 @@ mod tests {
         assert!(!feedback.cancelled());
         assert!(feedback.record_turn("other").is_err());
         feedback.record_turn(&request.request_id).unwrap();
-        let mut next = current(&s.inner.lock().unwrap().store).unwrap().unwrap();
+        let mut next = current(&s.conversation.inner.lock().unwrap().store)
+            .unwrap()
+            .unwrap();
         next.generation += 1;
-        s.inner
+        s.conversation
+            .inner
             .lock()
             .unwrap()
             .store

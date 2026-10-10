@@ -62,7 +62,7 @@ pub async fn compaction_event(
     Json(event): Json<Value>,
 ) -> ApiResult<Json<Value>> {
     let s = tasks::execution_service(&root, &h)?;
-    let inner = s.inner.lock().unwrap();
+    let inner = s.conversation.inner.lock().unwrap();
     let turn = inner
         .turn
         .as_ref()

@@ -141,6 +141,7 @@ impl Transcript {
     }
     fn tool_usage(&self, s: &Service, value: Value) -> Result<()> {
         let turn = s
+            .conversation
             .inner
             .lock()
             .unwrap()

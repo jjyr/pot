@@ -48,7 +48,8 @@ pub async fn resume(
 
 /// Only an explicitly checkpointed, fully stopped Pot turn can resume automatically.
 pub fn paused(s: &Service) -> Result<Option<SendMessage>> {
-    Ok(s.inner
+    Ok(s.conversation
+        .inner
         .lock()
         .unwrap()
         .store
@@ -58,14 +59,14 @@ pub fn paused(s: &Service) -> Result<Option<SendMessage>> {
         .transpose()?)
 }
 pub fn resume_main(s: &Service) -> Result<()> {
-    if s.inner.lock().unwrap().turn.is_some() {
+    if s.conversation.inner.lock().unwrap().turn.is_some() {
         return Ok(());
     }
     let Some(req) = paused(s)? else { return Ok(()) };
     if !s.usage.lock().unwrap().ready("main", now())? {
         return Ok(());
     }
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     if inner.turn.is_some()
         || inner
             .store
@@ -83,13 +84,13 @@ pub fn resume_main(s: &Service) -> Result<()> {
         cancelling: false,
     });
     inner.model_requests = 0;
-    s.commands.send(req)?;
+    s.conversation.commands.send(req)?;
     Ok(())
 }
 
 pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     if inner.turn.is_some() {
         return Err(error(
             StatusCode::CONFLICT,
@@ -120,7 +121,7 @@ pub async fn cancel_wait(State(s): State<Service>, h: HeaderMap) -> ApiResult<Js
 }
 
 pub fn settle_cancelled_pause(s: &Service) -> Result<()> {
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = s.conversation.inner.lock().unwrap();
     if !inner.turn.as_ref().is_some_and(|t| t.cancelling) {
         return Ok(());
     }

@@ -37,7 +37,7 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
     let port = socket.local_addr().unwrap().port();
     drop(socket);
     let child = command(&root)
-        .arg("serve")
+        .args(["serve", "--composition", "assistant"])
         .env("POT_RUNTIME_BIND", "127.0.0.1:0")
         .env("POT_ACCESS_BIND", format!("127.0.0.1:{port}"))
         .env("POT_ACCESS_ORIGIN", format!("http://localhost:{port}"))
