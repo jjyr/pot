@@ -7,6 +7,7 @@ pub struct RuntimeConfig {
 }
 pub struct Backend {
     host: host::Host,
+    assistants: Option<Arc<assistants::Hub>>,
     state: Option<Service>,
     activated: std::sync::atomic::AtomicBool,
     main: Option<tokio::task::JoinHandle<()>>,
@@ -23,6 +24,9 @@ impl Backend {
     }
     pub fn optional_state(&self) -> Option<Service> {
         self.state.clone()
+    }
+    pub fn assistants(&self) -> Option<Arc<assistants::Hub>> {
+        self.assistants.clone()
     }
     pub fn host(&self) -> &host::Host {
         &self.host
@@ -45,6 +49,9 @@ impl Backend {
             orchestration::initialize(state)?;
             tasks::restore(state)?;
             *self.coordinator.lock().unwrap() = Some(tasks::start(state.clone()));
+            if let Some(hub) = &self.assistants {
+                hub.activate()?;
+            }
         }
         Ok(())
     }
@@ -55,6 +62,9 @@ impl Backend {
             state.stop.send_replace(true);
             tasks::request_shutdown(state);
             terminal::shutdown(state).await;
+        }
+        if let Some(hub) = &self.assistants {
+            hub.shutdown().await;
         }
         let coordinator = self.coordinator.lock().unwrap().take();
         if let Some(mut coordinator) = coordinator {
@@ -117,7 +127,7 @@ async fn initialize_assistant(
         max_output_tokens: execution_config.max_tokens,
     });
     let (events, _) = broadcast::channel(256);
-    let (commands, mut rx) = mpsc::unbounded_channel();
+    let (commands, rx) = mpsc::unbounded_channel();
     let resources = AgentResources::paths(&data);
     let sandboxes = Arc::new(sandbox::Manager::with_providers(&data, providers)?);
     host.attach_environment(sandboxes.clone());
@@ -128,6 +138,7 @@ async fn initialize_assistant(
     let s = Service {
         scope: OwnerScope {
             runtime_id: host.runtime_id().into(),
+            assistant_id: "main".into(),
             skill_selection: None,
             #[cfg(test)]
             test_tool_executor: None,
@@ -172,6 +183,7 @@ async fn initialize_assistant(
         },
         tasks: TaskService {
             hub: Arc::new(Mutex::new(tasks::Hub::default())),
+            capacity: Arc::new(Mutex::new(tasks::Capacity::default())),
         },
     };
     let configured = agent::configured(&s);
@@ -192,40 +204,10 @@ async fn initialize_assistant(
         s.usage.lock().unwrap().clear_wait("main")?;
     }
     agent::initialize(&s)?;
-    let worker = s.clone();
-    let main = tokio::spawn(async move {
-        while let Some(mut req) =
-            tokio::select! { _ = worker.stop_requested() => None, req = rx.recv() => req }
-        {
-            let use_agent = agent::configured(&worker);
-            if use_agent && usage::paused(&worker).ok().flatten().is_none() {
-                req.text.push_str(&tasks::context(&worker));
-            }
-            if use_agent && !req.request_id.starts_with(orchestration::RESULT_PREFIX) {
-                match agent::preferences::context(&worker) {
-                    Ok(context) => req.text.push_str(&context),
-                    Err(e) => {
-                        worker.phase(AgentPhase::Failed, Some(e.to_string()));
-                        worker.turn(None);
-                        continue;
-                    }
-                }
-            }
-            let result = if use_agent {
-                worker.runner().run(req).await
-            } else {
-                Err(anyhow!("Configure a main Agent before sending messages"))
-            };
-            if let Err(e) = result {
-                worker.phase(AgentPhase::Failed, Some(e.to_string()));
-            }
-            if let Err(e) = usage::settle_cancelled_pause(&worker) {
-                worker.phase(AgentPhase::Failed, Some(e.to_string()));
-            }
-            worker.turn(None);
-        }
-    });
+    let assistants = Arc::new(assistants::Hub::open(s.clone())?);
+    let main = start_main(s.clone(), rx);
     Ok(Backend {
+        assistants: Some(assistants),
         host: host.clone(),
         state: Some(s),
         activated: Default::default(),
@@ -286,9 +268,49 @@ pub async fn initialize_composition(
     }
     Ok(Backend {
         host,
+        assistants: None,
         state: None,
         activated: Default::default(),
         main: None,
         coordinator: Mutex::new(None),
+    })
+}
+
+pub(crate) fn start_main(
+    s: Service,
+    mut rx: mpsc::UnboundedReceiver<SendMessage>,
+) -> tokio::task::JoinHandle<()> {
+    let worker = s.clone();
+    tokio::spawn(async move {
+        while let Some(mut req) =
+            tokio::select! { _ = worker.stop_requested() => None, req = rx.recv() => req }
+        {
+            let use_agent = agent::configured(&worker);
+            if use_agent && usage::paused(&worker).ok().flatten().is_none() {
+                req.text.push_str(&tasks::context(&worker));
+            }
+            if use_agent && !req.request_id.starts_with(orchestration::RESULT_PREFIX) {
+                match agent::catalog::context(&worker) {
+                    Ok(context) => req.text.push_str(&context),
+                    Err(e) => {
+                        worker.phase(AgentPhase::Failed, Some(e.to_string()));
+                        worker.turn(None);
+                        continue;
+                    }
+                }
+            }
+            let result = if use_agent {
+                worker.runner().run(req).await
+            } else {
+                Err(anyhow!("Configure a main Agent before sending messages"))
+            };
+            if let Err(e) = result {
+                worker.phase(AgentPhase::Failed, Some(e.to_string()));
+            }
+            if let Err(e) = usage::settle_cancelled_pause(&worker) {
+                worker.phase(AgentPhase::Failed, Some(e.to_string()));
+            }
+            worker.turn(None);
+        }
     })
 }

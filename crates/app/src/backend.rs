@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 struct Host {
-    client: pot_server::LocalClient,
+    client: pot_server::ClientTransport,
     stop: tokio::sync::oneshot::Sender<()>,
     task: tokio::task::JoinHandle<anyhow_result::Result>,
 }
@@ -15,14 +15,18 @@ struct Host {
 mod anyhow_result {
     pub type Result = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
+static SELECTED_ASSISTANT: Mutex<String> = Mutex::new(String::new());
+pub fn select_assistant(id: &str) {
+    *SELECTED_ASSISTANT.lock().unwrap() = id.into();
+}
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static HOST: Mutex<Option<Host>> = Mutex::new(None);
-static EXIT_OWNER: Mutex<Option<pot_server::LocalClient>> = Mutex::new(None);
+static EXIT_OWNER: Mutex<Option<pot_server::ClientTransport>> = Mutex::new(None);
 static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().expect("backend runtime"))
 }
-fn client() -> Result<pot_server::LocalClient, String> {
+fn client() -> Result<pot_server::ClientTransport, String> {
     let mut host = HOST.lock().unwrap();
     if STOPPED.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("Pot is shutting down".into());
@@ -34,7 +38,7 @@ fn client() -> Result<pot_server::LocalClient, String> {
         let server = runtime()
             .block_on(pot_server::Server::embedded(config))
             .map_err(|e| e.to_string())?;
-        let client = server.local_client();
+        let client = pot_server::ClientTransport::Local(server.local_client());
         let (stop, rx) = tokio::sync::oneshot::channel();
         let task = runtime().spawn(async move {
             server
@@ -57,8 +61,19 @@ pub fn ready() -> Result<(), String> {
 }
 fn request(path: &str, body: Option<Value>, timeout: Duration) -> Result<Response, String> {
     let client = client()?;
+    let selected = SELECTED_ASSISTANT.lock().unwrap().clone();
+    let path = if !selected.is_empty()
+        && selected != "main"
+        && path.starts_with("/api/v1/")
+        && !path.starts_with("/api/v1/assistants")
+        && !path.starts_with("/api/v1/assistant-tasks")
+    {
+        format!("/api/v1/assistants/{selected}/{}", &path[8..])
+    } else {
+        path.into()
+    };
     runtime().block_on(async {
-        let reply = tokio::time::timeout(timeout, client.request(path, body))
+        let reply = tokio::time::timeout(timeout, client.request(&path, body))
             .await
             .map_err(|_| "Backend request timed out".to_string())?
             .map_err(|e| e.to_string())?;
@@ -133,11 +148,20 @@ pub extern "C" fn pot_backend_restart() {
 
 // Request construction is shared with the old cached client, but has no network transport.
 pub struct Requests {
+    owner: Option<String>,
     timeout: Duration,
 }
 impl Requests {
     pub fn config_builder() -> Self {
         Self {
+            owner: Some({
+                let selected = SELECTED_ASSISTANT.lock().unwrap();
+                if selected.is_empty() {
+                    "main".into()
+                } else {
+                    selected.clone()
+                }
+            }),
             timeout: Duration::from_secs(120),
         }
     }
@@ -153,11 +177,32 @@ impl Requests {
     pub fn new_agent(self) -> Self {
         self
     }
+    pub fn scope(mut self, owner: &str) -> Self {
+        self.owner = Some(owner.into());
+        self
+    }
+    fn scoped(&self, path: &str) -> String {
+        if path.starts_with("/api/v1/assistants")
+            || path.starts_with("/api/v1/assistant-tasks")
+            || path == "/api/v1/runtime"
+        {
+            return path.into();
+        }
+        self.owner
+            .as_ref()
+            .map(|owner| {
+                format!(
+                    "/api/v1/assistants/{owner}/{}",
+                    path.strip_prefix("/api/v1/").unwrap_or(path)
+                )
+            })
+            .unwrap_or_else(|| path.into())
+    }
     pub fn get(&self, url: &str) -> Builder {
-        Builder::new(url, self.timeout)
+        Builder::new(&self.scoped(url), self.timeout)
     }
     pub fn post(&self, url: &str) -> Builder {
-        Builder::new(url, self.timeout)
+        Builder::new(&self.scoped(url), self.timeout)
     }
 }
 pub struct Builder {

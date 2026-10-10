@@ -33,6 +33,9 @@ extern "C" {
     fn action(name: &str, value: &str);
 }
 struct Mobile {
+    assistants_ui: pot_ui::assistants::Editor,
+    assistant_model_open: bool,
+    assistant_save_sequence: u64,
     brand_icon: Arc<Image>,
     data: Value,
     page: String,
@@ -64,6 +67,26 @@ impl Mobile {
                     return;
                 };
                 match event.kind {
+                    "assistant-edit" => this
+                        .assistants_ui
+                        .select(event.value.as_str().unwrap_or("main")),
+                    "assistant-new" => this.assistants_ui.select("new"),
+                    "assistant-reload" => this
+                        .assistants_ui
+                        .reload(event.value.as_str().unwrap_or("main")),
+                    "assistant-close" => this.assistants_ui.open = false,
+                    "assistant-select" => {
+                        this.assistants_ui
+                            .select(event.value.as_str().unwrap_or("main"));
+                        this.assistant_model_open = false;
+                        action("assistant-select", event.value.as_str().unwrap_or("main"));
+                    }
+                    "assistant-save" => action("assistant-save", &event.value.to_string()),
+                    "assistant-model" => this.assistant_model_open = !this.assistant_model_open,
+                    "assistant-profile" => action(
+                        "assistant-profile",
+                        event.value.as_str().unwrap_or_default(),
+                    ),
                     "task-filter" | "task-clear-search" | "task-previous" | "task-next" => {
                         let query = serde_json::from_value::<pot_protocol::TaskQuery>(
                             this.data["task_query"].clone(),
@@ -85,7 +108,7 @@ impl Mobile {
                     "permission-decision" => {
                         action("permission-decision", &event.value.to_string())
                     }
-                    "task-open" => action("task", event.value.as_str().unwrap_or("")),
+                    "task-open" => action("task", &event.value.to_string()),
                     "sandbox-select" => {
                         this.sandbox_selection = event.value.as_str().unwrap_or("").into()
                     }
@@ -130,6 +153,13 @@ impl Render for Mobile {
                 theme.font_family = "IBM Plex Sans".into();
                 theme.font_size = px(16.);
             });
+        }
+        let save_sequence = self.data["assistant_save_sequence"].as_u64().unwrap_or(0);
+        if save_sequence != self.assistant_save_sequence {
+            if let Some(owner) = self.data["assistant_saved_owner"].as_str() {
+                self.assistants_ui.saved(owner);
+            }
+            self.assistant_save_sequence = save_sequence;
         }
         let conversation = self.data["conversation"]
             .as_str()
@@ -188,6 +218,46 @@ impl Render for Mobile {
             .flex()
             .flex_col()
             .gap_3();
+        if self.page == "chat" {
+            let handler = self.page_handler(cx);
+            let current = self.data["assistant_id"].as_str().unwrap_or("main");
+            content = content.child(self.assistants_ui.render(
+                &self.data["assistants"],
+                current,
+                &self.data["assistant_rules"],
+                self.catalog(),
+                handler.clone(),
+                window,
+                cx,
+            ));
+            if self.assistant_model_open {
+                content = content.child(
+                    div().flex().flex_col().gap_2().children(
+                        self.data["assistant_configuration"]["profiles"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|profile| {
+                                Button::new(SharedString::from(format!(
+                                    "assistant-profile-{}",
+                                    profile["id"].as_str().unwrap_or_default()
+                                )))
+                                .ghost()
+                                .label(format!(
+                                    "{} · {}",
+                                    profile["name"].as_str().unwrap_or_default(),
+                                    profile["model"].as_str().unwrap_or_default()
+                                ))
+                                .on_click(pot_ui::pages::on(
+                                    &handler,
+                                    "assistant-profile",
+                                    profile["id"].clone(),
+                                ))
+                            }),
+                    ),
+                );
+            }
+        }
         if self.page == "chat" || self.page == "task" {
             content = content.gap_5().child(pot_ui::permissions::cards(
                 &self.data["permissions"],
@@ -259,6 +329,7 @@ impl Render for Mobile {
             );
             content = content.p_0().gap_0().child(pot_ui::tasks::render(
                 pot_ui::tasks::TasksView {
+                    assistant_names: &self.data["assistants"],
                     search: &self.search,
                     scroll: &self.tasks_scroll,
                     navigation,
@@ -550,6 +621,9 @@ pub fn run() {
             let search = cx.new(|cx| InputState::new(window, cx));
             let composer = cx.new(|cx| TextareaState::new(window, cx));
             cx.new(|cx| Mobile {
+                assistants_ui: Default::default(),
+                assistant_model_open: false,
+                assistant_save_sequence: 0,
                 brand_icon: Arc::new(Image::from_bytes(
                     ImageFormat::Png,
                     include_bytes!("../../app/assets/Pot128.png").to_vec(),

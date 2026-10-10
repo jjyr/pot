@@ -7,6 +7,9 @@ pub use config::{ServerConfig, default_root};
 pub use hosting::Server;
 pub use routes::router;
 
+mod client;
+pub use client::{ClientTransport, RemoteClient};
+
 mod local;
 pub use local::{LocalClient, LocalReply};
 

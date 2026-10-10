@@ -68,6 +68,8 @@ Product-owned Threads: [Direct execution and context continuity, 2026-10-09](val
 
 Local Runtime composition: [Presets, identity and upgrade preservation, 2026-10-10](validation/runtime-composition-20261010.md).
 
+Multiple assistants: [Owner isolation, rule drafts and grouped Tasks, 2026-10-10](validation/multiple-assistants-20261010.md).
+
 ## Research on demand
 
 `research/` contains dated background material, not current implementation specifications:

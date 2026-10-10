@@ -59,3 +59,14 @@ editor at click time, avoiding a stale value captured during rendering.
 
 See [chat validation](validation/shared-ui-20261007.md) and
 [page migration validation](validation/shared-pages-20261007.md).
+
+## Multiple assistants
+
+App and Web share the assistant name entry, selector/new assistant form and
+name/AGENTS.md editor. Drafts are retained by owner and saves use definition and
+content revisions. Shared task rows carry assistant identity and group matching
+Tasks beneath assistant names. Native and browser transports capture the owner
+before asynchronous writes; late snapshots are discarded on owner changes.
+App navigation history includes Runtime and owner identity. The Server exposes
+bounded in-process and HTTPS client adapters; peer enrollment and connection
+management UI remain P3 work.

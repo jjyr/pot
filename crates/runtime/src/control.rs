@@ -381,7 +381,7 @@ pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Resul
             // Repeated saves are idempotent, including after a partial acknowledgement.
             let event = inner.store.save(Message {
                 id: entry.message_id.clone(),
-                conversation_id: "main".into(),
+                conversation_id: s.conversation_id(),
                 role: Role::User,
                 text: entry.text.clone(),
                 status: MessageStatus::Complete,
@@ -400,7 +400,7 @@ pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Resul
         if !mail.consumed && ids.contains(&format!("mail:{}", mail.request_id)) {
             let event = inner.store.save(Message {
                 id: mail.message_id.clone(),
-                conversation_id: "main".into(),
+                conversation_id: s.conversation_id(),
                 role: Role::System,
                 text: reference(mail),
                 status: MessageStatus::Complete,

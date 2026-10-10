@@ -372,3 +372,67 @@ async fn bare_server_exposes_identity_without_assistant_or_environment_storage()
     drop(client);
     server.serve(async {}).await.unwrap();
 }
+
+#[tokio::test]
+async fn assistant_clients_select_owners_and_edit_rules_without_model_calls() {
+    let fixture = Fixture::new();
+    let server = Server::bind(fixture.config()).await.unwrap();
+    let client = server.local_client();
+    let reply = client
+        .request(
+            "/api/v1/assistants",
+            Some(json!({"request_id":"assistant-a","name":"A"})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.status.as_u16(), 200);
+    let a: Value = serde_json::from_slice(&reply.body).unwrap();
+    let reply = client
+        .request(
+            "/api/v1/assistants",
+            Some(json!({"request_id":"assistant-b","name":"B"})),
+        )
+        .await
+        .unwrap();
+    let b: Value = serde_json::from_slice(&reply.body).unwrap();
+    assert_ne!(a["id"], b["id"]);
+    for assistant in [&a, &b] {
+        let id = assistant["id"].as_str().unwrap();
+        let response = client
+            .request(&format!("/api/v1/assistants/{id}/snapshot"), None)
+            .await
+            .unwrap();
+        assert_eq!(response.status.as_u16(), 200);
+        let snapshot: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(snapshot["conversation_id"], assistant["id"]);
+        assert_eq!(snapshot["messages"], json!([]));
+        let missing = client
+            .request(
+                &format!("/api/v1/assistants/{id}/tasks/{}", uuid::Uuid::new_v4()),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            missing.status.as_u16(),
+            404,
+            "{}",
+            String::from_utf8_lossy(&missing.body)
+        );
+    }
+    let grouped = client
+        .request("/api/v1/assistant-tasks", None)
+        .await
+        .unwrap();
+    assert_eq!(grouped.status.as_u16(), 200);
+    let response = client
+        .request(
+            &format!("/api/v1/assistants/{}/agent", a["id"].as_str().unwrap()),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status.as_u16(), 200);
+    drop(client);
+    server.serve(async {}).await.unwrap();
+}

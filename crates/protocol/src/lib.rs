@@ -186,6 +186,8 @@ pub enum TaskPhase {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskInfo {
+    #[serde(default)]
+    pub assistant_id: String,
     pub sandbox_id: String,
     pub id: String,
     pub title: String,
@@ -208,8 +210,6 @@ pub struct TaskRouting {
     pub revision: u64,
     pub provider: String,
     pub reason: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preference_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection_reason: Option<String>,
 }
@@ -239,8 +239,6 @@ pub struct CreateTask {
     pub profile: Option<String>,
     #[serde(default)]
     pub requirements: TaskRequirements,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preference_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection_reason: Option<String>,
 }

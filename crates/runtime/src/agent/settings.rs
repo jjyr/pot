@@ -65,14 +65,17 @@ pub struct Select {
     profile: String,
 }
 fn main_owner() -> String {
-    "main".into()
+    String::new()
 }
 pub async fn select(
     State(root): State<Service>,
     h: HeaderMap,
-    Json(request): Json<Select>,
+    Json(mut request): Json<Select>,
 ) -> ApiResult<Json<Value>> {
     root.authorized(&h)?;
+    if request.owner.is_empty() {
+        request.owner = root.usage_scope.clone();
+    }
     if request.request_id.is_empty() || request.request_id.len() > 128 {
         return Err(error(
             StatusCode::BAD_REQUEST,
@@ -255,7 +258,7 @@ pub async fn settings(
         .map_err(|e| internal(e.into()))?;
     let result = (|| -> Result<()> {
         if settings.follow_main && current(&inner.store)?.is_none() {
-            select_initial(&mut inner.store, "main", spec)?;
+            select_initial(&mut inner.store, &s.usage_scope, spec)?;
         } else if settings.follow_main {
             queue(&mut inner.store, &settings.request_id, spec)?;
         }

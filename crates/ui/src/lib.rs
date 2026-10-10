@@ -29,3 +29,6 @@ pub mod resources;
 
 #[cfg(feature = "presentation")]
 pub mod permissions;
+
+#[cfg(feature = "presentation")]
+pub mod assistants;

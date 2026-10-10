@@ -753,5 +753,14 @@
   "permissions.version": "版本",
   "permissions.builtin-tool": "内置工具",
   "permissions.unknown-source": "工具来源未提供",
-  "permissions.environment": "环境"
+  "permissions.environment": "环境",
+  "assistant.new": "新建助手",
+  "assistant.name": "名称",
+  "assistant.rules-hint": "规则影响后续分派，已有任务保持原分配。",
+  "assistant.save": "保存",
+  "assistant.model": "AI 配置",
+  "assistant.close": "关闭",
+  "assistant.saved": "已保存",
+  "assistant.conflict": "已保存版本发生变化，当前草稿已保留。",
+  "assistant.reload": "丢弃草稿并重新加载"
 }

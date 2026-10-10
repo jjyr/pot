@@ -13,7 +13,6 @@ user agreement; see the repository `AGENTS.md`.
 | Composition | `exec`, `wait` | Main, Worker |
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
-| Preferences | `get_execution_preferences`, `update_execution_preferences` | Main |
 | Sandboxes | `list_sandboxes`, `manage_sandbox`, `set_sandbox_mappings` | Main |
 
 Profile filters can narrow visibility. Execution tools accept `environment: "host"`

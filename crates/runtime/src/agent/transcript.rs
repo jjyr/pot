@@ -25,14 +25,14 @@ impl Transcript {
     pub fn record(&mut self, s: &Service, update: &Update) -> Result<()> {
         match update {
             Update::PolicyDenied => s.save(Message {
-                id: id(), conversation_id: "main".into(), role: Role::System,
+                id: id(), conversation_id: s.conversation_id(), role: Role::System,
                 text: "Agent 请求的额外权限已被当前 Sandbox 策略拒绝。Pot 只允许本轮角色授权的工具；此请求未获批准。".into(),
                 status: MessageStatus::Complete, created_at_ms: now(), request_id: None,
             })?,
             Update::MessageStarted => {
                 let message = Message {
                     id: id(),
-                    conversation_id: "main".into(),
+                    conversation_id: s.conversation_id(),
                     role: Role::Assistant,
                     text: String::new(),
                     status: MessageStatus::Streaming,
@@ -87,7 +87,7 @@ impl Transcript {
                 self.tool_usage(s, json!({"type":"tool_execution_start","toolCallId":call_id,"toolName":name,"args":args}))?;
                 let message = Message {
                     id: id(),
-                    conversation_id: "main".into(),
+                    conversation_id: s.conversation_id(),
                     role: Role::Tool,
                     text: limited(format!("{name}\n{args}")),
                     status: MessageStatus::Streaming,

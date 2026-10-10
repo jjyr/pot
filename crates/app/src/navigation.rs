@@ -11,6 +11,7 @@ use serde_json::json;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
+    Assistant(String, Box<Route>),
     Chat,
     Tasks,
     Task(String),
@@ -23,6 +24,7 @@ pub enum Route {
 }
 #[derive(Clone)]
 pub struct State {
+    assistant_id: String,
     page: u64,
     selected: String,
     show_tasks: bool,
@@ -101,7 +103,14 @@ impl Shell {
             return;
         }
         let v = self.client.view.lock().unwrap().clone();
-        let route = self.route(&v);
+        let route = Route::Assistant(
+            format!(
+                "{}/{}",
+                v.runtime["runtime_id"].as_str().unwrap_or_default(),
+                v.assistant_id()
+            ),
+            Box::new(self.route(&v)),
+        );
         let y = -f32::from(self.tasks_scroll.offset().y);
         let task_anchor = v
             .tasks
@@ -110,6 +119,7 @@ impl Shell {
         self.history.observe(
             route,
             State {
+                assistant_id: v.assistant_id().to_owned(),
                 page: self.native["page"].as_u64().unwrap_or(0),
                 selected: v.selected,
                 show_tasks: self.show_tasks,
@@ -137,6 +147,7 @@ impl Shell {
         let Some(state) = self.history.travel(forward) else {
             return;
         };
+        self.client.select_assistant(state.assistant_id);
         self.client.select(state.selected);
         self.show_tasks = state.show_tasks;
         self.schedule_tab = state.schedule_tab;
@@ -198,6 +209,7 @@ impl Shell {
     pub fn toolbar(&self, view: &client::View, cx: &mut Context<Self>) -> Div {
         let route = self.route(view);
         let (context, title) = match route {
+            Route::Assistant(_, _) => unreachable!("history identity only"),
             Route::Chat => ("", crate::i18n::text("navigation.chat").into()),
             Route::Tasks => (
                 "",
@@ -327,6 +339,25 @@ impl Shell {
 #[cfg(test)]
 mod tests {
     use super::{History, Route};
+    #[test]
+    fn assistant_and_runtime_are_distinct_navigation_destinations() {
+        let mut history = History::default();
+        history.observe(
+            Route::Assistant("runtime-a/assistant-a".into(), Box::new(Route::Chat)),
+            1,
+        );
+        history.observe(
+            Route::Assistant("runtime-a/assistant-b".into(), Box::new(Route::Chat)),
+            2,
+        );
+        history.observe(
+            Route::Assistant("runtime-b/assistant-a".into(), Box::new(Route::Chat)),
+            3,
+        );
+        assert_eq!(history.travel(false), Some(2));
+        assert_eq!(history.travel(false), Some(1));
+        assert_eq!(history.travel(true), Some(2));
+    }
     #[test]
     fn local_state_does_not_consume_history_and_new_destination_discards_forward_branch() {
         let mut h = History::default();

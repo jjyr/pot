@@ -482,10 +482,10 @@ fn trim(plan: &mut Plan) {
         }
     }
 }
-fn report(sid: &str, run: &ScheduleRun, title: &str) -> Message {
+fn report(owner: &str, sid: &str, run: &ScheduleRun, title: &str) -> Message {
     Message {
         id: format!("task-report-schedule-{}", run.id),
-        conversation_id: "main".into(),
+        conversation_id: owner.into(),
         role: Role::Assistant,
         text: format!(
             "定时计划「{title}」：{}\n{}\n计划编号：{sid}{}",
@@ -535,7 +535,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
             || (phase != TaskPhase::Cancelled
                 && ["changes", "failures"].contains(&r.notify.as_str()))
         {
-            let message = report(&sid, r, &p.info.spec.title);
+            let message = report(&root.usage_scope, &sid, r, &p.info.spec.title);
             hub.schedules.outbox.push(message);
         }
         changed = true;

@@ -20,6 +20,7 @@ impl Drop for Process {
 fn command(root: &std::path::Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_pot"));
     c.arg("--root").arg(root);
+    c.env("POT_AGENT_HOME", root.join("agent-home"));
     c
 }
 #[test]

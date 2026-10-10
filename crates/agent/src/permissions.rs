@@ -365,7 +365,8 @@ pub async fn authorize(
             state["grants"].clone(),
         )
     };
-    if policy.default == DefaultDecision::Allow && tool != "set_sandbox_mappings" {
+    let review = context.feedback.requires_owner_review(tool, args);
+    if !review && policy.default == DefaultDecision::Allow && tool != "set_sandbox_mappings" {
         return Ok(());
     }
     let operation_scope = scope(tool, args)?;
@@ -388,9 +389,10 @@ pub async fn authorize(
         plugin: plugin.map(|plugin| plugin.identity()),
     };
     let grants: Vec<Grant> = serde_json::from_value(grants)?;
-    if grants
-        .iter()
-        .any(|g| g.owner == request.owner && g.scope.covers(&operation_scope))
+    if !review
+        && grants
+            .iter()
+            .any(|g| g.owner == request.owner && g.scope.covers(&operation_scope))
     {
         return Ok(());
     }

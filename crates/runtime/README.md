@@ -18,7 +18,7 @@ pot-agent runs in-process on Host with an injected ToolExecutor and owner servic
 there is no implicit local backend. It owns [permission policy](../../docs/permissions.md)
 and [tool composition](../../docs/tool-composition.md). Main defaults to Host; Workers
 default to their assigned Sandbox and may request authorized Host execution.
-Agent context, compaction, usage and preferences remain Host-owned.
+Agent context, compaction and usage remain owned by the assistant Runtime. Each assistant has independent configuration and AGENTS.md routing rules.
 
 Main manages Tasks, schedules and Sandboxes; Workers cannot delegate, manage or
 switch Sandboxes. Summary turns inspect Tasks only. Guest workspaces contain

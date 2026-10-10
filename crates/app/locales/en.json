@@ -753,5 +753,14 @@
   "permissions.version": "Version",
   "permissions.builtin-tool": "Built-in tool",
   "permissions.unknown-source": "Tool source not provided",
-  "permissions.environment": "Environment"
+  "permissions.environment": "Environment",
+  "assistant.new": "New assistant",
+  "assistant.name": "Name",
+  "assistant.rules-hint": "Rules apply to future dispatches. Existing tasks keep their assignments.",
+  "assistant.save": "Save",
+  "assistant.model": "AI Configuration",
+  "assistant.close": "Close",
+  "assistant.saved": "Saved",
+  "assistant.conflict": "The saved version changed. Your draft is retained.",
+  "assistant.reload": "Discard draft and reload"
 }

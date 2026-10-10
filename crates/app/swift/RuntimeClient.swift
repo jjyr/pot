@@ -13,7 +13,15 @@ import Foundation
 @MainActor final class RuntimeClient {
     var root: URL?
     var ip = ""
+    var assistantID = "main"
+    func scopedCopy() -> RuntimeClient {
+        let copy = RuntimeClient(); copy.root = root; copy.assistantID = assistantID; return copy
+    }
+
     func request(_ path: String, body: [String: Any]? = nil) async throws -> [String: Any] {
+        let path = path.hasPrefix("api/v1/") && !path.hasPrefix("api/v1/assistants") && !path
+            .hasPrefix("api/v1/assistant-tasks") && path != "api/v1/runtime"
+            ? "api/v1/assistants/" + assistantID + "/" + String(path.dropFirst(7)) : path
         let text = try body.map { try String(data: JSONSerialization.data(withJSONObject: $0), encoding: .utf8)! } ?? ""
         let data = await Task.detached {
             path.withCString { path in text.withCString { body in
