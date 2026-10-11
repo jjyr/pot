@@ -42,7 +42,10 @@ between local and remote. Data, drafts, event cursors and cached results are sco
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
 UI is deferred. Machines shows lightweight status cards, expandable environments and
 Tasks filtered by the exact execution target. Technical management and file transfers
-belong in ordinary Chat; there is no assistant-management shortcut or download UI.
+belong in ordinary Chat; there is no assistant-management shortcut or Machines/Task
+artifact-download UI. The approved file-delivery design uses clickable Chat links:
+Control relays a task file from its execution machine to the current client; App
+asks for a save location and Web uses browser downloads. Transport is pending.
 A desktop entry requires an implemented client transport (currently local App only).
 Web UI requires `pot serve --ui --control URL`, a server-held
 Control credential and explicit browser listener settings. It has no local/remote
