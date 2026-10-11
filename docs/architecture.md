@@ -218,11 +218,11 @@ after its acceptance window closes, preventing in-flight acceptance races.
 Remote Sandbox management supports existing start/stop/recover/update/delete. Create
 and select remain local to the destination. Active executions, unresolved receipts,
 and references from all destination assistants' Tasks/schedules protect deletion.
-Retired Sandbox IDs cannot be silently reused. Remote plugin Host TLS fixtures
-are qualified; real Sandbox plugin/platform acceptance,
-actual multi-machine Task Agent qualification remain tracked in #39. Three-node Agent/Environment
-placement is deferred beyond this release; successful Host tests do not establish
-the pending features.
+Retired Sandbox IDs cannot be silently reused. Host HTTPS, actual Linux Podman
+plugins, independent Linux Control/macOS Host processes and native App/Web
+qualification are recorded in the [production report](validation/task-agent-production-20261011.md)
+and [client report](validation/control-cross-machine-ui-20261011.md). Three-node
+Agent/Environment placement remains deferred beyond this release.
 
 ## Implementation boundaries
 

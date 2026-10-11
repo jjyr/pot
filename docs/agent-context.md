@@ -10,7 +10,7 @@ For Control-owned assistants this source belongs to Control, not joined executio
 nodes. Task Agents do not load global Main or assistant AGENTS.md. The approved
 remote launch uses Control-selected global skills/plugins while preserving project
 AGENTS.md and project skills at the execution workspace; see
-[Architecture](architecture.md) for pending implementation scope.
+[Architecture](architecture.md) for the execution contract.
 Permission storage is separate from instruction discovery; see
 [Agent permissions](permissions.md). Project discovery uses the actual tool execution cwd. Main uses Host execution:
 its configured workspace without a selected Sandbox, or `product/agent-workspace`

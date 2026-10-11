@@ -53,5 +53,6 @@ Logs: `/private/tmp/pot39-cleanup-final-tests.log`,
 `/private/tmp/pot39-cleanup-upgrade-final.log`.
 
 No new UI interaction, paid model call, deployment or actual remote VM qualification
-was performed. Task Agent loops still run at the owner; fresh remote launch, desktop
-transport and broader machine/provider qualification remain unfinished in #39.
+was performed. Subsequent destination Task Agent and machine qualification are recorded in
+[production integration](task-agent-production-20261011.md) and
+[client acceptance](control-cross-machine-ui-20261011.md); remote desktop remains deferred.

@@ -325,5 +325,6 @@ access, change authorization or request notification permission. A newly install
 Home Screen app may use a separate storage context and require its own Token configuration. Notifications remain a separate explicit opt-in.
 
 
-Remote Control notification relay and desktop streaming remain pending in #39.
-Local notification infrastructure does not establish their remote availability.
+Remote Control notification relay is implemented; see its [validation report](validation/control-notifications-20261011.md)
+for checked behavior and the untested external push-service delivery. Remote desktop
+streaming remains deferred pending a connection design.
