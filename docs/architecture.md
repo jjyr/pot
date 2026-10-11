@@ -240,8 +240,8 @@ are only required across machines.
 
 Provider metadata and secrets use Control's SQLite database. Provider snapshots
 contain credential references, never plaintext keys. Secrets use AES-256-GCM;
-the master key is external to SQLite (macOS Keychain or an explicitly supplied
-owner-only key file). Assistant rules remain SQLite records scoped to the
+the master key is external to SQLite (macOS Keychain or `~/.pot/secrets/master.key` on other platforms,
+with an explicit owner-only key file override). Assistant rules remain SQLite records scoped to the
 assistant, while project AGENTS.md remains filesystem based. Runner receives no
 Provider credentials. General task-secret distribution is a future protocol;
 there is no implicit secret export endpoint. See [secrets](secrets.md).

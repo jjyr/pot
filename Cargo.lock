@@ -6291,6 +6291,7 @@ dependencies = [
  "openssl",
  "rusqlite",
  "security-framework",
+ "tempfile",
  "zeroize",
 ]
 

@@ -20,9 +20,16 @@ under service `pot.control.secrets` with the Control data path as its account.
 The item is created on the first secret write. A locked or unavailable Keychain
 fails the operation; it never falls back to plaintext storage.
 
-For an unattended deployment, set `POT_SECRET_KEY_FILE` to an owner-only file
-containing exactly 32 random raw bytes. This source also overrides Keychain on
-macOS. For example, provision once before starting Control:
+On other platforms, Control automatically creates `~/.pot/secrets/master.key`
+on the first secret write. New directories use mode `0700` and the key uses
+`0600`. The complete random key is published atomically without overwriting an
+existing key, including when multiple Control processes initialize concurrently.
+The file is reused on restart. A missing key with existing encrypted secrets is
+an error, not a reason to generate a replacement (also true for Keychain).
+
+To override either default, set `POT_SECRET_KEY_FILE` to an owner-only file
+containing exactly 32 random raw bytes. Explicitly configured files must already
+exist; Pot does not generate or overwrite them. For example, provision once before starting Control:
 
 ```sh
 install -d -m 700 "$HOME/.config/pot"
