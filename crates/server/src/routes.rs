@@ -72,6 +72,11 @@ pub fn router(s: Service) -> Router {
         .route("/api/v1/mcp", post(tool_bridge::mcp))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/query", get(tasks::query))
+        .route("/api/v1/tasks/{id}/files", get(pot_runtime::files::chunk))
+        .route(
+            "/api/v1/tasks/{id}/file-download",
+            get(pot_runtime::files::download),
+        )
         .route(
             "/api/v1/schedules",
             get(schedules::list).post(schedules::command),

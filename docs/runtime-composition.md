@@ -43,9 +43,13 @@ by mode/Runtime/owner. Remote failures never select local execution. Resource cr
 UI is deferred. Machines shows lightweight status cards, expandable environments and
 Tasks filtered by the exact execution target. Technical management and file transfers
 belong in ordinary Chat; there is no assistant-management shortcut or Machines/Task
-artifact-download UI. The approved file-delivery design uses clickable Chat links:
+artifact-download UI. File delivery uses clickable Chat links:
 Control relays a task file from its execution machine to the current client; App
-asks for a save location and Web uses browser downloads. Transport is pending.
+asks for a save location and Web uses browser downloads. Links use
+`pot-file://TASK_UUID/encoded/relative/path`; owner-scoped reads use the task's
+immutable environment, including finished tasks. Reads are bounded to 192 KiB
+chunks and 1 GiB files; missing files, offline machines and detected changes fail.
+No new model-visible file tool is required.
 A desktop entry requires an implemented client transport (currently local App only).
 Web UI requires `pot serve --ui --control URL`, a server-held
 Control credential and explicit browser listener settings. It has no local/remote
@@ -114,6 +118,6 @@ after its acceptance window closes, preventing in-flight acceptance races.
 Remote Sandbox management supports existing start/stop/recover/update/delete. Create
 and select remain local to the destination. Active executions, unresolved receipts,
 and references from all destination assistants' Tasks/schedules protect deletion.
-Retired Sandbox IDs cannot be silently reused. Remote plugins, artifact transport,
+Retired Sandbox IDs cannot be silently reused. Remote plugins,
 desktop transport, remote Agent runners and three-node qualification remain tracked
 in #39; successful Host tests do not establish those features.

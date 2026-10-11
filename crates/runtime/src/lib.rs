@@ -20,6 +20,7 @@ pub use services::OwnerScope;
 use services::{
     AgentResources, AgentService, ConversationService, EnvironmentService, TaskService,
 };
+pub mod files;
 mod store;
 pub mod tasks;
 pub mod terminal;

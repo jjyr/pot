@@ -62,6 +62,8 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `/api/v1/tasks`, `/api/v1/tasks/query`, `/api/v1/tasks/{id}` | Main task creation, bounded list/search and scoped detail |
 | `/api/v1/tasks/{id}/messages`, `/interrupt` | Persistent guidance and interruption preserving pending guidance |
 | `/api/v1/tasks/{id}/cancel` | Explicit task abandonment; discards guidance, marks cancelled and archives after cleanup |
+| `GET /api/v1/assistants/{owner}/tasks/{id}/files` | Owner-only task workspace chunk; query `path`, `offset`, `revision`; response `{size,offset,revision,data}` with base64 data, 192 KiB chunks, 1 GiB maximum; worker/cross-owner access rejected |
+| `GET /api/v1/assistants/{owner}/tasks/{id}/file-download` | Binary attachment stream, query `path`, optional `revision`; task-bound local or Control-relayed execution workspace; missing/offline/changed files fail, no Agent tool invocation |
 | `GET/POST /api/v1/schedules` | Durable schedules, occurrences and user actions |
 | `/api/v1/usage`, `/summary`, `/policy`, `/providers`, `/resume`, `/cancel` | Request/token accounting and allowance policy/recovery |
 | `/api/v1/terminals`, `/{id}/socket`, `/{id}/close` | Native/operator Sandbox PTY; no authentication command injection |

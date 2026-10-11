@@ -106,3 +106,5 @@ Single Control App client (P3b): [Mode isolation, private configuration and nati
 Explicit Control Web hosting (P3c): [Startup, fixed proxy and streaming validation, 2026-10-11](validation/control-web-20261011.md).
 
 Lightweight Machines (P3d1): [Status cards, exact environment Tasks and validation limits, 2026-10-11](validation/machines-simple-20261011.md).
+
+Chat file delivery (P3d2a): [Scoped chunks, Control relay and native save acceptance, 2026-10-11](validation/chat-file-downloads-20261011.md).

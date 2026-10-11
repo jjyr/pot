@@ -198,6 +198,11 @@ struct Envelope {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Rpc {
+    ReadFile {
+        owner: String,
+        target: Target,
+        query: pot_protocol::FileQuery,
+    },
     ManageSandbox {
         operation_id: String,
         accept_before_ms: i64,
@@ -1234,6 +1239,18 @@ impl Authority {
                 )
                 .await
             }
+            Rpc::ReadFile {
+                owner,
+                target,
+                query,
+            } => {
+                uuid::Uuid::parse_str(&owner)?;
+                require_target(host, &target).await?;
+                let workspace = digest(&(peer, &owner, &target))?;
+                Ok(serde_json::to_value(
+                    host.controlled_file(&target, &workspace, query).await?,
+                )?)
+            }
             Rpc::Inventory => Ok(host.environment_inventory().await),
             Rpc::Acquire {
                 owner,
@@ -1679,6 +1696,110 @@ mod tests {
             std::fs::remove_dir_all(&a.data).unwrap();
         }
     }
+    #[tokio::test]
+    async fn outward_file_download_survives_finished_leases_and_is_scoped() {
+        use pot_runtime::remote_environment::RemoteEnvironment;
+        let control = resources().await;
+        let node = resources().await;
+        native(
+            &node,
+            json!({"request_id":"files-host","resource":{"kind":"host"}}),
+        )
+        .await;
+        join_nodes(&control, &node).await;
+        control
+            .control
+            .call(&node.control.identity.runtime_id, Rpc::Inventory)
+            .await
+            .unwrap();
+        let owner = uuid::Uuid::new_v4().to_string();
+        let target = Target::Host {};
+        let environment = EnvironmentRef {
+            runtime_id: node.control.identity.runtime_id.clone(),
+            target: target.clone(),
+        };
+        let workspace = node
+            .control
+            .data
+            .join("peer-workspaces")
+            .join(digest(&(&control.control.identity.runtime_id, &owner, &target)).unwrap());
+        std::fs::create_dir_all(&workspace).unwrap();
+        let bytes: Vec<_> = (0..pot_runtime::files::CHUNK_BYTES + 29)
+            .map(|n| n as u8)
+            .collect();
+        std::fs::write(workspace.join("report.bin"), &bytes).unwrap();
+        // No active execution lease is required to fetch a completed task's files.
+        let mut query = pot_protocol::FileQuery {
+            path: "report.bin".into(),
+            ..Default::default()
+        };
+        let first = control
+            .control
+            .read_file(environment.clone(), owner.clone(), query.clone())
+            .await
+            .unwrap();
+        let mut actual = base64::engine::general_purpose::STANDARD
+            .decode(&first.data)
+            .unwrap();
+        query.offset = actual.len() as u64;
+        query.revision = first.revision;
+        let last = control
+            .control
+            .read_file(environment.clone(), owner.clone(), query.clone())
+            .await
+            .unwrap();
+        actual.extend(
+            base64::engine::general_purpose::STANDARD
+                .decode(last.data)
+                .unwrap(),
+        );
+        assert_eq!(actual, bytes);
+        query.offset = 0;
+        assert!(
+            control
+                .control
+                .read_file(
+                    environment.clone(),
+                    uuid::Uuid::new_v4().to_string(),
+                    query.clone()
+                )
+                .await
+                .is_err()
+        );
+        query.path = "../report.bin".into();
+        assert!(
+            control
+                .control
+                .read_file(environment.clone(), owner.clone(), query.clone())
+                .await
+                .is_err()
+        );
+        query.path = "report.bin".into();
+        std::fs::write(workspace.join("report.bin"), "changed").unwrap();
+        assert!(
+            control
+                .control
+                .read_file(environment.clone(), owner.clone(), query.clone())
+                .await
+                .is_err()
+        );
+        control
+            .control
+            .remove_member(&environment.runtime_id)
+            .unwrap();
+        assert!(
+            control
+                .control
+                .read_file(environment, owner, query)
+                .await
+                .is_err()
+        );
+        for r in [control, node] {
+            r.shutdown().await;
+            std::fs::remove_dir_all(r.control.data.parent().unwrap()).unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn outward_membership_single_control_full_inventory_and_removal() {
         let control = resources().await;

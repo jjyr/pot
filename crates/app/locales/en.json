@@ -801,5 +801,8 @@
   "machines.add-control": "Add Control",
   "machines.remote-mode": "Remote Control · click for local",
   "machines.local-mode": "Local · click for Control",
-  "machines.copy-invitation": "Copy invitation"
+  "machines.copy-invitation": "Copy invitation",
+  "files.save-title": "Save file",
+  "files.download-failed": "File download failed",
+  "files.assistant-changed": "Assistant changed; click the file link again."
 }

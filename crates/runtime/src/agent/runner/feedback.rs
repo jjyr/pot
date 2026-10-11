@@ -254,6 +254,9 @@ fn make_context(
     } else {
         orchestration::MAIN_PROMPT.into()
     };
+    if s.is_worker {
+        main_prompt.push_str(&format!("For files you actually create inside your task workspace, include Markdown download links [filename](pot-file://{}/RELATIVE_PATH) in your reply. Percent-encode spaces and non-ASCII path characters, preserving slashes. Do not link outside the task workspace or claim files were downloaded to the user's machine.", s.usage_scope));
+    }
     {
         main_prompt = main_prompt.replace("Environment tools execute in the current default Sandbox unless you pass an explicit sandbox_id.", "Main execution defaults to Host; use environment=sandbox:ID for explicit Sandbox execution.").replace("Direct Host tool execution is unavailable.", "You normally chat on the Host. exec_command, write_stdin and apply_patch operate in the selected execution environment. Main defaults to host; task agents default to their fixed Host or Sandbox target. environment=host explicitly requests Host execution; environment=sandbox:ID selects a Sandbox. Each environment loads its own ~/.pot/agent/permissions.json. Host policy defaults to ask: execution needs a matching grant or owner approval. Sandbox policy defaults to allow: ordinary Sandbox execution does not need approval, unless the owner configures ask. Task and Sandbox management do not require permission approval. write_stdin continues an authorized process session without asking again. Role and assignment boundaries still apply. Use set_sandbox_mappings only for an owner-reviewed mapping change. Never claim permanent permission exists before approval.");
     }

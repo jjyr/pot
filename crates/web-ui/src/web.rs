@@ -269,7 +269,7 @@ impl Render for Mobile {
             ));
             if let Some(snapshot) = &snapshot {
                 let labels = pot_ui::chat::Labels::new(|key| self.label(key));
-                let handler: pot_ui::chat::ChatHandler = Rc::new(cx.listener(
+                let handler: pot_ui::chat::ChatHandler = Arc::new(cx.listener(
                     |this, event: &pot_ui::chat::ChatAction, _, cx| {
                         match event {
                             pot_ui::chat::ChatAction::ToggleTool(id) => {
@@ -278,6 +278,15 @@ impl Render for Mobile {
                                 }
                             }
                             pot_ui::chat::ChatAction::OpenTask(id) => action("task", id),
+                            pot_ui::chat::ChatAction::DownloadFile(link) => {
+                                if let Some((task, path)) = pot_protocol::parse_file_link(link) {
+                                    action(
+                                        "file-download",
+                                        &serde_json::json!({"task_id":task,"path":path})
+                                            .to_string(),
+                                    );
+                                }
+                            }
                         }
                         cx.notify();
                     },
