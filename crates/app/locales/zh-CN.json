@@ -804,5 +804,7 @@
   "machines.copy-invitation": "复制加入邀请",
   "files.save-title": "保存文件",
   "files.download-failed": "文件下载失败",
-  "files.assistant-changed": "助手已切换，请重新点击文件链接。"
+  "files.assistant-changed": "助手已切换，请重新点击文件链接。",
+  "machines.tags": "标签（空格分隔）",
+  "machines.save-tags": "保存标签"
 }

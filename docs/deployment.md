@@ -330,3 +330,13 @@ Home Screen app may use a separate storage context and require its own Token con
 Remote Control notification relay is implemented; see its [validation report](validation/control-notifications-20261011.md)
 for checked behavior and the untested external push-service delivery. Remote desktop
 streaming remains deferred pending a connection design.
+
+## Machine labels
+
+Control owns routing labels; joined Runtimes report their OS at enrollment.
+`GET /api/v1/machines` includes `tags` per machine. The authenticated
+`POST /api/v1/machine-connections` operator accepts
+`{"action":"set_tags","runtime_id":"ID","tags":["linux","task-runner"]}`.
+This replaces the complete label set, including allowing an empty set. It does
+not enable resources or verify capabilities. Runner-side edits are rejected.
+See [routing semantics](agent-context.md#message-references-and-machine-labels).

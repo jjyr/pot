@@ -804,5 +804,7 @@
   "machines.copy-invitation": "Copy invitation",
   "files.save-title": "Save file",
   "files.download-failed": "File download failed",
-  "files.assistant-changed": "Assistant changed; click the file link again."
+  "files.assistant-changed": "Assistant changed; click the file link again.",
+  "machines.tags": "Labels (space-separated)",
+  "machines.save-tags": "Save labels"
 }

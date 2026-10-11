@@ -390,6 +390,7 @@ impl Shell {
         }
         self.last_content = content;
         let state = serde_json::json!({
+            "completions": if view.selected.is_empty() { view.completions.clone() } else { serde_json::Value::Null },
             "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
             "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),

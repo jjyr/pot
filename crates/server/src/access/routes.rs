@@ -252,7 +252,8 @@ fn allowed(method: &Method, path: &str) -> bool {
     if *method == Method::GET
         && matches!(
             path,
-            "/api/v1/snapshot"
+            "/api/v1/completions"
+                | "/api/v1/snapshot"
                 | "/api/v1/events"
                 | "/api/v1/tasks"
                 | "/api/v1/tasks/query"
@@ -553,6 +554,11 @@ mod tests {
     fn allowlist_excludes_management_and_terminal() {
         assert!(allowed(&Method::POST, "/api/v1/messages"));
         assert!(allowed(&Method::POST, "/api/v1/machine-connections"));
+        assert!(allowed(&Method::GET, "/api/v1/assistants/main/completions"));
+        assert!(!allowed(
+            &Method::POST,
+            "/api/v1/assistants/main/completions"
+        ));
         assert!(!allowed(&Method::POST, "/api/v1/runtime/control"));
         assert!(!allowed(
             &Method::POST,

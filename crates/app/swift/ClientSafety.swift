@@ -23,3 +23,16 @@ enum DraftReceipt {
         return true
     }
 }
+
+/// NSTextView offsets are UTF-16; preserve suffix text when inserting a reference.
+enum ComposerReferenceQuery {
+    static func range(in text: String, selection: NSRange) -> NSRange? {
+        guard selection.length == 0, selection.location <= (text as NSString).length else { return nil }
+        let prefix = (text as NSString).substring(to: selection.location)
+        guard let word = prefix.split(whereSeparator: { $0.isWhitespace }).last,
+              prefix.last?.isWhitespace == false, word.hasPrefix("/"),
+              !word.dropFirst().contains("/") else { return nil }
+        let length = (String(word) as NSString).length
+        return NSRange(location: selection.location - length, length: length)
+    }
+}

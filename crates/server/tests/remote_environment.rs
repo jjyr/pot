@@ -207,6 +207,7 @@ async fn qualify_recovery(
         .unwrap()
         .to_owned();
     target.api("/api/v1/runtime/control",Some(json!({"action":"join","request":{"request_id":uuid::Uuid::new_v4(),"url":format!("https://localhost:{}",address.port()),"invitation":enrollment["invitation"],"expected_runtime_id":enrollment["identity"]["runtime_id"],"expected_fingerprint":enrollment["identity"]["fingerprint"],"ca_pem":cert.pem()}}))).await;
+    caller.api("/api/v1/machine-connections", Some(json!({"action":"set_tags","runtime_id":target_id,"tags":["remote-test","task-runner"]}))).await;
     let machines = caller.api("/api/v1/machines", None).await;
     assert_eq!(machines["machines"].as_array().unwrap().len(), 2);
     let model_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -256,7 +257,16 @@ async fn qualify_recovery(
             )
             .await;
     }
-    let task=caller.api("/api/v1/tasks",Some(json!({"request_id":"remote-task","text":"Write where.txt on the assigned machine","environment_ref":{"runtime_id":target_id,"target":execution_target}}))).await;
+    let mut request =
+        json!({"request_id":"remote-task","text":"Write where.txt on the assigned machine"});
+    if sandbox {
+        request["environment_ref"] = json!({"runtime_id":target_id,"target":execution_target});
+    } else {
+        request["text"] =
+            json!("/tag:remote-test /tag:task-runner Write where.txt on the assigned machine");
+    }
+    let task = caller.api("/api/v1/tasks", Some(request)).await;
+    assert_eq!(task["environment_ref"]["runtime_id"], target_id);
     let task_id = task["id"].as_str().unwrap();
     let mut reviews = 0;
     let mut disconnected = before_start;

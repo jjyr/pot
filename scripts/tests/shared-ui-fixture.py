@@ -157,6 +157,7 @@ page_usage = dict(
 
 
 fixture_writes = []
+machine_labels = ["desktop", "task-runner", "macos"]
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -192,6 +193,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.data(dict(text="Fixture assistant rules", revision="fixture"))
         elif path == "/api/v1/permissions":
             self.data(dict(requests=[], grants=[]))
+        elif path == "/api/v1/completions":
+            self.data(
+                dict(
+                    items=[
+                        dict(token="/machine:fixture", label="Control", detail="Machine"),
+                        dict(token="/tag:desktop", label="desktop", detail="Machine label"),
+                        dict(token="/tag:task-runner", label="task-runner", detail="Machine label"),
+                        dict(
+                            token="/skill:skill-creator",
+                            label="skill-creator",
+                            detail="Create Skills",
+                        ),
+                    ]
+                )
+            )
         elif path == "/api/v1/machines":
             self.data(
                 dict(
@@ -201,6 +217,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             name="Control",
                             local=True,
                             connection="online",
+                            tags=machine_labels,
                             environments=[
                                 dict(
                                     environment_ref=dict(
@@ -294,6 +311,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if length > 65536:
             self.send_error(413)
             return
+        path = urlsplit(self.path).path
+        if path.startswith("/api/v1/assistants/main/"):
+            path = "/api/v1/" + path[len("/api/v1/assistants/main/") :]
         value = json.loads(self.rfile.read(length))
         fixture_writes.append(dict(path=self.path, body=value))
         if self.path == "/access/token":
@@ -301,7 +321,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/v1/usage/policy" and args.pages:
             page_usage["quota"]["policy"] = value
             self.data(dict(accepted=True))
-        elif self.path == "/api/v1/messages":
+        elif path == "/api/v1/machine-connections" and value.get("action") == "set_tags":
+            machine_labels[:] = value["tags"]
+            self.data(dict(tags=machine_labels))
+        elif path == "/api/v1/messages":
             duplicate = any(
                 m.get("request_id") == value["request_id"] for m in snapshot["messages"]
             )

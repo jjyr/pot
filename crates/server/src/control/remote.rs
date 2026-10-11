@@ -226,6 +226,26 @@ fn attempt_id(run: &str, attempt: u64) -> Result<String> {
     Ok(uuid::Uuid::from_bytes(hash.as_ref()[..16].try_into().unwrap()).to_string())
 }
 impl RemoteEnvironment for Authority {
+    fn machines(&self) -> Vec<pot_protocol::MachineRoute> {
+        let mut machines = vec![pot_protocol::MachineRoute {
+            runtime_id: self.identity.runtime_id.clone(),
+            tags: self.local_tags(),
+        }];
+        machines.extend(
+            self.book
+                .lock()
+                .unwrap()
+                .members
+                .values()
+                .filter(|m| m.enabled)
+                .map(|m| pot_protocol::MachineRoute {
+                    runtime_id: m.identity.runtime_id.clone(),
+                    tags: m.tags.clone(),
+                }),
+        );
+        machines
+    }
+
     fn run_task(
         &self,
         launch: pot_runner::Launch,
@@ -501,6 +521,7 @@ impl RemoteEnvironment for Authority {
                     .unwrap_or_default()
                 {
                     item["connection"] = machine["connection"].clone();
+                    item["machine_tags"] = machine["tags"].clone();
                     items.push(item);
                 }
             }

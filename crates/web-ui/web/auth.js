@@ -1,3 +1,8 @@
+let composing=false;
+addEventListener("compositionstart",()=>{composing=true;},true);
+addEventListener("compositionend",()=>{composing=false;},true);
+window.potIsComposing=()=>composing;
+
 let machineReply=null,machinePending=false;
 import {createInstaller, isInstalled} from '/install.js';
 let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
@@ -68,7 +73,7 @@ async function refresh(){
     if(receipt){accepted=receipt;notice=t('mobile.shell.received');}
     const data={connected:true,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches,page,conversation:task||assistantId,locale:language,notice,snapshot,accepted,installed:isInstalled(),dark:matchMedia('(prefers-color-scheme: dark)').matches};
     data.runtime=directory;data.assistant_id=requestedAssistant;data.assistants=await api('/api/v1/assistants');data.assistant_saved_owner=assistantSavedOwner;data.assistant_save_sequence=assistantSaveSequence;
-    if(page==='chat'){data.assistant_rules=await api(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await api('/api/v1/agent',undefined,requestedAssistant);}
+    if(page==='chat'){data.completions=await api('/api/v1/completions',undefined,requestedAssistant);data.assistant_rules=await api(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await api('/api/v1/agent',undefined,requestedAssistant);}
     if(page==='chat'||page==='task')data.permissions=await api('/api/v1/permissions',undefined,requestedAssistant);
     if(page==='tasks'){const result=await api(`/api/v1/assistant-tasks?scope=${scope}&q=${encodeURIComponent(query)}&environment=${encodeURIComponent(environment)}&offset=${offset}&limit=20`);data.task_page=result;data.task_query={scope,q:query,environment,offset,limit:20,selected:''};nextOffset=result.next_offset;}
     if(page==='usage'){data.usage=await api('/api/v1/usage/summary?days='+usageDays+'&offset='+usageOffset+'&timezone='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone),undefined,requestedAssistant);}

@@ -56,6 +56,7 @@ pub struct View {
     pub client_mode: String,
     pub runtime: Value,
     pub machines: Value,
+    pub completions: Value,
     pub machine_reply: Value,
     pub machine_pending: bool,
     pub assistants: Value,
@@ -426,6 +427,12 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             }
         }
     }
+    let completions: Value = agent
+        .get("/api/v1/completions")
+        .call()?
+        .body_mut()
+        .read_json()
+        .map_err(|e| e.to_string())?;
     let permissions: Value = agent
         .get("/api/v1/permissions")
         .call()
@@ -466,6 +473,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     }
     v.runtime = directory;
     v.permissions = permissions;
+    v.completions = completions;
     v.assistants = assistants;
     v.assistant_rules = assistant_rules;
     if main.api_version != API_VERSION || snapshot.api_version != API_VERSION {

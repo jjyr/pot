@@ -31,6 +31,8 @@ thread_local! {
 extern "C" {
     #[wasm_bindgen(js_namespace = window, js_name = potAction)]
     fn action(name: &str, value: &str);
+    #[wasm_bindgen(js_namespace = window, js_name = potIsComposing)]
+    fn is_composing() -> bool;
 }
 struct Mobile {
     assistants_ui: pot_ui::assistants::Editor,
@@ -41,6 +43,10 @@ struct Mobile {
     data: Value,
     page: String,
     composer: Entity<TextareaState>,
+    composer_watch: Subscription,
+    completion_index: usize,
+    completion_context: (String, usize),
+    completion_dismissed: Option<(String, usize)>,
     drafts: pot_ui::state::Drafts<Entity<TextareaState>>,
     expanded: HashSet<String>,
     conversation: String,
@@ -132,6 +138,106 @@ impl Mobile {
         )
     }
 
+    fn completions(&self, cx: &App) -> Vec<pot_protocol::references::Completion> {
+        if self.page != "chat" || is_composing() {
+            return vec![];
+        }
+        let input = self.composer.read(cx);
+        let text = input.value().to_string();
+        let caret = input.cursor();
+        if !input.selected_range().is_empty()
+            || self.completion_dismissed.as_ref() == Some(&(text.clone(), caret))
+        {
+            return vec![];
+        }
+        let Some((_, query)) = pot_protocol::references::query(&text, caret) else {
+            return vec![];
+        };
+        serde_json::from_value::<Vec<pot_protocol::references::Completion>>(
+            self.data["completions"]["items"].clone(),
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| pot_protocol::references::matches(i, query))
+        .take(30)
+        .collect()
+    }
+    fn completion_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let items = self.completions(cx);
+        if items.is_empty() {
+            return;
+        }
+        match key {
+            "down" => self.completion_index = (self.completion_index + 1) % items.len(),
+            "up" => {
+                self.completion_index =
+                    (self.completion_index.min(items.len() - 1) + items.len() - 1) % items.len()
+            }
+            "enter" => {
+                let token = items[self.completion_index.min(items.len() - 1)]
+                    .token
+                    .clone();
+                self.insert_completion(&token, window, cx);
+            }
+            "escape" => {
+                let input = self.composer.read(cx);
+                self.completion_dismissed = Some((input.value().to_string(), input.cursor()));
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+        window.prevent_default();
+        cx.notify();
+    }
+    fn insert_completion(&mut self, token: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer.update(cx, |input, cx| {
+            let text = input.value().to_string();
+            let caret = input.cursor();
+            if let Some((start, _)) = pot_protocol::references::query(&text, caret) {
+                input.set_selected_range(start..caret, cx);
+                input.replace(format!("{token} "), window, cx);
+                input.focus(window, cx);
+            }
+        });
+        self.completion_index = 0;
+        self.completion_dismissed = None;
+    }
+    fn completion_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let mut menu = div()
+            .flex()
+            .flex_col()
+            .bg(crate::design::navigation(cx))
+            .rounded_lg();
+        let items = self.completions(cx);
+        let rows = ((f32::from(window.fully_visible_bounds().size.height) - 230.) / 40.)
+            .clamp(1., 6.) as usize;
+        // Bound the popup to the visible viewport, including a raised phone keyboard.
+        let selected = self.completion_index.min(items.len().saturating_sub(1));
+        for (index, item) in items
+            .into_iter()
+            .enumerate()
+            .skip(selected.saturating_sub(rows - 1))
+            .take(rows)
+        {
+            let token = item.token.clone();
+            menu = menu.child(
+                Button::new(SharedString::from(format!("completion-{index}")))
+                    .ghost()
+                    .h(px(40.))
+                    .label(format!(
+                        "{} {} · {}",
+                        if index == selected { "›" } else { " " },
+                        item.label,
+                        item.token.split(':').next().unwrap_or("")
+                    ))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.insert_completion(&token, window, cx);
+                        cx.notify();
+                    })),
+            );
+        }
+        menu
+    }
     fn label(&self, key: &str) -> String {
         pot_ui::localization::Catalog::new(self.data["locale"].as_str().unwrap_or("en"))
             .text(key)
@@ -170,6 +276,9 @@ impl Render for Mobile {
                 .drafts
                 .get(&conversation)
                 .unwrap_or_else(|| cx.new(|cx| TextareaState::new(window, cx)));
+            self.composer_watch = cx.observe(&self.composer, |_, _, cx| cx.notify());
+            self.completion_dismissed = None;
+            self.completion_index = 0;
             self.conversation = conversation;
         }
         if let Ok(receipt) =
@@ -187,6 +296,12 @@ impl Render for Mobile {
                 composer.update(cx, |input, cx| input.set_value("", window, cx));
             }
             self.accepted = receipt.id;
+        }
+        let input = self.composer.read(cx);
+        let context = (input.value().to_string(), input.cursor());
+        if context != self.completion_context {
+            self.completion_index = 0;
+            self.completion_context = context;
         }
         let locale = self.data["locale"].as_str().unwrap_or("en").to_owned();
         if locale != self.locale {
@@ -578,6 +693,29 @@ impl Render for Mobile {
                     .flex()
                     .flex_col()
                     .gap_2()
+                    .capture_action(cx.listener(
+                        |this, _: &gpui_kit::component::input::MoveDown, window, cx| {
+                            this.completion_key("down", window, cx);
+                        },
+                    ))
+                    .capture_action(cx.listener(
+                        |this, _: &gpui_kit::component::input::MoveUp, window, cx| {
+                            this.completion_key("up", window, cx);
+                        },
+                    ))
+                    .capture_action(cx.listener(
+                        |this, event: &gpui_kit::component::input::Enter, window, cx| {
+                            if !event.shift && !event.secondary {
+                                this.completion_key("enter", window, cx);
+                            }
+                        },
+                    ))
+                    .capture_action(cx.listener(
+                        |this, _: &gpui_kit::component::input::Escape, window, cx| {
+                            this.completion_key("escape", window, cx);
+                        },
+                    ))
+                    .child(self.completion_menu(window, cx))
                     .child(
                         Textarea::new(&self.composer)
                             .aria_label(self.label("mobile.message"))
@@ -751,6 +889,10 @@ pub fn run() {
                 )),
                 data: json!({}),
                 page: "chat".into(),
+                composer_watch: cx.observe(&composer, |_, _, cx| cx.notify()),
+                completion_index: 0,
+                completion_context: Default::default(),
+                completion_dismissed: None,
                 composer,
                 search,
                 drafts: pot_ui::state::Drafts::default(),

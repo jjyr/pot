@@ -12,6 +12,11 @@ pub struct RemoteBinding {
     pub environment: pot_core::EnvironmentRef,
 }
 pub trait RemoteEnvironment: Send + Sync {
+    /// Control-owned routing directory; no capability scoring or fallback.
+    fn machines(&self) -> Vec<pot_protocol::MachineRoute> {
+        vec![]
+    }
+
     fn run_task(
         &self,
         _launch: pot_runner::Launch,

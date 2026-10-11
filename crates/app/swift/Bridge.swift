@@ -72,7 +72,11 @@ var bridge: PotBridge?
 
 @MainActor final class Composer: NSTextView {
     var submit: (() -> Void)?
+    var completeKey: ((NSEvent) -> Bool)?
     override func keyDown(with event: NSEvent) {
+        if !hasMarkedText(), completeKey?(event) == true {
+            return
+        }
         // Route navigation as editing commands, never as printable control codes.
         // Leave marked-text navigation to the input method.
         if !hasMarkedText(), [123, 124, 125, 126, 115, 119].contains(event.keyCode) {
@@ -108,6 +112,13 @@ var bridge: PotBridge?
     let web: WKWebView
     let rail = NSView()
     let composer = Composer()
+    let completionBox = NSStackView()
+    var completionItems: [[String: String]] = []
+    var completionIndex = 0
+    var completionQuery = ""
+    var displayedCompletions = ""
+    var dismissedCompletion: String?
+
     let composerBox = NSView()
     let composerScroll = NSScrollView()
     let placeholder = PlaceholderLabel(labelWithString: L.text("bridge.message-pot"))
@@ -219,6 +230,12 @@ var bridge: PotBridge?
         composer.isVerticallyResizable = true; composer.isHorizontallyResizable = false
         composer.autoresizingMask = [.width]; composer.textContainer?.widthTracksTextView = true
         composer.delegate = self; composer.submit = { [weak self] in self?.sendMessage() }
+        composer.completeKey = { [weak self] event in self?.completionKey(event) ?? false }
+        completionBox.orientation = .vertical; completionBox.spacing = 2
+        completionBox.alignment = .leading; completionBox.wantsLayer = true
+        completionBox.layer?.cornerRadius = 8; completionBox.isHidden = true
+        rootView.addSubview(completionBox)
+
         composerScroll.documentView = composer; composerScroll.hasVerticalScroller = true; composerScroll
             .autohidesScrollers = true; composerScroll.drawsBackground = false
         composerBox.addSubview(composerScroll)
@@ -464,6 +481,10 @@ var bridge: PotBridge?
         if composer.frame.size != textSize {
             composer.setFrameSize(textSize)
         }
+        completionBox.frame = NSRect(x: boxFrame.minX, y: boxFrame.maxY + 6, width: width,
+                                     height: CGFloat(min(completionItems.count, 6)) * 34)
+        completionBox.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        completionBox.isHidden = completionItems.isEmpty || composerBox.isHidden
         placeholder.frame = NSRect(x: 18, y: height - 33, width: width - 90, height: 22)
         sendButton.frame = NSRect(x: width - 42, y: 8, width: 32, height: 32)
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -515,7 +536,84 @@ var bridge: PotBridge?
     }
 
     func textDidChange(_: Notification) {
-        placeholder.isHidden = !composer.string.isEmpty; layout()
+        placeholder.isHidden = !composer.string.isEmpty; refreshCompletions(); layout()
+    }
+
+    func textViewDidChangeSelection(_: Notification) {
+        refreshCompletions(); layout()
+    }
+
+    func completionRange() -> NSRange? {
+        guard !composer.hasMarkedText() else { return nil }
+        return ComposerReferenceQuery.range(in: composer.string, selection: composer.selectedRange())
+    }
+
+    func refreshCompletions() {
+        let identity = "\(draftKey):\(composer.selectedRange().location):\(composer.string)"
+        completionItems = []
+        if page == 0, selected.isEmpty, dismissedCompletion != identity,
+           let range = completionRange(),
+           let catalog = lastUIState["completions"] as? [String: Any],
+           let items = catalog["items"] as? [[String: String]]
+        {
+            let query = String((composer.string as NSString).substring(with: range).dropFirst()).lowercased()
+            if completionQuery != query {
+                completionIndex = 0; completionQuery = query
+            }
+            completionItems = Array(items.filter { item in
+                ["token", "label", "detail"].contains { key in (item[key] ?? "").lowercased().contains(query) } || query
+                    .isEmpty
+            }.prefix(30))
+        }
+        completionIndex = min(completionIndex, max(0, completionItems.count - 1))
+        completionBox.isHidden = completionItems.isEmpty || composerBox.isHidden
+        let display = "\(completionIndex):\(completionItems)"
+        guard display != displayedCompletions else { return }
+        displayedCompletions = display
+        for view in completionBox
+            .arrangedSubviews
+        {
+            completionBox.removeArrangedSubview(view); view.removeFromSuperview()
+        }
+        let start = max(0, completionIndex - 5)
+        for index in start ..< min(start + 6, completionItems.count) {
+            let item = completionItems[index]
+            let kind = (item["token"] ?? "").split(separator: ":").first.map(String.init) ?? ""
+            let button = NSButton(
+                title: "\(index == completionIndex ? "›" : " ") \(item["label"] ?? "") · \(kind)",
+                target: self,
+                action: #selector(chooseCompletion(_:))
+            )
+            button.tag = index; button.isBordered = false; button.alignment = .left
+            button.toolTip = item["detail"]; button.setAccessibilityLabel(button.title)
+            completionBox.addArrangedSubview(button)
+            button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        }
+        completionBox.isHidden = completionItems.isEmpty || composerBox.isHidden
+    }
+
+    func completionKey(_ event: NSEvent) -> Bool {
+        guard !completionItems.isEmpty else { return false }
+        switch event.keyCode {
+        case 125: completionIndex = (completionIndex + 1) % completionItems.count
+        case 126: completionIndex = (completionIndex + completionItems.count - 1) % completionItems.count
+        case 36 where !event.modifierFlags.contains(.shift): insertCompletion(completionIndex); return true
+        case 53: dismissedCompletion = "\(draftKey):\(composer.selectedRange().location):\(composer.string)"
+        default: return false
+        }
+        refreshCompletions(); layout(); return true
+    }
+
+    @objc func chooseCompletion(_ sender: NSButton) {
+        insertCompletion(sender.tag)
+    }
+
+    func insertCompletion(_ index: Int) {
+        guard completionItems.indices.contains(index), let range = completionRange(),
+              let token = completionItems[index]["token"] else { return }
+        composer.insertText(token + " ", replacementRange: range)
+        host.makeFirstResponder(composer)
+        refreshCompletions(); layout()
     }
 
     @objc func sendMessage() {
@@ -1105,6 +1203,7 @@ var bridge: PotBridge?
         if page == 0 && value["needs_configuration"] as? Bool == true {
             composerBox.isHidden = true
         }
+        refreshCompletions()
         ready = (value["can_send"] as? Bool ?? false) && !isApplying
         failed = (value["error"] as? Bool ?? false) || localPhase == "failed"
         sendButton.image = NSImage(
