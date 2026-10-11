@@ -16,6 +16,7 @@ pub mod sandbox_resources;
 pub mod schedules;
 mod services;
 mod skills;
+pub mod task_agent;
 pub use services::OwnerScope;
 use services::{
     AgentResources, AgentService, ConversationService, EnvironmentService, TaskService,

@@ -194,6 +194,9 @@ impl Host {
     pub(crate) fn request_stop(&self) {
         self.stop.send_replace(true);
     }
+    pub(crate) fn stopping(&self) -> bool {
+        *self.stop.borrow()
+    }
 }
 
 async fn describe(State(host): State<Host>, h: HeaderMap) -> ApiResult<Json<Value>> {

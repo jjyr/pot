@@ -20,6 +20,9 @@ must be discussed and confirmed before implementation.
 - P4: fresh Task Agent startup on the execution Runtime, durable launch/result
   records, Control model/budget/approval services, ordered guidance/cancellation,
   disconnection pause and reconciliation. Current loops still run at the owner.
+  The destination journal and worker execution port now exist; production Control
+  transport and task dispatch are not connected to them yet. See the scoped
+  [foundation checks](validation/task-agent-foundation-20261011.md).
 - Final acceptance: real machines and supported providers, recovery without replay,
   data-preserving upgrades, documentation and packaging. Do not infer completion
   from same-host fixtures or deliver undeclared fallback behavior.
