@@ -764,6 +764,7 @@
   "assistant.conflict": "The saved version changed. Your draft is retained.",
   "assistant.reload": "Discard draft and reload",
   "machines.title": "Machines",
+  "machines.control": "Control",
   "machines.local": "This machine",
   "machines.online": "Connected",
   "machines.offline": "Offline",
@@ -780,7 +781,7 @@
   "machines.session-count": "%{0} process sessions, %{1} plugin sessions",
   "machines.runtime": "Runtime",
   "machines.sandbox-unavailable": "This environment is unavailable. Check the installed provider and resources.",
-  "machines.connections": "Connections and access",
+  "machines.connections": "Control and machines",
   "machines.address": "HTTPS address",
   "main.waiting-for-remote-machine": "Waiting for remote machine",
   "backend.remote-waiting-receipt": "Waiting for the remote machine to reconcile the original operation; it will not be replayed",
@@ -789,5 +790,13 @@
   "backend.remote-lease-renewal-failed": "Remote lease renewal failed; waiting to reconcile the original operation without replay",
   "machines.control-hint": "Execution machines join one Control. Control manages all configured environments.",
   "machines.create-invitation": "Create machine invitation",
-  "machines.remove-member": "Remove machine"
+  "machines.remove-member": "Remove machine",
+  "machines.add-control-hint": "Connect this App to your Control first. Then join execution machines to that Control.",
+  "machines.control-address": "Control address",
+  "machines.control-token": "Control client credential",
+  "machines.control-ca": "Private CA certificate (optional)",
+  "machines.add-control": "Add Control",
+  "machines.remote-mode": "Remote Control · click for local",
+  "machines.local-mode": "Local · click for Control",
+  "machines.copy-invitation": "Copy invitation"
 }

@@ -237,9 +237,11 @@ impl Render for Mobile {
             let handler = self.page_handler(cx);
             let current = self.data["assistant_id"].as_str().unwrap_or("main");
             content = content.child(self.assistants_ui.render(
-                &self.data["assistants"],
-                current,
-                &self.data["assistant_rules"],
+                pot_ui::assistants::View {
+                    assistants: &self.data["assistants"],
+                    current,
+                    rules: &self.data["assistant_rules"],
+                },
                 self.catalog(),
                 handler.clone(),
                 window,
@@ -378,6 +380,7 @@ impl Render for Mobile {
             let handler = self.page_handler(cx);
             let connections = self.machine_connections.render(
                 pot_ui::machine_connections::View {
+                    client: None,
                     directory: &self.data["machines"],
                     selected: &self.machine_selection,
                     reply: &self.data["machine_reply"],

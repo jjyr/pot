@@ -1,4 +1,4 @@
-//! Client adapters share bounded replies. Browser credentials are not peer grants.
+//! Client adapters share bounded replies; client and machine credentials are separate.
 use crate::{LocalClient, LocalReply};
 use anyhow::{Result, ensure};
 use serde_json::Value;
@@ -25,6 +25,9 @@ pub struct RemoteClient {
 }
 impl RemoteClient {
     pub fn new(endpoint: &str, token: String) -> Result<Self> {
+        Self::with_ca(endpoint, token, None)
+    }
+    pub fn with_ca(endpoint: &str, token: String, ca_pem: Option<&str>) -> Result<Self> {
         let endpoint = url::Url::parse(endpoint)?;
         ensure!(
             endpoint.scheme() == "https"
@@ -44,13 +47,16 @@ impl RemoteClient {
             "Use a Runtime origin without credentials, path, query or fragment"
         );
         ensure!(!token.is_empty(), "Client credential required");
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(120));
+        if let Some(ca) = ca_pem {
+            builder = builder.add_root_certificate(reqwest::Certificate::from_pem(ca.as_bytes())?);
+        }
         Ok(Self {
             endpoint,
             token,
-            http: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(std::time::Duration::from_secs(120))
-                .build()?,
+            http: builder.build()?,
         })
     }
     pub async fn request(&self, path: &str, body: Option<Value>) -> Result<LocalReply> {

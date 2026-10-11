@@ -46,7 +46,19 @@ extern "C" fn wake_ui() {
         let _ = sender.try_send(());
     }
 }
+struct ModeCache {
+    client: client::Client,
+    history: navigation::History<navigation::State>,
+    assistants_ui: pot_ui::assistants::Editor,
+    machine_connections: pot_ui::machine_connections::Editor,
+    settings: ui::Settings,
+    schedules_ui: schedules_ui::SchedulesUI,
+    usage_ui: usage_ui::UsageUI,
+    machine_selection: serde_json::Value,
+}
 struct Shell {
+    other_mode: Option<ModeCache>,
+    pending_mode: bool,
     client: client::Client,
     scroll: ScrollHandle,
     tasks_scroll: ScrollHandle,
@@ -76,6 +88,49 @@ struct Shell {
     usage_ui: usage_ui::UsageUI,
 }
 impl Shell {
+    fn switch_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if backend::toggle_mode().is_err() {
+            self.machine_connections.open = true;
+            ui::command(serde_json::json!({"action":"page","value":1}));
+            return;
+        }
+        let mut other = self.other_mode.take().unwrap_or_else(|| ModeCache {
+            client: client::Client::start_mode(backend::mode()),
+            history: Default::default(),
+            assistants_ui: Default::default(),
+            machine_connections: Default::default(),
+            settings: ui::Settings::new(window, cx),
+            schedules_ui: schedules_ui::SchedulesUI::new(window, cx),
+            usage_ui: usage_ui::UsageUI::new(self.catalog(), window, cx),
+            machine_selection: serde_json::Value::Null,
+        });
+        std::mem::swap(&mut self.client, &mut other.client);
+        std::mem::swap(&mut self.history, &mut other.history);
+        std::mem::swap(&mut self.assistants_ui, &mut other.assistants_ui);
+        std::mem::swap(
+            &mut self.machine_connections,
+            &mut other.machine_connections,
+        );
+        std::mem::swap(&mut self.settings, &mut other.settings);
+        std::mem::swap(&mut self.schedules_ui, &mut other.schedules_ui);
+        std::mem::swap(&mut self.usage_ui, &mut other.usage_ui);
+        std::mem::swap(&mut self.machine_selection, &mut other.machine_selection);
+        self.other_mode = Some(other);
+        backend::select_assistant(self.client.view.lock().unwrap().assistant_id());
+        self.pending_history = None;
+        self.pending_offsets = None;
+        self.pending_task_anchor = None;
+        self.last_view = None;
+        self.last_content.clear();
+        self.expanded.clear();
+        self.first = true;
+        self.show_tasks = false;
+        self.schedule_tab = false;
+        self.task_search
+            .update(cx, |f, cx| f.set_value("", window, cx));
+        ui::command(serde_json::json!({"action":"mode-changed","mode":backend::mode()}));
+        self.client.refresh();
+    }
     fn catalog(&self) -> pot_ui::localization::Catalog {
         pot_ui::localization::Catalog::new(&rust_i18n::locale())
     }
@@ -100,7 +155,7 @@ impl Shell {
                     "native" => ui::command(event.value),
                     "machine-select" => {
                         this.machine_selection = event.value.clone();
-                        let sandbox = event.value["target"]["kind"] == "sandbox"
+                        let sandbox = backend::mode()=="local" && event.value["target"]["kind"] == "sandbox"
                             && this.client.view.lock().unwrap().runtime["runtime_id"] == event.value["runtime_id"];
                         ui::command(serde_json::json!({"action":"machines-detail","value":!sandbox}));
                         if sandbox {
@@ -184,6 +239,7 @@ impl Shell {
                 serde_json::from_slice(unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes())
                     .unwrap_or_default();
             match event["action"].as_str() {
+                Some("mode-toggle") => self.pending_mode = true,
                 Some("send") => {
                     if let Some(text) = event["text"].as_str() {
                         self.client.send(text.into());
@@ -285,7 +341,8 @@ impl Shell {
         if removal_finished || cx.reduce_motion() {
             self.summary_removal = None;
         }
-        let mut changed = summary_changed
+        let mut changed = self.pending_mode
+            || summary_changed
             || removal_finished
             || native_changed
             || self.last_view.as_ref() != Some(&view)
@@ -325,13 +382,13 @@ impl Shell {
         }
         self.last_content = content;
         let state = serde_json::json!({
-            "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"conversation":if view.selected.is_empty() {view.assistant_id()} else {&view.selected},"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
+            "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
             "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),
             "model":snapshot.map(|s|s.agent.model.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
             "used":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.used),
             "limit":snapshot.and_then(|s|s.budget.as_ref()).map(|b|b.limit),
-            "accepted":accepted,"accepted_conversation":accepted_conversation,"at_bottom":at_bottom,
+            "accepted":accepted,"accepted_conversation":accepted_conversation.map(|id|format!("{}/{id}",view.client_mode)),"at_bottom":at_bottom,
             "messages":view.main_snapshot.as_ref().map(|s|s.messages.as_slice()).unwrap_or(&[]).iter().map(|m|serde_json::json!({"id":m.id,"role":m.role,"status":m.status})).collect::<Vec<_>>()
         });
         if let Ok(json) = CString::new(state.to_string()) {
@@ -414,6 +471,7 @@ impl Shell {
                 let handler = self.page_handler(cx);
                 let connections = self.machine_connections.render(
                     pot_ui::machine_connections::View {
+                        client: Some(&backend::control_projection()),
                         directory: &view.machines,
                         selected: &self.machine_selection,
                         reply: &view.machine_reply,
@@ -424,8 +482,20 @@ impl Shell {
                     window,
                     cx,
                 );
-                return div().h_full().flex().flex_col().child(connections).child(
-                    pot_ui::machines::render(
+                return div()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(div().ml(px(56.)).child(connections))
+                    .when(!view.error.is_empty(), |el| {
+                        el.child(
+                            div()
+                                .ml(px(56.))
+                                .p_3()
+                                .child(crate::i18n::message(&view.error)),
+                        )
+                    })
+                    .child(pot_ui::machines::render(
                         pot_ui::machines::MachinesView {
                             directory: &view.machines,
                             preferred: &self.machine_selection,
@@ -436,8 +506,7 @@ impl Shell {
                         self.catalog(),
                         handler,
                         cx,
-                    ),
-                );
+                    ));
             }
             _ => {}
         }
@@ -536,9 +605,11 @@ impl Shell {
         }
         let assistant_handler = self.page_handler(cx);
         let assistant_header = self.assistants_ui.render(
-            &view.assistants,
-            view.assistant_id(),
-            &view.assistant_rules,
+            pot_ui::assistants::View {
+                assistants: &view.assistants,
+                current: view.assistant_id(),
+                rules: &view.assistant_rules,
+            },
             self.catalog(),
             assistant_handler,
             window,
@@ -781,6 +852,9 @@ impl Shell {
 }
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::take(&mut self.pending_mode) {
+            self.switch_mode(window, cx);
+        }
         if let Some(forward) = self.pending_history.take() {
             self.travel(forward, window, cx);
         }
@@ -953,6 +1027,8 @@ fn main() {
                         })
                         .detach();
                         Shell {
+                            other_mode: None,
+                            pending_mode: false,
                             client: client::Client::start(),
                             assistants_ui: Default::default(),
                             machine_connections: Default::default(),
