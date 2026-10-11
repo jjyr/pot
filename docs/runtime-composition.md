@@ -40,7 +40,11 @@ assistant databases or model credentials.
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
-UI is deferred. Web UI requires `pot serve --ui --control URL`, a server-held
+UI is deferred. Machines shows lightweight status cards, expandable environments and
+Tasks filtered by the exact execution target. Technical management and file transfers
+belong in ordinary Chat; there is no assistant-management shortcut or download UI.
+A desktop entry requires an implemented client transport (currently local App only).
+Web UI requires `pot serve --ui --control URL`, a server-held
 Control credential and explicit browser listener settings. It has no local/remote
 switch. App no longer hosts or configures a browser endpoint. Remote desktop and
 remote notification transport remain pending; see #39 for implementation status.

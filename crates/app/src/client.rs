@@ -333,6 +333,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .query("offset", query.offset.to_string())
         .query("limit", query.limit.to_string())
         .query("selected", &selected)
+        .query("environment", &query.environment)
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
@@ -851,6 +852,16 @@ impl Client {
         let _ = self.refresh.try_send(());
         crate::wake_ui();
     }
+    pub fn filter_environment(&self, environment: String) {
+        let mut v = self.view.lock().unwrap();
+        v.task_query.environment = environment;
+        v.task_query.scope = "active".into();
+        v.task_query.q.clear();
+        v.task_query.offset = 0;
+        v.tasks.clear();
+        v.tasks_loading = true;
+        let _ = self.refresh.try_send(());
+    }
     pub fn filter_tasks(&self, scope: String, q: String, offset: usize) {
         let mut v = self.view.lock().unwrap();
         if v.task_query.scope == scope && v.task_query.q == q && v.task_query.offset == offset {
@@ -1072,6 +1083,25 @@ mod tests {
             assert_eq!(detail, "Provider diagnostic 中文 {0}");
             assert_eq!(crate::i18n::message(&detail), detail);
         }
+    }
+
+    #[test]
+    fn late_environment_page_cannot_replace_the_current_environment() {
+        let mut v = View::default();
+        let old = v.task_query.clone();
+        v.task_query.environment =
+            serde_json::json!({"runtime_id":"other-machine","target":{"kind":"host"}}).to_string();
+        v.tasks_loading = true;
+        v.apply_task_page(
+            &old,
+            "",
+            TaskPage {
+                total: 12,
+                ..Default::default()
+            },
+        );
+        assert!(v.tasks_loading);
+        assert_eq!(v.task_page.total, 0);
     }
 
     #[test]

@@ -174,13 +174,15 @@ pub async fn invoke(
             .0,
         ),
         "list_tasks" => {
-            let query: TaskQuery = serde_json::from_value(call.args.clone()).map_err(|_| {
+            let mut query: TaskQuery = serde_json::from_value(call.args.clone()).map_err(|_| {
                 error(
                     StatusCode::BAD_REQUEST,
                     "invalid_task_query",
                     "Invalid task query",
                 )
             })?;
+            // The UI environment filter is not part of the model tool contract.
+            query.environment.clear();
             serde_json::to_value(tasks::page(&s, &query)?)
         }
         "get_task" => {

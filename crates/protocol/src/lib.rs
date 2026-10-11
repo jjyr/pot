@@ -273,6 +273,9 @@ fn task_page_limit() -> usize {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskQuery {
+    /// Client-only environment filter, encoded as an EnvironmentRef JSON value.
+    #[serde(default)]
+    pub environment: String,
     #[serde(default = "active_scope")]
     pub scope: String,
     #[serde(default)]
@@ -290,6 +293,7 @@ pub struct TaskQuery {
 impl Default for TaskQuery {
     fn default() -> Self {
         Self {
+            environment: String::new(),
             scope: active_scope(),
             phase: None,
             q: String::new(),

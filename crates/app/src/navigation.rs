@@ -162,15 +162,7 @@ impl Shell {
             &self.client.view.lock().unwrap().machines,
             &state.machine_selection,
         );
-        let local = self.client.view.lock().unwrap().runtime["runtime_id"].clone();
-        let sandbox = self.machine_selection["target"]["kind"] == "sandbox"
-            && self.machine_selection["runtime_id"] == local;
-        ui::command(serde_json::json!({"action":"machines-detail","value":!sandbox}));
-        if sandbox {
-            ui::command(
-                serde_json::json!({"action":"sandbox-view","id":self.machine_selection["target"]["sandbox_id"]}),
-            );
-        }
+        ui::command(serde_json::json!({"action":"machines-detail","value":true}));
         self.schedule_tab = state.schedule_tab;
         self.task_search
             .update(cx, |f, cx| f.set_value(state.query.q.clone(), window, cx));

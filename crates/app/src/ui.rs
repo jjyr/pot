@@ -241,28 +241,7 @@ impl Settings {
                         ));
                 }
             }
-            _ => {
-                form = form.child(
-                    field(crate::i18n::text("ui.environment-management")).child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(hint(
-                                crate::i18n::text("ui.select-an-environment-on-the-sandbox-page"),
-                                cx,
-                            ))
-                            .child(
-                                Button::new("open-sandbox-page")
-                                    .primary()
-                                    .label(crate::i18n::text("ui.open-sandbox"))
-                                    .on_click(|_, _, _| {
-                                        command(json!({"action":"page","value":1}))
-                                    }),
-                            ),
-                    ),
-                );
-            }
+            _ => {}
         }
         let fields = self.fields.clone();
         let mut actions = div().flex().items_center().justify_end().gap_2();
@@ -293,7 +272,6 @@ impl Settings {
                             (0, crate::i18n::text("ui.general")),
                             (1, crate::i18n::text("ui.ai-configuration")),
                             (4, crate::i18n::text("ui.task-configuration")),
-                            (3, crate::i18n::text("ui.work-environment")),
                         ]
                         .into_iter()
                         .map(|(i, name)| {

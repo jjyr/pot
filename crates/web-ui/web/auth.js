@@ -1,7 +1,7 @@
 let machineReply=null,machinePending=false;
 import {createInstaller, isInstalled} from '/install.js';
 let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
-let scope='active', query='', offset=0, nextOffset=null, usageDays=7, usageOffset=0, pushStatus;
+let environment='', scope='active', query='', offset=0, nextOffset=null, usageDays=7, usageOffset=0, pushStatus;
 let assistantId=initialAssistant(), pendingOwner='main', assistantSavedOwner=null, assistantSaveSequence=0, assistantSaving=false;
 function initialAssistant(){return new URLSearchParams(location.search).get('assistant')||'main';}
 let pageData={}, connectionNotice=false, accessToken='', authenticated=false;
@@ -9,7 +9,7 @@ const incomingToken=new URLSearchParams(location.hash.slice(1)).get('access_toke
 if(incomingToken!==null)history.replaceState(history.state,'',location.pathname+location.search);
 const initialRoute=new URLSearchParams(location.search);
 task=initialRoute.get('task')||'';page=task?'task':(['chat','tasks','machines','more','usage','schedules'].includes(initialRoute.get('page'))?initialRoute.get('page'):'chat');
-function navigate(){history.pushState({page,task,scope,query,offset,assistantId},'',(task?'/?task='+encodeURIComponent(task):'/?page='+page)+'&assistant='+encodeURIComponent(assistantId));}
+function navigate(){history.pushState({page,task,scope,query,offset,assistantId,environment},'',(task?'/?task='+encodeURIComponent(task):'/?page='+page)+'&assistant='+encodeURIComponent(assistantId));}
 
 const el=id=>document.getElementById(id);
 function requestUUID(){
@@ -47,7 +47,7 @@ async function configure(token){
 }
 async function refresh(){
   if(!module||!authenticated||refreshing||document.visibilityState==='hidden')return;refreshing=true;
-  const requestedAssistant=assistantId, route=task, requestedPage=page, requestedQuery=`${scope}:${query}:${offset}:${usageDays}:${usageOffset}`;
+  const requestedAssistant=assistantId, route=task, requestedPage=page, requestedQuery=`${scope}:${query}:${environment}:${offset}:${usageDays}:${usageOffset}`;
   try{
     const directory=await api('/api/v1/runtime');
     const required={chat:'conversation',task:'tasks',tasks:'tasks',machines:'runtime',usage:'accounting',schedules:'schedules'}[requestedPage];
@@ -70,10 +70,10 @@ async function refresh(){
     data.runtime=directory;data.assistant_id=requestedAssistant;data.assistants=await api('/api/v1/assistants');data.assistant_saved_owner=assistantSavedOwner;data.assistant_save_sequence=assistantSaveSequence;
     if(page==='chat'){data.assistant_rules=await api(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await api('/api/v1/agent',undefined,requestedAssistant);}
     if(page==='chat'||page==='task')data.permissions=await api('/api/v1/permissions',undefined,requestedAssistant);
-    if(page==='tasks'){const result=await api(`/api/v1/assistant-tasks?scope=${scope}&q=${encodeURIComponent(query)}&offset=${offset}&limit=20`);data.task_page=result;data.task_query={scope,q:query,offset,limit:20,selected:''};nextOffset=result.next_offset;}
+    if(page==='tasks'){const result=await api(`/api/v1/assistant-tasks?scope=${scope}&q=${encodeURIComponent(query)}&environment=${encodeURIComponent(environment)}&offset=${offset}&limit=20`);data.task_page=result;data.task_query={scope,q:query,environment,offset,limit:20,selected:''};nextOffset=result.next_offset;}
     if(page==='usage'){data.usage=await api('/api/v1/usage/summary?days='+usageDays+'&offset='+usageOffset+'&timezone='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone),undefined,requestedAssistant);}
     if(page==='schedules'){data.schedules=await api('/api/v1/schedules',undefined,requestedAssistant);}
-    if(requestedAssistant!==assistantId||route!==task||requestedPage!==page||requestedQuery!==`${scope}:${query}:${offset}:${usageDays}:${usageOffset}`)return;
+    if(requestedAssistant!==assistantId||route!==task||requestedPage!==page||requestedQuery!==`${scope}:${query}:${environment}:${offset}:${usageDays}:${usageOffset}`)return;
     if(connectionNotice){notice='';connectionNotice=false;data.notice='';}
     pageData=data;module.update_view(JSON.stringify(data));
   }catch(e){if(requestedAssistant!==assistantId||route!==task||requestedPage!==page)return;connectionNotice=true;notice=t('mobile.shell.connection-unavailable')+e.message;module.update_view(JSON.stringify({...pageData,connected:false,page,conversation:task||assistantId,locale:language,notice,page_error:e.message,snapshot,accepted}));}
@@ -83,7 +83,7 @@ async function start(){
   pushStatus=await api('/access/status');authenticated=pushStatus.authenticated;el('configure-token').disabled=false;if(authenticated)el('auth').hidden=true;
   if(pushStatus.authenticated&&!module){
     module=await import('/pkg/pot_mobile.js');await module.default();module.run();
-    history.replaceState({page,task,scope,query,offset,assistantId},'');
+    history.replaceState({page,task,scope,query,offset,assistantId,environment},'');
     await refresh();setInterval(refresh,1500);
     setInterval(()=>{if(authenticated&&pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});},10000);
   }
@@ -134,7 +134,9 @@ window.potAction=async(action,value)=>{
     if(action==='page'){page=value;task='';navigate();}
     if(action==='task'){if(sending||JSON.parse(module.pending_send()))throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));let entry;try{entry=JSON.parse(value);}catch{}if(entry?.id){task=entry.id;assistantId=entry.assistant_id;}else task=typeof entry==='string'?entry:value;page='task';navigate();}
     if(action==='filter'){scope=value;offset=0;}
-    if(action==='task-query'){const q=JSON.parse(value);scope=q.scope;query=q.q;offset=q.offset;}
+    if(action==='environment-tasks'){environment=value;page='tasks';task='';scope='active';query='';offset=0;navigate();}
+    if(action==='environment-filter-clear'){environment='';offset=0;}
+    if(action==='task-query'){const q=JSON.parse(value);scope=q.scope;query=q.q;offset=q.offset;environment=q.environment||'';}
     if(action==='permission-decision')await api('/api/v1/permissions',JSON.parse(value));
     if(action==='usage-query'){const q=JSON.parse(value);usageDays=q.days;usageOffset=q.offset;}
     if(action==='search'){query=value;offset=0;}
@@ -167,7 +169,7 @@ window.potAction=async(action,value)=>{
     }
   }catch(e){notice=e.message;}finally{if(write)sending=false;if(action==='assistant-save')assistantSaving=false;await refresh();}
 };
-addEventListener('popstate',e=>{page=e.state?.page||'chat';task=e.state?.task||'';assistantId=e.state?.assistantId||'main';scope=e.state?.scope||'active';query=e.state?.query||'';offset=e.state?.offset||0;refresh();});
+addEventListener('popstate',e=>{page=e.state?.page||'chat';task=e.state?.task||'';assistantId=e.state?.assistantId||'main';scope=e.state?.scope||'active';query=e.state?.query||'';offset=e.state?.offset||0;environment=e.state?.environment||'';refresh();});
 addEventListener('visibilitychange',()=>{refresh();if(module&&pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});});
 async function attempt(fn){try{el('notice').textContent='';await fn();}catch(e){if(el('notice'))el('notice').textContent=e.message;else{notice=e.message;await refresh();}}}
 el('configure-token').onclick=()=>attempt(async()=>{

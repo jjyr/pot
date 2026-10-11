@@ -402,6 +402,26 @@ pub(super) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
             "Invalid scope, query or page size (1–50)",
         ));
     }
+    let environment: Option<pot_core::EnvironmentRef> = if query.environment.is_empty() {
+        None
+    } else {
+        let reference: pot_core::EnvironmentRef = serde_json::from_str(&query.environment)
+            .map_err(|_| {
+                error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_task_query",
+                    "Invalid environment filter",
+                )
+            })?;
+        reference.validate().map_err(|_| {
+            error(
+                StatusCode::BAD_REQUEST,
+                "invalid_task_query",
+                "Invalid environment filter",
+            )
+        })?;
+        Some(reference)
+    };
     let hub = root.tasks.hub.lock().unwrap();
     let needle = query.q.trim().to_lowercase();
     let mut items: Vec<_> = hub
@@ -414,6 +434,9 @@ pub(super) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
                 .as_ref()
                 .map(|p| p == &i.phase)
                 .unwrap_or(query.scope == "all" || i.phase.scope() == query.scope)
+                && environment
+                    .as_ref()
+                    .is_none_or(|r| i.environment_ref.as_ref() == Some(r))
                 && (needle.is_empty()
                     || i.title.to_lowercase().contains(&needle)
                     || i.id.to_lowercase().contains(&needle))
@@ -1871,6 +1894,70 @@ pub(super) mod tests {
         let req = rx.try_recv().unwrap();
         assert!(req.text.contains("observed failure"));
         assert!(!req.text.contains("Result historical"));
+    }
+
+    #[tokio::test]
+    async fn task_pages_match_exact_environment_before_pagination() {
+        let s = fixture();
+        let targets = [
+            pot_core::EnvironmentRef::host("machine-a"),
+            pot_core::EnvironmentRef::sandbox("machine-a", "build"),
+            pot_core::EnvironmentRef::sandbox("machine-b", "build"),
+        ];
+        for n in 0..9 {
+            let task = add(&s, &format!("Environment task {n}"), "").await;
+            s.tasks
+                .hub
+                .lock()
+                .unwrap()
+                .lanes
+                .get_mut(&task.id)
+                .unwrap()
+                .record
+                .info
+                .environment_ref = Some(targets[n % 3].clone());
+        }
+        for target in &targets {
+            let query = TaskQuery {
+                scope: "all".into(),
+                environment: serde_json::to_string(target).unwrap(),
+                limit: 2,
+                ..Default::default()
+            };
+            let first = page(&s, &query).unwrap();
+            assert_eq!(first.total, 3);
+            assert_eq!(first.items.len(), 2);
+            assert!(
+                first
+                    .items
+                    .iter()
+                    .all(|i| i.environment_ref.as_ref() == Some(target))
+            );
+            let last = page(
+                &s,
+                &TaskQuery {
+                    offset: first.next_offset.unwrap(),
+                    ..query
+                },
+            )
+            .unwrap();
+            assert_eq!(last.items.len(), 1);
+            assert_eq!(last.items[0].environment_ref.as_ref(), Some(target));
+            assert!(first.items.iter().all(|i| i.id != last.items[0].id));
+            assert!(last.next_offset.is_none());
+        }
+        for invalid in ["broken", r#"{"runtime_id":"","target":{"kind":"host"}}"#] {
+            assert!(
+                page(
+                    &s,
+                    &TaskQuery {
+                        environment: invalid.into(),
+                        ..Default::default()
+                    }
+                )
+                .is_err()
+            );
+        }
     }
 
     #[tokio::test]

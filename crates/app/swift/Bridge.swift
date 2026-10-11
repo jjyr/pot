@@ -342,7 +342,6 @@ var bridge: PotBridge?
             (L.text("menu.hide-pot"), #selector(hideWindow), "h"),
             (L.text("machines.title"), #selector(toggleDesktop), "d"),
             (L.text("bridge.settings"), #selector(openSettings), ","),
-            (L.text("bridge.open-workspace"), #selector(openWorkspace), ""),
             (L.text("menu.quit-pot"), #selector(quitApp), "q"),
         ] {
             let i = NSMenuItem(title: title, action: action, keyEquivalent: key); i.target = self; menu.addItem(i)
@@ -905,6 +904,25 @@ var bridge: PotBridge?
         }
     }
 
+    func openEnvironmentDesktop(_ target: String) {
+        guard let localRuntime, !runtime.remoteMode else { return }
+        let client = RuntimeClient(); client.root = localRuntime.root
+        Task {
+            do {
+                let result = try await client.request("api/v1/desktop/sessions", body: ["sandbox_id": target])
+                guard let session = result["session"] as? [String: Any],
+                      let sessionID = session["id"] as? String, let path = result["path"] as? String,
+                      let data = try? Data(contentsOf: localRuntime.root
+                          .appendingPathComponent("product/runtime.json")),
+                      let endpoint = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let port = endpoint["port"] as? Int,
+                      let url = URL(string: "http://127.0.0.1:\(port)\(path)") else { return }
+                localRuntime.closeDesktop(); localRuntime.desktopSession = sessionID
+                NSWorkspace.shared.open(url)
+            } catch { sandboxError = error.localizedDescription; bridgeWake?() }
+        }
+    }
+
     @objc func openWorkspace() {
         openSandboxWorkspace(localRuntime?.sandboxID ?? "default")
     }
@@ -949,7 +967,7 @@ var bridge: PotBridge?
             refreshSandboxes()
         }
         if page == 1 {
-            if localPhase == "running", desktopAttempt != localRuntime?.sandboxID, !sandboxBusy {
+            if !machinesDetail, localPhase == "running", desktopAttempt != localRuntime?.sandboxID, !sandboxBusy {
                 startSandbox()
             }
         }
@@ -1254,6 +1272,9 @@ private var bridgeWake: (@convention(c) () -> Void)?
             .machinesDetail || bridge.page != 1 || bridge.localRuntime?.displayReady != true
         case "sandbox-view": if let id = v["id"] as? String {
                 bridge.chooseSandbox(id)
+            }
+        case "environment-desktop": if let id = v["id"] as? String {
+                bridge.openEnvironmentDesktop(id)
             }
         case "start": bridge.startSandbox()
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
