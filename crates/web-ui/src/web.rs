@@ -47,7 +47,6 @@ struct Mobile {
     accepted: String,
     tasks_scroll: ScrollHandle,
     usage_ui: pot_ui::usage::UsageUI,
-    sandbox_selection: String,
     machine_selection: Value,
     locale: String,
     search: Entity<InputState>,
@@ -115,17 +114,10 @@ impl Mobile {
                         action("permission-decision", &event.value.to_string())
                     }
                     "task-open" => action("task", &event.value.to_string()),
+                    "environment-filter-clear" => action("environment-filter-clear", ""),
+                    "environment-tasks" => action("environment-tasks", &event.value.to_string()),
                     "machine-select" => {
                         this.machine_selection = event.value.clone();
-                        if event.value["target"]["kind"] == "sandbox" {
-                            this.sandbox_selection = event.value["target"]["sandbox_id"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .into();
-                        }
-                    }
-                    "sandbox-select" => {
-                        this.sandbox_selection = event.value.as_str().unwrap_or("").into()
                     }
                     "refresh" => action("refresh", ""),
                     "usage-page" => {
@@ -133,14 +125,6 @@ impl Mobile {
                             action("page", "usage");
                         }
                     }
-                    "native" if event.value["action"] == "start" => {
-                        let selected = pot_ui::page_state::sandbox_selection(
-                            &this.data["sandbox_inventory"],
-                            &this.sandbox_selection,
-                        );
-                        action("desktop", &selected);
-                    }
-                    // Environment management remains owner CLI-only.
                     _ => {}
                 }
                 cx.notify();
@@ -371,11 +355,6 @@ impl Render for Mobile {
                 cx,
             ));
         } else if self.page == "machines" {
-            let inventory = &self.data["sandbox_inventory"];
-            let selected =
-                pot_ui::page_state::sandbox_selection(inventory, &self.sandbox_selection);
-            let mut state = pot_ui::page_state::sandbox_view(inventory, &selected);
-            state["desktop_access"] = serde_json::json!(true);
             let catalog = self.catalog();
             let handler = self.page_handler(cx);
             let connections = self.machine_connections.render(
@@ -399,8 +378,7 @@ impl Render for Mobile {
                     pot_ui::machines::MachinesView {
                         directory: &self.data["machines"],
                         preferred: &self.machine_selection,
-                        sandbox_state: &state,
-                        controls: false,
+                        desktop_runtime: None,
                     },
                     pot_ui::pages::Layout {
                         native: false,
@@ -695,7 +673,6 @@ pub fn run() {
                     window,
                     cx,
                 ),
-                sandbox_selection: String::new(),
                 machine_selection: Value::Null,
                 locale: String::new(),
             })

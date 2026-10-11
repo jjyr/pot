@@ -155,12 +155,20 @@ impl Shell {
                     "native" => ui::command(event.value),
                     "machine-select" => {
                         this.machine_selection = event.value.clone();
-                        let sandbox = backend::mode()=="local" && event.value["target"]["kind"] == "sandbox"
-                            && this.client.view.lock().unwrap().runtime["runtime_id"] == event.value["runtime_id"];
-                        ui::command(serde_json::json!({"action":"machines-detail","value":!sandbox}));
-                        if sandbox {
-                            ui::command(serde_json::json!({"action":"sandbox-view","id":event.value["target"]["sandbox_id"]}));
-                        }
+                        ui::command(serde_json::json!({"action":"machines-detail","value":true}));
+                    }
+                    "environment-tasks" => {
+                        this.client.filter_environment(event.value.to_string());
+                        this.show_tasks = true;
+                        ui::command(serde_json::json!({"action":"page","value":3}));
+                        this.client.refresh();
+                    }
+                    "environment-filter-clear" => {
+                        this.client.filter_environment(String::new());
+                        this.client.refresh();
+                    }
+                    "environment-desktop" => {
+                        ui::command(serde_json::json!({"action":"environment-desktop","id":event.value["target"]["sandbox_id"]}));
                     }
                     "sandbox-select" => {
                         ui::command(serde_json::json!({"action":"sandbox-view","id":event.value}))
@@ -496,8 +504,9 @@ impl Shell {
                         pot_ui::machines::MachinesView {
                             directory: &view.machines,
                             preferred: &self.machine_selection,
-                            sandbox_state: &self.native,
-                            controls: true,
+                            desktop_runtime: (backend::mode() == "local")
+                                .then(|| view.runtime["runtime_id"].as_str())
+                                .flatten(),
                         },
                         pot_ui::pages::Layout::NATIVE,
                         self.catalog(),

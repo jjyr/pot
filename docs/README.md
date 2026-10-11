@@ -104,3 +104,5 @@ Control membership (P3a): [Outward connection, sole Control and receipt recovery
 Single Control App client (P3b): [Mode isolation, private configuration and native acceptance, 2026-10-11](validation/control-client-20261011.md).
 
 Explicit Control Web hosting (P3c): [Startup, fixed proxy and streaming validation, 2026-10-11](validation/control-web-20261011.md).
+
+Lightweight Machines (P3d1): [Status cards, exact environment Tasks and validation limits, 2026-10-11](validation/machines-simple-20261011.md).

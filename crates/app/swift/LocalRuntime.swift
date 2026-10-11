@@ -21,10 +21,13 @@ import WebKit
     func closeDesktop() {
         let session = desktopSession; desktopSession = ""
         if !session.isEmpty {
-            Task { let client = RuntimeClient(); client.root = root; _ = try? await client.request(
-                "api/v1/desktop/sessions/close",
-                body: ["session_id": session]
-            ) }
+            Task {
+                let client = RuntimeClient(); client.root = root; client.remoteMode = false; _ = try? await client
+                    .request(
+                        "api/v1/desktop/sessions/close",
+                        body: ["session_id": session]
+                    )
+            }
         }
     }
 

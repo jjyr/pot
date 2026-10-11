@@ -13,7 +13,6 @@ pub mod state;
 #[cfg(feature = "presentation")]
 pub mod pages;
 #[cfg(feature = "presentation")]
-pub mod sandbox;
 #[cfg(feature = "presentation")]
 pub mod tasks;
 

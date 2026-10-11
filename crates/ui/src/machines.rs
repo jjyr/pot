@@ -1,4 +1,4 @@
-//! Shared machine/environment navigation; platform adapters own transport and effects.
+//! Lightweight machine status. Technical management belongs in Chat.
 use crate::{
     design,
     localization::Catalog,
@@ -6,16 +6,16 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme,
+    Disableable,
     button::{Button, ButtonVariants},
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 pub struct MachinesView<'a> {
     pub directory: &'a Value,
     pub preferred: &'a Value,
-    pub sandbox_state: &'a Value,
-    pub controls: bool,
+    /// A desktop transport is currently available only for this Runtime.
+    pub desktop_runtime: Option<&'a str>,
 }
 pub fn render(
     view: MachinesView<'_>,
@@ -24,321 +24,161 @@ pub fn render(
     handler: Handler,
     cx: &mut App,
 ) -> Div {
-    let MachinesView {
-        directory,
-        preferred,
-        sandbox_state,
-        controls,
-    } = view;
-    let selected = crate::machine_state::selection(directory, preferred);
-    let machines = directory["machines"]
+    let machines = view.directory["machines"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let mut list = div()
-        .id("machine-list")
+    let selected = crate::machine_state::selection(view.directory, view.preferred);
+    let mut body = div()
+        .id("machine-status-list")
         .flex_1()
         .min_h_0()
         .overflow_y_scroll()
-        .p_3()
+        .p_4()
         .flex()
         .flex_col()
-        .gap_2();
-    for machine in &machines {
-        let id = machine["runtime_id"].as_str().unwrap_or_default();
+        .gap_4();
+    if machines.is_empty() {
+        body = body.child(pages::hint(catalog.text("machines.loading"), cx));
+    }
+    for machine in machines {
+        let runtime = machine["runtime_id"].as_str().unwrap_or_default();
+        let online = machine["connection"] == "online";
         let name = machine["name"]
             .as_str()
             .unwrap_or(if machine["local"] == true {
                 catalog.text("machines.local")
             } else {
-                id
+                runtime
             });
-        let active = selected["runtime_id"] == id && selected.get("target").is_none();
-        list = list.child(
-            Button::new(SharedString::from(format!("machine-{id}")))
-                .ghost()
-                .w_full()
-                .h_auto()
-                .p_3()
-                .bg(if active {
-                    cx.theme().secondary
-                } else {
-                    design::navigation(cx)
-                })
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .w_full()
-                        .items_start()
-                        .gap_2()
-                        .child(name.to_owned())
-                        .child(pages::hint(
-                            catalog.text(if machine["connection"] == "online" {
-                                "machines.online"
-                            } else {
-                                "machines.offline"
-                            }),
-                            cx,
-                        )),
-                )
-                .on_click(pages::on(
-                    &handler,
-                    "machine-select",
-                    json!({"runtime_id":id}),
-                )),
-        );
+        let mut card = div()
+            .p_4()
+            .rounded_lg()
+            .bg(design::navigation(cx))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(name.to_owned())
+                    .child(pages::hint(
+                        catalog.text(if online {
+                            "machines.online"
+                        } else {
+                            "machines.offline"
+                        }),
+                        cx,
+                    )),
+            );
         let environments = machine["environments"]
             .as_array()
             .cloned()
             .unwrap_or_default();
         if environments.is_empty() {
-            list = list.child(
-                div()
-                    .px_3()
-                    .child(pages::hint(catalog.text("machines.empty"), cx)),
-            );
+            card = card.child(pages::hint(catalog.text("machines.empty"), cx));
         }
         for environment in environments {
             let reference = &environment["environment_ref"];
             let host = reference["target"]["kind"] == "host";
-            let name = if host {
+            let title = if host {
                 "Host"
             } else {
                 environment["name"].as_str().unwrap_or("Sandbox")
             };
-            let state = if host {
-                catalog.text("machines.approval")
+            let expanded = view.preferred.get("target").is_some() && selected == *reference;
+            let phase = environment["state"]["phase"].as_str().unwrap_or("unknown");
+            let status = if !online {
+                catalog.text("machines.offline")
+            } else if host {
+                catalog.text("machines.online")
             } else {
-                catalog.phase(environment["state"]["phase"].as_str().unwrap_or("unknown"))
+                catalog.phase(phase)
             };
-            list = list.child(
+            let mut row = div().flex().flex_col().gap_2().child(
                 Button::new(SharedString::from(format!(
-                    "environment-{id}-{}",
+                    "environment-{runtime}-{}",
                     reference["target"]
                 )))
                 .ghost()
                 .w_full()
                 .h_auto()
-                .p_3()
-                .ml_2()
-                .bg(if selected == *reference {
-                    cx.theme().secondary
-                } else {
-                    design::navigation(cx)
-                })
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .w_full()
-                        .items_start()
-                        .gap_2()
-                        .child(name.to_owned())
-                        .child(pages::hint(state, cx).whitespace_normal()),
-                )
+                .label(format!("{title} · {status}"))
                 .on_click(pages::on(
                     &handler,
                     "machine-select",
-                    reference.clone(),
+                    if expanded {
+                        Value::Null
+                    } else {
+                        reference.clone()
+                    },
                 )),
             );
-        }
-    }
-    let sidebar = div()
-        .w(if layout.compact {
-            relative(1.)
-        } else {
-            px(224.).into()
-        })
-        .h(if layout.compact {
-            px(260.).into()
-        } else {
-            relative(1.)
-        })
-        .flex_shrink_0()
-        .flex()
-        .flex_col()
-        .bg(design::navigation(cx))
-        .border_r_1()
-        .border_color(cx.theme().border)
-        .child(
-            div()
-                .h(px(56.))
-                .px_4()
-                .flex()
-                .items_center()
-                .child(catalog.text("machines.title")),
-        )
-        .child(list)
-        .when(controls, |el| {
-            el.child(
-                Button::new("machines-resource-cache")
-                    .ghost()
-                    .label(catalog.text("resources.cache"))
-                    .on_click(pages::on(
-                        &handler,
-                        "native",
-                        json!({"action":"resource-cache"}),
-                    )),
-            )
-        });
-    let machine = machines
-        .iter()
-        .find(|m| m["runtime_id"] == selected["runtime_id"]);
-    let mut detail = div().flex_1().min_w_0().h_full().flex().flex_col();
-    if let Some(machine) = machine {
-        let environment = machine["environments"]
-            .as_array()
-            .and_then(|items| items.iter().find(|e| e["environment_ref"] == selected));
-        if let Some(environment) = environment {
-            if selected["target"]["kind"] == "sandbox" && machine["local"] == true {
-                let target = selected["target"]["sandbox_id"]
-                    .as_str()
-                    .unwrap_or_default();
-                let mut state = sandbox_state.clone();
-                state["machines_embedded"] = json!(true);
-                state["sandbox_view"] = json!(target);
-                state["sandbox_default"] = machine["default"].clone();
-                state["sandboxes"] = machine["environments"].clone();
-                state["phase"] = environment["state"]["phase"].clone();
-                detail = crate::sandbox::render(
-                    &state,
-                    layout,
-                    controls && machine["connection"] == "online",
-                    catalog,
-                    handler,
-                    cx,
+            if expanded {
+                let desktop = crate::machine_state::desktop_available(
+                    &machine,
+                    &environment,
+                    view.desktop_runtime,
                 );
-            } else {
-                detail = detail.child(
+                row = row.child(
                     div()
-                        .p_8()
+                        .px_3()
+                        .pb_3()
                         .flex()
                         .flex_col()
-                        .gap_4()
-                        .child(pages::title(if selected["target"]["kind"] == "host" {
-                            "Host"
-                        } else {
-                            "Sandbox"
-                        }))
+                        .gap_3()
                         .child(pages::hint(
-                            machine["runtime_id"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_owned(),
+                            if online {
+                                format!("{name} · {status}")
+                            } else {
+                                catalog.text("machines.offline-detail").into()
+                            },
                             cx,
                         ))
-                        .child(pages::hint(catalog.text("machines.approval"), cx))
-                        .when_some(environment["workspace"].as_str(), |el, cwd| {
-                            el.child(pages::hint(
-                                format!("{}: {cwd}", catalog.text("machines.workspace")),
-                                cx,
-                            ))
-                        })
-                        .child(pages::hint(catalog.text("machines.sessions"), cx))
-                        .children(
-                            environment["sessions"]
-                                .as_array()
-                                .cloned()
-                                .unwrap_or_default()
-                                .into_iter()
-                                .map(|scope| {
-                                    let processes = scope["sessions"]["processes"]["sessions"]
-                                        .as_array()
-                                        .map(Vec::len)
-                                        .unwrap_or(0);
-                                    let plugins = scope["sessions"]["plugins"]
-                                        .as_array()
-                                        .map(Vec::len)
-                                        .unwrap_or(0);
-                                    pages::hint(
-                                        format!(
-                                            "{} · {}",
-                                            scope["owner"].as_str().unwrap_or_default(),
-                                            catalog.format(
-                                                "machines.session-count",
-                                                &[processes.to_string(), plugins.to_string()]
-                                            )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .gap_2()
+                                .child(
+                                    Button::new(SharedString::from(format!(
+                                        "environment-tasks-{runtime}-{}",
+                                        reference["target"]
+                                    )))
+                                    .ghost()
+                                    .label(catalog.text("machines.view-tasks"))
+                                    .on_click(pages::on(
+                                        &handler,
+                                        "environment-tasks",
+                                        reference.clone(),
+                                    )),
+                                )
+                                .when(desktop, |el| {
+                                    el.child(
+                                        Button::new(SharedString::from(format!(
+                                            "environment-desktop-{runtime}-{}",
+                                            reference["target"]
+                                        )))
+                                        .ghost()
+                                        .label(catalog.text("machines.open-desktop"))
+                                        .disabled(!online || phase != "running")
+                                        .on_click(
+                                            pages::on(
+                                                &handler,
+                                                "environment-desktop",
+                                                reference.clone(),
+                                            ),
                                         ),
-                                        cx,
                                     )
                                 }),
-                        )
-                        .when(
-                            environment["sessions"].as_array().is_none_or(Vec::is_empty),
-                            |el| el.child(pages::hint(catalog.text("machines.no-sessions"), cx)),
-                        )
-                        .child(pages::hint(
-                            catalog.text(if machine["connection"] == "online" {
-                                "machines.online"
-                            } else {
-                                "machines.offline-detail"
-                            }),
-                            cx,
-                        )),
+                        ),
                 );
             }
-        } else {
-            let capabilities = machine["capabilities"]
-                .as_array()
-                .map(|c| {
-                    c.iter()
-                        .filter_map(Value::as_str)
-                        .filter_map(|key| match key {
-                            "runtime" => Some(catalog.text("machines.runtime")),
-                            "conversation" => Some(catalog.text("mobile.chat")),
-                            "tasks" => Some(catalog.text("mobile.tasks")),
-                            "host_execution" => Some("Host"),
-                            "sandbox_execution" => Some("Sandbox"),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default();
-            detail = detail.child(
-                div()
-                    .p_8()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .child(pages::title(catalog.text("machines.details")))
-                    .child(pages::hint(
-                        machine["runtime_id"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_owned(),
-                        cx,
-                    ))
-                    .child(pages::hint(
-                        format!("{}: {capabilities}", catalog.text("machines.capabilities")),
-                        cx,
-                    ))
-                    .child(pages::hint(
-                        catalog.text(if machine["connection"] == "online" {
-                            "machines.online"
-                        } else {
-                            "machines.offline-detail"
-                        }),
-                        cx,
-                    ))
-                    .when(
-                        machine["environments"].as_array().is_none_or(Vec::is_empty),
-                        |el| el.child(pages::hint(catalog.text("machines.empty-detail"), cx)),
-                    ),
-            );
+            card = card.child(row);
         }
-    } else {
-        detail = detail.child(
-            div()
-                .p_8()
-                .child(pages::hint(catalog.text("machines.loading"), cx)),
-        );
+        body = body.child(card);
     }
-    pages::page(layout, cx)
-        .flex()
-        .when(layout.compact, |el| el.flex_col())
-        .child(sidebar)
-        .child(detail)
+    pages::page(layout, cx).flex().flex_col().child(body)
 }

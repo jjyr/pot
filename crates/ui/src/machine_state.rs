@@ -55,9 +55,26 @@ pub fn task_location(
     }
 }
 
+/// UI affordances follow actual transport availability, never just Provider support.
+pub fn desktop_available(machine: &Value, environment: &Value, runtime: Option<&str>) -> bool {
+    runtime.is_some_and(|id| machine["runtime_id"] == id)
+        && environment["environment_ref"]["target"]["kind"] == "sandbox"
+        && environment["desktop_capabilities"]["viewing"] == true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn desktop_entry_requires_the_available_sandbox_transport() {
+        let machine = json!({"runtime_id":"a"});
+        let sandbox = json!({"environment_ref":{"runtime_id":"a","target":{"kind":"sandbox","sandbox_id":"build"}},"desktop_capabilities":{"viewing":true}});
+        assert!(desktop_available(&machine, &sandbox, Some("a")));
+        assert!(!desktop_available(&machine, &sandbox, None));
+        assert!(!desktop_available(&machine, &sandbox, Some("other")));
+        let host = json!({"environment_ref":{"target":{"kind":"host"}},"desktop_capabilities":{"viewing":true}});
+        assert!(!desktop_available(&machine, &host, Some("a")));
+    }
     #[test]
     fn selection_preserves_offline_targets_and_never_changes_default() {
         let host = json!({"runtime_id":"b","target":{"kind":"host"}});
