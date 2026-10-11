@@ -436,7 +436,24 @@ impl Render for Mobile {
                                 )
                                 .child(div().child(
                                     item["next_label"].as_str().unwrap_or_default().to_owned(),
-                                )),
+                                ))
+                                .child(div().child(format!(
+                                    "{} · {}",
+                                    item["spec"]["environment_ref"]["runtime_id"]
+                                        .as_str()
+                                        .unwrap_or_default(),
+                                    match item["spec"]["environment_ref"]["target"]["kind"].as_str()
+                                    {
+                                        Some("host") => "Host".to_owned(),
+                                        Some("sandbox") => format!(
+                                            "Sandbox / {}",
+                                            item["spec"]["environment_ref"]["target"]["sandbox_id"]
+                                                .as_str()
+                                                .unwrap_or_default()
+                                        ),
+                                        _ => String::new(),
+                                    }
+                                ))),
                         );
                 }
             }

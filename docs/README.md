@@ -28,7 +28,8 @@ the tested scope. Current distributed evidence: [membership](validation/control-
 [Machines](validation/machines-simple-20261011.md), [Chat downloads](validation/chat-file-downloads-20261011.md),
 [global resources](validation/control-global-resources-20261011.md),
 [plugins](validation/control-plugins-20261011.md),
-[Task Agent production integration](validation/task-agent-production-20261011.md).
+[Task Agent production integration](validation/task-agent-production-20261011.md),
+[remote schedules](validation/remote-schedules-20261011.md).
 Platform/executor reports remain under `validation/`; applicable platform research
 remains under `research/`. Superseded designs and reports are retained in Git history.
 

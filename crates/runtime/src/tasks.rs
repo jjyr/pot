@@ -576,74 +576,10 @@ fn enqueue_from(
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
-    let environment = if let Some(environment) = &req.environment_ref {
-        if !req.sandbox_id.is_empty() {
-            return Err(error(
-                StatusCode::BAD_REQUEST,
-                "environment_conflict",
-                "Use environment_ref or sandbox_id",
-            ));
-        }
-        environment
-            .validate()
-            .map_err(|e| error(StatusCode::BAD_REQUEST, "environment", &e.to_string()))?;
-        if !environment.is_local_to(&root.runtime_id) {
-            crate::remote_environment::port(root)
-                .and_then(|port| port.validate(environment))
-                .map_err(|e| {
-                    error(
-                        StatusCode::CONFLICT,
-                        "environment_unavailable",
-                        &e.to_string(),
-                    )
-                })?;
-        }
-        environment.clone()
-    } else if req.sandbox_id.is_empty()
-        && root.environment_service.sandboxes.assignment("").is_err()
-        && root
-            .environment_service
-            .host_enabled
-            .load(std::sync::atomic::Ordering::SeqCst)
-    {
-        pot_core::EnvironmentRef::host(&root.runtime_id)
-    } else {
-        pot_core::EnvironmentRef::sandbox(
-            &root.runtime_id,
-            &root
-                .environment_service
-                .sandboxes
-                .assignment(&req.sandbox_id)
-                .map_err(internal)?,
-        )
-    };
-    let sandbox_id = if !environment.is_local_to(&root.runtime_id) {
-        match &environment.target {
-            pot_core::EnvironmentTarget::Host {} => String::new(),
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.clone(),
-        }
-    } else {
-        match &environment.target {
-            pot_core::EnvironmentTarget::Host {} => {
-                if !root
-                    .environment_service
-                    .host_enabled
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                {
-                    return Err(error(
-                        StatusCode::CONFLICT,
-                        "environment_unavailable",
-                        "Host execution resource is disabled",
-                    ));
-                }
-                String::new()
-            }
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => root
-                .environment_service
-                .sandboxes
-                .assignment(sandbox_id)
-                .map_err(internal)?,
-        }
+    let environment = resolve_environment(root, req.environment_ref.clone(), &req.sandbox_id)?;
+    let sandbox_id = match &environment.target {
+        pot_core::EnvironmentTarget::Host {} => String::new(),
+        pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.clone(),
     };
     let task_id = id();
     let first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
@@ -1203,7 +1139,129 @@ pub(super) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         },
     )))
 }
+pub(super) fn resolve_environment(
+    root: &Service,
+    environment_ref: Option<pot_core::EnvironmentRef>,
+    sandbox_id: &str,
+) -> ApiResult<pot_core::EnvironmentRef> {
+    let environment = if let Some(environment) = &environment_ref {
+        if !sandbox_id.is_empty() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "environment_conflict",
+                "Use environment_ref or sandbox_id",
+            ));
+        }
+        environment
+            .validate()
+            .map_err(|e| error(StatusCode::BAD_REQUEST, "environment", &e.to_string()))?;
+        if !environment.is_local_to(&root.runtime_id) {
+            crate::remote_environment::port(root)
+                .and_then(|port| port.validate(environment))
+                .map_err(|e| {
+                    error(
+                        StatusCode::CONFLICT,
+                        "environment_unavailable",
+                        &e.to_string(),
+                    )
+                })?;
+        }
+        environment.clone()
+    } else if sandbox_id.is_empty()
+        && root.environment_service.sandboxes.assignment("").is_err()
+        && root
+            .environment_service
+            .host_enabled
+            .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        pot_core::EnvironmentRef::host(&root.runtime_id)
+    } else {
+        pot_core::EnvironmentRef::sandbox(
+            &root.runtime_id,
+            &root
+                .environment_service
+                .sandboxes
+                .assignment(sandbox_id)
+                .map_err(internal)?,
+        )
+    };
+    match &environment.target {
+        pot_core::EnvironmentTarget::Host {} if environment.is_local_to(&root.runtime_id) => {
+            if !root
+                .environment_service
+                .host_enabled
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(error(
+                    StatusCode::CONFLICT,
+                    "environment_unavailable",
+                    "Host execution resource is disabled",
+                ));
+            }
+        }
+        pot_core::EnvironmentTarget::Sandbox { sandbox_id }
+            if environment.is_local_to(&root.runtime_id) =>
+        {
+            root.environment_service
+                .sandboxes
+                .assignment(sandbox_id)
+                .map_err(internal)?;
+        }
+        _ => {}
+    }
+    Ok(environment)
+}
+#[cfg(test)]
 pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Result<()> {
+    finish_with_result(root, task_id, result, None)
+}
+async fn finish_remote(root: &Service, task_id: &str, result: Result<()>) -> Result<()> {
+    let scheduled = {
+        let hub = root.tasks.hub.lock().unwrap();
+        schedules::contains_task(&hub.schedules, task_id)
+    };
+    let service = control_service(root, task_id).map_err(|e| anyhow!(e.1.0.message))?;
+    let remote = service
+        .environment_ref
+        .as_ref()
+        .is_some_and(|e| !e.is_local_to(&root.runtime_id));
+    let structured = if scheduled && remote && result.is_ok() {
+        Some(
+            async {
+                use base64::Engine;
+                let chunk = crate::files::task_chunk(
+                    root,
+                    task_id,
+                    &pot_protocol::FileQuery {
+                        path: ".pot-schedule-result.json".into(),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+                anyhow::ensure!(
+                    chunk.size <= 16384 && chunk.offset == 0,
+                    "Result exceeds 16 KiB"
+                );
+                let bytes = base64::engine::general_purpose::STANDARD.decode(chunk.data)?;
+                anyhow::ensure!(
+                    bytes.len() as u64 == chunk.size,
+                    "Incomplete schedule result"
+                );
+                schedules::parse_result(&bytes)
+            }
+            .await,
+        )
+    } else {
+        None
+    };
+    finish_with_result(root, task_id, result, structured)
+}
+fn finish_with_result(
+    root: &Service,
+    task_id: &str,
+    result: Result<()>,
+    structured: Option<Result<schedules::ResultFile>>,
+) -> Result<()> {
     let mut hub = root.tasks.hub.lock().unwrap();
     let lane = hub
         .lanes
@@ -1309,12 +1367,6 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
             }
         }
     }
-    let label = match status {
-        TaskPhase::Complete => "已完成",
-        TaskPhase::Cancelled => "已停止",
-        TaskPhase::Interrupted => "已中断",
-        _ => "未完成",
-    };
     let after = snap
         .messages
         .iter()
@@ -1335,7 +1387,14 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
         &workspace,
         &answer,
         now(),
+        structured,
     );
+    let label = match status {
+        TaskPhase::Complete => "已完成",
+        TaskPhase::Cancelled => "已停止",
+        TaskPhase::Interrupted => "已中断",
+        _ => "未完成",
+    };
     let lane = hub.lanes.get_mut(task_id).unwrap();
     // Stable report ID makes recovery/repeated event delivery idempotent.
     let report = Message {
@@ -1462,7 +1521,7 @@ pub(super) fn start(root: Service) -> tokio::task::JoinHandle<()> {
                     let root = root.clone();
                     workers.spawn(async move {
                         let result = service.runner().run(req).await;
-                        if let Err(e) = finish(&root, &task_id, result) {
+                        if let Err(e) = finish_remote(&root, &task_id, result).await {
                             eprintln!("task completion: {e}");
                         }
                     });
@@ -1524,7 +1583,7 @@ pub(super) fn uses_sandbox(root: &Service, sandbox_id: &str) -> bool {
                 &root.runtime_id,
                 sandbox_id,
             ))
-    }) || schedules::uses_sandbox(&hub.schedules, sandbox_id)
+    }) || schedules::uses_sandbox(&hub.schedules, &root.runtime_id, sandbox_id)
 }
 
 /// Serialize the final identity removal with task/schedule assignment.
@@ -1542,7 +1601,7 @@ pub(super) fn guard_sandbox_delete(
                     &root.runtime_id,
                     sandbox_id
                 )))
-            && !schedules::uses_sandbox(&hub.schedules, sandbox_id),
+            && !schedules::uses_sandbox(&hub.schedules, &root.runtime_id, sandbox_id),
         "Sandbox is assigned to a persisted task or schedule"
     );
     delete()

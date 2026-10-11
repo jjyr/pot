@@ -287,7 +287,7 @@ impl SchedulesUI {
             let delete_id = id.clone();
             let action = if plan.spec.enabled { "pause" } else { "resume" };
             body=body.child(ui::card(cx).child(ui::section(crate::i18n::text("navigation.schedule-details")))
-                    .child(ui::hint(rule(plan),cx)).child(ui::hint(plan.spec.goal.clone(),cx))
+                    .child(ui::hint(rule(plan),cx)).child(ui::hint(pot_ui::machine_state::schedule_location(&plan.spec), cx)).child(ui::hint(plan.spec.goal.clone(),cx))
                     .child(ui::hint(crate::i18n::tr!("schedules-ui.next",if plan.next_label.is_empty(){crate::i18n::text("schedules-ui.not-scheduled")}else{&plan.next_label}),cx))
                     .when(!plan.last_error.is_empty(),|el|el.child(ui::hint(crate::i18n::tr!("schedules-ui.schedule-error",crate::i18n::message(&plan.last_error)),cx)))
                     .child(div().flex().gap_2()
@@ -344,6 +344,10 @@ impl SchedulesUI {
                                     })),
                                 )
                                 .child(ui::hint(rule(plan), cx))
+                                .child(ui::hint(
+                                    pot_ui::machine_state::schedule_location(&plan.spec),
+                                    cx,
+                                ))
                                 .child(ui::hint(
                                     crate::i18n::tr!(
                                         "schedules-ui.next",

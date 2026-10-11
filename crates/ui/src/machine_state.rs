@@ -62,6 +62,21 @@ pub fn desktop_available(machine: &Value, environment: &Value, runtime: Option<&
         && environment["desktop_capabilities"]["viewing"] == true
 }
 
+pub fn schedule_location(spec: &pot_protocol::ScheduleSpec) -> String {
+    spec.environment_ref
+        .as_ref()
+        .map(|reference| {
+            let target = match &reference.target {
+                pot_core::EnvironmentTarget::Host {} => "Host".to_owned(),
+                pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+                    format!("Sandbox: {sandbox_id}")
+                }
+            };
+            format!("{} / {target}", reference.runtime_id)
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
