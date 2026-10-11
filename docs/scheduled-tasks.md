@@ -1,6 +1,6 @@
 # Scheduled tasks
 
-Control (or the local owner Runtime in local mode) owns schedules. Schedules are persistent definitions; each trigger creates an independent background task/Agent session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
+Control owns schedules in both local and remote modes. Schedules are persistent definitions; each trigger creates an independent background task/Agent session. Control owns triggering, deduplication, task admission and notifications. The destination Runtime manages actual Agent execution and local concurrency. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
 
 ```
 Chat / tasks -> schedules

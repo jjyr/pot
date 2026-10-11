@@ -21,6 +21,8 @@ is the single phase progress table.
 
 ## Evidence
 
+[Unified Runtime Agent execution](validation/runtime-execution-20261012.md).
+
 [Machine labels and composer references](validation/machine-labels-20261012.md).
 
 Current [component boundaries and regression checks](validation/component-boundaries-20261011.md).

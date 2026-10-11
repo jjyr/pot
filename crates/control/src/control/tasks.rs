@@ -153,7 +153,9 @@ fn child(
             commands,
         },
         agent_service: AgentService {
-            executor: root.agent_service.executor.clone(),
+            executions: root.agent_service.executions.clone(),
+            #[cfg(test)]
+            extensions: root.agent_service.extensions.clone(),
             resources: root.agent_service.resources.clone(),
         },
         environment_service: EnvironmentService {

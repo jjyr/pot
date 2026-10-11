@@ -541,7 +541,14 @@ pub(crate) mod tests {
                 commands,
             },
             agent_service: AgentService {
-                executor: Arc::new(pot_agent::Agent::default()),
+                executions: pot_runtime_execution::Manager::open(
+                    &data,
+                    "test-runtime",
+                    "test-boot",
+                    Default::default(),
+                )
+                .unwrap(),
+                extensions: None,
                 resources: Arc::new(AgentResources::paths(&data)),
             },
             environment_service: EnvironmentService {

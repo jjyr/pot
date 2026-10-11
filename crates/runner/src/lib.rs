@@ -72,7 +72,7 @@ impl Launch {
             serde_json::to_vec(self)?.len() <= 768 * 1024,
             "Task Agent launch exceeds transport limit"
         );
-        pot_agent::Agent::default().validate(&self.config)
+        pot_agent::validate(&self.config)
     }
     fn digest(&self) -> Result<String> {
         Ok(Sha256::digest(serde_json::to_vec(self)?)

@@ -6054,6 +6054,7 @@ dependencies = [
  "pot-protocol",
  "pot-resource",
  "pot-runner",
+ "pot-runtime-execution",
  "pot-sandbox",
  "pot-sandbox-images",
  "pot-sandbox-macos-apple-container",
@@ -6179,6 +6180,7 @@ dependencies = [
  "pot-agent",
  "pot-core",
  "pot-protocol",
+ "pot-runtime-execution",
  "pot-sandbox",
  "serde",
  "serde_json",
@@ -6195,14 +6197,28 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures",
- "pot-agent",
  "pot-control",
  "pot-core",
  "pot-protocol",
  "pot-runner",
+ "pot-runtime-execution",
  "pot-sandbox",
  "pot-tool-executor",
  "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "pot-runtime-execution"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "pot-agent",
+ "pot-core",
  "serde",
  "serde_json",
  "tokio",

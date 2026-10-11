@@ -72,7 +72,6 @@ async fn settle(task: &mut tokio::task::JoinHandle<()>) {
 pub async fn open(
     data: PathBuf,
     workspace: PathBuf,
-    agent_executor: Arc<pot_agent::Agent>,
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
     host: &mut host::Host,
 ) -> Result<Component> {
@@ -141,7 +140,9 @@ pub async fn open(
             commands,
         },
         agent_service: AgentService {
-            executor: agent_executor,
+            executions: host.executions().clone(),
+            #[cfg(test)]
+            extensions: None,
             resources: Arc::new(AgentResources::paths(&data)),
         },
         environment_service: EnvironmentService {

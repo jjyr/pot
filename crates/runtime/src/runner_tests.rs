@@ -353,6 +353,15 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
     let terminal = result.await.unwrap().unwrap();
     assert_eq!(terminal.outcome, Outcome::Success);
     assert_eq!(terminal.text, "Task result without a download");
+    let executions = backend.executions().snapshot();
+    let execution = executions
+        .iter()
+        .find(|e| e.owner == launch.task_id)
+        .unwrap();
+    assert_eq!(execution.request_id, launch.run_id);
+    assert_eq!(execution.runtime_id, host.runtime_id());
+    assert_eq!(execution.phase, pot_runtime_execution::Phase::Succeeded);
+
     let request = control.requests.lock().unwrap()[0].clone();
     let system = request["messages"][0]["content"].as_str().unwrap();
     assert!(system.contains("ACTUAL_PROJECT_RULE"));

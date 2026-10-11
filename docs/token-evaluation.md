@@ -20,7 +20,7 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 
 The runner is a separate workspace crate, `pot-eval`, under `crates/eval/`. It depends on shared contracts in `pot-core` and uses the host from `pot-agent`, with `pot-gateway` where direct transport or collection is needed. It does not depend on `pot-runtime`, product Storage or App. The crate owns scenario execution, immutable run records, validation, scoring, comparison and the CLI. The initial crate and scripted Pot runner are implemented; the remaining delivery sequence is listed below.
 
-Runtime and eval directly invoke the concrete `pot_agent::Agent::execute` entry point. Thread context belongs to the caller's Store, not to an external engine session. The Engine/Binding/NativeRef and DriverHost/SessionHandle abstractions have been removed. A future external baseline belongs in a separate evaluation command; it must not restore adapters to production execution.
+Production invocations go through `pot-runtime-execution`; isolated engine evaluation fixtures call `pot_agent::Agent::execute` directly. Thread context belongs to the caller's Store, not to an external engine session. The Engine/Binding/NativeRef and DriverHost/SessionHandle abstractions have been removed. A future external baseline belongs in a separate evaluation command; it must not restore adapters to production execution.
 
 ## Standalone execution services
 

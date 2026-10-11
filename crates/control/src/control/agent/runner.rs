@@ -1,7 +1,5 @@
 use super::*;
-#[cfg(test)]
-use pot_core::AgentEvent;
-pub use pot_core::{EventGate, Outcome, TurnRequest, Update};
+pub use pot_core::{Outcome, TurnRequest, Update};
 mod feedback;
 use feedback::context;
 pub async fn execute(
@@ -81,38 +79,35 @@ pub async fn execute(
             return Ok(());
         }
     }
-    let generation = thread.generation;
     let context = context(s, request, &thread)?;
-    let mut gate = EventGate::new(generation, &request.request_id);
     let result = s
         .agent_service
-        .executor
-        .as_ref()
-        .clone()
-        .services(Arc::new(crate::local_services::LocalServices(s.clone())))
+        .executions
         .execute(
-            &context,
-            &thread,
-            &TurnRequest {
-                request_id: request.request_id.clone(),
-                text: request.text.clone(),
+            pot_runtime_execution::Invocation {
+                context: &context,
+                thread: &thread,
+                request: &TurnRequest {
+                    request_id: request.request_id.clone(),
+                    text: request.text.clone(),
+                },
+                resuming,
+                services: Arc::new(crate::local_services::LocalServices(s.clone())),
+                #[cfg(test)]
+                extensions: s.agent_service.extensions.clone(),
+                #[cfg(not(test))]
+                extensions: None,
             },
-            resuming,
-            &mut |event| {
-                if gate.accept(&event) {
-                    transcript.record(s, &event.update)?;
-                }
-                Ok(())
-            },
+            &mut |event| transcript.record(s, &event.update),
         )
-        .await;
-    let result = result.and_then(|()| match gate.finish() {
-        Outcome::Success | Outcome::Cancelled => Ok(()),
-        Outcome::Failed(reason) => bail!("{reason}"),
-        Outcome::Unknown => {
-            bail!("Agent event stream ended without a terminal event; stop unconfirmed")
-        }
-    });
+        .await
+        .and_then(|outcome| match outcome {
+            Outcome::Success | Outcome::Cancelled => Ok(()),
+            Outcome::Failed(reason) => bail!("{reason}"),
+            Outcome::Unknown => {
+                bail!("Agent execution ended without a terminal event; stop unconfirmed")
+            }
+        });
     if result.is_err() || super::cancelled(s) || s.stopping() {
         environment::finish(s).await?;
     } else {
@@ -178,29 +173,5 @@ mod tests {
         worker.environment_ref = None;
         assert!(acquire_local_environment(&worker).await.is_err());
         std::fs::remove_dir_all(worker.data.parent().unwrap()).unwrap();
-    }
-    #[test]
-    fn late_duplicate_and_post_terminal_events_are_isolated() {
-        let mut gate = EventGate::new(2, "turn");
-        let mut event = AgentEvent {
-            generation: 1,
-            turn_id: "turn".into(),
-            seq: 1,
-            update: Update::TextDelta("old".into()),
-        };
-        assert!(!gate.accept(&event));
-        event.generation = 2;
-        event.turn_id = "other".into();
-        assert!(!gate.accept(&event));
-        event.turn_id = "turn".into();
-        assert!(gate.accept(&event));
-        assert!(!gate.accept(&event));
-        event.seq = 2;
-        event.update = Update::TurnFinished(Outcome::Cancelled);
-        assert!(gate.accept(&event));
-        event.seq = 3;
-        assert!(!gate.accept(&event));
-        assert_eq!(gate.finish(), Outcome::Cancelled);
-        assert_eq!(EventGate::new(1, "missing").finish(), Outcome::Unknown);
     }
 }

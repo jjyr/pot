@@ -39,7 +39,7 @@ Lifetime request, per-turn request, and per-request output caps remain independe
 
 ## Waiting and recovery
 
-When allowance is insufficient, gateway rejects the unsent request without consuming a request count. Runtime saves `execution.paused` only after tools settle and Storage persists the execution context. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
+When allowance is insufficient, gateway rejects the unsent request without consuming a request count. The Control execution adapter saves `execution.paused` only after tools settle and Storage persists the execution context. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
 
 When allowance is sufficient and automatic continuation enabled, the scheduler resumes. Otherwise click Continue in session usage. Cancel waiting discards pending work for that turn. After App/VM restart, only explicit persistent checkpoints can resume; unknown execution remains interrupted.
 
