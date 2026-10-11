@@ -189,6 +189,7 @@ fn invalid_configuration_is_rejected_before_acceptance() {
 struct Control {
     requests: Mutex<Vec<Value>>,
     ready: AtomicBool,
+    cancelled: AtomicBool,
     turns: AtomicUsize,
     switch_environment: AtomicBool,
 }
@@ -198,6 +199,7 @@ impl ExecutionFeedback for Control {
     }
     fn ready(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async {
+            anyhow::ensure!(!self.cancelled(), "Task Agent cancelled");
             while !self.ready.load(Ordering::SeqCst) {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
@@ -205,7 +207,7 @@ impl ExecutionFeedback for Control {
         })
     }
     fn cancelled(&self) -> bool {
-        false
+        self.cancelled.load(Ordering::SeqCst)
     }
     fn cancellation(&self) -> BoxFuture<'_, ()> {
         Box::pin(std::future::pending())
@@ -486,4 +488,46 @@ fn confirmed_reboot_interruption_retains_context_for_explicit_new_run() {
         Phase::Interrupted
     );
     std::fs::remove_dir_all(data).unwrap();
+}
+
+#[tokio::test]
+async fn cancelled_control_error_persists_cancelled_terminal() {
+    let root = std::env::temp_dir().join(format!("pot-task-cancel-{}", id()));
+    let data = root.join("product");
+    let mut backend = crate::initialize(crate::RuntimeConfig {
+        data: data.clone(),
+        workspace: data.join("workspace"),
+    })
+    .await
+    .unwrap();
+    backend.enable_host_resource();
+    let host = backend.host().clone();
+    let journal = Arc::new(Journal::open(&data, host.runtime_id(), &host.boot).unwrap());
+    let control_id = id();
+    let launch = launch(host.runtime_id());
+    journal.accept(&control_id, launch.clone()).unwrap();
+    let control = Arc::new(Control::default());
+    control.cancelled.store(true, Ordering::SeqCst);
+    let terminal = host
+        .execute_task_agent(
+            journal.clone(),
+            &control_id,
+            &launch.task_id,
+            &launch.run_id,
+            services(&control),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(terminal.outcome, Outcome::Cancelled);
+    assert_eq!(
+        journal
+            .inspect(&control_id, &launch.task_id, &launch.run_id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        Phase::Cancelled
+    );
+    assert!(control.requests.lock().unwrap().is_empty());
+    std::fs::remove_dir_all(root).unwrap();
 }

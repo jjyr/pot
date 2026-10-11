@@ -256,6 +256,7 @@ impl crate::host::Host {
         }.await;
         let outcome = match execution {
             Ok(()) => gate.finish(),
+            Err(_) if feedback.control.cancelled() => Outcome::Cancelled,
             Err(error) => Outcome::Failed(error.to_string()),
         };
         feedback.control.settle().await?;
