@@ -474,6 +474,7 @@ async fn peer_cancel_closes_sandbox_scope_and_preserves_other_owner() {
     for scope in ["peer-a", "peer-b"] {
         host.execute_controlled(
             ControlOperation {
+                resources_revision: None,
                 scope: scope.into(),
                 workspace_scope: scope.into(),
                 run_id: id(),

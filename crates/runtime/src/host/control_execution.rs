@@ -12,6 +12,7 @@ pub struct ControlOperation {
     pub call_id: String,
     pub name: String,
     pub args: Value,
+    pub resources_revision: Option<String>,
 }
 struct Feedback {
     host: Host,
@@ -116,11 +117,16 @@ impl Host {
                     .workspace_scope
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-                && request.generation > 0
-                && ["exec_command", "write_stdin", "apply_patch"].contains(&request.name.as_str()),
+                && request.generation > 0,
             "Unsupported peer operation"
         );
-        pot_core::environment_tools::validate(&request.name, &request.args)?;
+        let (operation, execution_args, policy) = self.controlled_tool(
+            &request.target.target,
+            &request.workspace_scope,
+            &request.name,
+            request.args.clone(),
+            request.resources_revision.as_deref(),
+        )?;
         let feedback = Arc::new(Feedback {
             host: self.clone(),
             cancelled: cancelled.clone(),
@@ -138,9 +144,12 @@ impl Host {
                     .join("peer-workspaces")
                     .join(&request.workspace_scope);
                 std::fs::create_dir_all(&workspace)?;
-                let policy = pot_core::ShellSettings::default();
-                let mut args = request.args;
-                pot_tool_executor::tools::normalize(&request.name, &mut args, &workspace, &policy)?;
+                let mut args = execution_args;
+                if operation != "plugin_call" {
+                    pot_tool_executor::tools::normalize(
+                        &operation, &mut args, &workspace, &policy,
+                    )?;
+                }
                 let executor = environment.host_executor(&request.scope, request.generation);
                 let context = ExecutionContext {
                     instructions: String::new(),
@@ -157,7 +166,7 @@ impl Host {
                 };
                 let mut emit = |_| Ok(());
                 tokio::select! {
-                    result=executor.execute(&context,&policy,&request.name,&args,&request.call_id,&mut emit)=>result.map(|value|json!({"result":value})),
+                    result=executor.execute(&context,&policy,&operation,&args,&request.call_id,&mut emit)=>result.map(|value|json!({"result":value})),
                     _=feedback.cancellation()=>{environment.finish_host(&request.scope).await?;bail!("Peer lease expired or was revoked")}
                 }
             }
@@ -181,14 +190,14 @@ impl Host {
                     thread_generation: request.generation,
                     target: sandbox_id.clone(),
                     worker: true,
-                    policy: pot_core::ShellSettings::default(),
+                    policy,
                 };
-                let mut args = request.args;
+                let mut args = execution_args;
                 args["sandbox_id"] = json!(sandbox_id);
                 manager
                     .execute(
                         &grant,
-                        &request.name,
+                        &operation,
                         &request.call_id,
                         &args,
                         &|| feedback.cancelled(),
@@ -238,6 +247,88 @@ impl Host {
 }
 
 impl Host {
+    fn controlled_tool(
+        &self,
+        target: &pot_core::EnvironmentTarget,
+        workspace_scope: &str,
+        name: &str,
+        args: Value,
+        expected_revision: Option<&str>,
+    ) -> Result<(String, Value, pot_core::ShellSettings)> {
+        anyhow::ensure!(
+            !workspace_scope.is_empty()
+                && workspace_scope
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            "Invalid workspace scope"
+        );
+        anyhow::ensure!(
+            name != "plugin_call",
+            "Internal plugin envelopes cannot be called directly"
+        );
+        let workspace = match target {
+            pot_core::EnvironmentTarget::Host {} => {
+                self.data.join("peer-workspaces").join(workspace_scope)
+            }
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+                let manager = self
+                    .sandboxes
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Sandbox service unavailable"))?;
+                manager.assignment(sandbox_id)?;
+                manager
+                    .workspace(sandbox_id)
+                    .join("tasks")
+                    .join(workspace_scope)
+            }
+        };
+        let supplied = if let Some(expected) = expected_revision {
+            let supplied = crate::control_resources::installed_snapshot(&workspace)?
+                .ok_or_else(|| anyhow!("Control resource snapshot missing"))?;
+            anyhow::ensure!(
+                supplied.0 == expected,
+                "Control resource snapshot binding changed"
+            );
+            Some(supplied)
+        } else {
+            // Core-only protocol calls use the protocol defaults, never node settings/cache.
+            None
+        };
+        let policy = supplied
+            .as_ref()
+            .map(|(_, s)| s.shell.clone())
+            .unwrap_or_default();
+        if let Some((_, resources)) = supplied {
+            let settings = pot_core::AgentSettings {
+                plugins: resources.plugins,
+                ..Default::default()
+            };
+            if let Some(plugin) = settings.plugin_for_tool(name)? {
+                anyhow::ensure!(
+                    !matches!(target, pot_core::EnvironmentTarget::Host {})
+                        || plugin.manifest.execution == "environment",
+                    "This plugin supports Sandbox execution only"
+                );
+                if matches!(target, pot_core::EnvironmentTarget::Host {}) {
+                    anyhow::ensure!(
+                        plugin
+                            .manifest
+                            .requirements
+                            .iter()
+                            .all(|r| matches!(r.as_str(), "node" | "chromium")),
+                        "Unsupported Host plugin dependency"
+                    );
+                }
+                return Ok((
+                    "plugin_call".into(),
+                    pot_core::plugins::call(plugin, name, args, resources.vision)?,
+                    policy,
+                ));
+            }
+        }
+        pot_core::environment_tools::validate(name, &args)?;
+        Ok((name.into(), args, policy))
+    }
     pub async fn install_controlled_resources(
         &self,
         target: &pot_core::EnvironmentTarget,
@@ -332,6 +423,7 @@ impl Host {
             run_id: run,
             name,
             args,
+            resources_revision,
             ..
         } = request;
         anyhow::ensure!(
@@ -339,23 +431,26 @@ impl Host {
             "Peer target belongs to another Runtime"
         );
         anyhow::ensure!(!cancelled(), "Peer lease expired or revoked");
-        anyhow::ensure!(
-            ["exec_command", "write_stdin", "apply_patch"].contains(&name.as_str()),
-            "Unsupported peer operation"
-        );
-        pot_core::environment_tools::validate(&name, &args)?;
+        let (operation, envelope, policy) = self.controlled_tool(
+            &target.target,
+            &workspace_scope,
+            &name,
+            args.clone(),
+            resources_revision.as_deref(),
+        )?;
         let context = self
             .controlled_context(&target.target, &workspace_scope)
             .await?;
-        let policy = pot_core::ShellSettings::default();
         let mut args = args;
         match &target.target {
-            pot_core::EnvironmentTarget::Host {} => pot_tool_executor::tools::normalize(
-                &name,
-                &mut args,
-                &PathBuf::from(context["workspace"].as_str().unwrap()),
-                &policy,
-            )?,
+            pot_core::EnvironmentTarget::Host {} if operation != "plugin_call" => {
+                pot_tool_executor::tools::normalize(
+                    &name,
+                    &mut args,
+                    &PathBuf::from(context["workspace"].as_str().unwrap()),
+                    &policy,
+                )?
+            }
             pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
                 let manager = self
                     .sandboxes
@@ -368,10 +463,13 @@ impl Host {
                     manager
                         .ready_for_execution(sandbox_id, &|| cancelled())
                         .await?;
-                    let prepared=manager.permissions(sandbox_id,&json!({"action":"prepare","cwd":context["workspace"],"role":"task","tool":name,"args":args,"policy":policy})).await?;
-                    args = prepared["args"].clone();
+                    let prepared=manager.permissions(sandbox_id,&json!({"action":"prepare","cwd":context["workspace"],"role":"task","tool":operation,"args":if operation == "plugin_call" { &envelope } else { &args },"policy":policy})).await?;
+                    if operation != "plugin_call" {
+                        args = prepared["args"].clone();
+                    }
                 }
             }
+            pot_core::EnvironmentTarget::Host {} => {}
         }
         anyhow::ensure!(!cancelled(), "Peer lease expired or revoked");
         Ok(args)

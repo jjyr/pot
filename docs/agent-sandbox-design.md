@@ -82,7 +82,7 @@ Qualification covers native tool loadouts, real CLI execution, resume, cancellat
 
 ## Agent skills
 
-Skills use filesystem bundles and a unified home-relative mapping; see [Agent skills](agent-skills.md). Delivered standalone execution supplies local roots and task filters. The approved Control-connected design selects global user/builtin skills and plugin versions at Control and supplies read-only task bundles to execution nodes, replacing destination-global discovery. Project rules/skills remain local to the actual workspace. Global bundle management belongs to Control; snapshot delivery is implemented in the remote environment adapter, while remote plugin invocation and Task Agent startup remain pending in #39.
+Skills use filesystem bundles and a unified home-relative mapping; see [Agent skills](agent-skills.md). Delivered standalone execution supplies local roots and task filters. The approved Control-connected design selects global user/builtin skills and plugin versions at Control and supplies read-only task bundles to execution nodes, replacing destination-global discovery. Project rules/skills remain local to the actual workspace. Global bundle management belongs to Control; snapshot delivery is implemented in the remote environment adapter, and named remote plugin invocation uses only the supplied pinned bundles. Remote Task Agent startup and real remote Sandbox plugin qualification remain pending in #39.
 
 ## Product surfaces
 

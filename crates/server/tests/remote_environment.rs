@@ -92,23 +92,27 @@ impl Node {
 }
 #[tokio::test]
 async fn local_task_agent_runs_on_remote_host_with_destination_project_rules_and_owner_approval() {
-    qualify(false, false, false).await;
+    qualify(false, false, false, false).await;
 }
 #[tokio::test]
 #[ignore = "requires Linux rootless Podman, prepared executor image and isolated container storage"]
 async fn local_task_agent_runs_on_remote_podman_with_destination_project_rules_and_owner_approval()
 {
-    qualify(true, false, false).await;
+    qualify(true, false, false, false).await;
 }
 #[tokio::test]
 async fn remote_task_waits_without_sampling_then_recovers_original_receipt() {
-    qualify(false, true, false).await;
+    qualify(false, true, false, false).await;
 }
 #[tokio::test]
 async fn offline_destination_waits_before_first_model_request_then_starts() {
-    qualify(false, false, true).await;
+    qualify(false, false, true, false).await;
 }
-async fn qualify(sandbox: bool, outage: bool, before_start: bool) {
+#[tokio::test]
+async fn remote_plugin_is_visible_reviewed_and_keeps_session_across_task_turns() {
+    qualify(false, false, false, true).await;
+}
+async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) {
     let caller = Node::start().await;
     let target = Node::start().await;
     caller
@@ -195,6 +199,12 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool) {
         let router=Router::new().route("/model",post(move|Json(body):Json<Value>|{
             let remote=body.to_string().contains("REMOTE_PROJECT_RULE");
             let number=if remote{counter.fetch_add(1,Ordering::SeqCst)}else{usize::MAX};
+            let plugin_session = body["messages"].as_array().into_iter().flatten()
+                .filter(|m| m["role"] == "tool")
+                .filter_map(|m| m["content"].as_str())
+                .filter_map(|text| serde_json::from_str::<Value>(text).ok())
+                .filter(|v| v.get("content").is_some())
+                .find_map(|v| v["session_id"].as_str().map(str::to_owned));
             requests.lock().unwrap().push(body);
             async move {
                 let command = if number == 0 {
@@ -202,6 +212,12 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool) {
                     format!("{}printf REMOTE > where.txt; cat where.txt; {skills}", if outage { "printf X >> once.txt; sleep 3; " } else { "" })
                 } else { "cat where.txt; printf FOLLOWUP >> where.txt".into() };
                 let delta=if number==0 || number==2 {json!({"tool_calls":[{"index":0,"id":format!("remote-command-{number}"),"type":"function","function":{"name":"exec_command","arguments":json!({"cmd":command}).to_string()}}]})}else{json!({"content":"Remote task complete."})};
+                let mut delta = delta;
+                if plugin && matches!(number, 0 | 2) {
+                    let mut input = json!({"code":if number == 0 { "let counter=40; nodeRepl.write(++counter);" } else { "nodeRepl.write(++counter);" }});
+                    if number == 2 { input["session_id"] = json!(plugin_session.expect("task follow-up lost plugin session evidence")); }
+                    delta["tool_calls"].as_array_mut().unwrap().push(json!({"index":1,"id":format!("remote-plugin-{number}"),"type":"function","function":{"name":"cua_repl","arguments":input.to_string()}}));
+                }
                 let events=vec![json!({"choices":[{"delta":delta,"finish_reason":null}]}),json!({"choices":[{"delta":{},"finish_reason":if number==0 || number==2{"tool_calls"}else{"stop"}}]}),json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}})];
                 Sse::new(futures::stream::iter(events.into_iter().map(|event|Ok::<_,Infallible>(Event::default().data(event.to_string())))))
             }
@@ -227,7 +243,10 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool) {
             let permissions = caller.api("/api/v1/permissions", None).await;
             for card in permissions["requests"].as_array().unwrap() {
                 assert_eq!(card["request"]["owner"], task_id);
-                assert_eq!(card["request"]["tool"], "exec_command");
+                assert!(card["request"]["tool"] == "exec_command" || (plugin && card["request"]["tool"] == "cua_repl"));
+                if card["request"]["tool"] == "cua_repl" {
+                    assert_eq!(card["request"]["plugin"]["id"], "computer-use");
+                }
                 assert!(
                     card["request"]["environment"]
                         .as_str()
@@ -275,7 +294,7 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool) {
     .unwrap();
     let detail = caller.api(&format!("/api/v1/tasks/{task_id}"), None).await;
     assert_eq!(finished["phase"], "complete", "{finished} {detail}");
-    assert_eq!(reviews, 1);
+    assert_eq!(reviews, if plugin { 2 } else { 1 });
     if before_start {
         assert!(disconnected && recovered);
     }
@@ -291,6 +310,11 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool) {
     assert!(detail.to_string().contains("Destination-only fixture"));
     let body = captured.lock().unwrap()[0].to_string();
     assert!(body.contains("REMOTE_PROJECT_RULE"), "{body}");
+    // Control owns the tool contract: a node capability list must not hide its plugin.
+    assert!(
+        body.contains("cua_repl"),
+        "Control plugin tool was silently removed: {body}"
+    );
     assert!(!body.contains("ASSISTANT_PRIVATE_RULE"));
     assert!(!body.contains("LOCAL_PRIVATE_PROJECT_RULE"));
     assert!(body.contains("REMOTE_INSTALLED_SKILL"));
@@ -334,6 +358,13 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool) {
     })
     .await
     .unwrap();
+    if plugin {
+        let evidence = captured.lock().unwrap().last().unwrap().to_string();
+        assert!(
+            evidence.contains("42"),
+            "remote plugin did not preserve its session: {evidence}"
+        );
+    }
     let files = std::fs::read_dir(&workspace)
         .unwrap()
         .filter_map(Result::ok)

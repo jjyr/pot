@@ -413,7 +413,12 @@ async fn execution_environment(
     } else {
         None
     };
-    let session_environment = if plugin {
+    // Remote sessions are verified by the bound destination executor, not local registries.
+    let remote_session = requested
+        .as_ref()
+        .is_some_and(|r| !r.is_local_to(&s.runtime_id))
+        || crate::remote_environment::is_remote(s);
+    let session_environment = if plugin && !remote_session {
         if let Some(session) = args["session_id"].as_str() {
             if s.environment_service
                 .host
@@ -478,10 +483,6 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         pot_core::environment_tools::validate(name, &args)?;
     }
     if environment.starts_with("remote:") {
-        anyhow::ensure!(
-            plugin.is_none(),
-            "Remote destination does not support this installed plugin"
-        );
         let reference = crate::remote_environment::from_key(&environment)?;
         let binding = crate::remote_environment::binding(s, reference)?;
         crate::remote_environment::open(s, binding.clone()).await?;
