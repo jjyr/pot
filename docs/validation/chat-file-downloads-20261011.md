@@ -42,12 +42,24 @@ download URLs contain no credentials.
 
 Screenshot: `/private/tmp/pot39-file-chat.png` (native Chat fixture).
 
+## Browser follow-up
+
+After the user manually opened the public shell in Chrome's agent profile, the
+existing page rendered Control Assistant and the synthetic Chat download link.
+Clicking that link produced a completed browser download event whose saved path
+was `/Users/jjy/Downloads/pot39-download-fixture.bin`. Screenshot:
+`/private/tmp/pot39-file-web-chat.jpg`. Browser interaction required no model call.
+macOS denied reading that Downloads file, including outside the workspace sandbox,
+so the browser-saved file's hash was not independently verified. The matching
+App file and authenticated HTTP attachment hashes above remain separately verified.
+
 ## Limits
 
-Chrome agent-profile automated navigation currently receives `cross_site` for
-the public shell. Browser clicking/save completion has not been qualified for
-this change. A narrow top-level document-navigation exception allows public-shell
+Chrome agent-profile automated navigation received `cross_site` for
+the public shell; the follow-up used the page manually opened by the user.
+A narrow top-level document-navigation exception allows public-shell
 links while retaining API/download/frame/mutation boundaries; it does not resolve
-the automated navigation failure. Native clicking and HTTP streaming were tested
-independently. No real model, VM Sandbox, remote desktop or remote plugin was
+the automated navigation failure. Browser clicking/completion, native clicking
+and HTTP streaming were tested independently, with the browser-file hash limitation
+above. No real model, VM Sandbox, remote desktop or remote plugin was
 qualified here; joined file transport tests used separate TLS nodes on one host.
