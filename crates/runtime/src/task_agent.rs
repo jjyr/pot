@@ -11,6 +11,7 @@ use std::{
 };
 
 const VERSION: u32 = 1;
+pub mod control;
 mod runner;
 pub use runner::RunServices;
 
@@ -89,6 +90,7 @@ pub enum Phase {
     Failed,
     Cancelled,
     RecoveryRequired,
+    Interrupted,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,6 +111,8 @@ pub struct Run {
     pub phase: Phase,
     pub result: Option<Terminal>,
     pub context: Option<Value>,
+    #[serde(default)]
+    sequence: u64,
 }
 
 /// One journal per process authority; the Host already holds the data-root lock.
@@ -151,13 +155,15 @@ impl Journal {
             ensure!(
                 matches!(
                     run.phase,
-                    Phase::Complete | Phase::Failed | Phase::Cancelled
+                    Phase::Complete | Phase::Failed | Phase::Cancelled | Phase::Interrupted
                 ) == run.result.is_some(),
                 "Task Agent terminal record is inconsistent"
             );
             if let Some(result) = &run.result {
                 ensure!(
-                    run.phase == result.phase()?,
+                    run.phase == result.phase()?
+                        || (run.phase == Phase::Interrupted
+                            && result.outcome == Outcome::Cancelled),
                     "Task Agent outcome differs from terminal phase"
                 );
             }
@@ -210,6 +216,25 @@ impl Journal {
                 && r.result.is_none()),
             "Previous Task Agent run requires reconciliation"
         );
+        let previous = records
+            .values()
+            .filter(|r| r.control_id == control && r.launch.task_id == launch.task_id)
+            .max_by_key(|r| r.sequence);
+        let sequence = previous.map_or(Ok(1), |r| {
+            r.sequence
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("Task run sequence exhausted"))
+        })?;
+        let context = previous
+            .filter(|r| {
+                r.result.is_some()
+                    && r.launch.generation == launch.generation
+                    && r.launch.environment == launch.environment
+                    && serde_json::to_value(&r.launch.config).ok()
+                        == serde_json::to_value(&launch.config).ok()
+                    && r.launch.resources.revision().ok() == launch.resources.revision().ok()
+            })
+            .and_then(|r| r.context.clone());
         let run = Run {
             schema_version: VERSION,
             control_id: control.into(),
@@ -218,7 +243,8 @@ impl Journal {
             boot_id: self.boot_id.clone(),
             phase: Phase::Accepted,
             result: None,
-            context: None,
+            context,
+            sequence,
         };
         Self::write(&self.data, &key, &run)?;
         records.insert(key, run.clone());
@@ -274,6 +300,16 @@ impl Journal {
             Ok(())
         })
     }
+    /// Called only after the transport has reconciled every issued operation and
+    /// drained the previous boot's scope. This never claims or restarts an Agent.
+    pub fn interrupt_recovered(&self, control: &str, task: &str, run: &str) -> Result<()> {
+        self.change(control,task,run,|record| {
+            ensure!(record.phase==Phase::RecoveryRequired && record.boot_id!=self.boot_id,"Run does not require previous-boot recovery");
+            record.phase=Phase::Interrupted;
+            record.result=Some(Terminal{outcome:Outcome::Cancelled,text:"Execution Runtime restarted; use guide_task to continue explicitly after receipt reconciliation.".into()});
+            Ok(())
+        })
+    }
     pub fn finish(&self, control: &str, task: &str, run: &str, result: Terminal) -> Result<()> {
         self.change(control, task, run, |record| {
             if let Some(old) = &record.result {
@@ -306,3 +342,12 @@ impl Terminal {
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Debug)]
+pub struct Interrupted;
+impl std::fmt::Display for Interrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Execution Runtime restarted; original run stopped after receipt reconciliation. Use guide_task to continue explicitly.")
+    }
+}
+impl std::error::Error for Interrupted {}

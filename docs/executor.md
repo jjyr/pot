@@ -1,7 +1,7 @@
 # Sandbox command execution
 
 The Host Agent (pot-agent) calls the same role-scoped tools. Runtime validates
-arguments and routes them to a credential-free guest runner. Current Agent loops remain at the owner; remote startup is pending in #39. pot-agent also routes these same tool names to
+arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. pot-agent also routes these same tool names to
 Host after its [permission gate](permissions.md).
 `environment` selects Host or a Sandbox for pot-agent. Main defaults to Host and
 tasks remain bound to their fixed Host/Sandbox target. File tools share the same runner implementation.

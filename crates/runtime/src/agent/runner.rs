@@ -12,6 +12,12 @@ pub async fn execute(
 ) -> Result<()> {
     let _lease = acquire_local_environment(s).await?;
     let thread = thread(s)?;
+    s.conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .set("execution.remote_interrupted", "")?;
     environment::finish_stale(s, thread.generation).await?;
     environment::refresh(s).await?;
     crate::gateway::validate_spec(s, &thread.config)?;
@@ -19,6 +25,58 @@ pub async fn execute(
         !resuming || thread.config.supports_checkpoint(),
         "Configured protocol does not support checkpoint resume"
     );
+    let _renewal = crate::remote_environment::renewal(s);
+    if s.is_worker && crate::remote_environment::is_remote(s) {
+        let binding = crate::remote_environment::binding(s, s.environment_ref.clone().unwrap())?;
+        let worker = s.clone();
+        let result = crate::remote_environment::port(s)?
+            .run_task(
+                crate::task_agent::Launch {
+                    task_id: binding.owner,
+                    run_id: binding.run_id,
+                    generation: binding.generation,
+                    environment: binding.environment,
+                    config: thread.config.clone(),
+                    resources: crate::control_resources::snapshot(s)?,
+                    skills: s.skill_selection.clone(),
+                    text: request.text.clone(),
+                },
+                Arc::new(move || super::cancelled(&worker) || worker.stopping()),
+            )
+            .await;
+        let result = match result {
+            Err(error)
+                if error
+                    .downcast_ref::<crate::task_agent::Interrupted>()
+                    .is_some() =>
+            {
+                let mut inner = s.conversation.inner.lock().unwrap();
+                inner.store.set("execution.remote_interrupted", "true")?;
+                if let Some(turn) = inner.turn.as_mut() {
+                    turn.cancelling = true;
+                }
+                drop(inner);
+                s.phase(AgentPhase::Ready, Some(error.to_string()));
+                return Ok(());
+            }
+            result => result?,
+        };
+        transcript.record(s, &Update::MessageStarted)?;
+        transcript.record(
+            s,
+            &Update::MessageFinished {
+                text: result.text,
+                outcome: result.outcome.clone(),
+            },
+        )?;
+        environment::finish_turn(s).await?;
+        environment::drain(s).await?;
+        return match result.outcome {
+            Outcome::Success | Outcome::Cancelled => Ok(()),
+            Outcome::Failed(reason) => bail!("{reason}"),
+            Outcome::Unknown => bail!("Remote Task Agent outcome remains unresolved"),
+        };
+    }
     if crate::remote_environment::is_remote(s) {
         crate::remote_environment::start(s).await?;
         if super::cancelled(s) || s.stopping() {
@@ -27,7 +85,6 @@ pub async fn execute(
             return Ok(());
         }
     }
-    let _renewal = crate::remote_environment::renewal(s);
     let generation = thread.generation;
     let context = context(s, request, &thread)?;
     let mut gate = EventGate::new(generation, &request.request_id);

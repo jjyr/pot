@@ -16,6 +16,8 @@ use std::{
 
 mod management;
 mod remote;
+mod task_agent;
+mod task_services;
 const VERSION: u32 = 1;
 const CODE_MS: i64 = 300_000;
 const LEASE_MS: i64 = 30_000;
@@ -128,6 +130,8 @@ struct Lease {
     expires_at_ms: i64,
     cancelled: bool,
     resources_revision: Option<String>,
+    #[serde(default)]
+    replacement: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -199,6 +203,17 @@ struct Envelope {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Rpc {
+    LaunchTask {
+        lease_id: String,
+        launch: Box<pot_runtime::task_agent::Launch>,
+    },
+    InspectTask {
+        task_id: String,
+        run_id: String,
+    },
+    RecoverTaskLease {
+        lease_id: String,
+    },
     ReadFile {
         owner: String,
         target: Target,
@@ -264,6 +279,7 @@ pub(crate) struct Authority {
     book: Mutex<Book>,
     operations: tokio::sync::Mutex<()>,
     management_calls: tokio::sync::Mutex<()>,
+    task_journal: Mutex<Option<Arc<pot_runtime::task_agent::Journal>>>,
     stopping: std::sync::atomic::AtomicBool,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     active: Mutex<std::collections::BTreeSet<PathBuf>>,
@@ -330,6 +346,7 @@ impl Authority {
             book: Mutex::new(book),
             operations: Default::default(),
             management_calls: Default::default(),
+            task_journal: Default::default(),
             stopping: Default::default(),
             tasks: Default::default(),
             active: Default::default(),
@@ -533,6 +550,7 @@ impl Authority {
                 expires_at_ms: now() + LEASE_MS,
                 cancelled: false,
                 resources_revision: None,
+                replacement: None,
             };
             book.leases.insert(lease.id.clone(), lease.clone());
             Ok(json!(lease))
@@ -733,6 +751,7 @@ fn client(url: &str, ca: Option<&str>) -> Result<(reqwest::Client, url::Url)> {
     );
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
         .timeout(std::time::Duration::from_secs(10));
     if let Some(ca) = ca {
         builder = builder.add_root_certificate(reqwest::Certificate::from_pem(ca.as_bytes())?);
@@ -1174,6 +1193,7 @@ fn scope(lease: &Lease) -> Result<String> {
         &lease.run_id,
         lease.generation,
         &lease.target,
+        &lease.id,
     ))
 }
 impl Authority {
@@ -1195,6 +1215,15 @@ impl Authority {
     ) -> Result<Value> {
         let boot = host.describe()["boot_id"].as_str().unwrap().to_owned();
         match body {
+            Rpc::LaunchTask { lease_id, launch } => {
+                self.launch_task(host, control, lease_id, *launch).await
+            }
+            Rpc::InspectTask { task_id, run_id } => {
+                self.inspect_task(host, control, &task_id, &run_id).await
+            }
+            Rpc::RecoverTaskLease { lease_id } => {
+                self.recover_task_lease(host, control, &lease_id).await
+            }
             Rpc::ManageSandbox {
                 operation_id,
                 accept_before_ms,
@@ -1506,6 +1535,11 @@ impl Authority {
             .route("/control/v1/identity", get(identity))
             .route("/control/v1/join", axum::routing::post(register))
             .route("/control/v1/poll", axum::routing::post(poll))
+            .route(
+                "/control/v1/task-service",
+                axum::routing::post(task_services::service)
+                    .layer(axum::extract::DefaultBodyLimit::max(18 * 1024 * 1024)),
+            )
             .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
             .with_state(resources.clone())
             .merge(resources.router());

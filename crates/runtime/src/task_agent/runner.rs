@@ -80,7 +80,9 @@ impl ExecutionFeedback for Feedback {
                 .prepare_execution_operation(&name, args)
                 .await?;
             ensure!(
-                prepared["environment"] == serde_json::to_value(&run.launch.environment)?,
+                prepared["environment"] == serde_json::to_value(&run.launch.environment)?
+                    || prepared["environment"]
+                        == format!("remote:{}", serde_json::to_string(&run.launch.environment)?),
                 "Control preparation changed the fixed Task Agent environment"
             );
             Ok(prepared)
@@ -109,6 +111,18 @@ impl ExecutionFeedback for Feedback {
     fn acknowledge_steering(&self, ids: &[String]) -> Result<()> {
         self.run()?;
         self.control.acknowledge_steering(ids)
+    }
+    fn fetch_steering(&self, finalizing: bool) -> BoxFuture<'_, Result<Vec<(String, String)>>> {
+        Box::pin(async move {
+            self.run()?;
+            self.control.fetch_steering(finalizing).await
+        })
+    }
+    fn commit_steering<'a>(&'a self, ids: &'a [String]) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.run()?;
+            self.control.commit_steering(ids).await
+        })
     }
     fn diagnostic(&self, event: &Value) -> Result<()> {
         self.run()?;
@@ -208,6 +222,7 @@ impl crate::host::Host {
             let context = self.install_controlled_resources(&accepted.launch.environment.target, &workspace_scope, accepted.launch.resources.clone()).await?;
             let mut skills: Vec<pot_agent::Skill> = serde_json::from_value(context["skills"].clone())?;
             if let Some(selection) = &accepted.launch.skills {
+                ensure!(selection.iter().all(|name|skills.iter().any(|skill|&skill.name==name)),"Selected task skill is unavailable at the fixed destination");
                 skills.retain(|s| selection.contains(&s.name));
             }
             let data = journal.data.join(Journal::key(control_id, task_id, run_id)?);
@@ -243,6 +258,7 @@ impl crate::host::Host {
             Ok(()) => gate.finish(),
             Err(error) => Outcome::Failed(error.to_string()),
         };
+        feedback.control.settle().await?;
         let terminal = Terminal { outcome, text };
         // Unknown outcomes deliberately remain unsettled for reconciliation.
         journal.finish(control_id, task_id, run_id, terminal.clone())?;

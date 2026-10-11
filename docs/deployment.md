@@ -92,8 +92,9 @@ not import assistant instruction files or saved routing preferences.
 App creates its default assistant through the same resource API. New resource
 creation UI is deferred by user choice. Native management authority and
 Control membership remains separate; this endpoint is not a member execution
-authorization mechanism. Task Agent loops currently run on the owner and use remote execution adapters.
-Fresh remote Task Agent startup and broader transports remain pending in #39.
+authorization mechanism. Remote Task Agents start on the selected execution
+Runtime; Control retains model credentials, budgets and approvals. See
+[architecture](architecture.md) for launch, receipt and recovery rules.
 
 Web listener configuration remains separately explicit. Resource creation does
 not automatically start Web access. Lazy macOS Helper lifecycle and real VM

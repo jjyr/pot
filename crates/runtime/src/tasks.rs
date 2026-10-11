@@ -251,7 +251,12 @@ pub(super) fn restore(root: &Service) -> Result<()> {
             record.create_request.skills.clone(),
         )?;
         if let Some(job) = record.active.take() {
-            if !record.interrupt_requested && usage::paused(&service)?.is_some() {
+            if !record.interrupt_requested && crate::remote_environment::is_remote(&service) {
+                // Recover the original input identity. The remote launch journal
+                // reconciles that run; this never starts a replacement worker.
+                record.queue.push_front(job);
+                record.info.phase = TaskPhase::Queued;
+            } else if !record.interrupt_requested && usage::paused(&service)?.is_some() {
                 record.queue.push_front(job);
                 record.info.phase = TaskPhase::Waiting;
             } else {
@@ -1261,7 +1266,19 @@ pub(super) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Resul
         lane.record.info.updated_at_ms = now();
         return persist(root, &hub);
     }
-    let stopped = snap.turn.as_ref().is_some_and(|t| t.cancelling);
+    let remote_interrupted = lane
+        .service
+        .conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .get("execution.remote_interrupted")?
+        .is_some_and(|v| v == "true");
+    if remote_interrupted {
+        lane.record.interrupt_requested = true;
+    }
+    let stopped = remote_interrupted || snap.turn.as_ref().is_some_and(|t| t.cancelling);
     let message = snap.messages.iter().find(|m| m.id == job.message_id);
     let mut status = if stopped {
         if lane.record.interrupt_requested {
@@ -2834,6 +2851,52 @@ pub(super) mod tests {
         wrong.runtime_id = id();
         assert!(restore(&wrong).is_err());
         assert!(owner(&root, &task.id).is_ok());
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
+    #[tokio::test]
+    async fn control_restart_retains_original_remote_input_identity_for_reconciliation() {
+        let root = fixture();
+        let task = create(
+            State(root.clone()),
+            headers(),
+            Json(CreateTask {
+                text: "original input".into(),
+                request_id: "original-request".into(),
+                environment_ref: Some(pot_core::EnvironmentRef::host(&root.runtime_id)),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let (_, _, request) = claim(&root).unwrap().unwrap();
+        let destination = pot_core::EnvironmentRef::host(&id());
+        {
+            let mut hub = root.tasks.hub.lock().unwrap();
+            let lane = hub.lanes.get_mut(&task.id).unwrap();
+            lane.record.info.environment_ref = Some(destination.clone());
+            lane.record.create_request.environment_ref = Some(destination.clone());
+            lane.record.assignment = Some(pot_core::Assignment::on_environment(
+                &root.runtime_id,
+                &task.id,
+                destination.clone(),
+            ));
+            persist(&root, &hub).unwrap();
+        }
+        restore(&root).unwrap();
+        let hub = root.tasks.hub.lock().unwrap();
+        let lane = &hub.lanes[&task.id];
+        assert!(lane.record.active.is_none());
+        assert_eq!(lane.record.info.phase, TaskPhase::Queued);
+        assert_eq!(lane.record.queue.len(), 1);
+        assert_eq!(lane.record.queue[0].request_id, request.request_id);
+        assert_eq!(lane.record.queue[0].text, request.text);
+        assert_eq!(lane.service.environment_ref, Some(destination.clone()));
+        assert_eq!(
+            lane.record.assignment.as_ref().unwrap().agent_runtime_id,
+            destination.runtime_id
+        );
+        drop(hub);
         std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }
     #[tokio::test]

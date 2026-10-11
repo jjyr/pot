@@ -181,12 +181,25 @@ pub trait ExecutionFeedback: Send + Sync {
     fn acknowledge_steering(&self, _ids: &[String]) -> Result<()> {
         Ok(())
     }
+    /// Remote hosts can preserve the same finalization boundary without blocking
+    /// a synchronous feedback callback on network I/O.
+    fn fetch_steering(&self, finalizing: bool) -> BoxFuture<'_, Result<Vec<(String, String)>>> {
+        Box::pin(async move { self.steering(finalizing) })
+    }
+    fn commit_steering<'a>(&'a self, ids: &'a [String]) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move { self.acknowledge_steering(ids) })
+    }
     /// Metadata only: never provider payloads, credentials, shell output, or arguments.
     fn diagnostic(&self, _event: &Value) -> Result<()> {
         Ok(())
     }
     /// Cooperative pause gate; does not interrupt an in-flight request/tool.
     fn ready(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    /// A terminal run is acknowledged only after all issued effects are known.
+    /// Distributed hosts may wait here for original receipts, without new actions.
+    fn settle(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
     fn load_context(&self) -> Result<Option<Value>> {
@@ -233,7 +246,8 @@ pub enum ExecutionObservation {
     },
 }
 /// Credential-free request description. Services own transport and authentication.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelRequest {
     pub id: String,
     pub protocol: String,

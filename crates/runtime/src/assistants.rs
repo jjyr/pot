@@ -126,6 +126,20 @@ impl Hub {
             .find(|o| tasks::execution_service(&o.service, headers).is_ok())
             .map(|o| o.service.clone())
     }
+    /// Used only after a member request has been authenticated and bound to an assignment.
+    pub fn task_service(&self, task: &str) -> Result<Service> {
+        let mut services = Vec::new();
+        if let Some(service) = tasks::permission_lane(&self.root, task) {
+            services.push(service);
+        }
+        for owner in self.owners.lock().unwrap().values() {
+            if let Some(service) = tasks::permission_lane(&owner.service, task) {
+                services.push(service);
+            }
+        }
+        anyhow::ensure!(services.len() == 1, "Task owner is missing or ambiguous");
+        Ok(services.pop().unwrap())
+    }
     pub fn activate(&self) -> Result<()> {
         for d in self.definitions() {
             if d.id != self.root.usage_scope {

@@ -5,17 +5,25 @@ use pot_runtime::remote_environment::{RemoteBinding, RemoteEnvironment};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct ClientRun {
-    binding: RemoteBinding,
-    lease_id: Option<String>,
+    pub(super) binding: RemoteBinding,
+    pub(super) lease_id: Option<String>,
     context: Option<Value>,
-    cancelled: bool,
+    pub(super) cancelled: bool,
     #[serde(default)]
-    cancel_requested: bool,
+    pub(super) cancel_requested: bool,
     #[serde(default)]
     attempt: u64,
     #[serde(default)]
     waiting_reason: Option<String>,
     operations: BTreeMap<String, ClientOperation>,
+    #[serde(default)]
+    pub(super) task_launch: Option<pot_runtime::task_agent::Launch>,
+    #[serde(default)]
+    pub(super) task_result: Option<pot_runtime::task_agent::Terminal>,
+    #[serde(default)]
+    task_interrupted: bool,
+    #[serde(default)]
+    task_sent_at_ms: Option<i64>,
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 struct ClientOperation {
@@ -23,11 +31,11 @@ struct ClientOperation {
     args: Value,
     result: Option<Value>,
 }
-fn run_key(binding: &RemoteBinding) -> Result<String> {
+pub(super) fn run_key(binding: &RemoteBinding) -> Result<String> {
     digest(binding)
 }
 impl Authority {
-    fn client_run(&self, binding: &RemoteBinding) -> Result<ClientRun> {
+    pub(super) fn client_run(&self, binding: &RemoteBinding) -> Result<ClientRun> {
         self.book
             .lock()
             .unwrap()
@@ -36,7 +44,7 @@ impl Authority {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Remote run has not been opened"))
     }
-    async fn ensure_run(&self, binding: &RemoteBinding) -> Result<ClientRun> {
+    pub(super) async fn ensure_run(&self, binding: &RemoteBinding) -> Result<ClientRun> {
         self.validate(&binding.environment)?;
         let key = run_key(binding)?;
         // Do not replace an unsettled older run, including after caller restart.
@@ -54,6 +62,30 @@ impl Authority {
             .cloned()
             .collect::<Vec<_>>();
         for old in previous {
+            if old.task_launch.is_some() && old.task_result.is_none() {
+                let receipt = self
+                    .call(
+                        &old.binding.environment.runtime_id,
+                        Rpc::InspectTask {
+                            task_id: old.binding.owner.clone(),
+                            run_id: old.binding.run_id.clone(),
+                        },
+                    )
+                    .await?;
+                let result: pot_runtime::task_agent::Terminal =
+                    serde_json::from_value(receipt["result"].clone()).map_err(|_| {
+                        anyhow::anyhow!(
+                            "Previous Task Agent remains unresolved; replacement is blocked"
+                        )
+                    })?;
+                self.update(|book| {
+                    book.client_runs
+                        .get_mut(&run_key(&old.binding)?)
+                        .unwrap()
+                        .task_result = Some(result);
+                    Ok(())
+                })?;
+            }
             for (call, operation) in &old.operations {
                 if operation.result.is_none() {
                     let lease = old.lease_id.as_ref().ok_or_else(|| {
@@ -90,6 +122,10 @@ impl Authority {
                     attempt: 0,
                     waiting_reason: None,
                     operations: BTreeMap::new(),
+                    task_launch: None,
+                    task_result: None,
+                    task_interrupted: false,
+                    task_sent_at_ms: None,
                 });
             Ok(())
         })?;
@@ -145,7 +181,7 @@ impl Authority {
             Ok(())
         })
     }
-    fn waiting(&self, binding: &RemoteBinding, reason: Option<&str>) -> Result<()> {
+    pub(super) fn waiting(&self, binding: &RemoteBinding, reason: Option<&str>) -> Result<()> {
         let key = run_key(binding)?;
         let reason = reason.map(str::to_owned);
         if self.client_run(binding)?.waiting_reason == reason {
@@ -190,6 +226,185 @@ fn attempt_id(run: &str, attempt: u64) -> Result<String> {
     Ok(uuid::Uuid::from_bytes(hash.as_ref()[..16].try_into().unwrap()).to_string())
 }
 impl RemoteEnvironment for Authority {
+    fn run_task(
+        &self,
+        launch: pot_runtime::task_agent::Launch,
+        cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> BoxFuture<'_, Result<pot_runtime::task_agent::Terminal>> {
+        Box::pin(async move {
+            let binding = RemoteBinding {
+                owner: launch.task_id.clone(),
+                run_id: launch.run_id.clone(),
+                generation: launch.generation,
+                environment: launch.environment.clone(),
+            };
+            if let Ok(run) = self.client_run(&binding)
+                && let Some(result) = run.task_result
+            {
+                while !self.client_run(&binding)?.cancelled {
+                    if RemoteEnvironment::cancel(self, binding.clone())
+                        .await
+                        .is_err()
+                    {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+                if run.task_interrupted {
+                    return Err(pot_runtime::task_agent::Interrupted.into());
+                }
+                return Ok(result);
+            }
+            let run = loop {
+                match self.ensure_run(&binding).await {
+                    Ok(run) => break run,
+                    Err(error) if error.downcast_ref::<RemoteRejection>().is_some() => {
+                        return Err(error);
+                    }
+                    Err(error) => {
+                        if self.client_run(&binding).is_err() {
+                            return Err(error);
+                        }
+                        self.waiting(&binding, Some("等待远程机器接入；尚未启动 Task Agent"))?;
+                        ensure!(!cancelled(), "Task cancelled before launch acceptance");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            };
+            let key = run_key(&binding)?;
+            if run.task_interrupted {
+                return Err(pot_runtime::task_agent::Interrupted.into());
+            }
+            if let Some(result) = run.task_result {
+                return Ok(result);
+            }
+            let fresh = run.task_launch.is_none();
+            if fresh {
+                loop {
+                    match RemoteEnvironment::install_resources(
+                        self,
+                        binding.clone(),
+                        launch.resources.clone(),
+                    )
+                    .await
+                    {
+                        Ok(_) => break,
+                        Err(error) if error.downcast_ref::<RemoteRejection>().is_some() => {
+                            return Err(error);
+                        }
+                        Err(_) => {
+                            self.waiting(
+                                &binding,
+                                Some("等待远程机器核对资源；尚未启动 Task Agent"),
+                            )?;
+                            ensure!(!cancelled(), "Task cancelled before launch acceptance");
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+            }
+            if let Some(old) = &run.task_launch {
+                ensure!(
+                    serde_json::to_value(old)? == serde_json::to_value(&launch)?,
+                    "Task launch intent conflict"
+                );
+            } else {
+                self.update(|book| {
+                    let run = book.client_runs.get_mut(&key).unwrap();
+                    run.task_launch = Some(launch.clone());
+                    run.task_sent_at_ms = Some(now());
+                    Ok(())
+                })?;
+            }
+            let remote = &binding.environment.runtime_id;
+            let mut receipt = if fresh {
+                self.call(
+                    remote,
+                    Rpc::LaunchTask {
+                        lease_id: run.lease_id.unwrap(),
+                        launch: Box::new(launch),
+                    },
+                )
+                .await
+                .ok()
+            } else {
+                None
+            };
+            loop {
+                if let Some(result) = receipt
+                    .as_ref()
+                    .and_then(|v| v.get("result"))
+                    .filter(|v| !v.is_null())
+                {
+                    let result: pot_runtime::task_agent::Terminal =
+                        serde_json::from_value(result.clone())?;
+                    self.update(|book| {
+                        let run = book.client_runs.get_mut(&key).unwrap();
+                        run.task_result = Some(result.clone());
+                        run.task_interrupted = receipt
+                            .as_ref()
+                            .is_some_and(|v| v["phase"] == "interrupted");
+                        Ok(())
+                    })?;
+                    while !self.client_run(&binding)?.cancelled {
+                        if RemoteEnvironment::cancel(self, binding.clone())
+                            .await
+                            .is_err()
+                        {
+                            self.waiting(&binding, Some("结果已保存；等待远程执行范围清理确认"))?;
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                    }
+                    self.waiting(&binding, None)?;
+                    if self.client_run(&binding)?.task_interrupted {
+                        return Err(pot_runtime::task_agent::Interrupted.into());
+                    }
+                    return Ok(result);
+                }
+                if receipt
+                    .as_ref()
+                    .is_some_and(|v| v["phase"] == "recovery_required")
+                {
+                    self.waiting(
+                        &binding,
+                        Some("执行机器已重启；原操作结果待核对，不会自动续跑"),
+                    )?;
+                }
+                if cancelled() {
+                    RemoteEnvironment::cancel(self, binding.clone()).await?;
+                }
+                if receipt.is_none() {
+                    self.waiting(
+                        &binding,
+                        Some("等待远程 Task Agent 原 run 回执；不会重新启动"),
+                    )?;
+                }
+                let _ = RemoteEnvironment::renew(self, binding.clone()).await;
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                receipt = self
+                    .call(
+                        remote,
+                        Rpc::InspectTask {
+                            task_id: binding.owner.clone(),
+                            run_id: binding.run_id.clone(),
+                        },
+                    )
+                    .await
+                    .ok();
+                if receipt
+                    .as_ref()
+                    .is_some_and(|v| v["phase"] == "not_accepted")
+                    && self
+                        .client_run(&binding)?
+                        .task_sent_at_ms
+                        .is_some_and(|t| now() - t > 30_000)
+                {
+                    anyhow::bail!(
+                        "Original Task Agent launch was not accepted; no replay performed"
+                    );
+                }
+            }
+        })
+    }
     fn read_file(
         &self,
         environment: EnvironmentRef,
@@ -248,7 +463,7 @@ impl RemoteEnvironment for Authority {
             .unwrap()
             .client_runs
             .values()
-            .filter(|run| run.binding.owner == owner && !run.cancelled && !run.cancel_requested)
+            .filter(|run| run.binding.owner == owner && !run.cancelled)
             .find_map(|run| run.waiting_reason.clone())
     }
     fn validate(&self, environment: &EnvironmentRef) -> Result<()> {
@@ -428,15 +643,53 @@ impl RemoteEnvironment for Authority {
                 !run.cancelled && !run.cancel_requested,
                 "Remote run is cancelled"
             );
-            self.call(
-                &binding.environment.runtime_id,
-                Rpc::Renew {
-                    lease_id: run
-                        .lease_id
-                        .ok_or_else(|| anyhow::anyhow!("Remote lease acceptance unconfirmed"))?,
-                },
-            )
-            .await?;
+            let lease = run
+                .lease_id
+                .ok_or_else(|| anyhow::anyhow!("Remote lease acceptance unconfirmed"))?;
+            if self
+                .call(
+                    &binding.environment.runtime_id,
+                    Rpc::Renew {
+                        lease_id: lease.clone(),
+                    },
+                )
+                .await
+                .is_err()
+            {
+                ensure!(
+                    run.task_launch.is_some(),
+                    "Expired non-agent lease requires explicit reconciliation"
+                );
+                let directory = self.data.join("task-service-receipts");
+                if directory.exists() {
+                    for path in task_services::receipt_files(&directory)? {
+                        let receipt: Receipt = serde_json::from_slice(&std::fs::read(&path)?)?;
+                        if receipt.request["binding"] == json!(binding) {
+                            ensure!(
+                                receipt.result.is_some(),
+                                "Control service outcome requires reconciliation before continuation"
+                            );
+                        }
+                    }
+                }
+                let next = self
+                    .call(
+                        &binding.environment.runtime_id,
+                        Rpc::RecoverTaskLease { lease_id: lease },
+                    )
+                    .await?;
+                let id = next["id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing recovered lease"))?
+                    .to_owned();
+                self.update(|book| {
+                    book.client_runs
+                        .get_mut(&run_key(&binding)?)
+                        .unwrap()
+                        .lease_id = Some(id);
+                    Ok(())
+                })?;
+            }
             Ok(())
         })
     }
@@ -776,6 +1029,10 @@ mod tests {
                         attempt: 0,
                         waiting_reason: None,
                         operations: BTreeMap::new(),
+                        task_launch: None,
+                        task_result: None,
+                        task_interrupted: false,
+                        task_sent_at_ms: None,
                     },
                 );
                 Ok(())

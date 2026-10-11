@@ -23,7 +23,7 @@ pub struct Assignment {
 impl Assignment {
     pub fn local(runtime_id: &str, task_id: &str, environment_id: &str) -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             owner: ObjectRef {
                 runtime_id: runtime_id.into(),
                 object_id: task_id.into(),
@@ -36,6 +36,7 @@ impl Assignment {
     }
     pub fn on_environment(runtime_id: &str, task_id: &str, environment: EnvironmentRef) -> Self {
         let mut assignment = Self::local(runtime_id, task_id, "default");
+        assignment.agent_runtime_id = environment.runtime_id.clone();
         assignment.environment = Some(environment);
         assignment
     }
@@ -90,15 +91,25 @@ impl<'de> Deserialize<'de> for Assignment {
                         .map(|v| EnvironmentRef::sandbox(&v.runtime_id, &v.object_id))
                 })
                 .transpose(),
-            2 => stored.environment.map(serde_json::from_value).transpose(),
+            2 | 3 => stored.environment.map(serde_json::from_value).transpose(),
             _ => return Err(serde::de::Error::custom("Unsupported Assignment schema")),
         }
         .map_err(serde::de::Error::custom)?;
+        // Current persisted assignments predate destination-local Task Agents.
+        // Upgrade their placement only; retain owner, target and workspace identity.
+        let agent_runtime_id =
+            if stored.schema_version < 3 && stored.agent_runtime_id == stored.owner.runtime_id {
+                environment
+                    .as_ref()
+                    .map_or(stored.agent_runtime_id.clone(), |e| e.runtime_id.clone())
+            } else {
+                stored.agent_runtime_id
+            };
         Ok(Self {
-            schema_version: 2,
+            schema_version: 3,
             owner: stored.owner,
             dispatch_origin_runtime: stored.dispatch_origin_runtime,
-            agent_runtime_id: stored.agent_runtime_id,
+            agent_runtime_id,
             environment,
             workspace_scope: stored.workspace_scope,
         })
@@ -113,7 +124,8 @@ mod tests {
     fn version_one_assignment_upgrades_without_rebinding() {
         let value = json!({"schema_version":1,"owner":{"runtime_id":"a","object_id":"task"},"dispatch_origin_runtime":"a","agent_runtime_id":"a","environment":{"runtime_id":"b","object_id":"default"},"workspace_scope":"tasks/task"});
         let assignment: Assignment = serde_json::from_value(value).unwrap();
-        assert_eq!(assignment.schema_version, 2);
+        assert_eq!(assignment.schema_version, 3);
+        assert_eq!(assignment.agent_runtime_id, "b");
         assignment
             .validate_binding("a", "task", &EnvironmentRef::sandbox("b", "default"))
             .unwrap();
@@ -126,9 +138,27 @@ mod tests {
         );
     }
     #[test]
+    fn current_remote_assignment_upgrade_changes_only_agent_placement() {
+        let original =
+            Assignment::on_environment("control", "task", EnvironmentRef::host("machine"));
+        let mut value = serde_json::to_value(&original).unwrap();
+        value["schema_version"] = json!(2);
+        value["agent_runtime_id"] = json!("control");
+        let upgraded: Assignment = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(upgraded, original);
+        value["agent_runtime_id"] = json!("third-machine");
+        let invalid: Assignment = serde_json::from_value(value).unwrap();
+        assert!(
+            invalid
+                .validate_binding("control", "task", &EnvironmentRef::host("machine"))
+                .is_err()
+        );
+    }
+    #[test]
     fn typed_binding_rejects_host_remote_and_owner_substitution() {
         let environment = EnvironmentRef::host("b");
         let assignment = Assignment::on_environment("a", "task", environment.clone());
+        assert_eq!(assignment.agent_runtime_id, "b");
         assignment
             .validate_binding("a", "task", &environment)
             .unwrap();
@@ -144,7 +174,7 @@ mod tests {
                 .is_err()
         );
         let mut stored = serde_json::to_value(assignment).unwrap();
-        stored["schema_version"] = json!(3);
+        stored["schema_version"] = json!(4);
         assert!(serde_json::from_value::<Assignment>(stored).is_err());
     }
 }

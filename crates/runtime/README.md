@@ -70,7 +70,11 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 
 ## Tasks, profiles and schedules
 
-Every task has a private product transcript, Agent context and persisted Sandbox assignment. Guidance receipts are durable and consumed in order. FIFO dispatch respects configured concurrency and cooperative resource locks; one lane cannot cancel another. Restart marks already-started work interrupted rather than replaying it. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. See [Task coordination](../../docs/task-coordination.md) for guidance, messages, waiting, stopping and archive semantics.
+Every task has a private product transcript and fixed Host/Sandbox assignment.
+Remote Task Agent context and run journals live on the execution Runtime; Control
+keeps the task transcript, launch intent and terminal result. Guidance receipts are durable and consumed in order. FIFO dispatch respects configured concurrency and cooperative resource locks; one lane cannot cancel another. Local restart marks started work interrupted. Control restart reconciles the
+original remote run; execution Runtime restart waits for receipts and interrupts
+it, requiring explicit guidance. Neither path replays external effects. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. See [Task coordination](../../docs/task-coordination.md) for guidance, messages, waiting, stopping and archive semantics.
 
 Explicit task profiles take precedence over configured worker defaults. With no explicit worker default, new tasks snapshot the active Main Agent. Saved profile changes do not rewrite existing task configurations. Explicit Change Agent copies a new configuration into the same Thread at a safe turn boundary, preserving its complete context and Sandbox assignment. The configuration update and pending-update removal commit together. Events and permission requests are filtered by owner/generation/turn to reject stale updates. Provider-specific replay is retained in stored history and sent only to its original provider/model/protocol; other routes receive portable text and paired tool calls/results.
 
@@ -80,7 +84,10 @@ Schedules persist an environment at save time; each occurrence resolves its Agen
 
 Gateway validates the active immutable provider/model snapshot and allow-listed HTTPS endpoint (HTTP allowed only for loopback). It reserves allowances before networking, disables retries/redirects and preserves the selected Chat/Responses/Messages/Gemini wire format. Missing usage remains unknown; unsupported protocols disable exact budget/usage/checkpoint claims. All model usage is accounted per API request. See [token usage](../../docs/token-usage.md).
 
-Product SQLite/usage/Thread contexts live on Host in `root/product`; guest mounts contain artifacts only. SQLite uses DELETE journal and synchronous=EXTRA. Private JSON writes fsync data and parent directory. Inspect live state through HTTP and SQLite only when offline.
+Control product SQLite/usage/Thread configuration live in `root/product`.
+Destination Task Agent journals retain context and results without an assistant
+database or provider credentials; guest mounts contain task files and the supplied
+read-only resources. SQLite uses DELETE journal and synchronous=EXTRA. Private JSON writes fsync data and parent directory. Inspect live state through HTTP and SQLite only when offline.
 
 ## Verification
 

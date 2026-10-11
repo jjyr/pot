@@ -40,12 +40,12 @@ requires Agent and Environment to belong to the same execution Runtime. No live
 Agent relocation or three-node placement is included. Execution nodes do not need
 assistant databases or provider credentials.
 
-Currently Task Agent loops still run on the task-owning Runtime and forward
-environment operations. Control-selected global Skills and pinned plugin
-configuration are now delivered through the authenticated outward connection.
-Named remote plugin calls now execute the supplied pinned bundle in Host/Sandbox
-through the existing owner approval and receipt path. Remote Task Agent startup
-remains implementation work in #39; the Agent loop still runs at Control.
+Remote Task Agent loops run on the execution Runtime. Control-selected global
+Skills and pinned plugin configuration are delivered through the authenticated
+outward connection. Named remote plugin calls execute the supplied pinned bundle
+in Host/Sandbox through the existing owner approval and receipt path. The Task
+Agent uses outward signed Control service calls for models, policy, approvals and
+guidance; provider secrets remain at Control. Main assistants stay at their owner.
 
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
@@ -141,7 +141,7 @@ Control updates affect later launches, not already bound tasks. Missing bundles
 fail explicitly rather than falling back to a node-local catalog. Standalone App
 local mode retains its independent local resources and state.
 
-## Remote Task Agent launch and results (approved, pending implementation)
+## Remote Task Agent launch and results
 
 ```text
 App / Web -> Control
@@ -186,7 +186,26 @@ API/Chat based, with concrete model-visible changes requiring separate agreement
 Execution leases bind Control session, owner, run, generation, target, destination
 boot and deadline. A lease is a liveness fence, not a configurable privilege grant.
 Lost connectivity stops new model and tool actions. Expired leases drain execution
-sessions without affecting another owner's scope.
+sessions without affecting another owner's scope. After all issued tool and Control
+service receipts have settled and been read, the same live Task Agent run can
+receive a new lease for the unchanged Control session/configuration/target/boot.
+The old lease stays fenced; new execution scopes cannot reuse old sessions. Unknown
+results block continuation and are never replayed. Execution Runtime reboot does
+not restart the Agent: known outcomes and old scopes are reconciled, the Task is
+interrupted, and explicit `guide_task` starts a new run using the destination's
+saved context. Unresolved outcomes keep replacement blocked.
+
+Control restart preserves the accepted task/run identity and queries its existing
+launch/result receipt. It does not send another launch. Both ends persist service
+intents/results, including model response bytes, before acknowledgment. Lost model
+or approval replies are read from the original receipt. A Control service whose
+outcome became unknown after restart blocks automatic continuation. Explicit
+`pot_token_limit` refusal occurs before contacting the provider: the same live
+Agent waits for allowance, then starts a new accounted request attempt. Other
+provider/send failures never trigger automatic resampling. Model replies are
+bounded to 16 MiB and the signed response envelope to 24 MiB; oversized responses
+fail explicitly. Launches are bounded to 768 KiB and current global bundles to
+512 KiB. Acceptance windows must close before absence is considered final.
 
 Callers persist intent before sending effects. Destinations persist acceptance and
 terminal outcomes. Transport timeout, reply loss and restart never cause automatic
@@ -199,8 +218,7 @@ and select remain local to the destination. Active executions, unresolved receip
 and references from all destination assistants' Tasks/schedules protect deletion.
 Retired Sandbox IDs cannot be silently reused. Remote plugin Host TLS fixtures
 are qualified; real Sandbox plugin/platform acceptance,
-co-located remote Task Agent startup and actual
-multi-machine qualification remain tracked in #39. Three-node Agent/Environment
+actual multi-machine Task Agent qualification remain tracked in #39. Three-node Agent/Environment
 placement is deferred beyond this release; successful Host tests do not establish
 the pending features.
 
