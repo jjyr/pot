@@ -141,6 +141,58 @@ impl Context {
         s.feedback.save_context(&serde_json::to_value(self)?)
     }
 }
+/// Apply only confirmed results to a stopped run's pending calls. This never
+/// executes tools, samples a model, or treats an absent receipt as success.
+pub fn reconcile_context(
+    value: &Value,
+    receipts: &std::collections::BTreeMap<String, Value>,
+    vision: bool,
+) -> Result<Value> {
+    let mut context: Context = serde_json::from_value(value.clone())?;
+    ensure!(
+        context.kind == "context" && context.version == 1,
+        "Invalid Pot context"
+    );
+    for call in std::mem::take(&mut context.pending) {
+        if let Some(result) = receipts.get(&call.id) {
+            context
+                .messages
+                .push(tool_result_message(&call.id, result, vision)?);
+            context.receipts.push(
+                json!({"id":call.id,"name":call.name,"arguments":call.arguments,"result":result}),
+            );
+            if context.started.as_ref() == Some(&call.id) {
+                context.started = None;
+            }
+        } else {
+            context.pending.push(call);
+        }
+    }
+    Ok(serde_json::to_value(context)?)
+}
+fn tool_result_message(call: &str, value: &Value, vision: bool) -> Result<Message> {
+    let mut text_value = value.clone();
+    let mut images = vec![];
+    if let Some(content) = text_value.get_mut("content").and_then(Value::as_array_mut) {
+        for item in content.iter().filter(|item| item["type"] == "image") {
+            ensure!(vision, "Image result unavailable for text-only model");
+            let image = model::ModelImage {
+                mime_type: item["mimeType"].as_str().unwrap_or("").into(),
+                data: item["data"].as_str().unwrap_or("").into(),
+                width: item["width"].as_u64().unwrap_or(0) as u32,
+                height: item["height"].as_u64().unwrap_or(0) as u32,
+            };
+            image.validate()?;
+            images.push(image);
+        }
+        content.retain(|item| item["type"] != "image");
+    }
+    let mut message = Message::text("tool", text_value.to_string());
+    message.images = images;
+    message.call_id = call.into();
+    Ok(message)
+}
+
 fn client(timeout_ms: u64) -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -947,28 +999,8 @@ async fn run(
                 || value["exit_code"].as_i64().is_some_and(|c| c != 0)
                 || value["reason"].is_string();
             s.feedback.diagnostic(&json!({"kind":"tool_finished","tool":call.name,"call_id":call.id,"elapsed_ms":started.elapsed().as_millis(),"failed":failed,"cached":cached}))?;
-            let mut text_value = value.clone();
-            let mut images = vec![];
-            if let Some(content) = text_value.get_mut("content").and_then(Value::as_array_mut) {
-                for item in content.iter().filter(|item| item["type"] == "image") {
-                    ensure!(
-                        descriptor.vision(),
-                        "Image result unavailable for text-only model"
-                    );
-                    let image = model::ModelImage {
-                        mime_type: item["mimeType"].as_str().unwrap_or("").into(),
-                        data: item["data"].as_str().unwrap_or("").into(),
-                        width: item["width"].as_u64().unwrap_or(0) as u32,
-                        height: item["height"].as_u64().unwrap_or(0) as u32,
-                    };
-                    image.validate()?;
-                    images.push(image);
-                }
-                content.retain(|item| item["type"] != "image");
-            }
-            let mut message = Message::text("tool", text_value.to_string());
-            message.images = images;
-            message.call_id = call.id.clone();
+            let message = tool_result_message(&call.id, &value, descriptor.vision())?;
+            let text_value: Value = serde_json::from_str(&message.text)?;
             state.messages.push(message);
             state.pending.remove(0);
             state.started = None;

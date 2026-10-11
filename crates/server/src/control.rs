@@ -661,7 +661,7 @@ fn response(result: Result<Value>) -> Response {
         Ok(value) => Json(value).into_response(),
         Err(error) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error":error.to_string()})),
+            Json(json!({"error":format!("{error:#}")})),
         )
             .into_response(),
     }

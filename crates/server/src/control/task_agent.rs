@@ -32,16 +32,29 @@ impl Authority {
                 .filter(|l| l.control_id == control && l.owner == task && l.run_id == run)
                 .cloned()
                 .collect::<Vec<_>>();
+            let mut recovered = BTreeMap::new();
             let directory = self.data.join("execution-operations");
             if directory.exists() {
                 for path in task_services::receipt_files(&directory)? {
                     let receipt: Receipt = serde_json::from_slice(&std::fs::read(&path)?)?;
-                    if leases.iter().any(|l| receipt.request["lease_id"] == l.id)
-                        && receipt.result.is_none()
-                    {
-                        return Ok(
-                            json!({"phase":"recovery_required","reason":"unknown_tool_outcome"}),
-                        );
+                    if leases.iter().any(|l| receipt.request["lease_id"] == l.id) {
+                        let Some(result) = receipt.result else {
+                            return Ok(
+                                json!({"phase":"recovery_required","reason":"unknown_tool_outcome"}),
+                            );
+                        };
+                        if let Some(call) = receipt.request["call_id"]
+                            .as_str()
+                            .and_then(|id| id.strip_prefix(&format!("{run}:")))
+                        {
+                            let value = match remote::outcome(&result) {
+                                Ok(value) => value["result"].clone(),
+                                Err(error) => json!({"isError":true,"error":error.to_string()}),
+                            };
+                            if let Some(old) = recovered.insert(call.to_owned(), value.clone()) {
+                                ensure!(old == value, "Conflicting recovered task tool result");
+                            }
+                        }
                     }
                 }
             }
@@ -87,6 +100,7 @@ impl Authority {
                 host.cancel_controlled(&scope(&lease)?, &lease.target)
                     .await?;
             }
+            journal.reconcile_recovered_context(control, task, run, &recovered)?;
             journal.interrupt_recovered(control, task, run)?;
         }
         Ok(match journal.inspect(control, task, run)? {
@@ -381,6 +395,159 @@ mod tests {
                 .unwrap()
                 .phase,
             Phase::Running
+        );
+        for node in [control, target] {
+            node.shutdown().await;
+            std::fs::remove_dir_all(node.control.data.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn reboot_reconciles_known_tool_results_without_restarting_or_replaying() {
+        use super::super::tests::{join_nodes, native, resources};
+        let control = resources().await;
+        let target = resources().await;
+        assert!(
+            native(
+                &target,
+                json!({"request_id":"host","resource":{"kind":"host"}})
+            )
+            .await
+            .status()
+            .is_success()
+        );
+        join_nodes(&control, &target).await;
+        let host = target.host().await;
+        let boot = uuid::Uuid::new_v4().to_string();
+        let control_id = &control.control.identity.runtime_id;
+        let config = pot_core::Profile::api(&pot_runtime::execution::Config {
+            model: "fixture".into(),
+            ..Default::default()
+        })
+        .resolve()
+        .unwrap();
+        let vision = config
+            .params
+            .agent
+            .model_descriptor(&config.provider, &config.model)
+            .unwrap()
+            .vision();
+        let launch = Launch {
+            task_id: uuid::Uuid::new_v4().to_string(),
+            run_id: uuid::Uuid::new_v4().to_string(),
+            generation: 1,
+            environment: EnvironmentRef::host(&target.control.identity.runtime_id),
+            resources: pot_runtime::control_resources::GlobalResources {
+                plugins: config.params.agent.plugins.clone(),
+                shell: config.params.agent.shell.clone(),
+                vision,
+                ..Default::default()
+            },
+            config,
+            skills: None,
+            text: "fixture".into(),
+        };
+
+        let value = target
+            .control
+            .acquire(
+                control_id,
+                &launch.task_id,
+                &launch.run_id,
+                1,
+                &launch.environment.target,
+                &boot,
+            )
+            .unwrap();
+        let id = value["id"].as_str().unwrap();
+        let old = Journal::open(
+            &target.control.data,
+            &target.control.identity.runtime_id,
+            &boot,
+        )
+        .unwrap();
+        old.accept(control_id, launch.clone()).unwrap();
+        assert!(
+            old.claim(control_id, &launch.task_id, &launch.run_id)
+                .unwrap()
+        );
+        let calls = json!([
+            {"id":"known","name":"exec_command","arguments":{"cmd":"printf X >> once"}},
+            {"id":"unknown","name":"exec_command","arguments":{"cmd":"other"}}
+        ]);
+        old.save_context(
+            control_id,
+            &launch.task_id,
+            &launch.run_id,
+            json!({
+                "type":"context", "version":1,
+                "messages":[{"role":"assistant","text":"","calls":calls}],
+                "pending":calls, "started":"known", "last_request":"original"
+            }),
+        )
+        .unwrap();
+        drop(old);
+        let lease = target.control.lease(control_id, id, &boot, false).unwrap();
+        let path = target.control.receipt_path(&lease, "known").unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut receipt = Receipt {
+            schema_version: VERSION,
+            request: json!({"lease_id":id,"call_id":format!("{}:known",launch.run_id)}),
+            boot_id: boot,
+            result: None,
+        };
+        private_json(&path, &receipt).unwrap();
+        assert_eq!(
+            target
+                .control
+                .inspect_task(&host, control_id, &launch.task_id, &launch.run_id)
+                .await
+                .unwrap()["phase"],
+            "recovery_required"
+        );
+        receipt.result = Some(json!({"ok":true,"value":{"result":{"stdout":"X","exit_code":0}}}));
+        private_json(&path, &receipt).unwrap();
+        let result = target
+            .control
+            .inspect_task(&host, control_id, &launch.task_id, &launch.run_id)
+            .await
+            .unwrap();
+        assert_eq!(result["phase"], "interrupted");
+        let journal = target.control.journal(&host).unwrap();
+        let record = journal
+            .inspect(control_id, &launch.task_id, &launch.run_id)
+            .unwrap()
+            .unwrap();
+        let context = record.context.unwrap();
+        assert_eq!(context["pending"], json!([calls[1]]));
+        assert_eq!(context["messages"][1]["call_id"], "known");
+        assert_eq!(
+            serde_json::from_str::<Value>(context["messages"][1]["text"].as_str().unwrap())
+                .unwrap(),
+            json!({"stdout":"X","exit_code":0})
+        );
+        assert_eq!(context["last_request"], "original");
+        assert!(
+            !journal
+                .claim(control_id, &launch.task_id, &launch.run_id)
+                .unwrap()
+        );
+        assert_eq!(
+            target
+                .control
+                .inspect_task(&host, control_id, &launch.task_id, &launch.run_id)
+                .await
+                .unwrap(),
+            result
+        );
+        assert_eq!(
+            journal
+                .inspect(control_id, &launch.task_id, &launch.run_id)
+                .unwrap()
+                .unwrap()
+                .context
+                .unwrap(),
+            context
         );
         for node in [control, target] {
             node.shutdown().await;
