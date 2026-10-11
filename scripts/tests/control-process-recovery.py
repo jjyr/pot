@@ -6,6 +6,7 @@ import base64
 import http.server
 import json
 import os
+import signal
 import shlex
 from pathlib import Path
 import socket
@@ -82,10 +83,20 @@ class Worker:
 
     def stop(self, crash=False):
         if self.process and self.process.poll() is None:
+            if getattr(self, "suspended", False):
+                self.resume()
             self.process.kill() if crash else self.process.terminate()
             self.process.wait(timeout=15)
         if hasattr(self, "log"):
             self.log.close()
+
+    def pause(self):
+        os.kill(self.process.pid, signal.SIGSTOP)
+        self.suspended = True
+
+    def resume(self):
+        os.kill(self.process.pid, signal.SIGCONT)
+        self.suspended = False
 
     def listen(self, address):
         reservation = socket.socket()
@@ -373,11 +384,11 @@ def qualify(args):
         wait_for(first_approval)
         wait_for(lambda: target.evidence()["effects"] == ["X"])
         original = target.evidence()["runs"][0]["launch"]["run_id"]
-        control.call("stop", crash=True)
+        control.call("pause") if args.suspend_control else control.call("stop", crash=True)
         time.sleep(33)
         assert control.call("stats")["count"] == 1, "sampled during Control crash"
         assert target.evidence()["effects"] == ["X"], "replayed disconnected effect"
-        control.call("start")
+        control.call("resume") if args.suspend_control else control.call("start")
         finished = wait_for(
             lambda: (
                 s
@@ -389,7 +400,12 @@ def qualify(args):
         assert target.evidence()["runs"][0]["launch"]["run_id"] == original
         assert target.evidence()["effects"] == ["X"]
         assert control.call("stats")["count"] == 2
-        print("PASS Control SIGKILL > lease expiry: original run, exactly one effect", flush=True)
+        print(
+            "PASS Control "
+            + ("SIGSTOP/SIGCONT" if args.suspend_control else "SIGKILL")
+            + " > lease expiry: original run, exactly one effect",
+            flush=True,
+        )
         task2 = api(
             "/api/v1/tasks",
             {
@@ -600,6 +616,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--extended", action="store_true")
+    parser.add_argument("--suspend-control", action="store_true")
     for key in (
         "binary",
         "root",

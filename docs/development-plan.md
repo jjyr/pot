@@ -13,20 +13,21 @@ must be discussed and confirmed before implementation.
 - Minimal Machines status/environment views and optional Chat file delivery.
 - Control-selected global snapshots, pinned remote plugin dispatch and receipts.
 
-## Remaining
+## Qualification
 
-- Actual Sandbox plugin qualification and multi-machine App/Web acceptance;
-  remote notification relay.
-- P4: fresh Task Agent startup on the execution Runtime, durable launch/result
-  records, Control model/budget/approval services, ordered guidance/cancellation,
-  disconnection pause and reconciliation are wired into production. Host HTTPS
-  tests cover project rules, approvals, pinned plugins, follow-ups and same-run
-  recovery after lease expiry. Crash/reboot, real Sandbox, supported-model and
-  multi-machine acceptance still need qualification before closing the phase.
-  See [production integration](validation/task-agent-production-20261011.md).
-- Final acceptance: real machines and supported providers, recovery without replay,
-  data-preserving upgrades, documentation and packaging. Do not infer completion
-  from same-host fixtures or deliver undeclared fallback behavior.
+Fresh destination Task Agents, Control model/budget/approval services, guidance,
+cancellation, pinned plugins, result/file reads and remote schedules are delivered.
+Actual Linux Podman, physical Linux Control/macOS Host processes, native App/Web,
+Control restart, disconnect/crash and process-suspension recovery are qualified.
+The real DeepSeek test returned the destination project's marker; Provider secrets
+remained on Control. See [production integration](validation/task-agent-production-20261011.md),
+[clients](validation/control-cross-machine-ui-20261011.md),
+[notifications](validation/control-notifications-20261011.md) and
+[final qualification](validation/control-final-qualification-20261011.md).
+
+External push-service/browser OS notification delivery and whole-machine sleep or
+power loss have not been exercised. Keep these verification limits explicit in
+#39; process suspension and encrypted-payload tests do not establish them.
 
 Global resources and exact configuration are selected by Control. Execution nodes
 run the assigned model/environment/tools or report an error. Task results do not

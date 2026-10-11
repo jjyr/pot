@@ -50,7 +50,7 @@ with tarfile.open(archive, "w:gz") as tar:
         root / ".local/tailscale/TailscaleDependencyLicenses.txt",
         arcname="lib/pot/TailscaleDependencyLicenses.txt",
     )
-    tar.add(root / "docs/standalone-server.md", arcname="README.md")
+    tar.add(root / "docs/deployment.md", arcname="README.md")
     tar.add(root / "skills", arcname="lib/pot/skills")
     if args.runtime_resources:
         tar.add(args.runtime_resources.resolve(strict=True), arcname="lib/pot/runtime")
