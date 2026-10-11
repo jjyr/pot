@@ -1,114 +1,39 @@
-# Documentation index
+# Documentation
 
-Choose a page for your question; reading everything is unnecessary. Code defines the current implementation. Product goals are not delivered features, and historical acceptance results do not establish the current state.
+[Architecture](architecture.md) defines the current design and distinguishes pending
+implementation. Code defines actual behavior. Issue [#39](https://github.com/jjyr/pot/issues/39)
+is the single phase progress table.
 
-| Goal | Read |
+| Topic | Read |
 |---|---|
-| Deploy the Web UI with an Agent; choose HTTPS or HTTP access | [Web UI deployment guide](web-ui-deployment.md) |
-| Install standalone CLI or understand embedded App hosting | [Standalone Server](standalone-server.md) |
-| Start, build, or test | [Development guide](development.md) |
-| Review About information and dependency license checks | [About and license policy](licenses-and-about.md) |
-| Publish a macOS release or update the Homebrew cask | [Releases and Homebrew](development.md#releases-and-homebrew) |
-| Understand delivered and remaining work | [Development plan](development-plan.md) |
-| Understand components, data flow, and task orchestration | [Architecture](architecture.md) |
-| Review Control and Agent/Task/Environment composition | [Composable runtimes](runtime-composition.md) (Control membership delivered; client and later distributed phases tracked in #39) |
-| Understand task messaging, interruption, resume and archive rules | [Task coordination](task-coordination.md) |
-| Understand direct tools, JavaScript composition and waiting | [Agent tool composition](tool-composition.md) |
-| Understand pot-agent approvals, persistent grants and environment-local access | [Agent permissions](permissions.md) |
-| Configure text/vision browser computer use | [Browser computer use](computer-use.md) |
-| Review Host Agent / multiple Sandbox boundaries | [Local Agents and managed Sandboxes](agent-sandbox-design.md)  |
-| Review the Linux and macOS target design | [Sandbox provider redesign](sandbox-providers.md) (Linux extraction delivered; macOS prepared-instance implementation awaiting VM qualification) |
-| Prepare/enroll a macOS development VM | [macOS Sandbox](macos-sandbox.md) |
-| Understand backend crate and standalone Server boundaries | [Backend crate split](backend-crates.md) |
-| Understand AGENTS.md discovery and injection | [Agent instructions](agent-instructions.md) |
-| Inject skills into main and task pot-agent sessions | [Agent skill injection](agent-skills.md) |
-| Change APIs, pot-agent, task state, or recovery | [Runtime contract](../crates/runtime/README.md) |
-| Understand approved downloads, progress, cache and embedded hashes | [Sandbox resource delivery](sandbox-resources.md) |
-| Build the Linux Sandbox image, or review target Linux/macOS template layout | [Sandbox image](sandbox-image.md) |
-| Understand command shells, PTY, background sessions and initialization snapshots | [Sandbox command execution](executor.md) |
-| Configure QR/Token browser access and encrypted main-message push | [Mobile access](mobile-access.md) |
-| Change UI language, translations or locale matching | [Internationalization](internationalization.md) |
-| Understand shared App/Mobile page components and platform adapters | [Shared UI](shared-ui.md) |
-| Change chat, tasks, settings, or Sandbox UI | [UI specification](ui-ux-design.md) |
-| Apply the approved visual, component, motion, and navigation direction | [Design language](design-language.md) (shared shell, page layouts, Chat and Pot icons implemented; acceptance limits documented) |
-| Change token accounting, periodic allowances, or budget recovery | [Token usage](token-usage.md) |
-| Change scheduled triggers, time zones, or notifications | [Scheduled tasks](scheduled-tasks.md) |
-| Review long-term product boundaries and acceptance goals | [Product design](product-design.md) |
-| Review completed tests and limitations | [Host Agents and managed Sandboxes](validation/host-pot-agent-20261006.md) |
+| Deployment, resource APIs, Control membership and Web access | [Deployment](deployment.md) |
+| Build, test and release | [Development](development.md) |
+| Delivered scope and remaining work | [Development plan](development-plan.md) |
+| Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
+| Chat, Tasks, Machines and configuration interactions | [UI specification](ui-ux-design.md), [design language](design-language.md) |
+| Backend responsibilities and API contracts | [Crates](backend-crates.md), [Runtime](../crates/runtime/README.md) |
+| Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
+| Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
+| Sandbox execution and resources | [Providers](sandbox-providers.md), [executor](executor.md), [resources](sandbox-resources.md), [images](sandbox-image.md), [macOS](macos-sandbox.md) |
+| Shared UI, language and licenses | [Shared UI](shared-ui.md), [internationalization](internationalization.md), [licenses](licenses-and-about.md) |
+| Product goals | [Product](product-design.md) |
 
-Podman Web desktop acceptance: [Desktop and Client isolation, 2026-10-07](validation/podman-desktop-20261007.md).
+## Evidence
 
-Linux/Podman and multiple-client acceptance: [Linux Server and clients, 2026-10-07](validation/linux-server-clients-20261007.md).
+Current [design cleanup and regression checks](validation/design-cleanup-20261011.md).
 
-Web access redesign: [Token authentication and embedded Tailscale, 2026-10-08](validation/web-access-token-20261008.md).
+Validation reports record date, method, results and limitations. They establish only
+the tested scope. Current distributed evidence: [membership](validation/control-membership-20261011.md),
+[App](validation/control-client-20261011.md), [Web](validation/control-web-20261011.md),
+[Machines](validation/machines-simple-20261011.md), [Chat downloads](validation/chat-file-downloads-20261011.md),
+[global resources](validation/control-global-resources-20261011.md),
+[plugins](validation/control-plugins-20261011.md).
+Platform/executor reports remain under `validation/`; applicable platform research
+remains under `research/`. Superseded designs and reports are retained in Git history.
 
-Agent permissions: [Owner approvals, grants and Host access, 2026-10-08](validation/agent-permissions-20261008.md).
+## Maintenance
 
-Independent Web UI access: [LAN HTTP and optional tailnet HTTPS, 2026-10-08](validation/web-access-independent-20261008.md).
-
-Native client reliability acceptance: [Helper failures and conversation receipts, 2026-10-07](validation/client-reliability-20261007.md).
-
-Provider/executor merge acceptance: [Cross-turn sessions and executor v2 image, 2026-10-07](validation/sandbox-merge-20261007.md).
-
-First resource Release: [0.0.1 publication, 2026-10-07](validation/sandbox-resource-release-20261007.md).
-
-Resource delivery acceptance: [Embedded catalog, approval and Linux VM, 2026-10-07](validation/sandbox-resources-20261007.md).
-
-Unified desktop gateway acceptance: [Sandbox desktop sessions, 2026-10-07](validation/sandbox-desktop-20261007.md).
-
-Sandbox UI acceptance: [Sandbox environment list and desktop, 2026-10-06](validation/sandbox-ui-20261006.md).
-
-Sandbox architecture extraction: [Manager and Linux Provider, 2026-10-07](validation/sandbox-architecture-20261007.md).
-
-Current decoupling acceptance: [Host pot-agent and Sandbox tools, 2026-10-06](validation/host-pot-agent-20261006.md).
-
-Single Agent engine: [Removal and automated validation, 2026-10-09](validation/single-agent-20261009.md).
-
-Product-owned Threads: [Direct execution and context continuity, 2026-10-09](validation/thread-execution-20261009.md).
-
-Local Runtime composition: [Presets, identity and upgrade preservation, 2026-10-10](validation/runtime-composition-20261010.md).
-
-Multiple assistants: [Owner isolation, rule drafts and grouped Tasks, 2026-10-10](validation/multiple-assistants-20261010.md).
-
-Environment foundations (partial P3): [Typed targets, Host-only execution and receipts, 2026-10-10](validation/environment-foundations-20261010.md).
-
-Assistant instructions: [DB ownership, self-scoped tools and approvals, 2026-10-10](validation/assistant-instructions-db-20261010.md).
-
-Caller-created resources (partial P3): [API lifecycle and rule boundaries, 2026-10-10](validation/runtime-resources-20261010.md).
-
-Local Machines UI (partial P3): [Merged machine/environment navigation and discovery, 2026-10-10](validation/machines-ui-20261010.md).
-
-Historical peer authority (superseded): [HTTPS pairing, grants, leases and receipts, 2026-10-11](validation/peer-authority-20261011.md).
-
-## Research on demand
-
-`research/` contains dated background material, not current implementation specifications:
-
-- UI framework: [GPUI Kit](research/gpui-kit-evaluation.md). See the UI specification for current component usage.
-- VMs and desktops: [Apple Containerization](research/apple-containerization.md), [Docker GUI](research/docker-gui.md).
-- macOS implementation route: [VZ/Xcode Provider research](research/macos-provider.md).
-- Native OS execution: [macOS and Windows Sandbox providers](research/macos-windows-sandboxes.md).
-- Deferred Android: [SDK Emulator provider research](research/android-provider.md).
-- Deferred virtual iPhone: [vphone provider research](research/vphone-provider.md).
-- Future memory: [Identity and memory](research/identity-memory.md).
-- Session research: [Coordination comparison](research/session-coordination.md), [Hermes](research/hermes-sessions.md), [OpenClaw](research/openclaw-sessions.md).
-
-## Maintenance rules
-
-Maintain documentation in English. Keep documentation consistent with the overall architecture; implementation details are determined by the code and do not require corresponding documentation updates. Keep one architecture overview per topic, progress in the development plan, and commands in the relevant entry-point document. Acceptance reports record the date, method, results, and untested scope; append later changes without rewriting old observations as new conclusions. Keep superseded recommendations in Git history or label them historical.
-
-Remote Environment adapter (partial P3): [Owner approvals, destination rules, workspace continuity and connection UI, 2026-10-11](validation/remote-environment-20261011.md).
-
-Control membership (P3a): [Outward connection, sole Control and receipt recovery, 2026-10-11](validation/control-membership-20261011.md).
-
-Single Control App client (P3b): [Mode isolation, private configuration and native acceptance, 2026-10-11](validation/control-client-20261011.md).
-
-Explicit Control Web hosting (P3c): [Startup, fixed proxy and streaming validation, 2026-10-11](validation/control-web-20261011.md).
-
-Lightweight Machines (P3d1): [Status cards, exact environment Tasks and validation limits, 2026-10-11](validation/machines-simple-20261011.md).
-
-Chat file delivery (P3d2a): [Scoped chunks, Control relay and native save acceptance, 2026-10-11](validation/chat-file-downloads-20261011.md).
-
-Control global resources: [Task snapshots and destination isolation, 2026-10-11](validation/control-global-resources-20261011.md).
-
-Control plugins: [Pinned remote dispatch and lease configuration binding, 2026-10-11](validation/control-plugins-20261011.md).
+Write documentation in English. Keep one architecture overview and one source per
+contract; link rather than repeat. Commands belong in deployment/development.
+Remove contradictions and superseded recommendations. Progress belongs in #39;
+do not create a second TODO table or claim pending features from fixture results.

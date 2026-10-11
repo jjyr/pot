@@ -10,14 +10,14 @@ API connections are saved through `POST /api/v1/providers`, with immutable crede
 
 `product/execution-limits.json` contains `request_limit`, `max_tokens`, `max_requests_per_turn` and `max_parallel_tasks`; it carries no credentials or implicit Agent selection. Default limits are 10,000 lifetime requests, 8,192 output tokens, 100 requests per turn and eight parallel tasks. Zero lifetime requests disables new requests. Output tokens accept integers up to 9,007,199,254,740,991. The per-turn request limit is 1–1,000; task concurrency accepts 1 through the platform’s `usize::MAX`. The App UI retains its 1–1,000 concurrency input range. Changing limits restarts Host backend independently of VM lifecycle.
 
-Runtime directly invokes pot-agent. Snapshot/event schema version is 2: `agent` status contains model, phase (`needs_configuration`, `ready`, `failed`) and detail, without external-engine installation/authentication fields. Each owner Store persists one Thread configuration and its execution context; there are no Engine, Binding, NativeRef, DriverHost or SessionHandle adapters. Context persistence uses the same SQLite durability as product messages. Configuration changes preserve messages, tool results, pending calls and compaction summaries. Corrupt context fails visibly. No legacy conversation, configuration or usage importer is provided; use a fresh Host root.
+Runtime directly invokes pot-agent. Snapshot/event schema version is 2: `agent` status contains model, phase (`needs_configuration`, `ready`, `failed`) and detail, without external-engine installation/authentication fields. Each owner Store persists one Thread configuration and its execution context; there are no Engine, Binding, NativeRef, DriverHost or SessionHandle adapters. Context persistence uses the same SQLite durability as product messages. Configuration changes preserve messages, tool results, pending calls and compaction summaries. Corrupt context fails visibly. Current product data is preserved through bounded upgrades. Obsolete engines and assistant file formats are not imported.
 
 ## Agent execution
 
 pot-agent runs in-process on Host with an injected ToolExecutor and owner services;
 there is no implicit local backend. It owns [permission policy](../../docs/permissions.md)
 and [tool composition](../../docs/tool-composition.md). Main defaults to Host; Workers
-default to their assigned Sandbox and may request authorized Host execution.
+execute only in their fixed Host/Sandbox Environment, including after approval.
 Agent context, compaction and usage remain owned by the assistant Runtime. Each assistant has independent configuration and AGENTS.md routing rules.
 
 Main manages Tasks, schedules and Sandboxes; Workers cannot delegate, manage or
@@ -29,9 +29,9 @@ Cancellation settles the active turn and drains remote operations. Executor subp
 
 ## Environment selection and lifecycle
 
-Main may create/start/stop/delete/select/recover environments or open their desktops. Inventory is limited to 16 Linux definitions. The initial selected Sandbox is `default`.
+Main may create/start/stop/delete/select/recover environments or open their desktops. Inventory is limited to 16 Linux definitions. Fresh Runtime roots have no environments. Callers explicitly create resources.
 
-Task creation uses explicit `sandbox_id`, or snapshots the main selection when omitted. It does not allocate a VM per task or balance across environments. Three unspecified tasks share the selected Sandbox, with separate `/data/workspace/tasks/TASK_ID` directories. To split tasks, main creates definitions and passes different IDs. Selection changes through the main management tool affect future creations and main tools; existing task bindings and saved schedules remain fixed across turns/restart. The Sandbox environment sidebar selects the displayed environment only.
+Task creation uses a typed `environment_ref` or the approved local selectors. Omitted targets resolve on the dispatching Agent Runtime: the selected Sandbox when configured, otherwise its enabled Host. It does not allocate a VM per task or balance across environments. Three unspecified tasks share the selected Sandbox, with separate `/data/workspace/tasks/TASK_ID` directories. To split tasks, main creates definitions and passes different IDs. Selection changes through the main management tool affect future creations and main tools; existing task bindings and saved schedules remain fixed across turns/restart. The Sandbox environment sidebar selects the displayed environment only.
 
 Agent profile routing determines provider/model, not environment. Global/profile/provider concurrency limits determine dispatch capacity, not placement. Runtime starts a bound environment when needed and never falls back to Host or retargets a worker. Task turns and operations hold leases; stop/delete rejects occupied or quarantined environments. Definitions referenced by tasks/schedules cannot be deleted, and deleted IDs cannot be reused. Deletion retains workspace artifacts.
 
@@ -97,19 +97,16 @@ Real CLI/VM tests use isolated Host homes and local mock models, require Apple V
 
 Sandbox management also supports `update` with `name` and `config` (`cpus`, `memory_gib`, `disk_gib`). Updates require a stopped/failed environment without active leases or unsettled operations; resources apply on the next start. Inventory exposes per-environment configuration, running-task counts, associated tasks and durable-reference status for the native UI.
 
-## Local Runtime composition
+## Runtime resources and task bindings
 
-Host identity and process authority exist without product services. Fresh standalone
-roots default to `bare`; existing product databases retain `assistant`, and App
-explicitly selects `assistant`. `environment` provides native-authorized Sandbox
-operations without model, Conversation or Task initialization. See
-[Standalone Server](../../docs/standalone-server.md#runtime-composition) for selection
-and operator endpoints.
+Identity and process authority exist independently of product services. Startup is
+neutral; callers create assistants, Host execution and Sandbox definitions through
+the [resource API](../../docs/deployment.md#runtime-resources). The durable manifest
+restores these resources. App creates its initial assistant through the same API.
 
-Conversation, Task, Agent and Environment service state is separated locally.
-Task dispatch enters `RunnerPort`; the current adapter is local and retains an
-owner service facade for existing tool/control integration. Versioned local
-Assignments persist Runtime/Task/environment/workspace references. Restore
-backfills missing assignments without relocating contexts/artifacts, rejects
-conflicting/future assignments, and swaps in-memory task state after successful
-validation and persistence. Remote Runner acceptance/replay is future work.
+Conversation, Task, Agent and Environment service state remain separate. Typed
+Environment references are the execution target; Assignment stores run/owner and
+workspace bindings. Bounded upgrades convert old records before ordinary restore,
+which rejects conflicting assignments. Current task dispatch retains the owner
+Runner adapter until fresh remote Task Agent launch is implemented in P4. Remote
+environment adapters do not establish remote Agent startup.

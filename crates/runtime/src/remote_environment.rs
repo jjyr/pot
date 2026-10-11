@@ -1,4 +1,4 @@
-//! Injected transport port. Runtime owns task/model state; server owns peer credentials.
+//! Injected transport port. Runtime owns task/model state; server owns Control/member credentials.
 use crate::*;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};

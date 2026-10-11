@@ -60,16 +60,16 @@ Build and start the backend without App/Helper. Paths belong to the Server machi
 
 ```sh
 mise exec -- cargo build --locked -p pot-server
-POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 POT_RUNTIME_COMPOSITION=assistant mise run server
+POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots default to bare; select `assistant` for chat/Web, `environment` for Host plus Sandbox execution, or `host` for direct Host execution without VM Providers. In the assistant preset, without a configured Agent, main chat shows an AI Configuration entry; Sandbox remains available. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants and execution environments through the resource API; enable Web UI explicitly with its fixed Control address. Unconfigured assistants offer AI Configuration. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
 
-App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](standalone-server.md) for CLI installation, local OS authority and packaging.
+App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](deployment.md) for CLI installation, local OS authority and packaging.
 
 ## Mobile browser pilot
 
-See [Mobile access](mobile-access.md) for the optional owner-controlled HTTPS listener, QR/Token administration and `mise run build:mobile`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
+See [Mobile access](deployment.md) for the optional owner-controlled HTTPS listener, QR/Token administration and `mise run build:mobile`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
 
 ## Validation
 
@@ -148,7 +148,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. No legacy conversation or usage migration is provided; use a fresh Host root.
+Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. Current data is preserved through bounded versioned upgrades; obsolete engine formats are not imported.
 
 ## About and dependency licenses
 

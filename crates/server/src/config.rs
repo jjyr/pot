@@ -6,8 +6,6 @@ pub struct ServerConfig {
     pub runtime: RuntimeConfig,
     pub bind: String,
     pub web_control: Option<WebControlConfig>,
-    /// None loads the owner's versioned composition or preserves an existing assistant.
-    pub composition: Option<pot_runtime::host::Composition>,
 }
 pub fn default_root() -> PathBuf {
     if let Some(root) = std::env::var_os("POT_LOCAL_ROOT") {
@@ -26,7 +24,6 @@ pub fn default_root() -> PathBuf {
 impl ServerConfig {
     pub fn from_env() -> Self {
         Self {
-            composition: None,
             web_control: None,
             runtime: RuntimeConfig {
                 data: std::env::var("POT_DATA_DIR")

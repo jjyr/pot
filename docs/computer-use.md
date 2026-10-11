@@ -1,6 +1,6 @@
 # Computer use plugin
 
-The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaScript session and a dedicated headless Chromium on **Host or Linux Sandbox**. It follows the shared [permissions](permissions.md): Main defaults to Host with owner approval; Worker defaults to its assigned Sandbox, which allows execution by default. Environment policies and Agent-specific grants apply to every invocation. Native desktop automation is not supported.
+The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaScript session and a dedicated headless Chromium on **Host or Linux Sandbox**. It follows the shared [permissions](permissions.md): Main defaults to Host with owner approval; Worker remains bound to its assigned Host/Sandbox. Control owns connected-task configuration and approvals; destination globals cannot override them. Independent local Sandbox execution allows calls by default, subject to its configured policy. Native desktop automation is not supported.
 
 ## Configuration
 

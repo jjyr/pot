@@ -14,7 +14,6 @@ use tokio::sync::Notify;
 
 #[derive(Default)]
 struct Feedback {
-    supported_execution: Mutex<Option<Vec<String>>>,
     grants: Mutex<Option<Value>>,
     prepared_environment: Mutex<Option<String>>,
     permission_requests: Mutex<Vec<Value>>,
@@ -33,9 +32,6 @@ enum SaveFault {
     Receipt,
 }
 impl ExecutionFeedback for Feedback {
-    fn supported_execution_tools(&self) -> Option<Vec<String>> {
-        self.supported_execution.lock().unwrap().clone()
-    }
     fn prepare_execution_operation(
         &self,
         _: &str,
@@ -2371,12 +2367,11 @@ async fn thread_switches_between_all_protocols_without_losing_tool_history_or_re
 }
 
 #[tokio::test]
-async fn destination_capabilities_narrow_tools_without_mutating_thread_config() {
+async fn configured_tools_remain_available_without_mutating_thread_config() {
     for role in [ExecutionRole::Main, ExecutionRole::Worker] {
         let mut f = Fixture::new("openai_chat");
         full_loadout(&mut f);
         f.context.role = role;
-        *f.feedback.supported_execution.lock().unwrap() = Some(vec!["exec_command".into()]);
         let config = f.thread.config.clone();
         f.services.queue(wire("openai_chat", "done", &[]));
         f.turn(false).await.unwrap();
@@ -2388,9 +2383,9 @@ async fn destination_capabilities_narrow_tools_without_mutating_thread_config() 
             .filter_map(|t| t["name"].as_str())
             .collect::<Vec<_>>();
         assert!(names.contains(&"exec_command"));
-        assert!(!names.contains(&"write_stdin"));
-        assert!(!names.contains(&"apply_patch"));
-        assert!(!names.contains(&"cua_repl"));
+        assert!(names.contains(&"write_stdin"));
+        assert!(names.contains(&"apply_patch"));
+        assert!(names.contains(&"cua_repl"));
         if role == ExecutionRole::Main {
             assert!(names.contains(&"create_task"));
         }

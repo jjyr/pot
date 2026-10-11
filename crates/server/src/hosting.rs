@@ -21,7 +21,6 @@ impl Server {
     /// App requests dispatch in memory. TCP is restricted to subprocess model/MCP integration.
     pub async fn embedded(mut config: ServerConfig) -> Result<Self> {
         config.bind = "127.0.0.1:0".into();
-        config.composition = None;
         config.web_control = None;
         Self::bind_mode(config, true).await
     }
@@ -43,16 +42,6 @@ impl Server {
             None => None,
         };
         let listener = tokio::net::TcpListener::bind(&config.bind).await?;
-        let composition = match config.composition {
-            Some(composition) => composition,
-            None if config.runtime.data.join("runtime-resources.json").exists() => {
-                pot_runtime::host::Composition::Bare
-            }
-            None if config.runtime.data.join("pot-v2.sqlite").exists() => {
-                pot_runtime::host::Composition::Assistant
-            }
-            None => pot_runtime::host::Composition::Bare,
-        };
         let ts_hostname = std::env::var("POT_TAILSCALE_HOSTNAME").ok();
         let use_ts = web_router.is_some() && ts_hostname.is_some();
         let access_config = if web_router.is_none() {
@@ -98,23 +87,7 @@ impl Server {
         } else {
             None
         };
-        let providers: Vec<Arc<dyn pot_sandbox::Provider>> = if !composition.has_sandboxes() {
-            vec![]
-        } else if cfg!(target_os = "linux") {
-            vec![Arc::new(
-                pot_sandbox_linux_podman::LinuxPodmanProvider::new()?,
-            )]
-        } else {
-            vec![
-                Arc::new(pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new()?),
-                Arc::new(pot_sandbox_macos_apple_vm::MacOSAppleVMProvider::new(
-                    macos_helper_path(),
-                )),
-            ]
-        };
-        let mut backend =
-            pot_runtime::initialize_composition(config.runtime.clone(), composition, providers)
-                .await?;
+        let mut backend = pot_runtime::initialize(config.runtime.clone()).await?;
         let endpoint = backend.endpoint(listener.local_addr()?.port());
 
         let mut access = if let Some(cfg) = access_config {
@@ -190,9 +163,6 @@ impl Server {
     }
     pub fn local_addr(&self) -> Result<std::net::SocketAddr> {
         Ok(self.listener.local_addr()?)
-    }
-    pub fn composition(&self) -> pot_runtime::host::Composition {
-        self.host.composition()
     }
     pub fn endpoint(&self) -> Result<RuntimeEndpoint> {
         Ok(self.host.endpoint(self.local_addr()?.port()))

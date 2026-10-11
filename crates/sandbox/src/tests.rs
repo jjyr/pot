@@ -158,16 +158,16 @@ fn fixture() -> (tempfile::TempDir, Arc<Manager>, Arc<Fake>) {
     (dir, manager, provider)
 }
 #[tokio::test]
-async fn receipts_are_manager_owned_deduplicated_and_unknown_legacy_calls_never_replay() {
+async fn receipts_are_manager_owned_deduplicated_and_unknown_calls_never_replay() {
     let (_dir, m, p) = fixture();
     let args = json!({"cmd":"echo guest"});
     let g = grant("main", false);
     let a = m
-        .execute(&g, "exec_command", "call", &args, &|| false, None)
+        .execute(&g, "exec_command", "call", &args, &|| false)
         .await
         .unwrap();
     let b = m
-        .execute(&g, "exec_command", "call", &args, &|| false, None)
+        .execute(&g, "exec_command", "call", &args, &|| false)
         .await
         .unwrap();
     assert_eq!(a, b);
@@ -178,15 +178,27 @@ async fn receipts_are_manager_owned_deduplicated_and_unknown_legacy_calls_never_
             "exec_command",
             "call",
             &json!({"cmd":"different"}),
-            &|| false,
-            None
+            &|| false
         )
         .await
         .is_err()
     );
     let old = json!({"name":"exec_command","args":args,"status":"accepted"});
+    use sha2::{Digest, Sha256};
+    let key: String =
+        Sha256::digest(serde_json::to_vec(&(g.owner.as_str(), &g.turn, "uncertain")).unwrap())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+    private_json(
+        &m.data_dir()
+            .join("sandbox-receipts")
+            .join(format!("{key}.json")),
+        &old,
+    )
+    .unwrap();
     assert!(
-        m.execute(&g, "exec_command", "legacy", &args, &|| false, Some(old))
+        m.execute(&g, "exec_command", "uncertain", &args, &|| false)
             .await
             .unwrap_err()
             .to_string()
@@ -204,7 +216,6 @@ async fn sessions_are_fixed_to_owner_epoch_and_target() {
         "call",
         &json!({"cmd":"true"}),
         &|| false,
-        None,
     )
     .await
     .unwrap();
@@ -215,7 +226,6 @@ async fn sessions_are_fixed_to_owner_epoch_and_target() {
             "foreign",
             &json!({"session_id":"session"}),
             &|| false,
-            None,
         )
         .await
         .unwrap_err();
@@ -230,7 +240,6 @@ async fn sessions_are_fixed_to_owner_epoch_and_target() {
             "switch",
             &json!({"cmd":"true","sandbox_id":"other"}),
             &|| false,
-            None,
         )
         .await
         .unwrap_err();
@@ -242,8 +251,7 @@ async fn sessions_are_fixed_to_owner_epoch_and_target() {
             "write_stdin",
             "expired",
             &json!({"session_id":"session"}),
-            &|| false,
-            None
+            &|| false
         )
         .await
         .unwrap_err()
@@ -256,11 +264,11 @@ async fn browser_sessions_cannot_retarget_or_cross_owner_and_boot() {
     let (_dir, m, p) = fixture();
     let owner = grant("main", false);
     let open = plugin_args(json!({"code":r#"let tab = await cua.open("https://example.com");"#}));
-    m.execute(&owner, "plugin_call", "open", &open, &|| false, None)
+    m.execute(&owner, "plugin_call", "open", &open, &|| false)
         .await
         .unwrap();
     // Completed operation IDs replay the receipt rather than a second navigation.
-    m.execute(&owner, "plugin_call", "open", &open, &|| false, None)
+    m.execute(&owner, "plugin_call", "open", &open, &|| false)
         .await
         .unwrap();
     assert_eq!(p.dispatches.load(Ordering::SeqCst), 1);
@@ -274,8 +282,7 @@ async fn browser_sessions_cannot_retarget_or_cross_owner_and_boot() {
             "plugin_call",
             "foreign",
             &observe,
-            &|| false,
-            None
+            &|| false
         )
         .await
         .unwrap_err()
@@ -284,35 +291,23 @@ async fn browser_sessions_cannot_retarget_or_cross_owner_and_boot() {
     );
     let mut same_target = observe.clone();
     same_target["sandbox_id"] = json!("default");
-    m.execute(
-        &owner,
-        "plugin_call",
-        "same-target",
-        &same_target,
-        &|| false,
-        None,
-    )
+    m.execute(&owner, "plugin_call", "same-target", &same_target, &|| {
+        false
+    })
     .await
     .unwrap();
     let mut retarget = observe.clone();
     retarget["sandbox_id"] = json!("other");
     assert!(
-        m.execute(
-            &owner,
-            "plugin_call",
-            "retarget",
-            &retarget,
-            &|| false,
-            None
-        )
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("cannot switch")
+        m.execute(&owner, "plugin_call", "retarget", &retarget, &|| false)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cannot switch")
     );
     p.generation.store(2, Ordering::SeqCst);
     assert!(
-        m.execute(&owner, "plugin_call", "boot", &observe, &|| false, None)
+        m.execute(&owner, "plugin_call", "boot", &observe, &|| false)
             .await
             .unwrap_err()
             .to_string()
@@ -321,7 +316,7 @@ async fn browser_sessions_cannot_retarget_or_cross_owner_and_boot() {
     m.finish("main").await.unwrap();
     assert!(m.session_target("main", 1, "session").is_err());
     assert!(
-        m.execute(&owner, "plugin_call", "expired", &observe, &|| false, None)
+        m.execute(&owner, "plugin_call", "expired", &observe, &|| false)
             .await
             .unwrap_err()
             .to_string()
@@ -338,8 +333,7 @@ async fn browser_unavailable_guest_is_rejected_before_action_dispatch() {
             "plugin_call",
             "unsupported",
             &plugin_args(json!({"code":r#"await cua.open("https://example.com");"#})),
-            &|| false,
-            None
+            &|| false
         )
         .await
         .unwrap_err()
@@ -357,7 +351,6 @@ async fn unknown_cleanup_quarantines_persistently_and_busy_stop_cannot_delete_st
         "call",
         &json!({"cmd":"true"}),
         &|| false,
-        None,
     )
     .await
     .unwrap();
@@ -433,8 +426,8 @@ async fn concurrent_duplicate_calls_dispatch_once_and_restart_advances_epoch() {
     let g = grant("main", false);
     let args = json!({"cmd":"true"});
     let (first, second) = tokio::join!(
-        manager.execute(&g, "exec_command", "same", &args, &|| false, None),
-        manager.execute(&g, "exec_command", "same", &args, &|| false, None)
+        manager.execute(&g, "exec_command", "same", &args, &|| false),
+        manager.execute(&g, "exec_command", "same", &args, &|| false)
     );
     assert_eq!(first.unwrap(), second.unwrap());
     assert_eq!(provider.dispatches.load(Ordering::SeqCst), 1);
@@ -459,7 +452,6 @@ async fn exclusive_provider_rejects_another_owner_until_confirmed_closure() {
             "one",
             &args,
             &|| false,
-            None,
         )
         .await
         .unwrap();
@@ -470,8 +462,7 @@ async fn exclusive_provider_rejects_another_owner_until_confirmed_closure() {
                 "exec_command",
                 "two",
                 &args,
-                &|| false,
-                None
+                &|| false
             )
             .await
             .unwrap_err()
@@ -487,7 +478,6 @@ async fn exclusive_provider_rejects_another_owner_until_confirmed_closure() {
             "two",
             &args,
             &|| false,
-            None,
         )
         .await
         .unwrap();
@@ -515,7 +505,6 @@ async fn persistent_scope_closure_releases_ownership_without_stopping_vm() {
             "call",
             &json!({"cmd":"true"}),
             &|| false,
-            None,
         )
         .await
         .unwrap();

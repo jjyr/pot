@@ -1,7 +1,7 @@
 # Shared native and browser UI
 
 The `pot-ui` crate holds transport-independent page behavior and GPUI presentation.
-Native App and Mobile call the same Chat, Tasks, Sandbox and Usage components.
+Native App and Web use shared Chat, Tasks, Machines and Usage components.
 Navigation chrome, native settings, Schedules, the Swift composer, desktop viewer
 and browser authentication remain platform adapters.
 
@@ -24,12 +24,12 @@ GPUI presentation is an opt-in `presentation` feature. Page transitions, allowan
 portable and require no GPUI, Swift, network client or browser API, including in
 Linux backend CI. Native and WASM clients enable presentation for their targets.
 The shared layer receives protocol data and dispatches actions; it never fetches
-an endpoint, reads a native token, registers a Passkey or changes OS settings.
+an endpoint, reads a native token, retrieves a browser Token or changes OS settings.
 
-App supplies ureq transport, native navigation/history, Finder artifact actions,
+App supplies ureq transport, native navigation/history, native file-save actions,
 its running-task summary extension, AppKit/Swift input and editor storage. Mobile
 supplies same-origin fetch/cookies, browser history, GPUI Textarea editor entities,
-Passkey/PWA/push and the mobile navigation shell. Browser JS delegates pending
+Token/PWA and the mobile navigation shell. Browser JS delegates pending
 request construction, receipt validation and snapshot reconciliation to Rust.
 Native keeps its existing automatic same-ID transport retries; Mobile keeps
 explicit retry after an uncertain send. These are adapter policies around the
@@ -68,21 +68,18 @@ content revisions. Shared task rows carry assistant identity and group matching
 Tasks beneath assistant names. Native and browser transports capture the owner
 before asynchronous writes; late snapshots are discarded on owner changes.
 App navigation history includes Runtime and owner identity. The Server exposes
-bounded in-process and HTTPS client adapters; Control membership and connection
-management UI remain P3 work.
+bounded in-process and HTTPS client adapters; Control membership and App mode isolation are implemented. Remote transports
+remain pending in #39.
 
-## Machines (2026-10-10)
+## Machines
 
-`pot-ui::machines` replaces the standalone Sandbox destination in native and Web
-navigation. `machine_state` resolves typed view selections independently from
-execution defaults and retains targets present in offline cached inventory.
-The local Sandbox detail reuses `pot-ui::sandbox` without its old sidebar;
-Host and machine details use the common page components. Native desktop overlay
-visibility follows the selected detail, including navigation-history restoration.
-Web discovery works without a conversation capability. Native resource creation
-remains separate from read-only machine discovery and Web permissions.
+`pot-ui::machines` supplies top-level machine cards and expandable Host/Sandbox
+rows. View selection is separate from execution defaults; cached offline inventory
+remains visible. View Tasks filters by the exact Runtime and target before pagination.
+Only implemented client transports expose desktop entries. Resource creation is
+API-only; technical management stays in Chat. No plugin/session/artifact panels or
+management shortcut buttons are present.
 
-`machine_connections` displays Control membership and supports machine invitations
-and member removal. The former pairing and per-target grant controls are removed.
-Resource creation remains API-only. App connection setup and its local/remote icon
-are tracked in #39; Web stays connected to its configured Control.
+App configures one Control and switches local/remote with one icon. Web stays fixed
+to its configured Control. Transport captures mode/Runtime/owner before each request
+and rejects late results after navigation changes.

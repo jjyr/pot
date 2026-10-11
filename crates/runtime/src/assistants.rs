@@ -153,7 +153,7 @@ impl Hub {
     fn build(&self, owner: &str) -> Result<(Service, mpsc::UnboundedReceiver<SendMessage>)> {
         let data = self.root.data.join("assistants").join(owner);
         std::fs::create_dir_all(&data)?;
-        let mut store = Store::open(&data.join("pot-v2.sqlite"))?;
+        let mut store = upgrade::open_store(&data.join("pot-v2.sqlite"), &self.root.data, owner)?;
         if agent::current(&store)?.is_none() {
             let root_inner = self.root.conversation.inner.lock().unwrap();
             if let Some(profiles) = root_inner.store.get(agent::PROFILES)? {

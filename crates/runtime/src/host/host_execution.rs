@@ -84,7 +84,7 @@ pub(super) async fn execute(host: &Host, request: Operation) -> Result<Value> {
         .host_environment
         .as_ref()
         .ok_or_else(|| anyhow!("Host execution service is disabled"))?;
-    // Native Runtime authority was checked by the route. Peer authority must
+    // Native Runtime authority was checked by the route. Control authority must
     // use its own scoped grants before this executor can be shared remotely.
     let original = json!({"run_id":request.run_id,"call_id":request.call_id,
         "environment_ref":request.environment_ref,"name":request.name,"args":request.args});

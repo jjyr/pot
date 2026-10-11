@@ -168,6 +168,9 @@ mod tests {
         )
         .unwrap();
         let project = root.environment_service.sandboxes.workspace("default");
+        let host_project = root.data.join("agent-workspace");
+        std::fs::create_dir_all(&host_project).unwrap();
+        std::fs::write(host_project.join("AGENTS.md"), "HOST_FIRST").unwrap();
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join(".git"), "gitdir").unwrap();
         std::fs::write(project.join("AGENTS.md"), "PROJECT_FIRST").unwrap();
@@ -186,12 +189,13 @@ mod tests {
         let worker = tasks::owner(&root, &task.id).unwrap();
         let main = crate::instructions::load(&root).unwrap().text;
         let child = crate::instructions::load(&worker).unwrap().text;
-        assert!(main.contains("ASSISTANT_DB_ONLY") && main.contains("PROJECT_FIRST"));
+        assert!(main.contains("ASSISTANT_DB_ONLY") && main.contains("HOST_FIRST"));
         assert!(child.contains("PROJECT_FIRST") && !child.contains("ASSISTANT_DB_ONLY"));
         std::fs::write(project.join("AGENTS.md"), "PROJECT_CHANGED").unwrap();
-        for service in [&root, &worker] {
+        std::fs::write(host_project.join("AGENTS.md"), "HOST_CHANGED").unwrap();
+        for (service, expected) in [(&root, "HOST_CHANGED"), (&worker, "PROJECT_CHANGED")] {
             let text = crate::instructions::load(service).unwrap().text;
-            assert!(text.contains("PROJECT_CHANGED") && !text.contains("PROJECT_FIRST"));
+            assert!(text.contains(expected) && !text.contains("PROJECT_FIRST"));
         }
         assert_eq!(read(&root).unwrap(), saved);
         save(
@@ -205,6 +209,7 @@ mod tests {
             "PROJECT_CHANGED"
         );
         std::fs::remove_file(project.join("AGENTS.md")).unwrap();
+        std::fs::remove_file(host_project.join("AGENTS.md")).unwrap();
         let main = crate::instructions::load(&root).unwrap().text;
         assert!(main.contains("ASSISTANT_DB_CHANGED") && !main.contains("PROJECT_CHANGED"));
         assert!(

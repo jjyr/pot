@@ -752,15 +752,6 @@ async fn run(
     if s.role != ExecutionRole::Summary {
         descriptor.apply_tools(&mut available)?;
     }
-    if let Some(supported) = s.feedback.supported_execution_tools() {
-        available.retain(|tool| {
-            tool["name"].as_str().is_some_and(|name| {
-                let execution = permissions::is_execution_tool(name)
-                    || settings.plugin_for_tool(name).is_ok_and(|p| p.is_some());
-                !execution || supported.iter().any(|n| n == name)
-            })
-        });
-    }
     let mut names = std::collections::HashSet::new();
     ensure!(
         available.iter().all(|t| t["name"]

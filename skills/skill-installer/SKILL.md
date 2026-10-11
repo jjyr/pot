@@ -5,8 +5,9 @@ description: Install skills from a local directory or GitHub, inspect installed 
 
 # Install and manage user skills
 
-Global skills are installed at `~/.pot/agent/skills/<name>`. Main and task agents
-discover the same global skills. Use `--dest <project>/.agents/skills` when the user
+Global skills are installed at `~/.pot/agent/skills/<name>`. Control owns global skill installation and updates for connected execution.
+Task Agents receive fixed read-only bundles and cannot install/update global skills.
+Independent App local mode uses its own global catalog. Use `--dest <project>/.agents/skills` when the user
 requests a project-specific installation.
 
 List installed bundles by reading SKILL.md metadata in these directories.
@@ -16,14 +17,18 @@ curated catalog.
 
 ## Install
 
+Resolve helper paths from the injected catalog, relative to the relevant SKILL.md.
+Global commands must run on Control (or the independent local owner); on execution
+nodes use only explicit project `--dest` paths. Do not write into the supplied cache.
+
 Use the helper through exec_command. It validates the complete bundle, preserves
 resources and executable script permissions, prepares a sibling staging directory,
 and publishes only after validation succeeds.
 
 ```sh
-python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --local /data/workspace/downloads/example-skill
-python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main
-python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill
+python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/downloads/example-skill
+python3 <injected-skill-installer-path>/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main
+python3 <injected-skill-installer-path>/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill
 ```
 
 For branch names containing slashes, prefer `--repo`, `--path` and `--ref`.
@@ -42,7 +47,7 @@ user's task.
 The shared format validator is available at:
 
 ```sh
-python3 ~/.pot/agent/skills/skill-creator/scripts/quick_validate.py ~/.pot/agent/skills/example-skill
+python3 <injected-skill-creator-path>/scripts/quick_validate.py ~/.pot/agent/skills/example-skill
 ```
 
 It checks structure and metadata, not instruction quality or script behavior.

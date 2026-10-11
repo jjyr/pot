@@ -18,91 +18,6 @@ pub use control_execution::ControlOperation;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Composition {
-    #[default]
-    Bare,
-    Environment,
-    Host,
-    Assistant,
-}
-impl Composition {
-    pub fn load(data: &Path) -> Result<Self> {
-        if let Ok(value) = std::env::var("POT_RUNTIME_COMPOSITION") {
-            return value.parse();
-        }
-        let path = data.join("runtime-composition.json");
-        if path.exists() {
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Config {
-                schema_version: u32,
-                preset: Composition,
-            }
-            let config: Config = serde_json::from_slice(&std::fs::read(path)?)?;
-            anyhow::ensure!(
-                config.schema_version == 1,
-                "Unsupported Runtime composition schema"
-            );
-            return Ok(config.preset);
-        }
-        // An existing product root keeps its behavior; fresh standalone roots are idle.
-        Ok(if data.join("pot-v2.sqlite").exists() {
-            Self::Assistant
-        } else {
-            Self::Bare
-        })
-    }
-    pub fn has_environments(self) -> bool {
-        self != Self::Bare
-    }
-    pub fn has_sandboxes(self) -> bool {
-        matches!(self, Self::Environment | Self::Assistant)
-    }
-    pub fn capabilities(self) -> &'static [&'static str] {
-        match self {
-            Self::Bare => &["runtime"],
-            Self::Host => &["runtime", "host_execution"],
-            Self::Environment => &[
-                "host_execution",
-                "runtime",
-                "sandbox_execution",
-                "sandbox_management",
-                "resources",
-            ],
-            Self::Assistant => &[
-                "runtime",
-                "conversation",
-                "tasks",
-                "agent",
-                "model",
-                "accounting",
-                "schedules",
-                "sandbox_execution",
-                "sandbox_management",
-                "resources",
-                "host_execution",
-                "host_approval",
-            ],
-        }
-    }
-}
-impl std::str::FromStr for Composition {
-    type Err = anyhow::Error;
-    fn from_str(value: &str) -> Result<Self> {
-        match value {
-            "bare" => Ok(Self::Bare),
-            "environment" => Ok(Self::Environment),
-            "host" => Ok(Self::Host),
-            "assistant" => Ok(Self::Assistant),
-            _ => {
-                bail!("Unknown Runtime composition: expected bare, host, environment or assistant")
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Identity {
@@ -118,7 +33,7 @@ pub struct Host {
     pub(crate) boot: String,
     pub(crate) lock: Arc<std::fs::File>,
     runtime_id: String,
-    composition: Composition,
+    assistant_enabled: bool,
     pub(crate) host_enabled: bool,
     stop: tokio::sync::watch::Sender<bool>,
     sandboxes: Option<Arc<sandbox::Manager>>,
@@ -126,7 +41,7 @@ pub struct Host {
     pub(crate) host_environment: Option<Arc<environment::HostEnvironment>>,
 }
 impl Host {
-    pub(crate) fn open(data: &Path, composition: Composition) -> Result<Self> {
+    pub(crate) fn open(data: &Path) -> Result<Self> {
         std::fs::create_dir_all(data)?;
         std::fs::set_permissions(data, std::fs::Permissions::from_mode(0o700))?;
         let file = std::fs::OpenOptions::new()
@@ -140,6 +55,7 @@ impl Host {
             unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
             "This data directory is already owned by another Pot instance"
         );
+        upgrade::runtime_paths(data)?;
         let path = data.join("runtime-identity.json");
         let identity: Identity = if path.exists() {
             serde_json::from_slice(&std::fs::read(&path)?)?
@@ -162,8 +78,8 @@ impl Host {
             boot: id(),
             lock: Arc::new(file),
             runtime_id: identity.runtime_id,
-            composition,
-            host_enabled: composition.has_environments(),
+            assistant_enabled: false,
+            host_enabled: false,
             stop: tokio::sync::watch::channel(false).0,
             sandboxes: None,
             host_operations: Arc::new(tokio::sync::Mutex::new(())),
@@ -180,15 +96,7 @@ impl Host {
         self.sandboxes.clone()
     }
     pub(crate) fn resource_capabilities(&mut self, assistant: bool) {
-        self.composition = if assistant {
-            Composition::Assistant
-        } else if self.sandboxes.is_some() {
-            Composition::Environment
-        } else if self.host_environment.is_some() {
-            Composition::Host
-        } else {
-            Composition::Bare
-        };
+        self.assistant_enabled = assistant;
     }
     pub fn instance_lock(&self) -> Arc<std::fs::File> {
         self.lock.clone()
@@ -196,23 +104,34 @@ impl Host {
     pub fn data_dir(&self) -> &Path {
         &self.data
     }
-    pub fn composition(&self) -> Composition {
-        self.composition
-    }
+
     pub fn runtime_id(&self) -> &str {
         &self.runtime_id
     }
     pub fn describe(&self) -> Value {
-        {
-            let capabilities: Vec<_> = self
-                .composition
-                .capabilities()
-                .iter()
-                .filter(|c| self.host_enabled || !["host_execution", "host_approval"].contains(c))
-                .collect();
-            json!({"schema_version":1,"runtime_id":self.runtime_id,"boot_id":self.boot,"composition":self.composition,"capabilities":capabilities})
+        let mut capabilities = vec!["runtime"];
+        if self.host_enabled {
+            capabilities.push("host_execution");
         }
+        if self.sandboxes.is_some() {
+            capabilities.extend(["sandbox_execution", "sandbox_management", "resources"]);
+        }
+        if self.assistant_enabled {
+            capabilities.extend([
+                "conversation",
+                "tasks",
+                "agent",
+                "model",
+                "accounting",
+                "schedules",
+            ]);
+            if self.host_enabled {
+                capabilities.push("host_approval");
+            }
+        }
+        json!({"schema_version":1,"runtime_id":self.runtime_id,"boot_id":self.boot,"capabilities":capabilities})
     }
+
     pub fn endpoint(&self, port: u16) -> RuntimeEndpoint {
         RuntimeEndpoint {
             api_version: API_VERSION,
@@ -245,17 +164,14 @@ impl Host {
     }
     pub fn router(&self) -> Router {
         let mut routes = Router::new().route("/api/v1/runtime", get(describe));
-        if matches!(
-            self.composition,
-            Composition::Host | Composition::Environment
-        ) {
+        if !self.assistant_enabled && (self.host_enabled || self.sandboxes.is_some()) {
             routes = routes
                 .route("/api/v1/environments", get(environment_inventory))
                 .route("/api/v1/execution", post(execute))
                 .route("/api/v1/environment/cancel", post(cancel))
                 .route("/api/v1/environment/operations", get(host_execution::query));
         }
-        if self.composition == Composition::Environment {
+        if !self.assistant_enabled && self.sandboxes.is_some() {
             routes = routes
                 .route("/api/v1/sandboxes", get(inventory).post(manage))
                 .route(
@@ -494,14 +410,7 @@ async fn execute(
         policy: pot_core::ShellSettings::default(),
     };
     let result = manager
-        .execute(
-            &grant,
-            &request.name,
-            &request.call_id,
-            &args,
-            &cancelled,
-            None,
-        )
+        .execute(&grant, &request.name, &request.call_id, &args, &cancelled)
         .await
         .map_err(|e| {
             error(

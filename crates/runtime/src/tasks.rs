@@ -149,7 +149,11 @@ fn child(
         },
         conversation: ConversationService {
             inner: Arc::new(Mutex::new(Inner {
-                store: Store::open(&data.join("pot-v2.sqlite"))?,
+                store: upgrade::open_store(
+                    &data.join("pot-v2.sqlite"),
+                    root.environment_service.sandboxes.data_dir(),
+                    task_id,
+                )?,
                 agent: root.conversation.inner.lock().unwrap().agent.clone(),
                 turn: None,
                 model_requests: 0,
@@ -179,29 +183,21 @@ fn child(
 }
 pub(super) fn restore(root: &Service) -> Result<()> {
     let inner = root.conversation.inner.lock().unwrap();
+    upgrade::task_book(&inner.store, &root.runtime_id, &root.assistant_id)?;
     let current = inner.store.get("tasks.v2")?;
-    let legacy = inner.store.get("tasks.v1")?;
     drop(inner);
-    let (mut records, book): (Vec<Record>, schedules::Book) = if let Some(v) = current {
-        let v: Value = serde_json::from_str(&v)?;
-        (
-            serde_json::from_value(v["tasks"].clone())?,
-            serde_json::from_value(v["schedules"].clone())?,
-        )
-    } else {
-        (
-            legacy
-                .map(|s| serde_json::from_str(&s))
-                .transpose()?
-                .unwrap_or_default(),
-            schedules::Book::default(),
-        )
+    let (records, book): (Vec<Record>, schedules::Book) = match current {
+        Some(value) => {
+            let value: Value = serde_json::from_str(&value)?;
+            (
+                serde_json::from_value(value["tasks"].clone())?,
+                serde_json::from_value(value["schedules"].clone())?,
+            )
+        }
+        None => (vec![], schedules::Book::default()),
     };
     schedules::validate_bindings(root, &book)?;
-    for record in &mut records {
-        if record.info.assistant_id.is_empty() {
-            record.info.assistant_id = root.assistant_id.clone();
-        }
+    for record in &records {
         anyhow::ensure!(
             record.info.assistant_id == root.assistant_id,
             "Task assistant ownership mismatch"
@@ -210,15 +206,7 @@ pub(super) fn restore(root: &Service) -> Result<()> {
             .info
             .environment_ref
             .clone()
-            .or_else(|| {
-                record
-                    .assignment
-                    .as_ref()
-                    .and_then(|a| a.environment.clone())
-            })
-            .unwrap_or_else(|| {
-                pot_core::EnvironmentRef::sandbox(&root.runtime_id, &record.info.sandbox_id)
-            });
+            .ok_or_else(|| anyhow!("Task Environment missing"))?;
         let projected = match &environment.target {
             pot_core::EnvironmentTarget::Host {} => "",
             pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.as_str(),
@@ -227,13 +215,10 @@ pub(super) fn restore(root: &Service) -> Result<()> {
             record.info.sandbox_id == projected,
             "Task Environment projection mismatch"
         );
-        let assignment = record.assignment.get_or_insert_with(|| {
-            pot_core::Assignment::on_environment(
-                &root.runtime_id,
-                &record.info.id,
-                environment.clone(),
-            )
-        });
+        let assignment = record
+            .assignment
+            .as_ref()
+            .ok_or_else(|| anyhow!("Task assignment missing"))?;
         assignment.validate_binding(&root.runtime_id, &record.info.id, &environment)?;
         if let Some(requested) = &record.create_request.environment_ref {
             anyhow::ensure!(
@@ -241,7 +226,6 @@ pub(super) fn restore(root: &Service) -> Result<()> {
                 "Task request Environment mismatch"
             );
         }
-        record.info.environment_ref = Some(environment);
     }
     let mut current_hub = root.tasks.hub.lock().unwrap();
     {

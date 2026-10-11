@@ -42,4 +42,4 @@ Run records are preserved under `.local/eval/deepseek-flash-20261006/{chat,tools
 
 ## Same-command Pi CLI comparison follow-up (2026-10-06)
 
-At the user's request, Pi was compared through its existing CLI without implementing a Pi Driver or connecting tools. Three identical commands were each repeated three times with both native tool sets. See the [comparison method, outcomes and limits](pi-token-comparison.md). This supersedes the earlier observation that no Pi experiment had been performed, but does not establish a compaction or aligned-policy benchmark.
+At the user's request, Pi was compared through its existing CLI without implementing a Pi Driver or connecting tools. Three identical commands were each repeated three times with both native tool sets. See the [current architecture](../architecture.md). This supersedes the earlier observation that no Pi experiment had been performed, but does not establish a compaction or aligned-policy benchmark.

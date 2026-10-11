@@ -72,10 +72,16 @@ impl Hub {
         // Absence means no grants. Do not create or rewrite user configuration on startup.
         Ok(hub)
     }
-    pub fn open_with_legacy(path: &std::path::Path, legacy: &std::path::Path) -> Result<Self> {
+    pub(crate) fn upgrade_file(path: &std::path::Path, legacy: &std::path::Path) -> Result<()> {
         // A manually supplied JSON file is authoritative. Import only when absent.
-        if read(path)?.is_some() || !legacy.exists() {
-            return Self::open(path);
+        if read(path)?.is_some() {
+            if legacy.exists() {
+                std::fs::remove_file(legacy)?;
+            }
+            return Ok(());
+        }
+        if !legacy.exists() {
+            return Ok(());
         }
         use rusqlite::OptionalExtension;
         let connection = rusqlite::Connection::open_with_flags(
@@ -122,7 +128,7 @@ impl Hub {
         }
         // Successful migration discards the old request/history store.
         std::fs::remove_file(legacy)?;
-        Ok(hub)
+        Ok(())
     }
     fn persist(
         &self,
@@ -1135,7 +1141,8 @@ mod tests {
             )
             .unwrap();
         drop(store);
-        let hub = Hub::open_with_legacy(&path, &legacy).unwrap();
+        Hub::upgrade_file(&path, &legacy).unwrap();
+        let hub = Hub::open(&path).unwrap();
         assert!(!legacy.exists());
         assert!(hub.book.lock().unwrap().requests.is_empty());
         assert_eq!(hub.grants("main")[0]["id"], "latest");

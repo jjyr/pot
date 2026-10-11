@@ -133,26 +133,22 @@ pub(crate) fn workspace_view(s: &Service) -> Result<(PathBuf, PathBuf, PathBuf, 
         );
         return Ok(host_workspace_view(&s.workspace));
     }
-    if !s.is_worker && s.environment_service.sandboxes.assignment("").is_err() {
-        return Ok(host_workspace_view(&s.workspace));
+    if !s.is_worker {
+        let workspace = if s.environment_service.sandboxes.assignment("").is_err() {
+            s.workspace.clone()
+        } else {
+            s.data.join("agent-workspace")
+        };
+        return Ok(host_workspace_view(&workspace));
     }
-    let target = if s.is_worker {
-        s.sandbox_id
-            .clone()
-            .ok_or_else(|| anyhow!("Worker Sandbox binding missing"))?
-    } else {
-        s.environment_service.sandboxes.assignment("")?
-    };
+    let target = s
+        .sandbox_id
+        .clone()
+        .ok_or_else(|| anyhow!("Worker Sandbox binding missing"))?;
     let base = s.environment_service.sandboxes.workspace(&target);
     let visible_base = PathBuf::from(s.environment_service.sandboxes.guest_workspace(&target)?);
-    let (cwd, visible) = if s.is_worker {
-        (
-            base.join("tasks").join(&s.usage_scope),
-            visible_base.join("tasks").join(&s.usage_scope),
-        )
-    } else {
-        (base.clone(), visible_base.clone())
-    };
+    let cwd = base.join("tasks").join(&s.usage_scope);
+    let visible = visible_base.join("tasks").join(&s.usage_scope);
     Ok((base, visible_base, cwd, visible))
 }
 
