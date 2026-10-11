@@ -83,7 +83,7 @@
   "navigation.forward": "Forward",
   "navigation.forward-13": "Forward (⌘])",
   "schedules-ui.edit-schedule": "Edit schedule",
-  "schedules-ui.describe-a-goal-and-time-in-the": "Describe a goal and time in the main chat to create a schedule. It can run with the window hidden. It cannot run while Pot is quit or your computer is asleep or shut down; missed runs follow the schedule policy when Pot resumes.",
+  "schedules-ui.describe-a-goal-and-time-in-the": "Describe a goal and time in chat to create a schedule. Schedules require their owning Runtime to remain running. In remote mode, closing this App does not stop Control; missed runs follow the schedule policy when the owning Runtime resumes.",
   "schedules-ui.name": "Name",
   "schedules-ui.a-short-description-of-this-schedule": "A short description of this schedule",
   "schedules-ui.goal": "Goal",

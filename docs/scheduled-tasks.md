@@ -30,7 +30,7 @@ Describe goal, time, time zone, and frequency in main chat; main Agent creates t
 
 Pause/delete stops future triggers; queued/running tasks continue and can be interrupted on the task page. Paused schedules can run now. Skip a trigger while its previous run is queued/running to prevent backlog. Delete preserves history; APIs hide deleted definitions by default.
 
-Hiding the window keeps execution running; Quit/sleep/shutdown stops it. Resume applies catch-up policy without waking the Mac. Interrupted model execution is not replayed automatically. Scheduling waits while the model is unready or budget exhausted.
+Schedules require their owning Runtime to remain running. Local App Quit/sleep/shutdown stops its Runtime; closing a remote client does not stop Control. Runtime resume applies catch-up policy without waking the execution machine. Interrupted model execution is not replayed automatically. Scheduling waits while the model is unready or budget exhausted.
 
 DST: choose the earlier occurrence of repeated hours and trigger once; skip nonexistent daily/weekly times for that day; reject nonexistent one-off times on save.
 
