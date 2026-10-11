@@ -96,6 +96,7 @@ async fn api(root: &Path, path: &str, body: Option<Value>) -> Result<Value> {
         value["message"]
             .as_str()
             .or(value["code"].as_str())
+            .or(value["error"].as_str())
             .unwrap_or("Request rejected")
     );
     Ok(value)

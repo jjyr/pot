@@ -2391,3 +2391,49 @@ async fn configured_tools_remain_available_without_mutating_thread_config() {
         }
     }
 }
+
+#[test]
+fn stopped_context_reconciliation_pairs_known_results_without_replaying_unknown_calls() {
+    let known = model::ToolCall {
+        id: "known".into(),
+        name: "exec_command".into(),
+        arguments: json!({"cmd":"printf X >> once"}),
+    };
+    let unknown = model::ToolCall {
+        id: "unknown".into(),
+        name: "exec_command".into(),
+        arguments: json!({"cmd":"other"}),
+    };
+    let mut assistant = Message::text("assistant", String::new());
+    assistant.calls = vec![known.clone(), unknown.clone()];
+    let context = Context {
+        kind: "context".into(),
+        version: 1,
+        messages: vec![assistant],
+        pending: vec![known, unknown],
+        started: Some("known".into()),
+        last_request: "original".into(),
+        receipts: vec![],
+        steering_ids: vec![],
+        usage_anchor: None,
+    };
+    let input = serde_json::to_value(context).unwrap();
+    let result = json!({"stdout":"X","exit_code":0});
+    let receipts = std::collections::BTreeMap::from([("known".into(), result.clone())]);
+    let recovered = reconcile_context(&input, &receipts, false).unwrap();
+    assert_eq!(recovered["pending"].as_array().unwrap().len(), 1);
+    assert_eq!(recovered["pending"][0]["id"], "unknown");
+    assert!(recovered["started"].is_null());
+    assert_eq!(recovered["last_request"], "original");
+    assert_eq!(recovered["messages"][1]["call_id"], "known");
+    assert_eq!(
+        serde_json::from_str::<Value>(recovered["messages"][1]["text"].as_str().unwrap()).unwrap(),
+        result
+    );
+    assert_eq!(
+        reconcile_context(&recovered, &receipts, false).unwrap(),
+        recovered
+    );
+    assert_eq!(input["pending"].as_array().unwrap().len(), 2);
+    assert!(reconcile_context(&json!({"type":"context","version":999}), &receipts, false).is_err());
+}

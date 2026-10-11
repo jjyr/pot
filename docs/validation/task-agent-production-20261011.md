@@ -22,7 +22,8 @@ continuation/replacement. Terminal results wait for effect reconciliation and
 confirmed execution-scope cleanup; a result alone does not release the lease.
 
 Execution reboot never claims an old Agent again. Known receipts/scopes settle
-before interruption; explicit guidance starts a new run with saved destination
+before interruption; confirmed tool results are reconstructed into the original
+pending context, while absent/unknown calls remain pending. Explicit guidance starts a new run with saved destination
 context. Control restoration retains the original active input identity and
 reconciles its accepted run instead of launching another Agent. These restart
 rules currently have journal/coordinator tests; independent process-crash
@@ -30,12 +31,16 @@ qualification remains outstanding.
 
 ## Evidence
 
-- Core: 18 tests; Agent: 71; Runtime: 172. Includes current Assignment upgrade to
+- Core: 18 tests; Agent: 72; Runtime: 172. Includes current Assignment upgrade to
   destination Agent placement, original remote input identity after restoration,
   reboot interruption, project/global rule separation and missing-skill refusal.
-- Server: 28 unit tests passed, one existing opt-in ignored. Recovery test rejects
+- Server: 29 unit tests passed, one existing opt-in ignored. Recovery test rejects
   unknown tool outcomes, rotates only a live same-boot run, preserves run identity,
-  returns the same replacement on retry and rejects the old lease.
+  returns the same replacement on retry and rejects the old lease. A previous-boot
+  transport test blocks on an unknown receipt, reconstructs the confirmed result,
+  retains unmatched pending calls and the original request, and verifies repeated
+  inspection never claims/replays the stopped Agent. CLI connection diagnostics
+  now preserve the underlying error chain instead of generic rejection text.
 - Host HTTPS integration: five passed; two Linux Podman tests are opt-in locally.
   Actual commands, owner approval, fixed plugin definitions, same-run 41→42 and
   rejection of cross-run sessions, project rules/Skills, follow-up context,

@@ -302,6 +302,28 @@ impl Journal {
     }
     /// Called only after the transport has reconciled every issued operation and
     /// drained the previous boot's scope. This never claims or restarts an Agent.
+    pub fn reconcile_recovered_context(
+        &self,
+        control: &str,
+        task: &str,
+        run: &str,
+        receipts: &BTreeMap<String, Value>,
+    ) -> Result<()> {
+        self.change(control, task, run, |record| {
+            ensure!(
+                record.phase == Phase::RecoveryRequired && record.boot_id != self.boot_id,
+                "Run does not require previous-boot recovery"
+            );
+            if let Some(context) = &record.context {
+                record.context = Some(pot_agent::reconcile_context(
+                    context,
+                    receipts,
+                    record.launch.resources.vision,
+                )?);
+            }
+            Ok(())
+        })
+    }
     pub fn interrupt_recovered(&self, control: &str, task: &str, run: &str) -> Result<()> {
         self.change(control,task,run,|record| {
             ensure!(record.phase==Phase::RecoveryRequired && record.boot_id!=self.boot_id,"Run does not require previous-boot recovery");
