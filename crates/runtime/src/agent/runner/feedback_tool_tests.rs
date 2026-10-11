@@ -422,7 +422,7 @@ async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary
     std::fs::write(base.join("AGENTS.md"), "PROJECT_FIRST").unwrap();
     let host = main.data.join("agent-workspace");
     std::fs::create_dir_all(&host).unwrap();
-    std::fs::write(host.join("AGENTS.md"), "WRONG_HOST").unwrap();
+    std::fs::write(host.join("AGENTS.md"), "HOST_PROJECT").unwrap();
     let task = tasks::create(
         State(main.clone()),
         tasks::tests::headers(),
@@ -442,10 +442,13 @@ async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary
             let request = SandboxFixture::activate(service);
             let thread = thread(service).unwrap();
             for text in ["PROJECT_FIRST", "PROJECT_UPDATED"] {
-                std::fs::write(base.join("AGENTS.md"), text).unwrap();
+                let project = if service.is_worker { &base } else { &host };
+                std::fs::write(project.join("AGENTS.md"), text).unwrap();
                 let context = make_context(service, &thread, Some(&request)).unwrap();
                 assert!(context.instructions.contains(text));
-                assert!(!context.instructions.contains("WRONG_HOST"));
+                if !service.is_worker {
+                    assert!(!context.instructions.contains("/data/workspace"));
+                }
                 assert_eq!(
                     context.instructions.contains("WORKER_LOCAL"),
                     service.is_worker

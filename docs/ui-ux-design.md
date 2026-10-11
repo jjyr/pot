@@ -1,6 +1,6 @@
 # Pot UI specification
 
-Updated: 2026-10-07. Current MVP UI specification; see [Development plan](development-plan.md) for scope.
+Updated: 2026-10-11. Current MVP UI specification; see [Development plan](development-plan.md) for scope.
 
 For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Shared page colors, layouts, the contextual toolbar and navigation history, Chat, the composer and Pot activity/unread icons now follow that direction. The upstream browser-authorization/provider integration and Terminal removal are retained; the new AI panels share these visual tokens and responsive forms.
 
@@ -14,7 +14,7 @@ the application language.
 
 ## Shared layout
 
-Tasks, settings, and Sandbox use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared layout lives in `crates/app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
+Tasks, settings, and Machines use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared layout lives in `crates/app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
 
 | Element | Specification |
 | --- | --- |
@@ -37,18 +37,18 @@ The Chat navigation icon uses the selected [Pot Companion reference](design/pot-
 
 ## Navigation history
 
-History is window-local. Chat, task lists/details, schedule details, overall/conversation Usage, allowance configuration, Settings and Sandbox are destinations. Back/Forward buttons and ⌘[ / ⌘] restore task filters/page/scroll anchor, schedule selection/page, Usage range/ranking page, Settings section and scroll offsets. Search/group/tab changes checkpoint the current destination without adding entries; navigating to a new destination after Back discards the forward branch.
+History is window-local. Chat, task lists/details, schedule details, overall/conversation Usage, allowance configuration, Settings and Machines are destinations. Back/Forward buttons and ⌘[ / ⌘] restore task filters/page/scroll anchor, schedule selection/page, Usage range/ranking page, Settings section and scroll offsets. Search/group/tab changes checkpoint the current destination without adding entries; navigating to a new destination after Back discards the forward branch.
 
 Native conversation drafts and entity-backed unsaved forms remain intact during navigation. History does not send messages, save settings, execute tasks or reclaim desktop control. Returning to Settings changes its section without reopening or resetting an in-progress AI connection panel. Embedded WebView focus and active marked-text composition retain their shortcut handling. Task scroll restoration uses the visible task ID plus inset to tolerate reordering. Missing task destinations show an inline recovery action.
 
 ## Pages and interactions
 
 - **Chat**: Pot icon opens chat; no central avatar. Blue user/neutral assistant bubbles. Small action bar below messages: Copy left, linked View task right, both with tooltips. Latest assistant actions show when idle; historical/user actions show on hover. Reserve height to avoid movement. Latest messages shares native input width/centering, sits above it, is fully clickable, and hides immediately on click. Preserve native IME/edit shortcuts. Opened conversations show cache before background refresh.
-- **Tasks**: executor brand icons appear in Chat running-task summaries and task-list rows, without additional Agent/model/reason labels; actual model and switching remain in task details. Icons follow Thread configuration snapshots and explicit configuration changes. Click the assistant name to select/create/edit an assistant and explicitly save its AGENTS.md rules; see [Execution preferences](execution-preferences.md). Fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running/waiting), Needs attention (failed/interrupted), Archived (completed/cancelled). Lifecycle details: [Task coordination](task-coordination.md). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Within each state tab, Tasks are grouped by assistant; assistants with no matching tasks are hidden. Grouped rows retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Task Configuration concurrency defaults to 8.
-- **Task conversation header**: Back/Forward, title and Usage live in the shared toolbar; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore old 48-character truncation from original task first lines. One row below shows stage/archive and task actions using small icons/secondary text. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
+- **Tasks**: executor brand icons appear in Chat running-task summaries and task-list rows, without additional Agent/model/reason labels; actual model and switching remain in task details. Icons follow Thread configuration snapshots and explicit configuration changes. Click the assistant name to select/create/edit an assistant and explicitly save its AGENTS.md rules; see [Agent context](agent-context.md). Fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running/waiting), Needs attention (failed/interrupted), Archived (completed/cancelled). Lifecycle details: [Task coordination](task-coordination.md). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Within each state tab, Tasks are grouped by assistant; assistants with no matching tasks are hidden. Grouped rows retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Task Configuration concurrency defaults to 8.
+- **Task conversation header**: Back/Forward, title and Usage live in the shared toolbar; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore full titles from original task first lines. One row below shows stage/archive and task actions using small icons/secondary text. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
 - **Schedules**: reuse Tasks / Schedules navigation, Kit Button/Form/Field/Input/cards. Fixed bottom pagination matches tasks: total/page left, previous/next right. Details show next run/state/paginated history linking to tasks. Main Agent creates schedules; no manual creation. Existing edit forms scroll with fixed save/cancel and include zone/frequency/notification/missed policy. Pause/delete preserves current runs; second click confirms deletion. See [Scheduled tasks](scheduled-tasks.md).
 - **Usage**: overall statistics/charts only, last 7/30/90 days/year. No granularity selector; year automatically aggregates 7-day groups. Task/main usage belongs in each conversation and survives archive. Single-page details: totals, horizontal model stacks (conversation/compaction, real tokens/proportions/hover), tool rankings (estimated tokens/calls, shared scale, top 5 expandable). Hide zero compaction/empty tools; no tabs/per-request lists/Skills stats. Never add tool output to model consumption. Hide allowance cards without periodic limits. See [Token usage](token-usage.md).
-- **Settings**: General starts with Language (English / 简体中文), above Appearance and keyboard shortcuts. First launch matches macOS preferred languages, falling back to English; the resolved choice is saved. Changes apply immediately without restarting or resetting drafts. See [Internationalization](internationalization.md). General / AI Configuration / Task Configuration / Work Environment. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. The provider chooser uses compact branded controls; connection sheets use a 12 px radius, responsive shared labels, compact model/authorization actions, and a 200 ms fade respecting Reduce Motion. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances; Work Environment keeps Sandbox resources.
+- **Settings**: General starts with Language (English / 简体中文), above Appearance and keyboard shortcuts. First launch matches macOS preferred languages, falling back to English; the resolved choice is saved. Changes apply immediately without restarting or resetting drafts. See [Internationalization](internationalization.md). General / AI Configuration / Task Configuration. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. The provider chooser uses compact branded controls; connection sheets use a 12 px radius, responsive shared labels, compact model/authorization actions, and a 200 ms fade respecting Reduce Motion. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances.
 - **Machines**: lightweight machine cards group Host and Sandbox environments. Click an environment to expand its status, View Tasks, and an available desktop entry. View Tasks filters by the exact Runtime and target, with a clear-filter action. Desktop is shown only when the client has an implemented transport. Connect machine remains available. Technical management, plugin/session/work-directory inspection and file transfers belong in ordinary Chat; no management shortcut, artifact list or download buttons. Resources are created through the API. Selecting an environment never changes task routing. App local/remote mode selects the conversation owner; it does not follow environment selection.
 - **Chat file downloads**: completion summaries report the task result; file names/download links are optional and appear only when the task has files to deliver. Clicking downloads the task file from its execution machine through Control to the current client. App asks for a save location; Web uses the browser's normal download flow. Control is a relay, not the save destination. The link binds a specific file and its task/assistant; it cannot expose arbitrary Host paths. Offline machines or missing files produce an explicit error. Machines and Task pages have no artifact lists or download buttons. Links use `pot-file://TASK_UUID/encoded/relative/path` in ordinary Markdown; existing tools and their arguments are unchanged. Downloads are limited to regular files within the task workspace (1 GiB maximum); symlinks, traversal and detected changes are rejected. App writes a private temporary file and replaces the chosen destination only after completion.
 - **Remote Task execution (approved, pending)**: start a Task Agent on the same machine as its Host/Sandbox; Task details show necessary status and execution machine/environment. Reuse existing guidance, cancel and approval interactions. No Runner management page, Agent migration controls, separate Agent placement selector or global plugin/skill management panel. Global resources are managed by Control through API/Chat; new model-visible tool contracts require explicit agreement.
@@ -57,7 +57,7 @@ Native conversation drafts and entity-backed unsaved forms remain intact during 
 ## Implementation boundaries
 
 - Rust / Kit: chat, tasks, settings, Sandbox title/toolbar, unready states.
-- Swift: window/sidebar/tray/native chat input/configuration/lifecycle. `SettingsPanel.swift` is configuration service only, not settings rendering. Restart confirmation uses native sheets; Sandbox More uses NSMenu anchored to toolbar right in window coordinates, avoiding WebView popup clipping.
+- Swift: window/sidebar/tray/native chat input/configuration/lifecycle. `SettingsPanel.swift` is configuration service only, not settings rendering. Restart confirmation uses native sheets; Desktop viewer menus remain confined to the viewer.
 - WKWebView / noVNC: desktop canvas/environment/clipboard/scaling. Standalone viewer retains its web More menu; shared web implementations use neutral colors, 8 px radii, 13-14 px text, synchronized themes. Hide web title bar in App to avoid duplicate toolbars.
 
 Rust reads nonsensitive state through `pot_bridge_ui` and sends allowlisted operations via `pot_bridge_command`. Saved keys never return to UI; masked Input accepts new keys, blank preserves existing. Sync forms only on configuration revision changes; background refresh must preserve unsaved input. Validate ranges/active tasks/connection before save; after confirmation, stop normally, write atomically, restart.
@@ -103,15 +103,20 @@ Native/Web conversations show approval cards separately from model messages, wit
 Agent, environment, tool, arguments and scope. Actions are Always allow, Allow once,
 Deny, in that order; saved grants can be revoked. See [Agent permissions](permissions.md).
 
-## Sandbox desktop
+## Machines and desktop
 
-The Host chat/backend stay available with every environment stopped. Sandbox uses the existing 56 pt global rail, a 224 pt environment sidebar, and a desktop area with two 56 pt toolbar rows. Selecting an environment shows its noVNC desktop directly. A stopped environment stays stopped until Start Desktop is pressed. Selecting a running execution environment requests its desktop component automatically. View selection never changes the execution default; Set Execution Default is an explicit menu action affecting future unspecified assignments. Each task retains its immutable Sandbox ID.
+Machines is a top-level destination combining machine and environment status.
+Cards show name, connectivity and running Tasks. Expanding shows Host/Sandbox
+rows; selecting an environment shows the Tasks bound to that exact target.
+Offline data is marked cached and new operations are disabled. Local supported
+Sandbox desktops reuse the existing viewer entry. Remote desktop transport is
+pending. Viewing never changes a task target or starts a stopped instance.
 
-The list shows environment name, phase, running task count and the execution-default marker. New creates a stopped Linux environment. The desktop toolbar provides Take Over / Give Back, selected-environment Settings and More. More contains reconnect, browser, clipboard, workspace, associated tasks, execution-default selection, stop and delete. Busy leases and unsettled operations explain disabled stop/delete actions; the Runtime rechecks restrictions. The default environment and environments referenced by durable tasks or schedules cannot be deleted. Files are retained after deletion.
-
-Settings edits the selected environment's name and CPU/memory/system-disk values through Runtime. The environment must be stopped or failed, with no active leases or unsettled operations. Resources persist in `sandboxes/<id>/sandbox.json` and apply on the next start; global resource files are no longer read. Worker lifecycle/target changes are rejected by Runtime. Async status, desktop probes and management requests capture their target; switching views invalidates prior view completions.
-
-Embedded noVNC uses a warm-white minimal Xfce desktop matching Pot. Persistent bottom Browser/Files/Terminal launchers/window switching and matching context menu. CJK fonts cover Chinese/Japanese/Korean. Software is preinstalled; see Sandbox image for build/theme entries.
+Technical management stays in ordinary Chat/API. There are no resource creation,
+plugin configuration, session, artifact/download or “ask assistant to manage”
+controls on Machines. Resource creation UI is deferred. Task details keep necessary
+machine/environment status and existing guidance/cancel/approval interactions.
+File links appear in Chat only for tasks with deliverables.
 
 ## AI Configuration (#7)
 
@@ -140,24 +145,14 @@ including input/output/input-cache/incomplete records; missing attribution shows
 Global categories follow selected ranges; details use session totals, 20/page with previous/next.
 Category pages do not change totals/trends/allowances; range/session/zone changes reset pages.
 
-## Web access settings
+## App modes and Web hosting
 
-Settings has separate Web UI and Tailscale tabs, available from every settings page.
-General continues to contain language, appearance and keyboard-shortcut help.
-Web UI offers independently persisted LAN and Tailscale access switches, both off
-for new instances, and optional Tailscale HTTPS. LAN access needs no Tailscale login.
-Tailscale has its own connect/disconnect, login/device approval and DNS settings
-controls. Web UI links to that tab when the node is disconnected. Connecting a node
-does not enable browser access; disabling browser access does not disconnect it.
-HTTPS is applied only to the Tailscale entry point; LAN remains HTTP. Listener or
-certificate failures do not stop local features or the other access entry point.
-Each available address is clickable and configures the browser using a Token
-fragment; Copy address copies only the plain URL. Scan to connect expands a
-credential-bearing QR with a do-not-share warning. Access Token has Show/Hide,
-Copy and Regenerate controls; regeneration invalidates every browser connection.
-No separate Open browser button or per-browser authorization list is present.
-Browser More offers Change access Token and Clear local Token. Invalid Token state
-stops polling, hides protected content and presents a recoverable configuration form.
+App's local Runtime starts/exits with App and cannot become Control. Users first
+add one independently deployed Control; additional machines join that Control.
+A single icon switches local/remote mode. Drafts, caches and cursors are scoped by
+mode/Runtime/assistant. Remote failure never selects local execution.
 
-Add to Home Screen is available in authenticated GPUI More; the Token configuration
-page contains only the access configuration controls.
+Web UI is explicitly enabled by `pot serve --ui --control URL` and remains fixed
+to that Control. It has no local/remote switch. App has no Web UI/Tailscale hosting
+settings. Browser Token controls belong to the standalone host; see
+[deployment](deployment.md).

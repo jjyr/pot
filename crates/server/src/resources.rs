@@ -115,7 +115,7 @@ impl Resources {
         Self::open_policy(backend, config, true).await
     }
     pub async fn open_policy(
-        backend: Backend,
+        mut backend: Backend,
         config: RuntimeConfig,
         control_allowed: bool,
     ) -> Result<Arc<Self>> {
@@ -133,6 +133,34 @@ impl Resources {
                 entries: vec![],
             }
         };
+        // One-time adoption of product roots created before the resource manifest.
+        if !path.exists()
+            && config.data.join("pot-v2.sqlite").exists()
+            && backend.assistants().is_none()
+        {
+            backend.enable_host_resource();
+            let manager =
+                backend.register_environment_providers(crate::hosting::installed_providers()?)?;
+            if !config.data.join("sandboxes.json").exists() {
+                manager
+                    .management(
+                        &json!({"action":"create","sandbox_id":"default","name":"Linux"}),
+                        false,
+                        &|| false,
+                        &|_, action| action(),
+                    )
+                    .await?;
+                manager
+                    .management(
+                        &json!({"action":"select","sandbox_id":"default"}),
+                        false,
+                        &|| false,
+                        &|_, action| action(),
+                    )
+                    .await?;
+            }
+            backend.enable_assistant_resources(config.clone()).await?;
+        }
         // Preserve the current product resource definitions when upgrading an existing root.
         // This does not import assistant instruction files or old preference records.
         if !path.exists() && backend.assistants().is_some() {
@@ -344,7 +372,7 @@ impl Resources {
     }
     pub async fn shutdown(&self) {
         if let Err(error) = self.control.stop_listener(false).await {
-            eprintln!("Peer listener shutdown failed: {error}");
+            eprintln!("Control listener shutdown failed: {error}");
         }
         self.control.stop_operations().await;
         self.inner.lock().await.backend.shutdown().await;
@@ -492,13 +520,7 @@ mod tests {
             data: root.join("product"),
             workspace: root.join("workspace"),
         };
-        let backend = pot_runtime::initialize_composition(
-            config.clone(),
-            pot_runtime::host::Composition::Bare,
-            vec![],
-        )
-        .await
-        .unwrap();
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
         backend.activate().unwrap();
         let resources = Resources::open(backend, config.clone()).await.unwrap();
         let denied = machines(State(resources.clone()), HeaderMap::new()).await;

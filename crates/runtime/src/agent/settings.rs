@@ -268,9 +268,21 @@ pub async fn settings(
             .store
             .set(storage::PROFILES, &serde_json::to_string(&profiles)?)?;
         if settings.follow_worker {
+            let mut policy: routing::Policy = inner
+                .store
+                .get("agent.routing.v1")?
+                .map(|s| serde_json::from_str(&s))
+                .transpose()?
+                .unwrap_or_default();
+            policy.worker_profile = Some(settings.profile.id.clone());
+            policy.follow_chat = false;
+            policy.revision = policy
+                .revision
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("Routing revision overflow"))?;
             inner
                 .store
-                .set("agent.default.worker", &settings.profile.id)?;
+                .set("agent.routing.v1", &serde_json::to_string(&policy)?)?;
         }
         inner.store.set(&key, &fingerprint)?;
         Ok(())
@@ -427,7 +439,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spec.source_profile_id, profile.id);
-        // Later connection saves may change the legacy fallback, but not an explicit role choice.
+        // The upgrade preserves an explicit routing choice over an old default.
         s.conversation
             .inner
             .lock()
@@ -435,6 +447,12 @@ mod tests {
             .store
             .set("agent.default.worker", "pot-default")
             .unwrap();
+        crate::upgrade::owner_store(
+            &s.conversation.inner.lock().unwrap().store,
+            &s.data,
+            &s.usage_scope,
+        )
+        .unwrap();
         assert_eq!(
             routing::resolve(
                 &s,

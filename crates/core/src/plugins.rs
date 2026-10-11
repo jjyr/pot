@@ -431,15 +431,6 @@ impl crate::AgentSettings {
             ensure!(bundle.manifest.id == *id, "Plugin ID differs from package");
             config.bundle = Some(bundle);
         }
-        // Translate the previous browser setting on migration to the plugin tool.
-        self.builtin_tools.retain(|n| n != "browser");
-        if let Some(allow) = &mut self.allowed_tools {
-            for name in allow {
-                if name == "browser" {
-                    *name = "cua_repl".into();
-                }
-            }
-        }
         self.validate_plugins()
     }
     pub fn validate_plugins(&self) -> Result<()> {

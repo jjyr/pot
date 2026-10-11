@@ -22,7 +22,7 @@ Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages
 
 ## Main-chat routing subset
 
-The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global scope follows the selected date window; main-chat details use lifetime scope. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](execution-preferences.md).
+The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global scope follows the selected date window; main-chat details use lifetime scope. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](agent-context.md).
 
 
 ## Display and limits

@@ -61,36 +61,38 @@ impl Authority {
             "Host cannot be managed as a Sandbox"
         );
         let book = self.book.lock().unwrap();
-        let peer = book
+        let control = book
             .members
             .get(&environment.runtime_id)
             .filter(|p| p.enabled)
             .ok_or_else(|| anyhow::anyhow!("Remote machine is not connected"))?;
         ensure!(
-            peer.inventory["items"].as_array().is_some_and(|items| items
-                .iter()
-                .any(|item| item["environment_ref"] == json!(environment))),
+            control.inventory["items"]
+                .as_array()
+                .is_some_and(|items| items
+                    .iter()
+                    .any(|item| item["environment_ref"] == json!(environment))),
             "Remote Sandbox is not in the Control machine inventory"
         );
         Ok(())
     }
-    fn management_path(&self, peer: &str, operation: &str) -> Result<PathBuf> {
+    fn management_path(&self, control: &str, operation: &str) -> Result<PathBuf> {
         ensure!(
             !operation.is_empty() && operation.len() <= 256,
             "Invalid management operation identity"
         );
         Ok(self
             .data
-            .join("peer-management")
-            .join(digest(&(peer, operation))?))
+            .join("environment-management")
+            .join(digest(&(control, operation))?))
     }
     pub(super) fn inspect_management(
         &self,
-        peer: &str,
+        control: &str,
         operation: &str,
         boot: &str,
     ) -> Result<Value> {
-        let path = self.management_path(peer, operation)?;
+        let path = self.management_path(control, operation)?;
         if !path.exists() {
             return Ok(json!({"state":"not_accepted"}));
         }
@@ -103,7 +105,7 @@ impl Authority {
     }
     /// Called under the acceptance lock, before acquiring any execution lease.
     pub(super) fn management_busy(&self, target: &Target) -> Result<()> {
-        let dir = self.data.join("peer-management");
+        let dir = self.data.join("environment-management");
         if dir.exists() {
             for entry in std::fs::read_dir(dir)? {
                 let receipt: Receipt = serde_json::from_slice(&std::fs::read({
@@ -128,7 +130,7 @@ impl Authority {
                 !self.lease_valid(&book, lease, boot),
                 "Sandbox has an active remote execution lease"
             );
-            let dir = self.data.join("peer-operations");
+            let dir = self.data.join("execution-operations");
             if dir.exists() {
                 for entry in std::fs::read_dir(&dir)? {
                     let receipt: Receipt = serde_json::from_slice(&std::fs::read({
@@ -150,7 +152,7 @@ impl Authority {
     pub(super) async fn accept_management(
         self: &Arc<Self>,
         host: &pot_runtime::host::Host,
-        peer: &str,
+        control: &str,
         request: Request,
         hub: Option<Arc<pot_runtime::assistants::Hub>>,
     ) -> Result<Value> {
@@ -187,7 +189,7 @@ impl Authority {
         args.as_object_mut()
             .ok_or_else(|| anyhow::anyhow!("Invalid management arguments"))?
             .remove("runtime_id");
-        let path = self.management_path(peer, &operation)?;
+        let path = self.management_path(control, &operation)?;
         let request = json!({"target":target,"args":args});
         if path.exists() {
             let receipt: Receipt = serde_json::from_slice(&std::fs::read(&path)?)?;
@@ -202,17 +204,17 @@ impl Authority {
             "Management acceptance window expired or invalid"
         );
         self.management_busy(&target)?;
-        let session = self.control_session(peer)?;
+        let session = self.control_session(control)?;
         require_target(host, &target).await?;
-        // Recovery reconciles executor state, but cannot erase peer uncertainty or terminate a live peer lease.
+        // Recovery reconciles executor state, but cannot erase control uncertainty or terminate a live control lease.
         self.execution_busy(&target, &boot)?;
         let check = self.clone();
-        let peer = peer.to_owned();
+        let control = control.to_owned();
         let deadline = accept_before_ms;
         let cancelled: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
             check.stopping.load(std::sync::atomic::Ordering::SeqCst)
                 || now() >= deadline
-                || check.control_session(&peer).ok().as_ref() != Some(&session)
+                || check.control_session(&control).ok().as_ref() != Some(&session)
         });
         ensure!(!cancelled(), "Management authority expired");
         std::fs::create_dir_all(path.parent().unwrap())?;
@@ -376,7 +378,7 @@ mod tests {
         assert!(management_terminal(&json!({"state":"uncertain"}), now() - 1).is_none());
     }
     #[test]
-    fn management_receipts_fence_targets_survive_restart_and_keep_peer_scope() {
+    fn management_receipts_fence_targets_survive_restart_and_keep_control_scope() {
         let root =
             std::env::temp_dir().join(format!("pot-management-receipt-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
@@ -385,7 +387,7 @@ mod tests {
         let target = Target::Sandbox {
             sandbox_id: "managed".into(),
         };
-        let path = authority.management_path("peer-a", "once").unwrap();
+        let path = authority.management_path("control-a", "once").unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let receipt = Receipt {
             schema_version: VERSION,
@@ -401,13 +403,13 @@ mod tests {
         };
         assert_eq!(
             authority
-                .inspect_management("peer-a", "once", "boot")
+                .inspect_management("control-a", "once", "boot")
                 .unwrap()["state"],
             "accepted"
         );
         assert_eq!(
             authority
-                .inspect_management("peer-b", "once", "boot")
+                .inspect_management("control-b", "once", "boot")
                 .unwrap()["state"],
             "not_accepted"
         );
@@ -418,7 +420,7 @@ mod tests {
         let restored = Authority::open(&root, &runtime).unwrap();
         assert_eq!(
             restored
-                .inspect_management("peer-a", "once", "next-boot")
+                .inspect_management("control-a", "once", "next-boot")
                 .unwrap()["state"],
             "uncertain"
         );
@@ -428,7 +430,7 @@ mod tests {
         private_json(&path, &receipt).unwrap();
         assert_eq!(
             restored
-                .inspect_management("peer-a", "once", "next-boot")
+                .inspect_management("control-a", "once", "next-boot")
                 .unwrap()["state"],
             "completed"
         );
@@ -649,13 +651,7 @@ mod tests {
         };
         caller.shutdown().await;
         drop(caller);
-        let backend = pot_runtime::initialize_composition(
-            config.clone(),
-            pot_runtime::host::Composition::Bare,
-            vec![],
-        )
-        .await
-        .unwrap();
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
         let caller = Resources::open(backend, config).await.unwrap();
         let restored = caller.control.clone();
         assert!(

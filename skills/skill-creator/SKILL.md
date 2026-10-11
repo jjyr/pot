@@ -15,7 +15,8 @@ output; omit unused directories and scaffolds.
 
 Create global skills at `~/.pot/agent/skills/<name>`, or use
 `<project>/.agents/skills/<name>` when the user requests a project-specific skill.
-Main and task agents discover the same global skills. Project skills take priority
+Control owns global installation/updates; connected tasks consume fixed read-only
+bundles. Independent local mode uses its own catalog. Project skills take priority
 over user global skills. Inspect an existing bundle before editing it.
 
 ## Format
@@ -50,10 +51,14 @@ restating enforced permissions, and provide concrete steps only where useful.
 
 ## Prepare and validate
 
+Resolve helper paths from the injected catalog, relative to SKILL.md. Global
+publication runs on Control (or independent local owner), never a connected task.
+Project edits use the actual workspace and its applicable permissions.
+
 Use apply_patch to prepare or edit a bundle in the workspace. Validate it with:
 
 ```sh
-python3 ~/.pot/agent/skills/skill-creator/scripts/quick_validate.py /data/workspace/draft/example-skill
+python3 <injected-skill-creator-path>/scripts/quick_validate.py /data/workspace/draft/example-skill
 ```
 
 The validator checks YAML, metadata, unfinished placeholders, ordinary resource
@@ -64,7 +69,7 @@ with representative inputs and inspect their output when appropriate.
 For a new global skill, publish the validated bundle with the installer helper:
 
 ```sh
-python3 ~/.pot/agent/skills/skill-installer/scripts/install_skill.py --local /data/workspace/draft/example-skill
+python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/draft/example-skill
 ```
 
 For an update, use the same command with `--replace` after reviewing the existing

@@ -6,19 +6,19 @@ placement on Host does not grant Host execution authority.
 
 ## Environments and authority
 
-Main defaults to Host; tasks default to their assigned Sandbox. Both use the same
-execution tools and may explicitly target Host. Tasks cannot switch Sandboxes,
-manage environments or delegate. Sandbox failure never causes Host fallback.
+Main defaults to Host. Tasks use their fixed typed Host/Sandbox target and the
+same execution tools. Approval cannot switch a task target; Tasks cannot manage
+environments or delegate. Sandbox failure never causes Host fallback.
 
 | Operation | Default policy |
 |---|---|
 | Host command, patch or plugin invocation | Ask unless an Agent-specific grant matches |
 | Ordinary assigned-Sandbox execution | Allow; owner may configure ask |
 | Continue an authorized command session | Allow with session ownership checks |
-| Task, schedule, preference and Sandbox management | Allow within the role's authority |
+| Task, schedule and Sandbox management | Allow within the role's authority |
 | Change Host directory mappings | Owner approval or an exact approved grant, even under allow policy |
 
-Policy belongs to the environment; permanent grants belong to one Agent (`main`
+Control owns policy/approvals for connected tasks; destination configuration cannot override them. Independent local Sandbox policy may use its environment file. Permanent grants belong to one Agent (`main`
 or a Task ID). Host and Sandbox grants are separate. Allow policy does not bypass
 role, assignment, session or configuration protection. Ordinary guest execution
 cannot modify permission policy to authorize itself. Permission administration
@@ -91,8 +91,8 @@ Execution receipts prevent duplicate effects; uncertain calls are not replayed.
 
 ## Editable configuration
 
-Host uses `~/.pot/agent/permissions.json`, alongside global `AGENTS.md`;
-`POT_AGENT_HOME` overrides the Host Agent directory. Each Sandbox uses its own
+Control and independent local Host use `~/.pot/agent/permissions.json`, alongside global `AGENTS.md`;
+`POT_AGENT_HOME` overrides the Host Agent directory. Independent local Sandbox execution uses its own
 guest execution HOME's `~/.pot/agent/permissions.json`, retained with that environment.
 
 ```json
@@ -144,8 +144,8 @@ system mounts. The prepared macOS guest provider does not support this operation
 
 Mappings change the environment and are visible to every Task sharing it.
 Revoking a grant does not remove an existing mapping; removing it requires another
-configuration change. An approved Task-specific Host operation provides access
-without sharing the path with other Tasks.
+configuration change. A Task explicitly bound to Host can request owner-approved Host execution; approval
+never switches a Sandbox-bound Task to Host.
 
 Owner API: `GET/POST /api/v1/permissions`. Sources: `crates/agent/src/permissions.rs`,
 `crates/runtime/src/permissions.rs`. Dated checks and untested scope:

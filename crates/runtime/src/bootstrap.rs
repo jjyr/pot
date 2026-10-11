@@ -84,8 +84,16 @@ impl Backend {
     }
 }
 pub async fn initialize(config: RuntimeConfig) -> Result<Backend> {
-    let composition = host::Composition::load(&config.data)?;
-    initialize_composition(config, composition, vec![]).await
+    let host = host::Host::open(&config.data)?;
+    Ok(Backend {
+        host,
+        assistants: None,
+        state: None,
+        activated: Default::default(),
+        main: None,
+        owns_lifecycle: true,
+        coordinator: Mutex::new(None),
+    })
 }
 /// Embedders can install code-level tools, context transforms and token estimation.
 pub async fn initialize_with_agent_executor(
@@ -106,7 +114,9 @@ async fn initialize_with_providers_and_agent(
     agent_executor: Arc<pot_agent::Agent>,
     providers: Vec<Arc<dyn pot_sandbox::Provider>>,
 ) -> Result<Backend> {
-    let mut host = host::Host::open(&config.data, host::Composition::Assistant)?;
+    let mut host = host::Host::open(&config.data)?;
+    host.host_enabled = true;
+    host.resource_capabilities(true);
     initialize_assistant(config, agent_executor, providers, &mut host, false).await
 }
 
@@ -143,9 +153,12 @@ async fn initialize_assistant(
         host.attach_host_environment();
     }
     host.attach_sandboxes(sandboxes.clone());
-    let permissions = Arc::new(permissions::Hub::open_with_legacy(
+    permissions::Hub::upgrade_file(
         &resources.home.join("permissions.json"),
         &data.join("permissions-v1.sqlite"),
+    )?;
+    let permissions = Arc::new(permissions::Hub::open(
+        &resources.home.join("permissions.json"),
     )?);
     let s = Service {
         scope: OwnerScope {
@@ -174,7 +187,7 @@ async fn initialize_assistant(
         },
         conversation: ConversationService {
             inner: Arc::new(Mutex::new(Inner {
-                store: Store::open(&data.join("pot-v2.sqlite"))?,
+                store: upgrade::open_store(&data.join("pot-v2.sqlite"), &data, "main")?,
                 agent: AgentStatus {
                     model: String::new(),
                     phase: AgentPhase::NeedsConfiguration,
@@ -327,47 +340,6 @@ impl Drop for Backend {
             coordinator.abort();
         }
     }
-}
-
-/// Explicit capability assembly; disabled compositions never open assistant stores.
-pub async fn initialize_composition(
-    config: RuntimeConfig,
-    composition: host::Composition,
-    providers: Vec<Arc<dyn pot_sandbox::Provider>>,
-) -> Result<Backend> {
-    anyhow::ensure!(
-        composition.has_sandboxes() || providers.is_empty(),
-        "This Runtime composition cannot register Sandbox Providers"
-    );
-    let mut host = host::Host::open(&config.data, composition)?;
-    if composition == host::Composition::Assistant {
-        return initialize_assistant(
-            config,
-            Arc::new(pot_agent::Agent::default()),
-            providers,
-            &mut host,
-            false,
-        )
-        .await;
-    }
-    if composition.has_environments() {
-        host.attach_host_environment();
-    }
-    if composition == host::Composition::Environment {
-        host.attach_sandboxes(Arc::new(sandbox::Manager::with_providers(
-            &config.data,
-            providers,
-        )?));
-    }
-    Ok(Backend {
-        host,
-        assistants: None,
-        state: None,
-        activated: Default::default(),
-        main: None,
-        owns_lifecycle: true,
-        coordinator: Mutex::new(None),
-    })
 }
 
 pub(crate) fn start_main(

@@ -132,10 +132,6 @@ pub struct ExecutionContext {
 /// Synchronous acknowledgements preserve persistence-before-network ordering.
 /// Runtime validates owner/generation/turn before applying these observations.
 pub trait ExecutionFeedback: Send + Sync {
-    /// None keeps configured availability; a bound destination can narrow execution tools.
-    fn supported_execution_tools(&self) -> Option<Vec<String>> {
-        None
-    }
     /// Protected user instruction edits can require a fresh review even with a grant.
     fn requires_owner_review(&self, _tool: &str, _args: &Value) -> bool {
         false

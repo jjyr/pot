@@ -67,7 +67,7 @@ Avoid uniformly applying one large radius to every element. Touch-oriented surfa
 
 ## Application shell and navigation
 
-Keep the compact 56 px icon-only sidebar: Chat, Tasks, Sandbox, Usage and Settings. The Pot icon is the Chat entry; there is no separate brand block or chat-bubble entry. Show names in hover/focus tooltips and accessibility labels. Place Settings at the bottom. Tasks contains Tasks / Schedules rather than another top-level navigation entry.
+Keep the compact 56 px icon-only sidebar: Chat, Tasks, Machines, Usage and Settings. The Pot icon is the Chat entry; there is no separate brand block or chat-bubble entry. Show names in hover/focus tooltips and accessibility labels. Place Settings at the bottom. Tasks contains Tasks / Schedules rather than another top-level navigation entry.
 
 The target design removes the user-facing Terminal page, consistent with [AI configuration #7](https://github.com/jjyr/pot/issues/7). This does not itself remove shell tools or background agent execution.
 
@@ -168,11 +168,11 @@ Persistent task-executor preferences follow [#3](https://github.com/jjyr/pot/iss
 
 Use 7 / 30 / 90 days / year, compact totals, one trend region and readable Agent/model and tool rankings. Keep category colors consistent and numeric labels neutral. Model consumption and estimated tool tokens remain distinct. Show allowance cards only when configured. Conversation Usage is its own history destination. Retain existing aggregation and incomplete-record semantics; see [Token usage](token-usage.md).
 
-### Sandbox
+### Machines
 
-Keep the desktop usable and full-width. The toolbar shows navigation/title, textual connection state, Take over / Hand back, environment information, reconnect, settings and More. At minimum width, move low-priority actions into More.
-
-Connection and control ownership reflect actual acknowledgment; viewing or navigating does not reclaim control. Show connected/observing, human control, starting, disconnected/retry and unavailable states. Environment information uses a compact resource panel. Web access remains separate under [#8](https://github.com/jjyr/pot/issues/8).
+Use lightweight machine status cards and expandable Host/Sandbox rows. Show necessary
+connectivity and Task state; technical management stays in Chat/API. Desktop viewers
+reuse the established visual language. No management shortcuts or artifact panels.
 
 ### Menu-bar Pot activity and unread indicator
 

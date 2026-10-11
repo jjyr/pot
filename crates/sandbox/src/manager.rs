@@ -100,6 +100,9 @@ impl Drop for Lease {
     }
 }
 impl Manager {
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data
+    }
     pub fn open(data: &std::path::Path, providers: Vec<Arc<dyn Provider>>) -> Result<Self> {
         Self::open_inventory(data, providers, true)
     }
@@ -805,7 +808,6 @@ impl Manager {
         call_id: &str,
         args: &Value,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-        legacy_receipt: Option<Value>,
     ) -> Result<Value> {
         anyhow::ensure!(
             !call_id.is_empty() && call_id.len() <= 256 && !grant.turn.is_empty(),
@@ -844,11 +846,6 @@ impl Manager {
         let directory = self.data.join("sandbox-receipts");
         std::fs::create_dir_all(&directory)?;
         let receipt = directory.join(format!("{key}.json"));
-        if !receipt.exists()
-            && let Some(old) = legacy_receipt
-        {
-            private_json(&receipt, &old)?;
-        }
         if receipt.exists() {
             let old: Value = serde_json::from_slice(&std::fs::read(&receipt)?)?;
             anyhow::ensure!(

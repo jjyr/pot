@@ -44,7 +44,7 @@ fn digest(value: &impl Serialize) -> Result<String> {
     Ok(B64
         .encode(ring::digest::digest(&ring::digest::SHA256, &serde_json::to_vec(value)?).as_ref()))
 }
-fn private_json(path: &Path, value: &impl Serialize) -> Result<()> {
+pub(super) fn private_json(path: &Path, value: &impl Serialize) -> Result<()> {
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let temp = path.with_extension("tmp");
     let mut file = std::fs::OpenOptions::new()
@@ -118,7 +118,7 @@ struct Code {
 #[derive(Clone, Serialize, Deserialize)]
 struct Lease {
     id: String,
-    peer_id: String,
+    control_id: String,
     owner: String,
     run_id: String,
     generation: u64,
@@ -285,7 +285,8 @@ impl Authority {
         Self::open_policy(data, runtime_id, true)
     }
     pub fn open_policy(data: &Path, runtime_id: &str, control_allowed: bool) -> Result<Arc<Self>> {
-        let key_path = data.join("peer-identity.json");
+        super::upgrade::control_data(data)?;
+        let key_path = data.join("control-identity.json");
         let keys: Keys = if key_path.exists() {
             serde_json::from_slice(&std::fs::read(&key_path)?)?
         } else {
@@ -314,11 +315,11 @@ impl Authority {
         let path = data.join("runtime-control.json");
         let book: Book = if path.exists() {
             let book: Book = serde_json::from_slice(&std::fs::read(&path)?)?;
-            ensure!(book.schema_version == VERSION, "Unsupported Control schema");
+            ensure!(book.schema_version == 2, "Unsupported Control schema");
             book
         } else {
             Book {
-                schema_version: VERSION,
+                schema_version: 2,
                 ..Default::default()
             }
         };
@@ -488,7 +489,7 @@ impl Authority {
     }
     fn acquire(
         &self,
-        peer: &str,
+        control: &str,
         owner: &str,
         run: &str,
         generation: u64,
@@ -504,11 +505,11 @@ impl Authority {
             let binding = book
                 .control
                 .as_ref()
-                .filter(|c| c.identity.runtime_id == peer)
+                .filter(|c| c.identity.runtime_id == control)
                 .ok_or_else(|| anyhow::anyhow!("Not the bound Control"))?;
             let session = digest(&binding.token)?;
             if let Some(lease) = book.leases.values().find(|l| {
-                l.peer_id == peer
+                l.control_id == control
                     && l.owner == owner
                     && l.run_id == run
                     && l.generation == generation
@@ -522,7 +523,7 @@ impl Authority {
             }
             let lease = Lease {
                 id: secret()?,
-                peer_id: peer.into(),
+                control_id: control.into(),
                 owner: owner.into(),
                 run_id: run.into(),
                 generation,
@@ -543,25 +544,28 @@ impl Authority {
             && lease.boot_id == boot
             && lease.expires_at_ms > now()
             && book.control.as_ref().is_some_and(|c| {
-                c.identity.runtime_id == lease.peer_id
+                c.identity.runtime_id == lease.control_id
                     && digest(&c.token).ok().as_ref() == Some(&lease.session)
             })
     }
-    fn lease(&self, peer: &str, id: &str, boot: &str, effect: bool) -> Result<Lease> {
+    fn lease(&self, control: &str, id: &str, boot: &str, effect: bool) -> Result<Lease> {
         let book = self.book.lock().unwrap();
         let lease = book
             .leases
             .get(id)
             .ok_or_else(|| anyhow::anyhow!("Lease not found"))?;
-        ensure!(lease.peer_id == peer, "Lease belongs to another peer");
+        ensure!(
+            lease.control_id == control,
+            "Lease belongs to another control"
+        );
         ensure!(
             !effect || self.lease_valid(&book, lease, boot),
             "Lease expired, cancelled or fenced"
         );
         Ok(lease.clone())
     }
-    fn renew(&self, peer: &str, id: &str, boot: &str) -> Result<Value> {
-        self.lease(peer, id, boot, true)?;
+    fn renew(&self, control: &str, id: &str, boot: &str) -> Result<Value> {
+        self.lease(control, id, boot, true)?;
         self.update(|book| {
             let old = book.leases.get(id).unwrap();
             ensure!(
@@ -574,13 +578,16 @@ impl Authority {
             Ok(value)
         })
     }
-    fn cancel(&self, peer: &str, id: &str) -> Result<Lease> {
+    fn cancel(&self, control: &str, id: &str) -> Result<Lease> {
         self.update(|book| {
             let lease = book
                 .leases
                 .get_mut(id)
                 .ok_or_else(|| anyhow::anyhow!("Lease not found"))?;
-            ensure!(lease.peer_id == peer, "Lease belongs to another peer");
+            ensure!(
+                lease.control_id == control,
+                "Lease belongs to another control"
+            );
             lease.cancelled = true;
             let result = lease.clone();
             Ok(result)
@@ -593,7 +600,7 @@ impl Authority {
         );
         Ok(self
             .data
-            .join("peer-operations")
+            .join("execution-operations")
             .join(digest(&(lease.id.as_str(), call))?))
     }
     pub(super) fn metadata(&self) -> Value {
@@ -806,12 +813,12 @@ impl Authority {
             }
             Ok(())
         })?;
-        // Repeat completion never reenrolls or implicitly reconnects a disconnected peer.
+        // Repeat completion never reenrolls or implicitly reconnects a disconnected control.
         {
             let book = self.book.lock().unwrap();
             if book.pending[&request.request_id].completed {
                 return Ok(
-                    json!({"identity":book.control.as_ref().filter(|c|c.identity.runtime_id==request.expected_runtime_id).ok_or_else(||anyhow::anyhow!("Completed peer record missing"))?.identity}),
+                    json!({"identity":book.control.as_ref().filter(|c|c.identity.runtime_id==request.expected_runtime_id).ok_or_else(||anyhow::anyhow!("Completed control record missing"))?.identity}),
                 );
             }
         }
@@ -843,9 +850,12 @@ impl Authority {
         );
         let token = reply.payload["token"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing peer credential"))?
+            .ok_or_else(|| anyhow::anyhow!("Missing control credential"))?
             .to_owned();
-        ensure!(B64.decode(&token)?.len() == 32, "Invalid peer credential");
+        ensure!(
+            B64.decode(&token)?.len() == 32,
+            "Invalid control credential"
+        );
         self.update(|book| {
             ensure!(
                 book.control.as_ref().is_none_or(|c| c.identity == identity),
@@ -1155,11 +1165,11 @@ async fn require_target(host: &pot_runtime::host::Host, target: &Target) -> Resu
     Ok(())
 }
 fn workspace_scope(lease: &Lease) -> Result<String> {
-    digest(&(&lease.peer_id, &lease.owner, &lease.target))
+    digest(&(&lease.control_id, &lease.owner, &lease.target))
 }
 fn scope(lease: &Lease) -> Result<String> {
     digest(&(
-        &lease.peer_id,
+        &lease.control_id,
         &lease.owner,
         &lease.run_id,
         lease.generation,
@@ -1171,15 +1181,15 @@ impl Authority {
     async fn dispatch(
         self: &Arc<Self>,
         host: &pot_runtime::host::Host,
-        peer: &str,
+        control: &str,
         body: Rpc,
     ) -> Result<Value> {
-        self.dispatch_with_hub(host, peer, body, None).await
+        self.dispatch_with_hub(host, control, body, None).await
     }
     async fn dispatch_with_hub(
         self: &Arc<Self>,
         host: &pot_runtime::host::Host,
-        peer: &str,
+        control: &str,
         body: Rpc,
         hub: Option<Arc<pot_runtime::assistants::Hub>>,
     ) -> Result<Value> {
@@ -1193,7 +1203,7 @@ impl Authority {
             } => {
                 self.accept_management(
                     host,
-                    peer,
+                    control,
                     management::Request {
                         operation: operation_id,
                         accept_before_ms,
@@ -1205,13 +1215,13 @@ impl Authority {
                 .await
             }
             Rpc::InspectManagement { operation_id } => {
-                self.inspect_management(peer, &operation_id, &boot)
+                self.inspect_management(control, &operation_id, &boot)
             }
             Rpc::Resources {
                 lease_id,
                 resources,
             } => {
-                let lease = self.lease(peer, &lease_id, &boot, true)?;
+                let lease = self.lease(control, &lease_id, &boot, true)?;
                 require_target(host, &lease.target).await?;
                 let revision = resources.revision()?;
                 self.update(|book| {
@@ -1237,7 +1247,7 @@ impl Authority {
                 .await
             }
             Rpc::Context { lease_id } => {
-                let lease = self.lease(peer, &lease_id, &boot, true)?;
+                let lease = self.lease(control, &lease_id, &boot, true)?;
                 require_target(host, &lease.target).await?;
                 host.controlled_context(&lease.target, &workspace_scope(&lease)?)
                     .await
@@ -1247,13 +1257,13 @@ impl Authority {
                 name,
                 args,
             } => {
-                let lease = self.lease(peer, &lease_id, &boot, true)?;
+                let lease = self.lease(control, &lease_id, &boot, true)?;
                 let authority = self.clone();
-                let peer = peer.to_owned();
+                let control = control.to_owned();
                 let check_boot = boot.clone();
                 let cancelled = Arc::new(move || {
                     authority
-                        .lease(&peer, &lease_id, &check_boot, true)
+                        .lease(&control, &lease_id, &check_boot, true)
                         .is_err()
                 });
                 host.prepare_controlled(
@@ -1282,7 +1292,7 @@ impl Authority {
             } => {
                 uuid::Uuid::parse_str(&owner)?;
                 require_target(host, &target).await?;
-                let workspace = digest(&(peer, &owner, &target))?;
+                let workspace = digest(&(control, &owner, &target))?;
                 Ok(serde_json::to_value(
                     host.controlled_file(&target, &workspace, query).await?,
                 )?)
@@ -1297,17 +1307,17 @@ impl Authority {
                 let _guard = self.operations.lock().await;
                 self.management_busy(&target)?;
                 require_target(host, &target).await?;
-                self.acquire(peer, &owner, &run_id, generation, &target, &boot)
+                self.acquire(control, &owner, &run_id, generation, &target, &boot)
             }
-            Rpc::Renew { lease_id } => self.renew(peer, &lease_id, &boot),
+            Rpc::Renew { lease_id } => self.renew(control, &lease_id, &boot),
             Rpc::Cancel { lease_id } => {
-                let lease = self.cancel(peer, &lease_id)?;
+                let lease = self.cancel(control, &lease_id)?;
                 host.cancel_controlled(&scope(&lease)?, &lease.target)
                     .await?;
                 Ok(json!({"cancelled":true}))
             }
             Rpc::Inspect { lease_id, call_id } => {
-                let lease = self.lease(peer, &lease_id, &boot, false)?;
+                let lease = self.lease(control, &lease_id, &boot, false)?;
                 let path = self.receipt_path(&lease, &call_id)?;
                 if !path.exists() {
                     return Ok(json!({"state":"not_accepted"}));
@@ -1326,7 +1336,7 @@ impl Authority {
                 args,
             } => {
                 let _guard = self.operations.lock().await;
-                let lease = self.lease(peer, &lease_id, &boot, false)?;
+                let lease = self.lease(control, &lease_id, &boot, false)?;
                 let path = self.receipt_path(&lease, &call_id)?;
                 let request =
                     json!({"lease_id":lease_id,"call_id":call_id,"name":name,"args":args});
@@ -1338,7 +1348,7 @@ impl Authority {
                     );
                     return Ok(self.operation_result(&receipt, &path, &boot));
                 }
-                self.lease(peer, &lease_id, &boot, true)?;
+                self.lease(control, &lease_id, &boot, true)?;
                 require_target(host, &lease.target).await?;
                 // The destination validates named tools against the supplied Control snapshot.
                 // Internal envelopes remain unavailable on this RPC.
@@ -1366,12 +1376,12 @@ impl Authority {
                 let task = tokio::spawn(async move {
                     let _active = active;
                     let check = authority.clone();
-                    let peer = lease.peer_id.clone();
+                    let control = lease.control_id.clone();
                     let lease_id = lease.id.clone();
                     let execution_boot = boot.clone();
                     let cancelled: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
                         check
-                            .lease(&peer, &lease_id, &execution_boot, true)
+                            .lease(&control, &lease_id, &execution_boot, true)
                             .is_err()
                     });
                     // The monitor also drains yielded sessions after expiry, independently of new RPCs.
@@ -1387,7 +1397,7 @@ impl Authority {
                             .cancel_controlled(&monitor_scope, &monitor_target)
                             .await
                         {
-                            eprintln!("Peer scope cleanup failed: {error}");
+                            eprintln!("Control scope cleanup failed: {error}");
                         }
                     });
                     authority.track(monitor);
@@ -1418,7 +1428,7 @@ impl Authority {
                     });
                     if let Err(error) = private_json(&path, &receipt) {
                         eprintln!(
-                            "Peer receipt persistence failed; outcome remains uncertain: {error}"
+                            "Control receipt persistence failed; outcome remains uncertain: {error}"
                         );
                     }
                 });
@@ -1545,10 +1555,10 @@ impl Authority {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        futures_util::future::join_all(control.into_iter().map(|peer|async move {
-            let online=peer.enabled && matches!(tokio::time::timeout(std::time::Duration::from_secs(2),self.call(&peer.identity.runtime_id,Rpc::Inventory)).await,Ok(Ok(_)));
+        futures_util::future::join_all(control.into_iter().map(|control|async move {
+            let online=control.enabled && matches!(tokio::time::timeout(std::time::Duration::from_secs(2),self.call(&control.identity.runtime_id,Rpc::Inventory)).await,Ok(Ok(_)));
             let book=self.book.lock().unwrap();
-            let current=book.members.get(&peer.identity.runtime_id).unwrap_or(&peer);
+            let current=book.members.get(&control.identity.runtime_id).unwrap_or(&control);
             json!({"runtime_id":current.identity.runtime_id,"identity":current.identity,"local":false,
                 "connection":if online && current.enabled{"online"}else{"offline"},"enabled":current.enabled,"last_seen_ms":current.last_seen_ms,
                 "environments":current.inventory["items"],"default":null})
@@ -1584,7 +1594,7 @@ impl Authority {
                     task.abort();
                     let _ = task.await;
                     eprintln!(
-                        "Peer operation shutdown timed out; inspect its durable receipt before any new action"
+                        "Control operation shutdown timed out; inspect its durable receipt before any new action"
                     );
                 }
             }
@@ -2113,7 +2123,7 @@ mod tests {
         let workspace = node
             .control
             .data
-            .join("peer-workspaces")
+            .join("execution-workspaces")
             .join(digest(&(&control.control.identity.runtime_id, &owner, &target)).unwrap());
         std::fs::create_dir_all(&workspace).unwrap();
         let bytes: Vec<_> = (0..pot_runtime::files::CHUNK_BYTES + 29)
@@ -2297,18 +2307,13 @@ mod tests {
         std::fs::remove_dir_all(control.control.data.parent().unwrap()).unwrap();
     }
     pub(super) async fn resources() -> Arc<Resources> {
-        let root = std::env::temp_dir().join(format!("pot-peer-runtime-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("pot-control-runtime-{}", uuid::Uuid::new_v4()));
         let config = pot_runtime::RuntimeConfig {
             data: root.join("data"),
             workspace: root.join("workspace"),
         };
-        let backend = pot_runtime::initialize_composition(
-            config.clone(),
-            pot_runtime::host::Composition::Bare,
-            vec![],
-        )
-        .await
-        .unwrap();
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
         Resources::open(backend, config).await.unwrap()
     }
     pub(super) async fn native(
@@ -2366,7 +2371,7 @@ mod recovery_tests {
     async fn completed(
         authority: &Arc<Authority>,
         host: &pot_runtime::host::Host,
-        peer: &str,
+        control: &str,
         lease: &str,
         call: &str,
     ) -> Value {
@@ -2375,7 +2380,7 @@ mod recovery_tests {
                 let value = authority
                     .dispatch(
                         host,
-                        peer,
+                        control,
                         Rpc::Inspect {
                             lease_id: lease.into(),
                             call_id: call.into(),
@@ -2402,13 +2407,13 @@ mod recovery_tests {
         )
         .await;
         enroll(&caller.control, &target.control);
-        let peer = &caller.control.identity.runtime_id;
+        let control = &caller.control.identity.runtime_id;
         let host = target.host().await;
         let boot = host.describe()["boot_id"].as_str().unwrap().to_owned();
         let value = target
             .control
             .acquire(
-                peer,
+                control,
                 "a",
                 &uuid::Uuid::new_v4().to_string(),
                 1,
@@ -2417,7 +2422,7 @@ mod recovery_tests {
             )
             .unwrap();
         let id = value["id"].as_str().unwrap();
-        let lease = target.control.lease(peer, id, &boot, false).unwrap();
+        let lease = target.control.lease(control, id, &boot, false).unwrap();
         let args = json!({"cmd":"touch replay-forbidden"});
         let call = "uncertain";
         let path = target.control.receipt_path(&lease, call).unwrap();
@@ -2439,20 +2444,14 @@ mod recovery_tests {
         target.shutdown().await;
         drop(host);
         drop(target);
-        let backend = pot_runtime::initialize_composition(
-            config.clone(),
-            pot_runtime::host::Composition::Bare,
-            vec![],
-        )
-        .await
-        .unwrap();
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
         let restarted = Resources::open(backend, config).await.unwrap();
         let host = restarted.host().await;
         let result = restarted
             .control
             .dispatch(
                 &host,
-                peer,
+                control,
                 Rpc::Execute {
                     lease_id: id.into(),
                     call_id: call.into(),
@@ -2468,7 +2467,7 @@ mod recovery_tests {
                 .control
                 .dispatch(
                     &host,
-                    peer,
+                    control,
                     Rpc::Renew {
                         lease_id: id.into()
                     }
@@ -2480,7 +2479,7 @@ mod recovery_tests {
             !restarted
                 .control
                 .data
-                .join("peer-workspaces")
+                .join("execution-workspaces")
                 .join(workspace_scope(&lease).unwrap())
                 .exists()
         );
@@ -2497,7 +2496,7 @@ mod recovery_tests {
         )
         .await;
         enroll(&caller.control, &target.control);
-        let peer = &caller.control.identity.runtime_id;
+        let control = &caller.control.identity.runtime_id;
         let host = target.host().await;
         let boot = host.describe()["boot_id"].as_str().unwrap().to_owned();
         let mut leases = vec![];
@@ -2506,7 +2505,7 @@ mod recovery_tests {
             let lease = target
                 .control
                 .acquire(
-                    peer,
+                    control,
                     owner,
                     &uuid::Uuid::new_v4().to_string(),
                     1,
@@ -2519,7 +2518,7 @@ mod recovery_tests {
                 .control
                 .dispatch(
                     &host,
-                    peer,
+                    control,
                     Rpc::Execute {
                         lease_id: id.clone(),
                         call_id: "start".into(),
@@ -2529,20 +2528,20 @@ mod recovery_tests {
                 )
                 .await
                 .unwrap();
-            let result = completed(&target.control, &host, peer, &id, "start").await;
+            let result = completed(&target.control, &host, control, &id, "start").await;
             assert_eq!(result["result"]["ok"], true, "{result}");
             results.push(result);
             leases.push(id);
         }
         let expired = target
             .control
-            .lease(peer, &leases[0], &boot, false)
+            .lease(control, &leases[0], &boot, false)
             .unwrap();
         let pid: i32 = std::fs::read_to_string(
             target
                 .control
                 .data
-                .join("peer-workspaces")
+                .join("execution-workspaces")
                 .join(workspace_scope(&expired).unwrap())
                 .join("pid"),
         )
@@ -2571,7 +2570,7 @@ mod recovery_tests {
             .control
             .dispatch(
                 &host,
-                peer,
+                control,
                 Rpc::Execute {
                     lease_id: leases[1].clone(),
                     call_id: "poll".into(),
@@ -2581,14 +2580,14 @@ mod recovery_tests {
             )
             .await
             .unwrap();
-        let result = completed(&target.control, &host, peer, &leases[1], "poll").await;
+        let result = completed(&target.control, &host, control, &leases[1], "poll").await;
         assert_eq!(result["result"]["ok"], true, "{result}");
         let foreign = results[0]["result"]["value"]["result"]["session_id"].clone();
         target
             .control
             .dispatch(
                 &host,
-                peer,
+                control,
                 Rpc::Execute {
                     lease_id: leases[1].clone(),
                     call_id: "foreign".into(),
@@ -2598,13 +2597,13 @@ mod recovery_tests {
             )
             .await
             .unwrap();
-        let result = completed(&target.control, &host, peer, &leases[1], "foreign").await;
+        let result = completed(&target.control, &host, control, &leases[1], "foreign").await;
         assert_eq!(result["result"]["ok"], false);
         target
             .control
             .dispatch(
                 &host,
-                peer,
+                control,
                 Rpc::Cancel {
                     lease_id: leases[1].clone(),
                 },

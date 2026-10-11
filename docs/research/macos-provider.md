@@ -48,7 +48,7 @@ Sandbox Manager
 | Lume | Alternative unattended installer/VM tooling | Preparation option, not a required runtime dependency |
 | Host process restrictions | Can add defenses to a process | Does not supply an independent macOS guest |
 
-Tart publishes base/Xcode VM images and preparation guidance, but these are full VM images with default credentials. Do not enroll them unchanged or assume disk/config compatibility. Its license and image distribution need independent assessment; the prior [platform research](macos-windows-sandboxes.md#macos-image-preparation-and-initial-setup) records those limits. [Tart quick start](https://github.com/openai/tart/blob/main/docs/quick-start.md), [Packer templates](https://github.com/cirruslabs/macos-image-templates).
+Tart publishes base/Xcode VM images and preparation guidance, but these are full VM images with default credentials. Do not enroll them unchanged or assume disk/config compatibility. Its license and image distribution need independent assessment; the prior [current architecture](../architecture.md) records those limits. [Tart quick start](https://github.com/openai/tart/blob/main/docs/quick-start.md), [Packer templates](https://github.com/cirruslabs/macos-image-templates).
 
 ## Rust crate and Swift helper
 
@@ -60,7 +60,7 @@ The helper requires `com.apple.security.virtualization` and distribution signing
 
 ## VM bundle and preparation
 
-Maintain the macOS source description under proposed `crates/sandbox-images/macos/xcode/` (template metadata, versioned VZ recipe and bootstrap assets). Installed stopped templates and per-project writable VM bundles live under the injected private Sandbox storage root, not inside the Rust Provider crate or Git. Common catalog types are owned by Manager; `pot-sandbox-macos` validates VZ-specific fields. See [template storage](../sandbox-providers.md#imagetemplate-descriptions-and-storage).
+Maintain the macOS source description under proposed `crates/sandbox-images/macos/xcode/` (template metadata, versioned VZ recipe and bootstrap assets). Installed stopped templates and per-project writable VM bundles live under the injected private Sandbox storage root, not inside the Rust Provider crate or Git. Common catalog types are owned by Manager; `pot-sandbox-macos` validates VZ-specific fields. See [template storage](../sandbox-providers.md#platform-and-resource-details).
 
 Proposed private bundle:
 

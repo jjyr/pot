@@ -45,7 +45,7 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
         return Ok(SkillResources::default());
     }
     let (base, _, cwd, visible) = crate::environment::workspace_view(s)?;
-    let host = s.is_worker && s.sandbox_id.is_none();
+    let host = !s.is_worker || s.sandbox_id.is_none();
     let mut roots = vec![];
     let mut project = cwd.as_path();
     let mut location = visible.as_path();
@@ -111,15 +111,11 @@ mod tests {
         .unwrap();
     }
     #[test]
-    fn builtin_management_skills_use_guest_locations_and_ignore_user_overrides() {
+    fn builtin_management_skills_use_actual_host_locations_and_ignore_user_overrides() {
         let root = tasks::tests::fixture();
         for name in ["skill-creator", "skill-installer"] {
             bundle(
-                &root
-                    .environment_service
-                    .sandboxes
-                    .workspace("default")
-                    .join(".agents/skills"),
+                &root.data.join("agent-workspace/.agents/skills"),
                 name,
                 "forged project override",
             );
@@ -138,7 +134,17 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 skill.location,
-                format!("/data/workspace/.pot/agent/skills/{name}/SKILL.md")
+                root.agent_service
+                    .resources
+                    .skill_builtin
+                    .join(name)
+                    .join("SKILL.md")
+                    .to_string_lossy()
+            );
+            assert!(
+                std::fs::read_to_string(&skill.location)
+                    .unwrap()
+                    .contains(&format!("name: {name}"))
             );
             assert!(!skill.description.contains("forged"));
         }
@@ -235,7 +241,15 @@ mod tests {
         sandbox::management(&root, &json!({"action":"select","sandbox_id":"second"}))
             .await
             .unwrap();
-        for (service, expected) in [(&root, "new default"), (&worker, "original sandbox")] {
+        bundle(
+            &root.data.join("agent-workspace/.agents/skills"),
+            "environment",
+            "actual Host project",
+        );
+        for (service, expected) in [
+            (&root, "actual Host project"),
+            (&worker, "original sandbox"),
+        ] {
             let catalog = pot_agent::discover_skills(&resources(service).unwrap()).unwrap();
             assert_eq!(
                 catalog

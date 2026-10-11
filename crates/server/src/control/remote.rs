@@ -254,15 +254,17 @@ impl RemoteEnvironment for Authority {
     fn validate(&self, environment: &EnvironmentRef) -> Result<()> {
         environment.validate()?;
         let book = self.book.lock().unwrap();
-        let peer = book
+        let remote = book
             .members
             .get(&environment.runtime_id)
             .filter(|p| p.enabled)
             .ok_or_else(|| anyhow::anyhow!("Remote machine is not connected"))?;
         ensure!(
-            peer.inventory["items"].as_array().is_some_and(|items| items
-                .iter()
-                .any(|item| item["environment_ref"] == json!(environment))),
+            remote.inventory["items"]
+                .as_array()
+                .is_some_and(|items| items
+                    .iter()
+                    .any(|item| item["environment_ref"] == json!(environment))),
             "Remote Environment is not in the Control machine inventory"
         );
         Ok(())
@@ -519,12 +521,12 @@ impl RemoteEnvironment for Authority {
                     Ok(())
                 })?;
             }
-            let peer = &binding.environment.runtime_id;
+            let remote = &binding.environment.runtime_id;
             let mut receipt = if previous.is_none() {
                 // An uncertain send is followed only by inspect, never by another execute.
                 match self
                     .call(
-                        peer,
+                        remote,
                         Rpc::Execute {
                             lease_id: lease.clone(),
                             call_id: call.clone(),

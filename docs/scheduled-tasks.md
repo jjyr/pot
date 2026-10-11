@@ -9,7 +9,7 @@ Chat / tasks -> schedules
 Runtime scheduler -> SQLite tasks.v2 (schedules + triggers + task queue)
              | Due: create one run transactionally
              ▼
-Shared task queue (default concurrency 5) -> independent Host Agent / fixed Sandbox working directory
+Shared task queue (default concurrency 8) -> independent Task / fixed Host or Sandbox environment
              │ .pot-schedule-result.json
              ▼
 Validate result -> compare fingerprint -> save history

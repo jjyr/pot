@@ -78,21 +78,29 @@ struct Node {
     serving: tokio::task::JoinHandle<()>,
 }
 impl Node {
-    async fn start(
-        root: &Path,
-        composition: Composition,
-        providers: Vec<Arc<dyn Provider>>,
-    ) -> Self {
-        let backend = initialize_composition(
-            RuntimeConfig {
-                data: root.join("product"),
-                workspace: root.join("workspace"),
-            },
-            composition,
-            providers,
-        )
+    async fn start(root: &Path, enable_host: bool, providers: Vec<Arc<dyn Provider>>) -> Self {
+        let mut backend = initialize(RuntimeConfig {
+            data: root.join("product"),
+            workspace: root.join("workspace"),
+        })
         .await
         .unwrap();
+        if enable_host {
+            backend.enable_host_resource();
+        }
+        if !providers.is_empty() {
+            let provider_id = providers[0].descriptor().id;
+            let manager = backend.register_environment_providers(providers).unwrap();
+            manager
+                .management(
+                    &json!({"action":"create","sandbox_id":"default","provider":provider_id}),
+                    false,
+                    &|| false,
+                    &|_, action| action(),
+                )
+                .await
+                .unwrap();
+        }
         backend.activate().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -139,13 +147,13 @@ impl Node {
     }
 }
 fn root() -> PathBuf {
-    std::env::temp_dir().join(format!("pot-composition-{}", id()))
+    std::env::temp_dir().join(format!("pot-resources-{}", id()))
 }
 
 #[tokio::test]
 async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
     let root = root();
-    let node = Node::start(&root, Composition::Host, vec![]).await;
+    let node = Node::start(&root, true, vec![]).await;
     assert!(node.backend.state().is_err());
     let description: Value = node.get("/api/v1/runtime").await.json().await.unwrap();
     assert_eq!(
@@ -188,7 +196,7 @@ async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
         StatusCode::CONFLICT
     );
     node.close().await;
-    let node = Node::start(&root, Composition::Host, vec![]).await;
+    let node = Node::start(&root, true, vec![]).await;
     assert_eq!(
         node.post("/api/v1/execution", op.clone())
             .await
@@ -254,7 +262,7 @@ async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
 #[tokio::test]
 async fn host_cancel_cleans_only_its_run_and_prevents_new_effects() {
     let root = root();
-    let node = Node::start(&root, Composition::Host, vec![]).await;
+    let node = Node::start(&root, true, vec![]).await;
     let environment = pot_core::EnvironmentRef::host(node.backend.host().runtime_id());
     let run = id();
     let sibling = id();
@@ -321,7 +329,7 @@ async fn host_cancel_cleans_only_its_run_and_prevents_new_effects() {
 #[tokio::test]
 async fn bare_startup_is_idle_and_identity_survives_restart() {
     let root = root();
-    let node = Node::start(&root, Composition::Bare, vec![]).await;
+    let node = Node::start(&root, false, vec![]).await;
     assert!(node.backend.state().is_err());
     let first: Value = node.get("/api/v1/runtime").await.json().await.unwrap();
     assert_eq!(first["capabilities"], json!(["runtime"]));
@@ -351,7 +359,7 @@ async fn bare_startup_is_idle_and_identity_survives_restart() {
     );
     assert!(node.backend.activate().is_err());
     node.close().await;
-    let node = Node::start(&root, Composition::Bare, vec![]).await;
+    let node = Node::start(&root, false, vec![]).await;
     let second: Value = node.get("/api/v1/runtime").await.json().await.unwrap();
     assert_eq!(first["runtime_id"], second["runtime_id"]);
     assert_ne!(first["boot_id"], second["boot_id"]);
@@ -363,7 +371,7 @@ async fn bare_startup_is_idle_and_identity_survives_restart() {
 async fn environment_executes_without_agent_and_replays_receipts_not_effects() {
     let root = root();
     let executor = Arc::new(Executor::default());
-    let node = Node::start(&root, Composition::Environment, vec![executor.clone()]).await;
+    let node = Node::start(&root, true, vec![executor.clone()]).await;
     assert!(node.backend.state().is_err());
     assert_eq!(
         node.get("/api/v1/tasks").await.status(),
@@ -433,45 +441,43 @@ async fn environment_executes_without_agent_and_replays_receipts_not_effects() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
-#[test]
-fn composition_rollout_preserves_existing_roots_and_rejects_future_versions() {
+#[tokio::test]
+async fn neutral_startup_ignores_obsolete_preset_without_opening_product_data() {
     let root = root();
     let data = root.join("product");
     std::fs::create_dir_all(&data).unwrap();
-    assert_eq!(Composition::load(&data).unwrap(), Composition::Bare);
     std::fs::write(data.join("pot-v2.sqlite"), b"existing data").unwrap();
-    assert_eq!(Composition::load(&data).unwrap(), Composition::Assistant);
     execution::private_json(
         &data.join("runtime-composition.json"),
-        &json!({"schema_version":1,"preset":"environment"}),
+        &json!({"schema_version":1,"preset":"assistant"}),
     )
     .unwrap();
-    assert_eq!(Composition::load(&data).unwrap(), Composition::Environment);
-    execution::private_json(
-        &data.join("runtime-composition.json"),
-        &json!({"schema_version":2,"preset":"environment"}),
-    )
+    let mut backend = initialize(RuntimeConfig {
+        data: data.clone(),
+        workspace: root.join("workspace"),
+    })
+    .await
     .unwrap();
-    assert!(Composition::load(&data).is_err());
+    assert_eq!(
+        backend.host().describe()["capabilities"],
+        json!(["runtime"])
+    );
+    assert!(backend.optional_state().is_none());
     assert_eq!(
         std::fs::read(data.join("pot-v2.sqlite")).unwrap(),
         b"existing data"
     );
+    backend.shutdown().await;
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
-async fn peer_cancel_closes_sandbox_scope_and_preserves_other_owner() {
+async fn control_cancel_closes_sandbox_scope_and_preserves_other_owner() {
     let root = root();
-    let node = Node::start(
-        &root,
-        Composition::Environment,
-        vec![Arc::new(Executor::default())],
-    )
-    .await;
+    let node = Node::start(&root, true, vec![Arc::new(Executor::default())]).await;
     let host = node.backend.host();
     let target = pot_core::EnvironmentRef::sandbox(&host.runtime_id, "default");
-    for scope in ["peer-a", "peer-b"] {
+    for scope in ["control-a", "control-b"] {
         host.execute_controlled(
             ControlOperation {
                 resources_revision: None,
@@ -491,11 +497,11 @@ async fn peer_cancel_closes_sandbox_scope_and_preserves_other_owner() {
     }
     let manager = node.backend.environment_manager().unwrap();
     assert_eq!(manager.inventory().await["items"][0]["active_leases"], 2);
-    host.cancel_controlled("peer-a", &target.target)
+    host.cancel_controlled("control-a", &target.target)
         .await
         .unwrap();
     assert_eq!(manager.inventory().await["items"][0]["active_leases"], 1);
-    host.cancel_controlled("peer-b", &target.target)
+    host.cancel_controlled("control-b", &target.target)
         .await
         .unwrap();
     assert_eq!(manager.inventory().await["items"][0]["active_leases"], 0);

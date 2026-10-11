@@ -40,18 +40,7 @@ pub fn policy(root: &Service) -> Result<Policy> {
 }
 pub async fn inspect(State(root): State<Service>, h: HeaderMap) -> ApiResult<Json<Policy>> {
     root.authorized(&h)?;
-    let mut effective = policy(&root).map_err(internal)?;
-    if !effective.follow_chat && effective.worker_profile.is_none() {
-        effective.worker_profile = root
-            .conversation
-            .inner
-            .lock()
-            .unwrap()
-            .store
-            .get("agent.default.worker")
-            .map_err(internal)?;
-    }
-    Ok(Json(effective))
+    Ok(Json(policy(&root).map_err(internal)?))
 }
 pub async fn configure(
     State(root): State<Service>,
@@ -140,9 +129,7 @@ pub fn resolve(
     if profile.is_none() {
         let policy = policy(root)?;
         let inner = root.conversation.inner.lock().unwrap();
-        if (policy.follow_chat
-            || (policy.worker_profile.is_none()
-                && inner.store.get("agent.default.worker")?.is_none()))
+        if (policy.follow_chat || (policy.worker_profile.is_none()))
             && let Some(thread) = current(&inner.store)?
         {
             let spec = thread.config;
@@ -173,15 +160,12 @@ pub fn resolve(
                     .config
                     .source_profile_id
             } else {
-                policy(root)?.worker_profile.unwrap_or({
-                    let inner = root.conversation.inner.lock().unwrap();
-                    inner.store.get("agent.default.worker")?.unwrap_or_else(|| {
-                        current(&inner.store)
-                            .ok()
-                            .flatten()
-                            .map(|b| b.config.source_profile_id)
-                            .unwrap_or_else(|| "pot-default".into())
-                    })
+                policy(root)?.worker_profile.unwrap_or_else(|| {
+                    current(&root.conversation.inner.lock().unwrap().store)
+                        .ok()
+                        .flatten()
+                        .map(|b| b.config.source_profile_id)
+                        .unwrap_or_else(|| "pot-default".into())
                 })
             },
             "worker_default",
@@ -243,20 +227,26 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn inspection_exposes_legacy_worker_default_without_rewriting_policy() {
+    async fn inspection_uses_only_routing_policy() {
         let s = crate::tests::service();
         s.conversation
             .inner
             .lock()
             .unwrap()
             .store
-            .set("agent.default.worker", "legacy-worker")
+            .set(
+                POLICY,
+                &json!({"worker_profile":"chosen-worker"}).to_string(),
+            )
             .unwrap();
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "Bearer test-token".parse().unwrap());
         let Json(visible) = inspect(State(s.clone()), headers.clone()).await.unwrap();
-        assert_eq!(visible.worker_profile.as_deref(), Some("legacy-worker"));
-        assert!(policy(&s).unwrap().worker_profile.is_none());
+        assert_eq!(visible.worker_profile.as_deref(), Some("chosen-worker"));
+        assert_eq!(
+            policy(&s).unwrap().worker_profile.as_deref(),
+            Some("chosen-worker")
+        );
         s.conversation
             .inner
             .lock()

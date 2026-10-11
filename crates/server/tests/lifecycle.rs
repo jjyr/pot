@@ -17,10 +17,27 @@ impl Fixture {
                     .as_nanos()
             )))
     }
+    async fn start(&self) -> Server {
+        let server = Server::bind(self.config()).await.unwrap();
+        for (id, resource) in [
+            ("assistant", json!({"kind":"assistant","name":"Assistant"})),
+            ("host", json!({"kind":"host"})),
+        ] {
+            let reply = server
+                .local_client()
+                .request(
+                    "/api/v1/runtime/resources",
+                    Some(json!({"request_id":id,"resource":resource})),
+                )
+                .await
+                .unwrap();
+            assert_eq!(reply.status, 200);
+        }
+        server
+    }
     fn config(&self) -> ServerConfig {
         ServerConfig {
             web_control: None,
-            composition: Some(pot_runtime::host::Composition::Assistant),
             runtime: RuntimeConfig {
                 data: self.0.join("data"),
                 workspace: self.0.join("workspace"),
@@ -38,7 +55,7 @@ impl Drop for Fixture {
 #[tokio::test]
 async fn standalone_server_auth_persistence_sse_and_shutdown_without_app() {
     let fixture = Fixture::new();
-    let server = Server::bind(fixture.config()).await.unwrap();
+    let server = fixture.start().await;
     let endpoint = server.endpoint().unwrap();
     let published: RuntimeEndpoint = serde_json::from_slice(
         &std::fs::read(fixture.0.join("data").join(RUNTIME_ENDPOINT_FILE)).unwrap(),
@@ -140,7 +157,7 @@ async fn standalone_server_auth_persistence_sse_and_shutdown_without_app() {
             .unwrap()
             .is_none()
     );
-    let next = Server::bind(fixture.config()).await.unwrap();
+    let next = fixture.start().await;
     let next_endpoint = next.endpoint().unwrap();
     assert_ne!(next_endpoint.boot_id, endpoint.boot_id);
     assert_ne!(next_endpoint.token, endpoint.token);
@@ -216,7 +233,7 @@ async fn shutdown_settles_active_main_and_worker_model_requests_without_host_exe
         );
         axum::serve(upstream, router).await.unwrap();
     });
-    let server = Server::bind(fixture.config()).await.unwrap();
+    let server = fixture.start().await;
     let endpoint = server.endpoint().unwrap();
     let base = format!("http://{}", server.local_addr().unwrap());
     let (stop, shutdown) = tokio::sync::oneshot::channel();
@@ -304,7 +321,7 @@ async fn embedded_dispatch_needs_no_ui_socket_and_keeps_driver_listener_private(
 #[tokio::test]
 async fn local_socket_authorizes_without_tokens_and_refuses_browser_origin() {
     let fixture = Fixture::new();
-    let server = Server::bind(fixture.config()).await.unwrap();
+    let server = fixture.start().await;
     let (stop, rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(server.serve_local(async {
         let _ = rx.await;
@@ -349,10 +366,8 @@ async fn local_socket_authorizes_without_tokens_and_refuses_browser_origin() {
 #[tokio::test]
 async fn bare_server_exposes_identity_without_assistant_or_environment_storage() {
     let fixture = Fixture::new();
-    let mut config = fixture.config();
-    config.composition = Some(pot_runtime::host::Composition::Bare);
+    let config = fixture.config();
     let server = Server::bind(config).await.unwrap();
-    assert_eq!(server.composition(), pot_runtime::host::Composition::Bare);
     let client = server.local_client();
     let response = client.request("/api/v1/runtime", None).await.unwrap();
     assert_eq!(response.status.as_u16(), 200);
@@ -377,7 +392,7 @@ async fn bare_server_exposes_identity_without_assistant_or_environment_storage()
 #[tokio::test]
 async fn assistant_clients_select_owners_and_edit_rules_without_model_calls() {
     let fixture = Fixture::new();
-    let server = Server::bind(fixture.config()).await.unwrap();
+    let server = fixture.start().await;
     let client = server.local_client();
     let reply = client
         .request(
@@ -441,8 +456,7 @@ async fn assistant_clients_select_owners_and_edit_rules_without_model_calls() {
 #[tokio::test]
 async fn caller_created_resources_are_idle_idempotent_isolated_and_restored() {
     let fixture = Fixture::new();
-    let mut config = fixture.config();
-    config.composition = None;
+    let config = fixture.config();
     let client = reqwest::Client::new();
     let mut original = Value::Null;
     for restarting in [false, true] {
@@ -590,11 +604,28 @@ async fn resource_upgrade_preserves_current_assistants_rules_and_sandbox_definit
     let client = reqwest::Client::new();
     let mut original_rules = Value::Null;
     for upgraded in [false, true] {
-        let mut config = fixture.config();
-        if upgraded {
-            config.composition = None;
+        if !upgraded {
+            let mut legacy = pot_runtime::initialize_with_providers(
+                fixture.config().runtime,
+                if cfg!(target_os = "linux") {
+                    vec![std::sync::Arc::new(
+                        pot_sandbox_linux_podman::LinuxPodmanProvider::new().unwrap(),
+                    )
+                        as std::sync::Arc<dyn pot_sandbox::Provider>]
+                } else {
+                    vec![std::sync::Arc::new(
+                        pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new()
+                            .unwrap(),
+                    )
+                        as std::sync::Arc<dyn pot_sandbox::Provider>]
+                },
+            )
+            .await
+            .unwrap();
+            legacy.shutdown().await;
+            drop(legacy);
         }
-        let server = Server::bind(config).await.unwrap();
+        let server = Server::bind(fixture.config()).await.unwrap();
         let endpoint = server.endpoint().unwrap();
         let base = format!("http://{}", server.local_addr().unwrap());
         let (stop, shutdown) = tokio::sync::oneshot::channel();
@@ -675,8 +706,7 @@ async fn resource_upgrade_preserves_current_assistants_rules_and_sandbox_definit
 async fn sandbox_creation_receipts_do_not_undo_later_inventory_changes() {
     let fixture = Fixture::new();
     let client = reqwest::Client::new();
-    let mut config = fixture.config();
-    config.composition = None;
+    let config = fixture.config();
     let provider = if cfg!(target_os = "linux") {
         pot_sandbox::LINUX_PODMAN_PROVIDER
     } else {

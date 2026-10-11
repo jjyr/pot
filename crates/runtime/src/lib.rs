@@ -26,6 +26,7 @@ mod store;
 pub mod tasks;
 pub mod terminal;
 pub mod tool_bridge;
+pub mod upgrade;
 pub mod usage;
 use anyhow::{Result, anyhow, bail};
 use axum::{
@@ -41,8 +42,7 @@ use pot_protocol::*;
 pub mod assistants;
 mod bootstrap;
 pub use bootstrap::{
-    Backend, RuntimeConfig, initialize, initialize_composition, initialize_with_agent_executor,
-    initialize_with_providers,
+    Backend, RuntimeConfig, initialize, initialize_with_agent_executor, initialize_with_providers,
 };
 pub mod desktop;
 pub mod api {

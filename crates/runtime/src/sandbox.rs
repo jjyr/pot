@@ -358,16 +358,6 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         (name, args.clone())
     };
     let args = &args;
-    let legacy_key = format!("sandbox.operation:{turn}:{call_id}");
-    let legacy = s
-        .conversation
-        .inner
-        .lock()
-        .unwrap()
-        .store
-        .get(&legacy_key)?
-        .map(|text| serde_json::from_str(&text))
-        .transpose()?;
     let grant = pot_sandbox::AccessGrant {
         workspace_owner: None,
         owner: s.usage_scope.clone(),
@@ -380,14 +370,9 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     s.environment_service
         .sandboxes
         .environment
-        .execute(
-            &grant,
-            name,
-            call_id,
-            args,
-            &|| !turn_alive(s, &turn) || s.stopping(),
-            legacy,
-        )
+        .execute(&grant, name, call_id, args, &|| {
+            !turn_alive(s, &turn) || s.stopping()
+        })
         .await
 }
 pub async fn execute(

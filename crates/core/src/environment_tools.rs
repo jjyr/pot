@@ -106,10 +106,7 @@ mod tests {
     use super::*;
     #[test]
     fn shell_and_terminal_arguments_are_shared_and_type_checked() {
-        let tools: Vec<_> = schemas(&crate::ShellSettings::default())
-            .into_iter()
-            .filter(|t| t["name"] != "browser")
-            .collect();
+        let tools = schemas(&crate::ShellSettings::default());
         for key in ["shell", "login", "tty"] {
             assert!(tools[0]["inputSchema"]["properties"].get(key).is_some());
         }

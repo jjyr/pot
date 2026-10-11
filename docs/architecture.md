@@ -1,63 +1,218 @@
-# Current architecture
+# Architecture
 
-Updated: 2026-10-11. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for authority and lifecycle contracts.
+The current design uses one independently deployed Control for a user's remote
+machines. Execution machines join this Control and accept its commands.
+Issue [#39](https://github.com/jjyr/pot/issues/39) owns the phase checklist. Validation reports record tested scope and limitations.
 
-The [Control and composable Runtime design](runtime-composition.md) describes optional resources and task execution. Multiple assistants and outward-connected execution machines are delivered. The App owns its local Runtime and can connect to one independent Control through isolated local/remote modes. Explicit Web hosting targets that Control. The approved remaining design makes Control authoritative for global plugins/skills and starts new Task Agents alongside their remote Host/Sandbox, collecting results on completion. It does not relocate chat assistants or require three-node placement. Control-selected global snapshot delivery and named remote plugin dispatch are implemented; Task Agent startup, actual Sandbox plugin qualification and broader remote environment transports remain in #39. The diagram below shows delivered local App execution.
-
-The [Sandbox provider redesign](sandbox-providers.md) has extracted Linux support and implemented prepared-instance macOS integration (awaiting real VM qualification), with Android/iOS deferred, and inserts a dedicated Sandbox Manager between Runtime and Providers. Runtime retains product/task authority; Manager owns environment coordination and state. Separate Provider crates implement `pot-sandbox` contracts and are registered by App/Server assembly without reverse Cargo dependencies. The diagram and implementation details below describe current Linux behavior, not that target architecture.
-
-```mermaid
-flowchart TB
-    App[macOS App: chat, tasks, settings, environments] --> Server[Host Server / Runtime / Storage / Gateway]
-    Server --> Helper[Sandbox Helper]
-    Server --> Thread[Thread: context, configuration and execution state]
-    Thread --> Pot[Host pot-agent in-process]
-    Pot --> Gateway[Model Gateway]
-    Gateway --> APIs[Model APIs]
-    Pot --> Permission[pot-agent permission policy]
-    Permission --> Tools[Injected Runtime execution backend]
-    Tools --> Host[Authorized Host executor]
-    Tools --> Manager[Host Sandbox manager]
-    Manager --> Helper
-    Manager --> A[Linux Sandbox A: executor and optional desktop]
-    Manager --> B[Linux Sandbox B: executor and optional desktop]
+```text
+App + local Runtime (start and exit together)
+                 |
+          local / remote icon
+            /           \
+     local owners     one Control
+                      assistants, rules, Tasks, schedules
+                      model configuration, budgets, approvals
+                         |                |
+                  outward connection  outward connection
+                     Machine A           Machine B
+                     Host/Sandbox        Host/Sandbox
 ```
 
-## Placement and entry points
+## Responsibility and lifecycle
 
-| Component | Responsibility | Entry points |
-|---|---|---|
-| App / Swift bridge | Persistent chat, immutable task environments, settings, environment selector and optional noVNC desktop | `crates/app/src/`, `crates/app/swift/` |
-| Helper | Start Host Server; separate VM instances and mounts; graceful product/VM shutdown | `helper/Sources/PotHelper/main.swift` |
-| Server / Runtime | HTTP/SSE/MCP/PTY hosting, authoritative messages, scheduling, sessions, cancellations | `crates/server/src/`, `crates/runtime/src/` |
-| Sandbox manager | Inventory, selection, lifecycle serialization, scoped execution, leases, durable operation receipts/quarantine | `crates/sandbox/src/manager.rs`; Runtime authorization bridge in `crates/runtime/src/sandbox.rs` |
-| Agent | Host in-process pot-agent; injected execution backend | `crates/agent/src/lib.rs` |
-| Gateway / Storage | Provider protocol/allowance enforcement; Host SQLite threads, contexts and usage | `crates/gateway/src/`, `crates/storage/src/` |
-| Guest executor | Authenticated execution-only HTTP service, unprivileged file/command tools, cgroup cancellation | `crates/sandbox-images/linux/default/executor.py`, `crates/tool-executor/src/`, `crates/sandbox-images/linux/default/sandbox.sh` |
+`pot serve` starts neutral infrastructure. Callers create assistants, Host execution
+and Sandbox definitions through `/api/v1/runtime/resources`. Creating an assistant
+does not request a model or enable Host execution. Creating a Sandbox does not start
+its instance. Installed Providers describe supported operations, not permissions.
 
-The App embeds the Host backend and dispatches local UI requests in memory. Standalone `pot serve` hosts the same backend with OS-protected CLI management. The Helper is started in Sandbox-only mode by these hosts. Internal `runtime.json` carries authenticated tool/model integration metadata, not App endpoint discovery. A Sandbox starts on explicit request or first authorized environment tool. The main Agent selects among up to 16 Linux definitions and can pass an explicit target to an environment tool. Workers receive exec_command, write_stdin and apply_patch, a lane token and one persistent assignment; Runtime rejects worker management and switching Sandboxes.
+The App owns its embedded Runtime and creates its default assistant through the
+resource API. Embedded Runtime cannot enable Control, including when a data root
+contains a persisted Control listener intent. A standalone Runtime may explicitly
+enable Control. A joined execution Runtime cannot become Control simultaneously.
 
-pot-agent owns [permission policy](permissions.md) and bounded
-[tool composition](tool-composition.md); Runtime supplies owner services and
-execution routing. Main defaults to Host and Workers to their assigned Sandbox.
-Pinned plugins use the same tool admission path and environment-specific Node runners; [computer use](computer-use.md) follows Host/Sandbox permissions. No Sandbox failure causes Host fallback.
+Control owns remote conversations, assistant instructions, Tasks, schedules,
+global plugins and skills, model configuration, budgets and approvals. Chat
+assistants remain on their owning local Runtime or Control. The approved remote
+task design starts a new Task Agent on the selected execution Runtime, alongside
+its Host/Sandbox environment, and reads its durable result after completion.
+Agent, Task and Environment retain separate identities, but the first release
+requires Agent and Environment to belong to the same execution Runtime. No live
+Agent relocation or three-node placement is included. Execution nodes do not need
+assistant databases or provider credentials.
 
-Model inference location is independent: Agent processes are local, model APIs can be remote or an explicitly configured loopback endpoint.
+Currently Task Agent loops still run on the task-owning Runtime and forward
+environment operations. Control-selected global Skills and pinned plugin
+configuration are now delivered through the authenticated outward connection.
+Named remote plugin calls now execute the supplied pinned bundle in Host/Sandbox
+through the existing owner approval and receipt path. Remote Task Agent startup
+remains implementation work in #39; the Agent loop still runs at Control.
 
-## Persistence and lifecycle
+The App connects to one Control as a client. The accepted UI has one icon to switch
+between local and remote. Data, drafts, event cursors and cached results are scoped
+by mode/Runtime/owner. Remote failures never select local execution. Resource creation
+UI is deferred. Machines shows lightweight status cards, expandable environments and
+Tasks filtered by the exact execution target. Technical management and file transfers
+belong in ordinary Chat; there is no assistant-management shortcut or Machines/Task
+artifact-download UI. File delivery uses clickable Chat links:
+Control relays a task file from its execution machine to the current client; App
+asks for a save location and Web uses browser downloads. Links use
+`pot-file://TASK_UUID/encoded/relative/path`; owner-scoped reads use the task's
+immutable environment, including finished tasks. Reads are bounded to 192 KiB
+chunks and 1 GiB files; missing files, offline machines and detected changes fail.
+No new model-visible file tool is required. Completion summaries include download
+links only when the task has files to deliver; ordinary results need no download.
+A desktop entry requires an implemented client transport (currently local App only).
+Web UI requires `pot serve --ui --control URL`, a server-held
+Control credential and explicit browser listener settings. It has no local/remote
+switch. App no longer hosts or configures a browser endpoint. Remote desktop and
+remote notification transport remain pending; see #39 for implementation status.
 
-Host state lives in `root/product`: SQLite messages/usage, tasks/schedules, Thread contexts and bearer endpoint. `sandboxes.json` holds definitions and main selection; `sandbox-operations.json` holds execution outcomes requiring reconciliation. Each Sandbox mounts only `root/sandboxes/ID/workspace` at `/data`. Environment tool output is bounded and currently delivered with each execution/poll response; `yield_time_ms` plus `write_stdin` enables progress polling. Guest artifacts are `/data/workspace`; task artifacts are `/data/workspace/tasks/TASK_ID`. Executor credentials remain in the Host Sandbox directory outside the mounted workspace and enter the root guest process only at startup. The guest removes the credential from child environments; its operation ledger and temporary output use root-private `/run/pot-executor`, outside virtiofs. The guest receives no provider credentials, Thread context, Host endpoint token or Helper socket.
+## Membership and transport
 
-Main chat and tasks use the same Thread representation. Tasks keep independent configuration snapshots and immutable `sandbox_id`. Schedules resolve and save their environment when configured. A worker turn holds an environment lease, and dispatched tools hold operation leases. Stop/delete rejects active task/operation leases and unknown outcomes. Task cancellation settles its remote processes without stopping the shared VM. A cgroup contains background and `setsid` descendants. Completed execution receipts replay the saved result, while conflicting/incomplete requests never reexecute. Client disconnects do not discard cleanup.
+Only standalone Control opens the HTTPS connection listener. Operators create a
+short-lived single-use invitation. An execution machine confirms the Control's
+stable identity and joins it. Exact retries keep the request identity; conflicting
+retries fail. Persisted credentials and private keys never appear in directory
+projections. Native client credentials are separate from member credentials.
 
-Host restart preserves Thread configuration and context and artifacts, marks interrupted turns visibly and quarantines unsettled executions. Main-only `recover` confirms executor cancellation or VM termination; it never repeats a command. Definitions referenced by tasks or schedules cannot be deleted. Deleted identities cannot be reused, and deletion retains workspace artifacts. Desktop is optional and explicitly started; stopping its environment closes it along with the guest.
+The execution machine polls outward over authenticated HTTPS. Control queues signed
+commands; the machine verifies the bound Control, recipient and time window, then
+returns a signed reply bound to the command digest. No execution node needs an
+inbound execution listener. Responses are bounded and redirects are forbidden.
 
-Multiple tasks sharing a VM are cooperative users of the same guest account. Workspace directories are organization, not task-level filesystem isolation. macOS/Windows provider qualification are outside this increment.
+An execution Runtime binds one Control. Joining allows that Control to operate all
+configured Host/Sandbox resources. There are no discovery, execution, management,
+artifact or desktop grants, expiry controls or grant/revoke APIs. Model operation
+approval remains independent: assistants still request approval for protected
+behavior and edits to their own instructions.
 
-## Tasks, profiles and usage
+Removing a member invalidates its connection credential. Leaving fences local
+leases. A new invitation creates a fresh session; old enrollment cannot silently
+reactivate removed membership. Stable signing identities and durable operation
+receipts are retained. 
 
-Background concurrency defaults to 8, with profile/provider limits, FIFO runnable queues, independent main chat and serial turns within each lane. Follow-ups persist; workers cannot recursively delegate. Completion reports are durable and summarized by a read-only main turn. Schedules own time zones, occurrence deduplication, missed-run policy and overlap prevention.
+## Execution targets and instructions
 
-Thread configuration and Agent context live directly in the owner SQLite Store. Runtime calls the concrete pot-agent executor; there is no Engine selector, Binding history, native session mapping or Driver host/session layer. Agent status contains only model, phase and detail; external-engine installation/version/auth-method states are removed. Profiles are reusable configuration templates: creation copies a resolved snapshot into the Thread. Explicit configuration changes apply atomically at a safe turn boundary without replacing context or writing a handoff summary. Owner/generation/turn checks reject stale execution updates. Existing tasks keep their snapshots when global profiles change. Model requests reserve allowance before networking, including tool continuations and failures. pot-agent uses a gateway token rather than provider secrets; product execution limits remain separate from credentials.
+Environment references distinguish the owning Runtime and actual target:
 
-Runtime exposes HTTP/SSE; App uses cached snapshots and paginated polling with stale-result rejection. SQLite uses DELETE journal and synchronous=EXTRA. Query live state through the API. [Runtime contract](../crates/runtime/README.md) documents the API, and [validation](validation/host-pot-agent-20261006.md) records current acceptance.
+```json
+{"runtime_id":"RUNTIME-ID","target":{"kind":"host"}}
+{"runtime_id":"RUNTIME-ID","target":{"kind":"sandbox","sandbox_id":"build"}}
+```
+
+Remote is a relationship, not an Environment kind. Host has execution sessions and
+working directories; VM instance lifecycle belongs only to Sandbox. Default dispatch
+is relative to the Agent Runtime, regardless of which machine renders its UI.
+An explicit task target takes precedence over routing instructions and local defaults.
+
+Each assistant's AGENTS.md is stored in its database and follows its identity.
+`read_agent_instructions({})` and `update_agent_instructions({text})` are self-scoped;
+updates request approval. Server-side approval baselines protect intervening user
+edits. Main also reads public/project AGENTS.md from the actual working directory.
+Task Agents have no assistant-level instructions; they use the task brief and the
+execution destination's project rules. In Control-connected execution, global
+plugins, skills and other global Agent resources are selected and versioned by
+Control. Execution nodes receive the selected bundles and may cache immutable
+versions; they do not discover global resources from their own home directories
+or packaged catalogs. Project AGENTS.md and project skills continue to be read
+from the actual execution workspace with their existing scope/precedence rules.
+Control snapshots global bundles before the first remote context and persists
+the snapshot with the task; follow-up turns and restart reuse it. Cache files
+retain executable bits and are exposed read-only; digest/contents are verified
+before reuse. Snapshots also bind Shell settings and the model observation mode.
+The execution lease stores the accepted resource digest outside the task workspace;
+prepare/execute reject a different cache revision, even if its own digest is valid.
+Changing configuration on an accepted run fails. Model-visible tool definitions
+remain Control-selected; the destination capability list does not filter them. Plugin sessions are scoped to
+the accepted run; a new run cannot reuse a previous run's session ID.
+Internal plugin envelopes are created only from supplied enabled bundles and cannot
+be invoked through the public named-tool RPC. The current inline snapshot is bounded to 512 KiB and 2048 files
+within the existing 1 MiB transport limit. Oversized or symlinked bundles fail
+explicitly; large-bundle chunked delivery remains unqualified.
+Control specifies the exact model, execution environment and tool configuration.
+The execution Runtime runs that configuration or returns an explicit unsupported
+configuration/dependency error. It must not replace models, plugins or targets,
+or silently hide tools according to node-local settings.
+Control updates affect later launches, not already bound tasks. Missing bundles
+fail explicitly rather than falling back to a node-local catalog. Standalone App
+local mode retains its independent local resources and state.
+
+## Remote Task Agent launch and results (approved, pending implementation)
+
+```text
+App / Web -> Control
+              chat assistant, Task state, global bundles, model gateway, approvals
+                 |
+                 | durable launch: task/run identity, brief, configuration version,
+                 | immutable Host/Sandbox target
+                 v
+              Machine B
+                new Task Agent -> Host/Sandbox on Machine B
+                  Control-supplied globals + execution-project rules/skills
+                 |
+                 | persist terminal result; notify Control
+                 v
+              Control reads result -> Task view / optional Chat summary
+                                        optional file links when files exist
+```
+
+A launch starts a task-scoped Agent, not a transferred assistant session. Control
+persists launch intent before delivery; the destination persists acceptance,
+run identity and terminal results. Exact duplicate launches return the same run
+receipt, never start another Agent. During execution only necessary status,
+guidance/cancellation, approvals and accountable usage are exchanged. Full live
+Agent context replication to Control is not required. Destination-local recovery
+records preserve execution evidence; restart/timeout does not imply rerunning a
+task. Control reconciles the accepted run and fetches its result after completion,
+including when a completion notification was lost.
+
+Task Agents request models through Control's gateway. Provider credentials,
+budget decisions and usage accounting remain there. Environment-dependent plugins
+execute at the assigned environment from Control-supplied definitions/bundles;
+this does not give the execution node ownership of the global catalog. Model
+behavior approval remains separate from machine membership.
+
+UI remains the existing Chat, Tasks and Machines. Task details need only state
+and execution machine/environment; the co-located Agent does not need a separate
+placement selector or Runner management page. Technical resource operations stay
+API/Chat based, with concrete model-visible changes requiring separate agreement.
+
+## Failure and receipt rules
+
+Execution leases bind Control session, owner, run, generation, target, destination
+boot and deadline. A lease is a liveness fence, not a configurable privilege grant.
+Lost connectivity stops new model and tool actions. Expired leases drain execution
+sessions without affecting another owner's scope.
+
+Callers persist intent before sending effects. Destinations persist acceptance and
+terminal outcomes. Transport timeout, reply loss and restart never cause automatic
+replay or fallback. Query the original operation receipt. A receipt with uncertain
+outcome blocks conflicting replacement work. Management absence is terminal only
+after its acceptance window closes, preventing in-flight acceptance races.
+
+Remote Sandbox management supports existing start/stop/recover/update/delete. Create
+and select remain local to the destination. Active executions, unresolved receipts,
+and references from all destination assistants' Tasks/schedules protect deletion.
+Retired Sandbox IDs cannot be silently reused. Remote plugin Host TLS fixtures
+are qualified; real Sandbox plugin/platform acceptance, desktop transport,
+co-located remote Task Agent startup and actual
+multi-machine qualification remain tracked in #39. Three-node Agent/Environment
+placement is deferred beyond this release; successful Host tests do not establish
+the pending features.
+
+## Implementation boundaries
+
+Server hosts native APIs, outward Control transport and explicit Web hosting.
+Runtime owns assistants, task/schedule state, model approvals and environment routing.
+pot-agent executes model/tool loops using injected context and services; it has no
+implicit executor. Storage persists owner Threads and product records; Gateway
+handles model protocols and credentials. HostEnvironment supplies production Host
+execution. Sandbox Manager owns definitions, provider registration, execution
+scopes, lifecycle, receipts and recovery. Providers implement platform mechanics.
+See [backend crates](backend-crates.md) and the [Runtime contract](../crates/runtime/README.md).
+
+A stopped Sandbox does not stop Chat. Shared Sandbox task directories organize
+work; they do not establish mutual task isolation. Cancellation settles the target
+scope, without stopping unrelated tasks or the shared VM. Unknown outcomes require
+reconciliation before new conflicting operations. Restart preserves current data
+through bounded upgrades; obsolete presets do not create resources.

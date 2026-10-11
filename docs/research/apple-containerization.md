@@ -9,7 +9,7 @@ Research date: 2026-10-02
 Version baseline: `apple/container 1.5.0`, with `apple/containerization 0.47.0`.  
 Scope: official releases, documentation at fixed tags, and key source files. No software installation, container execution, or performance benchmarks were performed.
 
-Related notes: [Docker GUI and embeddable runtime research](docker-gui.md).
+Related notes: [current architecture](../architecture.md).
 
 ## 0. Key findings
 

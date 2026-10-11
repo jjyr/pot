@@ -4,7 +4,7 @@ use axum::{
     response::sse::{Event, Sse},
     routing::post,
 };
-use pot_runtime::{RuntimeConfig, host::Composition};
+use pot_runtime::RuntimeConfig;
 use pot_server::{Server, ServerConfig};
 use serde_json::{Value, json};
 use std::{
@@ -29,7 +29,6 @@ impl Node {
         let root = std::env::temp_dir().join(format!("pot-remote-task-{}", uuid::Uuid::new_v4()));
         let server = Server::bind(ServerConfig {
             web_control: None,
-            composition: Some(Composition::Bare),
             runtime: RuntimeConfig {
                 data: root.join("data"),
                 workspace: root.join("workspace"),
@@ -109,7 +108,7 @@ async fn offline_destination_waits_before_first_model_request_then_starts() {
     qualify(false, false, true, false).await;
 }
 #[tokio::test]
-async fn remote_plugin_is_visible_reviewed_and_keeps_session_across_task_turns() {
+async fn remote_plugin_is_visible_reviewed_and_sessions_are_run_scoped() {
     qualify(false, false, false, true).await;
 }
 async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) {
@@ -124,7 +123,7 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
     target
         .api(
             "/api/v1/runtime/resources",
-            Some(if sandbox {json!({"request_id":"sandbox","resource":{"kind":"sandbox","sandbox_id":"peer-test","name":"Peer test","provider":"linux.podman"}})} else {json!({"request_id":"host","resource":{"kind":"host"}})}),
+            Some(if sandbox {json!({"request_id":"sandbox","resource":{"kind":"sandbox","sandbox_id":"remote-test","name":"Remote test","provider":"linux.podman"}})} else {json!({"request_id":"host","resource":{"kind":"host"}})}),
         )
         .await;
     let instructions = caller
@@ -138,9 +137,11 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
     )
     .unwrap();
     let project = if sandbox {
-        target.root.join("sandboxes/peer-test/workspace/workspace")
+        target
+            .root
+            .join("sandboxes/remote-test/workspace/workspace")
     } else {
-        target.root.join("data/peer-workspaces")
+        target.root.join("data/execution-workspaces")
     };
     let workspace = if sandbox {
         project.join("tasks")
@@ -162,7 +163,7 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
     )
     .unwrap();
     let execution_target = if sandbox {
-        json!({"kind":"sandbox","sandbox_id":"peer-test"})
+        json!({"kind":"sandbox","sandbox_id":"remote-test"})
     } else {
         json!({"kind":"host"})
     };
@@ -211,14 +212,17 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
                     let skills = if sandbox { "cat ../../.agents/skills/remote-fixture/SKILL.md" } else { "cat ../.agents/skills/remote-fixture/SKILL.md" };
                     format!("{}printf REMOTE > where.txt; cat where.txt; {skills}", if outage { "printf X >> once.txt; sleep 3; " } else { "" })
                 } else { "cat where.txt; printf FOLLOWUP >> where.txt".into() };
-                let delta=if number==0 || number==2 {json!({"tool_calls":[{"index":0,"id":format!("remote-command-{number}"),"type":"function","function":{"name":"exec_command","arguments":json!({"cmd":command}).to_string()}}]})}else{json!({"content":"Remote task complete."})};
+                let command_turn = number == 0 || number == if plugin { 3 } else { 2 };
+                let plugin_continuation = plugin && number == 1;
+                let tool_turn = command_turn || plugin_continuation;
+                let delta=if command_turn {json!({"tool_calls":[{"index":0,"id":format!("remote-command-{number}"),"type":"function","function":{"name":"exec_command","arguments":json!({"cmd":command}).to_string()}}]})}else if plugin_continuation { json!({"tool_calls":[]}) }else{json!({"content":"Remote task complete."})};
                 let mut delta = delta;
-                if plugin && matches!(number, 0 | 2) {
+                if plugin && tool_turn {
                     let mut input = json!({"code":if number == 0 { "let counter=40; nodeRepl.write(++counter);" } else { "nodeRepl.write(++counter);" }});
-                    if number == 2 { input["session_id"] = json!(plugin_session.expect("task follow-up lost plugin session evidence")); }
-                    delta["tool_calls"].as_array_mut().unwrap().push(json!({"index":1,"id":format!("remote-plugin-{number}"),"type":"function","function":{"name":"cua_repl","arguments":input.to_string()}}));
+                    if number != 0 { input["session_id"] = json!(plugin_session.expect("task follow-up lost plugin session evidence")); }
+                    delta["tool_calls"].as_array_mut().unwrap().push(json!({"index":if plugin_continuation {0} else {1},"id":format!("remote-plugin-{number}"),"type":"function","function":{"name":"cua_repl","arguments":input.to_string()}}));
                 }
-                let events=vec![json!({"choices":[{"delta":delta,"finish_reason":null}]}),json!({"choices":[{"delta":{},"finish_reason":if number==0 || number==2{"tool_calls"}else{"stop"}}]}),json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}})];
+                let events=vec![json!({"choices":[{"delta":delta,"finish_reason":null}]}),json!({"choices":[{"delta":{},"finish_reason":if tool_turn{"tool_calls"}else{"stop"}}]}),json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}})];
                 Sse::new(futures::stream::iter(events.into_iter().map(|event|Ok::<_,Infallible>(Event::default().data(event.to_string())))))
             }
         }));
@@ -294,7 +298,7 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
     .unwrap();
     let detail = caller.api(&format!("/api/v1/tasks/{task_id}"), None).await;
     assert_eq!(finished["phase"], "complete", "{finished} {detail}");
-    assert_eq!(reviews, if plugin { 2 } else { 1 });
+    assert_eq!(reviews, if plugin { 3 } else { 1 });
     if before_start {
         assert!(disconnected && recovered);
     }
@@ -349,7 +353,9 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
                 .iter()
                 .find(|t| t["id"] == task_id)
                 .unwrap();
-            if task["phase"] == "complete" && calls.load(Ordering::SeqCst) == 4 {
+            if task["phase"] == "complete"
+                && calls.load(Ordering::SeqCst) == if plugin { 5 } else { 4 }
+            {
                 break;
             }
             assert_ne!(task["phase"], "failed", "{task}");
@@ -359,10 +365,36 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
     .await
     .unwrap();
     if plugin {
-        let evidence = captured.lock().unwrap().last().unwrap().to_string();
+        let requests = captured.lock().unwrap();
+        let results = requests
+            .iter()
+            .flat_map(|body| body["messages"].as_array().into_iter().flatten())
+            .filter(|message| message["role"] == "tool")
+            .filter_map(|message| {
+                Some((
+                    message["tool_call_id"].as_str()?,
+                    serde_json::from_str::<Value>(message["content"].as_str()?).ok()?,
+                ))
+            })
+            .collect::<Vec<_>>();
         assert!(
-            evidence.contains("42"),
-            "remote plugin did not preserve its session: {evidence}"
+            results
+                .iter()
+                .any(|(call, result)| *call == "remote-plugin-1"
+                    && result["content"]
+                        .as_array()
+                        .is_some_and(|items| items.iter().any(|item| item["text"] == "42"))),
+            "same-run plugin continuation missing: {results:?}"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|(call, result)| *call == "remote-plugin-3"
+                    && result["isError"] == true
+                    && result["error"]
+                        .as_str()
+                        .is_some_and(|error| error.contains("session expired"))),
+            "new run accepted a stale plugin session: {results:?}"
         );
     }
     let files = std::fs::read_dir(&workspace)
@@ -377,7 +409,7 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
             .as_array()
             .unwrap()
             .iter()
-            .find(|item| item["id"] == "peer-test")
+            .find(|item| item["id"] == "remote-test")
             .unwrap()["config"]
             .clone();
         for action in ["start", "stop", "update", "recover", "delete"] {
@@ -387,7 +419,7 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
                 .unwrap()
                 .as_millis() as i64
                 + 30_000;
-            let mut args = json!({"action":action,"sandbox_id":"peer-test"});
+            let mut args = json!({"action":action,"sandbox_id":"remote-test"});
             if action == "update" {
                 args["name"] = json!("Managed remotely");
                 args["config"] = config.clone();

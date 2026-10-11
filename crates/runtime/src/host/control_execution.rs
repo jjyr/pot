@@ -1,4 +1,4 @@
-//! Execution after peer authority has been checked by the owning server.
+//! Execution after control authority has been checked by the owning server.
 use super::*;
 use futures::future::BoxFuture;
 use pot_core::{ExecutionContext, ExecutionFeedback, ExecutionRole, ToolExecutor};
@@ -30,10 +30,10 @@ impl ExecutionFeedback for Feedback {
         })
     }
     fn record_turn(&self, _: &str) -> Result<()> {
-        bail!("Peer execution has no local conversation")
+        bail!("Control execution has no local conversation")
     }
     fn input_streaming(&self, _: &str) -> Result<()> {
-        bail!("Peer execution has no local model input")
+        bail!("Control execution has no local model input")
     }
 }
 impl Host {
@@ -101,7 +101,7 @@ impl Host {
         request.target.validate()?;
         anyhow::ensure!(
             request.target.is_local_to(&self.runtime_id),
-            "Peer target belongs to another Runtime"
+            "Control target belongs to another Runtime"
         );
         anyhow::ensure!(
             !request.scope.is_empty()
@@ -118,7 +118,7 @@ impl Host {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
                 && request.generation > 0,
-            "Unsupported peer operation"
+            "Unsupported control operation"
         );
         let (operation, execution_args, policy) = self.controlled_tool(
             &request.target.target,
@@ -131,7 +131,7 @@ impl Host {
             host: self.clone(),
             cancelled: cancelled.clone(),
         });
-        anyhow::ensure!(!feedback.cancelled(), "Peer execution authority expired");
+        anyhow::ensure!(!feedback.cancelled(), "Control execution authority expired");
         match &request.target.target {
             pot_core::EnvironmentTarget::Host {} => {
                 anyhow::ensure!(self.host_enabled, "Host resource is disabled");
@@ -141,7 +141,7 @@ impl Host {
                     .ok_or_else(|| anyhow!("Host service unavailable"))?;
                 let workspace = self
                     .data
-                    .join("peer-workspaces")
+                    .join("execution-workspaces")
                     .join(&request.workspace_scope);
                 std::fs::create_dir_all(&workspace)?;
                 let mut args = execution_args;
@@ -167,7 +167,7 @@ impl Host {
                 let mut emit = |_| Ok(());
                 tokio::select! {
                     result=executor.execute(&context,&policy,&operation,&args,&request.call_id,&mut emit)=>result.map(|value|json!({"result":value})),
-                    _=feedback.cancellation()=>{environment.finish_host(&request.scope).await?;bail!("Peer lease expired or was revoked")}
+                    _=feedback.cancellation()=>{environment.finish_host(&request.scope).await?;bail!("Control lease expired or was revoked")}
                 }
             }
             pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
@@ -195,14 +195,9 @@ impl Host {
                 let mut args = execution_args;
                 args["sandbox_id"] = json!(sandbox_id);
                 manager
-                    .execute(
-                        &grant,
-                        &operation,
-                        &request.call_id,
-                        &args,
-                        &|| feedback.cancelled(),
-                        None,
-                    )
+                    .execute(&grant, &operation, &request.call_id, &args, &|| {
+                        feedback.cancelled()
+                    })
                     .await
             }
         }
@@ -231,7 +226,7 @@ impl Host {
         let mut items = vec![];
         if self.host_enabled && self.host_environment.is_some() {
             items.push(json!({"environment_ref":pot_core::EnvironmentRef::host(&self.runtime_id),"kind":"host","management":false,
-                "workspace":self.data.join("peer-workspaces"),"supported_operations":["exec_command","write_stdin","apply_patch"]}));
+                "workspace":self.data.join("execution-workspaces"),"supported_operations":["exec_command","write_stdin","apply_patch"]}));
         }
         if let Some(manager) = &self.sandboxes {
             let inventory = manager.inventory().await;
@@ -268,7 +263,7 @@ impl Host {
         );
         let workspace = match target {
             pot_core::EnvironmentTarget::Host {} => {
-                self.data.join("peer-workspaces").join(workspace_scope)
+                self.data.join("execution-workspaces").join(workspace_scope)
             }
             pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
                 let manager = self
@@ -338,7 +333,7 @@ impl Host {
         let context = self.controlled_context(target, workspace_scope).await?;
         let workspace = match target {
             pot_core::EnvironmentTarget::Host {} => {
-                self.data.join("peer-workspaces").join(workspace_scope)
+                self.data.join("execution-workspaces").join(workspace_scope)
             }
             pot_core::EnvironmentTarget::Sandbox { sandbox_id } => self
                 .sandboxes
@@ -375,7 +370,7 @@ impl Host {
         let (source, mount, cwd) = match target {
             pot_core::EnvironmentTarget::Host {} => {
                 anyhow::ensure!(self.host_enabled, "Host resource is disabled");
-                let workspace = self.data.join("peer-workspaces").join(workspace_scope);
+                let workspace = self.data.join("execution-workspaces").join(workspace_scope);
                 std::fs::create_dir_all(&workspace)?;
                 let root = workspace
                     .ancestors()
@@ -428,9 +423,9 @@ impl Host {
         } = request;
         anyhow::ensure!(
             target.is_local_to(&self.runtime_id),
-            "Peer target belongs to another Runtime"
+            "Control target belongs to another Runtime"
         );
-        anyhow::ensure!(!cancelled(), "Peer lease expired or revoked");
+        anyhow::ensure!(!cancelled(), "Control lease expired or revoked");
         let (operation, envelope, policy) = self.controlled_tool(
             &target.target,
             &workspace_scope,
@@ -471,7 +466,7 @@ impl Host {
             }
             pot_core::EnvironmentTarget::Host {} => {}
         }
-        anyhow::ensure!(!cancelled(), "Peer lease expired or revoked");
+        anyhow::ensure!(!cancelled(), "Control lease expired or revoked");
         Ok(args)
     }
 }
@@ -493,7 +488,7 @@ impl Host {
         let workspace = match target {
             pot_core::EnvironmentTarget::Host {} => {
                 anyhow::ensure!(self.host_enabled, "Host resource is disabled");
-                self.data.join("peer-workspaces").join(workspace_scope)
+                self.data.join("execution-workspaces").join(workspace_scope)
             }
             pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
                 let manager = self

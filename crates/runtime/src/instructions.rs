@@ -483,6 +483,9 @@ mod tests {
             "WRONG_OVERRIDE",
         )
         .unwrap();
+        let host_workspace = root.data.join("agent-workspace");
+        fs::create_dir_all(&host_workspace).unwrap();
+        fs::write(host_workspace.join("AGENTS.md"), "HOST_PROJECT").unwrap();
         fs::write(root.workspace.join("AGENTS.md"), "WRONG_HOST_CWD").unwrap();
         let task = tasks::create(
             State(root.clone()),
@@ -502,9 +505,10 @@ mod tests {
             .await
             .unwrap();
         let main = load(&root).unwrap().text;
-        assert!(main.contains("SECOND") && main.contains("GLOBAL"));
+        assert!(main.contains("HOST_PROJECT") && main.contains("GLOBAL"));
         assert!(
             !main.contains("FIRST")
+                && !main.contains("SECOND")
                 && !main.contains("WRONG_HOST_CWD")
                 && !main.contains("WRONG_OVERRIDE")
         );
