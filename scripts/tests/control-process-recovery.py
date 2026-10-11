@@ -2,6 +2,7 @@
 """Isolated CLI qualification; SSH credentials and machine paths are caller supplied."""
 
 import argparse
+import base64
 import http.server
 import json
 import os
@@ -148,7 +149,21 @@ class Worker:
                     if remote:
                         worker.requests.append(body)
                 report = "REPORT_ONLY" in json.dumps(body)
-                tool = remote and number in (0, 2) and not report
+                messages = body.get("messages", [])
+                results = [m for m in messages if m.get("role") == "tool"]
+                case = any(marker in json.dumps(body) for marker in ("GUIDE_CASE", "CANCEL_CASE"))
+                plugin = "PLUGIN_CASE" in json.dumps(body)
+                schedule = "SCHEDULE_CASE" in json.dumps(body)
+                tool = (
+                    remote
+                    and not report
+                    and (
+                        number in (0, 2)
+                        or (case and not results)
+                        or (plugin and len(results) < 2)
+                        or (schedule and not results)
+                    )
+                )
                 delta = (
                     {
                         "tool_calls": [
@@ -168,6 +183,33 @@ class Worker:
                     if tool
                     else {"content": "Cross-machine result settled."}
                 )
+                if plugin and tool:
+                    arguments = {"code": "let crossCounter=40; nodeRepl.write(++crossCounter);"}
+                    if results:
+                        session = json.loads(results[-1]["content"])["session_id"]
+                        arguments = {
+                            "code": "nodeRepl.write(++crossCounter);",
+                            "session_id": session,
+                        }
+                    delta["tool_calls"][0]["function"] = {
+                        "name": "cua_repl",
+                        "arguments": json.dumps(arguments),
+                    }
+                if schedule and tool:
+                    payload = json.dumps(
+                        {
+                            "summary": "Verified remote schedule",
+                            "fingerprint": "remote-stable",
+                            "evidence": ["fixture://remote-host"],
+                        }
+                    )
+                    delta["tool_calls"][0]["function"]["arguments"] = json.dumps(
+                        {
+                            "cmd": "printf %s "
+                            + shlex.quote(payload)
+                            + " > .pot-schedule-result.json"
+                        }
+                    )
                 events = [
                     {"choices": [{"delta": delta, "finish_reason": None}]},
                     {"choices": [{"delta": {}, "finish_reason": "tool_calls" if tool else "stop"}]},
@@ -396,6 +438,138 @@ def qualify(args):
             "PASS execution SIGKILL: interrupted until explicit guidance; no replay or destination credentials",
             flush=True,
         )
+        if args.extended:
+            chunk = api(f"/api/v1/tasks/{task['id']}/files?path=once.txt")
+            assert base64.b64decode(chunk["data"]) == b"X"
+            assert chunk["size"] == 1
+            print("PASS finished cross-machine task file read through Control", flush=True)
+            guided = api(
+                "/api/v1/tasks",
+                {"request_id": "guided-task", "text": "GUIDE_CASE", "environment_ref": binding},
+            )
+            wait_for(lambda: api("/api/v1/permissions")["requests"])
+            snapshot = api(f"/api/v1/tasks/{guided['id']}")
+            steering = {
+                "request_id": "guidance-once",
+                "user_message_id": snapshot["turn"]["user_message_id"],
+                "text": "GUIDE_SENTINEL",
+            }
+            first = api(f"/api/v1/tasks/{guided['id']}/steer", steering)
+            duplicate = api(f"/api/v1/tasks/{guided['id']}/steer", steering)
+            assert duplicate["duplicate"] and duplicate["message_id"] == first["message_id"]
+            approve()
+            wait_for(lambda: status(guided["id"])["phase"] == "complete")
+            requests = control.call("stats")["requests"]
+            final = requests[-1]
+            assert (
+                sum("GUIDE_SENTINEL" in str(m.get("content", "")) for m in final["messages"]) == 1
+            )
+            assert sorted(target.evidence()["effects"]) == ["X", "X"]
+            print("PASS live guidance fetched/acknowledged once at destination", flush=True)
+            cancelled = api(
+                "/api/v1/tasks",
+                {"request_id": "cancelled-task", "text": "CANCEL_CASE", "environment_ref": binding},
+            )
+            wait_for(lambda: api("/api/v1/permissions")["requests"])
+            before = control.call("stats")["count"]
+            api("/api/v1/runtime/control", {"action": "disable_control"})
+            api(f"/api/v1/tasks/{cancelled['id']}/cancel", {})
+            time.sleep(2)
+            assert control.call("stats")["count"] == before
+            assert sorted(target.evidence()["effects"]) == ["X", "X"]
+            api(
+                "/api/v1/runtime/control",
+                {
+                    "action": "enable_control",
+                    "config": {
+                        "address": listener["url"].removeprefix("https://"),
+                        "certificate": str(Path(args.remote_root) / "cert.pem"),
+                        "private_key": str(Path(args.remote_root) / "key.pem"),
+                    },
+                },
+            )
+            wait_for(lambda: status(cancelled["id"])["phase"] == "cancelled")
+            # Task cancellation is visible before receipt cleanup; wait for terminal destination evidence.
+            wait_for(
+                lambda: any(
+                    r["launch"]["task_id"] == cancelled["id"] and r["phase"] == "cancelled"
+                    for r in target.evidence()["runs"]
+                )
+            )
+            assert sorted(target.evidence()["effects"]) == ["X", "X"]
+            print("PASS offline cancellation settles without executing pending command", flush=True)
+            pinned = api(
+                "/api/v1/tasks",
+                {"request_id": "plugin-task", "text": "PLUGIN_CASE", "environment_ref": binding},
+            )
+
+            def plugin_done():
+                approve()
+                current = status(pinned["id"])
+                if current["phase"] == "failed":
+                    raise RuntimeError(api(f"/api/v1/tasks/{pinned['id']}")["messages"][-1]["text"])
+                return current["phase"] == "complete"
+
+            wait_for(plugin_done)
+            requests = control.call("stats")["requests"]
+            outputs = [
+                json.loads(m["content"])
+                for m in requests[-1]["messages"]
+                if m.get("role") == "tool"
+            ]
+            assert len(outputs) == 2
+            assert [o["content"][-1]["text"] for o in outputs] == ["41", "42"], outputs
+            assert all(not o.get("isError") for o in outputs)
+            print(
+                "PASS Control-pinned plugin executes on remote macOS Host with same-run 41 -> 42",
+                flush=True,
+            )
+            schedule = api(
+                "/api/v1/schedules",
+                {
+                    "request_id": "remote-schedule",
+                    "action": "create",
+                    "spec": {
+                        "title": "Remote qualification",
+                        "goal": "SCHEDULE_CASE",
+                        "kind": "interval",
+                        "every_minutes": 60,
+                        "enabled": False,
+                        "environment_ref": binding,
+                    },
+                },
+            )
+            run_request = {
+                "request_id": "remote-schedule-run",
+                "action": "run",
+                "schedule_id": schedule["id"],
+            }
+            scheduled = api("/api/v1/schedules", run_request)
+            assert api("/api/v1/schedules", run_request) == scheduled
+
+            def schedule_done():
+                approve()
+                current = status(scheduled["task_id"])
+                if current["phase"] == "failed":
+                    raise RuntimeError(
+                        "Remote scheduled task failed: "
+                        + json.dumps(api(f"/api/v1/schedules?selected={schedule['id']}"))
+                    )
+                return current["phase"] == "complete"
+
+            wait_for(schedule_done)
+            detail = api(f"/api/v1/schedules?selected={schedule['id']}")
+            assert detail["selected"]["spec"]["environment_ref"] == binding
+            assert detail["selected"]["baseline"] == "remote-stable", detail
+            assert len(detail["runs"]) == 1
+            assert detail["runs"][0]["changed"] is True
+            assert "Verified remote schedule" in detail["runs"][0]["summary"]
+            print(
+                "PASS remote schedule fixes environment, deduplicates trigger, reads destination result",
+                flush=True,
+            )
+            stats = control.call("stats")
+            evidence = target.evidence()
         Path(args.evidence).write_text(
             json.dumps(
                 {
@@ -425,6 +599,7 @@ def qualify(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker", action="store_true")
+    parser.add_argument("--extended", action="store_true")
     for key in (
         "binary",
         "root",

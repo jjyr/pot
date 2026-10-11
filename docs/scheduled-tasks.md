@@ -1,6 +1,6 @@
 # Scheduled tasks
 
-Schedules are persistent definitions; each trigger creates an independent background task/Agent session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
+Control (or the local owner Runtime in local mode) owns schedules. Schedules are persistent definitions; each trigger creates an independent background task/Agent session. Rust Runtime owns triggering, deduplication, concurrency, and notifications. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
 
 ```
 Chat / tasks -> schedules
@@ -34,9 +34,11 @@ Hiding the window keeps execution running; Quit/sleep/shutdown stops it. Resume 
 
 DST: choose the earlier occurrence of repeated hours and trigger once; skip nonexistent daily/weekly times for that day; reject nonexistent one-off times on save.
 
+Creation fixes `spec.environment_ref` to a typed Runtime + Host/Sandbox target, using the same resolution as `create_task`. The local `sandbox_id` string remains an input shorthand; supplying both is rejected. An update without either target preserves the saved environment. Triggers never follow later default changes. Existing schedules are upgraded once to their original local Sandbox reference. Remote targets restore while offline; triggering requires the configured target to be available.
+
 ## Results and storage
 
-Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, nonempty `evidence` array, optional relative-path `artifacts` array. Missing/invalid results fail rather than count as unchanged. Editing a goal resets the comparison baseline; old runs cannot overwrite the new baseline. Silent unchanged runs do not wake main Agent but retain task/schedule history; each check may still incur model costs.
+Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, nonempty `evidence` array, optional relative-path `artifacts` array. Control reads the result from the task's immutable execution target through the bounded file transport, including remote machines. Results must be ordinary files no larger than 16 KiB. Missing, oversized or invalid results fail rather than count as unchanged. Editing a goal resets the comparison baseline; old runs cannot overwrite the new baseline. Silent unchanged runs do not wake main Agent but retain task/schedule history; each check may still incur model costs.
 
 At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.v2`. Old task metadata is not imported.
 

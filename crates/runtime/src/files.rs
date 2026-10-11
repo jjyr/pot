@@ -86,7 +86,11 @@ pub fn read_chunk(root: &std::path::Path, query: &FileQuery) -> Result<FileChunk
     })
 }
 
-async fn task_chunk(root: &Service, task_id: &str, query: &FileQuery) -> Result<FileChunk> {
+pub(crate) async fn task_chunk(
+    root: &Service,
+    task_id: &str,
+    query: &FileQuery,
+) -> Result<FileChunk> {
     let task = tasks::control_service(root, task_id).map_err(|e| anyhow!(e.1.0.message))?;
     let environment = task
         .environment_ref

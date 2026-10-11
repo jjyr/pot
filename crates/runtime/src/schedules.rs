@@ -277,11 +277,7 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             }
             let mut spec: ScheduleSpec =
                 serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
-            spec.sandbox_id = root
-                .environment_service
-                .sandboxes
-                .assignment(&spec.sandbox_id)
-                .map_err(invalid)?;
+            bind(root, &mut spec)?;
             validate(&spec).map_err(invalid)?;
             agent::routing::resolve(
                 root,
@@ -347,14 +343,11 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             "update" => {
                 let mut spec: ScheduleSpec =
                     serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
-                spec.sandbox_id = if spec.sandbox_id.is_empty() {
-                    plan.info.spec.sandbox_id.clone()
+                if spec.environment_ref.is_none() && spec.sandbox_id.is_empty() {
+                    spec.environment_ref = plan.info.spec.environment_ref.clone();
                 } else {
-                    root.environment_service
-                        .sandboxes
-                        .assignment(&spec.sandbox_id)
-                        .map_err(invalid)?
-                };
+                    bind(root, &mut spec)?;
+                }
                 validate(&spec).map_err(invalid)?;
                 agent::routing::resolve(
                     root,
@@ -371,7 +364,9 @@ pub(super) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                 if spec.enabled && due.is_none() {
                     return Err(invalid("一次性计划时间已过"));
                 }
-                if spec.goal != plan.info.spec.goal {
+                if spec.goal != plan.info.spec.goal
+                    || spec.environment_ref != plan.info.spec.environment_ref
+                {
                     plan.generation += 1;
                     plan.info.baseline = None;
                 }
@@ -447,7 +442,7 @@ fn launch(
         root,
         hub,
         CreateTask {
-            sandbox_id: plan.info.spec.sandbox_id.clone(),
+            environment_ref: plan.info.spec.environment_ref.clone(),
             request_id: format!("schedule:{}", id()),
             text: brief,
             resource: String::new(),
@@ -646,7 +641,7 @@ pub(super) fn tick(root: &Service, at: i64) -> Result<()> {
     Ok(())
 }
 #[derive(Deserialize)]
-struct ResultFile {
+pub(super) struct ResultFile {
     summary: String,
     fingerprint: String,
     evidence: Vec<String>,
@@ -660,7 +655,11 @@ fn read_result(workspace: &std::path::Path) -> Result<ResultFile> {
         metadata.is_file() && metadata.len() <= 16384,
         "结果文件必须是小于 16 KiB 的普通文件"
     );
-    let r: ResultFile = serde_json::from_slice(&std::fs::read(path)?)?;
+    parse_result(&std::fs::read(path)?)
+}
+pub(super) fn parse_result(bytes: &[u8]) -> Result<ResultFile> {
+    anyhow::ensure!(bytes.len() <= 16384, "Result exceeds 16 KiB");
+    let r: ResultFile = serde_json::from_slice(bytes)?;
     anyhow::ensure!(
         !r.fingerprint.trim().is_empty()
             && r.fingerprint.len() <= 2048
@@ -669,6 +668,9 @@ fn read_result(workspace: &std::path::Path) -> Result<ResultFile> {
             && !r.evidence.is_empty()
             && r.evidence.len() <= 16
             && r.artifacts.len() <= 16
+            && r.artifacts
+                .iter()
+                .all(|path| pot_protocol::valid_file_path(path))
             && r.evidence
                 .iter()
                 .chain(&r.artifacts)
@@ -685,6 +687,7 @@ pub(super) fn complete(
     workspace: &std::path::Path,
     answer: &str,
     at: i64,
+    mut remote_result: Option<Result<ResultFile>>,
 ) -> Option<Option<String>> {
     for p in book.plans.values_mut() {
         let Some(r) = p
@@ -696,15 +699,17 @@ pub(super) fn complete(
         };
         r.finished_at_ms = Some(at);
         if *status == TaskPhase::Complete {
-            match read_result(workspace) {
+            match remote_result
+                .take()
+                .unwrap_or_else(|| read_result(workspace))
+            {
                 Ok(result) => {
                     r.changed = Some(p.info.baseline.as_deref() != Some(&result.fingerprint));
-                    r.summary = format!(
-                        "{}\n证据：{}\n产物：{}",
-                        result.summary,
-                        result.evidence.join("; "),
-                        result.artifacts.join(", ")
-                    );
+                    r.summary = format!("{}\n证据：{}", result.summary, result.evidence.join("; "));
+                    if !result.artifacts.is_empty() {
+                        r.summary
+                            .push_str(&format!("\n产物：{}", result.artifacts.join(", ")));
+                    }
                     if r.generation == p.generation {
                         p.info.baseline = Some(result.fingerprint);
                     }
@@ -739,22 +744,39 @@ pub(super) fn complete(
     None
 }
 
+pub(super) fn contains_task(book: &Book, task: &str) -> bool {
+    book.plans.values().any(|p| {
+        p.runs
+            .iter()
+            .any(|r| r.task_id.as_deref() == Some(task) && r.finished_at_ms.is_none())
+    })
+}
+fn bind(root: &Service, spec: &mut ScheduleSpec) -> ApiResult<()> {
+    let target = tasks::resolve_environment(root, spec.environment_ref.clone(), &spec.sandbox_id)?;
+    spec.sandbox_id.clear();
+    spec.environment_ref = Some(target);
+    Ok(())
+}
 pub(super) fn validate_bindings(root: &Service, book: &Book) -> Result<()> {
     for plan in book.plans.values() {
-        anyhow::ensure!(
-            !plan.info.spec.sandbox_id.is_empty(),
-            "Persisted schedule Sandbox assignment missing"
-        );
-        root.environment_service
-            .sandboxes
-            .assignment(&plan.info.spec.sandbox_id)?;
+        let target = plan
+            .info
+            .spec
+            .environment_ref
+            .as_ref()
+            .ok_or_else(|| anyhow!("Persisted schedule environment missing"))?;
+        target.validate()?;
+        // Offline remote targets remain pinned and can be restored without discovery.
+        if target.is_local_to(&root.runtime_id)
+            && let pot_core::EnvironmentTarget::Sandbox { sandbox_id } = &target.target
+        {
+            root.environment_service.sandboxes.assignment(sandbox_id)?;
+        }
     }
     Ok(())
 }
-pub(super) fn uses_sandbox(book: &Book, sandbox_id: &str) -> bool {
-    book.plans
-        .values()
-        .any(|plan| plan.info.spec.sandbox_id == sandbox_id)
+pub(super) fn uses_sandbox(book: &Book, runtime_id: &str, sandbox_id: &str) -> bool {
+    book.plans.values().any(|plan| plan.info.spec.environment_ref.as_ref().is_some_and(|e| e.is_local_to(runtime_id) && matches!(&e.target, pot_core::EnvironmentTarget::Sandbox { sandbox_id: id } if id == sandbox_id)))
 }
 
 #[cfg(test)]
@@ -789,6 +811,117 @@ mod tests {
     }
     fn result(worker: &Service, fingerprint: &str) {
         execution::private_json(&worker.workspace.join(".pot-schedule-result.json"),&json!({"summary":"Verified fixture observation","fingerprint":fingerprint,"evidence":["fixture://source"],"artifacts":[]})).unwrap();
+    }
+    struct Remote;
+    impl crate::remote_environment::RemoteEnvironment for Remote {
+        fn validate(&self, e: &pot_core::EnvironmentRef) -> Result<()> {
+            e.validate()
+        }
+        fn inventory(&self) -> futures::future::BoxFuture<'_, Result<Value>> {
+            Box::pin(async { Ok(json!({})) })
+        }
+        fn open(
+            &self,
+            _: crate::remote_environment::RemoteBinding,
+        ) -> futures::future::BoxFuture<'_, Result<Value>> {
+            Box::pin(async { bail!("unused") })
+        }
+        fn prepare(
+            &self,
+            _: crate::remote_environment::RemoteBinding,
+            _: String,
+            _: Value,
+        ) -> futures::future::BoxFuture<'_, Result<Value>> {
+            Box::pin(async { bail!("unused") })
+        }
+        fn execute(
+            &self,
+            _: crate::remote_environment::RemoteBinding,
+            _: String,
+            _: String,
+            _: Value,
+        ) -> futures::future::BoxFuture<'_, Result<Value>> {
+            Box::pin(async { bail!("unused") })
+        }
+        fn renew(
+            &self,
+            _: crate::remote_environment::RemoteBinding,
+        ) -> futures::future::BoxFuture<'_, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn ready(
+            &self,
+            _: crate::remote_environment::RemoteBinding,
+        ) -> futures::future::BoxFuture<'_, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn cancel(
+            &self,
+            _: crate::remote_environment::RemoteBinding,
+        ) -> futures::future::BoxFuture<'_, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+    #[test]
+    fn remote_target_persists_updates_and_restores_offline_without_following_defaults() {
+        let s = tasks::tests::fixture();
+        s.set_remote_environment(Arc::new(Remote));
+        let target = pot_core::EnvironmentRef::sandbox("remote-machine", "default");
+        let mut input = spec();
+        input.environment_ref = Some(target.clone());
+        let sid = create(&s, input, 0);
+        assert!(!uses_sandbox(
+            &s.tasks.hub.lock().unwrap().schedules,
+            &s.runtime_id,
+            "default"
+        ));
+        apply(
+            &s,
+            json!({"request_id":"update-remote","action":"update","schedule_id":sid,"spec":spec()}),
+            1,
+        )
+        .unwrap();
+        *s.environment_service.remote.write().unwrap() = None;
+        let mut reopened = s.clone();
+        reopened.tasks.hub = Arc::new(Mutex::new(tasks::Hub::default()));
+        tasks::restore(&reopened).unwrap();
+        assert_eq!(
+            reopened.tasks.hub.lock().unwrap().schedules.plans[&sid]
+                .info
+                .spec
+                .environment_ref,
+            Some(target.clone())
+        );
+        reopened.set_remote_environment(Arc::new(Remote));
+        let req = json!({"request_id":"run-remote","action":"run","schedule_id":sid});
+        let first = apply(&reopened, req.clone(), 2).unwrap();
+        assert_eq!(first, apply(&reopened, req, 3).unwrap());
+        let page = tasks::page(&reopened, &TaskQuery::default()).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].environment_ref, Some(target));
+        let mut conflict = spec();
+        conflict.sandbox_id = "default".into();
+        conflict.environment_ref = Some(pot_core::EnvironmentRef::host("remote-machine"));
+        assert!(
+            apply(
+                &reopened,
+                json!({"request_id":"conflict","action":"create","spec":conflict}),
+                4
+            )
+            .is_err()
+        );
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn structured_result_rejects_oversize_and_invalid_evidence() {
+        assert!(parse_result(&vec![b' '; 16385]).is_err());
+        assert!(parse_result(br#"{"summary":"ok","fingerprint":"stable","evidence":[]}"#).is_err());
+        assert!(
+            parse_result(
+                br#"{"summary":"ok","fingerprint":"stable","evidence":["fixture://verified"]}"#
+            )
+            .is_ok()
+        );
     }
     #[test]
     fn timezone_weekday_dst_and_interval_are_deterministic() {
@@ -1055,8 +1188,8 @@ mod tests {
             s.tasks.hub.lock().unwrap().schedules.plans[&sid]
                 .info
                 .spec
-                .sandbox_id,
-            "default"
+                .environment_ref,
+            Some(pot_core::EnvironmentRef::sandbox(&s.runtime_id, "default"))
         );
         let mut reopened = s.clone();
         reopened.tasks.hub = Arc::new(Mutex::new(tasks::Hub::default()));
@@ -1068,8 +1201,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            tasks::page(&reopened, &TaskQuery::default()).unwrap().items[0].sandbox_id,
-            "default"
+            tasks::page(&reopened, &TaskQuery::default()).unwrap().items[0].environment_ref,
+            Some(pot_core::EnvironmentRef::sandbox(&s.runtime_id, "default"))
         );
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }

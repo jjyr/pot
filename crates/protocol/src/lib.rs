@@ -333,6 +333,8 @@ fn enabled() -> bool {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScheduleSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_ref: Option<pot_core::EnvironmentRef>,
     #[serde(default)]
     pub sandbox_id: String,
     pub title: String,

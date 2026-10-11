@@ -143,6 +143,21 @@ pub(crate) fn task_book(store: &Store, runtime: &str, assistant: &str) -> Result
             changed = true;
         }
     }
+    if let Some(plans) = book["schedules"]["plans"].as_object_mut() {
+        for plan in plans.values_mut() {
+            if plan["info"]["spec"]["environment_ref"].is_null() {
+                let sandbox = plan["info"]["spec"]["sandbox_id"].as_str().unwrap_or("");
+                anyhow::ensure!(
+                    !sandbox.is_empty(),
+                    "Persisted schedule Sandbox assignment missing"
+                );
+                plan["info"]["spec"]["environment_ref"] =
+                    json!(pot_core::EnvironmentRef::sandbox(runtime, sandbox));
+                plan["info"]["spec"]["sandbox_id"] = json!("");
+                changed = true;
+            }
+        }
+    }
     if changed {
         for record in book["tasks"].as_array().unwrap() {
             let info: TaskInfo = serde_json::from_value(record["info"].clone())?;
@@ -172,6 +187,27 @@ pub(crate) fn task_book(store: &Store, runtime: &str, assistant: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn schedule_upgrade_fixes_original_sandbox_and_is_idempotent() {
+        let data = std::env::temp_dir().join(format!("pot-schedule-upgrade-{}", id()));
+        std::fs::create_dir_all(&data).unwrap();
+        let store = Store::open(&data.join("pot-v2.sqlite")).unwrap();
+        store.set("tasks.v2", &json!({"tasks":[], "schedules":{"plans":{"schedule":{"info":{"spec":{"sandbox_id":"original"}}}}}}).to_string()).unwrap();
+        task_book(&store, "own-runtime", "main").unwrap();
+        let saved = store.get("tasks.v2").unwrap().unwrap();
+        let book: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(
+            book["schedules"]["plans"]["schedule"]["info"]["spec"]["environment_ref"],
+            json!(pot_core::EnvironmentRef::sandbox("own-runtime", "original"))
+        );
+        assert_eq!(
+            book["schedules"]["plans"]["schedule"]["info"]["spec"]["sandbox_id"],
+            ""
+        );
+        task_book(&store, "other-runtime", "main").unwrap();
+        assert_eq!(store.get("tasks.v2").unwrap().unwrap(), saved);
+        std::fs::remove_dir_all(data).unwrap();
+    }
     #[test]
     fn upgrade_preserves_worker_policy_and_unknown_receipts_once() {
         let data = std::env::temp_dir().join(format!("pot-upgrade-{}", id()));
