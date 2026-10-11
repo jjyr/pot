@@ -341,7 +341,7 @@ impl Hub {
         );
         all
     }
-    fn remote_hub(self: &Arc<Self>, environment: &str) -> Result<Arc<Self>> {
+    pub(crate) fn remote_hub(self: &Arc<Self>, environment: &str) -> Result<Arc<Self>> {
         if let Some(hub) = self.remotes.lock().unwrap().get(environment).cloned() {
             return Ok(hub);
         }

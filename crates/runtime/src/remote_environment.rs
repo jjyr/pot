@@ -12,6 +12,13 @@ pub struct RemoteBinding {
     pub environment: pot_core::EnvironmentRef,
 }
 pub trait RemoteEnvironment: Send + Sync {
+    fn run_task(
+        &self,
+        _launch: crate::task_agent::Launch,
+        _cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> BoxFuture<'_, Result<crate::task_agent::Terminal>> {
+        Box::pin(async { bail!("Remote Task Agent transport is unavailable") })
+    }
     fn waiting_reason(&self, _owner: &str) -> Option<String> {
         None
     }

@@ -1,4 +1,4 @@
-//! Full local Agent -> HTTPS remote Host task, deterministic model and actual processes.
+//! Destination-local Task Agent -> Control model/approval services -> Host task, deterministic model and actual processes.
 use axum::{
     Json, Router,
     response::sse::{Event, Sse},
@@ -90,14 +90,20 @@ impl Node {
     }
 }
 #[tokio::test]
-async fn local_task_agent_runs_on_remote_host_with_destination_project_rules_and_owner_approval() {
+async fn destination_task_agent_runs_on_remote_host_with_destination_project_rules_and_owner_approval()
+ {
     qualify(false, false, false, false).await;
 }
 #[tokio::test]
 #[ignore = "requires Linux rootless Podman, prepared executor image and isolated container storage"]
-async fn local_task_agent_runs_on_remote_podman_with_destination_project_rules_and_owner_approval()
-{
+async fn destination_task_agent_runs_on_remote_podman_with_destination_project_rules_and_owner_approval()
+ {
     qualify(true, false, false, false).await;
+}
+#[tokio::test]
+#[ignore = "requires Linux rootless Podman, prepared executor image and isolated container storage"]
+async fn destination_task_agent_runs_pinned_plugin_on_remote_podman() {
+    qualify(true, false, false, true).await;
 }
 #[tokio::test]
 async fn remote_task_waits_without_sampling_then_recovers_original_receipt() {
@@ -112,6 +118,19 @@ async fn remote_plugin_is_visible_reviewed_and_sessions_are_run_scoped() {
     qualify(false, false, false, true).await;
 }
 async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) {
+    qualify_recovery(sandbox, outage, before_start, plugin, false).await;
+}
+#[tokio::test]
+async fn expired_lease_reconciles_then_continues_the_same_live_run_without_replay() {
+    qualify_recovery(false, true, false, false, true).await;
+}
+async fn qualify_recovery(
+    sandbox: bool,
+    outage: bool,
+    before_start: bool,
+    plugin: bool,
+    expiry: bool,
+) {
     let caller = Node::start().await;
     let target = Node::start().await;
     caller
@@ -242,7 +261,7 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
     let mut reviews = 0;
     let mut disconnected = before_start;
     let mut recovered = false;
-    let finished = tokio::time::timeout(Duration::from_secs(40), async {
+    let finished = tokio::time::timeout(Duration::from_secs(75), async {
         loop {
             let permissions = caller.api("/api/v1/permissions", None).await;
             for card in permissions["requests"].as_array().unwrap() {
@@ -283,6 +302,10 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
                 assert_eq!(calls.load(Ordering::SeqCst), usize::from(!before_start), "sampled before receipt reconciliation");
                 let snapshot = caller.api(&format!("/api/v1/tasks/{task_id}"), None).await;
                 assert!(snapshot["agent"]["detail"].as_str().unwrap().contains("等待远程"));
+                if expiry {
+                    tokio::time::sleep(Duration::from_secs(32)).await;
+                    assert_eq!(calls.load(Ordering::SeqCst),1,"sampled after disconnected lease expiry");
+                }
                 caller.api("/api/v1/runtime/control",Some(json!({"action":"enable_control","config":{"address":address,"certificate":certificate,"private_key":private_key}}))).await;
                 recovered = true;
             }
@@ -311,7 +334,36 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
             .collect::<Vec<_>>();
         assert_eq!(effects, vec!["X"], "original command was replayed");
     }
-    assert!(detail.to_string().contains("Destination-only fixture"));
+    let journals = std::fs::read_dir(target.root.join("data/task-agent-runs"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|e| e == "json"))
+        .map(|entry| {
+            serde_json::from_slice::<Value>(&std::fs::read(entry.path()).unwrap()).unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(journals.len(), 1);
+    assert_eq!(journals[0]["phase"], "complete");
+    assert!(
+        journals[0]["context"]
+            .to_string()
+            .contains("Destination-only fixture")
+    );
+    assert!(!caller.root.join("data/task-agent-runs").exists());
+    for entry in std::fs::read_dir(caller.root.join("data/task-service-receipts"))
+        .unwrap()
+        .filter_map(Result::ok)
+    {
+        if entry.path().extension().is_some() {
+            continue;
+        }
+        let receipt: Value = serde_json::from_slice(&std::fs::read(entry.path()).unwrap()).unwrap();
+        assert!(
+            receipt["request"]["operation"].is_string(),
+            "Control persisted a full live model context instead of its digest"
+        );
+    }
+    assert!(!target.root.join("data/providers.json").exists());
     let body = captured.lock().unwrap()[0].to_string();
     assert!(body.contains("REMOTE_PROJECT_RULE"), "{body}");
     // Control owns the tool contract: a node capability list must not hide its plugin.
@@ -391,9 +443,9 @@ async fn qualify(sandbox: bool, outage: bool, before_start: bool, plugin: bool) 
                 .iter()
                 .any(|(call, result)| *call == "remote-plugin-3"
                     && result["isError"] == true
-                    && result["error"]
-                        .as_str()
-                        .is_some_and(|error| error.contains("session expired"))),
+                    && result["error"].as_str().is_some_and(|error| error
+                        .to_ascii_lowercase()
+                        .contains("session expired"))),
             "new run accepted a stale plugin session: {results:?}"
         );
     }

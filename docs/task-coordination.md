@@ -36,7 +36,10 @@ running ----cancel_task----> stopping --cleanup confirmed--> cancelled
 `interrupt` preserves never-started guidance. Explicit `guide_task` resumes that
 queue in order, followed by the new guidance. Interrupted executing input is never
 replayed, including suspended allowance-waiting input. Restart does not auto-resume
-an interrupted Task.
+an interrupted Task. Control restart reconciles an accepted remote run using its
+original input identity. It does not relaunch the Agent or change its environment.
+Execution Runtime restart interrupts after known receipts and scopes are settled;
+unknown outcomes block replacement. See [failure rules](architecture.md#failure-and-receipt-rules).
 
 `cancel_task` discards pending guidance and abandons the Task, including an
 interrupted Task with an empty queue. History/files survive; completed results stay

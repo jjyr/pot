@@ -19,10 +19,11 @@ must be discussed and confirmed before implementation.
   remote notification relay.
 - P4: fresh Task Agent startup on the execution Runtime, durable launch/result
   records, Control model/budget/approval services, ordered guidance/cancellation,
-  disconnection pause and reconciliation. Current loops still run at the owner.
-  The destination journal and worker execution port now exist; production Control
-  transport and task dispatch are not connected to them yet. See the scoped
-  [foundation checks](validation/task-agent-foundation-20261011.md).
+  disconnection pause and reconciliation are wired into production. Host HTTPS
+  tests cover project rules, approvals, pinned plugins, follow-ups and same-run
+  recovery after lease expiry. Crash/reboot, real Sandbox, supported-model and
+  multi-machine acceptance still need qualification before closing the phase.
+  See [production integration](validation/task-agent-production-20261011.md).
 - Final acceptance: real machines and supported providers, recovery without replay,
   data-preserving upgrades, documentation and packaging. Do not infer completion
   from same-host fixtures or deliver undeclared fallback behavior.

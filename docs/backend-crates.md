@@ -27,7 +27,8 @@ execution and owner services into pot-agent. Providers depend on Sandbox contrac
 not Runtime; Sandbox Manager does not depend on concrete Providers.
 
 Connected Tasks use Control-owned model/global configuration and approvals.
-Current Agent loops run at the owner with remote environment adapters; P4 replaces
-this placement with fresh destination Task Agents. Guest execution services hold
+Fresh Task Agent loops run on the destination Runtime, alongside the fixed
+Host/Sandbox, with signed outward Control model/approval/guidance ports. Main
+assistants remain on their owner. Guest execution services hold
 no provider credentials or product management authority. Shared Sandbox workspaces
 do not establish isolation between Tasks.

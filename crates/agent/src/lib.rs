@@ -836,7 +836,7 @@ async fn run(
         if s.feedback.cancelled() {
             return Ok(());
         }
-        accept_steering(s, &mut state, false)?;
+        accept_steering(s, &mut state, false).await?;
         let started = Instant::now();
         s.feedback
             .diagnostic(&json!({"kind":"model_started","model":thread.config.model}))?;
@@ -872,7 +872,7 @@ async fn run(
         state.messages.push(response);
         state.save(s)?;
         if state.pending.is_empty() {
-            if accept_steering(s, &mut state, true)? {
+            if accept_steering(s, &mut state, true).await? {
                 continue;
             }
             return Ok(());
@@ -1141,8 +1141,12 @@ impl Dispatcher<'_> {
     }
 }
 
-fn accept_steering(s: &ExecutionContext, state: &mut Context, finalizing: bool) -> Result<bool> {
-    let pending = s.feedback.steering(finalizing)?;
+async fn accept_steering(
+    s: &ExecutionContext,
+    state: &mut Context,
+    finalizing: bool,
+) -> Result<bool> {
+    let pending = s.feedback.fetch_steering(finalizing).await?;
     let mut added = false;
     for (id, text) in &pending {
         if !state.steering_ids.contains(id) {
@@ -1154,7 +1158,8 @@ fn accept_steering(s: &ExecutionContext, state: &mut Context, finalizing: bool) 
     if !pending.is_empty() {
         state.save(s)?;
         s.feedback
-            .acknowledge_steering(&pending.into_iter().map(|(id, _)| id).collect::<Vec<_>>())?;
+            .commit_steering(&pending.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
+            .await?;
     }
     Ok(added)
 }

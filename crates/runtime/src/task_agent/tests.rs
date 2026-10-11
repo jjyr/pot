@@ -403,6 +403,87 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
         );
     }
     assert!(!workspace.join("forbidden").exists());
+    let mut missing = next.clone();
+    missing.run_id = id();
+    missing.skills = Some(vec!["node-skill".into()]);
+    journal.accept(&control_id, missing.clone()).unwrap();
+    let before = control.requests.lock().unwrap().len();
+    let rejected = host
+        .execute_task_agent(
+            journal.clone(),
+            &control_id,
+            &missing.task_id,
+            &missing.run_id,
+            services(&control),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(rejected.outcome,Outcome::Failed(ref reason) if reason.contains("skill is unavailable"))
+    );
+    assert_eq!(
+        control.requests.lock().unwrap().len(),
+        before,
+        "missing destination skill sampled a model or used a node-global fallback"
+    );
     backend.shutdown().await;
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn confirmed_reboot_interruption_retains_context_for_explicit_new_run() {
+    let data = std::env::temp_dir().join(format!("pot-task-reboot-{}", id()));
+    let runtime = id();
+    let control = id();
+    let launch = launch(&runtime);
+    let journal = Journal::open(&data, &runtime, &id()).unwrap();
+    journal.accept(&control, launch.clone()).unwrap();
+    journal
+        .claim(&control, &launch.task_id, &launch.run_id)
+        .unwrap();
+    let context = json!({"messages":["known completed effect"],"pending":[]});
+    journal
+        .save_context(&control, &launch.task_id, &launch.run_id, context.clone())
+        .unwrap();
+    assert!(
+        journal
+            .interrupt_recovered(&control, &launch.task_id, &launch.run_id)
+            .is_err()
+    );
+    drop(journal);
+    let journal = Journal::open(&data, &runtime, &id()).unwrap();
+    assert_eq!(
+        journal
+            .inspect(&control, &launch.task_id, &launch.run_id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        Phase::RecoveryRequired
+    );
+    journal
+        .interrupt_recovered(&control, &launch.task_id, &launch.run_id)
+        .unwrap();
+    assert!(
+        !journal
+            .claim(&control, &launch.task_id, &launch.run_id)
+            .unwrap()
+    );
+    let mut next = launch.clone();
+    next.run_id = id();
+    next.text = "Explicit guidance".into();
+    let accepted = journal.accept(&control, next.clone()).unwrap();
+    assert_eq!(accepted.context, Some(context));
+    assert_eq!(accepted.phase, Phase::Accepted);
+    drop(journal);
+    let journal = Journal::open(&data, &runtime, &id()).unwrap();
+    assert_eq!(
+        journal
+            .inspect(&control, &launch.task_id, &launch.run_id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        Phase::Interrupted
+    );
+    std::fs::remove_dir_all(data).unwrap();
 }
