@@ -53,6 +53,7 @@ fn task_progress(snapshot: &Snapshot) -> String {
 
 #[derive(Default, Clone, PartialEq)]
 pub struct View {
+    pub client_mode: String,
     pub runtime: Value,
     pub machines: Value,
     pub machine_reply: Value,
@@ -255,6 +256,10 @@ pub fn root() -> PathBuf {
             PathBuf::from(std::env::var_os("HOME").unwrap()).join("Library/Application Support/pot")
         })
 }
+fn requests(view: &Arc<Mutex<View>>) -> crate::backend::Requests {
+    let state = view.lock().unwrap();
+    crate::backend::Requests::for_mode(&state.client_mode).scope(state.assistant_id())
+}
 fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String> {
     crate::backend::ready()?;
     let (selected, query, assistant_id) = {
@@ -274,7 +279,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             v.runs_offset,
         )
     };
-    let agent = crate::backend::Requests::config_builder()
+    let agent = requests(view)
         .timeout_global(Some(Duration::from_secs(3)))
         .build()
         .new_agent();
@@ -284,12 +289,21 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .body_mut()
         .read_json()
         .map_err(|e| e.to_string())?;
-    let machines: Value = agent
+    let mut machines: Value = agent
         .get("/api/v1/machines")
         .call()?
         .body_mut()
         .read_json()
         .map_err(|e| e.to_string())?;
+    if view.lock().unwrap().client_mode == "remote"
+        && let Some(items) = machines["machines"].as_array_mut()
+    {
+        for machine in items {
+            if machine["local"] == true {
+                machine["name"] = serde_json::json!(crate::i18n::text("machines.control"));
+            }
+        }
+    }
     view.lock().unwrap().machines = machines;
     if !directory["capabilities"]
         .as_array()
@@ -495,7 +509,11 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
 }
 impl Client {
     pub fn start() -> Self {
+        Self::start_mode(crate::backend::mode())
+    }
+    pub fn start_mode(mode: &str) -> Self {
         let view = Arc::new(Mutex::new(View {
+            client_mode: mode.into(),
             error: crate::i18n::text("client.connecting-to-environment").into(),
             task_query: TaskQuery {
                 limit: 20,
@@ -516,6 +534,13 @@ impl Client {
                     let mut state = v.lock().unwrap();
                     if state.assistant_id() == owner {
                         state.error = e;
+                        if state.client_mode == "remote"
+                            && let Some(items) = state.machines["machines"].as_array_mut()
+                        {
+                            for machine in items {
+                                machine["connection"] = serde_json::json!("offline");
+                            }
+                        }
                     }
                 }
                 crate::wake_ui();
@@ -538,7 +563,7 @@ impl Client {
                         "new" => PATH_TASKS.to_string(),
                         id => format!("{PATH_TASKS}/{id}/messages"),
                     };
-                    match crate::backend::Requests::config_builder()
+                    match requests(&v)
                         .scope(&assistant_id)
                         .post(&path)
                         .config()
@@ -636,7 +661,7 @@ impl Client {
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
                 crate::backend::ready()?;
-                crate::backend::Requests::config_builder().scope(&owner)
+                requests(&view).scope(&owner)
                     .timeout_global(Some(Duration::from_secs(3)))
                     .build()
                     .new_agent()
@@ -664,7 +689,7 @@ impl Client {
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
-                let mut response = crate::backend::Requests::config_builder()
+                let mut response = requests(&view)
                     .scope(&owner)
                     .timeout_global(Some(Duration::from_secs(10)))
                     .build()
@@ -708,7 +733,7 @@ impl Client {
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
                 crate::backend::ready()?;
-                let mut response = crate::backend::Requests::config_builder()
+                let mut response = requests(&view)
                     .scope(&owner)
                     .timeout_global(Some(Duration::from_secs(90)))
                     .build()
@@ -766,7 +791,7 @@ impl Client {
         let active = self.running.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
-            let agent = crate::backend::Requests::config_builder()
+            let agent = requests(&view)
                 .scope(&owner)
                 .timeout_global(Some(Duration::from_secs(90)))
                 .build()
@@ -842,7 +867,7 @@ impl Client {
         std::thread::spawn(move || {
             let result = (|| -> Result<String, String> {
                 crate::backend::ready()?;
-                let agent = crate::backend::Requests::config_builder()
+                let agent = requests(&v)
                     .timeout_global(Some(Duration::from_secs(90)))
                     .build()
                     .new_agent();
@@ -890,7 +915,10 @@ impl Client {
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<Value, String> {
-                crate::backend::Requests::config_builder()
+                if value["command"]["action"] == "configure_control" {
+                    return crate::backend::configure_control(value["command"].clone());
+                }
+                requests(&view)
                     .post("/api/v1/machine-connections")
                     .send_json(value["command"].clone())?
                     .body_mut()
@@ -899,6 +927,11 @@ impl Client {
             })();
             let mut state = view.lock().unwrap();
             state.machine_pending = false;
+            let value = if value["command"]["action"] == "configure_control" {
+                json!({"command":{"action":"configure_control"}})
+            } else {
+                value
+            };
             state.machine_reply = match result {
                 Ok(result) => json!({"intent":value,"result":result}),
                 Err(error) => json!({"intent":value,"error":error}),
@@ -920,7 +953,7 @@ impl Client {
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<Value, String> {
-                let requests = crate::backend::Requests::config_builder();
+                let requests = requests(&view);
                 let owner = value["owner"].as_str().unwrap_or_default();
                 if owner == "new" {
                     return requests

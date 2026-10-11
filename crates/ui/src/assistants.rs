@@ -25,6 +25,11 @@ pub struct Editor {
     saved_owner: String,
     drafts: HashMap<String, Draft>,
 }
+pub struct View<'a> {
+    pub assistants: &'a Value,
+    pub current: &'a str,
+    pub rules: &'a Value,
+}
 impl Editor {
     pub fn select(&mut self, owner: &str) {
         self.selected = owner.into();
@@ -32,14 +37,17 @@ impl Editor {
     }
     pub fn render(
         &mut self,
-        assistants: &Value,
-        current: &str,
-        rules: &Value,
+        view: View<'_>,
         catalog: Catalog,
         handler: Handler,
         window: &mut Window,
         cx: &mut App,
     ) -> Div {
+        let View {
+            assistants,
+            current,
+            rules,
+        } = view;
         let list = assistants["assistants"]
             .as_array()
             .cloned()

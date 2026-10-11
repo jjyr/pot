@@ -764,6 +764,7 @@
   "assistant.conflict": "已保存版本发生变化，当前草稿已保留。",
   "assistant.reload": "丢弃草稿并重新加载",
   "machines.title": "机器",
+  "machines.control": "Control 节点",
   "machines.local": "本机",
   "machines.online": "已连接",
   "machines.offline": "离线",
@@ -780,7 +781,7 @@
   "machines.session-count": "%{0} 个进程会话，%{1} 个插件会话",
   "machines.runtime": "运行服务",
   "machines.sandbox-unavailable": "此环境不可用，请检查已安装的 Provider 和资源。",
-  "machines.connections": "连接与授权",
+  "machines.connections": "Control 与机器",
   "machines.address": "HTTPS 地址",
   "main.waiting-for-remote-machine": "等待远程机器",
   "backend.remote-waiting-receipt": "等待远程机器连接并核对原操作；不会重放",
@@ -789,5 +790,13 @@
   "backend.remote-lease-renewal-failed": "远程租约无法续期，等待核对原操作；不会重放",
   "machines.control-hint": "执行机器加入唯一 Control，由 Control 控制所有已配置的环境。",
   "machines.create-invitation": "创建机器加入邀请",
-  "machines.remove-member": "移除机器"
+  "machines.remove-member": "移除机器",
+  "machines.add-control-hint": "先为 App 添加一个 Control，然后将执行机器加入该 Control。",
+  "machines.control-address": "Control 地址",
+  "machines.control-token": "Control 客户端凭据",
+  "machines.control-ca": "私有 CA 证书（可选）",
+  "machines.add-control": "添加 Control",
+  "machines.remote-mode": "远程 Control · 点击切换本地",
+  "machines.local-mode": "本地 · 点击切换 Control",
+  "machines.copy-invitation": "复制加入邀请"
 }
