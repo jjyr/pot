@@ -17,5 +17,4 @@ mod local;
 pub use local::{LocalClient, LocalReply};
 
 mod settings;
-mod upgrade;
 pub use settings::apply_settings;

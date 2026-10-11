@@ -28,15 +28,43 @@ impl Host {
         .await
     }
     async fn start_with(root: &Path, provider: std::sync::Arc<dyn pot_sandbox::Provider>) -> Self {
-        let backend = pot_runtime::initialize_with_providers(
-            RuntimeConfig {
-                data: root.join("product"),
-                workspace: root.join("workspace"),
-            },
-            vec![provider],
-        )
-        .await
-        .unwrap();
+        let config = RuntimeConfig {
+            data: root.join("product"),
+            workspace: root.join("workspace"),
+        };
+        let mut backend = pot_runtime::initialize(config.clone()).await.unwrap();
+        backend.enable_host_resource();
+        let provider_id = provider.descriptor().id;
+        let manager = backend
+            .register_environment_providers(vec![provider])
+            .unwrap();
+        if manager.assignment("default").is_err() {
+            manager
+                .management(
+                    &json!({"action":"create","sandbox_id":"default","name":"Linux","provider":provider_id}),
+                    false,
+                    &|| false,
+                    &|_, action| action(),
+                )
+                .await
+                .unwrap();
+            manager
+                .management(
+                    &json!({"action":"select","sandbox_id":"default"}),
+                    false,
+                    &|| false,
+                    &|_, action| action(),
+                )
+                .await
+                .unwrap();
+        }
+        backend.enable_assistant_resources(config).await.unwrap();
+        backend
+            .state()
+            .unwrap()
+            .set_secret_key_source(std::sync::Arc::new(
+                pot_secrets::MemoryKey::new(vec![11; 32]).unwrap(),
+            ));
         let token = backend.endpoint(0).token;
         let cfg = AccessConfig {
             origin: url::Url::parse("https://pot.test/").unwrap(),
@@ -84,7 +112,7 @@ impl Host {
             &json!(host.backend.endpoint(port)),
         )
         .unwrap();
-        if !root.join("product/providers.json").exists() {
+        if !pot_control::control::agent::configured(&host.backend.state().unwrap()) {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let endpoint = format!("http://{}/model", listener.local_addr().unwrap());
             let model = axum::Router::new().route("/model",axum::routing::post(|axum::Json(input):axum::Json<Value>| async move {
@@ -108,6 +136,21 @@ impl Host {
             }));
             host.admin("/api/v1/providers",Some(json!({"request_id":uuid::Uuid::new_v4().to_string(),"expected_revision":0,"endpoint":endpoint,"model":"fixture","protocol":"openai_chat","api_key":"fixture"}))).await.error_for_status().unwrap();
         }
+        let config: Value = host
+            .admin("/api/v1/agent", None)
+            .await
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let mut profile = config["profiles"].as_array().unwrap()[0].clone();
+        let revision = profile["revision"].as_u64().unwrap();
+        profile["revision"] = json!(revision + 1);
+        // This transport fixture has no real model window; do not let the installed
+        // skill catalog turn a cancellation test into a context-budget test.
+        profile["params"]["agent"]["context_window"] = json!(1_000_000);
+        host.admin("/api/v1/agent",Some(json!({"profile":profile,"expected_revision":revision,"request_id":uuid::Uuid::new_v4().to_string(),"follow_main":true,"follow_worker":false}))).await.error_for_status().unwrap();
         host
     }
 

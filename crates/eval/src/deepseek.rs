@@ -124,7 +124,7 @@ impl DeepSeekConnection {
             "Scenario context window exceeds Pi Flash limit"
         );
         scenario.profile.provider = "deepseek".into();
-        scenario.profile.auth_ref = "providers.json:deepseek".into();
+        scenario.profile.auth_ref = "provider:deepseek".into();
         scenario.profile.model = self.model.clone();
         scenario.protocol = "openai_chat".into();
         let effort = scenario.profile.params.reasoning_effort.as_deref();

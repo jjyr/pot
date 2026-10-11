@@ -123,8 +123,6 @@ pub struct ExecutionContext {
     pub workspace: PathBuf,
     pub owner: String,
     pub role: ExecutionRole,
-    pub backend_url: String,
-    pub lane_token: String,
     pub main_prompt: String,
     pub feedback: Arc<dyn ExecutionFeedback>,
     pub tool_executor: Option<Arc<dyn ToolExecutor>>,
@@ -256,8 +254,8 @@ pub struct ModelRequest {
     pub body: Value,
     pub compaction_id: Option<String>,
 }
-/// Optional standalone services. Product hosts continue using authenticated HTTP
-/// services when none are injected; context/control remain in ExecutionFeedback.
+/// Explicit Control services, implemented by in-memory or authenticated network adapters.
+/// Agents never discover an implicit HTTP backend; context/control use ExecutionFeedback.
 pub trait ExecutionServices: Send + Sync {
     fn model<'a>(
         &'a self,
@@ -276,6 +274,10 @@ pub trait ExecutionServices: Send + Sync {
 
 /// Environment effects are dispatched by the embedder, never implicitly executed by the Agent.
 pub trait ToolExecutor: Send + Sync {
+    /// A routed executor consumes Environment selectors; a direct executor does not.
+    fn routes_environments(&self) -> bool {
+        false
+    }
     fn execute<'a>(
         &'a self,
         context: &'a ExecutionContext,

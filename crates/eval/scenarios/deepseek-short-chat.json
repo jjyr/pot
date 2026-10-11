@@ -6,7 +6,7 @@
     "name": "Evaluation fixture",
     "provider": "mock",
     "model": "fixture",
-    "auth_ref": "providers.json:mock",
+    "auth_ref": "provider:mock",
     "params": {
       "max_output_tokens": 512,
       "reasoning_effort": null,

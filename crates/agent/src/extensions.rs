@@ -2,7 +2,7 @@
 use anyhow::Result;
 use futures::future::BoxFuture;
 use pot_core::ExecutionContext;
-use pot_gateway::{
+use pot_model_protocol::{
     codecs::Protocol,
     model::{self, Message},
 };

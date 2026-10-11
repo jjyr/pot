@@ -2,52 +2,52 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use pot_control::control::{Service, api::*, usage};
 use pot_protocol::*;
-use pot_runtime::{Service, api::*, usage};
 /// Routes preserve the Control API while centralizing server assembly.
 pub fn router(s: Service) -> Router {
     Router::new()
-        .route("/api/v1/desktop/sessions", post(pot_runtime::desktop::open))
+        .route("/api/v1/desktop/sessions", post(pot_control::desktop::open))
         .route(
             "/api/v1/desktop/sessions/close",
-            post(pot_runtime::desktop::close),
+            post(pot_control::desktop::close),
         )
-        .route("/desktop/{id}/", get(pot_runtime::desktop::page))
+        .route("/desktop/{id}/", get(pot_control::desktop::page))
         .route(
             "/desktop/{id}/{name}",
-            get(pot_runtime::desktop::localization_asset),
+            get(pot_control::desktop::localization_asset),
         )
         .route(
             "/desktop/{id}/api/status",
-            get(pot_runtime::desktop::status),
+            get(pot_control::desktop::status),
         )
         .route(
             "/desktop/{id}/api/control",
-            post(pot_runtime::desktop::control),
+            post(pot_control::desktop::control),
         )
         .route(
             "/desktop/{id}/api/browser",
-            post(pot_runtime::desktop::browser),
+            post(pot_control::desktop::browser),
         )
         .route(
             "/desktop/{id}/api/metrics",
-            get(pot_runtime::desktop::metrics),
+            get(pot_control::desktop::metrics),
         )
-        .route("/desktop/{id}/rfb", get(pot_runtime::desktop::connect))
-        .route("/desktop-assets/{*path}", get(pot_runtime::desktop::asset))
-        .route("/api/v1/environments", get(pot_runtime::environment::list))
+        .route("/desktop/{id}/rfb", get(pot_control::desktop::connect))
+        .route("/desktop-assets/{*path}", get(pot_control::desktop::asset))
+        .route("/api/v1/environments", get(pot_control::environment::list))
         .route(
             "/api/v1/sandboxes",
             get(sandbox::list).post(sandbox::manage),
         )
         .route(
             "/api/v1/sandbox-resources",
-            get(pot_runtime::sandbox_resources::status)
-                .post(pot_runtime::sandbox_resources::command),
+            get(pot_control::sandbox_resources::status)
+                .post(pot_control::sandbox_resources::command),
         )
         .route(
             "/api/v1/permissions",
-            get(pot_runtime::permissions::inspect).post(pot_runtime::permissions::decide),
+            get(pot_control::permissions::inspect).post(pot_control::permissions::decide),
         )
         .route("/api/v1/execution", post(sandbox::execute))
         .route(
@@ -72,10 +72,10 @@ pub fn router(s: Service) -> Router {
         .route("/api/v1/mcp", post(tool_bridge::mcp))
         .route(PATH_TASKS, get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/query", get(tasks::query))
-        .route("/api/v1/tasks/{id}/files", get(pot_runtime::files::chunk))
+        .route("/api/v1/tasks/{id}/files", get(pot_control::files::chunk))
         .route(
             "/api/v1/tasks/{id}/file-download",
-            get(pot_runtime::files::download),
+            get(pot_control::files::download),
         )
         .route(
             "/api/v1/schedules",
@@ -117,7 +117,7 @@ pub fn router(s: Service) -> Router {
 
 /// Owner clients explicitly select a conversational owner; private integration tokens
 /// resolve to their originating assistant without granting access to another owner.
-pub fn assistant_routes(hub: std::sync::Arc<pot_runtime::assistants::Hub>) -> Router {
+pub fn assistant_routes(hub: std::sync::Arc<pot_control::control::assistants::Hub>) -> Router {
     Router::new()
         .route("/api/v1/assistant-tasks", get(assistant_tasks))
         .route(
@@ -177,7 +177,7 @@ async fn assistant_notifications(
         ),
     }
 }
-type AssistantState = axum::extract::State<std::sync::Arc<pot_runtime::assistants::Hub>>;
+type AssistantState = axum::extract::State<std::sync::Arc<pot_control::control::assistants::Hub>>;
 fn rejected(status: axum::http::StatusCode, message: &str) -> axum::response::Response {
     use axum::response::IntoResponse;
     (
@@ -197,7 +197,15 @@ async fn assistant_list(
             "Owner authority required",
         );
     }
-    axum::Json(serde_json::json!({"assistants":hub.definitions()})).into_response()
+    match hub.definitions() {
+        Ok(definitions) => {
+            axum::Json(serde_json::json!({"assistants": definitions})).into_response()
+        }
+        Err(error) => rejected(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            &error.to_string(),
+        ),
+    }
 }
 async fn assistant_create(
     axum::extract::State(hub): AssistantState,

@@ -1,7 +1,6 @@
 //! Provider networking and wire codecs; no product state or database access.
-pub mod codecs;
 use anyhow::{Result, anyhow};
-use codecs::Protocol;
+use pot_model_protocol::codecs::Protocol;
 use reqwest::header::HeaderValue;
 use serde_json::Value;
 use std::time::Duration;
@@ -13,12 +12,13 @@ pub async fn forward(
     protocol: &Protocol,
     body: &Value,
     beta: Option<&HeaderValue>,
+    timeout_ms: u64,
 ) -> Result<reqwest::Response> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never())
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_millis(timeout_ms))
         .build()?;
     let request = client.post(endpoint);
     let request = match protocol {
@@ -43,4 +43,4 @@ pub async fn forward(
         .map_err(|_| anyhow!("Model provider connection failed"))
 }
 
-pub mod model;
+pub mod registry;

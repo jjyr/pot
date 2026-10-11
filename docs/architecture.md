@@ -5,11 +5,11 @@ machines. Execution machines join this Control and accept its commands.
 Issue [#39](https://github.com/jjyr/pot/issues/39) owns the phase checklist. Validation reports record tested scope and limitations.
 
 ```text
-App + local Runtime (start and exit together)
+App UI + local Control + local Runner (in-process lifecycle)
                  |
           local / remote icon
             /           \
-     local owners     one Control
+     local Control    remote Control
                       assistants, rules, Tasks, schedules
                       model configuration, budgets, approvals
                          |                |
@@ -25,14 +25,15 @@ and Sandbox definitions through `/api/v1/runtime/resources`. Creating an assista
 does not request a model or enable Host execution. Creating a Sandbox does not start
 its instance. Installed Providers describe supported operations, not permissions.
 
-The App owns its embedded Runtime and creates its default assistant through the
-resource API. Embedded Runtime cannot enable Control, including when a data root
+The App owns its embedded Runtime composition (local Control and Runner) and creates its default assistant through the
+resource API. Embedded Control cannot open the remote Control listener, including when a data root
 contains a persisted Control listener intent. A standalone Runtime may explicitly
-enable Control. A joined execution Runtime cannot become Control simultaneously.
+enable Control. A joined execution Runtime cannot become Control simultaneously or create assistants.
+A local Control with assistants cannot join as a Runner; use a separate data root.
 
 Control owns remote conversations, assistant instructions, Tasks, schedules,
 global plugins and skills, model configuration, budgets and approvals. Chat
-assistants remain on their owning local Runtime or Control. The approved remote
+assistants remain on their local or remote Control. The approved remote
 task design starts a new Task Agent on the selected execution Runtime, alongside
 its Host/Sandbox environment, and reads its durable result after completion.
 Agent, Task and Environment retain separate identities, but the first release
@@ -226,17 +227,31 @@ Agent/Environment placement remains deferred beyond this release.
 
 ## Implementation boundaries
 
-Server hosts native APIs, outward Control transport and explicit Web hosting.
-Runtime owns assistants, task/schedule state, model approvals and environment routing.
-pot-agent executes model/tool loops using injected context and services; it has no
-implicit executor. Storage persists owner Threads and product records; Gateway
-handles model protocols and credentials. HostEnvironment supplies production Host
-execution. Sandbox Manager owns definitions, provider registration, execution
-scopes, lifecycle, receipts and recovery. Providers implement platform mechanics.
-See [backend crates](backend-crates.md) and the [Runtime contract](../crates/runtime/README.md).
+Runtime only assembles components and manages their lifetime. Server hosts native
+APIs, outward Control transport and explicit Web hosting. Control coordinates
+Tasks/schedules, approval and model policy through component APIs. Assistant owns
+identities, SQLite AGENTS.md records, conversation Threads and the chat driver.
+Runner owns destination run journals and Task Agent execution. Both use pot-agent,
+the injected model/tool engine. Model protocol encoding is a pure shared library;
+Gateway owns Provider transport and configuration, Usage owns accounting, and
+Secrets owns encrypted values. These are libraries in the same process, not extra
+services to deploy. Local Agent service calls stay in memory; network adapters
+are only required across machines.
+
+Provider metadata and secrets use Control's SQLite database. Provider snapshots
+contain credential references, never plaintext keys. Secrets use AES-256-GCM;
+the master key is external to SQLite (macOS Keychain or an explicitly supplied
+owner-only key file). Assistant rules remain SQLite records scoped to the
+assistant, while project AGENTS.md remains filesystem based. Runner receives no
+Provider credentials. General task-secret distribution is a future protocol;
+there is no implicit secret export endpoint. See [secrets](secrets.md).
+
+There are no legacy resource adoption, peer-identity upgrades, assistant-file
+imports or plaintext Provider JSON readers. Unsupported historical layouts are
+not converted. Existing files are not deleted on startup.
+See [backend crates](backend-crates.md) and [Runtime](../crates/runtime/README.md).
 
 A stopped Sandbox does not stop Chat. Shared Sandbox task directories organize
 work; they do not establish mutual task isolation. Cancellation settles the target
 scope, without stopping unrelated tasks or the shared VM. Unknown outcomes require
-reconciliation before new conflicting operations. Restart preserves current data
-through bounded upgrades; obsolete presets do not create resources.
+reconciliation before new conflicting operations. Restart restores current-schema data; obsolete presets do not create resources.

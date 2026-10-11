@@ -7,6 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+pot-usage.workspace = true
 pot-core.workspace = true
 pot-agent.workspace = true
 pot-tool-executor.workspace = true

@@ -48,7 +48,14 @@ depends = ["lint", "check:rust", "check:swift"]
 
 [tasks.test]
 description = "Run backend crate tests without model calls"
-run = "cargo test --locked -p pot-core -p pot-storage -p pot-agent -p pot-tool-executor -p pot-gateway -p pot-runtime -p pot-server -p pot-protocol -p pot-eval -p pot-sandbox -p pot-sandbox-macos-apple-container -p pot-sandbox-macos-apple-vm -p pot-sandbox-linux-podman -p pot-resource -p pot-sandbox-images -j 4"
+depends = ["test:architecture"]
+run = '''
+test_key_dir=$(mktemp -d)
+trap 'rm -rf "$test_key_dir"' EXIT
+export POT_SECRET_KEY_FILE="$test_key_dir/key"
+python -c 'import os, secrets; p = os.environ["POT_SECRET_KEY_FILE"]; fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(fd, secrets.token_bytes(32)); os.close(fd)'
+cargo test --locked -p pot-core -p pot-storage -p pot-usage -p pot-agent -p pot-tool-executor -p pot-gateway -p pot-model-protocol -p pot-assistant -p pot-secrets -p pot-runner -p pot-control -p pot-runtime -p pot-server -p pot-protocol -p pot-eval -p pot-sandbox -p pot-sandbox-macos-apple-container -p pot-sandbox-macos-apple-vm -p pot-sandbox-linux-podman -p pot-resource -p pot-sandbox-images -j 4
+'''
 
 [tasks."test:executor"]
 description = "Verify executor receipts, idle expiry and orphan cleanup without a VM"
@@ -184,3 +191,7 @@ run = "cargo test --locked -p pot-server --test multi_clients -j 4"
 [tasks."build:tailscale"]
 description = "Build embedded libtailscale and automatic tailnet HTTPS"
 run = "python scripts/build-tailscale"
+
+[tasks."test:architecture"]
+description = "Guard independently testable component dependency boundaries"
+run = "python scripts/tests/architecture.py"

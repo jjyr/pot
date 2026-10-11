@@ -1,0 +1,21 @@
+[package]
+name = "pot-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+pot-core.workspace = true
+pot-agent.workspace = true
+pot-protocol.workspace = true
+pot-sandbox.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow = "1"
+futures = "0.3"
+tokio = { version = "1", features = ["full"] }
+sha2 = "0.11"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"

@@ -49,6 +49,9 @@ struct ClientCredential {
     token: String,
 }
 impl Authority {
+    pub(super) fn is_member(&self) -> bool {
+        self.book.lock().unwrap().control.is_some()
+    }
     // Only the explicit Control HTTPS listener accepts this durable client authority.
     // Local process tokens, boot identities and member credentials remain independent.
     fn client_token(&self) -> Result<String> {
@@ -275,7 +278,7 @@ struct Envelope {
 pub(super) enum Rpc {
     LaunchTask {
         lease_id: String,
-        launch: Box<pot_runtime::task_agent::Launch>,
+        launch: Box<pot_runner::Launch>,
     },
     InspectTask {
         task_id: String,
@@ -301,7 +304,7 @@ pub(super) enum Rpc {
     Inventory,
     Resources {
         lease_id: String,
-        resources: pot_runtime::control_resources::GlobalResources,
+        resources: pot_runner::resources::GlobalResources,
     },
     Context {
         lease_id: String,
@@ -349,7 +352,7 @@ pub(crate) struct Authority {
     book: Mutex<Book>,
     operations: tokio::sync::Mutex<()>,
     management_calls: tokio::sync::Mutex<()>,
-    task_journal: Mutex<Option<Arc<pot_runtime::task_agent::Journal>>>,
+    task_journal: Mutex<Option<Arc<pot_runner::Journal>>>,
     stopping: std::sync::atomic::AtomicBool,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     active: Mutex<std::collections::BTreeSet<PathBuf>>,
@@ -371,7 +374,6 @@ impl Authority {
         Self::open_policy(data, runtime_id, true)
     }
     pub fn open_policy(data: &Path, runtime_id: &str, control_allowed: bool) -> Result<Arc<Self>> {
-        super::upgrade::control_data(data)?;
         let key_path = data.join("control-identity.json");
         let keys: Keys = if key_path.exists() {
             serde_json::from_slice(&std::fs::read(&key_path)?)?
@@ -788,7 +790,7 @@ pub(super) async fn operator(
                     Ok(json!({"identity":preview(&url,ca_pem.as_deref()).await?}))
                 }
                 Operator::Join { request } => {
-                    let result = authority.join(request).await?;
+                    let result = resources.join_control(request).await?;
                     authority.start_member(resources.clone()).await;
                     Ok(result)
                 }
@@ -867,7 +869,7 @@ async fn preview(url: &str, ca: Option<&str>) -> Result<Identity> {
     Ok(identity)
 }
 impl Authority {
-    async fn join(&self, request: Join) -> Result<Value> {
+    pub(super) async fn join(&self, request: Join) -> Result<Value> {
         uuid::Uuid::parse_str(&request.request_id)?;
         let (client, url) = client(&request.url, request.ca_pem.as_deref())?;
         ensure!(!self.is_control(), "Control cannot join another Control");
@@ -1244,7 +1246,7 @@ async fn poll(
         Err(_) => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
-async fn require_target(host: &pot_runtime::host::Host, target: &Target) -> Result<()> {
+async fn require_target(host: &pot_control::host::Host, target: &Target) -> Result<()> {
     let inventory = host.environment_inventory().await;
     ensure!(
         inventory["items"].as_array().is_some_and(|items| items
@@ -1271,7 +1273,7 @@ impl Authority {
     #[cfg(test)]
     async fn dispatch(
         self: &Arc<Self>,
-        host: &pot_runtime::host::Host,
+        host: &pot_control::host::Host,
         control: &str,
         body: Rpc,
     ) -> Result<Value> {
@@ -1279,10 +1281,10 @@ impl Authority {
     }
     async fn dispatch_with_hub(
         self: &Arc<Self>,
-        host: &pot_runtime::host::Host,
+        host: &pot_control::host::Host,
         control: &str,
         body: Rpc,
-        hub: Option<Arc<pot_runtime::assistants::Hub>>,
+        hub: Option<Arc<pot_control::control::assistants::Hub>>,
     ) -> Result<Value> {
         let boot = host.describe()["boot_id"].as_str().unwrap().to_owned();
         match body {
@@ -1367,7 +1369,7 @@ impl Authority {
                         .is_err()
                 });
                 host.prepare_controlled(
-                    pot_runtime::host::ControlOperation {
+                    pot_control::host::ControlOperation {
                         resources_revision: lease.resources_revision.clone(),
                         target: EnvironmentRef {
                             runtime_id: self.identity.runtime_id.clone(),
@@ -1504,7 +1506,7 @@ impl Authority {
                     let workspace = workspace_scope(&lease).unwrap();
                     let outcome = host
                         .execute_controlled(
-                            pot_runtime::host::ControlOperation {
+                            pot_control::host::ControlOperation {
                                 resources_revision: lease.resources_revision.clone(),
                                 scope: execution_scope,
                                 workspace_scope: workspace,
@@ -1902,10 +1904,8 @@ mod tests {
     #[tokio::test]
     async fn outward_global_resources_are_control_selected_and_lease_scoped() {
         use base64::Engine;
-        use pot_runtime::{
-            control_resources::{GlobalResources, ResourceFile},
-            remote_environment::{RemoteBinding, RemoteEnvironment},
-        };
+        use pot_control::remote_environment::{RemoteBinding, RemoteEnvironment};
+        use pot_runner::resources::{GlobalResources, ResourceFile};
         let control = resources().await;
         let node = resources().await;
         native(
@@ -1986,10 +1986,8 @@ mod tests {
     }
     #[tokio::test]
     async fn outward_plugins_use_control_bundle_and_scoped_sessions() {
-        use pot_runtime::{
-            control_resources::GlobalResources,
-            remote_environment::{RemoteBinding, RemoteEnvironment},
-        };
+        use pot_control::remote_environment::{RemoteBinding, RemoteEnvironment};
+        use pot_runner::resources::GlobalResources;
         let control = resources().await;
         let node = resources().await;
         native(
@@ -2134,7 +2132,7 @@ mod tests {
         // Even a different internally valid cache is not the Control-bound version.
         let mut forged = globals.clone();
         forged.vision = false;
-        pot_runtime::control_resources::install(
+        pot_control::control_resources::install(
             &PathBuf::from(context["workspace"].as_str().unwrap()),
             &forged,
         )
@@ -2255,7 +2253,7 @@ mod tests {
     }
     #[tokio::test]
     async fn outward_file_download_survives_finished_leases_and_is_scoped() {
-        use pot_runtime::remote_environment::RemoteEnvironment;
+        use pot_control::remote_environment::RemoteEnvironment;
         let control = resources().await;
         let node = resources().await;
         native(
@@ -2281,7 +2279,7 @@ mod tests {
             .join("execution-workspaces")
             .join(digest(&(&control.control.identity.runtime_id, &owner, &target)).unwrap());
         std::fs::create_dir_all(&workspace).unwrap();
-        let bytes: Vec<_> = (0..pot_runtime::files::CHUNK_BYTES + 29)
+        let bytes: Vec<_> = (0..pot_control::files::CHUNK_BYTES + 29)
             .map(|n| n as u8)
             .collect();
         std::fs::write(workspace.join("report.bin"), &bytes).unwrap();
@@ -2491,6 +2489,48 @@ mod tests {
         );
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[tokio::test]
+    async fn runner_membership_and_assistant_ownership_are_mutually_exclusive() {
+        let center = resources().await;
+        let runner = resources().await;
+        enroll(&center.control, &runner.control);
+        let reply = native(&runner, json!({"request_id":"forbidden-assistant","resource":{"kind":"assistant","name":"Wrong owner"}})).await;
+        assert_eq!(reply.status(), StatusCode::CONFLICT);
+        assert!(runner.assistant_hub().await.is_none());
+        assert!(
+            !runner
+                .host()
+                .await
+                .data_dir()
+                .join("control.sqlite")
+                .exists()
+        );
+        assert!(
+            !runner
+                .host()
+                .await
+                .data_dir()
+                .join("pot-v2.sqlite")
+                .exists()
+        );
+        let local = resources().await;
+        assert_eq!(native(&local, json!({"request_id":"local-assistant","resource":{"kind":"assistant","name":"Local"}})).await.status(), StatusCode::OK);
+        let result = local
+            .join_control(Join {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                url: "https://127.0.0.1:1/".into(),
+                invitation: "unused".into(),
+                expected_runtime_id: center.control.identity.runtime_id.clone(),
+                expected_fingerprint: center.control.identity.fingerprint.clone(),
+                ca_pem: None,
+            })
+            .await;
+        assert!(result.unwrap_err().to_string().contains("cannot join"));
+        assert!(!local.control.is_member());
+        local.shutdown().await;
+        runner.shutdown().await;
+        center.shutdown().await;
+    }
     pub(super) async fn resources() -> Arc<Resources> {
         let root =
             std::env::temp_dir().join(format!("pot-control-runtime-{}", uuid::Uuid::new_v4()));
@@ -2555,7 +2595,7 @@ mod recovery_tests {
     use super::*;
     async fn completed(
         authority: &Arc<Authority>,
-        host: &pot_runtime::host::Host,
+        host: &pot_control::host::Host,
         control: &str,
         lease: &str,
         call: &str,

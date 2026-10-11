@@ -363,7 +363,7 @@ async fn qualify_recovery(
             "Control persisted a full live model context instead of its digest"
         );
     }
-    assert!(!target.root.join("data/providers.json").exists());
+    assert!(!target.root.join("data/control.sqlite").exists());
     let body = captured.lock().unwrap()[0].to_string();
     assert!(body.contains("REMOTE_PROJECT_RULE"), "{body}");
     // Control owns the tool contract: a node capability list must not hide its plugin.

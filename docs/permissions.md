@@ -148,5 +148,5 @@ configuration change. A Task explicitly bound to Host can request owner-approved
 never switches a Sandbox-bound Task to Host.
 
 Owner API: `GET/POST /api/v1/permissions`. Sources: `crates/agent/src/permissions.rs`,
-`crates/runtime/src/permissions.rs`. Dated checks and untested scope:
+`crates/control/src/permissions.rs`. Dated checks and untested scope:
 [validation](validation/agent-permissions-20261008.md).

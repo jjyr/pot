@@ -5988,9 +5988,8 @@ dependencies = [
  "futures",
  "libc",
  "pot-core",
- "pot-gateway",
+ "pot-model-protocol",
  "pot-tool-executor",
- "reqwest",
  "rquickjs",
  "serde",
  "serde_json",
@@ -6020,6 +6019,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "pot-assistant"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "pot-core",
+ "pot-protocol",
+ "pot-storage",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "pot-control"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "chrono-tz",
+ "futures",
+ "libc",
+ "percent-encoding",
+ "pot-agent",
+ "pot-assistant",
+ "pot-core",
+ "pot-gateway",
+ "pot-model-protocol",
+ "pot-protocol",
+ "pot-resource",
+ "pot-runner",
+ "pot-sandbox",
+ "pot-sandbox-images",
+ "pot-sandbox-macos-apple-container",
+ "pot-sandbox-macos-apple-vm",
+ "pot-secrets",
+ "pot-storage",
+ "pot-tool-executor",
+ "pot-usage",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "uuid",
+]
+
+[[package]]
 name = "pot-core"
 version = "0.1.0"
 dependencies = [
@@ -6041,6 +6094,7 @@ dependencies = [
  "pot-core",
  "pot-gateway",
  "pot-tool-executor",
+ "pot-usage",
  "reqwest",
  "serde",
  "serde_json",
@@ -6054,8 +6108,11 @@ name = "pot-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "pot-model-protocol",
+ "pot-secrets",
  "pot-storage",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
 ]
@@ -6070,6 +6127,17 @@ dependencies = [
  "pot-ui",
  "serde_json",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "pot-model-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pot-storage",
+ "pot-usage",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6102,36 +6170,42 @@ dependencies = [
 ]
 
 [[package]]
-name = "pot-runtime"
+name = "pot-runner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-stream",
- "axum",
  "base64 0.22.1",
- "chrono",
- "chrono-tz",
  "futures",
- "libc",
- "percent-encoding",
  "pot-agent",
  "pot-core",
- "pot-gateway",
  "pot-protocol",
- "pot-resource",
  "pot-sandbox",
- "pot-sandbox-images",
- "pot-sandbox-macos-apple-container",
- "pot-sandbox-macos-apple-vm",
- "pot-storage",
- "pot-tool-executor",
- "reqwest",
- "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "tokio",
- "tokio-tungstenite 0.30.0",
+ "uuid",
+]
+
+[[package]]
+name = "pot-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "futures",
+ "pot-agent",
+ "pot-control",
+ "pot-core",
+ "pot-protocol",
+ "pot-runner",
+ "pot-sandbox",
+ "pot-tool-executor",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -6210,6 +6284,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pot-secrets"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "openssl",
+ "rusqlite",
+ "security-framework",
+ "zeroize",
+]
+
+[[package]]
 name = "pot-server"
 version = "0.1.0"
 dependencies = [
@@ -6224,13 +6309,16 @@ dependencies = [
  "hyper",
  "libc",
  "openssl",
+ "pot-control",
  "pot-core",
  "pot-protocol",
+ "pot-runner",
  "pot-runtime",
  "pot-sandbox",
  "pot-sandbox-linux-podman",
  "pot-sandbox-macos-apple-container",
  "pot-sandbox-macos-apple-vm",
+ "pot-secrets",
  "qrcode",
  "rcgen",
  "reqwest",
@@ -6284,6 +6372,21 @@ dependencies = [
  "serde",
  "serde_json",
  "unicode-segmentation",
+ "uuid",
+]
+
+[[package]]
+name = "pot-usage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "chrono-tz",
+ "pot-core",
+ "pot-protocol",
+ "rusqlite",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 

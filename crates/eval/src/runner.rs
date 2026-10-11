@@ -291,8 +291,7 @@ pub(crate) async fn run_agent_configured(
         workspace,
         owner: "eval".into(),
         role: ExecutionRole::Worker,
-        backend_url: String::new(),
-        lane_token: String::new(),
+
         main_prompt: String::new(),
         feedback: feedback.clone(),
     };

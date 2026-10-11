@@ -1,7 +1,9 @@
 //! Unit fixtures for private Agent state transitions; no HTTP service or paid calls.
 use super::*;
 use crate::extensions::Defaults;
+use anyhow::bail;
 use futures::future::BoxFuture;
+use std::time::Duration;
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -296,8 +298,7 @@ impl Fixture {
             workspace: dir.clone(),
             owner: "unit".into(),
             role: ExecutionRole::Worker,
-            backend_url: String::new(),
-            lane_token: String::new(),
+
             main_prompt: String::new(),
             feedback: feedback.clone(),
         };
@@ -457,7 +458,6 @@ async fn compaction_threshold_exact_boundary_minimum_history_and_disabled_policy
         f.services.queue(wire("openai_chat", "summary", &[]));
         compact(
             Some(&f.services),
-            &client(1000).unwrap(),
             &f.context,
             &f.thread,
             &mut state,
@@ -494,7 +494,6 @@ async fn compaction_derived_threshold_accounts_for_output_and_context_reservatio
         let mut state = compact_history();
         compact(
             Some(&f.services),
-            &client(1000).unwrap(),
             &f.context,
             &f.thread,
             &mut state,
@@ -523,7 +522,6 @@ async fn compaction_without_a_recent_user_boundary_preserves_history() {
     let original = serde_json::to_value(&state).unwrap();
     compact(
         Some(&f.services),
-        &client(1000).unwrap(),
         &f.context,
         &f.thread,
         &mut state,
@@ -560,7 +558,6 @@ async fn provider_calibration_switch_changes_compaction_decision_without_changin
         f.services.queue(wire("openai_chat", "summary", &[]));
         compact(
             Some(&f.services),
-            &client(1000).unwrap(),
             &f.context,
             &f.thread,
             &mut state,
@@ -623,7 +620,6 @@ async fn unsuccessful_compaction_keeps_original_history_and_closes_lifecycle() {
         assert!(
             compact(
                 Some(&f.services),
-                &client(1000).unwrap(),
                 &f.context,
                 &f.thread,
                 &mut state,
@@ -666,7 +662,6 @@ async fn successful_compaction_clears_anchor_and_excludes_tools_from_summary_req
     f.services.queue(wire("openai_chat", "summary", &[]));
     compact(
         Some(&f.services),
-        &client(1000).unwrap(),
         &f.context,
         &f.thread,
         &mut state,
@@ -707,7 +702,6 @@ async fn rejected_completion_ack_and_failed_display_sink_do_not_publish_two_term
         let mut state = compact_history();
         let result = compact(
             Some(&f.services),
-            &client(1000).unwrap(),
             &f.context,
             &f.thread,
             &mut state,
@@ -767,7 +761,6 @@ async fn cumulative_usage_snapshots_cache_and_reasoning_are_not_added_twice() {
         f.services.queue(frames);
         let reply = sample(
             Some(&f.services),
-            &client(1000).unwrap(),
             &f.context,
             &f.thread,
             "system",
@@ -2084,6 +2077,9 @@ async fn composition_reuses_parent_receipts_and_routes_product_calls_across_prot
 
 struct CountPluginExecutor(Arc<std::sync::atomic::AtomicUsize>, &'static str);
 impl ToolExecutor for CountPluginExecutor {
+    fn routes_environments(&self) -> bool {
+        true
+    }
     fn execute<'a>(
         &'a self,
         _: &'a ExecutionContext,
@@ -2176,7 +2172,6 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
             for approved in [false, true] {
                 let mut f = Fixture::new("openai_chat");
                 f.context.role = role;
-                f.context.backend_url = "http://fixture".into();
                 f.services.rpc_tools = Some(vec![]);
                 f.thread.config.params.agent.builtin_tools = vec!["exec".into(), "wait".into()];
                 *f.feedback.grants.lock().unwrap() = Some(json!([]));

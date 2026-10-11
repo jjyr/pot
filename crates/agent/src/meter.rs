@@ -1,7 +1,7 @@
 //! Context estimates are separate from Runtime's actual-usage ledger and reservations.
 use crate::AgentExtensions;
 use anyhow::Result;
-use pot_gateway::{
+use pot_model_protocol::{
     codecs::Protocol,
     model::{self, Message},
 };
@@ -76,7 +76,7 @@ pub(crate) fn estimate(
 mod tests {
     use super::*;
     use crate::extensions::Defaults;
-    use pot_gateway::model::TokenUsage;
+    use pot_model_protocol::model::TokenUsage;
     use serde_json::json;
 
     fn history() -> Vec<Message> {

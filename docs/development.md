@@ -132,12 +132,12 @@ Rust workspace members and their bundled assets live under `crates/`. The browse
 | `crates/web-ui/` | WASM/browser shell, authenticated transport, PWA and push |
 | `helper/` | Swift Containerization, VM lifecycle |
 | `crates/server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
-| `crates/runtime/` | Backend library, product commands, tasks/schedules, execution coordination/recovery |
+| `crates/runtime/` | Component assembly and lifecycle |
 | `crates/core/` | Immutable Agent models, execution contracts, shared tool schema |
-| `crates/storage/` | SQLite, Thread context/configuration, usage/file-request ledgers, transactions |
+| `crates/storage/` | SQLite primitives, file-request ledger and transactions |
 | `crates/agent/` | In-process pot-agent |
 | `crates/tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for crates/eval/tests |
-| `crates/gateway/` | Provider HTTP transport and model protocol codecs |
+| `crates/gateway/` | Provider metadata and HTTP transport; encrypted credential references |
 | `crates/protocol/` | Shared message and control types |
 | `crates/sandbox-images/linux/default/` | Guest desktop, browser, broker/viewer resources |
 | `scripts/` | Build, bundle, icon generation |
@@ -148,7 +148,7 @@ Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not com
 
 ### Supported integrations
 
-Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. Current data is preserved through bounded versioned upgrades; obsolete engine formats are not imported.
+Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. Superseded configuration and engine formats are not imported.
 
 ## About and dependency licenses
 
@@ -180,7 +180,7 @@ manual on an explicitly selected Linux host; no Podman integration CI was added.
 Edit `desktop/index.template.html`, `crates/sandbox-images/linux/default/index.template.html`,
 and the shared `desktop/i18n.js`; translations belong in `crates/app/locales/*.json`.
 Run `mise run build:web` to inspect generated assets under `.local/web/`.
-Runtime Cargo builds generate and embed their own fresh assets automatically.
+Control Cargo builds generate and embed their own fresh assets automatically.
 Image/prepare entry points also run the generator and copy the Sandbox output.
 Use `mise run test:i18n` to verify catalog parity, template defaults, independent
 resources, asynchronous startup and automatic third-language discovery.

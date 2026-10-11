@@ -599,33 +599,24 @@ async fn caller_created_resources_are_idle_idempotent_isolated_and_restored() {
 }
 
 #[tokio::test]
-async fn resource_upgrade_preserves_current_assistants_rules_and_sandbox_definitions() {
+async fn resource_manifest_restores_current_assistants_rules_and_sandbox_definitions() {
     let fixture = Fixture::new();
     let client = reqwest::Client::new();
     let mut original_rules = Value::Null;
     for upgraded in [false, true] {
+        let server = if upgraded {
+            Server::bind(fixture.config()).await.unwrap()
+        } else {
+            fixture.start().await
+        };
         if !upgraded {
-            let mut legacy = pot_runtime::initialize_with_providers(
-                fixture.config().runtime,
-                if cfg!(target_os = "linux") {
-                    vec![std::sync::Arc::new(
-                        pot_sandbox_linux_podman::LinuxPodmanProvider::new().unwrap(),
-                    )
-                        as std::sync::Arc<dyn pot_sandbox::Provider>]
-                } else {
-                    vec![std::sync::Arc::new(
-                        pot_sandbox_macos_apple_container::MacOSAppleContainerProvider::new()
-                            .unwrap(),
-                    )
-                        as std::sync::Arc<dyn pot_sandbox::Provider>]
-                },
-            )
-            .await
-            .unwrap();
-            legacy.shutdown().await;
-            drop(legacy);
+            let provider = if cfg!(target_os = "linux") {
+                pot_sandbox::LINUX_PODMAN_PROVIDER
+            } else {
+                pot_sandbox::MACOS_APPLE_CONTAINER_PROVIDER
+            };
+            server.local_client().request("/api/v1/runtime/resources", Some(json!({"request_id":"sandbox","resource":{"kind":"sandbox","sandbox_id":"default","name":"Linux","provider":provider}}))).await.unwrap();
         }
-        let server = Server::bind(fixture.config()).await.unwrap();
         let endpoint = server.endpoint().unwrap();
         let base = format!("http://{}", server.local_addr().unwrap());
         let (stop, shutdown) = tokio::sync::oneshot::channel();

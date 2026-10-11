@@ -5,7 +5,7 @@ use pot_runtime::Backend;
 use std::sync::Arc;
 pub struct Server {
     backend: Arc<crate::resources::Resources>,
-    host: pot_runtime::host::Host,
+    host: pot_control::host::Host,
     embedded: bool,
     listener: tokio::net::TcpListener,
     access: Option<(
