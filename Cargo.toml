@@ -27,7 +27,7 @@ pot-gateway = { path = "crates/gateway" }
 pot-runtime = { path = "crates/runtime" }
 pot-eval = { path = "crates/eval" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [profile.dev]
 debug = 0
