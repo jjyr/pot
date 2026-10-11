@@ -6,14 +6,15 @@ use gpui_kit::component::{
     clipboard::Clipboard,
 };
 use pot_protocol::{Message, MessageStatus, Role};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub enum ChatAction {
     ToggleTool(String),
     OpenTask(String),
+    DownloadFile(String),
 }
-pub type ChatHandler = Rc<dyn Fn(&ChatAction, &mut Window, &mut App)>;
+pub type ChatHandler = Arc<dyn Fn(&ChatAction, &mut Window, &mut App) + Send + Sync>;
 
 pub struct Labels {
     pub tool: String,
@@ -177,7 +178,14 @@ pub fn message(view: MessageView<'_>, handler: ChatHandler, cx: &App) -> Div {
                     )
                 })
                 .when(!tool || expanded, |el| {
-                    el.child(markdown::render(&m.id, source, user, dark, cx))
+                    el.child(markdown::render(
+                        &m.id,
+                        source,
+                        user,
+                        dark,
+                        Some(handler.clone()),
+                        cx,
+                    ))
                 })
                 .when_some(artifact, |el, extension| el.child(extension))
                 .when(

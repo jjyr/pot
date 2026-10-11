@@ -61,6 +61,20 @@ pub fn admin_router(access: Access) -> Router {
         .route("/api/v1/access", get(admin_status).post(admin_command))
         .with_state(access)
 }
+// The public login shell is safe to open from a link/bookmark. API reads,
+// downloads, embedded frames and every mutation retain the cross-site boundary.
+fn public_shell_navigation(req: &Request) -> bool {
+    req.method() == Method::GET
+        && req.uri().path() == "/"
+        && req
+            .headers()
+            .get("sec-fetch-mode")
+            .is_some_and(|v| v == "navigate")
+        && req
+            .headers()
+            .get("sec-fetch-dest")
+            .is_some_and(|v| v == "document")
+}
 async fn boundary(State(a): State<Access>, mut req: Request, next: Next) -> Response {
     let secure = a.origin().starts_with("https://");
     if !secure {
@@ -99,6 +113,7 @@ async fn boundary(State(a): State<Access>, mut req: Request, next: Next) -> Resp
         .headers()
         .get("sec-fetch-site")
         .is_some_and(|v| v == "cross-site")
+        && !public_shell_navigation(&req)
     {
         return fail(StatusCode::FORBIDDEN, "cross_site").into_response();
     }
@@ -249,7 +264,9 @@ fn allowed(method: &Method, path: &str) -> bool {
     }
     let parts = path.split('/').collect::<Vec<_>>();
     if parts.len() >= 5 && parts[..4] == ["", "api", "v1", "tasks"] && !parts[4].is_empty() {
-        return (*method == Method::GET && parts.len() == 5)
+        return (*method == Method::GET
+            && (parts.len() == 5
+                || (parts.len() == 6 && matches!(parts[5], "files" | "file-download"))))
             || (*method == Method::POST
                 && parts.len() == 6
                 && matches!(parts[5], "messages" | "cancel" | "interrupt"));
@@ -508,6 +525,25 @@ fn set_enabled(a: &Access, enabled: bool) -> Result<(), Failure> {
 mod tests {
     use super::*;
     #[test]
+    fn only_top_level_public_shell_navigation_can_be_cross_site() {
+        for (method, path, dest, expected) in [
+            ("GET", "/?page=chat", "document", true),
+            ("GET", "/api/v1/snapshot", "document", false),
+            ("GET", "/api/v1/tasks/id/file-download", "document", false),
+            ("GET", "/", "iframe", false),
+            ("POST", "/", "document", false),
+        ] {
+            let req = axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .header("sec-fetch-mode", "navigate")
+                .header("sec-fetch-dest", dest)
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(public_shell_navigation(&req), expected);
+        }
+    }
+    #[test]
     fn allowlist_excludes_management_and_terminal() {
         assert!(allowed(&Method::POST, "/api/v1/messages"));
         assert!(allowed(&Method::POST, "/api/v1/machine-connections"));
@@ -517,6 +553,15 @@ mod tests {
             "/api/v1/assistants/main/machine-connections"
         ));
         assert!(allowed(&Method::GET, "/api/v1/tasks/id"));
+        assert!(allowed(
+            &Method::GET,
+            "/api/v1/assistants/main/tasks/id/file-download"
+        ));
+        assert!(allowed(
+            &Method::GET,
+            "/api/v1/assistants/main/tasks/id/files"
+        ));
+        assert!(!allowed(&Method::POST, "/api/v1/tasks/id/files"));
         for p in [
             "/api/v1/execution",
             "/api/v1/terminals",

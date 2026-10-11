@@ -396,3 +396,66 @@ pub struct SchedulePage {
     pub runs: Vec<ScheduleRun>,
     pub runs_next_offset: Option<usize>,
 }
+
+/// A Chat download link identifies a task and a relative file, never an endpoint.
+/// The receiving client supplies its captured Runtime and assistant identity.
+pub fn parse_file_link(link: &str) -> Option<(String, String)> {
+    let (task, encoded) = link.strip_prefix("pot-file://")?.split_once('/')?;
+    let task = uuid::Uuid::parse_str(task).ok()?.to_string();
+    if encoded.contains(['?', '#', '\\']) {
+        return None;
+    }
+    let path = percent_encoding::percent_decode_str(encoded)
+        .decode_utf8()
+        .ok()?
+        .into_owned();
+    valid_file_path(&path).then_some((task, path))
+}
+pub fn valid_file_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 4096
+        && !path.contains(['\\', '\0'])
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FileChunk {
+    pub size: u64,
+    pub offset: u64,
+    pub revision: String,
+    pub data: String,
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct FileQuery {
+    pub path: String,
+    #[serde(default)]
+    pub offset: u64,
+    #[serde(default)]
+    pub revision: String,
+}
+#[cfg(test)]
+mod file_link_tests {
+    #[test]
+    fn file_links_bind_tasks_and_cannot_select_an_endpoint_or_escape() {
+        let task = "00000000-0000-4000-8000-000000000001";
+        let link = format!("pot-file://{task}/reports/%E6%8A%A5%E5%91%8A%20a.pdf");
+        assert_eq!(
+            super::parse_file_link(&link),
+            Some((task.into(), "reports/报告 a.pdf".into()))
+        );
+        for path in [
+            "../x",
+            "%2Fetc/passwd",
+            "a/%2e%2e/x",
+            "a%5Cb",
+            "x%00",
+            "x?token=z",
+            "x#z",
+            "",
+        ] {
+            assert!(super::parse_file_link(&format!("pot-file://{task}/{path}")).is_none());
+        }
+        assert!(super::parse_file_link("pot-file://evil.example/report.pdf").is_none());
+    }
+}

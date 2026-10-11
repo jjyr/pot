@@ -346,3 +346,38 @@ impl Host {
         Ok(args)
     }
 }
+
+impl Host {
+    pub async fn controlled_file(
+        &self,
+        target: &pot_core::EnvironmentTarget,
+        workspace_scope: &str,
+        query: pot_protocol::FileQuery,
+    ) -> Result<pot_protocol::FileChunk> {
+        anyhow::ensure!(
+            !workspace_scope.is_empty()
+                && workspace_scope
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            "Invalid workspace scope"
+        );
+        let workspace = match target {
+            pot_core::EnvironmentTarget::Host {} => {
+                anyhow::ensure!(self.host_enabled, "Host resource is disabled");
+                self.data.join("peer-workspaces").join(workspace_scope)
+            }
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+                let manager = self
+                    .sandboxes
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Sandbox service unavailable"))?;
+                manager.assignment(sandbox_id)?;
+                manager
+                    .workspace(sandbox_id)
+                    .join("tasks")
+                    .join(workspace_scope)
+            }
+        };
+        tokio::task::spawn_blocking(move || crate::files::read_chunk(&workspace, &query)).await?
+    }
+}

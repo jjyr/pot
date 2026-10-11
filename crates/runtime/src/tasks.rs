@@ -1897,6 +1897,85 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn task_file_download_checks_owner_and_streams_exact_bytes() {
+        let s = fixture();
+        let task = add(&s, "Download fixture", "").await;
+        let worker = control_service(&s, &task.id).unwrap();
+        let bytes = vec![0xab; crate::files::CHUNK_BYTES + 41];
+        std::fs::write(worker.workspace.join("报告.bin"), &bytes).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {}", s.token).parse().unwrap(),
+        );
+        let query = pot_protocol::FileQuery {
+            path: "报告.bin".into(),
+            ..Default::default()
+        };
+        let response = crate::files::download(
+            State(s.clone()),
+            headers.clone(),
+            Path(task.id.clone()),
+            Query(query.clone()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response.headers()["content-length"],
+            bytes.len().to_string()
+        );
+        assert!(
+            response.headers()["content-disposition"]
+                .to_str()
+                .unwrap()
+                .starts_with("attachment; filename*=UTF-8''")
+        );
+        let body = axum::body::to_bytes(response.into_body(), bytes.len() + 1)
+            .await
+            .unwrap();
+        assert_eq!(body.as_ref(), bytes.as_slice());
+        let other = fixture();
+        let mut other_headers = HeaderMap::new();
+        other_headers.insert(
+            "authorization",
+            format!("Bearer {}", other.token).parse().unwrap(),
+        );
+        assert!(
+            crate::files::chunk(
+                State(other.clone()),
+                other_headers,
+                Path(task.id.clone()),
+                Query(query.clone())
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            crate::files::chunk(
+                State(s.clone()),
+                HeaderMap::new(),
+                Path(task.id.clone()),
+                Query(query.clone())
+            )
+            .await
+            .is_err()
+        );
+        let mut worker_headers = HeaderMap::new();
+        worker_headers.insert(
+            "authorization",
+            format!("Bearer {}", worker.token).parse().unwrap(),
+        );
+        assert!(
+            crate::files::chunk(State(worker), worker_headers, Path(task.id), Query(query))
+                .await
+                .is_err()
+        );
+        for root in [s.data.parent().unwrap(), other.data.parent().unwrap()] {
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn task_pages_match_exact_environment_before_pagination() {
         let s = fixture();
         let targets = [

@@ -190,6 +190,33 @@ fn attempt_id(run: &str, attempt: u64) -> Result<String> {
     Ok(uuid::Uuid::from_bytes(hash.as_ref()[..16].try_into().unwrap()).to_string())
 }
 impl RemoteEnvironment for Authority {
+    fn read_file(
+        &self,
+        environment: EnvironmentRef,
+        owner: String,
+        query: pot_protocol::FileQuery,
+    ) -> BoxFuture<'_, Result<pot_protocol::FileChunk>> {
+        Box::pin(async move {
+            self.validate(&environment)?;
+            uuid::Uuid::parse_str(&owner)?;
+            anyhow::ensure!(
+                pot_protocol::valid_file_path(&query.path),
+                "Invalid relative file path"
+            );
+            let result = self
+                .call(
+                    &environment.runtime_id,
+                    Rpc::ReadFile {
+                        owner,
+                        target: environment.target,
+                        query,
+                    },
+                )
+                .await?;
+            Ok(serde_json::from_value(result)?)
+        })
+    }
+
     fn ready_owner(&self, owner: String) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { self.reconcile_management(&owner).await })
     }

@@ -6076,9 +6076,11 @@ dependencies = [
 name = "pot-protocol"
 version = "0.1.0"
 dependencies = [
+ "percent-encoding",
  "pot-core",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -6106,10 +6108,12 @@ dependencies = [
  "anyhow",
  "async-stream",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "futures",
  "libc",
+ "percent-encoding",
  "pot-agent",
  "pot-core",
  "pot-gateway",

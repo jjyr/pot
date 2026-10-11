@@ -31,6 +31,14 @@ pub trait RemoteEnvironment: Send + Sync {
     ) -> BoxFuture<'_, Result<Value>> {
         Box::pin(async { bail!("Remote Sandbox management is unavailable") })
     }
+    fn read_file(
+        &self,
+        _environment: pot_core::EnvironmentRef,
+        _owner: String,
+        _query: pot_protocol::FileQuery,
+    ) -> BoxFuture<'_, Result<pot_protocol::FileChunk>> {
+        Box::pin(async { bail!("Remote file transport unavailable") })
+    }
     fn inventory(&self) -> BoxFuture<'_, Result<Value>>;
     fn open(&self, binding: RemoteBinding) -> BoxFuture<'_, Result<Value>>;
     fn prepare(

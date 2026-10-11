@@ -766,10 +766,16 @@ impl Shell {
                                 .on_click(move |_, _, _| { let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn(); }).into_any_element()
                         });
                         let labels = pot_ui::chat::Labels::new(|key| crate::i18n::text(key).into());
-                        let handler: pot_ui::chat::ChatHandler = std::rc::Rc::new(cx.listener(|this, action: &pot_ui::chat::ChatAction, _, cx| {
+                        let handler: pot_ui::chat::ChatHandler = std::sync::Arc::new(cx.listener(|this, action: &pot_ui::chat::ChatAction, _, cx| {
                             match action {
                                 pot_ui::chat::ChatAction::ToggleTool(id) => { if !this.expanded.remove(id) { this.expanded.insert(id.clone()); } }
                                 pot_ui::chat::ChatAction::OpenTask(id) => { this.client.select(id.clone()); this.show_tasks=false; this.first=true; }
+                                pot_ui::chat::ChatAction::DownloadFile(link) => {
+                                    if let Some((task, path)) = pot_protocol::parse_file_link(link) {
+                                        let owner = this.client.view.lock().unwrap().assistant_id().to_owned();
+                                        ui::command(serde_json::json!({"action":"file-download","task_id":task,"path":path,"owner":owner}));
+                                    }
+                                }
                             }
                             cx.notify();
                         }));

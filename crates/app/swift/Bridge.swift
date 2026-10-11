@@ -904,6 +904,68 @@ var bridge: PotBridge?
         }
     }
 
+    func downloadTaskFile(_ task: String, path: String, owner: String) {
+        let client = runtime.scopedCopy(); client.assistantID = owner
+        Task {
+            var temporary: URL?
+            do {
+                var allowed = CharacterSet.urlQueryAllowed
+                allowed.remove(charactersIn: "&+=?#")
+                guard let encoded = path.addingPercentEncoding(withAllowedCharacters: allowed),
+                      UUID(uuidString: task) != nil else { return }
+                let base = "api/v1/tasks/" + task + "/files?path=" + encoded
+                let first = try await client.request(base)
+                let panel = NSSavePanel(); panel.title = L.text("files.save-title")
+                panel.nameFieldStringValue = (path as NSString).lastPathComponent
+                guard panel.runModal() == .OK, let destination = panel.url else { return }
+                let temp = destination.deletingLastPathComponent()
+                    .appendingPathComponent(".pot-download-" + UUID().uuidString)
+                temporary = temp
+                guard FileManager.default.createFile(
+                    atPath: temp.path,
+                    contents: nil,
+                    attributes: [.posixPermissions: 0o600]
+                ) else { throw CocoaError(.fileWriteUnknown) }
+                let output = try FileHandle(forWritingTo: temp); defer { try? output.close() }
+                guard let size = (first["size"] as? NSNumber)?.uint64Value,
+                      size <= 1024 * 1024 * 1024,
+                      let revision = first["revision"] as? String,
+                      let encodedRevision = revision.addingPercentEncoding(withAllowedCharacters: allowed)
+                else { throw CocoaError(.fileReadCorruptFile) }
+                var offset: UInt64 = 0
+                var chunk = first
+                while true {
+                    guard let data = (chunk["data"] as? String).flatMap({ Data(base64Encoded: $0) }),
+                          data.count <= 192 * 1024,
+                          (chunk["offset"] as? NSNumber)?.uint64Value == offset,
+                          (chunk["size"] as? NSNumber)?.uint64Value == size, chunk["revision"] as? String == revision,
+                          offset + UInt64(data.count) <= size,
+                          !data.isEmpty || offset == size else { throw CocoaError(.fileReadCorruptFile) }
+                    try output.write(contentsOf: data); offset += UInt64(data.count)
+                    if offset == size {
+                        break
+                    }
+                    chunk = try await client
+                        .request(base + "&offset=" + String(offset) + "&revision=" + encodedRevision)
+                }
+                try output.synchronize(); try output.close()
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    _ = try FileManager.default.replaceItemAt(destination, withItemAt: temp)
+                } else {
+                    try FileManager.default.moveItem(at: temp, to: destination)
+                }
+                temporary = nil
+            } catch {
+                if let temporary {
+                    try? FileManager.default.removeItem(at: temporary)
+                }
+                let alert = NSAlert(); alert.messageText = L.text("files.download-failed"); alert
+                    .informativeText = error.localizedDescription
+                alert.runModal()
+            }
+        }
+    }
+
     func openEnvironmentDesktop(_ target: String) {
         guard let localRuntime, !runtime.remoteMode else { return }
         let client = RuntimeClient(); client.root = localRuntime.root
@@ -1272,6 +1334,11 @@ private var bridgeWake: (@convention(c) () -> Void)?
             .machinesDetail || bridge.page != 1 || bridge.localRuntime?.displayReady != true
         case "sandbox-view": if let id = v["id"] as? String {
                 bridge.chooseSandbox(id)
+            }
+        case "file-download": if let task = v["task_id"] as? String, let path = v["path"] as? String,
+                                 let owner = v["owner"] as? String
+            {
+                bridge.downloadTaskFile(task, path: path, owner: owner)
             }
         case "environment-desktop": if let id = v["id"] as? String {
                 bridge.openEnvironmentDesktop(id)

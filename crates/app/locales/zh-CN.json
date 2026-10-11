@@ -801,5 +801,8 @@
   "machines.add-control": "添加 Control",
   "machines.remote-mode": "远程 Control · 点击切换本地",
   "machines.local-mode": "本地 · 点击切换 Control",
-  "machines.copy-invitation": "复制加入邀请"
+  "machines.copy-invitation": "复制加入邀请",
+  "files.save-title": "保存文件",
+  "files.download-failed": "文件下载失败",
+  "files.assistant-changed": "助手已切换，请重新点击文件链接。"
 }

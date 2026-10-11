@@ -133,6 +133,14 @@ window.potAction=async(action,value)=>{
     if(action==='install')await installer.open();
     if(action==='page'){page=value;task='';navigate();}
     if(action==='task'){if(sending||JSON.parse(module.pending_send()))throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));let entry;try{entry=JSON.parse(value);}catch{}if(entry?.id){task=entry.id;assistantId=entry.assistant_id;}else task=typeof entry==='string'?entry:value;page='task';navigate();}
+    if(action==='file-download'){
+      const file=JSON.parse(value), owner=assistantId;
+      const base=`/api/v1/assistants/${encodeURIComponent(owner)}/tasks/${encodeURIComponent(file.task_id)}`;
+      const chunk=await api(`${base}/files?path=${encodeURIComponent(file.path)}`,undefined,owner);
+      if(owner!==assistantId)throw Error(t('files.assistant-changed'));
+      const link=document.createElement('a');link.href=`${base}/file-download?path=${encodeURIComponent(file.path)}&revision=${encodeURIComponent(chunk.revision)}`;
+      link.download=file.path.split('/').pop();document.body.appendChild(link);link.click();link.remove();
+    }
     if(action==='filter'){scope=value;offset=0;}
     if(action==='environment-tasks'){environment=value;page='tasks';task='';scope='active';query='';offset=0;navigate();}
     if(action==='environment-filter-clear'){environment='';offset=0;}

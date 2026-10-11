@@ -97,6 +97,8 @@ async fn relay(destination: &Destination, request: Request) -> Result<Response> 
         "cache-control",
         "retry-after",
         "content-disposition",
+        "content-length",
+        "x-content-type-options",
     ] {
         if let Some(value) = upstream.headers().get(name) {
             response = response.header(name, value);

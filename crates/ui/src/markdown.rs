@@ -11,6 +11,7 @@ pub fn render(
     source: &str,
     user: bool,
     dark: bool,
+    handler: Option<crate::chat::ChatHandler>,
     cx: &App,
 ) -> impl IntoElement + use<> {
     let style = TextViewStyle::from_theme(&Theme::global(cx));
@@ -27,7 +28,17 @@ pub fn render(
     )
     .style(style)
     .selectable(true)
-    .on_link_click(|url, _, _, cx| {
+    .on_link_click(move |url, _, window, cx| {
+        if pot_protocol::parse_file_link(url).is_some() {
+            if let Some(handler) = &handler {
+                handler(
+                    &crate::chat::ChatAction::DownloadFile(url.to_string()),
+                    window,
+                    cx,
+                );
+            }
+            return;
+        }
         if url.starts_with("https://") || url.starts_with("http://") {
             cx.open_url(url);
         }
