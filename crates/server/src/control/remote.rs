@@ -325,7 +325,14 @@ impl RemoteEnvironment for Authority {
                     },
                 )
                 .await
-                .ok()
+                .map(Some)
+                .or_else(|error| {
+                    if error.downcast_ref::<RemoteRejection>().is_some() {
+                        Err(error)
+                    } else {
+                        Ok(None)
+                    }
+                })?
             } else {
                 None
             };

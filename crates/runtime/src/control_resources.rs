@@ -24,7 +24,9 @@ pub struct GlobalResources {
 }
 impl GlobalResources {
     pub fn revision(&self) -> Result<String> {
-        let bytes = serde_json::to_vec(self)?;
+        let mut value = serde_json::to_value(self)?;
+        value.sort_all_objects();
+        let bytes = serde_json::to_vec(&value)?;
         anyhow::ensure!(
             bytes.len() <= MAX_BYTES,
             "Global resource snapshot exceeds 512 KiB"

@@ -100,7 +100,7 @@ Web listener configuration remains separately explicit. Resource creation does
 not automatically start Web access. Lazy macOS Helper lifecycle and real VM
 qualification remain part of the outstanding environment deployment work.
 
-## Control listener and membership (partial P3)
+## Control listener and membership
 
 Use native operator `pot api /api/v1/runtime/control` for Control identity and
 membership. POST exact JSON commands with `pot api PATH /absolute/path/request.json`.
@@ -113,7 +113,9 @@ Enable Control on a standalone Runtime (never the embedded App Runtime):
 
 Control exposes `/control/v1/identity`, `/control/v1/join`, and
 `/control/v1/poll`, plus authenticated product APIs. There is no inbound execution
-RPC on members. HTTPS certificates must match the Control hostname.
+RPC on members. HTTPS certificates must match the Control hostname and permit server authentication.
+Private fixture certificates also require `extendedKeyUsage=serverAuth`; a bare
+self-signed certificate may be rejected by the TLS client.
 
 Create an invitation on Control with `{"action":"create_invitation"}`. Preview
 its identity from the joining machine with `{"action":"preview","url":"https://control.example:19443","ca_pem":null}`.
@@ -133,6 +135,12 @@ behavior approvals remain enforced. Do not distribute member tokens as UI tokens
 `{"action":"disable_control"}` stops the listener; restart with its explicit
 configuration to reconnect members. Native diagnostic `action:call` uses `runtime_id`
 and a protocol `body`; it is excluded from browser-facing machine commands.
+
+Upgrade Control and execution binaries together. Protocol signatures and digests
+use canonical nested JSON ordering across App/macOS and standalone/Linux builds;
+there is no alternate legacy signature path. Persistent signing identities,
+membership credentials, local operation paths and user data are retained. Active
+execution-node runs follow the reboot interruption rule, not automatic replay.
 
 See [Control architecture](architecture.md) and #39 for App mode switching,
 explicit fixed-Control Web startup, and remaining remote transports.
