@@ -12,7 +12,7 @@ use std::{
 use zeroize::Zeroizing;
 
 pub trait KeySource: Send + Sync {
-    fn key(&self) -> Result<Zeroizing<Vec<u8>>>;
+    fn key(&self, allow_create: bool) -> Result<Zeroizing<Vec<u8>>>;
 }
 /// Explicit process-owned key, useful for embedders and deterministic tests.
 pub struct MemoryKey(Zeroizing<Vec<u8>>);
@@ -23,11 +23,11 @@ impl MemoryKey {
     }
 }
 impl KeySource for MemoryKey {
-    fn key(&self) -> Result<Zeroizing<Vec<u8>>> {
+    fn key(&self, _allow_create: bool) -> Result<Zeroizing<Vec<u8>>> {
         Ok(self.0.clone())
     }
 }
-/// macOS uses Keychain. Headless deployments explicitly supply a protected key file.
+/// macOS uses Keychain; other platforms use ~/.pot/secrets/master.key.
 pub struct SystemKey {
     account: String,
 }
@@ -37,22 +37,9 @@ impl SystemKey {
     }
 }
 impl KeySource for SystemKey {
-    fn key(&self) -> Result<Zeroizing<Vec<u8>>> {
+    fn key(&self, allow_create: bool) -> Result<Zeroizing<Vec<u8>>> {
         if let Some(path) = std::env::var_os("POT_SECRET_KEY_FILE") {
-            use std::os::unix::fs::PermissionsExt;
-            let file = std::fs::File::open(path)?;
-            ensure!(
-                file.metadata()?.permissions().mode() & 0o077 == 0,
-                "Secret key file must be owner-only"
-            );
-            use std::io::Read;
-            let mut key = Zeroizing::new(Vec::new());
-            file.take(33).read_to_end(&mut key)?;
-            ensure!(
-                key.len() == 32,
-                "Secret key file must contain exactly 32 raw bytes"
-            );
-            return Ok(key);
+            return read_key_file(Path::new(&path));
         }
         #[cfg(target_os = "macos")]
         {
@@ -62,7 +49,7 @@ impl KeySource for SystemKey {
             let service = "pot.control.secrets";
             let key = match get_generic_password(service, &self.account) {
                 Ok(value) => value,
-                Err(error) if error.code() == -25300 => {
+                Err(error) if error.code() == -25300 && allow_create => {
                     let mut key = Zeroizing::new(vec![0; 32]);
                     rand_bytes(&mut key)?;
                     set_generic_password(service, &self.account, &key)?;
@@ -76,11 +63,72 @@ impl KeySource for SystemKey {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = &self.account;
-            Err(anyhow!(
-                "Configure POT_SECRET_KEY_FILE to unlock Control secrets"
-            ))
+            let home = std::env::var_os("HOME")
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| anyhow!("HOME is unavailable; configure POT_SECRET_KEY_FILE"))?;
+            default_file_key(
+                &Path::new(&home).join(".pot/secrets/master.key"),
+                allow_create,
+            )
         }
     }
+}
+
+fn read_key_file(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
+    use std::{io::Read, os::unix::fs::PermissionsExt};
+    let file = std::fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    ensure!(
+        metadata.is_file() && metadata.permissions().mode() & 0o077 == 0,
+        "Secret key file must be a regular owner-only file"
+    );
+    let mut key = Zeroizing::new(Vec::new());
+    file.take(33).read_to_end(&mut key)?;
+    ensure!(
+        key.len() == 32,
+        "Secret key file must contain exactly 32 raw bytes"
+    );
+    Ok(key)
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+fn default_file_key(path: &Path, allow_create: bool) -> Result<Zeroizing<Vec<u8>>> {
+    use std::{
+        io::{ErrorKind, Write},
+        os::unix::fs::{DirBuilderExt, PermissionsExt},
+    };
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => return read_key_file(path),
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    ensure!(
+        allow_create,
+        "Secret master key is missing; restore the original key"
+    );
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("Secret key directory missing"))?;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(parent)?;
+    ensure!(
+        std::fs::metadata(parent)?.permissions().mode() & 0o077 == 0,
+        "Secret key directory must be owner-only"
+    );
+    let mut key = Zeroizing::new(vec![0; 32]);
+    rand_bytes(&mut key)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(&key)?;
+    temporary.as_file().sync_all()?;
+    // Publish only a complete key, without replacing another process's key.
+    match temporary.persist_noclobber(path) {
+        Ok(_) => std::fs::File::open(parent)?.sync_all()?,
+        Err(error) if error.error.kind() == ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.error.into()),
+    }
+    read_key_file(path)
 }
 
 pub struct Store {
@@ -112,10 +160,12 @@ impl Store {
             !id.is_empty() && id.len() <= 256 && plaintext.len() <= 1024 * 1024,
             "Invalid secret size or reference"
         );
-        let key = self.keys.key()?;
-        ensure!(key.len() == 32, "Invalid Control master key");
         let mut db = self.db.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let populated: bool =
+            tx.query_row("SELECT EXISTS(SELECT 1 FROM secrets)", [], |r| r.get(0))?;
+        let key = self.keys.key(!populated)?;
+        ensure!(key.len() == 32, "Invalid Control master key");
         if let Some(existing) = read(&tx, id, &key)? {
             ensure!(
                 existing.len() == plaintext.len() && openssl::memcmp::eq(&existing, plaintext),
@@ -142,7 +192,7 @@ impl Store {
         Ok(())
     }
     pub fn get(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
-        let key = self.keys.key()?;
+        let key = self.keys.key(false)?;
         read(&self.db.lock().unwrap(), id, &key)?
             .ok_or_else(|| anyhow!("Secret reference unavailable"))
     }
@@ -176,6 +226,69 @@ fn read(db: &Connection, id: &str, key: &[u8]) -> Result<Option<Zeroizing<Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct FileKey(std::path::PathBuf);
+    impl KeySource for FileKey {
+        fn key(&self, allow_create: bool) -> Result<Zeroizing<Vec<u8>>> {
+            default_file_key(&self.0, allow_create)
+        }
+    }
+    #[test]
+    fn default_key_is_private_reused_and_never_recreated_for_existing_secrets() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(".pot/secrets/master.key");
+        let keys = Arc::new(FileKey(path.clone()));
+        let db = root.path().join("control.sqlite");
+        let store = Store::open(&db, keys.clone()).unwrap();
+        assert!(store.get("missing").is_err());
+        assert!(!path.exists());
+        store.put("one", b"private").unwrap();
+        let original = read_key_file(&path).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        drop(store);
+        let store = Store::open(&db, keys).unwrap();
+        assert_eq!(&**store.get("one").unwrap(), b"private");
+        assert_eq!(*read_key_file(&path).unwrap(), *original);
+        std::fs::remove_file(&path).unwrap();
+        assert!(store.put("two", b"another").is_err());
+        assert!(store.get("one").is_err());
+        assert!(!path.exists());
+    }
+    #[test]
+    fn concurrent_initializers_share_one_complete_key_and_reject_invalid_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("secrets/master.key");
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    default_file_key(&path, true).unwrap()
+                })
+            })
+            .collect();
+        let keys: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(keys.iter().all(|k| **k == *keys[0]));
+        std::fs::write(&path, b"short").unwrap();
+        assert!(default_file_key(&path, true).is_err());
+        std::fs::write(&path, [7; 32]).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(default_file_key(&path, true).is_err());
+    }
     #[test]
     fn ciphertext_survives_reopen_and_rejects_wrong_keys_and_tampering() {
         let mut suffix = [0; 8];
