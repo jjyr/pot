@@ -238,6 +238,37 @@ impl Host {
 }
 
 impl Host {
+    pub async fn install_controlled_resources(
+        &self,
+        target: &pot_core::EnvironmentTarget,
+        workspace_scope: &str,
+        resources: crate::control_resources::GlobalResources,
+    ) -> Result<Value> {
+        let context = self.controlled_context(target, workspace_scope).await?;
+        let workspace = match target {
+            pot_core::EnvironmentTarget::Host {} => {
+                self.data.join("peer-workspaces").join(workspace_scope)
+            }
+            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => self
+                .sandboxes
+                .as_ref()
+                .ok_or_else(|| anyhow!("Sandbox service unavailable"))?
+                .workspace(sandbox_id)
+                .join("tasks")
+                .join(workspace_scope),
+        };
+        let revision = tokio::task::spawn_blocking(move || {
+            crate::control_resources::install(&workspace, &resources)
+        })
+        .await??;
+        let mut updated = self.controlled_context(target, workspace_scope).await?;
+        anyhow::ensure!(
+            updated["workspace"] == context["workspace"],
+            "Execution workspace changed"
+        );
+        updated["global_resources_revision"] = json!(revision);
+        Ok(updated)
+    }
     pub async fn controlled_context(
         &self,
         target: &pot_core::EnvironmentTarget,

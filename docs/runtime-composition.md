@@ -42,8 +42,10 @@ Agent relocation or three-node placement is included. Execution nodes do not nee
 assistant databases or provider credentials.
 
 Currently Task Agent loops still run on the task-owning Runtime and forward
-environment operations. Remote Task Agent startup and Control-owned global bundle
-distribution remain implementation work in #39; they are not delivered features.
+environment operations. Control-selected global Skills and pinned plugin
+configuration are now delivered through the authenticated outward connection.
+Remote plugin invocation and remote Task Agent startup remain implementation
+work in #39; resource delivery alone does not establish those features.
 
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
@@ -114,6 +116,12 @@ Control. Execution nodes receive the selected bundles and may cache immutable
 versions; they do not discover global resources from their own home directories
 or packaged catalogs. Project AGENTS.md and project skills continue to be read
 from the actual execution workspace with their existing scope/precedence rules.
+Control snapshots global bundles before the first remote context and persists
+the snapshot with the task; follow-up turns and restart reuse it. Cache files
+retain executable bits and are exposed read-only; digest/contents are verified
+before reuse. The current inline snapshot is bounded to 512 KiB and 2048 files
+within the existing 1 MiB transport limit. Oversized or symlinked bundles fail
+explicitly; large-bundle chunked delivery remains unqualified.
 Control updates affect later launches, not already bound tasks. Missing bundles
 fail explicitly rather than falling back to a node-local catalog. Standalone App
 local mode retains its independent local resources and state.
@@ -174,8 +182,8 @@ after its acceptance window closes, preventing in-flight acceptance races.
 Remote Sandbox management supports existing start/stop/recover/update/delete. Create
 and select remain local to the destination. Active executions, unresolved receipts,
 and references from all destination assistants' Tasks/schedules protect deletion.
-Retired Sandbox IDs cannot be silently reused. Control-owned global bundle delivery,
-remote plugins, desktop transport, co-located remote Task Agent startup and actual
+Retired Sandbox IDs cannot be silently reused. Remote plugin invocation,
+desktop transport, co-located remote Task Agent startup and actual
 multi-machine qualification remain tracked in #39. Three-node Agent/Environment
 placement is deferred beyond this release; successful Host tests do not establish
 the pending features.

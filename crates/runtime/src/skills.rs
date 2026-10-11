@@ -2,16 +2,15 @@
 use super::*;
 use pot_core::{SkillResources, SkillRoot};
 
-/// Discover installed resources on the execution machine without creating an Agent.
-/// Only catalog metadata crosses the peer connection; bundles stay at destination paths.
+/// Discover project resources plus Control-supplied global bundles.
+/// Destination user/builtin catalogs are never discovery sources.
 pub(crate) fn destination_catalog(
-    data: &std::path::Path,
+    _data: &std::path::Path,
     source: &std::path::Path,
     mount: &std::path::Path,
     cwd: &std::path::Path,
-    host: bool,
+    _host: bool,
 ) -> Result<pot_agent::SkillCatalog> {
-    let resources = crate::services::AgentResources::paths(data);
     let relative = cwd.strip_prefix(mount)?;
     let mut project = source.join(relative);
     let mut location = cwd.to_path_buf();
@@ -34,35 +33,11 @@ pub(crate) fn destination_catalog(
             .ok_or_else(|| anyhow!("Invalid destination skill location"))?
             .to_path_buf();
     }
-    let guest = cwd.join(".pot/agent/skills");
-    let builtin = SkillRoot {
-        path: resources.skill_builtin.clone(),
-        location: if host {
-            resources.skill_builtin.clone()
-        } else {
-            guest.clone()
-        },
-        builtin: true,
-    };
-    let reserved_names = pot_agent::discover_skills(&SkillResources {
-        roots: vec![builtin.clone()],
-        ..Default::default()
-    })?
-    .skills
-    .into_iter()
-    .map(|skill| skill.name)
-    .collect();
-    roots.push(SkillRoot {
-        path: resources.skill_user.clone(),
-        location: if host { resources.skill_user } else { guest },
-        builtin: false,
-    });
-    roots.push(builtin);
-    pot_agent::discover_skills(&SkillResources {
-        roots,
-        reserved_names,
-        selection: None,
-    })
+    let mut resources = crate::control_resources::installed_resources(&source.join(relative), cwd)?
+        .unwrap_or_default();
+    roots.append(&mut resources.roots);
+    resources.roots = roots;
+    pot_agent::discover_skills(&resources)
 }
 
 pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
