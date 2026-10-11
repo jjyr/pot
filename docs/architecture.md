@@ -64,8 +64,12 @@ links only when the task has files to deliver; ordinary results need no download
 A desktop entry requires an implemented client transport (currently local App only).
 Web UI requires `pot serve --ui --control URL`, a server-held
 Control credential and explicit browser listener settings. It has no local/remote
-switch. App no longer hosts or configures a browser endpoint. Remote desktop and
-remote notification transport remain pending; see #39 for implementation status.
+switch. App no longer hosts or configures a browser endpoint. Remote desktop
+transport is deferred until its connection design is agreed and is outside the
+current #39 completion scope. Control remains responsible for session identity;
+neither desktop data relay through Control nor direct access is selected. Existing
+local desktop support remains available. Remote notification transport remains
+pending; see #39 for implementation status.
 
 ## Membership and transport
 
@@ -194,7 +198,7 @@ Remote Sandbox management supports existing start/stop/recover/update/delete. Cr
 and select remain local to the destination. Active executions, unresolved receipts,
 and references from all destination assistants' Tasks/schedules protect deletion.
 Retired Sandbox IDs cannot be silently reused. Remote plugin Host TLS fixtures
-are qualified; real Sandbox plugin/platform acceptance, desktop transport,
+are qualified; real Sandbox plugin/platform acceptance,
 co-located remote Task Agent startup and actual
 multi-machine qualification remain tracked in #39. Three-node Agent/Environment
 placement is deferred beyond this release; successful Host tests do not establish
