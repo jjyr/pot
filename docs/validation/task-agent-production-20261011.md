@@ -96,3 +96,18 @@ recovery, not native App/Web clicking, a real model, OS sleep or power loss.
 All model responses above are deterministic fixtures. No paid model or new UI
 acceptance is claimed. Physical cross-machine App/Web flows, supported real providers and Apple VM qualification remain tracked
 in #39. Remote desktop transport remains explicitly deferred.
+
+## Extended physical Control / macOS Host qualification
+
+The independent-process harness was extended with live steering, offline cancellation,
+finished task files, pinned plugin calls and scheduled tasks. Linux Control and macOS
+execution Host use fresh roots and signed HTTPS over the tailnet. The final run passed
+all cases: duplicate guidance is acknowledged and injected once; offline cancellation
+runs no pending command; destination cancellation is durably `Cancelled`; the pinned
+plugin retains same-run state (41 then 42). The cancellation test exposed an error
+path which previously recorded `Failed("Task Agent cancelled")`; the runner now records
+`Cancelled` when the authenticated cancellation signal is set, after settling receipts.
+A regression test locks the terminal journal status and absence of model requests.
+
+These are deterministic model fixtures; native App/Web, paid provider and OS
+sleep/power-loss remain separate gates.
