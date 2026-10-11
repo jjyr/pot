@@ -614,7 +614,7 @@ impl Render for Mobile {
 }
 #[wasm_bindgen]
 pub fn update_view(data: &str) {
-    let Ok(data) = serde_json::from_str::<Value>(data) else {
+    let Ok(mut data) = serde_json::from_str::<Value>(data) else {
         return;
     };
     HANDLE.with(|cell| {
@@ -623,6 +623,15 @@ pub fn update_view(data: &str) {
                 if let Some(view) = view.borrow().as_ref() {
                     app.update(|cx| {
                         view.update(cx, |this, cx| {
+                            if let Some(machines) = data["machines"]["machines"].as_array_mut() {
+                                for machine in machines {
+                                    if machine["local"] == true {
+                                        machine["name"] = serde_json::json!(
+                                            this.catalog().text("machines.control")
+                                        );
+                                    }
+                                }
+                            }
                             this.page = data["page"].as_str().unwrap_or("chat").into();
                             this.data = data;
                             cx.notify();

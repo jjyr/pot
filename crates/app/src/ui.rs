@@ -10,7 +10,6 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     form::Form,
     input::{Input, InputState},
-    switch::Switch,
 };
 use serde_json::{Value, json};
 use std::ffi::CString;
@@ -43,235 +42,9 @@ pub struct Settings {
     secret_revision: Option<i64>,
     draft_revision: Option<i64>,
     pub advanced: bool,
-    web_show_token: bool,
-    web_qr_origin: String,
     api_advanced: bool,
 }
 impl Settings {
-    fn web_access(&self, view: &crate::client::View, cx: &mut Context<Shell>) -> Div {
-        let state = &view.access;
-        let t = crate::i18n::text;
-        let mut panel = div().flex().flex_col().gap_3();
-        if state.is_null() {
-            return panel.child(t("web.loading"));
-        }
-        let web = &state["web"];
-        let ts_running = state["tailscale"]["state"] == "Running";
-        panel = panel.child(t("web.description"));
-        for (action, key) in [("lan", "web.lan"), ("tailscale", "web.tailnet-access")] {
-            panel = panel.child(
-                Switch::new(SharedString::from(format!("web-{action}")))
-                    .label(t(key))
-                    .checked(web[action] == true)
-                    .disabled(
-                        view.access_pending
-                            || (action == "tailscale" && !ts_running && web[action] != true),
-                    )
-                    .on_change(cx.listener(move |this, enabled, _, _| {
-                        this.client
-                            .access_command(json!({"action":action,"enabled":enabled}))
-                    })),
-            );
-            if action == "tailscale" && !ts_running {
-                panel = panel.child(t("web.tailnet-disconnected")).child(
-                    Button::new("open-tailscale-settings")
-                        .ghost()
-                        .label(t("web.open-tailscale"))
-                        .on_click(|_, _, _| command(json!({"action":"section","value":6}))),
-                );
-            }
-            if action == "lan" && web[action] == true {
-                panel = panel.child(t("web.http-hint"));
-            }
-        }
-        panel = panel
-            .child(
-                Switch::new("web-https")
-                    .label(t("web.https"))
-                    .checked(web["https"] == true)
-                    .disabled(view.access_pending || !ts_running || web["tailscale"] != true)
-                    .on_change(cx.listener(|this, enabled, _, _| {
-                        this.client
-                            .access_command(json!({"action":"https","enabled":enabled}))
-                    })),
-            )
-            .child(t("web.https-hint"));
-        if let Some(error) = web["error"].as_str().filter(|v| !v.is_empty()) {
-            panel = panel.child(error.to_owned());
-        }
-        let token = state["token"].as_str().unwrap_or_default().to_owned();
-        let mut urls = web["lan_urls"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|url| url.as_str().map(str::to_owned))
-            .collect::<Vec<_>>();
-        if ts_running && let Some(origin) = web["tailscale_url"].as_str().filter(|v| !v.is_empty())
-        {
-            urls.push(origin.to_owned());
-        }
-        for (index, origin) in urls.iter().enumerate() {
-            let url = format!("{origin}/#access_token={token}");
-            let plain = origin.clone();
-            let qr_origin = origin.clone();
-            panel = panel.child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(
-                        Button::new(("web-address", index))
-                            .ghost()
-                            .label(origin.clone())
-                            .on_click(move |_, _, cx| cx.open_url(&url)),
-                    )
-                    .child(
-                        Button::new(("copy-address", index))
-                            .ghost()
-                            .label(t("web.copy-address"))
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(plain.clone()))
-                            }),
-                    )
-                    .child(
-                        Button::new(("connection-qr", index))
-                            .ghost()
-                            .label(t("web.scan"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.settings.web_qr_origin =
-                                    if this.settings.web_qr_origin == qr_origin {
-                                        String::new()
-                                    } else {
-                                        qr_origin.clone()
-                                    };
-                                cx.notify();
-                            })),
-                    ),
-            );
-        }
-        let connection = format!("{}/#access_token={token}", self.web_qr_origin);
-        let token_copy = token.clone();
-        panel = panel
-            .child(t("web.access-token"))
-            .child(if self.web_show_token {
-                token.clone()
-            } else {
-                "••••••••••••••••".into()
-            })
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(
-                        Button::new("show-token")
-                            .ghost()
-                            .label(t(if self.web_show_token {
-                                "web.hide"
-                            } else {
-                                "web.show"
-                            }))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings.web_show_token = !this.settings.web_show_token;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("copy-token")
-                            .ghost()
-                            .label(t("web.copy-token"))
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(token_copy.clone()))
-                            }),
-                    )
-                    .child(
-                        Button::new("rotate-token")
-                            .ghost()
-                            .label(t("web.regenerate"))
-                            .disabled(view.access_pending)
-                            .on_click(cx.listener(|this, _, _, _| {
-                                this.client
-                                    .access_command(json!({"action":"regenerate_token"}))
-                            })),
-                    ),
-            );
-        if urls.contains(&self.web_qr_origin)
-            && let Ok(code) = qrcode::QrCode::new(connection)
-        {
-            let width = code.width();
-            let colors = code.to_colors();
-            let rows = (0..width + 8).map(|y| {
-                div().flex().children((0..width + 8).map(|x| {
-                    let dark = x >= 4
-                        && y >= 4
-                        && x < width + 4
-                        && y < width + 4
-                        && colors[(y - 4) * width + x - 4] == qrcode::Color::Dark;
-                    div()
-                        .w(px(4.))
-                        .h(px(4.))
-                        .bg(gpui::rgb(if dark { 0x000000 } else { 0xffffff }))
-                }))
-            });
-            panel = panel
-                .child(div().flex().flex_col().items_start().children(rows))
-                .child(t("web.qr-warning"));
-        }
-        panel
-            .child(t("web.rotate-hint"))
-            .child(view.access_notice.clone())
-    }
-
-    fn tailscale_settings(&self, view: &crate::client::View, cx: &mut Context<Shell>) -> Div {
-        let t = crate::i18n::text;
-        if view.access.is_null() {
-            return div().child(t("web.loading"));
-        }
-        let ts = &view.access["tailscale"];
-        let mut panel = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(t("tailscale.description"))
-            .child(format!(
-                "Tailscale · {}",
-                ts["state"].as_str().unwrap_or("Disconnected")
-            ));
-        if let Some(name) = ts["dns_name"].as_str().filter(|v| !v.is_empty()) {
-            panel = panel.child(name.to_owned());
-        }
-        for (action, key) in [("connect", "web.connect"), ("disconnect", "web.disconnect")] {
-            panel = panel.child(
-                Button::new(action)
-                    .ghost()
-                    .label(t(key))
-                    .disabled(view.access_pending)
-                    .on_click(cx.listener(move |this, _, _, _| {
-                        this.client.access_command(json!({"action":action}))
-                    })),
-            );
-        }
-        if let Some(url) = ts["auth_url"].as_str().filter(|v| !v.is_empty()) {
-            let url = url.to_owned();
-            panel = panel.child(
-                Button::new("ts-login")
-                    .label(t("web.login"))
-                    .on_click(move |_, _, cx| cx.open_url(&url)),
-            );
-        }
-        if let Some(error) = ts["error"].as_str().filter(|v| !v.is_empty()) {
-            panel = panel.child(error.to_owned());
-        }
-        panel
-            .child(
-                Button::new("ts-dns")
-                    .ghost()
-                    .label(t("web.dns-settings"))
-                    .on_click(|_, _, cx| cx.open_url("https://login.tailscale.com/admin/dns")),
-            )
-            .child(view.access_notice.clone())
-    }
-
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         let fields = (0..24)
             .map(|i| {
@@ -295,8 +68,6 @@ impl Settings {
             secret_revision: None,
             draft_revision: None,
             advanced: false,
-            web_show_token: false,
-            web_qr_origin: String::new(),
             api_advanced: false,
         }
     }
@@ -378,12 +149,7 @@ impl Settings {
             self.fields[15].read(cx).focus_handle(cx).focus(window, cx);
         }
     }
-    pub fn render(
-        &self,
-        state: &Value,
-        view: &crate::client::View,
-        cx: &mut Context<Shell>,
-    ) -> Div {
+    pub fn render(&self, state: &Value, cx: &mut Context<Shell>) -> Div {
         let section = state["section"].as_u64().unwrap_or(0);
         if section == 1 {
             return self.render_ai(state, cx);
@@ -397,16 +163,6 @@ impl Settings {
                 .child(Input::new(&self.fields[i]).aria_label(name))
         };
         match section {
-            6 => {
-                form = form.child(
-                    field(crate::i18n::text("tailscale.title"))
-                        .child(self.tailscale_settings(view, cx)),
-                );
-            }
-            5 => {
-                form = form
-                    .child(field(crate::i18n::text("web.title")).child(self.web_access(view, cx)));
-            }
             0 => {
                 form = form
                     .child(field(crate::i18n::text("settings.language"))
@@ -526,8 +282,6 @@ impl Settings {
                         crate::i18n::text("ui.ai-configuration"),
                         crate::i18n::text("ui.work-environment"),
                         crate::i18n::text("ui.task-configuration"),
-                        crate::i18n::text("web.title"),
-                        crate::i18n::text("tailscale.title"),
                     ]
                     .get(section as usize)
                     .copied()
@@ -540,8 +294,6 @@ impl Settings {
                             (1, crate::i18n::text("ui.ai-configuration")),
                             (4, crate::i18n::text("ui.task-configuration")),
                             (3, crate::i18n::text("ui.work-environment")),
-                            (5, crate::i18n::text("web.title")),
-                            (6, crate::i18n::text("tailscale.title")),
                         ]
                         .into_iter()
                         .map(|(i, name)| {
@@ -562,8 +314,6 @@ impl Settings {
                         0 => crate::i18n::text("ui.make-pot-work-the-way-you-prefer"),
                         1 => crate::i18n::text("ui.connect-an-agent-and-choose-the-model"),
                         4 => crate::i18n::text("ui.new-tasks-follow-the-chat-configuration-by"),
-                        5 => crate::i18n::text("web.description"),
-                        6 => crate::i18n::text("tailscale.description"),
                         _ => {
                             crate::i18n::text("ui.resource-changes-apply-after-restarting-chat-and")
                         }

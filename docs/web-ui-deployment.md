@@ -1,7 +1,9 @@
 # Deploy the Pot Web UI
 
-Run Pot Server on a host and access its embedded Web UI from a desktop or phone
-browser. **HTTPS is recommended for remote access.**
+Explicitly host Pot Web UI for one standalone Control. Plain `pot serve` starts
+Runtime infrastructure without UI, regardless of saved listener settings. All
+product requests use the configured Control; failed connections never load local
+Runtime data. **HTTPS is required for remote browser access.**
 
 ## Choose access
 
@@ -10,7 +12,6 @@ browser. **HTTPS is recommended for remote access.**
 | Tailscale HTTPS | Devices on the same tailnet | Supported; provision certificates on Host |
 | Own-domain HTTPS | LAN, VPN or public access | Supported; provision certificates on Host |
 | Local HTTP | Browser on Host or through an SSH local tunnel | Supported |
-| Remote HTTP | App LAN / embedded Tailscale access with fewer browser features | Supported in App; manual CLI HTTP remains localhost-only |
 
 ## Deploy with an Agent
 
@@ -37,10 +38,12 @@ Expose only the Web UI listener. Keep native Runtime and guest service ports pri
 
 ## HTTP
 
-Start Server and open `http://localhost:17701` on Host:
+Start an independently configured Control first (see [Control membership](standalone-server.md#control-listener-and-membership-partial-p3)). Obtain its native client credential from its private Runtime endpoint using operator access. This is distinct from the browser login Token and machine invitations. Store it in the service environment as `POT_CONTROL_TOKEN`, never in a browser URL or command-line argument. A private Control CA can be supplied with `POT_CONTROL_CA=/absolute/control-ca.pem`.
+
+Start the explicit Web host and open `http://localhost:17701`:
 
 ```sh
-pot --root /absolute/instance serve
+POT_ACCESS_ORIGIN=http://localhost:17701 pot --root /absolute/instance serve --ui --control https://CONTROL:19443
 ```
 
 For a browser on another desktop, create a local tunnel and open the same URL:
@@ -49,8 +52,8 @@ For a browser on another desktop, create a local tunnel and open the same URL:
 ssh -N -L 17701:127.0.0.1:17701 USER@HOST
 ```
 
-Manual CLI HTTP configuration is localhost-only. App Web UI settings independently
-provide private-IPv4 LAN HTTP and embedded Tailscale HTTP.
+Manual CLI HTTP configuration is localhost-only. The App is a native client and
+its embedded Runtime does not host Web UI.
 The localhost tunnel is not a general iPhone access method.
 
 ## HTTPS
@@ -98,7 +101,7 @@ Save the following in `/private/listener-settings.json` using your actual values
 
 ```sh
 pot --root /absolute/instance config server /private/listener-settings.json
-pot --root /absolute/instance serve
+pot --root /absolute/instance serve --ui --control https://CONTROL:19443
 ```
 
 Environment overrides saved settings. Arrange certificate renewal through
@@ -134,3 +137,11 @@ retains tailnet Web UI preferences for reconnection. Existing enabled tailnet HT
 instances retain that mode on upgrade.
 
 CLI localhost and manual HTTPS procedures above remain supported independently.
+
+## Current limits
+
+The Web host keeps Control credentials on the server and streams SSE updates.
+Browser Tokens and cookies authenticate only the Web host and are not forwarded
+to Control. There is no local/remote switch. Native-only APIs remain excluded by
+the browser route allowlist. Remote desktop and push notifications are later #39
+work; they do not use the Web host's local execution or local notification state.

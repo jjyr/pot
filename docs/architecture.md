@@ -1,8 +1,8 @@
 # Current architecture
 
-Updated: 2026-10-10. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for authority and lifecycle contracts.
+Updated: 2026-10-11. See [Local Agents and managed Sandboxes](agent-sandbox-design.md) for authority and lifecycle contracts.
 
-The [composable Runtime proposal](runtime-composition.md) describes optional services and distributed Agent/Task/Environment assignments. Its local service split and bare/environment/assistant presets are delivered; federation and multiple conversational owners remain planned. The diagram below shows the App assistant preset.
+The [Control and composable Runtime design](runtime-composition.md) describes optional resources and distributed Agent/Task/Environment assignments. Multiple assistants and outward-connected execution machines are delivered. The App owns its local Runtime and can connect to one independent Control through isolated local/remote modes. Explicit Web hosting targets that Control. Remote Agent runners and broader remote environment transports remain in #39. The diagram below shows local App execution.
 
 The [Sandbox provider redesign](sandbox-providers.md) has extracted Linux support and implemented prepared-instance macOS integration (awaiting real VM qualification), with Android/iOS deferred, and inserts a dedicated Sandbox Manager between Runtime and Providers. Runtime retains product/task authority; Manager owns environment coordination and state. Separate Provider crates implement `pot-sandbox` contracts and are registered by App/Server assembly without reverse Cargo dependencies. The diagram and implementation details below describe current Linux behavior, not that target architecture.
 

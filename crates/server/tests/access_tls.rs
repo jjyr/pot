@@ -20,7 +20,7 @@ impl Drop for Process {
 }
 #[tokio::test]
 async fn tls_passthrough_certificate_validation_disable_and_reenable() {
-    let root = std::env::temp_dir().join(format!("pot-access-tls-{}", uuid::Uuid::new_v4()));
+    let root = PathBuf::from("/tmp").join(format!("pot-access-tls-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
@@ -31,7 +31,23 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = reservation.local_addr().unwrap().port();
     drop(reservation);
-    let child = Command::new(env!("CARGO_BIN_EXE_pot-server"))
+    let control_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let control_url = format!("http://{}", control_listener.local_addr().unwrap());
+    let control_task = tokio::spawn(async move {
+        let router = axum::Router::new().route("/api/v1/runtime/control", axum::routing::get(|headers: axum::http::HeaderMap| async move {
+            assert_eq!(headers["authorization"], "Bearer tls-control-fixture");
+            axum::Json(json!({"role":"control","identity":{"runtime_id":"00000000-0000-4000-8000-000000000001"}}))
+        })).route("/api/v1/runtime", axum::routing::get(|headers: axum::http::HeaderMap| async move {
+            assert_eq!(headers["authorization"], "Bearer tls-control-fixture");
+            axum::Json(json!({"runtime_id":"00000000-0000-4000-8000-000000000001"}))
+        }));
+        axum::serve(control_listener, router).await.unwrap();
+    });
+    let child = Command::new(env!("CARGO_BIN_EXE_pot"))
+        .arg("--root")
+        .arg(&root)
+        .args(["serve", "--ui", "--control", &control_url])
+        .env("POT_CONTROL_TOKEN", "tls-control-fixture")
         .env("POT_DATA_DIR", root.join("product"))
         .env("POT_WORKSPACE", root.join("workspace"))
         .env("POT_AGENT_HOME", root.join("agent-home"))
@@ -41,8 +57,9 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
         .env("POT_ACCESS_CERT", root.join("cert.pem"))
         .env("POT_ACCESS_KEY", root.join("key.pem"))
         .env_remove("POT_ACCESS_VAPID_KEY")
+        .env_remove("POT_TAILSCALE_HOSTNAME")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .unwrap();
     let mut process = Process { child, root };
@@ -58,18 +75,6 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
     })
     .await
     .unwrap();
-    reqwest::Client::new()
-        .post(format!(
-            "http://127.0.0.1:{}/api/v1/runtime/resources",
-            endpoint.port
-        ))
-        .bearer_auth(&endpoint.token)
-        .json(&json!({"request_id":"tls-assistant","resource":{"kind":"assistant","name":"TLS"}}))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
     let client = reqwest::Client::builder()
         .no_proxy()
         .add_root_certificate(reqwest::Certificate::from_pem(certificate.as_bytes()).unwrap())
@@ -126,6 +131,36 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
     drop(via_relay);
     forwarding.abort();
     let admin = format!("http://127.0.0.1:{}/api/v1/access", endpoint.port);
+    let access: serde_json::Value = client
+        .get(&admin)
+        .bearer_auth(&endpoint.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let directory: serde_json::Value = client
+        .get(format!("{origin}/api/v1/runtime"))
+        .bearer_auth(access["token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        directory["runtime_id"],
+        "00000000-0000-4000-8000-000000000001"
+    );
+    assert!(!process.root.join("product/pot-v2.sqlite").exists());
+    let denied = client
+        .get(format!("{origin}/api/v1/runtime/control"))
+        .bearer_auth(access["token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), reqwest::StatusCode::FORBIDDEN);
     for action in ["disable", "enable"] {
         assert!(
             client
@@ -165,4 +200,5 @@ async fn tls_passthrough_certificate_validation_disable_and_reenable() {
         libc::kill(process.child.id() as i32, libc::SIGTERM);
     }
     assert!(process.child.wait().unwrap().success());
+    control_task.abort();
 }

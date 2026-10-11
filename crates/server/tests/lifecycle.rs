@@ -19,6 +19,7 @@ impl Fixture {
     }
     fn config(&self) -> ServerConfig {
         ServerConfig {
+            web_control: None,
             composition: Some(pot_runtime::host::Composition::Assistant),
             runtime: RuntimeConfig {
                 data: self.0.join("data"),

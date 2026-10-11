@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, path::Path};
 ///
 /// # Safety
 /// Call before any other threads start: this function changes process environment.
-pub unsafe fn apply_settings(root: &Path, local_web: bool) -> Result<()> {
+pub unsafe fn apply_settings(root: &Path) -> Result<()> {
     let path = root.join("server.json");
     let values: BTreeMap<String, String> = if path.exists() {
         serde_json::from_slice(&std::fs::read(path)?)?
@@ -16,7 +16,6 @@ pub unsafe fn apply_settings(root: &Path, local_web: bool) -> Result<()> {
             matches!(
                 key.as_str(),
                 "POT_TAILSCALE_HOSTNAME"
-                    | "POT_RUNTIME_COMPOSITION"
                     | "POT_ACCESS_ORIGIN"
                     | "POT_ACCESS_BIND"
                     | "POT_ACCESS_CERT"
@@ -31,11 +30,6 @@ pub unsafe fn apply_settings(root: &Path, local_web: bool) -> Result<()> {
             unsafe {
                 std::env::set_var(key, value);
             }
-        }
-    }
-    if local_web && std::env::var_os("POT_ACCESS_ORIGIN").is_none() {
-        unsafe {
-            std::env::set_var("POT_ACCESS_ORIGIN", "http://localhost:17701");
         }
     }
     Ok(())

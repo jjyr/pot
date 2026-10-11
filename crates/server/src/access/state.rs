@@ -38,16 +38,19 @@ impl AccessConfig {
             bind,
             certificate: std::env::var("POT_ACCESS_CERT").unwrap_or_default().into(),
             private_key: std::env::var("POT_ACCESS_KEY").unwrap_or_default().into(),
-            assets: std::env::var_os("POT_ACCESS_ASSETS")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|path| path.parent().map(|parent| parent.join("mobile")))
-                        .filter(|path| path.is_dir())
-                        .unwrap_or_else(|| PathBuf::from("crates/web-ui/dist"))
-                }),
+            assets: Self::assets_from_env(),
         }))
+    }
+    pub(crate) fn assets_from_env() -> PathBuf {
+        std::env::var_os("POT_ACCESS_ASSETS")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|path| path.parent().map(|parent| parent.join("mobile")))
+                    .filter(|path| path.is_dir())
+                    .unwrap_or_else(|| PathBuf::from("crates/web-ui/dist"))
+            })
     }
     pub fn validate_origin(origin: &Url) -> Result<()> {
         ensure!(
@@ -105,6 +108,7 @@ pub struct Access {
     pub data: PathBuf,
     pub root_token: String,
     pub runtime: axum::Router,
+    pub fixed_control: bool,
     pub inner: Arc<Mutex<Inner>>,
     pub notifications: Arc<Mutex<Option<pot_runtime::Service>>>,
     pub push: Option<Arc<super::push::Push>>,
@@ -151,6 +155,7 @@ impl Access {
             data,
             root_token,
             runtime,
+            fixed_control: false,
             inner: Arc::new(Mutex::new(Inner {
                 credentials,
                 enabled,

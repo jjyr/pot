@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct ServerConfig {
     pub runtime: RuntimeConfig,
     pub bind: String,
+    pub web_control: Option<WebControlConfig>,
     /// None loads the owner's versioned composition or preserves an existing assistant.
     pub composition: Option<pot_runtime::host::Composition>,
 }
@@ -26,6 +27,7 @@ impl ServerConfig {
     pub fn from_env() -> Self {
         Self {
             composition: None,
+            web_control: None,
             runtime: RuntimeConfig {
                 data: std::env::var("POT_DATA_DIR")
                     .map(PathBuf::from)
@@ -37,5 +39,20 @@ impl ServerConfig {
             bind: std::env::var("POT_RUNTIME_BIND")
                 .unwrap_or_else(|_| format!("127.0.0.1:{RUNTIME_PORT}")),
         }
+    }
+}
+
+/// Explicit Web UI destination. The credential is never included in Debug output.
+#[derive(Clone)]
+pub struct WebControlConfig {
+    pub url: String,
+    pub token: String,
+    pub ca_pem: Option<String>,
+}
+impl std::fmt::Debug for WebControlConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebControlConfig")
+            .field("url", &self.url)
+            .finish_non_exhaustive()
     }
 }

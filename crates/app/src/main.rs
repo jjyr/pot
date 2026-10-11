@@ -454,17 +454,14 @@ impl Shell {
                 );
             }
             Some(2) => {
-                return self
-                    .settings
-                    .render(&self.native["settings"], &view, cx)
-                    .child(
-                        Button::new("settings-resource-cache")
-                            .ghost()
-                            .label(crate::i18n::text("resources.cache"))
-                            .on_click(|_, _, _| {
-                                ui::command(serde_json::json!({"action":"resource-cache"}))
-                            }),
-                    );
+                return self.settings.render(&self.native["settings"], cx).child(
+                    Button::new("settings-resource-cache")
+                        .ghost()
+                        .label(crate::i18n::text("resources.cache"))
+                        .on_click(|_, _, _| {
+                            ui::command(serde_json::json!({"action":"resource-cache"}))
+                        }),
+                );
             }
             Some(1) => {
                 let catalog = self.catalog();
@@ -923,7 +920,7 @@ fn startup_error(error: &str) -> ! {
 fn main() {
     // Configure the embedded backend before GPUI or Tokio starts any threads.
     let root = client::root();
-    if let Err(error) = unsafe { pot_server::apply_settings(&root, true) } {
+    if let Err(error) = unsafe { pot_server::apply_settings(&root) } {
         startup_error(&error.to_string());
     }
     if let Some(resources) = std::env::current_exe()

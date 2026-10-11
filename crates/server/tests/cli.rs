@@ -79,7 +79,6 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
         vec!["status"],
         vec!["tasks", "list"],
         vec!["config", "get", "providers"],
-        vec!["access", "status"],
     ] {
         let output = command(&process.root).args(args).output().unwrap();
         assert!(
@@ -89,16 +88,11 @@ fn cli_runs_without_app_and_uses_local_os_authority() {
         );
         serde_json::from_slice::<Value>(&output.stdout).unwrap();
     }
-    let output = command(&process.root)
-        .args(["access", "token"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["token"].as_str().unwrap().len(), 43);
+    // Ambient listener settings do not implicitly start browser access.
+    assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok());
     assert!(
-        command(&process.root)
-            .args(["access", "regenerate-token"])
+        !command(&process.root)
+            .args(["access", "status"])
             .output()
             .unwrap()
             .status
@@ -159,4 +153,22 @@ fn service_install_is_private_and_does_not_register_or_start_a_daemon() {
             .success()
     );
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_ui_requires_control_and_credentials_before_initialization() {
+    let root = std::env::temp_dir().join(format!("pot-ui-cli-{}", uuid::Uuid::new_v4()));
+    for args in [
+        vec!["serve", "--ui"],
+        vec!["serve", "--ui", "--control", "https://control.example"],
+    ] {
+        let output = command(&root)
+            .args(args)
+            .env_remove("POT_CONTROL_TOKEN")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(!root.join("product/runtime-resources.json").exists());
+    }
+    let _ = std::fs::remove_dir_all(root);
 }
