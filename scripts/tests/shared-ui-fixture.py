@@ -74,6 +74,7 @@ def task(identifier, title, phase, icon="openai"):
         title=title,
         phase=phase,
         sandbox_id="default",
+        assistant_id="main",
         pending=2 if phase == "running" else 0,
         created_at_ms=1,
         updated_at_ms=1,
@@ -176,14 +177,67 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path == "/__fixture/writes" and args.pages:
+        if path.startswith("/api/v1/assistants/main/"):
+            path = "/api/v1/" + path[len("/api/v1/assistants/main/") :]
+        if path == "/api/v1/runtime":
+            self.data(
+                dict(
+                    runtime_id="fixture",
+                    capabilities=["conversation", "tasks", "runtime", "accounting", "schedules"],
+                )
+            )
+        elif path == "/api/v1/assistants":
+            self.data(dict(assistants=[dict(id="main", name="Pot", revision=1)]))
+        elif path == "/api/v1/instructions":
+            self.data(dict(text="Fixture assistant rules", revision="fixture"))
+        elif path == "/api/v1/permissions":
+            self.data(dict(requests=[], grants=[]))
+        elif path == "/api/v1/machines":
+            self.data(
+                dict(
+                    machines=[
+                        dict(
+                            runtime_id="fixture",
+                            name="Control",
+                            local=True,
+                            connection="online",
+                            environments=[
+                                dict(
+                                    environment_ref=dict(
+                                        runtime_id="fixture", target=dict(kind="host")
+                                    ),
+                                    name="Host",
+                                    state=dict(phase="running"),
+                                )
+                            ],
+                        )
+                    ]
+                )
+            )
+        elif path == "/api/v1/schedules":
+            self.data(
+                dict(
+                    items=[
+                        dict(
+                            spec=dict(
+                                title="Daily check",
+                                environment_ref=dict(
+                                    runtime_id="fixture", target=dict(kind="host")
+                                ),
+                            ),
+                            next_label="Tomorrow",
+                        )
+                    ]
+                )
+            )
+        elif path == "/__fixture/writes" and args.pages:
             self.data(fixture_writes)
         elif path == "/access/status":
             # UI-only simulation: does not qualify real Passkey/authentication.
             self.data(dict(authenticated=True, enrollment_open=False, push_available=False))
         elif path == "/api/v1/snapshot":
             self.data(snapshot)
-        elif path == "/api/v1/tasks/query":
+        elif path in ("/api/v1/tasks/query", "/api/v1/assistant-tasks"):
             query = parse_qs(urlsplit(self.path).query)
             scope = query.get("scope", ["active"])[0]
             text = query.get("q", [""])[0].lower()
@@ -242,7 +296,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         value = json.loads(self.rfile.read(length))
         fixture_writes.append(dict(path=self.path, body=value))
-        if self.path == "/api/v1/usage/policy" and args.pages:
+        if self.path == "/access/token":
+            self.data(dict(accepted=True))
+        elif self.path == "/api/v1/usage/policy" and args.pages:
             page_usage["quota"]["policy"] = value
             self.data(dict(accepted=True))
         elif self.path == "/api/v1/messages":

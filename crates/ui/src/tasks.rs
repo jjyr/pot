@@ -204,12 +204,12 @@ pub fn render(
                                             .child(pages::single_line_title(
                                                 &task.title,
                                                 15.,
-                                                (window.viewport_size().width
-                                                    - px(if layout.native {
-                                                        pages::SIDEBAR
-                                                    } else {
-                                                        0.
-                                                    }))
+                                                (if layout.native {
+                                                    window.viewport_size().width
+                                                        - px(pages::SIDEBAR)
+                                                } else {
+                                                    cx.global::<design::Viewport>().0
+                                                })
                                                 .min(px(pages::PAGE_WIDTH))
                                                     - px(130.),
                                                 layout.native,
@@ -225,6 +225,7 @@ pub fn render(
                                 div()
                                     .flex()
                                     .items_center()
+                                    .when(layout.compact, |el| el.flex_col().items_start())
                                     .gap_2()
                                     .child(
                                         div()

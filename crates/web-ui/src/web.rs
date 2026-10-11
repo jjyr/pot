@@ -198,7 +198,11 @@ impl Render for Mobile {
             self.locale = locale;
         }
         cx.set_reduce_motion(self.data["reduce_motion"] == true);
-        cx.set_global(crate::design::Viewport(window.viewport_size().width));
+        let visible = window.fully_visible_bounds();
+        let compact = visible.size.width < px(900.);
+        let sidebar = if compact { 0. } else { 176. };
+        let column_width = (f32::from(visible.size.width) - sidebar).clamp(0., 820.);
+        cx.set_global(crate::design::Viewport(px(column_width)));
         let snapshot =
             serde_json::from_value::<pot_protocol::Snapshot>(self.data["snapshot"].clone()).ok();
         let pending = SEND.with(|state| state.borrow().pending().is_some());
@@ -210,6 +214,10 @@ impl Render for Mobile {
         );
         let mut content = div()
             .id("mobile-content")
+            .w_full()
+            .max_w(px(820.))
+            .mx_auto()
+            .min_w_0()
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
@@ -312,8 +320,8 @@ impl Render for Mobile {
                                 latest_reply: snapshot.turn.is_none()
                                     && index + 1 == snapshot.messages.len()
                                     && m.role == pot_protocol::Role::Assistant,
-                                touch: window.viewport_size().width < px(600.),
-                                available_width: f32::from(window.viewport_size().width) - 32.,
+                                touch: compact,
+                                available_width: column_width - 32.,
                             },
                         },
                         handler.clone(),
@@ -356,7 +364,7 @@ impl Render for Mobile {
                 },
                 pot_ui::pages::Layout {
                     native: false,
-                    compact: true,
+                    compact,
                 },
                 self.catalog(),
                 self.page_handler(cx),
@@ -391,7 +399,7 @@ impl Render for Mobile {
                     },
                     pot_ui::pages::Layout {
                         native: false,
-                        compact: window.viewport_size().width < px(900.),
+                        compact,
                     },
                     self.catalog(),
                     self.page_handler(cx),
@@ -411,7 +419,7 @@ impl Render for Mobile {
                 },
                 pot_ui::pages::Layout {
                     native: false,
-                    compact: true,
+                    compact,
                 },
                 self.catalog(),
                 handler,
@@ -520,7 +528,10 @@ impl Render for Mobile {
                 );
         }
         let mut main = div()
-            .size_full()
+            .h_full()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .flex()
@@ -528,12 +539,22 @@ impl Render for Mobile {
             .child(
                 div()
                     .h(px(48.))
+                    .flex_shrink_0()
                     .px_3()
                     .flex()
                     .items_center()
                     .gap_2()
                     .child(img(self.brand_icon.clone()).size(px(28.)))
-                    .child("Pot"),
+                    .child("Pot")
+                    .when(self.page == "task", |el| {
+                        el.child(
+                            Button::new("back-to-tasks")
+                                .ghost()
+                                .h(px(44.))
+                                .label(self.label("main.back-to-tasks"))
+                                .on_click(|_, _, _| action("page", "tasks")),
+                        )
+                    }),
             )
             .child(
                 div().text_sm().px_4().child(
@@ -549,6 +570,10 @@ impl Render for Mobile {
             let stop = self.label("mobile.stop");
             main = main.child(
                 div()
+                    .w_full()
+                    .max_w(px(820.))
+                    .mx_auto()
+                    .flex_shrink_0()
                     .p_3()
                     .flex()
                     .flex_col()
@@ -556,7 +581,11 @@ impl Render for Mobile {
                     .child(
                         Textarea::new(&self.composer)
                             .aria_label(self.label("mobile.message"))
-                            .h(px(80.)),
+                            .h(px(if visible.size.height < px(500.) {
+                                48.
+                            } else {
+                                80.
+                            })),
                     )
                     .child(
                         div()
@@ -593,27 +622,62 @@ impl Render for Mobile {
             );
         }
         let mut nav = div()
-            .h(px(56.))
+            .id("web-navigation")
+            .flex_shrink_0()
             .flex()
-            .justify_between()
-            .px_2()
-            .border_t_1()
-            .border_color(cx.theme().border);
+            .gap_1()
+            .bg(crate::design::navigation(cx))
+            .border_color(cx.theme().border)
+            .when(compact, |el| {
+                el.h(px(56.))
+                    .items_center()
+                    .justify_between()
+                    .px_2()
+                    .border_t_1()
+            })
+            .when(!compact, |el| {
+                el.w(px(sidebar)).h_full().flex_col().p_3().border_r_1()
+            });
         for (name, key) in [
             ("chat", "mobile.chat"),
             ("tasks", "mobile.tasks"),
             ("machines", "machines.title"),
+            ("usage", "mobile.usage"),
+            ("schedules", "mobile.schedules"),
             ("more", "mobile.more"),
         ] {
+            if compact && matches!(name, "usage" | "schedules") {
+                continue;
+            }
+            let selected = self.page == name
+                || (name == "tasks" && self.page == "task")
+                || (compact
+                    && name == "more"
+                    && matches!(self.page.as_str(), "usage" | "schedules"));
             nav = nav.child(
                 Button::new(name)
                     .h(px(44.))
+                    .when(!compact, |el| el.w_full())
                     .ghost()
+                    .when(selected, |el| el.primary())
                     .label(self.label(key))
                     .on_click(move |_, _, _| action("page", name)),
             );
         }
-        main.child(nav)
+        let shell = div()
+            .absolute()
+            .left(visible.origin.x)
+            .top(visible.origin.y)
+            .w(visible.size.width)
+            .h(visible.size.height)
+            .overflow_hidden()
+            .flex()
+            .bg(cx.theme().background);
+        if compact {
+            shell.flex_col().child(main).child(nav)
+        } else {
+            shell.child(nav).child(main)
+        }
     }
 }
 #[wasm_bindgen]
