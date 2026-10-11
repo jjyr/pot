@@ -42,6 +42,65 @@ fn secret() -> Result<String> {
         .map_err(|_| anyhow::anyhow!("Random source unavailable"))?;
     Ok(B64.encode(bytes))
 }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClientCredential {
+    schema_version: u32,
+    token: String,
+}
+impl Authority {
+    // Only the explicit Control HTTPS listener accepts this durable client authority.
+    // Local process tokens, boot identities and member credentials remain independent.
+    fn client_token(&self) -> Result<String> {
+        let path = self.data.join("control-client-credential.json");
+        let credential: ClientCredential = if path.exists() {
+            serde_json::from_slice(&std::fs::read(&path)?)?
+        } else {
+            let credential = ClientCredential {
+                schema_version: 1,
+                token: secret()?,
+            };
+            private_json(&path, &credential)?;
+            credential
+        };
+        ensure!(
+            credential.schema_version == 1 && B64.decode(&credential.token)?.len() == 32,
+            "Invalid Control client credential"
+        );
+        Ok(credential.token)
+    }
+}
+fn control_client_router(
+    router: axum::Router,
+    client_token: String,
+    native_token: String,
+) -> axum::Router {
+    router.layer(axum::middleware::from_fn(
+        move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            let client_token = client_token.clone();
+            let native_token = native_token.clone();
+            async move {
+                let supplied = request
+                    .headers()
+                    .get("authorization")
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|h| h.strip_prefix("Bearer "));
+                if !request.headers().contains_key("origin")
+                    && supplied.is_some_and(|token| {
+                        token.len() == client_token.len()
+                            && openssl::memcmp::eq(token.as_bytes(), client_token.as_bytes())
+                    })
+                {
+                    request.headers_mut().insert(
+                        "authorization",
+                        format!("Bearer {native_token}").parse().unwrap(),
+                    );
+                }
+                next.run(request).await
+            }
+        },
+    ))
+}
 // Serialize signed protocol data independently of serde_json feature unification.
 // App builds may preserve object insertion order while standalone Linux sorts it.
 fn canonical_bytes(value: &impl Serialize) -> Result<Vec<u8>> {
@@ -1541,6 +1600,9 @@ impl Authority {
             &self.data.join("control-listener.json"),
             &Some(Listen { address, ..config }),
         )?;
+        let client_token = self.client_token()?;
+        let native_token = resources.host().await.endpoint(0).token;
+        let client_routes = control_client_router(resources.router(), client_token, native_token);
         let handle = axum_server::Handle::new();
         let serving = handle.clone();
         let router = Router::new()
@@ -1554,7 +1616,7 @@ impl Authority {
             )
             .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
             .with_state(resources.clone())
-            .merge(resources.router());
+            .merge(client_routes);
         let server = axum_server::from_tcp_rustls(listener, tls)?;
         let task = tokio::spawn(async move {
             if let Err(error) = server
@@ -1651,6 +1713,53 @@ impl Authority {
 mod tests {
     use super::*;
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn control_client_credential_survives_restart_without_local_authority() {
+        let authority = authority();
+        let token = authority.client_token().unwrap();
+        let reopened = Authority::open(&authority.data, &authority.identity.runtime_id).unwrap();
+        assert_eq!(token, reopened.client_token().unwrap());
+        let local = axum::Router::new().route(
+            "/api/v1/runtime",
+            get(|headers: HeaderMap| async move {
+                if headers.get("authorization").and_then(|h| h.to_str().ok())
+                    == Some("Bearer second-boot")
+                    && !headers.contains_key("origin")
+                {
+                    StatusCode::OK
+                } else {
+                    StatusCode::UNAUTHORIZED
+                }
+            }),
+        );
+        let remote = control_client_router(local.clone(), token.clone(), "second-boot".into());
+        for (routes, credential, origin, status) in [
+            (remote.clone(), token.as_str(), false, StatusCode::OK),
+            (local, token.as_str(), false, StatusCode::UNAUTHORIZED),
+            (
+                remote.clone(),
+                "first-boot",
+                false,
+                StatusCode::UNAUTHORIZED,
+            ),
+            (remote, token.as_str(), true, StatusCode::UNAUTHORIZED),
+        ] {
+            let mut req = axum::http::Request::builder()
+                .uri("/api/v1/runtime")
+                .header("authorization", format!("Bearer {credential}"));
+            if origin {
+                req = req.header("origin", "https://browser.example");
+            }
+            assert_eq!(
+                routes
+                    .oneshot(req.body(axum::body::Body::empty()).unwrap())
+                    .await
+                    .unwrap()
+                    .status(),
+                status
+            );
+        }
+    }
     fn authority() -> Arc<Authority> {
         let path = std::env::temp_dir().join(format!("pot-control-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();

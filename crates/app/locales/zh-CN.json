@@ -83,7 +83,7 @@
   "navigation.forward": "前进",
   "navigation.forward-13": "前进（⌘]）",
   "schedules-ui.edit-schedule": "编辑定时计划",
-  "schedules-ui.describe-a-goal-and-time-in-the": "请在主聊天中描述目标和时间来创建计划。隐藏窗口后仍可执行；Quit、睡眠或关机期间不执行，恢复后按计划补跑或跳过。",
+  "schedules-ui.describe-a-goal-and-time-in-the": "在聊天中描述目标和时间来创建计划。计划需要所属 Runtime 持续运行。远程模式下退出 App 不会停止 Control；所属 Runtime 恢复后按计划补跑或跳过。",
   "schedules-ui.name": "名称",
   "schedules-ui.a-short-description-of-this-schedule": "简短说明这个计划",
   "schedules-ui.goal": "目标",

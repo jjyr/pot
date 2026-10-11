@@ -410,10 +410,19 @@ async fn machines(State(s): State<Arc<Resources>>, headers: HeaderMap) -> Respon
     } else {
         return response;
     };
+    // The tools inventory includes all connected targets. A machine card must
+    // contain only environments owned by that exact Runtime.
+    let local_environments = environments["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["environment_ref"]["runtime_id"] == runtime["runtime_id"])
+        .cloned()
+        .collect::<Vec<_>>();
     let mut machines = vec![json!({
         "runtime_id":runtime["runtime_id"],"local":true,"connection":"online",
         "capabilities":runtime["capabilities"],"boot_id":runtime["boot_id"],
-        "environments":environments["items"],"default":environments["selected"]
+        "environments":local_environments,"default":environments["selected"]
     })];
     machines.extend(s.control.machines().await);
     Json(json!({"schema_version":1,"machines":machines,"control_authority":s.control.metadata()}))
@@ -584,6 +593,29 @@ mod tests {
             json!({"runtime_id":identity,"target":{"kind":"host"}})
         );
         assert!(!config.data.join("pot-v2.sqlite").exists());
+        let local_id = identity.clone();
+        *resources.routes.write().unwrap() = Router::new().route("/api/v1/environments", axum::routing::get(move || {
+            let id = local_id.clone();
+            async move { Json(json!({"items":[{"environment_ref":{"runtime_id":id,"target":{"kind":"host"}}},{"environment_ref":{"runtime_id":"other-runtime","target":{"kind":"host"}}}]})) }
+        }));
+        let response = machines(State(resources.clone()), headers.clone()).await;
+        let directory: Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            directory["machines"][0]["environments"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            directory["machines"][0]["environments"][0]["environment_ref"]["runtime_id"],
+            identity
+        );
         // Discovery does not grant resource mutation to requests with an Origin.
         headers.insert("origin", "https://client.example".parse().unwrap());
         assert_eq!(
