@@ -52,3 +52,7 @@ External FCM/browser OS notification delivery is untested; the relay and encrypt
 payload contracts are qualified in [notifications](control-notifications-20261011.md).
 Physical whole-machine sleep/power loss and remote desktop transport are not
 claimed. Desktop transport remains explicitly deferred by the user.
+
+The user subsequently accepted the delivered scope and authorized closing #39.
+Whole-machine sleep and live browser push delivery remain follow-up checks;
+closure does not change the evidence or imply those checks passed.

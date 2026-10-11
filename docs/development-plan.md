@@ -2,6 +2,8 @@
 
 [Issue #39](https://github.com/jjyr/pot/issues/39) owns the single phase TODO table,
 commits and acceptance gates. [Architecture](architecture.md) is the design source.
+On 2026-10-11 the user accepted the delivered scope as complete. The untested
+external checks below remain follow-up verification, not closure gates for #39.
 Changes to model-visible tool interfaces require explicit agreement. New UI flows
 must be discussed and confirmed before implementation.
 
