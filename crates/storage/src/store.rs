@@ -164,7 +164,6 @@ impl Store {
         if notify
             && message.role == Role::Assistant
             && message.status == MessageStatus::Complete
-            && message.conversation_id == "main"
             && !message.text.trim().is_empty()
             && !message.id.starts_with("task-report-")
         {
@@ -191,7 +190,7 @@ impl Store {
 mod tests {
     use super::*;
     #[test]
-    fn only_finalized_main_assistant_messages_enter_durable_outbox_once() {
+    fn only_finalized_assistant_messages_enter_durable_outbox_once() {
         let path = std::env::temp_dir().join(format!("pot-push-{}.sqlite", id()));
         let mut s = Store::open(&path).unwrap();
         let mut m = Message {
@@ -211,13 +210,12 @@ mod tests {
         assert_eq!(s.notifications(0).unwrap().len(), 1);
         for (role, status, conversation, prefix) in [
             (
-                Role::System,
+                Role::Assistant,
                 MessageStatus::Complete,
                 "main",
                 "task-report-",
             ),
             (Role::Assistant, MessageStatus::Failed, "main", ""),
-            (Role::Assistant, MessageStatus::Complete, "task-1", ""),
             (Role::Tool, MessageStatus::Complete, "main", ""),
         ] {
             m.id = format!("{prefix}{}", id());

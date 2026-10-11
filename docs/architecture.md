@@ -68,8 +68,10 @@ switch. App no longer hosts or configures a browser endpoint. Remote desktop
 transport is deferred until its connection design is agreed and is outside the
 current #39 completion scope. Control remains responsible for session identity;
 neither desktop data relay through Control nor direct access is selected. Existing
-local desktop support remains available. Remote notification transport remains
-pending; see #39 for implementation status.
+local desktop support remains available. Web notifications read final replies from Control using server-held credentials,
+with per-assistant durable cursors. One browser subscription covers all assistants;
+clicking opens the corresponding owner. Synthetic worker reports do not notify
+separately. See #39 for acceptance status.
 
 ## Membership and transport
 

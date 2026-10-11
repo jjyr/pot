@@ -110,7 +110,7 @@ pub struct Access {
     pub runtime: axum::Router,
     pub fixed_control: bool,
     pub inner: Arc<Mutex<Inner>>,
-    pub notifications: Arc<Mutex<Option<pot_runtime::Service>>>,
+    pub notifications: Arc<Mutex<Option<super::push::NotificationSource>>>,
     pub push: Option<Arc<super::push::Push>>,
     pub policy: tokio::sync::watch::Sender<bool>,
     pub desktop_open: Arc<tokio::sync::Mutex<()>>,

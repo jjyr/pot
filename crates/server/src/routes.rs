@@ -121,6 +121,10 @@ pub fn assistant_routes(hub: std::sync::Arc<pot_runtime::assistants::Hub>) -> Ro
     Router::new()
         .route("/api/v1/assistant-tasks", get(assistant_tasks))
         .route(
+            "/api/v1/assistant-notifications",
+            post(assistant_notifications),
+        )
+        .route(
             "/api/v1/assistants",
             get(assistant_list).post(assistant_create),
         )
@@ -137,6 +141,41 @@ pub fn assistant_routes(hub: std::sync::Arc<pot_runtime::assistants::Hub>) -> Ro
             axum::routing::any(assistant_dispatch),
         )
         .with_state(hub)
+}
+async fn assistant_notifications(
+    axum::extract::State(hub): AssistantState,
+    headers: axum::http::HeaderMap,
+    axum::Json(args): axum::Json<serde_json::Value>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    let after = if args["initialize"] == true {
+        None
+    } else {
+        match serde_json::from_value::<std::collections::BTreeMap<String, i64>>(
+            args["after"].clone(),
+        ) {
+            Ok(after) if after.len() <= 100 && after.values().all(|v| *v >= 0) => Some(after),
+            _ => {
+                return rejected(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "Invalid notification cursors",
+                );
+            }
+        }
+    };
+    match hub.notifications(after.as_ref()) {
+        Ok(feed) => axum::Json(feed).into_response(),
+        Err(error) => rejected(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            &error.to_string(),
+        ),
+    }
 }
 type AssistantState = axum::extract::State<std::sync::Arc<pot_runtime::assistants::Hub>>;
 fn rejected(status: axum::http::StatusCode, message: &str) -> axum::response::Response {

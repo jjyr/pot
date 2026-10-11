@@ -152,6 +152,19 @@ pub struct ApiError {
     pub message: String,
 }
 
+/// Internal authenticated notification feed. Cursors belong to each assistant Store.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AssistantNotifications {
+    pub cursors: std::collections::BTreeMap<String, i64>,
+    pub messages: Vec<AssistantNotification>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AssistantNotification {
+    pub assistant_id: String,
+    pub sequence: i64,
+    pub message: Message,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

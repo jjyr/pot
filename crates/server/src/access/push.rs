@@ -13,6 +13,26 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 use web_push::{ContentEncoding, SubscriptionInfo, VapidSignatureBuilder, WebPushMessageBuilder};
 
+#[derive(Clone)]
+pub struct NotificationSource {
+    pub control_id: String,
+    pub client: crate::RemoteClient,
+}
+impl NotificationSource {
+    pub(crate) async fn feed(&self, args: Value) -> Result<pot_protocol::AssistantNotifications> {
+        let response = tokio::time::timeout(
+            Duration::from_secs(15),
+            self.client
+                .request("/api/v1/assistant-notifications", Some(args)),
+        )
+        .await??;
+        ensure!(
+            response.status.is_success(),
+            "Control notification feed unavailable"
+        );
+        Ok(serde_json::from_slice(&response.body)?)
+    }
+}
 const INSTALLATION: &str = "__Host-pot-installation";
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Subscription {
@@ -20,7 +40,10 @@ pub struct Subscription {
     pub info: SubscriptionInfo,
     pub locale: String,
     pub private_preview: bool,
-    pub sequence: i64,
+    #[serde(default)]
+    pub cursors: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub control_id: String,
     pub failures: u32,
     pub retry_after_ms: i64,
 }
@@ -131,9 +154,11 @@ pub async fn subscribe(
     let info: SubscriptionInfo =
         serde_json::from_value(v["subscription"].clone()).map_err(|_| super::routes::invalid())?;
     validate(&info).map_err(|_| super::routes::invalid())?;
-    let sequence = source
-        .notification_sequence()
-        .map_err(|_| super::routes::invalid())?;
+    let cursors = source
+        .feed(json!({"initialize":true}))
+        .await
+        .map_err(|_| super::routes::fail(StatusCode::SERVICE_UNAVAILABLE, "push_unavailable"))?
+        .cursors;
     let mut i = a.inner.lock().unwrap();
     if !i.enabled || Access::token_generation(&i.credentials.token) != credential {
         return Err(super::routes::fail(
@@ -150,13 +175,17 @@ pub async fn subscribe(
             "subscription_limit",
         ));
     }
-    let sequence = i
+    let cursors = i
         .credentials
         .subscriptions
         .get(&id)
-        .filter(|s| s.credential == credential && s.info.endpoint == info.endpoint)
-        .map(|s| s.sequence)
-        .unwrap_or(sequence);
+        .filter(|s| {
+            s.credential == credential
+                && s.info.endpoint == info.endpoint
+                && s.control_id == source.control_id
+        })
+        .map(|s| s.cursors.clone())
+        .unwrap_or(cursors);
     // An endpoint belongs to one browser installation. Re-consent does not duplicate it.
     let previous = i.credentials.subscriptions.clone();
     i.credentials
@@ -174,7 +203,8 @@ pub async fn subscribe(
             }
             .into(),
             private_preview: v["private_preview"].as_bool().unwrap_or(false),
-            sequence,
+            cursors,
+            control_id: source.control_id.clone(),
             failures: 0,
             retry_after_ms: 0,
         },
@@ -281,7 +311,7 @@ fn now() -> i64 {
         .unwrap_or_default()
         .as_millis() as i64
 }
-fn payload(sub: &Subscription, msg: &pot_protocol::Message) -> Vec<u8> {
+fn payload(sub: &Subscription, owner: &str, msg: &pot_protocol::Message) -> Vec<u8> {
     // Bound UTF-8 bytes, not merely character count; retain original chat text.
     let mut end = msg.text.len().min(2000);
     while !msg.text.is_char_boundary(end) {
@@ -289,16 +319,16 @@ fn payload(sub: &Subscription, msg: &pot_protocol::Message) -> Vec<u8> {
     }
     let body = if sub.private_preview {
         if sub.locale == "zh-CN" {
-            "主 Agent 发来新消息"
+            "助手发来新消息"
         } else {
-            "New message from the main Agent"
+            "New message from your assistant"
         }
     } else {
         &msg.text[..end]
     };
     let mut preview = body.to_owned();
     loop {
-        let content=serde_json::to_vec(&json!({"title":"Pot","body":preview,"message_id":msg.id,"conversation":"main","url":format!("/?message={}",msg.id),"tag":format!("main:{}",msg.id)})).unwrap();
+        let content=serde_json::to_vec(&json!({"title":"Pot","body":preview,"message_id":msg.id,"conversation":owner,"url":format!("/?page=chat&assistant={}&message={}",url::form_urlencoded::byte_serialize(owner.as_bytes()).collect::<String>(),url::form_urlencoded::byte_serialize(msg.id.as_bytes()).collect::<String>()),"tag":format!("{owner}:{}",msg.id)})).unwrap();
         if content.len() <= 3000 || preview.is_empty() {
             return content;
         }
@@ -327,16 +357,23 @@ pub async fn dispatch(a: Access) {
             if sub.failures >= 7 || sub.retry_after_ms > now() {
                 continue;
             }
-            let Ok(messages) = source.notifications(sub.sequence) else {
+            if sub.control_id != source.control_id {
+                continue;
+            }
+            let Ok(feed) = source.feed(json!({"after":sub.cursors})).await else {
                 continue;
             };
-            for (seq, msg) in messages {
+            for notification in feed.messages {
+                let owner = notification.assistant_id;
+                let seq = notification.sequence;
+                let msg = notification.message;
                 // Hold the policy lock only for checks/commits, never during network I/O.
                 let eligible = {
                     let i = a.inner.lock().unwrap();
                     i.enabled
                         && i.credentials.subscriptions.get(&id).is_some_and(|s| {
-                            s.sequence < seq && s.info.endpoint == sub.info.endpoint
+                            *s.cursors.get(&owner).unwrap_or(&0) < seq
+                                && s.info.endpoint == sub.info.endpoint
                         })
                 };
                 if !eligible {
@@ -351,7 +388,7 @@ pub async fn dispatch(a: Access) {
                 let outcome = if visible || msg.created_at_ms < now() - 86400000 {
                     Ok(StatusCode::NO_CONTENT)
                 } else {
-                    push.send(&sub, &payload(&sub, &msg)).await
+                    push.send(&sub, &payload(&sub, &owner, &msg)).await
                 };
                 let mut i = a.inner.lock().unwrap();
                 let Some(current) = i.credentials.subscriptions.get_mut(&id) else {
@@ -364,7 +401,11 @@ pub async fn dispatch(a: Access) {
                 }
                 match outcome {
                     Ok(code) if code.is_success() => {
-                        current.sequence = current.sequence.max(seq);
+                        current
+                            .cursors
+                            .entry(owner.clone())
+                            .and_modify(|cursor| *cursor = (*cursor).max(seq))
+                            .or_insert(seq);
                         current.failures = 0;
                         current.retry_after_ms = 0;
                     }
@@ -385,7 +426,7 @@ pub async fn dispatch(a: Access) {
                     .credentials
                     .subscriptions
                     .get(&id)
-                    .is_some_and(|s| s.sequence >= seq)
+                    .is_some_and(|s| *s.cursors.get(&owner).unwrap_or(&0) >= seq)
                 {
                     break;
                 }
@@ -431,7 +472,8 @@ mod tests {
             ),
             locale: "en".into(),
             private_preview: false,
-            sequence: 0,
+            cursors: Default::default(),
+            control_id: "control".into(),
             failures: 0,
             retry_after_ms: 0,
         };
@@ -444,7 +486,16 @@ mod tests {
             created_at_ms: now(),
             request_id: None,
         };
-        let content = payload(&sub, &msg);
+        let content = payload(&sub, "assistant-a", &msg);
+        let notification: Value = serde_json::from_slice(&content).unwrap();
+        assert_eq!(notification["conversation"], "assistant-a");
+        assert!(
+            notification["url"]
+                .as_str()
+                .unwrap()
+                .contains("assistant=assistant-a")
+        );
+        assert_eq!(notification["tag"], "assistant-a:message-id");
         let mut encrypted = push
             .message(&sub, &content)
             .unwrap()
@@ -464,7 +515,7 @@ mod tests {
         encrypted[last] ^= 1;
         assert!(ece::decrypt(&key.raw_components().unwrap(), &auth, &encrypted).is_err());
         msg.text = "\"\n😀".repeat(2000);
-        let preview = payload(&sub, &msg);
+        let preview = payload(&sub, "assistant-a", &msg);
         assert!(preview.len() <= 3000);
         let body: Value = serde_json::from_slice(&preview).unwrap();
         assert!(msg.text.starts_with(body["body"].as_str().unwrap()));

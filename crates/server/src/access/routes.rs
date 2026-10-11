@@ -168,9 +168,15 @@ async fn boundary(State(a): State<Access>, mut req: Request, next: Next) -> Resp
 }
 async fn status(State(a): State<Access>, h: HeaderMap) -> Json<Value> {
     let authenticated = a.authorization(&h).is_some();
+    let source_id = a
+        .notifications
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.control_id.clone());
     let i = a.inner.lock().unwrap();
     Json(
-        json!({"authenticated":authenticated,"scope":"owner_instance","desktop_available":true,"push_available":a.push.is_some() && a.notifications.lock().unwrap().is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":true,"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
+        json!({"authenticated":authenticated,"scope":"owner_instance","desktop_available":true,"push_available":a.push.is_some() && a.notifications.lock().unwrap().is_some(),"push_key":a.push.as_ref().map(|p|&p.public_key),"subscription":if authenticated{cookie(&h,"__Host-pot-installation").and_then(|id|i.credentials.subscriptions.get(&id)).map(|s|json!({"enabled":source_id.as_deref()==Some(s.control_id.as_str()),"private_preview":s.private_preview,"locale":s.locale,"failures":s.failures}))}else{None}}),
     )
 }
 async fn configure_token(State(a): State<Access>, h: HeaderMap) -> Result<Response, Failure> {

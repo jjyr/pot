@@ -177,7 +177,7 @@ Expose only the Web UI listener. Keep native Runtime and guest service ports pri
 
 ### HTTP
 
-Start an independently configured Control first (see [Control membership](deployment.md)). Obtain its native client credential from its private Runtime endpoint using operator access. This is distinct from the browser login Token and machine invitations. Store it in the service environment as `POT_CONTROL_TOKEN`, never in a browser URL or command-line argument. A private Control CA can be supplied with `POT_CONTROL_CA=/absolute/control-ca.pem`.
+Start an independently configured Control first (see [Control membership](deployment.md)). Obtain its durable client credential from `product/control-client-credential.json` using operator access after enabling the Control listener. The private file is mode 0600 and survives Control restarts. It is accepted only by the Control HTTPS listener; local Runtime process tokens still rotate on every boot. This is distinct from the browser login Token and machine invitations. Store it in the service environment as `POT_CONTROL_TOKEN`, never in a browser URL or command-line argument. A private Control CA can be supplied with `POT_CONTROL_CA=/absolute/control-ca.pem`.
 
 Start the explicit Web host and open `http://localhost:17701`:
 
@@ -274,8 +274,14 @@ available independently.
 The Web host keeps Control credentials on the server and streams SSE updates.
 Browser Tokens and cookies authenticate only the Web host and are not forwarded
 to Control. There is no local/remote switch. Native-only APIs remain excluded by
-the browser route allowlist. Remote desktop and push notifications are later #39
-work; they do not use the Web host's local execution or local notification state.
+the browser route allowlist. Remote desktop is deferred in #39.
+
+Push notifications use the Web host's VAPID configuration and server-held Control
+credential. One subscription covers
+all assistants; per-owner cursors are durable and scoped to the Control identity.
+Only finalized assistant replies notify; Task results wait for the assistant's actual
+report. Clicking a notification opens its assistant. Control disconnects retain the
+cursors and do not fall back to local messages.
 
 
 ## Browser authentication and Home Screen
