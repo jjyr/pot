@@ -51,7 +51,7 @@ impl Port {
             operation,
             query,
         })?;
-        let expected = digest(&request)?;
+        let expected = protocol_digest(&request)?;
         let (client, url) = client(&binding.url, binding.ca_pem.as_deref())?;
         let response = client
             .post(url.join("control/v1/task-service")?)

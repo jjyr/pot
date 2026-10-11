@@ -155,9 +155,15 @@ impl ResolvedSpec {
         Ok(())
     }
     fn hash(&self) -> Result<String> {
+        self.payload_hash(true)
+    }
+    fn payload_hash(&self, canonical: bool) -> Result<String> {
         let mut value = self.clone();
         value.spec_hash.clear();
-        let value = serde_json::to_value(value)?;
+        let mut value = serde_json::to_value(value)?;
+        if canonical {
+            value.sort_all_objects();
+        }
         Ok(Sha256::digest(serde_json::to_vec(&value)?)
             .iter()
             .map(|byte| format!("{byte:02x}"))
@@ -166,7 +172,7 @@ impl ResolvedSpec {
     pub fn validate(&self) -> Result<()> {
         self.params.agent.validate()?;
         ensure!(
-            self.hash()? == self.spec_hash,
+            self.hash()? == self.spec_hash || self.payload_hash(false)? == self.spec_hash,
             "Resolved spec checksum mismatch"
         );
         Ok(())
@@ -205,6 +211,19 @@ mod checksum_tests {
         Profile::api(&Config).resolve().unwrap()
     }
 
+    #[test]
+    fn checksum_is_independent_of_json_order_and_verifies_existing_data() {
+        let mut original = spec();
+        let canonical = original.hash().unwrap();
+        let mut value = serde_json::to_value(&original).unwrap();
+        value.sort_all_objects();
+        let restored: ResolvedSpec = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.hash().unwrap(), canonical);
+        original.spec_hash = original.payload_hash(false).unwrap();
+        original.validate().unwrap();
+        original.model = "changed".into();
+        assert!(original.validate().is_err());
+    }
     #[test]
     fn checksum_detects_context_and_model_changes() {
         let mut spec = spec();

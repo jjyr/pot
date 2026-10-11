@@ -29,7 +29,7 @@ pub(super) async fn service(
     match result {
         Ok(value) => match resources
             .control
-            .sign(json!({"digest":digest(&signed).unwrap_or_default(),"value":value}))
+            .sign(json!({"digest":protocol_digest(&signed).unwrap_or_default(),"value":value}))
         {
             Ok(reply) => Json(reply).into_response(),
             Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),

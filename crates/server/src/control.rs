@@ -42,6 +42,17 @@ fn secret() -> Result<String> {
         .map_err(|_| anyhow::anyhow!("Random source unavailable"))?;
     Ok(B64.encode(bytes))
 }
+// Serialize signed protocol data independently of serde_json feature unification.
+// App builds may preserve object insertion order while standalone Linux sorts it.
+fn canonical_bytes(value: &impl Serialize) -> Result<Vec<u8>> {
+    let mut value = serde_json::to_value(value)?;
+    value.sort_all_objects();
+    Ok(serde_json::to_vec(&value)?)
+}
+fn protocol_digest(value: &impl Serialize) -> Result<String> {
+    Ok(B64.encode(ring::digest::digest(&ring::digest::SHA256, &canonical_bytes(value)?).as_ref()))
+}
+// Durable local identities retain their existing encoding and paths.
 fn digest(value: &impl Serialize) -> Result<String> {
     Ok(B64
         .encode(ring::digest::digest(&ring::digest::SHA256, &serde_json::to_vec(value)?).as_ref()))
@@ -81,7 +92,7 @@ impl Identity {
     fn verify(&self, payload: &impl Serialize, signature: &str) -> Result<()> {
         self.validate()?;
         signature::UnparsedPublicKey::new(&signature::ED25519, B64.decode(&self.public_key)?)
-            .verify(&serde_json::to_vec(payload)?, &B64.decode(signature)?)
+            .verify(&canonical_bytes(payload)?, &B64.decode(signature)?)
             .map_err(|_| anyhow::anyhow!("Runtime signature rejected"))
     }
 }
@@ -374,7 +385,7 @@ impl Authority {
         Ok(result)
     }
     fn sign<T: Serialize>(&self, payload: T) -> Result<Signed<T>> {
-        let signature = B64.encode(self.key.sign(&serde_json::to_vec(&payload)?).as_ref());
+        let signature = B64.encode(self.key.sign(&canonical_bytes(&payload)?).as_ref());
         Ok(Signed { payload, signature })
     }
     fn is_control(&self) -> bool {
@@ -465,7 +476,7 @@ impl Authority {
                 "Member identity changed"
             );
             self.sign(
-                json!({"identity":self.identity,"request_digest":digest(&request)?,"token":token}),
+                json!({"identity":self.identity,"request_digest":protocol_digest(&request)?,"token":token}),
             )
         })
     }
@@ -864,7 +875,7 @@ impl Authority {
         identity.verify(&reply.payload, &reply.signature)?;
         ensure!(
             reply.payload["identity"] == json!(identity)
-                && reply.payload["request_digest"] == digest(&enrollment)?,
+                && reply.payload["request_digest"] == protocol_digest(&enrollment)?,
             "Join response does not match request"
         );
         let token = reply.payload["token"]
@@ -945,7 +956,7 @@ impl Authority {
             command_id: secret()?,
             body,
         })?;
-        let key = digest(&request.payload)?;
+        let key = protocol_digest(&request.payload)?;
         let (tx, rx) = tokio::sync::oneshot::channel();
         // One network delivery only. Timeout/lost reply must be reconciled using original durable receipt.
         self.deliveries.lock().unwrap().insert(
@@ -1058,8 +1069,9 @@ impl Authority {
                     .and_then(|key| deliveries.get(&key).map(|d| d.request.clone()))
             };
             if command.is_some() || tokio::time::Instant::now() >= until {
-                return self
-                    .sign(json!({"request_digest":digest(&request.payload)?,"command":command}));
+                return self.sign(
+                    json!({"request_digest":protocol_digest(&request.payload)?,"command":command}),
+                );
             }
             let _ = tokio::time::timeout_at(until, notified).await;
         }
@@ -1104,14 +1116,14 @@ impl Authority {
                         .identity
                         .verify(&response.payload, &response.signature)?;
                     ensure!(
-                        response.payload["request_digest"] == digest(&poll.payload)?,
+                        response.payload["request_digest"] == protocol_digest(&poll.payload)?,
                         "Poll response identity mismatch"
                     );
                     if !response.payload["command"].is_null() {
                         let command: Signed<Envelope> =
                             serde_json::from_value(response.payload["command"].clone())?;
                         let control = authority.authorize(&binding.token, &command)?;
-                        let key = digest(&command.payload)?;
+                        let key = protocol_digest(&command.payload)?;
                         let result = authority
                             .dispatch_with_hub(
                                 &resources.host().await,
@@ -2339,6 +2351,36 @@ mod tests {
         assert!(blocked.listener.lock().await.is_none());
         control.shutdown().await;
         std::fs::remove_dir_all(control.control.data.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn signatures_and_digests_ignore_nested_json_object_order() {
+        let root = std::env::temp_dir().join(format!("pot-canonical-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let authority = Authority::open(&root, &uuid::Uuid::new_v4().to_string()).unwrap();
+        let first: Value =
+            serde_json::from_str(r#"{"z":{"b":2,"a":1},"a":[{"y":4,"x":3}]}"#).unwrap();
+        let second: Value =
+            serde_json::from_str(r#"{"a":[{"x":3,"y":4}],"z":{"a":1,"b":2}}"#).unwrap();
+        assert_eq!(
+            canonical_bytes(&first).unwrap(),
+            br#"{"a":[{"x":3,"y":4}],"z":{"a":1,"b":2}}"#
+        );
+        assert_eq!(
+            protocol_digest(&first).unwrap(),
+            protocol_digest(&second).unwrap()
+        );
+        let signed = authority.sign(first).unwrap();
+        authority
+            .identity
+            .verify(&second, &signed.signature)
+            .unwrap();
+        assert!(
+            authority
+                .identity
+                .verify(&json!({"a":[],"z":{}}), &signed.signature)
+                .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
     pub(super) async fn resources() -> Arc<Resources> {
         let root =
