@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 pub struct Editor {
     pub open: bool,
     fields: Option<Fields>,
+    tags: std::collections::HashMap<String, Entity<InputState>>,
 }
 struct Fields {
     address: Entity<InputState>,
@@ -88,6 +89,35 @@ impl Editor {
                 body=body.child(Button::new("configure-control").primary().disabled(view.pending).label(catalog.text("machines.add-control"))
                     .on_click(move|_,window,cx|{let pem=ca.read(cx).value().to_string();h(&pages::PageAction {kind:"machine-command",value:json!({"command":{"action":"configure_control","url":address.read(cx).value().to_string(),"token":token.read(cx).value().to_string(),"ca_pem":if pem.trim().is_empty(){None}else{Some(pem)}}})},window,cx);}));
             }
+        }
+        for machine in view.directory["machines"].as_array().into_iter().flatten() {
+            let Some(id) = machine["runtime_id"].as_str() else {
+                continue;
+            };
+            let input = self
+                .tags
+                .entry(id.to_owned())
+                .or_insert_with(|| {
+                    let value = machine["tags"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    cx.new(|cx| InputState::new(window, cx).default_value(value))
+                })
+                .clone();
+            let h = handler.clone();
+            let runtime = id.to_owned();
+            let field = input.clone();
+            body = body.child(pages::hint(format!("{} · {}", id, catalog.text("machines.tags")), cx))
+                .child(Input::new(&input))
+                .child(Button::new(SharedString::from(format!("save-tags-{id}"))).ghost().disabled(view.pending)
+                    .label(catalog.text("machines.save-tags")).on_click(move |_, window, cx| {
+                        let tags = field.read(cx).value().split_whitespace().map(str::to_owned).collect::<Vec<_>>();
+                        h(&pages::PageAction { kind: "machine-command", value: json!({"command":{"action":"set_tags","runtime_id":runtime,"tags":tags}}) }, window, cx);
+                    }));
         }
         let authority = &view.directory["control_authority"];
         body = body.child(pages::hint(catalog.text("machines.control-hint"), cx));

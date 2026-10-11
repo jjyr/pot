@@ -72,8 +72,13 @@ assistant or global Agent-home rules.
 The built-in dispatch instructions and fresh eligible Profile catalog remain
 injected independently. A custom system prompt still receives file instructions.
 
-Explicit task choices take precedence over saved rules; unmatched tasks use the
-configured default on the dispatching Agent Runtime. Rules cannot enable a
+Explicit task choices take precedence over saved rules. Without an explicit target,
+Control selects a machine labelled `task-runner`, preferring its own Runtime and
+then stable Runtime ID order. The selected machine's execution target is fixed
+when the task is created; local execution retains the configured Host/Sandbox
+default, while an implicit remote target uses Host. Explicit Host/Sandbox references
+remain available. Labels describe routing intent, not a capability guarantee;
+execution fails normally if the selected target cannot do the work. Rules cannot enable a
 service, allow a Profile or grant execution authority. `create_task` retains
 `selection_reason`; dedicated preference tools and `preference_revision` have
 been removed with user agreement. Existing tasks retain configuration snapshots.
@@ -143,7 +148,7 @@ ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved nam
 
 Task creation accepts optional `skills: ["name", ...]`: omitted discovers all skills, a list narrows discovery, and an empty list disables injection. Local tasks preserve selections; connected tasks additionally pin Control's global bundle snapshot across turns and restart. Unavailable selected skills fail visibly when preparing a turn.
 
-Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Explicit `/skill:name` invocation is not implemented. Main project discovery reflects its actual Host working directory; task environment bindings remain fixed.
+Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual Host working directory; task environment bindings remain fixed.
 
 ## Creation, installation and validation
 
@@ -154,3 +159,25 @@ The creator's scripts/quick_validate.py validates YAML metadata and scaffolds, a
 The installer uses the adjacent creator validator. It accepts a local bundle, GitHub repo/path/ref or tree URL. Downloads use only credentials available in the current execution environment. Archive extraction rejects traversal and special files. Installation preserves resource contents and executable permissions, normalizes readable permissions, validates before publishing, and refuses replacement without --replace. Ordinary publication failures restore the previous directory; crash recovery and concurrent installers are not transactional.
 
 apply_patch remains workspace-scoped. Global installation/update is performed on the owning Control, or the independent local Runtime in App local mode. Connected tasks cannot modify supplied global bundles. Use injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for project installation.
+
+## Message references and machine labels
+
+App and Web autocomplete standalone `/` words at the caret using authenticated,
+assistant-scoped `/api/v1/completions` metadata. Candidates include registered
+machines, Control-managed labels, and the assistant's current Skill catalog.
+References are editable message text: `/machine:RUNTIME_ID`, `/tag:desktop`,
+`/skill:skill-creator`. Their identifiers survive drafts, retries and history.
+Use spaces around tokens; backtick-quoted examples are not selectors.
+
+A message may specify one machine and multiple labels (AND). A machine plus labels
+must satisfy both; conflicting explicit tool destinations are rejected. Absent
+matching machines is an explicit routing error. Offline or incapable targets are
+not silently replaced. Only the current user turn constrains new delegated tasks;
+previous messages, system task reports, existing tasks and scheduled occurrences
+never inherit new selections. Selected Skills are persisted with the new task.
+Global/project Skill discovery and project AGENTS.md still use the existing rules.
+
+Control initializes its labels to `task-runner`, `desktop` and its OS. Newly joined
+machines receive only their declared OS label. Control owns all label edits;
+heartbeats, repeated enrollment and restarts do not restore removed labels.
+Labels use lowercase ASCII letters, digits, hyphens and underscores.

@@ -167,6 +167,8 @@ struct Keys {
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Member {
+    #[serde(default)]
+    tags: Vec<String>,
     identity: Identity,
     token: String,
     enabled: bool,
@@ -225,6 +227,8 @@ struct Pending {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Book {
+    #[serde(default)]
+    local_tags: Option<Vec<String>>,
     client_runs: BTreeMap<String, remote::ClientRun>,
     client_management: BTreeMap<String, management::Intent>,
     schema_version: u32,
@@ -237,6 +241,8 @@ struct Book {
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct JoinRequest {
+    #[serde(default)]
+    os: String,
     schema_version: u32,
     request_id: String,
     caller: Identity,
@@ -369,6 +375,37 @@ pub(crate) struct Authority {
     >,
 }
 impl Authority {
+    pub(super) fn local_tags(&self) -> Vec<String> {
+        let book = self.book.lock().unwrap();
+        book.local_tags.clone().unwrap_or_else(|| {
+            pot_protocol::references::default_labels(book.control.is_none(), std::env::consts::OS)
+        })
+    }
+    fn set_tags(&self, runtime: &str, mut tags: Vec<String>) -> Result<Value> {
+        ensure!(
+            tags.len() <= 64
+                && tags
+                    .iter()
+                    .all(|t| pot_protocol::references::valid_label(t)),
+            "Use up to 64 lowercase labels (letters, digits, dash, underscore)"
+        );
+        tags.sort();
+        tags.dedup();
+        self.update(|book| {
+            ensure!(book.control.is_none(), "Labels are managed by Control");
+            if runtime == self.identity.runtime_id {
+                book.local_tags = Some(tags.clone());
+            } else {
+                book.members
+                    .get_mut(runtime)
+                    .filter(|m| m.enabled)
+                    .ok_or_else(|| anyhow::anyhow!("Machine is not connected"))?
+                    .tags = tags.clone();
+            }
+            Ok(json!({"tags":tags}))
+        })
+    }
+
     #[cfg(test)]
     pub fn open(data: &Path, runtime_id: &str) -> Result<Arc<Self>> {
         Self::open_policy(data, runtime_id, true)
@@ -478,6 +515,10 @@ impl Authority {
                 && request.caller.runtime_id != self.identity.runtime_id,
             "Invalid Control membership"
         );
+        ensure!(
+            pot_protocol::references::valid_label(&request.os),
+            "Invalid OS label"
+        );
         uuid::Uuid::parse_str(&request.request_id)?;
         ensure!(
             B64.decode(&request.invitation)?.len() == 32,
@@ -526,6 +567,7 @@ impl Authority {
                     m.enabled = true;
                 })
                 .or_insert(Member {
+                    tags: pot_protocol::references::default_labels(false, &request.os),
                     identity: request.caller.clone(),
                     token: token.clone(),
                     enabled: true,
@@ -720,13 +762,29 @@ pub(super) struct Listen {
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Operator {
     CreateInvitation,
-    EnableControl { config: Listen },
+    EnableControl {
+        config: Listen,
+    },
     DisableControl,
-    Preview { url: String, ca_pem: Option<String> },
-    Join { request: Join },
+    Preview {
+        url: String,
+        ca_pem: Option<String>,
+    },
+    Join {
+        request: Join,
+    },
     Leave,
-    RemoveMember { runtime_id: String },
-    Call { runtime_id: String, body: Rpc },
+    RemoveMember {
+        runtime_id: String,
+    },
+    SetTags {
+        runtime_id: String,
+        tags: Vec<String>,
+    },
+    Call {
+        runtime_id: String,
+        body: Rpc,
+    },
 }
 fn response(result: Result<Value>) -> Response {
     match result {
@@ -798,6 +856,7 @@ pub(super) async fn operator(
                     authority.leave().await?;
                     Ok(json!({"left":true}))
                 }
+                Operator::SetTags { runtime_id, tags } => authority.set_tags(&runtime_id, tags),
                 Operator::RemoveMember { runtime_id } => {
                     authority.remove_member(&runtime_id)?;
                     Ok(json!({"removed":true}))
@@ -921,6 +980,7 @@ impl Authority {
         );
         let enrollment = JoinRequest {
             schema_version: VERSION,
+            os: std::env::consts::OS.into(),
             request_id: request.request_id.clone(),
             caller: self.identity.clone(),
             invitation: request.invitation.clone(),
@@ -1671,7 +1731,7 @@ impl Authority {
             let current=book.members.get(&control.identity.runtime_id).unwrap_or(&control);
             json!({"runtime_id":current.identity.runtime_id,"identity":current.identity,"local":false,
                 "connection":if online && current.enabled{"online"}else{"offline"},"enabled":current.enabled,"last_seen_ms":current.last_seen_ms,
-                "environments":current.inventory["items"],"default":null})
+                "tags":current.tags,"environments":current.inventory["items"],"default":null})
         })).await
     }
 }
@@ -1822,12 +1882,24 @@ mod tests {
             .to_owned();
         let request = JoinRequest {
             schema_version: VERSION,
+            os: std::env::consts::OS.into(),
             request_id: uuid::Uuid::new_v4().to_string(),
             caller: node.identity.clone(),
             invitation: invitation.clone(),
         };
         let reply = control
             .register(node.sign(request.clone()).unwrap())
+            .unwrap();
+        assert_eq!(
+            control.book.lock().unwrap().members[&node.identity.runtime_id].tags,
+            vec![std::env::consts::OS]
+        );
+        assert!(control.local_tags().contains(&"task-runner".into()));
+        control
+            .set_tags(&control.identity.runtime_id, vec![])
+            .unwrap();
+        control
+            .set_tags(&node.identity.runtime_id, vec!["desktop".into()])
             .unwrap();
         let restored = Authority::open(&control.data, &control.identity.runtime_id).unwrap();
         assert_eq!(
@@ -1836,6 +1908,16 @@ mod tests {
                 .unwrap()
                 .payload,
             reply.payload
+        );
+        assert!(restored.local_tags().is_empty());
+        assert_eq!(
+            restored.book.lock().unwrap().members[&node.identity.runtime_id].tags,
+            ["desktop"]
+        );
+        assert!(
+            restored
+                .set_tags(&node.identity.runtime_id, vec!["Bad Label".into()])
+                .is_err()
         );
         assert!(!restored.metadata().to_string().contains(&invitation));
         let mut conflict = request.clone();
@@ -2373,6 +2455,16 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+        control.control.set_tags(member, vec![]).unwrap();
+        control.control.call(member, Rpc::Inventory).await.unwrap();
+        assert_eq!(control.control.machines().await[0]["tags"], json!([]));
+        let reopened =
+            Authority::open(&control.control.data, &control.control.identity.runtime_id).unwrap();
+        assert!(
+            reopened.book.lock().unwrap().members[member]
+                .tags
+                .is_empty()
         );
         assert!(
             node.control.listener.lock().await.is_none(),

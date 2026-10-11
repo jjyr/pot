@@ -73,6 +73,16 @@ pub fn render(
                         cx,
                     )),
             );
+        card = card.child(pages::hint(
+            machine["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" · "),
+            cx,
+        ));
         let environments = machine["environments"]
             .as_array()
             .cloned()

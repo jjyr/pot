@@ -102,3 +102,15 @@ login form applies its own CSS safe-area padding.
 
 See [responsive browser validation](validation/responsive-web-20261012.md) for
 emulated desktop/phone coverage and physical-device limits.
+
+## Composer references
+
+Both composers complete `/machine:`, `/tag:` and `/skill:` references from the
+selected assistant's Control catalog. Type `/` to search, use Up/Down and Enter to
+insert, Escape to dismiss, or click/tap a result. Selection inserts editable text;
+Enter accepting a result does not send the message. Input-method composition is
+left to the platform. Drafts and exact send retries include reference text.
+See [Agent context](agent-context.md#message-references-and-machine-labels) for scope.
+
+Machines shows each machine's labels; Connections provides a space-separated
+label field and explicit Save for each machine. Resource creation stays API-only.

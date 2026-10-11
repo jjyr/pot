@@ -21,6 +21,8 @@ struct Record {
     info: TaskInfo,
     create_request: CreateTask,
     #[serde(default)]
+    message_skills: Option<Vec<String>>,
+    #[serde(default)]
     route_source: agent::routing::Source,
     queue: VecDeque<Job>,
     active: Option<Job>,
@@ -236,7 +238,10 @@ pub(crate) fn restore(root: &Service) -> Result<()> {
                 .environment_ref
                 .as_ref()
                 .expect("validated binding"),
-            record.create_request.skills.clone(),
+            record
+                .message_skills
+                .clone()
+                .or_else(|| record.create_request.skills.clone()),
         )?;
         if let Some(job) = record.active.take() {
             if !record.interrupt_requested && crate::remote_environment::is_remote(&service) {
@@ -564,7 +569,62 @@ fn enqueue_from(
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
-    let environment = resolve_environment(root, req.environment_ref.clone(), &req.sandbox_id)?;
+    if req.environment_ref.is_some() && !req.sandbox_id.is_empty() {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "environment_conflict",
+            "Use environment_ref or sandbox_id",
+        ));
+    }
+    let refs = task_references(root, &req, source)?;
+    let explicit = req.environment_ref.clone().or_else(|| {
+        (!req.sandbox_id.is_empty())
+            .then(|| pot_core::EnvironmentRef::sandbox(&root.runtime_id, &req.sandbox_id))
+    });
+    let constrained = refs.machine.is_some() || !refs.tags.is_empty();
+    let target = if explicit.is_none() || constrained {
+        let machines = crate::remote_environment::port(root)
+            .map(|p| p.machines())
+            .unwrap_or_default();
+        let machines = if machines.is_empty() {
+            vec![pot_protocol::MachineRoute {
+                runtime_id: root.runtime_id.clone(),
+                tags: pot_protocol::references::default_labels(true, std::env::consts::OS),
+            }]
+        } else {
+            machines
+        };
+        let runtime = pot_protocol::references::select_machine(&machines, &root.runtime_id, &refs)
+            .map_err(|e| error(StatusCode::BAD_REQUEST, "task_machine", e))?;
+        if let Some(environment) = &explicit {
+            // A label selector constrains membership, not which matching machine the model chooses.
+            let mut fixed = refs.clone();
+            fixed.machine = Some(environment.runtime_id.clone());
+            if refs
+                .machine
+                .as_ref()
+                .is_some_and(|id| id != &environment.runtime_id)
+                || pot_protocol::references::select_machine(&machines, &root.runtime_id, &fixed)
+                    .is_err()
+            {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "task_machine",
+                    "Task target conflicts with the current message references",
+                ));
+            }
+            explicit.clone()
+        } else if runtime == root.runtime_id {
+            None
+        } else {
+            Some(pot_core::EnvironmentRef::host(runtime))
+        }
+    } else {
+        explicit
+    };
+    let environment = resolve_environment(root, target, "")?;
+    let message_skills = (!refs.skills.is_empty()).then_some(refs.skills);
+    let selected_skills = message_skills.clone().or_else(|| req.skills.clone());
     let sandbox_id = match &environment.target {
         pot_core::EnvironmentTarget::Host {} => String::new(),
         pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.clone(),
@@ -592,6 +652,7 @@ fn enqueue_from(
             routing: Some(routing),
             executor_icon,
         },
+        message_skills,
         create_request: req,
         route_source: source,
         queue: VecDeque::from([first.clone()]),
@@ -599,13 +660,7 @@ fn enqueue_from(
         interrupt_requested: false,
         receipts: vec![first],
     };
-    let service = child(
-        root,
-        &task_id,
-        &environment,
-        record.create_request.skills.clone(),
-    )
-    .map_err(internal)?;
+    let service = child(root, &task_id, &environment, selected_skills).map_err(internal)?;
     {
         let mut inner = service.conversation.inner.lock().unwrap();
         if agent::current(&inner.store).map_err(internal)?.is_none() {
@@ -1615,6 +1670,33 @@ pub(crate) fn permission_lane(root: &Service, owner: &str) -> Option<Service> {
         .lanes
         .get(owner)
         .map(|l| l.service.clone())
+}
+
+fn task_references(
+    root: &Service,
+    req: &CreateTask,
+    source: agent::routing::Source,
+) -> ApiResult<pot_protocol::references::References> {
+    if source == agent::routing::Source::Schedule {
+        return Ok(Default::default());
+    }
+    let text = if source == agent::routing::Source::Tool {
+        let inner = root.conversation.inner.lock().unwrap();
+        inner
+            .turn
+            .as_ref()
+            .map(|turn| inner.store.message(&turn.user_message_id))
+            .transpose()
+            .map_err(internal)?
+            .flatten()
+            .filter(|m| m.role == Role::User)
+            .map(|m| m.text)
+            .unwrap_or_default()
+    } else {
+        req.text.clone()
+    };
+    pot_protocol::references::References::parse(&text)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, "message_references", e))
 }
 
 #[cfg(test)]
@@ -2814,6 +2896,135 @@ pub(crate) mod tests {
             TaskPhase::Interrupted
         );
         assert_eq!(claim(&s).unwrap().unwrap().0, second.id);
+    }
+    #[tokio::test]
+    async fn message_references_bind_only_new_tasks_and_survive_restore_and_retry() {
+        let s = fixture();
+        let mid = id();
+        s.save(Message {
+            id: mid.clone(),
+            conversation_id: s.conversation_id(),
+            role: Role::User,
+            text: format!(
+                "/machine:{} /tag:desktop /skill:skill-creator Create task",
+                s.runtime_id
+            ),
+            status: MessageStatus::Accepted,
+            created_at_ms: now(),
+            request_id: Some(id()),
+        })
+        .unwrap();
+        s.conversation.inner.lock().unwrap().turn = Some(TurnState {
+            user_message_id: mid,
+            cancelling: false,
+        });
+        let req = CreateTask {
+            request_id: id(),
+            text: "Perform work".into(),
+            ..Default::default()
+        };
+        let task = create_from(
+            s.clone(),
+            headers(),
+            req.clone(),
+            agent::routing::Source::Tool,
+        )
+        .await
+        .unwrap()
+        .0;
+        let worker = owner(&s, &task.id).unwrap();
+        assert_eq!(worker.skill_selection.as_ref().unwrap(), &["skill-creator"]);
+        let report = id();
+        s.save(Message {
+            id: report.clone(),
+            conversation_id: s.conversation_id(),
+            role: Role::System,
+            text: "/tag:missing /skill:other".into(),
+            status: MessageStatus::Complete,
+            created_at_ms: now(),
+            request_id: Some(id()),
+        })
+        .unwrap();
+        s.conversation.inner.lock().unwrap().turn = Some(TurnState {
+            user_message_id: report,
+            cancelling: false,
+        });
+        assert_eq!(
+            task_references(&s, &req, agent::routing::Source::Tool).unwrap(),
+            Default::default()
+        );
+        s.conversation.inner.lock().unwrap().turn = None;
+        let retry = create_from(
+            s.clone(),
+            headers(),
+            req.clone(),
+            agent::routing::Source::Tool,
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(retry.id, task.id);
+        restore(&s).unwrap();
+        assert_eq!(
+            owner(&s, &task.id)
+                .unwrap()
+                .skill_selection
+                .as_ref()
+                .unwrap(),
+            &["skill-creator"]
+        );
+        let next = create_from(
+            s.clone(),
+            headers(),
+            CreateTask {
+                request_id: id(),
+                ..req.clone()
+            },
+            agent::routing::Source::Tool,
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(owner(&s, &next.id).unwrap().skill_selection.is_none());
+        let configured = create_from(
+            s.clone(),
+            headers(),
+            CreateTask {
+                request_id: id(),
+                skills: Some(vec!["skill-installer".into()]),
+                ..req.clone()
+            },
+            agent::routing::Source::Tool,
+        )
+        .await
+        .unwrap()
+        .0;
+        restore(&s).unwrap();
+        assert_eq!(
+            owner(&s, &configured.id)
+                .unwrap()
+                .skill_selection
+                .as_ref()
+                .unwrap(),
+            &["skill-installer"]
+        );
+        let bad = create_from(
+            s.clone(),
+            headers(),
+            CreateTask {
+                request_id: id(),
+                text: "/tag:missing task".into(),
+                ..req
+            },
+            agent::routing::Source::User,
+        )
+        .await;
+        assert!(bad.is_err());
+        assert_eq!(
+            owner(&s, &task.id).unwrap().environment_ref,
+            worker.environment_ref
+        );
+        std::fs::remove_dir_all(&s.data).unwrap();
     }
     pub(crate) fn fixture() -> Service {
         let mut s = crate::tests::service();

@@ -105,6 +105,10 @@ pub fn router(s: Service) -> Router {
         .route("/api/v1/usage/resume", post(usage::resume))
         .route("/api/v1/usage/cancel", post(usage::cancel_wait))
         .route(PATH_EVENTS, get(events_handler))
+        .route(
+            "/api/v1/completions",
+            get(pot_control::control::completions),
+        )
         .route(PATH_MESSAGES, post(send))
         .route(PATH_CANCEL, post(cancel))
         .route("/api/v1/turn/steer", post(control::steer))

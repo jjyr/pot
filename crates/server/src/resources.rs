@@ -352,7 +352,7 @@ async fn machines(State(s): State<Arc<Resources>>, headers: HeaderMap) -> Respon
         .collect::<Vec<_>>();
     let mut machines = vec![json!({
         "runtime_id":runtime["runtime_id"],"local":true,"connection":"online",
-        "capabilities":runtime["capabilities"],"boot_id":runtime["boot_id"],
+        "tags":s.control.local_tags(),"capabilities":runtime["capabilities"],"boot_id":runtime["boot_id"],
         "environments":local_environments,"default":environments["selected"]
     })];
     machines.extend(s.control.machines().await);

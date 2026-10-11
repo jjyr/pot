@@ -172,6 +172,17 @@ pub(crate) async fn inventory(s: &Service) -> Value {
         }
     }
     if let Ok(port) = crate::remote_environment::port(s) {
+        let machines = port.machines();
+        if let Some(items) = value["items"].as_array_mut() {
+            for item in items {
+                if let Some(machine) = machines
+                    .iter()
+                    .find(|m| item["environment_ref"]["runtime_id"] == m.runtime_id)
+                {
+                    item["machine_tags"] = json!(machine.tags);
+                }
+            }
+        }
         match port.inventory().await {
             Ok(remote) => {
                 if let Some(items) = value["items"].as_array_mut() {

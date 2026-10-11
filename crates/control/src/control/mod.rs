@@ -233,6 +233,8 @@ pub async fn send(
             "Restart environment",
         ));
     }
+    pot_protocol::references::References::parse(&req.text)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, "message_references", e))?;
     let mut inner = s.conversation.inner.lock().unwrap();
     if let Some(old) = inner.store.duplicate(&req.request_id).map_err(internal)? {
         if old.text != req.text || old.conversation_id != req.conversation_id {
@@ -429,6 +431,51 @@ pub async fn events_handler(
     q: Query<Cursor>,
 ) -> ApiResult<impl IntoResponse> {
     events(s, h, q).await
+}
+
+/// Composer metadata is owner-scoped and comes from the same catalog as the assistant.
+pub async fn completions(
+    State(s): State<Service>,
+    h: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    s.authorized(&h)?;
+    let skills = pot_agent::discover_skills(&crate::skills::resources(&s).map_err(internal)?)
+        .map_err(internal)?;
+    let mut items = vec![];
+    for skill in skills
+        .skills
+        .into_iter()
+        .filter(|s| !s.disable_model_invocation)
+    {
+        items.push(pot_protocol::references::Completion {
+            token: format!("/skill:{}", skill.name),
+            label: skill.name,
+            detail: skill.description,
+        });
+    }
+    if let Ok(port) = crate::remote_environment::port(&s) {
+        let mut tags = std::collections::BTreeSet::new();
+        for machine in port.machines() {
+            items.push(pot_protocol::references::Completion {
+                token: format!("/machine:{}", machine.runtime_id),
+                label: machine.runtime_id.clone(),
+                detail: if machine.runtime_id == s.runtime_id {
+                    "Control".into()
+                } else {
+                    "Machine".into()
+                },
+            });
+            tags.extend(machine.tags);
+        }
+        for tag in tags {
+            items.push(pot_protocol::references::Completion {
+                token: format!("/tag:{tag}"),
+                label: tag,
+                detail: "Machine label".into(),
+            });
+        }
+    }
+    Ok(Json(serde_json::json!({"items":items})))
 }
 
 #[cfg(test)]
