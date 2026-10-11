@@ -151,7 +151,9 @@ impl Server {
             backend.ensure_app_assistant().await?;
         }
         if let Some((access, _, _)) = &mut access {
-            access.runtime = web_router.expect("explicit Control router");
+            let (router, source) = web_router.expect("explicit Control router");
+            access.runtime = router;
+            *access.notifications.lock().unwrap() = Some(source);
         }
         Ok(Self {
             backend,

@@ -101,6 +101,46 @@ impl Hub {
         }
         guard(&services, id, delete)
     }
+    pub fn notifications(
+        &self,
+        after: Option<&BTreeMap<String, i64>>,
+    ) -> Result<pot_protocol::AssistantNotifications> {
+        let services = std::iter::once(self.root.clone())
+            .chain(
+                self.owners
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .map(|o| o.service.clone()),
+            )
+            .collect::<Vec<_>>();
+        let mut feed = pot_protocol::AssistantNotifications::default();
+        for service in services {
+            let owner = service.owner_id().to_owned();
+            feed.cursors
+                .insert(owner.clone(), service.notification_sequence()?);
+            if let Some(after) = after {
+                for (sequence, message) in
+                    service.notifications(*after.get(&owner).unwrap_or(&0))?
+                {
+                    feed.messages.push(pot_protocol::AssistantNotification {
+                        assistant_id: owner.clone(),
+                        sequence,
+                        message,
+                    });
+                }
+            }
+        }
+        feed.messages.sort_by(|a, b| {
+            (a.message.created_at_ms, &a.assistant_id, a.sequence).cmp(&(
+                b.message.created_at_ms,
+                &b.assistant_id,
+                b.sequence,
+            ))
+        });
+        feed.messages.truncate(32);
+        Ok(feed)
+    }
     pub fn definitions(&self) -> Vec<Definition> {
         self.book.lock().unwrap().definitions.clone()
     }
@@ -548,6 +588,95 @@ mod tests {
         assert!(tasks::claim(&sb).unwrap().is_some());
         tasks::finish(&sb, &tb.id, Err(anyhow!("test finished"))).unwrap();
         hub.shutdown().await;
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
+    #[tokio::test]
+    async fn notifications_cover_all_assistants_once_and_exclude_worker_and_synthetic_reports() {
+        let root = tasks::tests::fixture();
+        agent::initialize(&root).unwrap();
+        let hub = Hub::open(root.clone()).unwrap();
+        let a = hub.create("notification-a", "A").unwrap();
+        let b = hub.create("notification-b", "B").unwrap();
+        for owner in hub.owners.lock().unwrap().values() {
+            owner.main.abort();
+            owner.coordinator.abort();
+        }
+        let sa = hub.service(&a.id).unwrap();
+        let sb = hub.service(&b.id).unwrap();
+        let initial = hub.notifications(None).unwrap();
+        assert!(initial.messages.is_empty());
+        for service in [&sa, &sb] {
+            let message = Message {
+                id: id(),
+                conversation_id: service.conversation_id(),
+                role: Role::Assistant,
+                text: "Actual assistant reply".into(),
+                status: MessageStatus::Complete,
+                created_at_ms: now(),
+                request_id: None,
+            };
+            service.save(message.clone()).unwrap();
+            service.save(message.clone()).unwrap();
+            let mut synthetic = message.clone();
+            synthetic.id = format!("task-report-{}", id());
+            service.save(synthetic).unwrap();
+            let mut streaming = message;
+            streaming.id = id();
+            streaming.status = MessageStatus::Streaming;
+            service.save(streaming).unwrap();
+        }
+        let task = tasks::enqueue(
+            &sa,
+            &mut sa.tasks.hub.lock().unwrap(),
+            CreateTask {
+                request_id: "notification-worker".into(),
+                text: "worker".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let worker = tasks::owner(&sa, &task.id).unwrap();
+        worker
+            .save(Message {
+                id: id(),
+                conversation_id: "main".into(),
+                role: Role::Assistant,
+                text: "Worker result".into(),
+                status: MessageStatus::Complete,
+                created_at_ms: now(),
+                request_id: None,
+            })
+            .unwrap();
+        let feed = hub.notifications(Some(&initial.cursors)).unwrap();
+        assert_eq!(feed.messages.len(), 2);
+        assert!(
+            feed.messages
+                .iter()
+                .all(|n| n.assistant_id == a.id || n.assistant_id == b.id)
+        );
+        assert!(
+            hub.notifications(Some(&feed.cursors))
+                .unwrap()
+                .messages
+                .is_empty()
+        );
+        hub.shutdown().await;
+        let reopened = Hub::open(root.clone()).unwrap();
+        reopened.activate().unwrap();
+        for owner in reopened.owners.lock().unwrap().values() {
+            owner.main.abort();
+            owner.coordinator.abort();
+        }
+
+        assert_eq!(
+            reopened
+                .notifications(Some(&initial.cursors))
+                .unwrap()
+                .messages
+                .len(),
+            2
+        );
+        reopened.shutdown().await;
         std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }
     #[tokio::test]

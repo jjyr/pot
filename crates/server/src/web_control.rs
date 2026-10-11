@@ -15,7 +15,9 @@ struct Destination {
     token: String,
     http: reqwest::Client,
 }
-pub(crate) async fn connect(config: &WebControlConfig) -> Result<Router> {
+pub(crate) async fn connect(
+    config: &WebControlConfig,
+) -> Result<(Router, crate::access::push::NotificationSource)> {
     let client =
         RemoteClient::with_ca(&config.url, config.token.clone(), config.ca_pem.as_deref())?;
     let metadata = tokio::time::timeout(
@@ -48,7 +50,14 @@ pub(crate) async fn connect(config: &WebControlConfig) -> Result<Router> {
         token: config.token.clone(),
         http: http.build()?,
     });
-    Ok(Router::new().fallback(forward).with_state(destination))
+    let source = crate::access::push::NotificationSource {
+        control_id: value["identity"]["runtime_id"].as_str().unwrap().into(),
+        client,
+    };
+    Ok((
+        Router::new().fallback(forward).with_state(destination),
+        source,
+    ))
 }
 async fn forward(State(destination): State<Arc<Destination>>, request: Request) -> Response {
     match relay(&destination, request).await {
@@ -91,6 +100,13 @@ async fn relay(destination: &Destination, request: Request) -> Result<Response> 
         !upstream.status().is_redirection(),
         "Control redirect rejected"
     );
+    if upstream.status() == StatusCode::UNAUTHORIZED {
+        return Ok((
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({"code":"control_authentication_failed"})),
+        )
+            .into_response());
+    }
     let mut response = Response::builder().status(upstream.status());
     for name in [
         "content-type",
@@ -118,6 +134,16 @@ mod tests {
             .route("/api/v1/runtime/control", get(move || async move {
                 axum::Json(serde_json::json!({"role":role,"identity":{"runtime_id":"00000000-0000-4000-8000-000000000001"}}))
             }))
+            .route("/api/v1/assistant-notifications", axum::routing::post(|headers: HeaderMap, axum::Json(args): axum::Json<serde_json::Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture-control");
+                assert!(!headers.contains_key("cookie"));
+                let mut feed = pot_protocol::AssistantNotifications::default();
+                feed.cursors.insert("assistant-b".into(), 7);
+                if args["initialize"] != true && args["after"]["assistant-b"].as_i64().unwrap_or(0) < 7 {
+                    feed.messages.push(pot_protocol::AssistantNotification { assistant_id: "assistant-b".into(), sequence: 7, message: pot_protocol::Message { id: "final-reply".into(), conversation_id: "assistant-b".into(), role: pot_protocol::Role::Assistant, text: "Verified assistant response".into(), status: pot_protocol::MessageStatus::Complete, created_at_ms: 0, request_id: None } });
+                }
+                axum::Json(feed)
+            }))
             .route("/api/v1/snapshot", get(|headers: HeaderMap| async move {
                 assert_eq!(headers["authorization"], "Bearer fixture-control");
                 assert!(!headers.contains_key("cookie"));
@@ -131,7 +157,8 @@ mod tests {
                         yield Ok::<_,std::io::Error>("data: control\n\n");
                         std::future::pending::<()>().await;
                     })).unwrap()
-            }));
+            }))
+            .route("/api/v1/rejected", get(|| async { StatusCode::UNAUTHORIZED }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let config = WebControlConfig {
             url: format!("http://{}", listener.local_addr().unwrap()),
@@ -142,9 +169,51 @@ mod tests {
         (config, task)
     }
     #[tokio::test]
+    async fn remote_notifications_bind_control_and_preserve_owner_cursors() {
+        let (config, task) = fixture("control").await;
+        let (_, source) = connect(&config).await.unwrap();
+        assert_eq!(source.control_id, "00000000-0000-4000-8000-000000000001");
+        let initial = source
+            .feed(serde_json::json!({"initialize":true}))
+            .await
+            .unwrap();
+        assert!(initial.messages.is_empty());
+        let feed = source.feed(serde_json::json!({"after":{}})).await.unwrap();
+        assert_eq!(feed.messages.len(), 1);
+        assert_eq!(feed.messages[0].assistant_id, "assistant-b");
+        assert!(
+            source
+                .feed(serde_json::json!({"after":initial.cursors}))
+                .await
+                .unwrap()
+                .messages
+                .is_empty()
+        );
+        task.abort();
+        let _ = task.await;
+        assert!(source.feed(serde_json::json!({"after":{}})).await.is_err());
+    }
+    #[tokio::test]
     async fn fixed_control_streams_and_never_forwards_browser_credentials() {
         let (config, task) = fixture("control").await;
-        let router = connect(&config).await.unwrap();
+        let (router, _) = connect(&config).await.unwrap();
+        let rejected = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/rejected")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            axum::body::to_bytes(rejected.into_body(), 1024)
+                .await
+                .unwrap(),
+            "{\"code\":\"control_authentication_failed\"}"
+        );
         let response = router
             .clone()
             .oneshot(
