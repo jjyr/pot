@@ -32,10 +32,18 @@ contains a persisted Control listener intent. A standalone Runtime may explicitl
 enable Control. A joined execution Runtime cannot become Control simultaneously.
 
 Control owns remote conversations, assistant instructions, Tasks, schedules,
-configuration and approvals. By default its assistants run there and dispatch Tasks
-to joined environments. Agent, Task and Environment have separate identities and
-bindings; remote Agent runners are a later phase. Execution-only nodes do not need
-assistant databases or model credentials.
+global plugins and skills, model configuration, budgets and approvals. Chat
+assistants remain on their owning local Runtime or Control. The approved remote
+task design starts a new Task Agent on the selected execution Runtime, alongside
+its Host/Sandbox environment, and reads its durable result after completion.
+Agent, Task and Environment retain separate identities, but the first release
+requires Agent and Environment to belong to the same execution Runtime. No live
+Agent relocation or three-node placement is included. Execution nodes do not need
+assistant databases or provider credentials.
+
+Currently Task Agent loops still run on the task-owning Runtime and forward
+environment operations. Remote Task Agent startup and Control-owned global bundle
+distribution remain implementation work in #39; they are not delivered features.
 
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
@@ -49,7 +57,8 @@ asks for a save location and Web uses browser downloads. Links use
 `pot-file://TASK_UUID/encoded/relative/path`; owner-scoped reads use the task's
 immutable environment, including finished tasks. Reads are bounded to 192 KiB
 chunks and 1 GiB files; missing files, offline machines and detected changes fail.
-No new model-visible file tool is required.
+No new model-visible file tool is required. Completion summaries include download
+links only when the task has files to deliver; ordinary results need no download.
 A desktop entry requires an implemented client transport (currently local App only).
 Web UI requires `pot serve --ui --control URL`, a server-held
 Control credential and explicit browser listener settings. It has no local/remote
@@ -99,8 +108,55 @@ Each assistant's AGENTS.md is stored in its database and follows its identity.
 updates request approval. Server-side approval baselines protect intervening user
 edits. Main also reads public/project AGENTS.md from the actual working directory.
 Task Agents have no assistant-level instructions; they use the task brief and the
-execution destination's project rules. Destination skills are discovered there;
-caller-private skills are not injected into another machine.
+execution destination's project rules. In Control-connected execution, global
+plugins, skills and other global Agent resources are selected and versioned by
+Control. Execution nodes receive the selected bundles and may cache immutable
+versions; they do not discover global resources from their own home directories
+or packaged catalogs. Project AGENTS.md and project skills continue to be read
+from the actual execution workspace with their existing scope/precedence rules.
+Control updates affect later launches, not already bound tasks. Missing bundles
+fail explicitly rather than falling back to a node-local catalog. Standalone App
+local mode retains its independent local resources and state.
+
+## Remote Task Agent launch and results (approved, pending implementation)
+
+```text
+App / Web -> Control
+              chat assistant, Task state, global bundles, model gateway, approvals
+                 |
+                 | durable launch: task/run identity, brief, configuration version,
+                 | immutable Host/Sandbox target
+                 v
+              Machine B
+                new Task Agent -> Host/Sandbox on Machine B
+                  Control-supplied globals + execution-project rules/skills
+                 |
+                 | persist terminal result; notify Control
+                 v
+              Control reads result -> Task view / optional Chat summary
+                                        optional file links when files exist
+```
+
+A launch starts a task-scoped Agent, not a transferred assistant session. Control
+persists launch intent before delivery; the destination persists acceptance,
+run identity and terminal results. Exact duplicate launches return the same run
+receipt, never start another Agent. During execution only necessary status,
+guidance/cancellation, approvals and accountable usage are exchanged. Full live
+Agent context replication to Control is not required. Destination-local recovery
+records preserve execution evidence; restart/timeout does not imply rerunning a
+task. Control reconciles the accepted run and fetches its result after completion,
+including when a completion notification was lost.
+
+Task Agents request models through Control's gateway. Provider credentials,
+budget decisions and usage accounting remain there. Environment-dependent plugins
+execute at the assigned environment from Control-supplied definitions/bundles;
+this does not give the execution node ownership of the global catalog. Model
+behavior approval remains separate from machine membership.
+
+UI remains the existing Chat, Tasks and Machines. Task details need only state
+and execution machine/environment; the co-located Agent does not need a separate
+placement selector or Runner management page. Technical resource operations stay
+API/Chat based, with concrete model-visible changes requiring separate agreement.
 
 ## Failure and receipt rules
 
@@ -118,6 +174,8 @@ after its acceptance window closes, preventing in-flight acceptance races.
 Remote Sandbox management supports existing start/stop/recover/update/delete. Create
 and select remain local to the destination. Active executions, unresolved receipts,
 and references from all destination assistants' Tasks/schedules protect deletion.
-Retired Sandbox IDs cannot be silently reused. Remote plugins,
-desktop transport, remote Agent runners and three-node qualification remain tracked
-in #39; successful Host tests do not establish those features.
+Retired Sandbox IDs cannot be silently reused. Control-owned global bundle delivery,
+remote plugins, desktop transport, co-located remote Task Agent startup and actual
+multi-machine qualification remain tracked in #39. Three-node Agent/Environment
+placement is deferred beyond this release; successful Host tests do not establish
+the pending features.

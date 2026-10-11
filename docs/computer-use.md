@@ -4,6 +4,12 @@ The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaS
 
 ## Configuration
 
+For Control-owned remote tasks, the approved design makes Control the sole source
+of global plugin definitions and pinned bundles; execution nodes run supplied
+bundles without discovering their own global plugins. That delivery/invocation
+work is pending in #39. The configuration below describes delivered owner-local
+plugin management and remains the source format for Control-owned configuration.
+
 Use owner-only `pot config get/set agent` (`GET/POST /api/v1/agent`). The default `params.agent.plugins` is:
 
 ```json
