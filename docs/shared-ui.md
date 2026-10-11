@@ -83,3 +83,22 @@ management shortcut buttons are present.
 App configures one Control and switches local/remote with one icon. Web stays fixed
 to its configured Control. Transport captures mode/Runtime/owner before each request
 and rejects late results after navigation changes.
+
+## Responsive browser shell
+
+Web selects its shell from the visible viewport width: below 900 CSS pixels,
+Chat/Tasks/Machines/More use bottom navigation; at 900 pixels and above, a 176-pixel
+sidebar also exposes Usage and Schedules directly. The selected destination is
+highlighted. Task detail includes a return-to-tasks action without resetting the
+list query. Content and composer share an 820-pixel maximum column; page density
+and task metadata adapt to the available space.
+
+The shell uses GPUI's fully visible bounds, including safe-area and visual-viewport
+changes, instead of the browser layout height alone. Under 500 pixels of visible
+height the composer reduces from 80 to 48 pixels. Content scrolls independently
+from navigation and input. Existing editor entities and owner-bound drafts survive
+resize and page changes. Canvas safe areas are handled once by GPUI; the HTML
+login form applies its own CSS safe-area padding.
+
+See [responsive browser validation](validation/responsive-web-20261012.md) for
+emulated desktop/phone coverage and physical-device limits.

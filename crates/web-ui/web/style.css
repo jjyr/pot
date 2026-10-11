@@ -1,4 +1,4 @@
-html,body{margin:0;height:100%;background:#fdfdfd;color:#202020;font:16px system-ui}body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}#auth{max-width:480px;padding:24px;margin:auto}button{min-height:44px;margin:8px 0;padding:10px 16px;border-radius:10px;border:1px solid #ddd;background:#e8f1fc;display:block;font:inherit}canvas{touch-action:none}
+html,body{margin:0;height:100%;background:#fdfdfd;color:#202020;font:16px system-ui}body{box-sizing:border-box}#auth{max-width:480px;padding:calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));margin:auto}button{min-height:44px;margin:8px 0;padding:10px 16px;border-radius:10px;border:1px solid #ddd;background:#e8f1fc;display:block;font:inherit}canvas{touch-action:none}
 button[hidden]{display:none}
 @media(prefers-color-scheme:dark){html,body{background:#202020;color:#f2f2f2}button{background:#243a52;color:#f2f2f2;border-color:#414141}}
 
