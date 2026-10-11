@@ -4,7 +4,19 @@ Runtime owns AGENTS.md discovery, execution-environment selection, refresh and e
 
 ## Sources and scope
 
-Global instructions come from `~/.pot/agent/AGENTS.md` (`POT_AGENT_HOME` overrides the Agent home directory). Permission storage is separate from instruction discovery; see [Agent permissions](permissions.md). Project instructions come from the assigned execution workspace. A Sandbox uses its shared guest-visible workspace; a Host-only assistant uses its configured working directory, and a Host task uses its fixed task working directory. Main uses the default Sandbox at context creation; a task uses its fixed assignment and task working directory. Selecting another default affects subsequent Main contexts and does not move existing tasks.
+Global Main instructions come from the owning Runtime's
+`~/.pot/agent/AGENTS.md` (`POT_AGENT_HOME` overrides the Agent home directory).
+For Control-owned assistants this source belongs to Control, not joined execution
+nodes. Task Agents do not load global Main or assistant AGENTS.md. The approved
+remote launch uses Control-selected global skills/plugins while preserving project
+AGENTS.md and project skills at the execution workspace; see
+[Composable runtimes](runtime-composition.md) for pending implementation scope.
+Permission storage is separate from instruction discovery; see
+[Agent permissions](permissions.md). A Sandbox uses its shared guest-visible
+workspace; a Host-only assistant uses its configured working directory, and a Host
+task uses its fixed task working directory. Main uses the default Sandbox at
+context creation; a task uses its fixed assignment and task working directory.
+Selecting another default affects subsequent Main contexts and does not move tasks.
 
 Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Sandbox discovery stops at its workspace mount boundary. Host discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 

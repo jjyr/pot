@@ -82,7 +82,7 @@ Qualification covers native tool loadouts, real CLI execution, resume, cancellat
 
 ## Agent skills
 
-Skills use filesystem catalogs and a unified home-relative mapping; see [Agent skills](agent-skills.md). Runtime supplies discovery roots and task filters. Main manages user bundles through its builtin skill-creator/skill-installer and existing execution tools; workers see the same global skills read-only. Builtins are distributed from repo `skills/` and remain read-only.
+Skills use filesystem bundles and a unified home-relative mapping; see [Agent skills](agent-skills.md). Delivered standalone execution supplies local roots and task filters. The approved Control-connected design selects global user/builtin skills and plugin versions at Control and supplies read-only task bundles to execution nodes, replacing destination-global discovery. Project rules/skills remain local to the actual workspace. Global bundle management belongs to Control; this distribution change is pending in #39.
 
 ## Product surfaces
 

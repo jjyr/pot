@@ -1,6 +1,18 @@
 # Agent skills
 
-Updated: 2026-10-06. Skills are filesystem resources; no skill registry or skill contents are stored in the product database.
+Updated: 2026-10-11. Skills are filesystem bundles. The approved Control-connected
+design in [Composable runtimes](runtime-composition.md) makes Control authoritative
+for global user/builtin catalogs and task-bound versions. Execution nodes receive
+selected bundles and may cache them; they must not discover globals from their
+own user or builtin roots. Project skill discovery remains at the actual execution
+workspace. This distribution change is pending in #39.
+
+The implementation details below describe delivered standalone/local behavior,
+including the destination-global discovery that must be replaced for connected
+tasks. They are not the target remote resource-management design. Standalone App
+local mode retains its independent catalog. In the remote design, global creation,
+installation and updates belong to Control; task views are read-only and updates
+take effect for later launches. Project installations retain workspace permissions.
 
 ## Directories and discovery
 
@@ -10,7 +22,11 @@ skills/<name>/                    # Packaged builtin bundles in this repo
 PROJECT/.agents/skills/<name>/    # Project-specific bundles
 ```
 
-There are no shared/main/task categories. Main and task agents discover the same global user and builtin skills. Every bundle contains UTF-8 SKILL.md with YAML frontmatter and optional scripts, references and assets. Only metadata is advertised during discovery; full instructions are read on demand.
+There are no shared/main/task categories. Standalone Main and task agents discover
+their owning Runtime's global user and builtin skills. Connected tasks instead
+use the global versions selected by Control. Every bundle contains UTF-8 SKILL.md
+with YAML frontmatter and optional scripts, references and assets. Only metadata
+is advertised during discovery; full instructions are read on demand.
 
 Runtime supplies ordered roots. Project directories are discovered from the assigned workspace upwards, stopping at a repository root or the Sandbox workspace boundary. The nearest project wins, then global user skills, then builtins. Names discovered in the packaged builtin catalog are reserved: user/project attempts to shadow them are diagnosed and ignored. Bundle names match their directory names in authored and packaged skills.
 
