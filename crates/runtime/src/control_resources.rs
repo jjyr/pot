@@ -19,6 +19,8 @@ pub struct GlobalResources {
     pub files: BTreeMap<String, ResourceFile>,
     pub reserved_names: Vec<String>,
     pub plugins: BTreeMap<String, PluginConfig>,
+    pub shell: pot_core::ShellSettings,
+    pub vision: bool,
 }
 impl GlobalResources {
     pub fn revision(&self) -> Result<String> {
@@ -37,9 +39,10 @@ impl GlobalResources {
         anyhow::ensure!(self.files.len() <= 2048, "Too many global resource files");
         let settings = pot_core::AgentSettings {
             plugins: self.plugins.clone(),
+            shell: self.shell.clone(),
             ..Default::default()
         };
-        settings.validate_plugins()?;
+        settings.validate()?;
         anyhow::ensure!(
             self.plugins
                 .values()
@@ -143,8 +146,16 @@ pub(crate) fn snapshot(s: &Service) -> Result<GlobalResources> {
         reserved_names,
         selection: None,
     })?;
+    let thread = agent::thread(s)?;
+    let descriptor = thread
+        .config
+        .params
+        .agent
+        .model_descriptor(&thread.config.provider, &thread.config.model)?;
     let mut result = GlobalResources {
-        plugins: agent::thread(s)?.config.params.agent.plugins,
+        shell: thread.config.params.agent.shell.clone(),
+        vision: descriptor.vision(),
+        plugins: thread.config.params.agent.plugins,
         ..Default::default()
     };
     for skill in catalog.skills {

@@ -20,6 +20,11 @@ connections, isolated App local/remote modes and explicit fixed-Control Web host
 P3d1 simplifies Machines. P3d2a delivers optional Chat file links, task-scoped
 file reads, Control relay and client downloads. See #39 for commits and qualified
 scope; completion reports need links only when the task has files to deliver.
+Control global snapshots and named remote plugin dispatch are delivered subphases.
+Snapshots bind plugin bundles, Shell settings and observation mode; leases pin the
+accepted digest. Control chooses the exact model/environment/tool configuration;
+a Runtime executes it or reports an unsupported configuration/dependency error.
+It does not replace configuration or hide tools based on node-local settings.
 
 ### P3d2b — Control resources and remote environment transports
 

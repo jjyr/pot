@@ -127,6 +127,7 @@ struct Lease {
     boot_id: String,
     expires_at_ms: i64,
     cancelled: bool,
+    resources_revision: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -530,6 +531,7 @@ impl Authority {
                 boot_id: boot.into(),
                 expires_at_ms: now() + LEASE_MS,
                 cancelled: false,
+                resources_revision: None,
             };
             book.leases.insert(lease.id.clone(), lease.clone());
             Ok(json!(lease))
@@ -1211,6 +1213,22 @@ impl Authority {
             } => {
                 let lease = self.lease(peer, &lease_id, &boot, true)?;
                 require_target(host, &lease.target).await?;
+                let revision = resources.revision()?;
+                self.update(|book| {
+                    let accepted = book
+                        .leases
+                        .get_mut(&lease.id)
+                        .ok_or_else(|| anyhow::anyhow!("Lease missing"))?;
+                    ensure!(
+                        accepted
+                            .resources_revision
+                            .as_ref()
+                            .is_none_or(|old| old == &revision),
+                        "Control resource configuration changed for an accepted run"
+                    );
+                    accepted.resources_revision = Some(revision);
+                    Ok(())
+                })?;
                 host.install_controlled_resources(
                     &lease.target,
                     &workspace_scope(&lease)?,
@@ -1240,6 +1258,7 @@ impl Authority {
                 });
                 host.prepare_controlled(
                     pot_runtime::host::ControlOperation {
+                        resources_revision: lease.resources_revision.clone(),
                         target: EnvironmentRef {
                             runtime_id: self.identity.runtime_id.clone(),
                             target: lease.target.clone(),
@@ -1321,11 +1340,12 @@ impl Authority {
                 }
                 self.lease(peer, &lease_id, &boot, true)?;
                 require_target(host, &lease.target).await?;
+                // The destination validates named tools against the supplied Control snapshot.
+                // Internal envelopes remain unavailable on this RPC.
                 ensure!(
-                    ["exec_command", "write_stdin", "apply_patch"].contains(&name.as_str()),
-                    "Unsupported Control operation"
+                    name != "plugin_call",
+                    "Internal plugin envelopes cannot be called directly"
                 );
-                pot_core::environment_tools::validate(&name, &args)?;
                 let execution_scope = scope(&lease)?;
                 std::fs::create_dir_all(path.parent().unwrap())?;
                 let receipt = Receipt {
@@ -1375,6 +1395,7 @@ impl Authority {
                     let outcome = host
                         .execute_controlled(
                             pot_runtime::host::ControlOperation {
+                                resources_revision: lease.resources_revision.clone(),
                                 scope: execution_scope,
                                 workspace_scope: workspace,
                                 run_id: lease.run_id,
@@ -1793,6 +1814,275 @@ mod tests {
                 .await
                 .is_err()
         );
+        for n in [control, node] {
+            n.control.stop_listener(false).await.unwrap();
+            std::fs::remove_dir_all(n.control.data.parent().unwrap()).unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn outward_plugins_use_control_bundle_and_scoped_sessions() {
+        use pot_runtime::{
+            control_resources::GlobalResources,
+            remote_environment::{RemoteBinding, RemoteEnvironment},
+        };
+        let control = resources().await;
+        let node = resources().await;
+        native(
+            &node,
+            json!({"request_id":"plugin-host","resource":{"kind":"host"}}),
+        )
+        .await;
+        join_nodes(&control, &node).await;
+        control
+            .control
+            .call(&node.control.identity.runtime_id, Rpc::Inventory)
+            .await
+            .unwrap();
+        let binding = RemoteBinding {
+            owner: uuid::Uuid::new_v4().to_string(),
+            run_id: uuid::Uuid::new_v4().to_string(),
+            generation: 1,
+            environment: EnvironmentRef::host(&node.control.identity.runtime_id),
+        };
+        let context = control.control.open(binding.clone()).await.unwrap();
+        let mut bundle = pot_core::plugins::PluginBundle::builtin("computer-use").unwrap();
+        bundle.manifest.requirements = vec!["node".into()];
+        bundle.files.insert("index.mjs".into(), "export function createPlugin({emit,mode}) { let n=0; return {async execute(){emit({type:'text',text:mode+':'+String(++n)});},async dispose(){}}; }".into());
+        bundle.digest = bundle.hash().unwrap();
+        let mut globals = GlobalResources {
+            vision: true,
+            ..Default::default()
+        };
+        globals.shell.default_timeout_ms = 4321;
+        globals.plugins.insert(
+            "computer-use".into(),
+            pot_core::plugins::PluginConfig {
+                enabled: true,
+                source: None,
+                bundle: Some(bundle.clone()),
+            },
+        );
+        control
+            .control
+            .install_resources(binding.clone(), globals.clone())
+            .await
+            .unwrap();
+        let command = control
+            .control
+            .prepare(
+                binding.clone(),
+                "exec_command".into(),
+                json!({"cmd":"true"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(command["timeout_ms"], 4321);
+        let args = json!({"code":"ignored"});
+        assert_eq!(
+            control
+                .control
+                .prepare(binding.clone(), "cua_repl".into(), args.clone())
+                .await
+                .unwrap(),
+            args
+        );
+        let first = control
+            .control
+            .execute(
+                binding.clone(),
+                "plugin-first".into(),
+                "cua_repl".into(),
+                args.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first["result"]["content"][0]["text"], "mixed:1");
+        assert_eq!(
+            first,
+            control
+                .control
+                .execute(
+                    binding.clone(),
+                    "plugin-first".into(),
+                    "cua_repl".into(),
+                    args
+                )
+                .await
+                .unwrap()
+        );
+        let continuation = json!({"session_id":first["result"]["session_id"],"code":"ignored"});
+        let next = control
+            .control
+            .execute(
+                binding.clone(),
+                "plugin-next".into(),
+                "cua_repl".into(),
+                continuation.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(next["result"]["content"][0]["text"], "mixed:2");
+        let mut other = binding.clone();
+        other.owner = uuid::Uuid::new_v4().to_string();
+        other.run_id = uuid::Uuid::new_v4().to_string();
+        control.control.open(other.clone()).await.unwrap();
+        control
+            .control
+            .install_resources(other.clone(), globals.clone())
+            .await
+            .unwrap();
+        let foreign = control
+            .control
+            .execute(
+                other.clone(),
+                "foreign-session".into(),
+                "cua_repl".into(),
+                continuation,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            foreign.to_string().contains("session expired"),
+            "{foreign:#}"
+        );
+        assert!(
+            control
+                .control
+                .prepare(binding.clone(), "plugin_call".into(), json!({}))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Internal plugin")
+        );
+        // An accepted run cannot adopt a new Control configuration.
+        let mut changed = globals.clone();
+        changed.vision = false;
+        assert!(
+            control
+                .control
+                .install_resources(binding.clone(), changed)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("configuration changed")
+        );
+        // Even a different internally valid cache is not the Control-bound version.
+        let mut forged = globals.clone();
+        forged.vision = false;
+        pot_runtime::control_resources::install(
+            &PathBuf::from(context["workspace"].as_str().unwrap()),
+            &forged,
+        )
+        .unwrap();
+        assert!(
+            control
+                .control
+                .prepare(
+                    binding.clone(),
+                    "cua_repl".into(),
+                    json!({"code":"ignored"})
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("snapshot binding changed")
+        );
+        control
+            .control
+            .install_resources(binding.clone(), globals.clone())
+            .await
+            .unwrap();
+        RemoteEnvironment::cancel(&*control.control, other.clone())
+            .await
+            .unwrap();
+        other.owner = uuid::Uuid::new_v4().to_string();
+        other.run_id = uuid::Uuid::new_v4().to_string();
+        control.control.open(other.clone()).await.unwrap();
+        // No node builtin fallback when Control has disabled this package.
+        globals.plugins.get_mut("computer-use").unwrap().enabled = false;
+        control
+            .control
+            .install_resources(other.clone(), globals.clone())
+            .await
+            .unwrap();
+        assert!(
+            control
+                .control
+                .prepare(other.clone(), "cua_repl".into(), json!({"code":"ignored"}))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown tool")
+        );
+        RemoteEnvironment::cancel(&*control.control, other.clone())
+            .await
+            .unwrap();
+        other.owner = uuid::Uuid::new_v4().to_string();
+        other.run_id = uuid::Uuid::new_v4().to_string();
+        control.control.open(other.clone()).await.unwrap();
+        globals.plugins.get_mut("computer-use").unwrap().enabled = true;
+        bundle
+            .manifest
+            .requirements
+            .push("unsupported-dependency".into());
+        bundle.digest = bundle.hash().unwrap();
+        globals.plugins.get_mut("computer-use").unwrap().bundle = Some(bundle.clone());
+        control
+            .control
+            .install_resources(other.clone(), globals.clone())
+            .await
+            .unwrap();
+        assert!(
+            control
+                .control
+                .prepare(other.clone(), "cua_repl".into(), json!({"code":"ignored"}))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported Host plugin dependency")
+        );
+        RemoteEnvironment::cancel(&*control.control, other.clone())
+            .await
+            .unwrap();
+        other.owner = uuid::Uuid::new_v4().to_string();
+        other.run_id = uuid::Uuid::new_v4().to_string();
+        control.control.open(other.clone()).await.unwrap();
+        bundle.manifest.requirements = vec!["node".into()];
+        bundle.manifest.execution = "sandbox".into();
+        bundle.digest = bundle.hash().unwrap();
+        globals.plugins.get_mut("computer-use").unwrap().bundle = Some(bundle);
+        control
+            .control
+            .install_resources(other.clone(), globals)
+            .await
+            .unwrap();
+        assert!(
+            control
+                .control
+                .prepare(other.clone(), "cua_repl".into(), json!({"code":"ignored"}))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Sandbox execution only")
+        );
+        RemoteEnvironment::cancel(&*control.control, binding.clone())
+            .await
+            .unwrap();
+        assert!(
+            control
+                .control
+                .execute(
+                    binding,
+                    "revoked".into(),
+                    "cua_repl".into(),
+                    json!({"code":"ignored"})
+                )
+                .await
+                .is_err()
+        );
+        RemoteEnvironment::cancel(&*control.control, other)
+            .await
+            .unwrap();
         for n in [control, node] {
             n.control.stop_listener(false).await.unwrap();
             std::fs::remove_dir_all(n.control.data.parent().unwrap()).unwrap();

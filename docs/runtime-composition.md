@@ -44,8 +44,9 @@ assistant databases or provider credentials.
 Currently Task Agent loops still run on the task-owning Runtime and forward
 environment operations. Control-selected global Skills and pinned plugin
 configuration are now delivered through the authenticated outward connection.
-Remote plugin invocation and remote Task Agent startup remain implementation
-work in #39; resource delivery alone does not establish those features.
+Named remote plugin calls now execute the supplied pinned bundle in Host/Sandbox
+through the existing owner approval and receipt path. Remote Task Agent startup
+remains implementation work in #39; the Agent loop still runs at Control.
 
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
@@ -119,9 +120,19 @@ from the actual execution workspace with their existing scope/precedence rules.
 Control snapshots global bundles before the first remote context and persists
 the snapshot with the task; follow-up turns and restart reuse it. Cache files
 retain executable bits and are exposed read-only; digest/contents are verified
-before reuse. The current inline snapshot is bounded to 512 KiB and 2048 files
+before reuse. Snapshots also bind Shell settings and the model observation mode.
+The execution lease stores the accepted resource digest outside the task workspace;
+prepare/execute reject a different cache revision, even if its own digest is valid.
+Changing configuration on an accepted run fails. Model-visible tool definitions
+remain Control-selected; the destination capability list does not filter them.
+Internal plugin envelopes are created only from supplied enabled bundles and cannot
+be invoked through the public named-tool RPC. The current inline snapshot is bounded to 512 KiB and 2048 files
 within the existing 1 MiB transport limit. Oversized or symlinked bundles fail
 explicitly; large-bundle chunked delivery remains unqualified.
+Control specifies the exact model, execution environment and tool configuration.
+The execution Runtime runs that configuration or returns an explicit unsupported
+configuration/dependency error. It must not replace models, plugins or targets,
+or silently hide tools according to node-local settings.
 Control updates affect later launches, not already bound tasks. Missing bundles
 fail explicitly rather than falling back to a node-local catalog. Standalone App
 local mode retains its independent local resources and state.
@@ -182,8 +193,9 @@ after its acceptance window closes, preventing in-flight acceptance races.
 Remote Sandbox management supports existing start/stop/recover/update/delete. Create
 and select remain local to the destination. Active executions, unresolved receipts,
 and references from all destination assistants' Tasks/schedules protect deletion.
-Retired Sandbox IDs cannot be silently reused. Remote plugin invocation,
-desktop transport, co-located remote Task Agent startup and actual
+Retired Sandbox IDs cannot be silently reused. Remote plugin Host TLS fixtures
+are qualified; real Sandbox plugin/platform acceptance, desktop transport,
+co-located remote Task Agent startup and actual
 multi-machine qualification remain tracked in #39. Three-node Agent/Environment
 placement is deferred beyond this release; successful Host tests do not establish
 the pending features.

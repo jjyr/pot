@@ -108,3 +108,7 @@ Explicit Control Web hosting (P3c): [Startup, fixed proxy and streaming validati
 Lightweight Machines (P3d1): [Status cards, exact environment Tasks and validation limits, 2026-10-11](validation/machines-simple-20261011.md).
 
 Chat file delivery (P3d2a): [Scoped chunks, Control relay and native save acceptance, 2026-10-11](validation/chat-file-downloads-20261011.md).
+
+Control global resources: [Task snapshots and destination isolation, 2026-10-11](validation/control-global-resources-20261011.md).
+
+Control plugins: [Pinned remote dispatch and lease configuration binding, 2026-10-11](validation/control-plugins-20261011.md).

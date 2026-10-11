@@ -32,21 +32,6 @@ impl Feedback {
     }
 }
 impl ExecutionFeedback for Feedback {
-    fn supported_execution_tools(&self) -> Option<Vec<String>> {
-        if !crate::remote_environment::is_remote(&self.service) {
-            return None;
-        }
-        let contexts = self.service.remote_context.lock().unwrap();
-        let context = contexts.get(self.service.environment_ref.as_ref()?)?;
-        Some(
-            context.context["supported_operations"]
-                .as_array()?
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect(),
-        )
-    }
     fn requires_owner_review(&self, tool: &str, args: &Value) -> bool {
         crate::permissions::rules_edit_requires_review(&self.service, tool, args)
     }
