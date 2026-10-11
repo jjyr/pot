@@ -76,7 +76,7 @@ Closing the tab preserves JS state. End the REPL with `reset:true` and its exist
 
 Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). Version 1 requires `runtime:"node"`, `execution:"environment"` (Host and Sandbox) or `"sandbox"` (Sandbox only), confined package paths, unique tool names, and flat scalar input schemas. Bundles are limited to 32 files / 512 KiB. Plugins export `createPlugin({mode,environment,emit})` with `execute({tool,input})` and `dispose()`.
 
-Runtime resolves the environment, checks permission, and sends the pinned bundle and model-derived mode to its runner. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, environment and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
+Control environment adapters resolve the target, check permission, and send the pinned bundle and model-derived mode to the execution backend. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, environment and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
 
 Tools may include optional `approval_display` metadata with localized `summary` text and `labels` keyed by argument name (each uses locale-to-text maps with an English fallback). Pot shows these plain-text labels with actual arguments; tools without metadata use raw JSON. Metadata is pinned with the bundle, validated on import, and excluded from model tool schemas. Changing display text requires importing the bundle again and saving the updated Thread configuration.
 

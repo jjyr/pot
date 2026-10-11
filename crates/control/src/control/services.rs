@@ -50,7 +50,9 @@ pub(crate) struct TaskService {
 
 #[derive(Clone)]
 pub(crate) struct AgentService {
-    pub(crate) executor: Arc<pot_agent::Agent>,
+    pub(crate) executions: pot_runtime_execution::Manager,
+    #[cfg(test)]
+    pub(crate) extensions: Option<Arc<dyn pot_agent::AgentExtensions>>,
     pub(crate) resources: Arc<AgentResources>,
 }
 

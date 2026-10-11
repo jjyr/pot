@@ -132,7 +132,8 @@ Rust workspace members and their bundled assets live under `crates/`. The browse
 | `crates/web-ui/` | WASM/browser shell, authenticated transport, PWA and push |
 | `helper/` | Swift Containerization, VM lifecycle |
 | `crates/server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
-| `crates/runtime/` | Component assembly and lifecycle |
+| `crates/runtime/` | Runtime composition and execution management |
+| `crates/runtime-execution/` | Shared Agent invocation, concurrency and metadata tracing |
 | `crates/core/` | Immutable Agent models, execution contracts, shared tool schema |
 | `crates/storage/` | SQLite primitives, file-request ledger and transactions |
 | `crates/agent/` | In-process pot-agent |

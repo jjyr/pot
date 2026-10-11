@@ -1,4 +1,4 @@
-//! In-process composition and lifecycle only. Business services live in their components.
+//! Runtime composition, lifecycle and a shared local Agent execution manager.
 use anyhow::{Result, anyhow};
 use pot_control::{
     component::Component,
@@ -45,6 +45,9 @@ impl Backend {
     pub fn assistants(&self) -> Option<Arc<Hub>> {
         self.control.as_ref().map(Component::assistants)
     }
+    pub fn executions(&self) -> &pot_runtime_execution::Manager {
+        self.host.executions()
+    }
     pub fn host(&self) -> &Host {
         &self.host
     }
@@ -87,14 +90,9 @@ impl Backend {
             config.data == self.host.data_dir(),
             "Control and local Runner must share the Runtime data root"
         );
-        let control = pot_control::component::open(
-            config.data,
-            config.workspace,
-            Arc::new(pot_agent::Agent::default()),
-            vec![],
-            &mut self.host,
-        )
-        .await?;
+        let control =
+            pot_control::component::open(config.data, config.workspace, vec![], &mut self.host)
+                .await?;
         if self.activated.load(Ordering::SeqCst) {
             control.activate()?;
         }
@@ -106,6 +104,16 @@ impl Backend {
         self.host.request_stop();
         if let Some(control) = &mut self.control {
             control.shutdown().await;
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                self.executions().drain(),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("Runtime Agent shutdown unconfirmed: {error}"),
+                Err(error) => eprintln!("Runtime Agent shutdown timed out: {error}"),
+            }
         } else if let Err(error) = self.host.shutdown().await {
             eprintln!("{error}");
         }

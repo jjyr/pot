@@ -11,6 +11,7 @@ use std::sync::Arc;
 /// destination execution. There is deliberately no local model or approval fallback.
 /// Environment capabilities supplied by Runtime assembly. No assistant or database access.
 pub trait Destination: Send + Sync {
+    fn executions(&self) -> &pot_runtime_execution::Manager;
     fn runtime_id(&self) -> &str;
     fn boot_id(&self) -> &str;
     fn stopping(&self) -> bool;
@@ -51,6 +52,9 @@ impl Feedback {
     }
 }
 impl ExecutionFeedback for Feedback {
+    fn settle(&self) -> BoxFuture<'_, Result<()>> {
+        self.control.settle()
+    }
     fn execution_home(&self) -> Option<PathBuf> {
         self.control.execution_home()
     }
@@ -228,7 +232,6 @@ pub async fn execute(
         control: services.control,
     });
     let mut text = String::new();
-    let mut gate = pot_core::EventGate::new(accepted.launch.generation, run_id);
     let execution = async {
             feedback.ready().await?;
             let context = host.install_resources(&accepted.launch.environment.target, &workspace_scope, accepted.launch.resources.clone()).await?;
@@ -252,13 +255,17 @@ pub async fn execute(
                 feedback: feedback.clone(),
                 tool_executor: Some(services.tools),
             };
-            pot_agent::Agent::with_extensions(Arc::new(Resources { skills })).services(services.model).execute(
-                &context,
-                &Thread { owner: task_id.into(), generation: accepted.launch.generation, config: accepted.launch.config },
-                &TurnRequest { request_id: run_id.into(), text: accepted.launch.text },
-                false,
+            host.executions().execute(
+                pot_runtime_execution::Invocation {
+                    context: &context,
+                    thread: &Thread { owner: task_id.into(), generation: accepted.launch.generation, config: accepted.launch.config },
+                    request: &TurnRequest { request_id: run_id.into(), text: accepted.launch.text },
+                    resuming: false,
+                    services: services.model,
+                    extensions: Some(Arc::new(Resources { skills })),
+                },
                 &mut |event| {
-                    if gate.accept(&event) && let Update::MessageFinished { text: message, .. } = event.update {
+                    if let Update::MessageFinished { text: message, .. } = event.update {
                         if !text.is_empty() { text.push('\n'); }
                         text.push_str(&message);
                     }
@@ -267,11 +274,10 @@ pub async fn execute(
             ).await
         }.await;
     let outcome = match execution {
-        Ok(()) => gate.finish(),
+        Ok(outcome) => outcome,
         Err(_) if feedback.control.cancelled() => Outcome::Cancelled,
         Err(error) => Outcome::Failed(error.to_string()),
     };
-    feedback.control.settle().await?;
     let terminal = Terminal { outcome, text };
     // Unknown outcomes deliberately remain unsettled for reconciliation.
     journal.finish(control_id, task_id, run_id, terminal.clone())?;

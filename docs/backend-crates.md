@@ -14,7 +14,8 @@
 | pot-gateway | Provider HTTP transport and SQLite Provider registry with secret references |
 | pot-control | Owner/task coordination, model policy, API adapters and environment integration |
 | pot-runner | Destination Task Agent execution, immutable launch manifests and run journals |
-| pot-runtime | In-process component assembly and lifecycle only |
+| pot-runtime | Runtime composition, shared execution manager and component lifecycle |
+| pot-runtime-execution | Destination-local Agent invocation, queue, concurrency, cancellation and execution tracing |
 | pot-tool-executor | Production Host/guest commands, patches and process sessions |
 | pot-server | Standalone/App adapters, authenticated APIs, Control and Web transport |
 | pot-protocol | Public client DTOs and API constants |
@@ -29,7 +30,9 @@
 Server creates neutral Runtime infrastructure. Resource APIs assemble optional
 assistant, Host and Sandbox services; persisted definitions restore them. App uses
 in-memory native dispatch; CLI uses an OS-protected socket. Control injects explicit in-memory or authenticated network services into pot-agent.
-Agent has no implicit HTTP fallback and no Provider networking dependency. Providers depend on Sandbox contracts,
+Every product Agent invocation passes through the destination Runtime execution manager.
+Assistant and Task adapters supply context and consume results; they do not start
+the engine directly. Agent has no implicit HTTP fallback and no Provider networking dependency. Providers depend on Sandbox contracts,
 not Runtime; Sandbox Manager does not depend on concrete Providers.
 
 Connected Tasks use Control-owned model/global configuration and approvals.
@@ -40,7 +43,7 @@ no provider credentials or product management authority. Shared Sandbox workspac
 do not establish isolation between Tasks.
 
 Component boundaries are checked by `mise run test:architecture`. Assistant,
-Gateway, Usage, Secrets, Agent and Runner cannot depend on Control, Runtime or
+Gateway, Usage, Secrets, Agent, Runner and Runtime Execution cannot depend on Control, Runtime or
 Server. Runtime has no direct database or HTTP dependencies. Control contains
 adapters that bind product state to the independently testable components; it is
 not a second Agent implementation. Gateway remains in the Control process.

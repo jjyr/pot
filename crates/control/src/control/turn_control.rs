@@ -425,6 +425,7 @@ pub(crate) fn record(s: &Service, generation: u64, metadata: &Value) -> Result<(
     let mut entry = json!({"at_ms":now(),"generation":generation,"owner":s.usage_scope,"user_message_id":inner.turn.as_ref().map(|t| &t.user_message_id)});
     for key in [
         "kind",
+        "execution_id",
         "model",
         "tool",
         "call_id",

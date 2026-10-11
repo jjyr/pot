@@ -751,9 +751,9 @@ async fn native_agent_code_extensions_tools_context_and_token_estimation() {
     )
     .await;
     let estimates = Arc::new(AtomicUsize::new(0));
-    s.agent_service.executor = Arc::new(pot_agent::Agent::with_extensions(Arc::new(CustomAgent {
+    s.agent_service.extensions = Some(Arc::new(CustomAgent {
         estimates: estimates.clone(),
-    })));
+    }));
     configure_agent(
         &s,
         pot_core::AgentSettings {
@@ -1269,5 +1269,28 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
             .unwrap();
         server.abort();
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn assistant_and_local_worker_invocations_are_tracked_by_runtime() {
+    for worker in [false, true] {
+        let (mut s, mut rx, server, _) = fixture("openai_chat", vec![]).await;
+        if worker {
+            s.is_worker = true;
+            s.sandbox_id = None;
+            s.environment_ref = Some(pot_core::EnvironmentRef::host(&s.runtime_id));
+        }
+        turn(&s, &mut rx, "runtime-tracked").await;
+        let executions = s.agent_service.executions.snapshot();
+        let execution = executions
+            .iter()
+            .find(|e| e.request_id == "runtime-tracked")
+            .unwrap();
+        assert_eq!(execution.owner, s.usage_scope);
+        assert_eq!(execution.role, if worker { "task" } else { "assistant" });
+        assert_eq!(execution.phase, pot_runtime_execution::Phase::Succeeded);
+        server.abort();
+        std::fs::remove_dir_all(&s.data).unwrap();
     }
 }

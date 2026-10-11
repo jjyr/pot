@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/resource", "crates/sandbox-images", "crates/app", "crates/protocol", "crates/core", "crates/storage", "crates/usage", "crates/secrets", "crates/assistant", "crates/runner", "crates/agent", "crates/tool-executor", "crates/gateway", "crates/model-protocol", "crates/runtime", "crates/control", "crates/server", "crates/eval", "crates/web-ui", "crates/ui", "crates/sandbox", "crates/sandbox-providers/macos-apple-container", "crates/sandbox-providers/macos-apple-vm", "crates/sandbox-providers/linux-podman"]
+members = ["crates/resource", "crates/sandbox-images", "crates/app", "crates/protocol", "crates/core", "crates/storage", "crates/usage", "crates/secrets", "crates/assistant", "crates/runner", "crates/agent", "crates/tool-executor", "crates/gateway", "crates/model-protocol", "crates/runtime", "crates/runtime-execution", "crates/control", "crates/server", "crates/eval", "crates/web-ui", "crates/ui", "crates/sandbox", "crates/sandbox-providers/macos-apple-container", "crates/sandbox-providers/macos-apple-vm", "crates/sandbox-providers/linux-podman"]
 default-members = ["crates/app"]
 
 [workspace.package]
@@ -30,6 +30,7 @@ pot-tool-executor = { path = "crates/tool-executor" }
 pot-model-protocol = { path = "crates/model-protocol" }
 pot-gateway = { path = "crates/gateway" }
 pot-control = { path = "crates/control" }
+pot-runtime-execution = { path = "crates/runtime-execution" }
 pot-runtime = { path = "crates/runtime" }
 pot-eval = { path = "crates/eval" }
 serde = { version = "1", features = ["derive"] }

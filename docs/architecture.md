@@ -48,6 +48,15 @@ in Host/Sandbox through the existing owner approval and receipt path. The Task
 Agent uses outward signed Control service calls for models, policy, approvals and
 guidance; provider secrets remain at Control. Main assistants stay at their owner.
 
+All assistant replies, local Task runs and remote Task runs enter the destination
+Runtime's shared execution manager. Control decides placement and fixed
+configuration; Runtime performs the actual Agent invocation, with a common queue,
+concurrency limit, cancellation and metadata trace. Assistant/Task adapters retain
+conversation and durable run semantics. Remote dispatch waiting consumes no local
+Agent slot. Runtime composition and its execution kernel are separate crates to
+keep business components independent of composition. See [Runtime](../crates/runtime/README.md)
+for lifecycle and failure semantics.
+
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
@@ -227,11 +236,13 @@ Agent/Environment placement remains deferred beyond this release.
 
 ## Implementation boundaries
 
-Runtime only assembles components and manages their lifetime. Server hosts native
+Runtime assembles components, manages their lifetime and owns the shared Agent
+execution manager. Server hosts native
 APIs, outward Control transport and explicit Web hosting. Control coordinates
 Tasks/schedules, approval and model policy through component APIs. Assistant owns
 identities, SQLite AGENTS.md records, conversation Threads and the chat driver.
-Runner owns destination run journals and Task Agent execution. Both use pot-agent,
+Runner owns destination Task run journals and context adaptation. Assistant and
+Task adapters submit to the Runtime execution manager, which invokes pot-agent,
 the injected model/tool engine. Model protocol encoding is a pure shared library;
 Gateway owns Provider transport and configuration, Usage owns accounting, and
 Secrets owns encrypted values. These are libraries in the same process, not extra

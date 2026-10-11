@@ -113,6 +113,9 @@ restores these resources. App creates its initial assistant through the same API
 
 Conversation, Task, Agent and Environment service state remain separate. Typed
 Environment references are the execution target; Assignment stores run/owner and
-workspace bindings. Unsupported old assignments are rejected. Local tasks use the
-Control owner adapter to the shared Agent engine; remote tasks launch a fresh
-`pot-runner` Agent on the destination and return durable terminal results.
+workspace bindings. Assistant and local Task adapters submit fixed context and
+services to the local Runtime execution manager. Remote Tasks deliver a launch to
+the destination Runner adapter, which submits to that destination's same manager
+and persists the terminal result. Control never invokes the Agent engine directly.
+Control's task admission, provider budgets and shared-environment rules are business
+policy; Runtime separately limits actual concurrent Agents on its machine.

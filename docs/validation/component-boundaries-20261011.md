@@ -44,7 +44,5 @@ acceptance was performed for this refactor. Previous dated reports are historica
 evidence, not a new qualification of this change.
 
 General task-secret distribution and master-key rotation remain future work.
-Local task ownership adapters remain in Control while remote runs use Runner's
-journal; both execute the same pot-agent engine. Server still owns Control/member
-transport and environment adapters. These are current integration responsibilities,
-not compatibility implementations or independent Runner configuration authority.
+The current invocation boundary is documented in [Runtime](../../crates/runtime/README.md).
+This dated report covers the component extraction, not subsequent execution-manager changes.

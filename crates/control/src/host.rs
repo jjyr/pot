@@ -31,6 +31,7 @@ pub struct Host {
     pub(crate) boot: String,
     pub(crate) lock: Arc<std::fs::File>,
     runtime_id: String,
+    executions: pot_runtime_execution::Manager,
     assistant_enabled: bool,
     pub(crate) host_enabled: bool,
     stop: tokio::sync::watch::Sender<bool>,
@@ -98,10 +99,18 @@ impl Host {
             "Unsupported Runtime identity schema"
         );
         uuid::Uuid::parse_str(&identity.runtime_id)?;
+        let boot = id();
+        let executions = pot_runtime_execution::Manager::open(
+            data,
+            &identity.runtime_id,
+            &boot,
+            pot_runtime_execution::Limits::load(data)?,
+        )?;
         Ok(Self {
+            executions,
             data: data.into(),
             token: id(),
-            boot: id(),
+            boot,
             lock: Arc::new(file),
             runtime_id: identity.runtime_id,
             assistant_enabled: false,
@@ -208,16 +217,25 @@ impl Host {
         routes.with_state(self.clone())
     }
     pub async fn shutdown(&self) -> Result<()> {
-        self.stop.send_replace(true);
+        self.request_stop();
+        let agents =
+            tokio::time::timeout(std::time::Duration::from_secs(20), self.executions.drain())
+                .await
+                .map_err(anyhow::Error::from)
+                .and_then(|result| result);
         if let Some(host) = &self.host_environment {
             host.shutdown_host().await?;
         }
         if let Some(environment) = &self.sandboxes {
             environment.shutdown().await?;
         }
-        Ok(())
+        agents
+    }
+    pub fn executions(&self) -> &pot_runtime_execution::Manager {
+        &self.executions
     }
     pub fn request_stop(&self) {
+        self.executions.stop();
         self.stop.send_replace(true);
     }
     pub(crate) fn stopping(&self) -> bool {
@@ -487,6 +505,9 @@ async fn cancel(
 }
 
 impl pot_runner::Destination for Host {
+    fn executions(&self) -> &pot_runtime_execution::Manager {
+        &self.executions
+    }
     fn runtime_id(&self) -> &str {
         self.runtime_id()
     }

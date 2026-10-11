@@ -340,3 +340,27 @@ Control owns routing labels; joined Runtimes report their OS at enrollment.
 This replaces the complete label set, including allowing an empty set. It does
 not enable resources or verify capabilities. Runner-side edits are rejected.
 See [routing semantics](agent-context.md#message-references-and-machine-labels).
+
+## Runtime Agent execution
+
+Each Runtime has one execution manager shared by assistants and Tasks. Local
+memory calls and remote launches use the same destination-local admission path.
+To set machine concurrency, create `runtime-execution.json` in that Runtime's data
+directory before startup:
+
+```json
+{"max_active_agents":8,"max_queued_agents":256}
+```
+
+These are the defaults when the file is absent; both values must be positive.
+The active limit must fit Tokio's semaphore limit. Unknown fields are rejected.
+Settings apply on restart. Queue overflow fails the invocation; it does not select
+another machine or model. Control's existing `execution-limits.json` governs
+business task admission and model budgets, not physical Agent slots on other machines.
+
+`runtime-executions.jsonl` records execution ID, Runtime/boot, owner, request/run,
+generation, role and lifecycle/event metadata. It excludes prompts, response text,
+tool arguments/output and credentials. Files are created with mode 0600, rotate
+at 8 MiB and retain one previous file (`runtime-executions.jsonl.1`). They are local
+diagnostics; conversations and Task journals remain authoritative for recovery.
+No resource-management UI or new model-visible tool is introduced.

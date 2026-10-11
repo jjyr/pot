@@ -26,6 +26,16 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Instant};
 pub use tools::schemas as tool_schemas;
 
+/// Validate a fixed configuration without constructing an execution engine.
+pub fn validate(config: &ResolvedSpec) -> Result<()> {
+    config.validate()?;
+    ensure!(
+        Protocol::from_name(&config.gateway_protocol)? != Protocol::Unknown,
+        "Unsupported model protocol"
+    );
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct Agent {
     extensions: Arc<dyn AgentExtensions>,
@@ -54,12 +64,7 @@ impl Agent {
         self
     }
     pub fn validate(&self, config: &ResolvedSpec) -> Result<()> {
-        config.validate()?;
-        ensure!(
-            Protocol::from_name(&config.gateway_protocol)? != Protocol::Unknown,
-            "Unsupported model protocol"
-        );
-        Ok(())
+        validate(config)
     }
     pub async fn execute(
         &self,
