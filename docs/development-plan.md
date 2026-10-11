@@ -15,8 +15,8 @@ must be discussed and confirmed before implementation.
 
 ## Remaining
 
-- Remote environment transports: outward desktop streaming, actual Sandbox plugin
-  qualification and multi-machine App/Web acceptance; remote notification relay.
+- Actual Sandbox plugin qualification and multi-machine App/Web acceptance;
+  remote notification relay.
 - P4: fresh Task Agent startup on the execution Runtime, durable launch/result
   records, Control model/budget/approval services, ordered guidance/cancellation,
   disconnection pause and reconciliation. Current loops still run at the owner.
@@ -29,3 +29,7 @@ run the assigned model/environment/tools or report an error. Task results do not
 require downloads unless files are actual deliverables. No live Agent relocation,
 three-node placement, peer pairing, per-machine capability grants or resource UI
 is planned for this release.
+
+Remote desktop transport is deferred by user decision until its connection design
+is agreed. Neither Control relay nor direct access is selected. It is outside the
+current #39 completion scope; existing local desktop support remains available.

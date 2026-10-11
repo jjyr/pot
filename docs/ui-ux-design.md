@@ -110,7 +110,8 @@ Cards show name, connectivity and running Tasks. Expanding shows Host/Sandbox
 rows; selecting an environment shows the Tasks bound to that exact target.
 Offline data is marked cached and new operations are disabled. Local supported
 Sandbox desktops reuse the existing viewer entry. Remote desktop transport is
-pending. Viewing never changes a task target or starts a stopped instance.
+deferred until its connection design is agreed; no remote desktop entry is added
+in the current #39 scope. Viewing never changes a task target or starts a stopped instance.
 
 Technical management stays in ordinary Chat/API. There are no resource creation,
 plugin configuration, session, artifact/download or “ask assistant to manage”
