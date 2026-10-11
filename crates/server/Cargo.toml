@@ -8,6 +8,8 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+pot-control.workspace = true
+pot-runner.workspace = true
 pot-sandbox.workspace = true
 pot-sandbox-linux-podman.workspace = true
 pot-sandbox-macos-apple-container.workspace = true
@@ -38,6 +40,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 web-push = { version = "0.11", default-features = false }
 base64 = "0.22"
 [dev-dependencies]
+pot-secrets.workspace = true
 tokio-tungstenite = "0.30"
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }

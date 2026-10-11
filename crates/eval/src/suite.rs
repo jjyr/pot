@@ -727,8 +727,7 @@ mod tests {
             workspace: path.clone(),
             owner: "eval".into(),
             role: pot_core::ExecutionRole::Worker,
-            backend_url: String::new(),
-            lane_token: String::new(),
+
             main_prompt: String::new(),
             feedback: Arc::new(
                 crate::runner::RunFeedback::new(&path.join("unused-events.jsonl"), "test".into())
@@ -796,8 +795,7 @@ mod tests {
             workspace: path.clone(),
             owner: "eval".into(),
             role: pot_core::ExecutionRole::Worker,
-            backend_url: String::new(),
-            lane_token: String::new(),
+
             main_prompt: String::new(),
             feedback: Arc::new(
                 crate::runner::RunFeedback::new(&path.join("unused-events.jsonl"), "test".into())

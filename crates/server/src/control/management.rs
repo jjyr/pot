@@ -1,6 +1,6 @@
 //! Independent Sandbox management authority and durable, non-replayed effects.
 use super::*;
-use pot_runtime::remote_environment::RemoteBinding;
+use pot_control::remote_environment::RemoteBinding;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Intent {
@@ -151,10 +151,10 @@ impl Authority {
     }
     pub(super) async fn accept_management(
         self: &Arc<Self>,
-        host: &pot_runtime::host::Host,
+        host: &pot_control::host::Host,
         control: &str,
         request: Request,
-        hub: Option<Arc<pot_runtime::assistants::Hub>>,
+        hub: Option<Arc<pot_control::control::assistants::Hub>>,
     ) -> Result<Value> {
         let Request {
             operation,
@@ -369,7 +369,7 @@ impl Authority {
 mod tests {
     use super::super::tests::{native, resources};
     use super::*;
-    use pot_runtime::remote_environment::RemoteEnvironment;
+    use pot_control::remote_environment::RemoteEnvironment;
     #[test]
     fn absence_does_not_close_an_inflight_acceptance_window() {
         let receipt = json!({"state":"not_accepted"});

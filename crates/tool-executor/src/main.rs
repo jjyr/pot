@@ -51,8 +51,7 @@ async fn main() -> Result<()> {
             workspace: PathBuf::from(request["cwd"].as_str().unwrap()),
             owner: String::new(),
             role: ExecutionRole::Worker,
-            backend_url: String::new(),
-            lane_token: String::new(),
+
             main_prompt: String::new(),
             feedback: Arc::new(Feedback),
             tool_executor: None,

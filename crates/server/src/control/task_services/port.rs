@@ -3,7 +3,7 @@ use super::*;
 
 pub(in crate::control) struct Port {
     pub authority: Arc<Authority>,
-    pub host: pot_runtime::host::Host,
+    pub host: pot_control::host::Host,
     pub binding: RemoteBinding,
     pub control: String,
     pub lease: String,

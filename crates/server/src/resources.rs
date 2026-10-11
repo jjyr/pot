@@ -110,17 +110,26 @@ fn persist(path: &Path, book: &Book) -> Result<()> {
     Ok(())
 }
 impl Resources {
+    pub(super) async fn join_control(&self, request: crate::control::Join) -> Result<Value> {
+        // Serialize role changes with resource creation and restoration.
+        let inner = self.inner.lock().await;
+        ensure!(
+            inner.backend.assistants().is_none(),
+            "A local Control with assistants cannot join as an execution Runner; use a separate data directory"
+        );
+        self.control.join(request).await
+    }
     #[cfg(test)]
     pub async fn open(backend: Backend, config: RuntimeConfig) -> Result<Arc<Self>> {
         Self::open_policy(backend, config, true).await
     }
     pub async fn open_policy(
-        mut backend: Backend,
+        backend: Backend,
         config: RuntimeConfig,
         control_allowed: bool,
     ) -> Result<Arc<Self>> {
         let path = config.data.join("runtime-resources.json");
-        let mut book = if path.exists() {
+        let book = if path.exists() {
             let book: Book = serde_json::from_slice(&std::fs::read(&path)?)?;
             ensure!(
                 book.schema_version == 1,
@@ -133,88 +142,6 @@ impl Resources {
                 entries: vec![],
             }
         };
-        // One-time adoption of product roots created before the resource manifest.
-        if !path.exists()
-            && config.data.join("pot-v2.sqlite").exists()
-            && backend.assistants().is_none()
-        {
-            backend.enable_host_resource();
-            let manager =
-                backend.register_environment_providers(crate::hosting::installed_providers()?)?;
-            if !config.data.join("sandboxes.json").exists() {
-                manager
-                    .management(
-                        &json!({"action":"create","sandbox_id":"default","name":"Linux"}),
-                        false,
-                        &|| false,
-                        &|_, action| action(),
-                    )
-                    .await?;
-                manager
-                    .management(
-                        &json!({"action":"select","sandbox_id":"default"}),
-                        false,
-                        &|| false,
-                        &|_, action| action(),
-                    )
-                    .await?;
-            }
-            backend.enable_assistant_resources(config.clone()).await?;
-        }
-        // Preserve the current product resource definitions when upgrading an existing root.
-        // This does not import assistant instruction files or old preference records.
-        if !path.exists() && backend.assistants().is_some() {
-            let main = backend
-                .assistants()
-                .unwrap()
-                .definitions()
-                .into_iter()
-                .find(|d| d.id == "main")
-                .unwrap();
-            book.entries.push(Entry {
-                request: Create {
-                    request_id: "upgrade-main-assistant".into(),
-                    resource: Resource::Assistant {
-                        name: main.name.clone(),
-                    },
-                },
-                result: Some(json!({"kind":"assistant","definition":main})),
-                error: None,
-            });
-            book.entries.push(Entry {
-                request: Create {
-                    request_id: "upgrade-host".into(),
-                    resource: Resource::Host,
-                },
-                result: Some(json!({"kind":"host","runtime_id":backend.host().runtime_id()})),
-                error: None,
-            });
-            if let Some(manager) = backend.environment_manager() {
-                for item in manager.inventory().await["items"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default()
-                {
-                    let sandbox_id = item["id"].as_str().unwrap().to_owned();
-                    // Earlier roots could hold the default definition only in memory.
-                    // Materialize the current inventory before recording ready adoption.
-                    manager.management(&json!({"action":"create","sandbox_id":sandbox_id,"name":item["name"],"provider":item["provider"]}), false, &||false, &|_, action|action()).await?;
-                    book.entries.push(Entry {
-                        request: Create {
-                            request_id: format!("upgrade-sandbox-{sandbox_id}"),
-                            resource: Resource::Sandbox {
-                                sandbox_id,
-                                name: item["name"].as_str().unwrap().into(),
-                                provider: item["provider"].as_str().unwrap().into(),
-                            },
-                        },
-                        result: Some(json!({"sandbox_id":item["id"],"phase":"stopped"})),
-                        error: None,
-                    });
-                }
-            }
-            persist(&path, &book)?;
-        }
         let token = backend.endpoint(0).token;
         let routes = crate::hosting::backend_router(&backend);
         let control = crate::control::Authority::open_policy(
@@ -258,6 +185,10 @@ impl Resources {
                 Ok(json!({"kind":"host", "runtime_id":backend.host().runtime_id()}))
             }
             Resource::Assistant { name } => {
+                ensure!(
+                    !self.control.is_member(),
+                    "Execution Runner cannot own assistants; create them on Control"
+                );
                 let first = backend.assistants().is_none();
                 let existing = self.config.data.join("pot-v2.sqlite").exists();
                 backend
@@ -272,7 +203,7 @@ impl Resources {
                         return Ok(result.clone());
                     }
                     let main = hub
-                        .definitions()
+                        .definitions()?
                         .into_iter()
                         .find(|d| d.id == "main")
                         .unwrap();
@@ -364,10 +295,10 @@ impl Resources {
             .register_environment_providers(vec![provider])
             .unwrap();
     }
-    pub(super) async fn assistant_hub(&self) -> Option<Arc<pot_runtime::assistants::Hub>> {
+    pub(super) async fn assistant_hub(&self) -> Option<Arc<pot_control::control::assistants::Hub>> {
         self.inner.lock().await.backend.assistants()
     }
-    pub(super) async fn host(&self) -> pot_runtime::host::Host {
+    pub(super) async fn host(&self) -> pot_control::host::Host {
         self.inner.lock().await.backend.host().clone()
     }
     pub async fn shutdown(&self) {
@@ -377,7 +308,7 @@ impl Resources {
         self.control.stop_operations().await;
         self.inner.lock().await.backend.shutdown().await;
     }
-    pub async fn optional_state(&self) -> Option<pot_runtime::Service> {
+    pub async fn optional_state(&self) -> Option<pot_control::control::Service> {
         self.inner.lock().await.backend.optional_state()
     }
 }

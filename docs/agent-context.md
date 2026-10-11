@@ -1,6 +1,6 @@
 # Agent context
 
-Runtime owns AGENTS.md discovery, execution-environment selection, refresh and error policy. pot-agent receives caller-provided text through `ExecutionContext.instructions` and `AgentExtensions::instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
+Control/environment adapters own AGENTS.md discovery, execution-environment selection, refresh and error policy. pot-agent receives caller-provided text through `ExecutionContext.instructions` and `AgentExtensions::instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
 
 ## Sources and scope
 
@@ -48,7 +48,7 @@ not exposed as unaudited MCP writes.
 
 ## Reference and tests
 
-Main's built-in delegation prompt is `MAIN_PROMPT` in `crates/runtime/src/orchestration.rs`,
+Main's built-in delegation prompt is `MAIN_PROMPT` in `crates/assistant/src/orchestration.rs`,
 injected by Runtime. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default pot-agent prompt.
 

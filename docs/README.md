@@ -11,7 +11,8 @@ is the single phase progress table.
 | Delivered scope and remaining work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Chat, Tasks, Machines and configuration interactions | [UI specification](ui-ux-design.md), [design language](design-language.md) |
-| Backend responsibilities and API contracts | [Crates](backend-crates.md), [Runtime](../crates/runtime/README.md) |
+| Encrypted credentials and master keys | [Secrets](secrets.md) |
+| Backend responsibilities and API contracts | [Crates](backend-crates.md), [Runtime](../crates/runtime/README.md), [Control](../crates/control/README.md) |
 | Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
 | Sandbox execution and resources | [Providers](sandbox-providers.md), [executor](executor.md), [resources](sandbox-resources.md), [images](sandbox-image.md), [macOS](macos-sandbox.md) |
@@ -20,7 +21,8 @@ is the single phase progress table.
 
 ## Evidence
 
-Current [design cleanup and regression checks](validation/design-cleanup-20261011.md).
+Current [component boundaries and regression checks](validation/component-boundaries-20261011.md).
+Previous [design cleanup](validation/design-cleanup-20261011.md).
 
 Validation reports record date, method, results and limitations. They establish only
 the tested scope. Current distributed evidence: [membership](validation/control-membership-20261011.md),

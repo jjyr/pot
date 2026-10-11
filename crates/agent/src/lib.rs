@@ -13,22 +13,20 @@ pub mod permissions;
 #[cfg(test)]
 mod tests;
 mod tools;
-use anyhow::{Result, anyhow, bail, ensure};
+use anyhow::{Result, anyhow, ensure};
 pub use extensions::AgentExtensions;
 use futures::StreamExt;
 use pot_core::*;
-use pot_gateway::{
+use pot_model_protocol::{
     codecs::Protocol,
     model::{self, Message},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Instant};
 pub use tools::schemas as tool_schemas;
 
+#[derive(Clone)]
 pub struct Agent {
     extensions: Arc<dyn AgentExtensions>,
     services: Option<Arc<dyn ExecutionServices>>,
@@ -193,48 +191,19 @@ fn tool_result_message(call: &str, value: &Value, vision: bool) -> Result<Messag
     Ok(message)
 }
 
-fn client(timeout_ms: u64) -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_millis(timeout_ms))
-        .build()?)
-}
 async fn rpc(
     services: Option<&dyn ExecutionServices>,
-    client: &reqwest::Client,
-    s: &ExecutionContext,
     session: Option<&str>,
     id: &str,
     method: &str,
     params: Value,
 ) -> Result<(Value, Option<String>)> {
-    if let Some(services) = services {
-        return services.rpc(session, id, method, params).await;
-    }
-    let mut req = client
-        .post(format!("{}/api/v1/mcp", s.backend_url))
-        .bearer_auth(&s.lane_token)
-        .json(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
-    if let Some(session) = session {
-        req = req.header("mcp-session-id", session);
-    }
-    let response = req.send().await?;
-    ensure!(
-        response.status().is_success(),
-        "Pot tool API rejected request ({})",
-        response.status()
-    );
-    let session = response
-        .headers()
-        .get("mcp-session-id")
-        .and_then(|h| h.to_str().ok())
-        .map(str::to_owned);
-    let result: Value = response.json().await?;
-    ensure!(result["error"].is_null(), "Pot tool API failed");
-    Ok((result["result"].clone(), session))
+    services
+        .ok_or_else(|| anyhow!("Agent execution services must be supplied by Control"))?
+        .rpc(session, id, method, params)
+        .await
 }
+
 fn replay_route(config: &ResolvedSpec) -> String {
     format!(
         "{}:{}:{}",
@@ -259,7 +228,6 @@ fn portable_context(config: &ResolvedSpec, messages: &[Message]) -> Vec<Message>
 #[allow(clippy::too_many_arguments)]
 async fn sample(
     services: Option<&dyn ExecutionServices>,
-    client: &reqwest::Client,
     s: &ExecutionContext,
     thread: &Thread,
     system: &str,
@@ -290,56 +258,21 @@ async fn sample(
         .into(),
         compaction_id: compaction.map(str::to_owned),
     })?;
-    let mut usage_observer = pot_gateway::codecs::UsageObserver::default();
+    let mut usage_observer = pot_model_protocol::codecs::UsageObserver::default();
     let mut cache_write = None;
     let mut cache_read = None;
     let result: Result<Message> = async {
-        let mut stream = if let Some(services) = services {
-            services
-                .model(ModelRequest {
-                    id: id.clone(),
-                    protocol: thread.config.gateway_protocol.clone(),
-                    provider: thread.config.provider.clone(),
-                    model: thread.config.model.clone(),
-                    body,
-                    compaction_id: compaction.map(str::to_owned),
-                })
-                .await?
-        } else {
-            let stream: Result<futures::stream::BoxStream<'_, Result<Vec<u8>>>> = async {
-                let path = match protocol {
-                    Protocol::OpenaiChat => "v1/chat/completions".into(),
-                    Protocol::OpenaiResponses => "v1/responses".into(),
-                    Protocol::AnthropicMessages => "v1/messages".into(),
-                    Protocol::Gemini => {
-                        format!("v1/models/{}:streamGenerateContent", thread.config.model)
-                    }
-                    Protocol::Unknown => bail!("Unsupported protocol"),
-                };
-                let mut req = client
-                    .post(format!(
-                        "{}/gw/{}/{path}",
-                        s.backend_url, thread.config.provider
-                    ))
-                    .bearer_auth(&s.lane_token)
-                    .json(&body);
-                if let Some(id) = compaction {
-                    req = req.header("x-pot-compaction", id);
-                }
-                let response = req.send().await?;
-                ensure!(
-                    response.status().is_success(),
-                    "Model gateway rejected request ({})",
-                    response.status()
-                );
-                Ok(response
-                    .bytes_stream()
-                    .map(|chunk| chunk.map(|b| b.to_vec()).map_err(Into::into))
-                    .boxed())
-            }
-            .await;
-            stream?
-        };
+        let mut stream = services
+            .ok_or_else(|| anyhow!("Agent model services must be supplied by Control"))?
+            .model(ModelRequest {
+                id: id.clone(),
+                protocol: thread.config.gateway_protocol.clone(),
+                provider: thread.config.provider.clone(),
+                model: thread.config.model.clone(),
+                body,
+                compaction_id: compaction.map(str::to_owned),
+            })
+            .await?;
         let mut sse = model::Sse::default();
         let mut decoder = model::Decoder::new(protocol.clone());
         let mut received = 0usize;
@@ -405,7 +338,7 @@ fn observe_usage(
     id: &str,
     protocol: &Protocol,
     event: &Value,
-    observer: &mut pot_gateway::codecs::UsageObserver,
+    observer: &mut pot_model_protocol::codecs::UsageObserver,
     cache_write: &mut Option<u64>,
     cache_read: &mut Option<u64>,
 ) -> Result<()> {
@@ -447,7 +380,6 @@ fn observe_usage(
 }
 async fn compaction_event(
     services: Option<&dyn ExecutionServices>,
-    client: &reqwest::Client,
     s: &ExecutionContext,
     event: Value,
 ) -> Result<()> {
@@ -455,27 +387,17 @@ async fn compaction_event(
         id: event["id"].as_str().unwrap_or_default().into(),
         action: event["action"].as_str().unwrap_or_default().into(),
     };
-    if let Some(services) = services {
-        services.compaction(event).await?;
-        return s.feedback.observe(&observation);
-    }
-    let response = client
-        .post(format!("{}/api/agent/compactions", s.backend_url))
-        .bearer_auth(&s.lane_token)
-        .json(&event)
-        .send()
+    services
+        .ok_or_else(|| anyhow!("Agent lifecycle services must be supplied by Control"))?
+        .compaction(event)
         .await?;
-    ensure!(
-        response.status().is_success(),
-        "Compaction lifecycle rejected"
-    );
     s.feedback.observe(&observation)
 }
+
 // Keep request state and injected services explicit at this execution boundary.
 #[allow(clippy::too_many_arguments)]
 async fn compact(
     services: Option<&dyn ExecutionServices>,
-    client: &reqwest::Client,
     s: &ExecutionContext,
     thread: &Thread,
     state: &mut Context,
@@ -537,7 +459,6 @@ async fn compact(
     let id = uuid::Uuid::new_v4().to_string();
     compaction_event(
         services,
-        client,
         s,
         json!({"id":id,"action":"start","reason":"threshold","tokens_before":tokens}),
     )
@@ -548,7 +469,6 @@ async fn compact(
     let result: Result<()> = async {
         let summary = sample(
             services,
-            client,
             s,
             thread,
             "Produce a concise factual continuation summary.",
@@ -598,7 +518,6 @@ async fn compact(
         state.usage_anchor = None;
         compaction_event(
             services,
-            client,
             s,
             json!({"id":id,"action":"complete","tokens_after":after,"entry_id":id}),
         )
@@ -609,7 +528,7 @@ async fn compact(
     }
     .await;
     if result.is_err() && !completed {
-        compaction_event(services, client, s, json!({"id":id,"action":"failed"})).await?;
+        compaction_event(services, s, json!({"id":id,"action":"failed"})).await?;
     }
     result
 }
@@ -681,7 +600,6 @@ async fn run(
         }
     }
     let protocol = Protocol::from_name(&thread.config.gateway_protocol)?;
-    let client = client(settings.request_timeout_ms)?;
     let mut available = if s.role == ExecutionRole::Summary {
         vec![]
     } else {
@@ -763,18 +681,9 @@ async fn run(
         }
     }
     let session = if s.role != ExecutionRole::Worker {
-        let (_,session)=rpc(services,&client,s,None,"initialize","initialize",json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"pot-agent","version":"0.1"}})).await?;
+        let (_,session)=rpc(services,None,"initialize","initialize",json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"pot-agent","version":"0.1"}})).await?;
         let session = session.ok_or_else(|| anyhow!("MCP session missing"))?;
-        let (result, _) = rpc(
-            services,
-            &client,
-            s,
-            Some(&session),
-            "list",
-            "tools/list",
-            json!({}),
-        )
-        .await?;
+        let (result, _) = rpc(services, Some(&session), "list", "tools/list", json!({})).await?;
         available.extend(
             result["tools"]
                 .as_array()
@@ -845,7 +754,6 @@ async fn run(
         request,
         extensions,
         services,
-        client: &client,
         session: session.as_deref(),
         available: &available,
         custom_names: &custom_names,
@@ -895,12 +803,12 @@ async fn run(
         let (response, prefix) = tokio::select! {
             _=s.feedback.cancellation()=>return Ok(()),
             result=composed.drive(async {
-                compact(services,&client,s,thread,&mut state,emit,extensions,&system,&available).await?;
+                compact(services,s,thread,&mut state,emit,extensions,&system,&available).await?;
                 let mut input = portable_context(&thread.config, &state.messages);
                 extensions.prepare_context(s, &mut input)?;
                 ensure!(meter::estimate(extensions, &protocol, &thread.config.model, &system, &input, &available, state.usage_anchor.as_ref().filter(|_| settings.use_provider_usage))?.saturating_add(thread.config.params.max_output_tokens) <= thread.config.context_window, "Context exceeds configured window; compact, trim, or raise the profile limit");
                 emit(Update::MessageStarted)?;
-                let response = sample(services,&client,s,thread,&system,&input,&available,None,emit).await?;
+                let response = sample(services,s,thread,&system,&input,&available,None,emit).await?;
                 input.push(response.clone());
                 Ok::<_, anyhow::Error>((response, input))
             })=>result?,
@@ -1022,7 +930,6 @@ struct Dispatcher<'a> {
     request: &'a TurnRequest,
     extensions: &'a dyn AgentExtensions,
     services: Option<&'a dyn ExecutionServices>,
-    client: &'a reqwest::Client,
     session: Option<&'a str>,
     available: &'a [Value],
     custom_names: &'a [String],
@@ -1039,7 +946,7 @@ impl Dispatcher<'_> {
             request,
             extensions,
             services,
-            client,
+
             session,
             available,
             custom_names,
@@ -1112,7 +1019,7 @@ impl Dispatcher<'_> {
                     let mut execution_args = call.arguments.clone();
                     if s.feedback.permission_grants()?.is_some()
                         && execution_args["environment"] == "host"
-                        && s.backend_url.is_empty()
+                        && !executor.routes_environments()
                     {
                         execution_args
                             .as_object_mut()
@@ -1141,8 +1048,6 @@ impl Dispatcher<'_> {
                     .ok_or_else(|| anyhow!("Tool API unavailable"))?;
                 rpc(
                     services,
-                    client,
-                    s,
                     Some(session),
                     &format!("{}:{}", request.request_id, call.id),
                     "tools/call",

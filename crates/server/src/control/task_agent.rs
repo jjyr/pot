@@ -1,8 +1,8 @@
 //! Durable launch and same-process lease recovery for destination-local workers.
 use super::*;
-use pot_runtime::task_agent::{Journal, Launch, Phase, RunServices};
+use pot_runner::{Journal, Launch, Phase, RunServices};
 impl Authority {
-    fn journal(&self, host: &pot_runtime::host::Host) -> Result<Arc<Journal>> {
+    fn journal(&self, host: &pot_control::host::Host) -> Result<Arc<Journal>> {
         let mut journal = self.task_journal.lock().unwrap();
         if let Some(journal) = &*journal {
             return Ok(journal.clone());
@@ -14,7 +14,7 @@ impl Authority {
     }
     pub(super) async fn inspect_task(
         self: &Arc<Self>,
-        host: &pot_runtime::host::Host,
+        host: &pot_control::host::Host,
         control: &str,
         task: &str,
         run: &str,
@@ -64,7 +64,7 @@ impl Authority {
             let port = task_services::Port {
                 authority: self.clone(),
                 host: host.clone(),
-                binding: pot_runtime::remote_environment::RemoteBinding {
+                binding: pot_control::remote_environment::RemoteBinding {
                     owner: task.into(),
                     run_id: run.into(),
                     generation: record.launch.generation,
@@ -112,7 +112,7 @@ impl Authority {
     }
     pub(super) async fn launch_task(
         self: &Arc<Self>,
-        host: &pot_runtime::host::Host,
+        host: &pot_control::host::Host,
         control: &str,
         lease_id: String,
         launch: Launch,
@@ -143,7 +143,7 @@ impl Authority {
             let port = Arc::new(task_services::Port {
                 authority: self.clone(),
                 host: host.clone(),
-                binding: pot_runtime::remote_environment::RemoteBinding {
+                binding: pot_control::remote_environment::RemoteBinding {
                     owner: launch.task_id.clone(),
                     run_id: launch.run_id.clone(),
                     generation: launch.generation,
@@ -157,19 +157,19 @@ impl Authority {
             let host = host.clone();
             let control = control.to_owned();
             self.track(tokio::spawn(async move {
-                if let Err(error) = host
-                    .execute_task_agent(
-                        journal,
-                        &control,
-                        &launch.task_id,
-                        &launch.run_id,
-                        RunServices {
-                            model: port.clone(),
-                            control: port.clone(),
-                            tools: port,
-                        },
-                    )
-                    .await
+                if let Err(error) = pot_runner::execute(
+                    Arc::new(host.clone()),
+                    journal,
+                    &control,
+                    &launch.task_id,
+                    &launch.run_id,
+                    RunServices {
+                        model: port.clone(),
+                        control: port.clone(),
+                        tools: port,
+                    },
+                )
+                .await
                 {
                     eprintln!("Task Agent remains unresolved: {error}");
                 }
@@ -179,7 +179,7 @@ impl Authority {
     }
     pub(super) async fn recover_task_lease(
         &self,
-        host: &pot_runtime::host::Host,
+        host: &pot_control::host::Host,
         control: &str,
         id: &str,
     ) -> Result<Value> {
@@ -285,7 +285,7 @@ mod tests {
         let host = target.host().await;
         let boot = host.describe()["boot_id"].as_str().unwrap().to_owned();
         let control_id = &control.control.identity.runtime_id;
-        let config = pot_core::Profile::api(&pot_runtime::execution::Config {
+        let config = pot_core::Profile::api(&pot_control::execution::Config {
             model: "fixture".into(),
             ..Default::default()
         })
@@ -302,7 +302,7 @@ mod tests {
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
             environment: EnvironmentRef::host(&target.control.identity.runtime_id),
-            resources: pot_runtime::control_resources::GlobalResources {
+            resources: pot_runner::resources::GlobalResources {
                 plugins: config.params.agent.plugins.clone(),
                 shell: config.params.agent.shell.clone(),
                 vision,
@@ -420,7 +420,7 @@ mod tests {
         let host = target.host().await;
         let boot = uuid::Uuid::new_v4().to_string();
         let control_id = &control.control.identity.runtime_id;
-        let config = pot_core::Profile::api(&pot_runtime::execution::Config {
+        let config = pot_core::Profile::api(&pot_control::execution::Config {
             model: "fixture".into(),
             ..Default::default()
         })
@@ -437,7 +437,7 @@ mod tests {
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
             environment: EnvironmentRef::host(&target.control.identity.runtime_id),
-            resources: pot_runtime::control_resources::GlobalResources {
+            resources: pot_runner::resources::GlobalResources {
                 plugins: config.params.agent.plugins.clone(),
                 shell: config.params.agent.shell.clone(),
                 vision,

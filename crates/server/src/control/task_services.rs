@@ -2,7 +2,8 @@
 //! read from durable receipts; an ambiguous send is never submitted twice.
 use super::*;
 use futures_util::StreamExt;
-use pot_runtime::{remote_environment::RemoteBinding, task_agent::control::Operation};
+use pot_control::remote_environment::RemoteBinding;
+use pot_runner::control::Operation;
 
 const RESPONSE_LIMIT: usize = 16 * 1024 * 1024;
 #[derive(Clone, Serialize, Deserialize)]

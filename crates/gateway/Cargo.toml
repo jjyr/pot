@@ -7,6 +7,9 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+pot-secrets.workspace = true
+rusqlite = { version = "0.40", features = ["bundled", "fallible_uint"] }
+pot-model-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow = "1"

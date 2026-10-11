@@ -6,7 +6,9 @@ and explicit Web hosting. Remote browser access requires HTTPS.
 Pot has one backend with two hosts: `pot serve` runs it independently; the macOS
 App owns it inside its own process. App requests, including the Swift settings
 adapter, dispatch in memory. App does not connect to a daemon or management
-socket. Closing App shuts down its backend before the Sandbox Helper.
+socket. Closing App shuts down its local Control and Runner before the Sandbox Helper.
+Provider credentials are configured on Control and encrypted in SQLite; see
+[master key setup](secrets.md) for unattended deployments.
 
 ## Install and run
 

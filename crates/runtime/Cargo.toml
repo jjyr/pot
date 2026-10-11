@@ -7,37 +7,21 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-pot-sandbox-images.workspace = true
-pot-resource.workspace = true
-pot-sandbox.workspace = true
-pot-protocol.workspace = true
-pot-core.workspace = true
-pot-tool-executor.workspace = true
-pot-storage.workspace = true
+pot-control.workspace = true
 pot-agent.workspace = true
-pot-gateway.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+pot-protocol.workspace = true
+pot-sandbox.workspace = true
 anyhow = "1"
-axum = { version = "0.8", features = ["ws"] }
-futures = "0.3"
-rusqlite = { version = "0.40", features = ["bundled", "fallible_uint"] }
 tokio = { version = "1", features = ["full"] }
-uuid = { version = "1", features = ["v4"] }
-async-stream = "0.3"
-reqwest = { version = "0.13", default-features = false, features = ["json", "query", "stream", "rustls"] }
-
-libc = "0.2"
-
-chrono = "0.4"
-chrono-tz = "0.10"
-
-sha2 = "0.11"
-
-base64 = "0.22"
-percent-encoding = "2"
 
 [dev-dependencies]
-pot-sandbox-macos-apple-container.workspace = true
-pot-sandbox-macos-apple-vm.workspace = true
-tokio-tungstenite = "0.30"
+pot-core.workspace = true
+pot-runner.workspace = true
+pot-tool-executor.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures = "0.3"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+axum = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }

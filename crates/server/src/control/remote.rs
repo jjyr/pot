@@ -1,7 +1,7 @@
 //! Caller journal and runtime port; effects are never retried automatically.
 use super::*;
 use futures_util::future::BoxFuture;
-use pot_runtime::remote_environment::{RemoteBinding, RemoteEnvironment};
+use pot_control::remote_environment::{RemoteBinding, RemoteEnvironment};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct ClientRun {
@@ -17,9 +17,9 @@ pub(super) struct ClientRun {
     waiting_reason: Option<String>,
     operations: BTreeMap<String, ClientOperation>,
     #[serde(default)]
-    pub(super) task_launch: Option<pot_runtime::task_agent::Launch>,
+    pub(super) task_launch: Option<pot_runner::Launch>,
     #[serde(default)]
-    pub(super) task_result: Option<pot_runtime::task_agent::Terminal>,
+    pub(super) task_result: Option<pot_runner::Terminal>,
     #[serde(default)]
     task_interrupted: bool,
     #[serde(default)]
@@ -72,7 +72,7 @@ impl Authority {
                         },
                     )
                     .await?;
-                let result: pot_runtime::task_agent::Terminal =
+                let result: pot_runner::Terminal =
                     serde_json::from_value(receipt["result"].clone()).map_err(|_| {
                         anyhow::anyhow!(
                             "Previous Task Agent remains unresolved; replacement is blocked"
@@ -228,9 +228,9 @@ fn attempt_id(run: &str, attempt: u64) -> Result<String> {
 impl RemoteEnvironment for Authority {
     fn run_task(
         &self,
-        launch: pot_runtime::task_agent::Launch,
+        launch: pot_runner::Launch,
         cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
-    ) -> BoxFuture<'_, Result<pot_runtime::task_agent::Terminal>> {
+    ) -> BoxFuture<'_, Result<pot_runner::Terminal>> {
         Box::pin(async move {
             let binding = RemoteBinding {
                 owner: launch.task_id.clone(),
@@ -250,7 +250,7 @@ impl RemoteEnvironment for Authority {
                     }
                 }
                 if run.task_interrupted {
-                    return Err(pot_runtime::task_agent::Interrupted.into());
+                    return Err(pot_runner::Interrupted.into());
                 }
                 return Ok(result);
             }
@@ -272,7 +272,7 @@ impl RemoteEnvironment for Authority {
             };
             let key = run_key(&binding)?;
             if run.task_interrupted {
-                return Err(pot_runtime::task_agent::Interrupted.into());
+                return Err(pot_runner::Interrupted.into());
             }
             if let Some(result) = run.task_result {
                 return Ok(result);
@@ -342,8 +342,7 @@ impl RemoteEnvironment for Authority {
                     .and_then(|v| v.get("result"))
                     .filter(|v| !v.is_null())
                 {
-                    let result: pot_runtime::task_agent::Terminal =
-                        serde_json::from_value(result.clone())?;
+                    let result: pot_runner::Terminal = serde_json::from_value(result.clone())?;
                     self.update(|book| {
                         let run = book.client_runs.get_mut(&key).unwrap();
                         run.task_result = Some(result.clone());
@@ -363,7 +362,7 @@ impl RemoteEnvironment for Authority {
                     }
                     self.waiting(&binding, None)?;
                     if self.client_run(&binding)?.task_interrupted {
-                        return Err(pot_runtime::task_agent::Interrupted.into());
+                        return Err(pot_runner::Interrupted.into());
                     }
                     return Ok(result);
                 }
@@ -511,7 +510,7 @@ impl RemoteEnvironment for Authority {
     fn install_resources(
         &self,
         binding: RemoteBinding,
-        resources: pot_runtime::control_resources::GlobalResources,
+        resources: pot_runner::resources::GlobalResources,
     ) -> BoxFuture<'_, Result<Value>> {
         Box::pin(async move {
             resources.validate()?;

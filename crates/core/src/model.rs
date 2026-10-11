@@ -37,7 +37,7 @@ impl Profile {
             name: "Pot · DeepSeek Flash".into(),
             provider: "deepseek".into(),
             model: config.model().to_owned(),
-            auth_ref: "providers.json:deepseek".into(),
+            auth_ref: "provider:deepseek".into(),
             params: Parameters {
                 max_output_tokens: config.max_tokens(),
                 reasoning_effort: None,
@@ -99,13 +99,13 @@ impl Profile {
             "Invalid reasoning effort"
         );
         ensure!(
-            (self.provider == "deepseek" && self.auth_ref == "providers.json:deepseek")
+            (self.provider == "deepseek" && self.auth_ref == "provider:deepseek")
                 || (self
                     .provider
                     .bytes()
                     .all(|c| c.is_ascii_alphanumeric() || c == b'-')
                     && !self.provider.is_empty()
-                    && self.auth_ref == format!("providers.json:{}", self.provider)),
+                    && self.auth_ref == format!("provider:{}", self.provider)),
             "Unsupported credential route"
         );
         let mut spec = ResolvedSpec {

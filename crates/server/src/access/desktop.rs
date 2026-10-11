@@ -108,7 +108,7 @@ pub(super) async fn proxy(
         let owner = session.clone();
         let id = ticket.clone();
         req.extensions_mut()
-            .insert(pot_runtime::desktop::DesktopAccessGuard(Arc::new(
+            .insert(pot_control::desktop::DesktopAccessGuard(Arc::new(
                 move || owns(&access, &id, &owner),
             )));
     }
