@@ -213,6 +213,10 @@ pub(super) enum Rpc {
         operation_id: String,
     },
     Inventory,
+    Resources {
+        lease_id: String,
+        resources: pot_runtime::control_resources::GlobalResources,
+    },
     Context {
         lease_id: String,
     },
@@ -1201,6 +1205,19 @@ impl Authority {
             Rpc::InspectManagement { operation_id } => {
                 self.inspect_management(peer, &operation_id, &boot)
             }
+            Rpc::Resources {
+                lease_id,
+                resources,
+            } => {
+                let lease = self.lease(peer, &lease_id, &boot, true)?;
+                require_target(host, &lease.target).await?;
+                host.install_controlled_resources(
+                    &lease.target,
+                    &workspace_scope(&lease)?,
+                    resources,
+                )
+                .await
+            }
             Rpc::Context { lease_id } => {
                 let lease = self.lease(peer, &lease_id, &boot, true)?;
                 require_target(host, &lease.target).await?;
@@ -1694,6 +1711,91 @@ mod tests {
         assert!(!node.metadata().to_string().contains(&token));
         for a in [control, node, other] {
             std::fs::remove_dir_all(&a.data).unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn outward_global_resources_are_control_selected_and_lease_scoped() {
+        use base64::Engine;
+        use pot_runtime::{
+            control_resources::{GlobalResources, ResourceFile},
+            remote_environment::{RemoteBinding, RemoteEnvironment},
+        };
+        let control = resources().await;
+        let node = resources().await;
+        native(
+            &node,
+            json!({"request_id":"global-host","resource":{"kind":"host"}}),
+        )
+        .await;
+        join_nodes(&control, &node).await;
+        control
+            .control
+            .call(&node.control.identity.runtime_id, Rpc::Inventory)
+            .await
+            .unwrap();
+        let binding = RemoteBinding {
+            owner: uuid::Uuid::new_v4().to_string(),
+            run_id: uuid::Uuid::new_v4().to_string(),
+            generation: 1,
+            environment: EnvironmentRef::host(&node.control.identity.runtime_id),
+        };
+        let context = control.control.open(binding.clone()).await.unwrap();
+        let workspace = PathBuf::from(context["workspace"].as_str().unwrap());
+        std::fs::create_dir_all(workspace.join(".agents/skills/project-only")).unwrap();
+        std::fs::write(
+            workspace.join(".agents/skills/project-only/SKILL.md"),
+            "---\nname: project-only\ndescription: project skill\n---\n",
+        )
+        .unwrap();
+        std::fs::write(workspace.join("AGENTS.md"), "PROJECT_ONLY_RULE").unwrap();
+        let mut globals = GlobalResources::default();
+        globals.files.insert(
+            "skills/user/control-only/SKILL.md".into(),
+            ResourceFile {
+                data: base64::engine::general_purpose::STANDARD
+                    .encode("---\nname: control-only\ndescription: control skill\n---\n"),
+                executable: false,
+            },
+        );
+        let installed = control
+            .control
+            .install_resources(binding.clone(), globals.clone())
+            .await
+            .unwrap();
+        assert!(
+            installed["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("PROJECT_ONLY_RULE")
+        );
+        let skills = installed["skills"].as_array().unwrap();
+        assert!(skills.iter().any(|s| s["name"] == "control-only"));
+        assert!(skills.iter().any(|s| s["name"] == "project-only"));
+        assert_eq!(
+            installed["global_resources_revision"],
+            globals.revision().unwrap()
+        );
+        assert_eq!(
+            installed,
+            control
+                .control
+                .install_resources(binding.clone(), globals.clone())
+                .await
+                .unwrap()
+        );
+        RemoteEnvironment::cancel(&*control.control, binding.clone())
+            .await
+            .unwrap();
+        assert!(
+            control
+                .control
+                .install_resources(binding, globals)
+                .await
+                .is_err()
+        );
+        for n in [control, node] {
+            n.control.stop_listener(false).await.unwrap();
+            std::fs::remove_dir_all(n.control.data.parent().unwrap()).unwrap();
         }
     }
     #[tokio::test]

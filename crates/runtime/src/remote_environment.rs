@@ -40,6 +40,13 @@ pub trait RemoteEnvironment: Send + Sync {
         Box::pin(async { bail!("Remote file transport unavailable") })
     }
     fn inventory(&self) -> BoxFuture<'_, Result<Value>>;
+    fn install_resources(
+        &self,
+        _binding: RemoteBinding,
+        _resources: crate::control_resources::GlobalResources,
+    ) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async { bail!("Control resource delivery is unavailable") })
+    }
     fn open(&self, binding: RemoteBinding) -> BoxFuture<'_, Result<Value>>;
     fn prepare(
         &self,
@@ -118,7 +125,10 @@ pub(crate) fn binding(s: &Service, environment: pot_core::EnvironmentRef) -> Res
     })
 }
 pub(crate) async fn open(s: &Service, binding: RemoteBinding) -> Result<()> {
-    let context = port(s)?.open(binding.clone()).await?;
+    let resources = crate::control_resources::snapshot(s)?;
+    let remote = port(s)?;
+    remote.open(binding.clone()).await?;
+    let context = remote.install_resources(binding.clone(), resources).await?;
     s.remote_context.lock().unwrap().insert(
         binding.environment.clone(),
         RemoteContext { binding, context },

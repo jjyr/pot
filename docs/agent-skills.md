@@ -5,11 +5,12 @@ design in [Composable runtimes](runtime-composition.md) makes Control authoritat
 for global user/builtin catalogs and task-bound versions. Execution nodes receive
 selected bundles and may cache them; they must not discover globals from their
 own user or builtin roots. Project skill discovery remains at the actual execution
-workspace. This distribution change is pending in #39.
+workspace. Control-selected global delivery is implemented for the remote
+environment adapter; remote Task Agent startup remains pending in #39.
 
 The implementation details below describe delivered standalone/local behavior,
-including the destination-global discovery that must be replaced for connected
-tasks. They are not the target remote resource-management design. Standalone App
+including local filesystem sources and Sandbox mount behavior. Connected-task
+discovery uses only project roots and the supplied Control snapshot. They are not the target remote resource-management design. Standalone App
 local mode retains its independent catalog. In the remote design, global creation,
 installation and updates belong to Control; task views are read-only and updates
 take effect for later launches. Project installations retain workspace permissions.

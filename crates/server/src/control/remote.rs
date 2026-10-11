@@ -284,6 +284,51 @@ impl RemoteEnvironment for Authority {
             Ok(json!({"items":items}))
         })
     }
+    fn install_resources(
+        &self,
+        binding: RemoteBinding,
+        resources: pot_runtime::control_resources::GlobalResources,
+    ) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move {
+            resources.validate()?;
+            let run = self.ensure_run(&binding).await?;
+            let response = self
+                .call(
+                    &binding.environment.runtime_id,
+                    Rpc::Resources {
+                        lease_id: run
+                            .lease_id
+                            .ok_or_else(|| anyhow::anyhow!("Remote lease missing"))?,
+                        resources,
+                    },
+                )
+                .await;
+            let context = match response {
+                Ok(context) => context,
+                Err(error) => {
+                    if error.downcast_ref::<RemoteRejection>().is_some() {
+                        self.waiting(&binding, None)?;
+                    } else {
+                        self.waiting(
+                            &binding,
+                            Some("等待远程机器接收 Control 资源；不会回退到本机资源"),
+                        )?;
+                    }
+                    return Err(error);
+                }
+            };
+            let key = run_key(&binding)?;
+            self.update(|book| {
+                book.client_runs
+                    .get_mut(&key)
+                    .ok_or_else(|| anyhow::anyhow!("Remote run missing"))?
+                    .context = Some(context.clone());
+                Ok(())
+            })?;
+            self.waiting(&binding, None)?;
+            Ok(context)
+        })
+    }
     fn open(&self, binding: RemoteBinding) -> BoxFuture<'_, Result<Value>> {
         Box::pin(async move {
             // A checkpoint may resume the same logical turn after confirmed cleanup.
