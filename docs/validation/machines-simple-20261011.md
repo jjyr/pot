@@ -40,3 +40,13 @@ blocked by ERR_BLOCKED_BY_CLIENT on localhost:19753. Automated tests and the WAS
 build do not establish manual browser acceptance. Remote desktop, installed-plugin
 transport, file delivery to the App machine, remote Agent runners, and three-node
 qualification remain incomplete in #39.
+
+## Later Web browser acceptance
+
+After Chrome site access was allowed, the latest Control Web fixture passed
+login, named Control assistant rendering, Machines Host expansion, View Tasks
+navigation and clearing the environment filter. The empty task list was used;
+Runtime tests establish populated-set filtering and pagination. The earlier
+ERR_BLOCKED_BY_CLIENT is resolved. See [Control Web acceptance](control-web-20261011.md#browser-acceptance-after-site-access-was-allowed)
+for the plugin digest fix and exact validation scope. Native click-through,
+remote desktop and file transport remain unverified or unimplemented as stated.

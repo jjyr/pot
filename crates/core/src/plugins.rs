@@ -131,12 +131,17 @@ impl PluginBundle {
         }
     }
     pub fn hash(&self) -> Result<String> {
-        Ok(
-            Sha256::digest(serde_json::to_vec(&json!([&self.manifest, &self.files]))?)
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect(),
-        )
+        let mut payload = json!([&self.manifest, &self.files]);
+        // JSON object order is not package content. App and standalone builds
+        // must produce the same identity, including nested tool schemas.
+        payload.sort_all_objects();
+        Self::payload_hash(&payload)
+    }
+    fn payload_hash(payload: &Value) -> Result<String> {
+        Ok(Sha256::digest(serde_json::to_vec(payload)?)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect())
     }
     pub fn validate(&self) -> Result<()> {
         let m = &self.manifest;
@@ -172,7 +177,14 @@ impl PluginBundle {
             self.files.values().map(String::len).sum::<usize>() <= 512 * 1024,
             "Plugin package too large"
         );
-        ensure!(self.hash()? == self.digest, "Plugin digest mismatch");
+        // Retain verified stored bundles created by the App before canonical
+        // hashing. Preserve JSON order during reads so their full payload can
+        // still be verified; never re-pin an unverified package.
+        ensure!(
+            self.hash()? == self.digest
+                || Self::payload_hash(&json!([&self.manifest, &self.files]))? == self.digest,
+            "Plugin digest mismatch"
+        );
         ensure!(
             !m.tools.is_empty() && m.tools.len() <= 16,
             "Invalid plugin tool count"
@@ -616,6 +628,44 @@ mod tests {
         settings.pin_plugins().unwrap();
         assert!(settings.plugin_for_tool("cua_repl").unwrap().is_none());
     }
+    #[test]
+    fn plugin_identity_survives_json_object_order_and_stored_app_bundles() {
+        let original = PluginBundle::builtin("computer-use").unwrap();
+        let mut reordered = original.clone();
+        fn reverse_objects(value: &mut Value) {
+            match value {
+                Value::Object(map) => {
+                    for child in map.values_mut() {
+                        reverse_objects(child);
+                    }
+                    let entries: Vec<_> = std::mem::take(map).into_iter().rev().collect();
+                    map.extend(entries);
+                }
+                Value::Array(items) => {
+                    for child in items {
+                        reverse_objects(child);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for tool in &mut reordered.manifest.tools {
+            reverse_objects(tool);
+        }
+        assert_eq!(original.hash().unwrap(), reordered.hash().unwrap());
+        reordered.validate().unwrap();
+        let mut stored = reordered;
+        stored.digest =
+            PluginBundle::payload_hash(&json!([&stored.manifest, &stored.files])).unwrap();
+        assert_ne!(stored.digest, stored.hash().unwrap());
+        let read: PluginBundle =
+            serde_json::from_str(&serde_json::to_string(&stored).unwrap()).unwrap();
+        read.validate().unwrap();
+        let mut tampered = read;
+        tampered.files.insert("index.mjs".into(), "changed".into());
+        assert!(tampered.validate().is_err());
+    }
+
     #[test]
     fn owner_import_pins_sources_and_preserves_replacement_identity() {
         let root = std::env::temp_dir().join(format!("pot-plugin-import-{}", std::process::id()));
