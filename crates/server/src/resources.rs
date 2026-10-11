@@ -93,7 +93,6 @@ pub(crate) struct Resources {
     routes: RwLock<Router>,
     config: RuntimeConfig,
     token: String,
-    notifications: Arc<std::sync::Mutex<Option<pot_runtime::Service>>>,
     pub(super) control: Arc<crate::control::Authority>,
 }
 fn persist(path: &Path, book: &Book) -> Result<()> {
@@ -203,7 +202,6 @@ impl Resources {
             routes: RwLock::new(routes),
             config,
             token,
-            notifications: Arc::new(std::sync::Mutex::new(None)),
             control,
         });
         {
@@ -219,7 +217,6 @@ impl Resources {
             if path.exists() {
                 persist(&path, &inner.book)?;
             }
-            *this.notifications.lock().unwrap() = inner.backend.optional_state();
             *this.routes.write().unwrap() = crate::hosting::backend_router(&inner.backend);
         }
         this.control.restore_listener(this.clone()).await?;
@@ -308,9 +305,6 @@ impl Resources {
                 }
             })
             .with_state(self.clone())
-    }
-    pub fn notification_source(&self) -> Arc<std::sync::Mutex<Option<pot_runtime::Service>>> {
-        self.notifications.clone()
     }
     pub async fn ensure_app_assistant(self: &Arc<Self>) -> Result<()> {
         if self.optional_state().await.is_some() {
@@ -476,7 +470,6 @@ async fn create(
         )
             .into_response();
     }
-    *s.notifications.lock().unwrap() = inner.backend.optional_state();
     *s.routes.write().unwrap() = crate::hosting::backend_router(&inner.backend);
     match result {
         Ok(value) => Json(value).into_response(),
@@ -594,51 +587,6 @@ mod tests {
         );
         resources.shutdown().await;
         drop(resources);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-    #[tokio::test]
-    async fn existing_notification_observers_follow_later_assistant_creation() {
-        let root =
-            std::env::temp_dir().join(format!("pot-resource-source-{}", uuid::Uuid::new_v4()));
-        let config = RuntimeConfig {
-            data: root.join("product"),
-            workspace: root.join("workspace"),
-        };
-        let backend = pot_runtime::initialize_composition(
-            config.clone(),
-            pot_runtime::host::Composition::Bare,
-            vec![],
-        )
-        .await
-        .unwrap();
-        backend.activate().unwrap();
-        let resources = Resources::open(backend, config).await.unwrap();
-        let observer = resources.notification_source();
-        assert!(observer.lock().unwrap().is_none());
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "authorization",
-            format!("Bearer {}", resources.token).parse().unwrap(),
-        );
-        let response = create(
-            State(resources.clone()),
-            headers,
-            Json(Create {
-                request_id: "assistant".into(),
-                resource: Resource::Assistant {
-                    name: "Assistant".into(),
-                },
-            }),
-        )
-        .await;
-        assert!(response.status().is_success());
-        assert_eq!(
-            observer.lock().unwrap().as_ref().unwrap().owner_id(),
-            "main"
-        );
-        resources.shutdown().await;
-        drop(resources);
-        drop(observer);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

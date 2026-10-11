@@ -100,3 +100,7 @@ Maintain documentation in English. Keep documentation consistent with the overal
 Remote Environment adapter (partial P3): [Owner approvals, destination rules, workspace continuity and connection UI, 2026-10-11](validation/remote-environment-20261011.md).
 
 Control membership (P3a): [Outward connection, sole Control and receipt recovery, 2026-10-11](validation/control-membership-20261011.md).
+
+Single Control App client (P3b): [Mode isolation, private configuration and native acceptance, 2026-10-11](validation/control-client-20261011.md).
+
+Explicit Control Web hosting (P3c): [Startup, fixed proxy and streaming validation, 2026-10-11](validation/control-web-20261011.md).

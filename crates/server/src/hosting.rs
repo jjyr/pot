@@ -22,6 +22,7 @@ impl Server {
     pub async fn embedded(mut config: ServerConfig) -> Result<Self> {
         config.bind = "127.0.0.1:0".into();
         config.composition = None;
+        config.web_control = None;
         Self::bind_mode(config, true).await
     }
     pub fn local_client(&self) -> crate::LocalClient {
@@ -36,7 +37,11 @@ impl Server {
         )
     }
     async fn bind_mode(config: ServerConfig, embedded: bool) -> Result<Self> {
-        // Bind first: listener conflicts must not initialize or recover product data.
+        // Validate the destination and bind listeners before initializing product data.
+        let web_router = match &config.web_control {
+            Some(control) => Some(crate::web_control::connect(control).await?),
+            None => None,
+        };
         let listener = tokio::net::TcpListener::bind(&config.bind).await?;
         let composition = match config.composition {
             Some(composition) => composition,
@@ -49,11 +54,8 @@ impl Server {
             None => pot_runtime::host::Composition::Bare,
         };
         let ts_hostname = std::env::var("POT_TAILSCALE_HOSTNAME").ok();
-        let use_ts = embedded || ts_hostname.is_some();
-        let access_config = if !embedded
-            && std::env::var_os("POT_ACCESS_ORIGIN").is_none()
-            && composition != pot_runtime::host::Composition::Assistant
-        {
+        let use_ts = web_router.is_some() && ts_hostname.is_some();
+        let access_config = if web_router.is_none() {
             None
         } else if use_ts {
             Some(crate::access::AccessConfig {
@@ -61,18 +63,12 @@ impl Server {
                 bind: "127.0.0.1:0".parse()?,
                 certificate: Default::default(),
                 private_key: Default::default(),
-                assets: std::env::var_os("POT_ACCESS_ASSETS")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|| {
-                        std::env::current_exe()
-                            .unwrap()
-                            .parent()
-                            .unwrap()
-                            .join("../Resources/runtime/mobile")
-                    }),
+                assets: crate::access::AccessConfig::assets_from_env(),
             })
         } else {
-            crate::access::AccessConfig::from_env()?
+            Some(crate::access::AccessConfig::from_env()?.ok_or_else(|| {
+                anyhow::anyhow!("Explicit Web UI requires POT_ACCESS_ORIGIN and listener settings")
+            })?)
         };
         anyhow::ensure!(
             access_config.is_none() || listener.local_addr()?.ip().is_loopback(),
@@ -134,7 +130,7 @@ impl Server {
                     return Err(error);
                 }
             };
-            *access.notifications.lock().unwrap() = backend.optional_state();
+            access.fixed_control = true;
             let (listener, tls) = access_listener.unwrap();
             if use_ts {
                 access.tailscale = Some(crate::access::tailscale::Tailscale::new(
@@ -182,8 +178,7 @@ impl Server {
             backend.ensure_app_assistant().await?;
         }
         if let Some((access, _, _)) = &mut access {
-            access.runtime = backend.router();
-            access.notifications = backend.notification_source();
+            access.runtime = web_router.expect("explicit Control router");
         }
         Ok(Self {
             backend,

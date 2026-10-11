@@ -40,6 +40,9 @@ pub(super) async fn proxy(
     State(mut a): State<Access>,
     mut req: Request,
 ) -> Result<Response, Failure> {
+    if a.fixed_control {
+        return Err(fail(StatusCode::NOT_IMPLEMENTED, "remote_desktop_pending"));
+    }
     a.capture_endpoint();
     let session = session(&a, &req)?;
     let opening = req.uri().path() == "/api/v1/desktop/sessions" && req.method() == Method::POST;

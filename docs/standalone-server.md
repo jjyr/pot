@@ -22,9 +22,13 @@ pot init
 pot serve
 ```
 
-`pot serve` runs in the foreground. Web access uses the separately configured
-`POT_ACCESS_ORIGIN` and listener settings; it is absent by default. With Web
-access configured, run `pot open` for automatic browser configuration,
+`pot serve` runs in the foreground without Web UI, even when listener settings
+exist. Enable it with `pot serve --ui --control https://CONTROL:19443` and
+`POT_CONTROL_TOKEN`; optionally supply a private CA file through `POT_CONTROL_CA`.
+The destination must authenticate as a standalone Control. Web requests always
+use this Control and never fall back to the hosting Runtime. The separately
+configured `POT_ACCESS_ORIGIN` controls the browser listener. Once explicitly
+started, run `pot open` for automatic browser configuration,
 or `pot access token` to configure the browser manually. `pot access qr` prints
 a connection QR containing the Token; do not share it.
 Localhost HTTP is a local secure-context
@@ -89,7 +93,7 @@ not import assistant instruction files or saved routing preferences.
 App creates its default assistant through the same resource API. New resource
 creation UI is deferred by user choice. Native management authority and
 Control membership remains separate; this endpoint is not a member execution
-authorization mechanism. Peer transport is partial P3 work; local task Agents
+authorization mechanism. Control transport is partial P3 work; local task Agents
 can use remote Host/Sandbox execution, and Control membership controls are shared
 by App and Web. Broader capability transports remain pending in Issue #39.
 
@@ -97,7 +101,7 @@ Web listener configuration remains separately explicit. Resource creation does
 not automatically start Web access. Lazy macOS Helper lifecycle and real VM
 qualification remain part of the outstanding environment deployment work.
 
-## Peer listener and enrollment (partial P3)
+## Control listener and membership (partial P3)
 
 Use native operator `pot api /api/v1/runtime/control` for Control identity and
 membership. POST exact JSON commands with `pot api PATH /absolute/path/request.json`.

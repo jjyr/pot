@@ -5,7 +5,8 @@ mod control;
 mod hosting;
 mod resources;
 mod routes;
-pub use config::{ServerConfig, default_root};
+mod web_control;
+pub use config::{ServerConfig, WebControlConfig, default_root};
 pub use hosting::Server;
 pub use routes::router;
 

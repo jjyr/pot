@@ -28,6 +28,7 @@ impl Node {
     async fn start() -> Self {
         let root = std::env::temp_dir().join(format!("pot-remote-task-{}", uuid::Uuid::new_v4()));
         let server = Server::bind(ServerConfig {
+            web_control: None,
             composition: Some(Composition::Bare),
             runtime: RuntimeConfig {
                 data: root.join("data"),

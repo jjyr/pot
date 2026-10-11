@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve                      Run Runtime; callers create resources\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|interrupt ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
+const HELP: &str = "Pot CLI\nUsage: pot [--root PATH] <command>\n  init                       Create an isolated instance\n  serve [--ui --control URL] Run Runtime; explicit Web UI targets Control\n  sandbox enroll-macos ID BUNDLE    Enroll a stopped owner-prepared VM\n  status | doctor | open     Inspect/connect to the local instance\n  access status|token|regenerate-token|qr|enable|disable|connect|disconnect\n  chat TEXT                  Submit a main Agent message\n  tasks list|show ID|interrupt ID|cancel ID\n  config get SECTION | set SECTION JSON_FILE\n  config server JSON_FILE    Persist listener/certificate settings (restart required)\n  api PATH [JSON_FILE]       Local API query or mutation\n  service install|start|stop|uninstall   macOS user service\nSections: providers, agent, routing, usage-policy\nRemote clients configure a persistent access Token; this CLI manages the local instance.";
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--version") {
@@ -32,7 +32,7 @@ fn main() -> Result<()> {
         std::env::set_var("POT_WORKSPACE", root.join("agent-workspace"));
     }
     unsafe {
-        pot_server::apply_settings(&root, true)?;
+        pot_server::apply_settings(&root)?;
     }
     if let Some(resources) = runtime_resources() {
         unsafe {
@@ -139,15 +139,29 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
             print(api(root,"/api/v1/sandboxes",Some(json!({"action":"create","sandbox_id":id,"provider":pot_sandbox_macos_apple_vm::PROVIDER_ID}))).await?)
         }
         "serve" => {
-            ensure!(args.len() == 1, "Usage: pot serve");
-            let config = pot_server::ServerConfig::from_env();
+            let mut config = pot_server::ServerConfig::from_env();
+            if args.len() > 1 {
+                ensure!(
+                    args.len() == 4 && args[1] == "--ui" && args[2] == "--control",
+                    "Usage: pot serve [--ui --control URL]"
+                );
+                let token = std::env::var("POT_CONTROL_TOKEN")
+                    .map_err(|_| anyhow::anyhow!("Web UI requires POT_CONTROL_TOKEN"))?;
+                let ca_pem = std::env::var_os("POT_CONTROL_CA")
+                    .map(std::fs::read_to_string)
+                    .transpose()?;
+                config.web_control = Some(pot_server::WebControlConfig {
+                    url: args[3].clone(),
+                    token,
+                    ca_pem,
+                });
+            }
+            let ui_enabled = config.web_control.is_some();
             let server = pot_server::Server::bind(config).await?;
             println!(
                 "Pot instance: {}\nWeb: {}\nAccess Token: pot --root '{}' access token",
                 root.display(),
-                if std::env::var_os("POT_ACCESS_ORIGIN").is_none()
-                    && std::env::var_os("POT_TAILSCALE_HOSTNAME").is_none()
-                {
+                if !ui_enabled {
                     "disabled (Runtime management only)".into()
                 } else if std::env::var_os("POT_TAILSCALE_HOSTNAME").is_some() {
                     "embedded Tailscale (pot access connect, then pot access enable)".into()
@@ -171,7 +185,7 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
             let state = api(root, "/api/v1/runtime", None).await;
             let assets = std::env::var_os("POT_ACCESS_ASSETS").map(PathBuf::from);
             print(
-                json!({"instance":root,"server_running":state.is_ok(),"web_origin":std::env::var("POT_ACCESS_ORIGIN")?,"web_embedded":cfg!(feature="embedded-web"),"assets_directory":assets,"sandbox_helper_running":root.join("helper.sock").exists(),"note":"Sandbox execution requires a supported provider; no host execution fallback"}),
+                json!({"instance":root,"server_running":state.is_ok(),"web_origin":std::env::var("POT_ACCESS_ORIGIN").ok(),"web_embedded":cfg!(feature="embedded-web"),"assets_directory":assets,"sandbox_helper_running":root.join("helper.sock").exists(),"note":"Sandbox execution requires a supported provider; no host execution fallback"}),
             )
         }
         "open" => {

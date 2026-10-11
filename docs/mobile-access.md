@@ -1,28 +1,19 @@
 # Browser access
 
-App has separate **Web UI** and **Tailscale** settings. New instances start with
-both LAN and Tailscale browser access disabled. In Web UI, enable LAN access to
-serve HTTP on the Host's active private IPv4 addresses (port 17701), or enable
-Tailscale access after connecting the embedded node in Settings → Tailscale.
-The two browser listeners can run together. Tailscale access defaults to HTTP;
-its optional HTTPS switch requires MagicDNS and HTTPS Certificates in Tailscale
-DNS settings. Pot provisions and renews tailnet certificates automatically.
-Other devices need tailnet connectivity and ACL permission. No system Tailscale
-installation, certificate paths, port forwarding or Funnel is needed on the App host.
-Connecting Tailscale does not enable Web UI. Disabling Web UI does not disconnect
-Tailscale. Both browser entry points retain the same persistent instance Token.
-HTTP does not encrypt LAN traffic; tailnet HTTP is network-encrypted but is not a
-browser secure context. Installation, notifications and clipboard capabilities
-remain subject to browser secure-context requirements.
-CLI retains localhost HTTP and owner-terminated HTTPS, and optionally embeds
-Tailscale. See [Web deployment](web-ui-deployment.md) and [Standalone Server](standalone-server.md).
-Native Runtime and guest brokers stay private.
+Web UI is hosted explicitly with `pot serve --ui --control URL` and a
+server-held Control credential. Plain Runtime startup and the App's embedded
+Runtime have no browser endpoint. The Web UI always uses its configured Control
+and has no local/remote switch. See [Web deployment](web-ui-deployment.md) for
+listener, certificate and credential setup. Native Runtime and guest brokers stay
+private. Remote desktop and push notification transport remain pending in #39;
+the sections below describe reusable browser authentication and transport mechanics,
+not delivery of those remote features.
 
 ## Access Token
 
-Each instance automatically generates a persistent random 256-bit Token. Click
-App's access address or choose Scan to connect. Both use `#access_token=...` to
-configure the browser automatically. Copy address copies the plain URL. Connection
+Each explicit Web host generates a persistent random 256-bit browser Token.
+`pot open` and `pot access qr` use `#access_token=...` to configure the browser
+automatically. This Token is separate from the server-held Control credential. Connection
 links, QR codes and their screenshots contain full access credentials: do not share.
 
 The browser removes the fragment immediately, verifies and saves the Token in
@@ -33,7 +24,7 @@ SameSite=Strict signed cookies support desktop navigation and WebSockets. Cookie
 contain a random browser identity and HMAC, not the Token. Browser storage compromise
 can expose this bearer credential; clearing browser storage requires configuration again.
 
-App offers Show, Copy and Regenerate Token. CLI uses `pot access token`,
+CLI uses `pot access token`,
 `pot access regenerate-token`, `pot access qr` and `pot open`. Regeneration invalidates
 all old Tokens/cookies, ends protected streams/desktops and clears push subscriptions.
 Browser More offers Change access Token and Clear local Token. There is no per-browser
@@ -51,11 +42,10 @@ hour. Token regeneration or disabling Web access terminates their live display
 streams and releases input. Desktop assets ship with the Web release; private
 broker URLs, tokens and addresses are never exposed by inventory.
 
-App shutdown closes its embedded node. Restart restores previously enabled access;
-login/certificate failures do not stop local chat/tasks. Disconnecting Tailscale closes only tailnet access and preserves Web UI preferences
-for reconnection; LAN access continues. Closing one listener invalidates its live
-authorization guards without disabling the other listener. Both listeners stop when
-App quits. HTTPS is available only on the tailnet; no public Funnel endpoint is configured.
+Stopping the Web host closes its browser listener. Restart restores the browser
+Token but still requires explicit UI startup and the Control destination. Closing
+App shuts down its local Runtime; it does not stop the independent Control or Web
+host. No public Funnel endpoint is configured.
 
 The browser runs GPUI Kit 0.7.1 WASM. The authentication shell and same-origin
 transport adapter are JS. GPUI reuses `pot-ui` Chat/Tasks/Sandbox/Usage components, Markdown, page/chat state,

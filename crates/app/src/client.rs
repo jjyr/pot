@@ -64,9 +64,6 @@ pub struct View {
     pub assistant_saved_owner: Option<String>,
     pub assistant_pending: bool,
     pub permissions: Value,
-    pub access: Value,
-    pub access_notice: String,
-    pub access_pending: bool,
     pub usage_query: Option<(String, u32, usize, String)>,
     pub usage: Value,
     pub usage_error: String,
@@ -428,13 +425,6 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             }
         }
     }
-    let access = agent
-        .get("/api/v1/access")
-        .call()
-        .ok()
-        .and_then(|mut r| r.body_mut().read_json::<Value>().ok())
-        .unwrap_or(Value::Null);
-
     let permissions: Value = agent
         .get("/api/v1/permissions")
         .call()
@@ -474,7 +464,6 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         v.cached_tasks.clear();
     }
     v.runtime = directory;
-    v.access = access;
     v.permissions = permissions;
     v.assistants = assistants;
     v.assistant_rules = assistant_rules;
@@ -854,35 +843,6 @@ impl Client {
                 }
             }
             let _ = refresh.try_send(());
-            crate::wake_ui();
-        });
-    }
-    pub fn access_command(&self, body: Value) {
-        let mut view = self.view.lock().unwrap();
-        if view.access_pending {
-            return;
-        }
-        view.access_pending = true;
-        let v = self.view.clone();
-        std::thread::spawn(move || {
-            let result = (|| -> Result<String, String> {
-                crate::backend::ready()?;
-                let agent = requests(&v)
-                    .timeout_global(Some(Duration::from_secs(90)))
-                    .build()
-                    .new_agent();
-                let mut reply = agent
-                    .post("/api/v1/access")
-                    .send_json(body)
-                    .map_err(|e| e.to_string())?;
-                let result: Value = reply.body_mut().read_json().map_err(|e| e.to_string())?;
-                let _ = result;
-                Ok(String::new())
-            })();
-            let mut view = v.lock().unwrap();
-            view.access_pending = false;
-            view.access_notice = result.unwrap_or_else(|e| e);
-            drop(view);
             crate::wake_ui();
         });
     }

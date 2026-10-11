@@ -40,8 +40,10 @@ assistant databases or model credentials.
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
-UI is deferred. Web UI will require explicit startup and a configured Control
-address, with no local/remote switch; see #39 for implementation status.
+UI is deferred. Web UI requires `pot serve --ui --control URL`, a server-held
+Control credential and explicit browser listener settings. It has no local/remote
+switch. App no longer hosts or configures a browser endpoint. Remote desktop and
+remote notification transport remain pending; see #39 for implementation status.
 
 ## Membership and transport
 
