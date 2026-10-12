@@ -809,5 +809,12 @@
   "navigation.back-schedules": "Back to Schedules (⌘[)",
   "navigation.back-conversation": "Back to conversation (⌘[)",
   "navigation.back-usage": "Back to Usage (⌘[)",
-  "navigation.conversation-usage": "Conversation Usage"
+  "navigation.conversation-usage": "Conversation Usage",
+  "onboarding.start": "Start using Pot",
+  "onboarding.choose-connection": "Configure AI on this Mac, or connect to an existing Runtime Control server.",
+  "onboarding.connect-server": "Connect server",
+  "onboarding.desktop-failure": "The task Agent failed because no desktop environment was found.",
+  "onboarding.create-desktop": "Create desktop Sandbox",
+  "onboarding.connect-desktop": "Connect desktop environment",
+  "onboarding.server-chat": "Open server chat"
 }

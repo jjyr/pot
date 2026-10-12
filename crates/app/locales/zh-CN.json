@@ -809,5 +809,12 @@
   "navigation.back-schedules": "返回定时任务列表（⌘[）",
   "navigation.back-conversation": "返回对话（⌘[）",
   "navigation.back-usage": "返回用量（⌘[）",
-  "navigation.conversation-usage": "对话用量"
+  "navigation.conversation-usage": "对话用量",
+  "onboarding.start": "开始使用 Pot",
+  "onboarding.choose-connection": "在本机配置 AI，或连接已有的 Runtime Control 服务器。",
+  "onboarding.connect-server": "连接服务器",
+  "onboarding.desktop-failure": "任务 Agent 因为找不到桌面环境失败。",
+  "onboarding.create-desktop": "创建桌面 Sandbox",
+  "onboarding.connect-desktop": "接入桌面环境",
+  "onboarding.server-chat": "打开服务器聊天"
 }
