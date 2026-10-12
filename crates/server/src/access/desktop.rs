@@ -168,9 +168,12 @@ pub(super) async fn asset(
         return Err(fail(StatusCode::NOT_FOUND, "desktop_asset"));
     }
     let name = format!("desktop-assets/{path}");
-    let data = if let Some(bytes) = super::routes::embedded_asset(&name) {
-        bytes.to_vec()
-    } else {
+    if let Some(response) =
+        super::assets::response(&name, "text/javascript; charset=utf-8", req.headers())
+    {
+        return Ok(response);
+    }
+    let data = {
         let root = a
             .assets
             .join("desktop-assets")

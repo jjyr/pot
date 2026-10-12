@@ -1,37 +1,84 @@
 #!/usr/bin/env python3
-"""Build the pinned GPUI WASM client; run through mise for the native toolchain."""
+"""Build and cache Web assets; Cargo uses an isolated target to avoid recursive locks."""
 
 from pathlib import Path
-import json
-import hashlib
-import tarfile
+import argparse
+import fcntl
 import gzip
+import hashlib
+import json
 import os
+import runpy
 import shutil
 import subprocess
+import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
-os.chdir(ROOT)
-subprocess.run(["python3", ROOT / "scripts/localize-web", "--check"], check=True)
 NIGHTLY = "nightly-2026-10-06"
 VERSION = "0.2.129"
-TOOL = ROOT / ".local/mobile-tools/bin/wasm-bindgen"
-subprocess.run(
-    [
-        "rustup",
-        "toolchain",
-        "install",
-        NIGHTLY,
-        "--profile",
-        "minimal",
-        "--target",
-        "wasm32-unknown-unknown",
-    ],
-    check=True,
-)
-if not TOOL.exists() or VERSION not in subprocess.check_output([TOOL, "--version"], text=True):
+helpers = runpy.run_path(str(ROOT / "scripts/package-web-assets"))
+sources = helpers["sources"]
+read_manifest = helpers["read_manifest"]
+write_changed = helpers["write_changed"]
+payloads_valid = helpers["payloads_valid"]
+digest = helpers["digest"]
+
+
+def child_environment(cache):
+    env = dict(os.environ)
+    # Cargo's native target/compiler flags must not leak into the WASM build.
+    for key in [
+        "RUSTC",
+        "RUSTDOC",
+        "RUSTUP_TOOLCHAIN",
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_TARGET",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_MAKEFLAGS",
+        "MAKEFLAGS",
+        "MFLAGS",
+    ]:
+        env.pop(key, None)
+    env["CARGO_TARGET_DIR"] = str(cache / "cargo")
+    return env
+
+
+def prepare_toolchain(cache, env):
+    installed = subprocess.run(
+        ["rustup", "target", "list", "--toolchain", NIGHTLY, "--installed"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if installed.returncode != 0 or "wasm32-unknown-unknown" not in installed.stdout.splitlines():
+        subprocess.run(
+            [
+                "rustup",
+                "toolchain",
+                "install",
+                NIGHTLY,
+                "--profile",
+                "minimal",
+                "--target",
+                "wasm32-unknown-unknown",
+            ],
+            check=True,
+            env=env,
+        )
+    for tool in [cache / "tools/bin/wasm-bindgen", ROOT / ".local/mobile-tools/bin/wasm-bindgen"]:
+        if (
+            tool.is_file()
+            and subprocess.check_output([tool, "--version"], text=True).strip()
+            == "wasm-bindgen " + VERSION
+        ):
+            return tool
     subprocess.run(
         [
+            "rustup",
+            "run",
+            NIGHTLY,
             "cargo",
             "install",
             "wasm-bindgen-cli",
@@ -39,99 +86,162 @@ if not TOOL.exists() or VERSION not in subprocess.check_output([TOOL, "--version
             VERSION,
             "--locked",
             "--root",
-            ".local/mobile-tools",
+            cache / "tools",
+            "--target-dir",
+            cache / "tool-cargo",
             "-j",
             "4",
         ],
         check=True,
+        env=env,
     )
-subprocess.run(
-    [
-        "cargo",
-        "+" + NIGHTLY,
-        "build",
-        "--release",
-        "--locked",
-        "-p",
-        "pot-mobile",
-        "--target",
-        "wasm32-unknown-unknown",
-        "-j",
-        "4",
-    ],
-    check=True,
-)
-dist = ROOT / "crates/web-ui/dist"
-dist.mkdir(parents=True, exist_ok=True)
-for asset in (ROOT / "crates/web-ui/web").iterdir():
-    shutil.copy2(asset, dist / asset.name)
-# Ship the pinned viewer JS with standalone Web releases too.
-archive = ROOT / ".local/container-image/novnc-1.7.0.tar.gz"
-archive.parent.mkdir(parents=True, exist_ok=True)
-if not archive.exists():
+    return cache / "tools/bin/wasm-bindgen"
+
+
+def build(cache, dist):
+    env = child_environment(cache)
+    tool = prepare_toolchain(cache, env)
+    subprocess.run(["python3", ROOT / "scripts/localize-web", "--check"], check=True, env=env)
     subprocess.run(
         [
-            "curl",
-            "--fail",
-            "--location",
-            "--retry",
-            "2",
-            "https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz",
-            "-o",
-            archive,
+            "rustup",
+            "run",
+            NIGHTLY,
+            "cargo",
+            "build",
+            "--manifest-path",
+            ROOT / "Cargo.toml",
+            "--release",
+            "--locked",
+            "-p",
+            "pot-mobile",
+            "--target",
+            "wasm32-unknown-unknown",
+            "-j",
+            "4",
+        ],
+        check=True,
+        env=env,
+    )
+    dist.mkdir(parents=True, exist_ok=True)
+    for asset in (ROOT / "crates/web-ui/web").iterdir():
+        shutil.copy2(asset, dist / asset.name)
+    # Ship the pinned viewer JS with standalone Web releases too.
+    archive = cache / "novnc-1.7.0.tar.gz"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    if not archive.exists():
+        subprocess.run(
+            [
+                "curl",
+                "--fail",
+                "--location",
+                "--retry",
+                "2",
+                "https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz",
+                "-o",
+                archive,
+            ],
+            check=True,
+        )
+    if (
+        hashlib.sha256(archive.read_bytes()).hexdigest()
+        != "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6"
+    ):
+        raise SystemExit("noVNC checksum mismatch")
+    viewer = dist / "desktop-assets"
+    shutil.rmtree(viewer, ignore_errors=True)
+    with tarfile.open(archive) as tar:
+        for member in tar.getmembers():
+            relative = Path(*Path(member.name).parts[1:])
+            if member.isfile() and relative.suffix == ".js" and ".." not in relative.parts:
+                dest = viewer / relative
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(tar.extractfile(member).read())
+    # Opaque cream background: let the OS apply its own Home Screen mask.
+    shutil.copy2(ROOT / "crates/app/assets/PotHomeScreen.png", dist / "icon.png")
+    for size in [192, 512]:
+        shutil.copy2(
+            ROOT / f"crates/app/assets/PotHomeScreen-{size}.png", dist / f"icon-{size}.png"
+        )
+    shutil.copy2(ROOT / "crates/web-ui/fonts/IBMPlexSans-Regular.ttf", dist / "font.ttf")
+    shutil.copy2(ROOT / "crates/web-ui/fonts/OFL.txt", dist / "OFL.txt")
+    target = cache / "cargo"
+    subprocess.run(
+        [
+            tool,
+            target / "wasm32-unknown-unknown/release/pot_mobile.wasm",
+            "--target",
+            "web",
+            "--out-dir",
+            dist / "pkg",
+            "--out-name",
+            "pot_mobile",
         ],
         check=True,
     )
-if (
-    hashlib.sha256(archive.read_bytes()).hexdigest()
-    != "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6"
-):
-    raise SystemExit("noVNC checksum mismatch")
-viewer = dist / "desktop-assets"
-shutil.rmtree(viewer, ignore_errors=True)
-with tarfile.open(archive) as tar:
-    for member in tar.getmembers():
-        relative = Path(*Path(member.name).parts[1:])
-        if member.isfile() and relative.suffix == ".js" and ".." not in relative.parts:
-            dest = viewer / relative
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(tar.extractfile(member).read())
-# Opaque cream background: let the OS apply its own Home Screen mask.
-shutil.copy2(ROOT / "crates/app/assets/PotHomeScreen.png", dist / "icon.png")
-for size in [192, 512]:
-    shutil.copy2(ROOT / f"crates/app/assets/PotHomeScreen-{size}.png", dist / f"icon-{size}.png")
-shutil.copy2(ROOT / "crates/web-ui/fonts/IBMPlexSans-Regular.ttf", dist / "font.ttf")
-shutil.copy2(ROOT / "crates/web-ui/fonts/OFL.txt", dist / "OFL.txt")
-target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
-subprocess.run(
-    [
-        TOOL,
-        target / "wasm32-unknown-unknown/release/pot_mobile.wasm",
-        "--target",
-        "web",
-        "--out-dir",
-        dist / "pkg",
-        "--out-name",
-        "pot_mobile",
-    ],
-    check=True,
-)
-print(f"Mobile assets: {dist}")
 
-for name in ["pkg/pot_mobile_bg.wasm", "pkg/pot_mobile.js"]:
-    path = dist / name
-    path.with_suffix(path.suffix + ".gz").write_bytes(
-        gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)
-    )
+    for name in ["pkg/pot_mobile_bg.wasm", "pkg/pot_mobile.js"]:
+        path = dist / name
+        path.with_suffix(path.suffix + ".gz").write_bytes(
+            gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)
+        )
 
-locales = {
-    locale: {
-        key: value
-        for key, value in json.loads(
-            (ROOT / f"crates/app/locales/{locale}.json").read_text()
-        ).items()
-        if key.startswith(("mobile.", "web."))
+    locales = {
+        locale: {
+            key: value
+            for key, value in json.loads(
+                (ROOT / f"crates/app/locales/{locale}.json").read_text()
+            ).items()
+            if key.startswith(("mobile.", "web."))
+        }
+        for locale in sorted(path.stem for path in (ROOT / "crates/app/locales").glob("*.json"))
     }
-    for locale in sorted(path.stem for path in (ROOT / "crates/app/locales").glob("*.json"))
-}
-(dist / "locales.json").write_text(json.dumps(locales, ensure_ascii=False))
+    (dist / "locales.json").write_text(json.dumps(locales, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "pot-web",
+    )
+    args = parser.parse_args()
+    cache = args.cache_dir.resolve()
+    cache.mkdir(parents=True, exist_ok=True)
+    # Serialize standalone builds and simultaneous debug/release Cargo builds.
+    with (cache / "build.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if shutil.which("brotli") is None:
+            raise SystemExit(
+                "Brotli CLI is required for web-ui. Install brotli (developers: mise install), or use --no-default-features."
+            )
+        dist = cache / "dist"
+        inputs = sources()
+        manifest = read_manifest(cache / "raw-manifest.json")
+        if manifest.get("sources") == inputs and payloads_valid(dist, manifest.get("assets", {})):
+            print("Web build: cache hit; skipping WASM and asset generation", flush=True)
+        else:
+            print(
+                "Web build: inputs changed or cache missing; building WASM and assets", flush=True
+            )
+            # Remove stale files; compressed cache remains available for per-file reuse.
+            shutil.rmtree(dist, ignore_errors=True)
+            build(cache, dist)
+            entries = {
+                p.relative_to(dist).as_posix(): digest(p.read_bytes())
+                for p in sorted(dist.rglob("*"))
+                if p.is_file()
+            }
+            write_changed(
+                cache / "raw-manifest.json",
+                (
+                    json.dumps({"sources": inputs, "assets": entries}, sort_keys=True) + "\n"
+                ).encode(),
+            )
+        helpers["compress"](dist, cache / "compressed")
+        print(f"Web assets: {dist}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

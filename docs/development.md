@@ -43,7 +43,7 @@ The Release workflow runs for numeric `vMAJOR.MINOR.PATCH` tags. Manual dispatch
 can retry an existing tag. Before the first release, configure:
 
 - A native Apple Silicon macOS 26+ self-hosted runner with labels `macOS`, `ARM64`,
-  and `pot-release`, Xcode/Swift 6.2+, mise, and GitHub CLI. Sandbox image construction
+  and `pot-release`, Xcode/Swift 6.2+, mise (including its pinned Brotli tool), and GitHub CLI. Sandbox image construction
   requires Apple Virtualization support; use a dedicated runner checkout.
 - Repository secret `HOMEBREW_TAP_TOKEN` with contents read/write access to
   `jjyr/homebrew-tap` to publish `Casks/pot.rb` automatically.
@@ -56,6 +56,9 @@ Application user data is retained on uninstall.
 
 ## Standalone Server (development entry point)
 
+For end-user installation with `cargo install --git` and the Control/Runner
+setup procedures, see [Server installation](deployment.md#install-server).
+
 Build and start the backend without App/Helper. Paths belong to the Server machine. Use a separate data directory rather than opening active App/VM data.
 
 ```sh
@@ -66,6 +69,48 @@ POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants and execution environments through the resource API; enable Web UI explicitly with its fixed Control address. Unconfigured assistants offer AI Configuration. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
 
 App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](deployment.md) for CLI installation, local OS authority and packaging.
+
+The `pot-server` package enables the optional `web-ui` feature by default.
+Its build script generates and compresses the frontend before embedding it.
+`--no-default-features` skips Web tooling and resources completely. There is no
+separate compression feature. `POT_ACCESS_ASSETS` remains the external-directory
+fallback for builds without embedded assets.
+
+Development uses `"conda:brotli-bin" = "1.2.0"` in `mise.toml`; run `mise install`.
+This installs the actual Brotli CLI, not a Rust compression implementation, and
+requires no separately installed Conda. Standalone Cargo users must install the
+CLI themselves. Missing Brotli produces an actionable error.
+
+`mise run build:mobile` and Cargo's build script use the same cache under
+`<Cargo target directory>/pot-web/`. Source/lockfile fingerprints validate the
+WASM/static asset cache; raw and compressed payload hashes detect missing or
+corrupt files. Brotli version and quality are part of the compression cache key.
+Unchanged assets are reused individually. Generated files stay in the ignored
+build directory and must not be committed. `mise run test:web-assets` checks
+reuse, invalidation, corruption recovery and missing-tool diagnostics.
+
+The first build uses rustup to prepare the pinned nightly WASM target and
+wasm-bindgen CLI, then obtains checksum-verified noVNC sources. Nested Cargo
+builds use a separate target directory and native compiler flags are removed to
+avoid lock contention and cross-target contamination. A cache lock serializes
+simultaneous frontend builds. CI installs Brotli through mise too.
+
+Brotli provides a larger size reduction than JS minification or `wasm-opt -Oz` on
+the measured client; those additional optimizers are not part of the build.
+The comparison and qualification are recorded in
+[Web assets validation](validation/embedded-web-assets-20261012.md).
+
+To build a CLI with embedded Web UI and the Tailscale library from this checkout:
+
+```sh
+mise exec -- python scripts/build-cli
+```
+
+The local archive under `.local/releases/` contains `bin/pot`, the Tailscale
+library and builtin skills. Extract it into a chosen prefix and add its `bin`
+directory to PATH. This is a developer build artifact, not a published Server
+download. Enable Web hosting through the [explicit Web UI setup](deployment.md#explicit-web-ui).
+MacOS Sandbox helpers/resources require additional provider setup.
 
 ## Mobile browser pilot
 
