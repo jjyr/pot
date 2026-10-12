@@ -276,3 +276,60 @@ async fn public_inventory_keeps_broker_secrets_private() {
         assert!(!data.to_string().contains(secret));
     }
 }
+
+#[cfg(feature = "embedded-web")]
+#[tokio::test]
+async fn embedded_web_works_without_an_asset_directory() {
+    let f = Fixture::new();
+    // The fixture has no frontend files: every response must come from the binary.
+    for (path, mime) in [
+        ("/", "text/html; charset=utf-8"),
+        ("/pkg/pot_mobile.js", "text/javascript"),
+        ("/pkg/pot_mobile_bg.wasm", "application/wasm"),
+        ("/font.ttf", "font/ttf"),
+        ("/locales.json", "application/json"),
+        ("/icon.png", "image/png"),
+    ] {
+        let encoded = public_router(f.a.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("accept-encoding", "br")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(encoded.status(), StatusCode::OK, "{path}");
+        assert_eq!(encoded.headers()["content-type"], mime);
+        assert_eq!(encoded.headers()["content-encoding"], "br");
+        let bytes = to_bytes(encoded.into_body(), 32 * 1024 * 1024)
+            .await
+            .unwrap();
+        let mut decoded = Vec::new();
+        std::io::Read::read_to_end(
+            &mut brotli_decompressor::Decompressor::new(&bytes[..], 4096),
+            &mut decoded,
+        )
+        .unwrap();
+        let identity = public_router(f.a.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("accept-encoding", "br;q=0, identity")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(identity.status(), StatusCode::OK);
+        assert!(identity.headers().get("content-encoding").is_none());
+        assert_eq!(
+            to_bytes(identity.into_body(), 32 * 1024 * 1024)
+                .await
+                .unwrap()
+                .as_ref(),
+            decoded
+        );
+    }
+}

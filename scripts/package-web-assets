@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Package checked-in Brotli Web assets, or check source and payload fingerprints."""
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+DEST = ROOT / "crates/server/web-assets"
+NAMES = [
+    "index.html",
+    "locales.json",
+    "OFL.txt",
+    "sw.js",
+    "manifest.json",
+    "icon.png",
+    "icon-192.png",
+    "icon-512.png",
+    "install.js",
+    "auth.js",
+    "style.css",
+    "pkg/pot_mobile.js",
+    "pkg/pot_mobile_bg.wasm",
+    "font.ttf",
+]
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def sources():
+    paths = [
+        ROOT / name
+        for name in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "scripts/build-mobile",
+            "scripts/localize-web",
+            "scripts/package-web-assets",
+            "mise.toml",
+            "crates/sandbox-images/linux/default/index.template.html",
+            "crates/app/assets/PotHomeScreen.png",
+            "crates/app/assets/PotHomeScreen-192.png",
+            "crates/app/assets/PotHomeScreen-512.png",
+        ]
+    ]
+    for directory in [
+        "crates/web-ui",
+        "crates/ui",
+        "crates/core",
+        "crates/protocol",
+        "crates/localization",
+        "crates/app/locales",
+        "desktop",
+    ]:
+        paths.extend(
+            p
+            for p in (ROOT / directory).rglob("*")
+            if p.is_file()
+            and not {"dist", "target", "__pycache__"}.intersection(p.relative_to(ROOT).parts)
+        )
+    return {p.relative_to(ROOT).as_posix(): digest(p.read_bytes()) for p in sorted(set(paths))}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    if args.check:
+        manifest = json.loads((DEST / "manifest.json").read_text())
+        current = sources()
+        previous = manifest["sources"]
+        changed = sorted(
+            name
+            for name in current.keys() | previous.keys()
+            if current.get(name) != previous.get(name)
+        )
+        if changed:
+            raise SystemExit("Stale Web assets; run mise run build:mobile:\n" + "\n".join(changed))
+        actual = {p.relative_to(DEST).as_posix() for p in DEST.rglob("*.br")}
+        assert actual == {name + ".br" for name in manifest["assets"]}, "Asset inventory mismatch"
+        assert set(NAMES) <= manifest["assets"].keys(), "Missing required Web assets"
+        for name, metadata in manifest["assets"].items():
+            data = (DEST / (name + ".br")).read_bytes()
+            assert (
+                len(data) == metadata["compressed_bytes"] and digest(data) == metadata["sha256"]
+            ), name
+        print("Embedded Web assets match sources and checksums")
+        return
+
+    version = subprocess.check_output(["brotli", "--version"], text=True).strip()
+    if version != "brotli 1.2.0":
+        raise SystemExit(f"Expected brotli 1.2.0, got {version}")
+    dist = ROOT / "crates/web-ui/dist"
+    names = sorted(
+        NAMES + [p.relative_to(dist).as_posix() for p in (dist / "desktop-assets").rglob("*.js")]
+    )
+    assert any(name.startswith("desktop-assets/") for name in names), "Missing noVNC assets"
+    manifest = {
+        "format": 1,
+        "encoding": "br",
+        "compressor": version,
+        "quality": 11,
+        "sources": sources(),
+        "assets": {},
+    }
+    DEST.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=DEST.parent) as temporary:
+        staging = Path(temporary)
+        for name in names:
+            raw = (dist / name).read_bytes()
+            output = staging / (name + ".br")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                [
+                    "brotli",
+                    "--quality=11",
+                    "--no-copy-stat",
+                    str(dist / name),
+                    "--output=" + str(output),
+                ],
+                check=True,
+            )
+            encoded = output.read_bytes()
+            decoded = subprocess.check_output(["brotli", "--decompress", "--stdout", str(output)])
+            assert decoded == raw, f"Compression round-trip failed: {name}"
+            manifest["assets"][name] = {
+                "sha256": digest(encoded),
+                "raw_sha256": digest(raw),
+                "compressed_bytes": len(encoded),
+                "raw_bytes": len(raw),
+            }
+        (staging / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        )
+        if DEST.exists():
+            shutil.rmtree(DEST)
+        shutil.copytree(staging, DEST)
+    total = sum(item["compressed_bytes"] for item in manifest["assets"].values())
+    print(f"Embedded Web assets: {total:,} bytes ({total / 2**20:.2f} MiB)")
+
+
+if __name__ == "__main__":
+    main()

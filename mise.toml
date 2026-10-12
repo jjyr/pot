@@ -161,6 +161,10 @@ run = "python scripts/localize-web"
 description = "Build the pinned nightly GPUI Web/WASM app and browser assets"
 run = "python scripts/build-mobile"
 
+[tasks."check:web-assets"]
+description = "Verify embedded Web assets match current sources and checksums"
+run = "python scripts/package-web-assets --check"
+
 [tasks."test:ui"]
 description = "Test portable shared UI state and locale contracts"
 run = "cargo test --locked -p pot-ui -j 4"

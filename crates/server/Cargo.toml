@@ -7,7 +7,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[build-dependencies]
+serde_json.workspace = true
+
 [dependencies]
+brotli-decompressor = "5.0.3"
 pot-control.workspace = true
 pot-runner.workspace = true
 pot-sandbox.workspace = true
@@ -50,4 +54,5 @@ ece = "2"
 rcgen = "0.14"
 
 [features]
+default = ["embedded-web"]
 embedded-web = []

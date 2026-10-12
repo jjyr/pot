@@ -1,0 +1,677 @@
+{
+  "assets": {
+    "OFL.txt": {
+      "compressed_bytes": 1408,
+      "raw_bytes": 4362,
+      "raw_sha256": "d741e57d5f865e294df801f96b7b5161a88b211df65887e4358d271c9fc5fb4f",
+      "sha256": "8d487fccb26c80ef950dcaea4932aab2658df069a9a5085ed815a3683fdb0427"
+    },
+    "auth.js": {
+      "compressed_bytes": 4736,
+      "raw_bytes": 17509,
+      "raw_sha256": "579e1bad373fac13b0cd720a471f46fb00a4932d9d651637285d1620ad2e263b",
+      "sha256": "0f6a0e3901e887ca76eac69ba27b32b64b7071d29a66e95f748ea91b68a4f908"
+    },
+    "desktop-assets/app/error-handler.js": {
+      "compressed_bytes": 797,
+      "raw_bytes": 2675,
+      "raw_sha256": "e48f9517e1972f42b9c8412769631d441f1921f3f26f809feca25a33d25dd134",
+      "sha256": "a89011335a22120ca40da3ad6e6d5cd241af995df9b271c93151078a456c24cf"
+    },
+    "desktop-assets/app/localization.js": {
+      "compressed_bytes": 1476,
+      "raw_bytes": 6677,
+      "raw_sha256": "cf74aeef3873903c0f0f952ae5d8d95d299875e757c0fbc65e6b324d254fdd59",
+      "sha256": "c1c98d14dcb05a7d3128dcec29684d85d0e18c64ac464a9ae2554665b8d27b73"
+    },
+    "desktop-assets/app/ui.js": {
+      "compressed_bytes": 10736,
+      "raw_bytes": 62614,
+      "raw_sha256": "40686a5f9511d6fa3e45be422ae25350eaeb10b18aaad30a9bd07f878e3f6bf0",
+      "sha256": "2b1b6aee93ed058667da86522ca84d148b1b704d7b346035c7186583b61f86cb"
+    },
+    "desktop-assets/app/webutil.js": {
+      "compressed_bytes": 1686,
+      "raw_bytes": 6662,
+      "raw_sha256": "717a031caabde9ff9e3e937f0875367789a5f8916e24f22756f97c8bf6d19a3e",
+      "sha256": "37975bbbb05d6a6322e941931cf679ecbc04d99fa752c9531198020e88732cf2"
+    },
+    "desktop-assets/core/base64.js": {
+      "compressed_bytes": 1320,
+      "raw_bytes": 4182,
+      "raw_sha256": "76d6b7ec73aed8cbc72b49b8b865bcb334acc59a6b0e96b19bc39c9e8e053ae3",
+      "sha256": "c59973a17070657302752809a37281087cc1d421a2c0932945314141dfca327d"
+    },
+    "desktop-assets/core/crypto/aes.js": {
+      "compressed_bytes": 1178,
+      "raw_bytes": 5965,
+      "raw_sha256": "00b9a69185f913b882270c4cc7a076b4dd3a083981edb91c1e55db22f8ffcef3",
+      "sha256": "8eb74d96218be3c8e351774eb8dbe5123d51f6ac0c19bb6018587388f3ee2928"
+    },
+    "desktop-assets/core/crypto/bigint.js": {
+      "compressed_bytes": 339,
+      "raw_bytes": 825,
+      "raw_sha256": "e7880d27af8bf439579f6fc40d7b81fd379a9babb1d13c83999effd8c64823ab",
+      "sha256": "14f6d2f464c99c3e0624a7db7e08f33ae7dd72b325b1c57da2c24dfd11eaf745"
+    },
+    "desktop-assets/core/crypto/crypto.js": {
+      "compressed_bytes": 613,
+      "raw_bytes": 3042,
+      "raw_sha256": "e6006697ce1d195c951ef1e986172d17174e533909df19e07be583ac75dd344b",
+      "sha256": "f6b93e757e3092c9d5c9197f843b9f7b50d40e01f247da1b3bb36be1c0f29c85"
+    },
+    "desktop-assets/core/crypto/des.js": {
+      "compressed_bytes": 3374,
+      "raw_bytes": 12723,
+      "raw_sha256": "91d8c8ed596d2beda7da9dd68c9ae1d325c673822e3ccfc8a4091e121c99a316",
+      "sha256": "cd7eb1cb767e065bfa65506146513d069a566463d97e61b2a3ca7d9602e34742"
+    },
+    "desktop-assets/core/crypto/dh.js": {
+      "compressed_bytes": 462,
+      "raw_bytes": 1612,
+      "raw_sha256": "9102454282ba646ee4a4ce34c5db5d2a9979179f9d4606737fc6bb7a669e5ebe",
+      "sha256": "a77978ec65ab289ab13bc53dca13170aa8766b3dfad779d6a0a5025f6df901d0"
+    },
+    "desktop-assets/core/crypto/md5.js": {
+      "compressed_bytes": 1285,
+      "raw_bytes": 4686,
+      "raw_sha256": "364c0f0d44d3f8fd608c18a0e1253e5a77e9b8e4c48e3c6503a0f45c9bb2ff8d",
+      "sha256": "20ac4a00139df34a3b4d1a5e3f522f31339ddc700680dd19179181c4d32a79de"
+    },
+    "desktop-assets/core/crypto/rsa.js": {
+      "compressed_bytes": 1082,
+      "raw_bytes": 4493,
+      "raw_sha256": "83875db9e5d978ea0eb2a1e2af8afbb7dedfb0f18eca2bab75c2756285037476",
+      "sha256": "51711c189845197d63863ed0108e491ffa6626187e40726ee711449aed2433ab"
+    },
+    "desktop-assets/core/decoders/copyrect.js": {
+      "compressed_bytes": 274,
+      "raw_bytes": 616,
+      "raw_sha256": "da3b571e10984438ea49559738e11034b5d0c85154a68eac1a6bf9ef10e5aa02",
+      "sha256": "1c31ab5ebe1ba3b268817a83c9883e3c1532f38e89d227850ada51ef032f2add"
+    },
+    "desktop-assets/core/decoders/h264.js": {
+      "compressed_bytes": 2166,
+      "raw_bytes": 9322,
+      "raw_sha256": "96d47901c5e26dc02256b152aa642490d936bbcc395f59ffd580356118edff84",
+      "sha256": "7f87b1dfd6ed33861f6fea0311ee2b7f6377d41bc16c24ad9a94662d6614f372"
+    },
+    "desktop-assets/core/decoders/hextile.js": {
+      "compressed_bytes": 1387,
+      "raw_bytes": 6060,
+      "raw_sha256": "63eb86247bea83119af75f3d145a4515a2411ff28a72492d2d7b925268d50163",
+      "sha256": "66277618003962c65d92cace3124d79d363daccc9b3473160f7d250bfce7b8fc"
+    },
+    "desktop-assets/core/decoders/jpeg.js": {
+      "compressed_bytes": 1051,
+      "raw_bytes": 4557,
+      "raw_sha256": "6747ac900d09a5899c3a6fff897e58e88607e69b39ff4a6bddddee2e9e6bc6b4",
+      "sha256": "fd65ffde545349814c1261f5b24ed418696c067afcc73e8c5c727c1bc37ba851"
+    },
+    "desktop-assets/core/decoders/raw.js": {
+      "compressed_bytes": 536,
+      "raw_bytes": 1622,
+      "raw_sha256": "bc7d4517213dc1df8626e8198eadf32b2c1946f75228b31387d3916963af0727",
+      "sha256": "3d59fd2312fd6f1ab0d873d60211111d3d98f03e515fdeef491515d51bfa8e47"
+    },
+    "desktop-assets/core/decoders/rre.js": {
+      "compressed_bytes": 354,
+      "raw_bytes": 1114,
+      "raw_sha256": "b3380dbc75310769ef24e956e1fa1f13d8217f8b1d7d6f5c9d08db9a336a4c0d",
+      "sha256": "a53fa252e3235a1c6bbb7b776b8f8c54c342dea275cbffb17fcacd1a89f6dd66"
+    },
+    "desktop-assets/core/decoders/tight.js": {
+      "compressed_bytes": 2009,
+      "raw_bytes": 11982,
+      "raw_sha256": "a7f01df99922be812ea21c5e46597b76379a5d8267f99ec8bea9a202bec34130",
+      "sha256": "06b1dfcc612573c2aee69a74dca4a6f0ceb29167412cde90f3776bb53a9056a8"
+    },
+    "desktop-assets/core/decoders/tightpng.js": {
+      "compressed_bytes": 318,
+      "raw_bytes": 687,
+      "raw_sha256": "38bd2fd200f5c8e9b0905eca2389fb8e6ad2151de886e4fa9a9c59cc1c7696f0",
+      "sha256": "e6ed8241bea0be0a81dc8268b48d1fce86cb095196bed0a6ce86ad36270fe78f"
+    },
+    "desktop-assets/core/decoders/zlib.js": {
+      "compressed_bytes": 458,
+      "raw_bytes": 1211,
+      "raw_sha256": "1d1c05cdca4840ff46082103ab35aa7696b41504bec91ebd74fae9e0e5f61380",
+      "sha256": "2754b058d9038a20210ddc87c3fbac0160dff6334324b3a8f1f83431c6b8c41b"
+    },
+    "desktop-assets/core/decoders/zrle.js": {
+      "compressed_bytes": 1368,
+      "raw_bytes": 6484,
+      "raw_sha256": "6853c115f97a1d4de39ca71ab8b519a05916bb8c173aa8112ce4881cbb612cbd",
+      "sha256": "813262058ff373e1e8157fbd0c3deb8337de29793b684d35f22a8a6819d57b70"
+    },
+    "desktop-assets/core/deflator.js": {
+      "compressed_bytes": 682,
+      "raw_bytes": 2589,
+      "raw_sha256": "ceb6763eb3fcc53f34d08534a8d1df9b63af3a95c58f8d96d238ef5ce639ad1f",
+      "sha256": "f7ba0e0bee7835454a0d4de2291fd36447124db7530bfb7dbbe52c40ea24c44a"
+    },
+    "desktop-assets/core/display.js": {
+      "compressed_bytes": 3835,
+      "raw_bytes": 18386,
+      "raw_sha256": "10d298551124a172c97dcb54d8d30fca416e6038b064c93ba5f7cf079fa4bf1f",
+      "sha256": "75c6c9f11d4e090ddf74067779104c6003d2d69b63d205a28627e01dc2fe6f6a"
+    },
+    "desktop-assets/core/encodings.js": {
+      "compressed_bytes": 527,
+      "raw_bytes": 1819,
+      "raw_sha256": "4975904fe1da6dc22b53ecb8462ec7c9a43e99db72dba4aab9f625c4177e355d",
+      "sha256": "4765ebd89fab386983d599580fd2ca043ad9cb78a6d6fb61f09d089ac63aef39"
+    },
+    "desktop-assets/core/inflator.js": {
+      "compressed_bytes": 598,
+      "raw_bytes": 1913,
+      "raw_sha256": "b1955cbd1608619911b8dfd451fae07f38c5767098f6f47e4a2a1682c11feb65",
+      "sha256": "152ca38f24f9db9c175a12522278f76f5dd880df0b60755d24f389a1c5661340"
+    },
+    "desktop-assets/core/input/domkeytable.js": {
+      "compressed_bytes": 2346,
+      "raw_bytes": 11478,
+      "raw_sha256": "5eb985e1a412d1be6b606ba0d7e912fc0842d873d252bd7ec8a363670dfc800c",
+      "sha256": "eada0035526830df46f9d05632edf47a39a8a817b0a4f9a9837bb537ab71f360"
+    },
+    "desktop-assets/core/input/fixedkeys.js": {
+      "compressed_bytes": 864,
+      "raw_bytes": 3804,
+      "raw_sha256": "6bb21b0a2d5f5d7ad73e75b80ddc1d844ac770c4426b312d5740f2443455f0c0",
+      "sha256": "da3acab7d12ed9acc11bb965b7990c3692a6320f3ef88cddb10f1ab0af796897"
+    },
+    "desktop-assets/core/input/gesturehandler.js": {
+      "compressed_bytes": 3477,
+      "raw_bytes": 18260,
+      "raw_sha256": "c04b67fdae6ac061c7d51cb5ee8ca296ee9c7c80aa246cee5751e74eefe61758",
+      "sha256": "4cd13c6412f21bb51b95f7f37f056879f5d6e71ea850703359aacd4c0897e562"
+    },
+    "desktop-assets/core/input/keyboard.js": {
+      "compressed_bytes": 2519,
+      "raw_bytes": 10849,
+      "raw_sha256": "46f82adef772b726ae3db144fb9c12b3d03374b7c803b8a5106e422a10ddcdba",
+      "sha256": "a42f360aaa832942f19b5fc50a12bdd435ee82331eddc6ce751fedd3e32cb929"
+    },
+    "desktop-assets/core/input/keysym.js": {
+      "compressed_bytes": 5113,
+      "raw_bytes": 34609,
+      "raw_sha256": "4ddf0e21f07328358974d91aa2d7f839ba2116688b28e43d3f6f4e2eae8c45cf",
+      "sha256": "d63a7c52cb088ec08b86f08390a8060ddebd60f9a1199f4cd0f71142fa9e7436"
+    },
+    "desktop-assets/core/input/keysymdef.js": {
+      "compressed_bytes": 4649,
+      "raw_bytes": 25374,
+      "raw_sha256": "76f338d45fb73b7decb7d8b4ef6e95edf7ce9583722c5220642a9be85fc2cc89",
+      "sha256": "b65cab62f00a910a3ae4523403545e5d061e9c5202bd0fdb0f54ec1b09c2b04b"
+    },
+    "desktop-assets/core/input/util.js": {
+      "compressed_bytes": 1515,
+      "raw_bytes": 6069,
+      "raw_sha256": "2e156ea656404afcb6cc54dd85cbe5dd2dd0ba209ae9a6fb1b78ec5db17d01ce",
+      "sha256": "04cd15fe9eb24c41e68a477b268b9db62653ae244e8ad6de83a377db70431774"
+    },
+    "desktop-assets/core/input/vkeys.js": {
+      "compressed_bytes": 718,
+      "raw_bytes": 2509,
+      "raw_sha256": "9a1ce4393e1aa4ace5dcdcf7e032f4a1c03a9cb964b4e0e7b7fcffd3a982eb84",
+      "sha256": "36ef350e1e8f662809dcd9767ba9a112a8534622c4f4be458012965d9cd8af90"
+    },
+    "desktop-assets/core/input/xtscancodes.js": {
+      "compressed_bytes": 2942,
+      "raw_bytes": 14400,
+      "raw_sha256": "f0fc982627e1c02feaac1bd50d7fdd3bcbb05f0062b910d8002f47d1b08967a6",
+      "sha256": "99ceffa33c652543ed8fbce211a3bcb099af24f02db944a9c144029eb23e48aa"
+    },
+    "desktop-assets/core/ra2.js": {
+      "compressed_bytes": 2198,
+      "raw_bytes": 12474,
+      "raw_sha256": "4aeffb60af9c163365170e2af392acb6f0a7c21a0cb6827f85dd776d33277bee",
+      "sha256": "c92b854c6e46525d2bdc126ec239fada258a2d3b2ef7194915e17bcb0261d95d"
+    },
+    "desktop-assets/core/rfb.js": {
+      "compressed_bytes": 20162,
+      "raw_bytes": 122306,
+      "raw_sha256": "c46dfefbf869eda0c6d06c5dd86c42e96fc8a77c125e91599a2cdf3841261564",
+      "sha256": "3c4818becb60b7ab434148a8eec3247a7812f66b1b19dfc469dc822f95ddb1ba"
+    },
+    "desktop-assets/core/util/browser.js": {
+      "compressed_bytes": 2452,
+      "raw_bytes": 7820,
+      "raw_sha256": "592f56dc2195331c3b8329f8e51fa3a444a89ac85d5fa29e2364508aa9303df7",
+      "sha256": "4d3f9aefc6b9d74eb8a5c3e6915013b568ea6bdbd8b71071376838845469ef38"
+    },
+    "desktop-assets/core/util/cursor.js": {
+      "compressed_bytes": 1886,
+      "raw_bytes": 8347,
+      "raw_sha256": "adabe605d73f38e5f29abd302489d4b9e98a9e495823a06a2edbe7f6744856fa",
+      "sha256": "bc0d3a6c7d3d533b1de9d6795bce7441e1c24ef4fef9a665ac926e2047a1bf13"
+    },
+    "desktop-assets/core/util/element.js": {
+      "compressed_bytes": 307,
+      "raw_bytes": 729,
+      "raw_sha256": "13845321fc5abccc1de25594082d8db15405af56c5f4fc32b3bdd0878bd891e3",
+      "sha256": "25f02d0f13d4ca01dfb9b040cf8a5a9f21aac64c97a3a076d306f7cabd736dfc"
+    },
+    "desktop-assets/core/util/events.js": {
+      "compressed_bytes": 1125,
+      "raw_bytes": 4327,
+      "raw_sha256": "ec7f4da0407ea67f5d6f5ce53bd9b3342155feb9407707de3992c5261e460ead",
+      "sha256": "0742cc837c35f60206da26f28a9205747a4a1216cb358143778402c50b2db38c"
+    },
+    "desktop-assets/core/util/eventtarget.js": {
+      "compressed_bytes": 313,
+      "raw_bytes": 896,
+      "raw_sha256": "9481965aa6cee36ae2decdccc6ca5203c9371a8afc33346ad4170e471766e0da",
+      "sha256": "b43bf8d8112c49d02b89169ad4d9c7aa78773902c74f25177521156efb047e73"
+    },
+    "desktop-assets/core/util/int.js": {
+      "compressed_bytes": 166,
+      "raw_bytes": 326,
+      "raw_sha256": "b1c4b7dec2e7767322b3464f3c186b13138cdf341c621db44ddd06ce78180c01",
+      "sha256": "1ede185896ff11296eba6525d01cb23ad49987961c307f018f7fe919a8f2e3b9"
+    },
+    "desktop-assets/core/util/logging.js": {
+      "compressed_bytes": 456,
+      "raw_bytes": 1351,
+      "raw_sha256": "c3a49715c9f908d5bb385de5787e99b824faf34d26036d993eea4740bac9d482",
+      "sha256": "4e78d1ab562c9cfc2382939f1466f2c3d674c4f48345547eb9b0877a1cee1e69"
+    },
+    "desktop-assets/core/util/strings.js": {
+      "compressed_bytes": 303,
+      "raw_bytes": 745,
+      "raw_sha256": "77d0604c7bf9e95de780f8cb9764d918ae24c86811a0a1c5b08cd30e50ad2a3a",
+      "sha256": "472460c6465a83b2005e09daf838c6ab9a5b11d09bedd9df3061d898f480abcf"
+    },
+    "desktop-assets/core/websock.js": {
+      "compressed_bytes": 2816,
+      "raw_bytes": 11258,
+      "raw_sha256": "d1a96fc1316eaab9badcba9b0f1a7a55d748a4d4d26dc0263cc179dba2131cf4",
+      "sha256": "b1a992458dd02da279db25b73868db305b7890db40ef29d8d835962fa0ab1db1"
+    },
+    "desktop-assets/tests/assertions.js": {
+      "compressed_bytes": 797,
+      "raw_bytes": 3931,
+      "raw_sha256": "06f1fbba2333f90b0bfb5ef2ff85a3b6a27e28073732471a1b78dde98797a8b8",
+      "sha256": "58148ebf63820e77f1bf540cf4d9dcd3d2cc2ce24c8e51ffde77307b08b0d450"
+    },
+    "desktop-assets/tests/fake.websocket.js": {
+      "compressed_bytes": 766,
+      "raw_bytes": 2895,
+      "raw_sha256": "bc4f58063e0915895b382fe4fbe9be4dffa188b3a1d5618a58f4961cbb9334f8",
+      "sha256": "c6fa6bc976d3a7355245cbdef5b344b4795e74be9a47ad841ccf3c8db2dc5a10"
+    },
+    "desktop-assets/tests/playback-ui.js": {
+      "compressed_bytes": 1531,
+      "raw_bytes": 6508,
+      "raw_sha256": "2c0a41b9ac1131b93a89e0102fb8aba18f3646cd33ff7f863e542f1db484e78e",
+      "sha256": "a58559d12fb84585c7cdac4865e280a33d5f4ebe00c995d6188f9b65c4aa2c96"
+    },
+    "desktop-assets/tests/playback.js": {
+      "compressed_bytes": 1177,
+      "raw_bytes": 4634,
+      "raw_sha256": "82053282a52168aecfd3ca934e7dfbfc98bf045d5ec4b61f58b2b3796cf01625",
+      "sha256": "542c7371089de9ea02c99b6e01dd3143d84e0f5596133fa654076e39f754906c"
+    },
+    "desktop-assets/tests/test.base64.js": {
+      "compressed_bytes": 618,
+      "raw_bytes": 1234,
+      "raw_sha256": "010614ba5363b43f2bc465aa6b22d148b10d5fe66f373c2d64394a2fb849b7e2",
+      "sha256": "96457fe0ab4e28904b25601547565bb8c820ca18b45c118e2cad6f963738cdec"
+    },
+    "desktop-assets/tests/test.browser.js": {
+      "compressed_bytes": 1065,
+      "raw_bytes": 8915,
+      "raw_sha256": "9503767d7d8b826b88da7723155b5f7c34b80c39ecb382a7973f41242df13b69",
+      "sha256": "3494b19ccb30092882f32d66fd98de2e9ed9c1e117f461787670738bcd0400ab"
+    },
+    "desktop-assets/tests/test.copyrect.js": {
+      "compressed_bytes": 667,
+      "raw_bytes": 3301,
+      "raw_sha256": "c1bd020e0ff647996e06a1b3f750c65086a33789019d9220bce1cb45a755bf66",
+      "sha256": "3a4e861c31a52cb78403e4fa531eca8ea0d548dd663fac63bd1fb74cc95e8e7c"
+    },
+    "desktop-assets/tests/test.deflator.js": {
+      "compressed_bytes": 719,
+      "raw_bytes": 2385,
+      "raw_sha256": "f5e877dc4cd981e9744e2df0c3bc7bfdf447b791d079b3f0bdaa7d3b14d9961c",
+      "sha256": "9d812102bb1e7cc09d3f0123d383ee7e56b3e3c28eca5a17ff83fc2c5914eca5"
+    },
+    "desktop-assets/tests/test.display.js": {
+      "compressed_bytes": 2145,
+      "raw_bytes": 16221,
+      "raw_sha256": "2fd5b2d06832de2edfe11fa6520ac5ef5cd5053188300625c214d707a87f22ea",
+      "sha256": "22162779b7fe358241fc413b31d52f23526fe21d94eaaf5b6d5c8d30a39aa550"
+    },
+    "desktop-assets/tests/test.gesturehandler.js": {
+      "compressed_bytes": 1818,
+      "raw_bytes": 35932,
+      "raw_sha256": "3b3e5c523086385148ec35a0f70b38b04f59dcb3e36e176e9fe3df6ff4f3043d",
+      "sha256": "c17d86a24f1b5f37ec32e2e20d28737f4758b64ce77063271970c196320c17dc"
+    },
+    "desktop-assets/tests/test.h264.js": {
+      "compressed_bytes": 2309,
+      "raw_bytes": 8349,
+      "raw_sha256": "312dfb486b5ef84207732ed8f1bdc944f0d07083da7be08de0d87f12bc28187e",
+      "sha256": "ae07a8f06cea967565cd2258b84f30c7fc2d56929f1cb8e69660ccc145297be4"
+    },
+    "desktop-assets/tests/test.helper.js": {
+      "compressed_bytes": 1738,
+      "raw_bytes": 12081,
+      "raw_sha256": "0697b2d9ba3c5d2d9795af833dc05438c77064d6fa29d356109c946461a75e09",
+      "sha256": "a84d565e5dbadaabb230553ca7ea25cbb4da88a1111d2d5d9188b12aa83900ec"
+    },
+    "desktop-assets/tests/test.hextile.js": {
+      "compressed_bytes": 1275,
+      "raw_bytes": 9197,
+      "raw_sha256": "6721180a753e1b9219cc5996229e3276c2a632aa14a111daf25b1cb47c5e16bb",
+      "sha256": "aa2cca6a802c2a616cfcaf8873821f35a4a5395217d466326033acf51943843e"
+    },
+    "desktop-assets/tests/test.inflator.js": {
+      "compressed_bytes": 860,
+      "raw_bytes": 3272,
+      "raw_sha256": "fcbaa00cf0a879aba90cc418d3924771079a45c13e4fb2f63d8d33b72467bd5c",
+      "sha256": "14f8024f6edb5b5681969d2f05b1ea374088c8fb069a7155e81645c398f459fe"
+    },
+    "desktop-assets/tests/test.int.js": {
+      "compressed_bytes": 186,
+      "raw_bytes": 426,
+      "raw_sha256": "feb25d2dc2e7eec98775926a09351ffe11914def8adb1d6c8c8498b18ad99192",
+      "sha256": "67190d8e5f7ab47c2922a3ca26b1a1aafc1f43d637112a6c1363bba0d239a692"
+    },
+    "desktop-assets/tests/test.jpeg.js": {
+      "compressed_bytes": 1436,
+      "raw_bytes": 14364,
+      "raw_sha256": "8847b8c24bc3ea27320a3f5436412b1ab5eba0f06f284f6045b0280752edea18",
+      "sha256": "c229b47f9a3e203d98739a89187e2e83a38ff647c9b40b10691b87ab1bb335ba"
+    },
+    "desktop-assets/tests/test.keyboard.js": {
+      "compressed_bytes": 2292,
+      "raw_bytes": 29905,
+      "raw_sha256": "301c8e9180a24310257e685dc68f52e2292e3c65d4f86f5e786b3a91819b5f13",
+      "sha256": "e69f1bac655c0095a0d46908b177a2f5660402d9dccc1f32b28a9e9ebef02e96"
+    },
+    "desktop-assets/tests/test.localization.js": {
+      "compressed_bytes": 984,
+      "raw_bytes": 6180,
+      "raw_sha256": "9115b766222518d6d5158ee9701e694104297963a78882ae7d3c09a78b43aa7e",
+      "sha256": "3f88580ac939c95f5973a77abadbe36e6581d77c828c1769a951ad0d386e3ed1"
+    },
+    "desktop-assets/tests/test.raw.js": {
+      "compressed_bytes": 747,
+      "raw_bytes": 6194,
+      "raw_sha256": "802756c54f07bc8f68a6e0005d870cba309a6130dfaca3f57e72da2273cb7644",
+      "sha256": "a8a06df52024ca397cb51818f433b72294fe86b269b9a8ab3d625ad84022c309"
+    },
+    "desktop-assets/tests/test.rfb.js": {
+      "compressed_bytes": 23307,
+      "raw_bytes": 258247,
+      "raw_sha256": "1c862eb31806e99ce534763ad87f2628217473b0da7a63390146c2500a47bf8f",
+      "sha256": "acd7e5b9a474a3992cf8e7a496231d85bc5dca210c70d2574f9803d9dc0d1692"
+    },
+    "desktop-assets/tests/test.rre.js": {
+      "compressed_bytes": 827,
+      "raw_bytes": 3831,
+      "raw_sha256": "b24f0dc7fef2ff5051ee3ebb3fa26d6eb14125fe3efc1e692471f7eb7530ad9a",
+      "sha256": "d35c5dd993153608c0f78c40d4a29d58c2d76b81f5b7f40b14a98a9fe50db3b4"
+    },
+    "desktop-assets/tests/test.tight.js": {
+      "compressed_bytes": 1868,
+      "raw_bytes": 22725,
+      "raw_sha256": "15b06092819c0d7a3517b40e0188639b4179df32b620fad3171dc2344d858335",
+      "sha256": "5096b0cc6ac1e6318940d7327ce2166da6924bf490a3d44e639490a125b86e9b"
+    },
+    "desktop-assets/tests/test.tightpng.js": {
+      "compressed_bytes": 1419,
+      "raw_bytes": 6485,
+      "raw_sha256": "b7a70b243f8d34d0d96e53de087db23c7c9e517f2b2b972fb1a22289a7fbbcd1",
+      "sha256": "6b39b49d4473091f73ef4384d002c972790e679ef0bc93ad1932a5eb301dc54c"
+    },
+    "desktop-assets/tests/test.util.js": {
+      "compressed_bytes": 807,
+      "raw_bytes": 3309,
+      "raw_sha256": "06440c7e8db9a31bb995886a4853758093d7eb293c0ca51ec784403fdcd387b2",
+      "sha256": "3ca1f85df77141b10da06081ddfed3a002a171da177f37d1035f955ec253dd33"
+    },
+    "desktop-assets/tests/test.websock.js": {
+      "compressed_bytes": 2620,
+      "raw_bytes": 25136,
+      "raw_sha256": "feeea2daadafdae461ef69f5edcc9f69e4f4f81ea39cc27adccca781c5c0c22d",
+      "sha256": "4dfb97c785ce226c14af7fb423bc55c8754093cea0285e0635112ae1c605e170"
+    },
+    "desktop-assets/tests/test.webutil.js": {
+      "compressed_bytes": 1250,
+      "raw_bytes": 10501,
+      "raw_sha256": "00917fae08b0866ab32966264be67b22897685e270966e61102f0fde3a42a312",
+      "sha256": "6339845900a6f077891f84f885c59b5e73ea78d7c1fae3fda630f771deb5ce13"
+    },
+    "desktop-assets/tests/test.zlib.js": {
+      "compressed_bytes": 740,
+      "raw_bytes": 3057,
+      "raw_sha256": "3a63ef46a7b57035db1048ac0546a354d37c61d59945a00f3763d781616d3c5b",
+      "sha256": "8da3b7783055c13b4678149b1fc291fb337a08e597552ed022b0b573f08f801b"
+    },
+    "desktop-assets/tests/test.zrle.js": {
+      "compressed_bytes": 762,
+      "raw_bytes": 6315,
+      "raw_sha256": "8da8a0af6b475ff9e04664d55e2a93c28aa5fa2a0e160d54e067320370addd64",
+      "sha256": "c01ace9759ce0ce11ce220862450c7392a34924da3d7213f4179f16e13dfa3b2"
+    },
+    "desktop-assets/utils/genkeysymdef.js": {
+      "compressed_bytes": 1085,
+      "raw_bytes": 3155,
+      "raw_sha256": "d19d44448581fe226f49b5a4234a865ce0510ba5472252d40ef8b34c8c5c8a46",
+      "sha256": "65f99988a870267567eb6a84088261d90ab50f092aa396b3461326dc2d9779f4"
+    },
+    "desktop-assets/vendor/pako/lib/utils/common.js": {
+      "compressed_bytes": 411,
+      "raw_bytes": 1062,
+      "raw_sha256": "0749bc4661ed186714b90e7f2321c9625a8ce7c680563bfe3ac6df7aa332bf28",
+      "sha256": "4b2ee615ecfb8253278f273adea8636219b5d76cb43295d897c77a6871363dbf"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/adler32.js": {
+      "compressed_bytes": 340,
+      "raw_bytes": 666,
+      "raw_sha256": "7412dd3ecc015888b99292f45e4d4ba69abc77f208508c9a1c93e8dfe54ba6cd",
+      "sha256": "c2822d00a1609a2523f029fdcf4310c9c6c9a4a44a8c154197366c9c239074aa"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/constants.js": {
+      "compressed_bytes": 493,
+      "raw_bytes": 1334,
+      "raw_sha256": "9d2c0dd36349e6eec9d41a37f965b2ff7e7374fbf00fb139e3116d428b551898",
+      "sha256": "1cf01a15ccd9638664d627c27f85ecd47f082db2fc65e91220300d6009635eb2"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/crc32.js": {
+      "compressed_bytes": 406,
+      "raw_bytes": 764,
+      "raw_sha256": "897fa9eabd2bb239ec632326dbff85bc72cc81d4da80265cde59520db339f405",
+      "sha256": "9670662027e8b5ffce503859827d270b0d08c6d089247f85e83b102ad1f3509e"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/deflate.js": {
+      "compressed_bytes": 12913,
+      "raw_bytes": 60286,
+      "raw_sha256": "d2a498ad04bb5d1f67ba01696c31a2e88e8b88e4fc6c36c635294d1c445b22c1",
+      "sha256": "eef684e6157ccee3ea846bc82575a79868ebc01d7dfbc713d0d4d79d23dffaac"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/gzheader.js": {
+      "compressed_bytes": 405,
+      "raw_bytes": 1251,
+      "raw_sha256": "9f9b2da72593769fcc97d397ceb771bb11d5b96f202759e2ed014c2be24d40d7",
+      "sha256": "c9a183da4b993ff063a901962ea1257011f1310c6575dc9233f69494babbe1d6"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/inffast.js": {
+      "compressed_bytes": 2570,
+      "raw_bytes": 11690,
+      "raw_sha256": "ec1e0f7abeec681a0d5e3da46d06f499969cbf265eaaa5e21a135d2a9b878c16",
+      "sha256": "1826f86788b74cbec3ac33107701604e1bd52156c94e451bd5800d3861cba919"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/inflate.js": {
+      "compressed_bytes": 8380,
+      "raw_bytes": 47281,
+      "raw_sha256": "321582ddc4023e47aa981a71caed0e1dad8b58f0d9e93a0b0a34fe7e3c45e05f",
+      "sha256": "0cc121208452b17403476c0edcc03deb7e3d74f58e8500ebe2c6856c237636ef"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/inftrees.js": {
+      "compressed_bytes": 3334,
+      "raw_bytes": 11527,
+      "raw_sha256": "94780cbdef562bcd0434c7e6f4faca1ff6be6980bf7305a200809d98d419d9c7",
+      "sha256": "0de50d6fe688de805ad9c53bb6fd0a5c65d4e89768578d02871420b2095c0195"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/messages.js": {
+      "compressed_bytes": 215,
+      "raw_bytes": 560,
+      "raw_sha256": "7860a8d3c873c28e4f5f92db9ca3e45006e21b084210d87b8b7775cddccf05ed",
+      "sha256": "4a53be3e2fff34b04139e833de125dc4501e02db1da1fe0a9fd2ff40b68bf018"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/trees.js": {
+      "compressed_bytes": 9513,
+      "raw_bytes": 38767,
+      "raw_sha256": "ad9cb5245b9e39edd164234d6ca19febb9dba683f1f99a67af48d62931d91426",
+      "sha256": "231ba964fa779d7faeb0c677332ed4aeb097d1d814c986564f098132a48340ff"
+    },
+    "desktop-assets/vendor/pako/lib/zlib/zstream.js": {
+      "compressed_bytes": 318,
+      "raw_bytes": 823,
+      "raw_sha256": "240917347c379b1ad33b8bf07cc6981557173bc3408f35e9875866a14b9967b2",
+      "sha256": "f83e61a3d047a0a272155c437b11f316845c2ed3bb12f01457b16fdd5fb0c74c"
+    },
+    "font.ttf": {
+      "compressed_bytes": 18368,
+      "raw_bytes": 49124,
+      "raw_sha256": "9cff0127b191fb3a02f56dec71ac1e7deffc61d2c95f81e4d5850fdb2f11313d",
+      "sha256": "8de63d8791f548e6b7131818f6ec42964b7b9ecd974462ab1c5e81f0c004de53"
+    },
+    "icon-192.png": {
+      "compressed_bytes": 29940,
+      "raw_bytes": 30185,
+      "raw_sha256": "dded12f59f934f33e9f7ea94863b547ece3c85cb52df72e0f461069b87eb5da7",
+      "sha256": "686dc1f7d872e8416425b0a71c355d3c892f82fba1f3af7af289b03bfd25cda3"
+    },
+    "icon-512.png": {
+      "compressed_bytes": 131527,
+      "raw_bytes": 134147,
+      "raw_sha256": "5d64c948bdac638fd3f23d49005cda874b5e6f722ebb82f23bdb6f37e053e6c5",
+      "sha256": "2fd32338f99e314a378c539835762b413f71730376e147d99147903f31a798e1"
+    },
+    "icon.png": {
+      "compressed_bytes": 515301,
+      "raw_bytes": 524050,
+      "raw_sha256": "93d7243a72ca195cbb8cdedb9b001dc905813366a39c3383a9f638611b7831bf",
+      "sha256": "9acd2f731f83c1ce3e0f7a2b9e41ae2062b4b9171465e5af43ea1f7fc450aaf5"
+    },
+    "index.html": {
+      "compressed_bytes": 352,
+      "raw_bytes": 1087,
+      "raw_sha256": "9ec30807214ea8261618a02550393a9cc82fe7f962f2748dc710dbc72ac1c929",
+      "sha256": "7b130b4231dd6c52702491b4bc2401f5b7f07284bfe655adb45971ae18d2a4a7"
+    },
+    "install.js": {
+      "compressed_bytes": 807,
+      "raw_bytes": 2470,
+      "raw_sha256": "33cab39c7642bf4882f04226745d5e71ad7a817a6ce34b1ddb7113cfec46fc8f",
+      "sha256": "2aaf34119756952be43d01ac1099bdb30774427cbfcc8db24652989b97543080"
+    },
+    "locales.json": {
+      "compressed_bytes": 3936,
+      "raw_bytes": 15226,
+      "raw_sha256": "dac028e42462cfd2cee3d82cac1e412ec0477de1790abc3ec7a30e500cbf8e90",
+      "sha256": "d266d91d58861950d6445f299acc1a62467959b55eb072e8df9281e9471dc002"
+    },
+    "manifest.json": {
+      "compressed_bytes": 225,
+      "raw_bytes": 603,
+      "raw_sha256": "f192e0c9fb5a7dba2b19e9c2acd41cc2b1e0c51e5755635ec10b340e2adce539",
+      "sha256": "3ce0671cdfae562c186eb19ff4419da224e092d223202969eb4ad84c1afe4b0a"
+    },
+    "pkg/pot_mobile.js": {
+      "compressed_bytes": 21133,
+      "raw_bytes": 176672,
+      "raw_sha256": "a5410561c07cddeb92c646955905cbbe6c098d2a9fa551721b1d5ee73d0ac3fc",
+      "sha256": "e80dcec98e55e2f45963b9733c53031867c496406298a222c49b30a3af534f55"
+    },
+    "pkg/pot_mobile_bg.wasm": {
+      "compressed_bytes": 3827139,
+      "raw_bytes": 18568057,
+      "raw_sha256": "da3f128f3d296d7741d904e2e49abea0f1bb569eb057cb9124be135c085a81a6",
+      "sha256": "4ac048dd88a494de86690e9af9989d2216219b8b1ef3a3e7f84d3d50e1de039b"
+    },
+    "style.css": {
+      "compressed_bytes": 473,
+      "raw_bytes": 1370,
+      "raw_sha256": "3332495219e1c49ffd2bc5de1c4908d39ae5e18e86ff0d60601000011cff96a8",
+      "sha256": "aae61197dd53e9f2af373dcd5a2855b94fd7f36e8c9f7b76a07ab4cd8b53f97c"
+    },
+    "sw.js": {
+      "compressed_bytes": 598,
+      "raw_bytes": 1637,
+      "raw_sha256": "725b553c0a0fc87d7afdcde48d109ba257262d08a4f8dcfc355697705e07bd3f",
+      "sha256": "b1b4f17acf779075a98ebc3f52f461119938b752aba7b75e992ada5e1450b105"
+    }
+  },
+  "compressor": "brotli 1.2.0",
+  "encoding": "br",
+  "format": 1,
+  "quality": 11,
+  "sources": {
+    "Cargo.lock": "a1411b9a99d66dda2bc0e9f2f5dcad3c1b04c06b47f1277a8452f31c53ea41a6",
+    "Cargo.toml": "83286134ddaa9892fb54a511e5ba7bce84af66f0fe4cd41a5fd81b76d942b7d6",
+    "crates/app/assets/PotHomeScreen-192.png": "dded12f59f934f33e9f7ea94863b547ece3c85cb52df72e0f461069b87eb5da7",
+    "crates/app/assets/PotHomeScreen-512.png": "5d64c948bdac638fd3f23d49005cda874b5e6f722ebb82f23bdb6f37e053e6c5",
+    "crates/app/assets/PotHomeScreen.png": "93d7243a72ca195cbb8cdedb9b001dc905813366a39c3383a9f638611b7831bf",
+    "crates/app/locales/en.json": "6cb1923fbed3e8867011a8fd73450ef42a7d426b40266de366e2d892612287c7",
+    "crates/app/locales/zh-CN.json": "23f9d5218d3f73f2a23b99403746d83388d9d9b1e70cca50fabfa47dbc1583b5",
+    "crates/core/Cargo.toml": "ceb06433742cebd83239b4b8568153b4a8d1705234fcd218f2d86c1b6bf37b6c",
+    "crates/core/src/agent.rs": "e56b211f855ba703e530ed63eadbb7d4700cdb259066415d7bacfc2fb65c164c",
+    "crates/core/src/environment.rs": "cc4aeca39bdbe106c692711b07383769110f582eea3464a339d6fdfce59f89ff",
+    "crates/core/src/environment_tools.rs": "f467708b2d49f0af8d0431ed6c21883415004ae3a5d27d8747b3920b479738d0",
+    "crates/core/src/execution.rs": "9926cc475f4a5488ce5a71b4aa4f190035b3cc20c11d27dd6e107c1af8783510",
+    "crates/core/src/lib.rs": "c214b22e0f1c753da83fa2e3314527923da00803bbacf5a4a79ae4beee5b1ccc",
+    "crates/core/src/model.rs": "e01a7573e487a04d168ab093392219a3b11fc54c48d8e0509e37f17677482a3b",
+    "crates/core/src/model_catalog.rs": "447a8e3507e75e87f9da9416ac88a144421e20f900e90d6b0b78b0e21cd2b5ff",
+    "crates/core/src/placement.rs": "5a9529ea7ccc5aa617bdd0cf3d8427c372848161daa6953fe3cc474cdde7a4a3",
+    "crates/core/src/plugins.rs": "54e81214f2afc69eac7d976518580d4ff8dfe0428ff57b2dcead3c019c5383e5",
+    "crates/core/src/pot-tools.json": "25ef0e8015c4b4368dda21fa18a5cad688452967cc2326d081e5987df17117b5",
+    "crates/localization/build.rs": "96b618d98a7ccee2466e045d7accd8cb99c2fce17f4d10d6c191aae41fd2462e",
+    "crates/protocol/Cargo.toml": "b4fd0789afe2b1d1b7ddc738f2ba1a344a1a2fed5400d6798372facacdfb790d",
+    "crates/protocol/src/lib.rs": "4b8b4204134dbc7d2cbddf8b51e2900e5fee300ca8765e7b34979e3d6a210768",
+    "crates/protocol/src/references.rs": "4531cbe3d120ed9e4a955b526558b48f5ff39c15753e49403651c6ebd2a1e511",
+    "crates/sandbox-images/linux/default/index.template.html": "fc756f40b234e2d55bca5d0802dc7f561eefbdb9829ee8f8597757c451872d02",
+    "crates/ui/Cargo.toml": "9366b4783f6e7dfadee4e6bf144cb4f300032a818e84733d83e77efccb224bb7",
+    "crates/ui/build.rs": "ceb19e51fe6c6af2f923bbf4e3ce3dc84b7c26d4143ea795be69a278d56b5247",
+    "crates/ui/src/assistants.rs": "1983b7a1f501217d9840b1c466b902490228dcb52a6e50fbecde778d9d2d0a7b",
+    "crates/ui/src/chat.rs": "d1861fc9ace27e6483f4391c616ca1af6312136041082edf1e55027d8aa610ec",
+    "crates/ui/src/design.rs": "de1636a5eb4877e4bbb29c42ef15e41981a2d4a958fb2d3412c65dc9408a8d28",
+    "crates/ui/src/lib.rs": "f2549b57a92625ef04760d3fa57866a52ed71f40db91a270b0c75333193a2735",
+    "crates/ui/src/localization.rs": "8fa6994e536e4623b4045f55b72affc38aef0bb6f9086cd8b29093187a87fdd3",
+    "crates/ui/src/machine_connections.rs": "1ed8da5a6e5c054e45a242b15932c8980685aca3407319daeac985106dff6ad5",
+    "crates/ui/src/machine_state.rs": "4cccd0841931cf8604a73c5ddf5fb135cd50094eaa2043347390a4c1745f7f03",
+    "crates/ui/src/machines.rs": "03b9c695d1073e029bedc21a987afe12ba6a9a0bc50a31d5d56d2c4de816b5cd",
+    "crates/ui/src/markdown.rs": "db6dc23665e06d5e43c14e19b811c9e5fe05cd77e1b9d6ea2736e54c816b91e7",
+    "crates/ui/src/page_state.rs": "d894b3b2822ace64c94d50de876d42e3e351ff4fbb8b0b7a98c33cbb4152bc30",
+    "crates/ui/src/pages.rs": "7bb264a08a8e31b7c671976d3dda31722663de313f5c9d1901a18420dc26cc9c",
+    "crates/ui/src/permission_display.rs": "d423603b4e06fbf48df3dcc3032cd3f8cd04e48f78578ba500b9725d6dc25b7f",
+    "crates/ui/src/permissions.rs": "364cc5dad2444fbd82a0850dcf7d6ce02f2c5f9b34f7c79c459a6c613adda76d",
+    "crates/ui/src/resources.rs": "a11d4afeb2ab165fe008cf72fed1721f2373e84c0b0fe95cccc3dc4d281bf12a",
+    "crates/ui/src/state.rs": "5474d127c3493159613b84715e22152cdb52e11a0ecf1e4501fd7da22bf0a8ca",
+    "crates/ui/src/tasks.rs": "8ade9e7e50148dcb22e943d4a8aeb099d62624f3232064cbab2d8d2cb7308a4b",
+    "crates/ui/src/usage.rs": "4ec1d77be8d866e16286d0fb40051370a1bd1b37e111c36a7038b23ef78fcd45",
+    "crates/ui/src/usage_state.rs": "06ab4a5fd9223e09f01cd608489ce3f67e7b4438de5c19cc43dbecc753ab0983",
+    "crates/web-ui/Cargo.toml": "7cb25d06b34c361609ba12ba3e6ccf192c9f0f091ef8f629e540b8c2d6b8e5b8",
+    "crates/web-ui/fonts/IBMPlexSans-Regular.ttf": "9cff0127b191fb3a02f56dec71ac1e7deffc61d2c95f81e4d5850fdb2f11313d",
+    "crates/web-ui/fonts/OFL.txt": "d741e57d5f865e294df801f96b7b5161a88b211df65887e4358d271c9fc5fb4f",
+    "crates/web-ui/fonts/README.md": "976bf1edcf436c9a68f04ad6f33c93732725223636c20260a6682d9362a3c335",
+    "crates/web-ui/src/lib.rs": "7ac32fba81b2ac4eb897fbbea84fb0bfebf253df45c749021c12cccfad4d5b6a",
+    "crates/web-ui/src/web.rs": "8a291fed85998bab0fcdb739dad44e2f26e37efb78714f2dc0e1407deb98f7b4",
+    "crates/web-ui/web/auth.js": "579e1bad373fac13b0cd720a471f46fb00a4932d9d651637285d1620ad2e263b",
+    "crates/web-ui/web/index.html": "9ec30807214ea8261618a02550393a9cc82fe7f962f2748dc710dbc72ac1c929",
+    "crates/web-ui/web/install.js": "33cab39c7642bf4882f04226745d5e71ad7a817a6ce34b1ddb7113cfec46fc8f",
+    "crates/web-ui/web/manifest.json": "f192e0c9fb5a7dba2b19e9c2acd41cc2b1e0c51e5755635ec10b340e2adce539",
+    "crates/web-ui/web/style.css": "3332495219e1c49ffd2bc5de1c4908d39ae5e18e86ff0d60601000011cff96a8",
+    "crates/web-ui/web/sw.js": "725b553c0a0fc87d7afdcde48d109ba257262d08a4f8dcfc355697705e07bd3f",
+    "desktop/i18n.js": "9c372eea92e9825009af3d0de957bc83441458d01483745f74df12925859cc9a",
+    "desktop/index.template.html": "31269fe7ac8b3c7f159800372d010ab890ce2425e31d8ab09f830267df1f2297",
+    "mise.toml": "ef9cac4be42c5a85b5a6854f12e8d043db05b6978462ef045596c489d637e965",
+    "scripts/build-mobile": "c6f820dbf95c15d8a30ad1d5a80537308814c9311519e269cd22bf0120440eb7",
+    "scripts/localize-web": "7f4d79673b5ba840efca1979f1e504e8d84fe57594d6d0909e86a917f7bae109",
+    "scripts/package-web-assets": "ee2179e8d0b2c903499093c001e0cdd8df62c3ef985173af59286c74aa8e4fb4"
+  }
+}

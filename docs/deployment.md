@@ -10,19 +10,160 @@ socket. Closing App shuts down its local Control and Runner before the Sandbox H
 Provider credentials are configured on Control and encrypted in SQLite; see
 [master key setup](secrets.md) for unattended deployments.
 
-## Install and run
+## Install Server
 
-The release CLI embeds the matching Web UI; users need neither a repository nor
-Rust/Node/WASM build tools. Extract a CLI archive into a chosen prefix and add
-its `bin` directory to PATH. A binary-only installation is also supported.
-Building a release from source uses the pinned toolchains:
+Server is installed from Git with Cargo; no prebuilt Server download is provided.
+Control and execution-only (Runner) use the same `pot` binary on Linux or macOS.
+Install Rust/Cargo (the repository pins Rust 1.98.1 in `mise.toml`), Git, Python 3
+(available as `python3`), a native C/C++ build toolchain, CMake, pkg-config, Make
+and Perl for native dependencies including vendored OpenSSL. On macOS,
+install Xcode Command Line Tools. Ensure Cargo's binary directory (normally
+`~/.cargo/bin`) is on PATH.
 
 ```sh
-mise exec -- python scripts/build-cli
-mise exec -- python scripts/install-cli .local/poc/cargo-target/release/pot --prefix ~/.local
-pot init
-pot serve
+cargo install --git https://github.com/jjyr/pot.git --locked --bin pot pot-server
+pot --version
 ```
+
+This builds from the repository's default branch. For reproducible deployments,
+add `--rev COMMIT` using the same commit on Control and Runners. To upgrade,
+repeat the installation with `--force`, then restart the affected services.
+
+Cargo installs the CLI with matching, prebuilt Web UI assets embedded by default.
+No frontend build tools or separate static directory are needed. Resources are
+stored once in Brotli format; clients that do not accept Brotli receive decoded
+responses. Web hosting still requires [explicit Web configuration](#explicit-web-ui);
+plain `pot serve` does not expose a browser endpoint. The macOS App can also
+connect directly to Control.
+
+For an execution-only binary without Web assets, add `--no-default-features` to
+the install command. Cargo does not install embedded Tailscale libraries, builtin
+skill directories or macOS Sandbox helpers. Execution dependencies such as
+Podman, Sandbox images and tools used by Host tasks must be installed separately.
+
+Choose one role per data directory:
+
+| Role | Configuration | Client / connection |
+|---|---|---|
+| Control | Enable the Control listener; create assistants and configure models | macOS App or explicitly enabled Web UI |
+| Execution-only (Runner) | Create execution resources; join one Control; no assistants | Outward HTTPS to Control |
+
+Plain `pot serve` starts neutral infrastructure; it does not select a role or
+create resources. A joined Runner cannot also enable Control or create assistants.
+A Runtime with assistants cannot join as a Runner. Use separate roots when both
+roles run on one machine, and give their listeners different ports.
+
+### Control Server
+
+Initialize a dedicated root and start the foreground process:
+
+```sh
+pot --root "$HOME/.pot-control" init
+pot --root "$HOME/.pot-control" serve
+```
+
+Keep it running and use a second terminal for the following operator commands.
+Provision a TLS certificate and private key for the Control hostname, readable
+by the service account. Save this as `enable-control.json`, replacing the paths:
+
+```json
+{"action":"enable_control","config":{"address":"0.0.0.0:19443","certificate":"/absolute/control.crt","private_key":"/absolute/control.key"}}
+```
+
+```sh
+pot --root "$HOME/.pot-control" api /api/v1/runtime/control "$PWD/enable-control.json"
+```
+
+Allow clients and Runners to reach the HTTPS listener. Certificate identity and
+membership details are in [Control listener and membership](#control-listener-and-membership).
+Create an assistant by saving this as `assistant.json`:
+
+```json
+{"request_id":"assistant-1","resource":{"kind":"assistant","name":"Assistant"}}
+```
+
+```sh
+pot --root "$HOME/.pot-control" api /api/v1/runtime/resources "$PWD/assistant.json"
+pot --root "$HOME/.pot-control" api /api/v1/runtime/control
+```
+
+Connect the macOS App to this remote Control using its HTTPS URL and the durable
+client credential in `.pot-control/product/control-client-credential.json` under
+your home directory. This is a client credential, not a machine invitation.
+Configure the model connection on Control through the App. For unattended
+operation, configure and retain the [master key](secrets.md#master-key).
+Control does not require a local execution resource when tasks run on Runners.
+
+To enroll a Runner, save `{"action":"create_invitation"}` as `invitation.json`
+and run:
+
+```sh
+pot --root "$HOME/.pot-control" api /api/v1/runtime/control "$PWD/invitation.json"
+```
+
+Use the returned invitation in the Runner procedure below.
+
+### Execution-only Server (Runner)
+
+On the execution machine, initialize its root and keep the foreground process running:
+
+```sh
+pot --root "$HOME/.pot-runner" init
+pot --root "$HOME/.pot-runner" serve
+```
+
+In another terminal, explicitly create the resources this machine will offer.
+For execution directly on the Host, save the following as `host.json`:
+
+```json
+{"request_id":"host-1","resource":{"kind":"host"}}
+```
+
+```sh
+pot --root "$HOME/.pot-runner" api /api/v1/runtime/resources "$PWD/host.json"
+```
+
+Host execution runs on this machine under the service account. For isolated
+execution, configure a [Sandbox resource](#runtime-resources) instead, with its
+[Provider dependencies](sandbox-providers.md) and image installed. Creating a
+Sandbox definition alone does not make it ready or start it.
+
+Save a Control identity preview request as `preview-control.json`:
+
+```json
+{"action":"preview","url":"https://control.example:19443","ca_pem":null}
+```
+
+```sh
+pot --root "$HOME/.pot-runner" api /api/v1/runtime/control "$PWD/preview-control.json"
+```
+
+Verify the returned identity and fingerprint against the intended Control.
+For a private CA, set `ca_pem` to the trusted CA's PEM contents in both preview
+and join requests. Save the join request as `join-control.json`, replacing all
+placeholders and using a fresh UUID for `request_id`:
+
+```json
+{"action":"join","request":{"request_id":"UUID","url":"https://control.example:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
+```
+
+```sh
+pot --root "$HOME/.pot-runner" api /api/v1/runtime/control "$PWD/join-control.json"
+pot --root "$HOME/.pot-runner" api /api/v1/runtime/control
+pot --root "$HOME/.pot-runner" api /api/v1/runtime/resources
+```
+
+Check that the machine appears connected in the Control client's Machines view
+and that its intended execution resources are present. Joining authorizes Control
+to use all configured resources on this Runtime, subject to Agent approvals.
+The Runner reconnects outward after restart; it needs no inbound execution port,
+assistant resource or model-provider key. Keep its data directory to retain membership.
+
+### Process and instance management
+
+Both examples run in the foreground. For unattended operation, arrange for your
+OS service manager to run the same command with the same service account, root
+and environment. Shut down cleanly before upgrading and restarting the binary.
 
 `pot serve` runs in the foreground without Web UI, even when listener settings
 exist. Enable it with `pot serve --ui --control https://CONTROL:19443` and
@@ -165,9 +306,10 @@ Runtime data. **HTTPS is required for remote browser access.**
 
 ### Install
 
-Install the CLI for the Host OS/architecture using
-[Standalone Server](deployment.md). Linux Sandbox execution
-also requires [rootless Podman and an installed image](deployment.md).
+The default [Cargo installation](#install-server) includes the Web UI. No
+separate asset download or frontend build is required.
+Linux Sandbox execution also requires rootless Podman and an installed image;
+see [Sandbox providers](sandbox-providers.md).
 
 Initialize a dedicated instance; replace example paths and addresses below:
 

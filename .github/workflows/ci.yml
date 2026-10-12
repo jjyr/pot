@@ -79,6 +79,7 @@ jobs:
           restore-keys: |
             rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
             rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-
+      - run: mise run check:web-assets
       - run: mise run clippy:backend
       - run: mise run test
       - run: mise run test:ui

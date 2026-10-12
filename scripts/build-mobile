@@ -135,3 +135,6 @@ locales = {
     for locale in sorted(path.stem for path in (ROOT / "crates/app/locales").glob("*.json"))
 }
 (dist / "locales.json").write_text(json.dumps(locales, ensure_ascii=False))
+
+# Prebuilt compressed assets are checked in for cargo install --git.
+subprocess.run(["python3", ROOT / "scripts/package-web-assets"], check=True)
