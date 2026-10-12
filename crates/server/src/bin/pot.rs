@@ -186,7 +186,7 @@ async fn run(root: &Path, args: &[String]) -> Result<()> {
             let state = api(root, "/api/v1/runtime", None).await;
             let assets = std::env::var_os("POT_ACCESS_ASSETS").map(PathBuf::from);
             print(
-                json!({"instance":root,"server_running":state.is_ok(),"web_origin":std::env::var("POT_ACCESS_ORIGIN").ok(),"web_embedded":cfg!(feature="embedded-web"),"assets_directory":assets,"sandbox_helper_running":root.join("helper.sock").exists(),"note":"Sandbox execution requires a supported provider; no host execution fallback"}),
+                json!({"instance":root,"server_running":state.is_ok(),"web_origin":std::env::var("POT_ACCESS_ORIGIN").ok(),"web_embedded":cfg!(feature="web-ui"),"assets_directory":assets,"sandbox_helper_running":root.join("helper.sock").exists(),"note":"Sandbox execution requires a supported provider; no host execution fallback"}),
             )
         }
         "open" => {

@@ -62,7 +62,7 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.6.0
-          install_args: rust python
+          install_args: rust python conda:brotli-bin
       - run: mise exec -- rustup component add clippy
       - name: Identify Rust compiler
         id: rust-version
@@ -79,6 +79,7 @@ jobs:
           restore-keys: |
             rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
             rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-
+      - run: mise run test:web-assets
       - run: mise run clippy:backend
       - run: mise run test
       - run: mise run test:ui
@@ -107,7 +108,7 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.6.0
-          install_args: rust python ruff shfmt shellcheck swiftformat
+          install_args: rust python conda:brotli-bin ruff shfmt shellcheck swiftformat
       - name: Check platform prerequisites
         run: |
           test "$(uname -m)" = arm64

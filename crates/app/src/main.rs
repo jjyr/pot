@@ -149,6 +149,7 @@ impl Shell {
                     "assistant-close" => this.assistants_ui.open = false,
                     "machine-connections-toggle" => this.machine_connections.open = !this.machine_connections.open,
                     "machine-command" => this.client.machine_command(event.value),
+                    "control-chat" => this.pending_mode = backend::mode() == "local",
                     "assistant-save" => this.client.assistant_save(event.value),
                     "assistant-model" => ui::command(serde_json::json!({"action":"ai-open","owner":event.value,"return_to_chat":true})),
                     "permission-decision" => this.client.permission_decision(event.value),
@@ -527,11 +528,9 @@ impl Shell {
             return ui::page(cx).child(
                 ui::content().child(
                     ui::card(cx)
-                        .child(ui::title(crate::i18n::text(
-                            "main.configure-an-agent-to-start-chatting",
-                        )))
+                        .child(ui::title(crate::i18n::text("onboarding.start")))
                         .child(ui::hint(
-                            crate::i18n::text("main.connect-an-agent-and-choose-a-model"),
+                            crate::i18n::text("onboarding.choose-connection"),
                             cx,
                         ))
                         .child(
@@ -542,10 +541,16 @@ impl Shell {
                                     ui::command(serde_json::json!({"action":"ai-open"}))
                                 }),
                         )
-                        .child(ui::hint(
-                            crate::i18n::text("main.you-can-also-use-sandbox-first"),
-                            cx,
-                        )),
+                        .child(
+                            Button::new("chat-control-setup")
+                                .ghost()
+                                .label(crate::i18n::text("onboarding.connect-server"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.machine_connections.open = true;
+                                    ui::command(serde_json::json!({"action":"page","value":1}));
+                                    cx.notify();
+                                })),
+                        ),
                 ),
             );
         }
@@ -784,6 +789,22 @@ impl Shell {
                             message: m, source: &source, labels: &labels, artifact,
                             options: pot_ui::chat::MessageOptions { dark, expanded:self.expanded.contains(&m.id), latest_reply, touch:false, available_width:f32::from(window.viewport_size().width) },
                         }, handler, cx)
+                            .when(view.selected.is_empty() && pot_ui::onboarding::missing_desktop(m), |el| {
+                                el.child(ui::card(cx).mt_2()
+                                    .child(crate::i18n::text("onboarding.desktop-failure"))
+                                    .child(div().flex().flex_wrap().gap_2()
+                                        .child(Button::new(SharedString::from(format!("desktop-create-{}", m.id)))
+                                            .ghost().small().label(crate::i18n::text("onboarding.create-desktop"))
+                                            .on_click(|_, _, _| ui::command(serde_json::json!({"action":"sandbox-onboarding"}))))
+                                        .child(Button::new(SharedString::from(format!("desktop-connect-{}", m.id)))
+                                            .ghost().small().label(crate::i18n::text("onboarding.connect-desktop"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.machine_connections.open = true;
+                                                ui::command(serde_json::json!({"action":"page","value":1}));
+                                                cx.notify();
+                                            }))))
+                                )
+                            })
                             .when(view.selected.is_empty() && latest_assistant == Some(index) && (!view.running_tasks.is_empty() || self.summary_removal.is_some()), |el| {
                                 el.child(div().mt_2().w_full().max_w(px(600.)).flex().flex_col().gap_1().text_size(px(12.)).text_color(rgb(muted))
                                     .children(view.running_tasks.iter().map(|task| {
@@ -817,6 +838,9 @@ impl Shell {
                         .text_size(px(12.))
                         .text_color(rgb(muted))
                         .when(!error.is_empty(), |el| el.child(div().py_2().child(error)))
+                        .when_some(self.native["sandbox_error"].as_str().filter(|error| !error.is_empty()), |el, error| {
+                            el.child(div().py_2().child(error.to_owned()))
+                        })
                         .when(running, |el| {
                             el.child(div().py_2().child(if stopping {
                                 crate::i18n::text("main.stopping")

@@ -790,5 +790,12 @@
   "permissions.limit-cpus": "CPU 上限",
   "permissions.limit-memory_gib": "内存上限（GiB）",
   "permissions.limit-disk_gib": "磁盘上限（GiB）",
-  "permissions.assign-sandbox": "分配给此助手管理"
+  "permissions.assign-sandbox": "分配给此助手管理",
+  "onboarding.start": "开始使用 Pot",
+  "onboarding.choose-connection": "在本机配置 AI，或连接已有的 Runtime Control 服务器。",
+  "onboarding.connect-server": "连接服务器",
+  "onboarding.desktop-failure": "任务 Agent 因为找不到桌面环境失败。",
+  "onboarding.create-desktop": "创建桌面 Sandbox",
+  "onboarding.connect-desktop": "接入桌面环境",
+  "onboarding.server-chat": "打开服务器聊天"
 }

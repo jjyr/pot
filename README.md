@@ -10,11 +10,35 @@ Pot runs its Agent locally with separately managed Linux sandboxes. Pot manages 
 
 ## Install
 
+### macOS App
+
 Requires Apple Silicon and macOS 26 or later.
 
 ```sh
 brew install --cask jjyr/tap/pot
 ```
+
+### Server (Control or execution-only)
+
+On Linux or macOS, install from source with Rust/Cargo, Brotli CLI and the native build
+prerequisites described in the [Server installation guide](docs/deployment.md#install-server):
+
+```sh
+cargo install --git https://github.com/jjyr/pot.git --locked --bin pot pot-server
+```
+
+Both modes use the same CLI:
+
+- **[Control](docs/deployment.md#control-server)** manages assistants, conversations,
+  model credentials, tasks and joined machines. Connect with the macOS App or Web UI.
+- **[Execution-only (Runner)](docs/deployment.md#execution-only-server-runner)** joins
+  a Control and provides explicitly configured Host or Sandbox execution resources.
+  It connects outward and needs no model-provider credentials.
+
+The default `web-ui` feature builds, compresses and embeds the frontend. Install
+Brotli CLI first; the initial build also prepares WASM tools. Execution-only
+installs can use `--no-default-features` to skip these dependencies. macOS Sandbox
+helpers require separate setup.
 
 ## Features
 

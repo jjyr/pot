@@ -341,7 +341,6 @@ fn public_inventory(value: &Value) -> Value {
     }).collect::<Vec<_>>()).unwrap_or_default();
     json!({"selected":value["selected"],"items":items})
 }
-include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 async fn assets(State(a): State<Access>, req: Request) -> Response {
     if req.method() != Method::GET {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
@@ -364,6 +363,9 @@ async fn assets(State(a): State<Access>, req: Request) -> Response {
         "/font.ttf" => ("font.ttf", "font/ttf"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
+    if let Some(response) = super::assets::response(file, mime, req.headers()) {
+        return response;
+    }
     let gzip = req
         .headers()
         .get("accept-encoding")
@@ -375,11 +377,7 @@ async fn assets(State(a): State<Access>, req: Request) -> Response {
     } else {
         file.into()
     };
-    let bytes = if let Some(bytes) = embedded_asset(&path) {
-        Ok(bytes.to_vec())
-    } else {
-        tokio::fs::read(a.assets.join(path)).await
-    };
+    let bytes = tokio::fs::read(a.assets.join(path)).await;
     match bytes {
         Ok(bytes) => {
             let mut r =

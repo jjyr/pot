@@ -23,6 +23,10 @@ is the single phase progress table.
 
 [Machine capability permissions](validation/machine-permissions-20261012.md).
 
+[Embedded Web assets and compression](validation/embedded-web-assets-20261012.md).
+
+[Contextual onboarding](validation/contextual-onboarding-20261012.md).
+
 [Integrated titlebar and parent navigation](validation/titlebar-parent-navigation-20261012.md).
 
 [Unified Runtime Agent execution](validation/runtime-execution-20261012.md).

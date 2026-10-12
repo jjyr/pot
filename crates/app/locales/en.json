@@ -790,5 +790,12 @@
   "permissions.limit-cpus": "CPU limit",
   "permissions.limit-memory_gib": "Memory limit (GiB)",
   "permissions.limit-disk_gib": "Disk limit (GiB)",
-  "permissions.assign-sandbox": "Assign management to this assistant"
+  "permissions.assign-sandbox": "Assign management to this assistant",
+  "onboarding.start": "Start using Pot",
+  "onboarding.choose-connection": "Configure AI on this Mac, or connect to an existing Runtime Control server.",
+  "onboarding.connect-server": "Connect server",
+  "onboarding.desktop-failure": "The task Agent failed because no desktop environment was found.",
+  "onboarding.create-desktop": "Create desktop Sandbox",
+  "onboarding.connect-desktop": "Connect desktop environment",
+  "onboarding.server-chat": "Open server chat"
 }
