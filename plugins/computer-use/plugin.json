@@ -34,26 +34,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "approval_display": {
-        "summary": {
-          "en": "Allow using or managing a browser automation session?",
-          "zh-CN": "是否允许使用或管理浏览器自动化会话？"
-        },
-        "labels": {
-          "code": {
-            "en": "Browser operation code",
-            "zh-CN": "浏览器操作代码"
-          },
-          "session_id": {
-            "en": "Existing session",
-            "zh-CN": "已有会话"
-          },
-          "reset": {
-            "en": "End this session",
-            "zh-CN": "结束此会话"
-          }
-        }
       }
     }
   ]

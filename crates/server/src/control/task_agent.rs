@@ -72,7 +72,6 @@ impl Authority {
                 },
                 control: control.into(),
                 lease: lease.id.clone(),
-                policy: Mutex::new(None),
                 cancelled: std::sync::atomic::AtomicBool::new(false),
             };
             let directory = self.data.join("task-service-intents");
@@ -151,7 +150,6 @@ impl Authority {
                 },
                 control: control.into(),
                 lease: lease_id,
-                policy: Mutex::new(None),
                 cancelled: std::sync::atomic::AtomicBool::new(false),
             });
             let host = host.clone();

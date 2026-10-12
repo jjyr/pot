@@ -86,7 +86,6 @@ pub async fn open(
     });
     let (events, _) = broadcast::channel(256);
     let (commands, rx) = mpsc::unbounded_channel();
-    let resources = AgentResources::paths(&data);
     let sandboxes = match host.sandbox_manager() {
         Some(manager) => manager,
         None => Arc::new(sandbox::Manager::empty(&data, providers)?),
@@ -95,9 +94,7 @@ pub async fn open(
         host.attach_host_environment();
     }
     host.attach_sandboxes(sandboxes.clone());
-    let permissions = Arc::new(permissions::Hub::open(
-        &resources.home.join("permissions.json"),
-    )?);
+    let permissions = Arc::new(permissions::Hub::open(&data.join("permissions.json"))?);
     let s = Service {
         scope: OwnerScope {
             runtime_id: host.runtime_id().into(),

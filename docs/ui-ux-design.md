@@ -110,7 +110,7 @@ Token input is decimal: 1K=1, 000, 1M=1, 000, 000, stored as integers. Remove th
 ## Agent approval cards
 
 Native/Web conversations show approval cards separately from model messages, with
-Agent, environment, tool, arguments and scope. Actions are Always allow, Allow once,
+assistant, machine and Host/Sandbox capability. Actions are Always allow, Allow this work,
 Deny, in that order; saved grants can be revoked. See [Agent permissions](permissions.md).
 
 ## Machines and desktop

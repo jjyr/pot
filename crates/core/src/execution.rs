@@ -130,12 +130,15 @@ pub struct ExecutionContext {
 /// Synchronous acknowledgements preserve persistence-before-network ordering.
 /// Runtime validates owner/generation/turn before applying these observations.
 pub trait ExecutionFeedback: Send + Sync {
-    /// Protected user instruction edits can require a fresh review even with a grant.
-    fn requires_owner_review(&self, _tool: &str, _args: &Value) -> bool {
-        false
+    /// Resolve a fixed target without starting resources or contacting execution nodes.
+    fn resolve_execution_operation(
+        &self,
+        _name: &str,
+        args: Value,
+    ) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move { Ok(args) })
     }
-
-    /// Prepare execution-visible arguments and fix the environment before approval.
+    /// Prepare resources and normalize execution arguments after machine authorization.
     fn prepare_execution_operation(
         &self,
         _name: &str,
@@ -143,11 +146,7 @@ pub trait ExecutionFeedback: Send + Sync {
     ) -> BoxFuture<'_, Result<Value>> {
         Box::pin(async move { Ok(args) })
     }
-    /// Current {policy, grants} for the resolved execution environment. Legacy
-    /// grant arrays retain ask-by-default behavior. None disables this service.
-    fn environment_grants(&self, _environment: &str) -> BoxFuture<'_, Result<Option<Value>>> {
-        Box::pin(async move { self.permission_grants() })
-    }
+
     /// HOME is independent from an operation's working directory.
     fn execution_home(&self) -> Option<PathBuf> {
         None
@@ -156,10 +155,10 @@ pub trait ExecutionFeedback: Send + Sync {
     fn prepare_permission_operation(&self, _name: &str, args: Value) -> Result<Value> {
         Ok(args)
     }
-    /// Optional owner-controlled permission storage/UI. Policy lives in pot-agent.
-    /// None disables Host tools; embeddings must opt in explicitly.
-    fn permission_grants(&self) -> Result<Option<Value>> {
-        Ok(None)
+    /// Availability marker for the owner authorization service; policy stays in Control.
+    /// Embedders opt in explicitly; contained test executors need no owner UI.
+    fn owner_authorization_available(&self) -> Result<bool> {
+        Ok(false)
     }
     /// Execute an already authorized product-specific Host operation.
     fn execute_authorized_host(&self, _name: &str, _args: Value) -> BoxFuture<'_, Result<Value>> {

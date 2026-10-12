@@ -32,10 +32,6 @@ impl Feedback {
     }
 }
 impl ExecutionFeedback for Feedback {
-    fn requires_owner_review(&self, tool: &str, args: &Value) -> bool {
-        crate::permissions::rules_edit_requires_review(&self.service, tool, args)
-    }
-
     fn execute_authorized_host(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
         let name = name.to_owned();
         Box::pin(async move {
@@ -53,11 +49,7 @@ impl ExecutionFeedback for Feedback {
                     revision.as_deref(),
                 );
             }
-            anyhow::ensure!(
-                !self.cancelled() && !self.service.is_worker && name == "set_sandbox_mappings",
-                "Host operation unavailable"
-            );
-            crate::sandbox::management(&self.service, &json!({"action":"set_mounts","sandbox_id":args["sandbox_id"],"mappings":args["mappings"]})).await
+            anyhow::bail!("Unsupported owner operation")
         })
     }
     fn prepare_permission_operation(&self, name: &str, mut args: Value) -> Result<Value> {
@@ -91,6 +83,19 @@ impl ExecutionFeedback for Feedback {
     fn execution_home(&self) -> Option<PathBuf> {
         std::env::var_os("HOME").map(PathBuf::from)
     }
+    fn resolve_execution_operation(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
+        let name = name.to_owned();
+        Box::pin(async move {
+            self.check()?;
+            #[cfg(test)]
+            if self.service.test_tool_executor.is_some()
+                && !self.service.environment_service.permissions.configured()
+            {
+                return Ok(args);
+            }
+            crate::permissions::resolve_operation(&self.service, &name, args).await
+        })
+    }
     fn prepare_execution_operation(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
         let name = name.to_owned();
         Box::pin(async move {
@@ -104,39 +109,15 @@ impl ExecutionFeedback for Feedback {
             crate::permissions::prepare(&self.service, &name, args).await
         })
     }
-    fn environment_grants(&self, environment: &str) -> BoxFuture<'_, Result<Option<Value>>> {
-        let environment = environment.to_owned();
-        Box::pin(async move {
-            self.check()?;
-            #[cfg(test)]
-            if self.service.test_tool_executor.is_some()
-                && !self.service.environment_service.permissions.configured()
-            {
-                return Ok(None);
-            }
-            Ok(Some(
-                self.service
-                    .environment_service
-                    .permissions
-                    .environment(&environment)?
-                    .state(&self.service.usage_scope),
-            ))
-        })
-    }
-    fn permission_grants(&self) -> Result<Option<Value>> {
+    fn owner_authorization_available(&self) -> Result<bool> {
         self.check()?;
         #[cfg(test)]
         if self.service.test_tool_executor.is_some()
             && !self.service.environment_service.permissions.configured()
         {
-            return Ok(None);
+            return Ok(false);
         }
-        Ok(Some(
-            self.service
-                .environment_service
-                .permissions
-                .grants(&self.service.usage_scope),
-        ))
+        Ok(true)
     }
     fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
         Box::pin(async move {

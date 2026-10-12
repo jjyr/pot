@@ -234,6 +234,24 @@ async fn shutdown_settles_active_main_and_worker_model_requests_without_host_exe
         axum::serve(upstream, router).await.unwrap();
     });
     let server = fixture.start().await;
+    let identity = server
+        .local_client()
+        .request("/api/v1/runtime", None)
+        .await
+        .unwrap();
+    let identity: Value = serde_json::from_slice(&identity.body).unwrap();
+    let configured = server
+        .local_client()
+        .request(
+            "/api/v1/permissions",
+            Some(json!({
+                "action":"configure", "machine_id":identity["runtime_id"],
+                "capability":"host", "decision":"allow"
+            })),
+        )
+        .await
+        .unwrap();
+    assert_eq!(configured.status, 200);
     let endpoint = server.endpoint().unwrap();
     let base = format!("http://{}", server.local_addr().unwrap());
     let (stop, shutdown) = tokio::sync::oneshot::channel();

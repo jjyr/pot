@@ -198,8 +198,11 @@ struct Control {
     switch_environment: AtomicBool,
 }
 impl ExecutionFeedback for Control {
-    fn permission_grants(&self) -> Result<Option<Value>> {
-        Ok(Some(json!({"policy":{"default":"allow"},"grants":[]})))
+    fn owner_authorization_available(&self) -> Result<bool> {
+        Ok(true)
+    }
+    fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
+        Box::pin(async move { Ok(json!({"request":request,"approved":true})) })
     }
     fn ready(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async {
@@ -423,7 +426,7 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
             tool_result["content"]
                 .as_str()
                 .unwrap()
-                .contains("Worker cannot switch its assigned Environment")
+                .contains("Worker cannot change its fixed target")
         );
     }
     assert!(!workspace.join("forbidden").exists());

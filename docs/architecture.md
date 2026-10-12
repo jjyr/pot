@@ -98,9 +98,9 @@ inbound execution listener. Responses are bounded and redirects are forbidden.
 
 An execution Runtime binds one Control. Joining allows that Control to operate all
 configured Host/Sandbox resources. There are no discovery, execution, management,
-artifact or desktop grants, expiry controls or grant/revoke APIs. Model operation
-approval remains independent: assistants still request approval for protected
-behavior and edits to their own instructions.
+artifact or desktop grants, expiry controls or grant/revoke APIs. Assistant authorization remains independent: Control grants each assistant Host
+and Sandbox capabilities per machine, for one work scope or permanently.
+Instruction edits retain fresh owner review. See [machine permissions](permissions.md).
 
 Removing a member invalidates its connection credential. Leaving fences local
 leases. A new invitation creates a fresh session; old enrollment cannot silently

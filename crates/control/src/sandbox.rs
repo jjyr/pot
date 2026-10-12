@@ -248,19 +248,101 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         return Ok(crate::environment::inventory(s).await);
     }
     if name == "manage_sandbox" {
+        let generation = agent::thread(s)?.generation;
+        #[cfg(test)]
+        let gated = s.environment_service.permissions.configured();
+        #[cfg(not(test))]
+        let gated = true;
+        if gated {
+            let response = crate::permissions::request(
+                s,
+                generation,
+                &turn,
+                json!(pot_agent::permissions::Request {
+                    owner: s.usage_scope.clone(),
+                    environment: String::new(),
+                    generation,
+                    turn: turn.clone(),
+                    call_id: call_id.into(),
+                    tool: name.into(),
+                    args: args.clone()
+                }),
+            )
+            .await?;
+            anyhow::ensure!(response["approved"] == true, "Owner denied sandbox access");
+        }
+        let _mutation = s
+            .environment_service
+            .permissions
+            .sandbox_mutations
+            .lock()
+            .await;
+        let machine = args["runtime_id"].as_str().unwrap_or(&s.runtime_id);
+        crate::permissions::ensure_current_access(
+            s,
+            machine,
+            pot_agent::permissions::Capability::Sandbox,
+        )?;
+        s.environment_service
+            .permissions
+            .validate_sandbox_change(machine, args)?;
+        if args["action"] != "create" {
+            let sandbox = if machine == s.runtime_id {
+                s.environment_service
+                    .sandboxes
+                    .assignment(args["sandbox_id"].as_str().unwrap_or(""))?
+            } else {
+                args["sandbox_id"].as_str().unwrap_or("").into()
+            };
+            s.environment_service.permissions.sandbox_access(
+                &s.assistant_id,
+                machine,
+                &sandbox,
+                true,
+            )?;
+        } else {
+            let sandbox = args["sandbox_id"].as_str().unwrap_or("");
+            anyhow::ensure!(
+                s.environment_service.sandboxes.assignment(sandbox).is_err(),
+                "Sandbox already exists"
+            );
+            let manager = &s.environment_service.sandboxes;
+            s.environment_service
+                .permissions
+                .validate_sandbox_creation(
+                    machine,
+                    manager.creation_config(args["provider"].as_str())?,
+                    manager.sandbox_count(),
+                )?;
+            // Reserve ownership durably before creation; failures leave an owner-visible reservation.
+            s.environment_service
+                .permissions
+                .record_sandbox(&s.assistant_id, machine, sandbox)?;
+        }
         anyhow::ensure!(
             args["action"] != "set_mounts",
-            "Host mappings require the pot-agent permission flow"
+            "Host mappings are configured only by the machine owner"
         );
         if let Some(target) = remote_management_target(s, args)? {
             let binding = remote_environment::binding(s, target)?;
             let service = s.clone();
             let cancelled = Arc::new(move || agent::cancelled(&service) || service.stopping());
-            return remote_environment::port(s)?
+            let result = remote_environment::port(s)?
                 .manage(binding, call_id.to_owned(), args.clone(), cancelled)
-                .await;
+                .await?;
+            if args["action"] == "delete" {
+                s.environment_service
+                    .permissions
+                    .forget_sandbox(machine, args["sandbox_id"].as_str().unwrap_or(""))?;
+            }
+            return Ok(result);
         }
         let result = management(s, args).await?;
+        if args["action"] == "delete" {
+            s.environment_service
+                .permissions
+                .forget_sandbox(machine, result["sandbox_id"].as_str().unwrap_or(""))?;
+        }
         if matches!(
             args["action"].as_str(),
             Some("create" | "start" | "desktop")

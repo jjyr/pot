@@ -1,6 +1,6 @@
 # Computer use plugin
 
-The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaScript session and a dedicated headless Chromium on **Host or Linux Sandbox**. It follows the shared [permissions](permissions.md): Main defaults to Host with owner approval; Worker remains bound to its assigned Host/Sandbox. Control owns connected-task configuration and approvals; destination globals cannot override them. Independent local Sandbox execution allows calls by default, subject to its configured policy. Native desktop automation is not supported.
+The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaScript session and a dedicated headless Chromium on **Host or Linux Sandbox**. It follows the shared [permissions](permissions.md): Main defaults to Host with owner approval; Worker remains bound to its assigned Host/Sandbox. Control owns connected-task configuration and approvals; destination globals cannot override them. Host and Sandbox each use the assistant’s machine capability policy. Native desktop automation is not supported.
 
 ## Configuration
 
@@ -78,26 +78,7 @@ Packages own their instructions, tool schemas and implementation. See the [bundl
 
 Control environment adapters resolve the target, check permission, and send the pinned bundle and model-derived mode to the execution backend. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, environment and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
 
-Tools may include optional `approval_display` metadata with localized `summary` text and `labels` keyed by argument name (each uses locale-to-text maps with an English fallback). Pot shows these plain-text labels with actual arguments; tools without metadata use raw JSON. Metadata is pinned with the bundle, validated on import, and excluded from model tool schemas. Changing display text requires importing the bundle again and saving the updated Thread configuration.
-
-Add it beside `name`, `description` and `inputSchema` in a manifest tool:
-
-```json
-"approval_display": {
-  "summary": {"en": "Allow browser use?", "zh-CN": "是否允许使用浏览器？"},
-  "labels": {
-    "code": {"en": "Operation code", "zh-CN": "操作代码"},
-    "session_id": {"en": "Session", "zh-CN": "会话"},
-    "reset": {"en": "End session", "zh-CN": "结束会话"}
-  }
-}
-```
-
-English text is required; labels must reference declared arguments. Approval cards
-show only the localized summary when supplied, and raw arguments otherwise. Actual
-arguments remain in the request for authorization. This is
-static plain text, without JavaScript callbacks, interpolation or inferred page
-actions. Runtime checks the display against the bound package before approval.
+Plugin tools use the shared machine capability approval. Tool-specific approval metadata is not accepted.
 
 Host needs Node and an installed Chrome/Chromium; the App supplies Node. Standard Linux and macOS browser paths are discovered automatically, or set `POT_BROWSER_EXECUTABLE`. Host uses temporary profiles, process-group cleanup and Chrome's native sandbox. Plugin children receive a restricted environment without inherited model credentials. Host approval authorizes code execution with the user's OS privileges; the JS context is not an isolation boundary.
 

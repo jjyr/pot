@@ -28,12 +28,7 @@ impl HostEnvironment {
             .1
             .clone()
     }
-    pub(crate) async fn host_plugin_session(
-        &self,
-        owner: &str,
-        generation: u64,
-        session: &str,
-    ) -> bool {
+    pub(crate) async fn host_session(&self, owner: &str, generation: u64, session: &str) -> bool {
         let executor = self
             .executors
             .lock()
@@ -42,7 +37,7 @@ impl HostEnvironment {
             .filter(|(bound, _)| *bound == generation)
             .map(|(_, e)| e.clone());
         match executor {
-            Some(e) => e.has_plugin_session(session).await,
+            Some(e) => e.has_session(session).await,
             None => false,
         }
     }
@@ -199,7 +194,9 @@ pub(crate) async fn inventory(s: &Service) -> Value {
 /// Resolve public local strings or a complete typed destination before effects.
 pub(crate) fn resolve(s: &Service, value: &Value) -> Result<pot_core::EnvironmentRef> {
     let reference = if let Some(value) = value.as_str() {
-        if value == "host" {
+        if value.starts_with("remote:") {
+            crate::remote_environment::from_key(value)?
+        } else if value == "host" {
             pot_core::EnvironmentRef::host(&s.runtime_id)
         } else {
             let sandbox_id = value
@@ -364,14 +361,7 @@ impl pot_core::ToolExecutor for Tools {
     }
 }
 pub async fn finish_turn(s: &Service) -> Result<()> {
-    if agent::cancelled(s) || s.stopping() {
-        finish(s).await
-    } else {
-        s.environment_service
-            .sandboxes
-            .finish_turn(&s.usage_scope)
-            .await
-    }
+    finish(s).await
 }
 pub async fn refresh(s: &Service) -> Result<()> {
     finish_turn(s).await

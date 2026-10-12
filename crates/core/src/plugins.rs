@@ -8,36 +8,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-/// Declarative owner-facing approval text. Never executes plugin code before approval.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ApprovalDisplay {
-    pub summary: BTreeMap<String, String>,
-    #[serde(default)]
-    pub labels: BTreeMap<String, BTreeMap<String, String>>,
-}
-impl ApprovalDisplay {
-    fn validate(&self, properties: &Value) -> Result<()> {
-        fn text(values: &BTreeMap<String, String>) -> bool {
-            values.get("en").is_some_and(|s| !s.trim().is_empty())
-                && values.len() <= 16
-                && values.iter().all(|(locale, s)| {
-                    locale.len() <= 32 && !s.trim().is_empty() && s.len() <= 2048
-                })
-        }
-        ensure!(text(&self.summary), "Invalid plugin approval summary");
-        ensure!(
-            self.labels.len() <= 32
-                && self
-                    .labels
-                    .iter()
-                    .all(|(key, label)| properties.get(key).is_some() && text(label)),
-            "Invalid plugin approval labels"
-        );
-        Ok(())
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
@@ -98,7 +68,7 @@ fn safe_path(path: &str) -> bool {
             .components()
             .all(|c| matches!(c, Component::Normal(_)))
 }
-/// Candidate names for owner-defined plugin grants; dispatch still requires a bound tool.
+/// Plugin names cannot shadow product tools; dispatch requires a pinned bundle.
 pub fn is_plugin_tool_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -112,7 +82,6 @@ pub fn is_plugin_tool_name(name: &str) -> bool {
                 | "browser"
                 | "exec"
                 | "wait"
-                | "set_sandbox_mappings"
                 | "read_agent_instructions"
                 | "update_agent_instructions"
         )
@@ -211,10 +180,15 @@ impl PluginBundle {
                 "Invalid plugin schema"
             );
             let input_schema = tool["inputSchema"].as_object().unwrap();
-            if let Some(display) = tool.get("approval_display") {
-                serde_json::from_value::<ApprovalDisplay>(display.clone())?
-                    .validate(&input_schema["properties"])?;
-            }
+            ensure!(
+                tool.as_object().is_some_and(|o| o.keys().all(|k| [
+                    "name",
+                    "description",
+                    "inputSchema"
+                ]
+                .contains(&k.as_str()))),
+                "Unsupported plugin tool metadata"
+            );
             ensure!(
                 input_schema["properties"].get("sandbox_id").is_none()
                     && input_schema["properties"].get("environment").is_none(),
@@ -404,15 +378,6 @@ impl PluginBundle {
         }
         Ok(())
     }
-    pub fn approval_display(&self, name: &str) -> Result<Option<ApprovalDisplay>> {
-        self.manifest
-            .tools
-            .iter()
-            .find(|t| t["name"] == name)
-            .and_then(|t| t.get("approval_display"))
-            .map(|display| serde_json::from_value(display.clone()).map_err(Into::into))
-            .transpose()
-    }
 }
 impl crate::AgentSettings {
     /// Called by owner settings import and spec resolution, never by the Guest.
@@ -497,9 +462,6 @@ impl crate::AgentSettings {
                         .tools,
                 );
             }
-        }
-        for tool in &mut tools {
-            tool.as_object_mut().unwrap().remove("approval_display");
         }
         Ok(tools)
     }
@@ -745,18 +707,12 @@ mod tests {
 }
 
 #[cfg(test)]
-mod permission_compatibility_tests {
+mod plugin_contract_tests {
     use super::*;
     #[test]
     fn plugins_cannot_shadow_new_product_tools_or_routing_arguments() {
         let original = PluginBundle::builtin("computer-use").unwrap();
-        for name in [
-            "exec",
-            "wait",
-            "create_task",
-            "manage_sandbox",
-            "set_sandbox_mappings",
-        ] {
+        for name in ["exec", "wait", "create_task", "manage_sandbox"] {
             let mut bundle = original.clone();
             bundle.manifest.tools[0]["name"] = json!(name);
             bundle.digest = bundle.hash().unwrap();
@@ -771,31 +727,10 @@ mod permission_compatibility_tests {
         assert!(is_plugin_tool_name("counter"));
     }
     #[test]
-    fn approval_metadata_is_optional_validated_and_not_model_visible() {
-        let original = PluginBundle::builtin("computer-use").unwrap();
-        assert!(original.approval_display("cua_repl").unwrap().is_some());
-        assert!(
-            crate::AgentSettings::default().plugin_tools().unwrap()[0]
-                .get("approval_display")
-                .is_none()
-        );
-        let mut external = original.clone();
-        external.manifest.tools[0]
-            .as_object_mut()
-            .unwrap()
-            .remove("approval_display");
-        external.digest = external.hash().unwrap();
-        external.validate().unwrap();
-        assert!(external.approval_display("cua_repl").unwrap().is_none());
-        for invalid in [
-            json!({"summary":{"zh-CN":"没有英文回退"}}),
-            json!({"summary":{"en":"Allow?"},"labels":{"unknown":{"en":"Unknown"}}}),
-            json!({"summary":{"en":"Allow?"},"run":"index.mjs"}),
-        ] {
-            let mut bundle = original.clone();
-            bundle.manifest.tools[0]["approval_display"] = invalid;
-            bundle.digest = bundle.hash().unwrap();
-            assert!(bundle.validate().is_err());
-        }
+    fn removed_approval_metadata_is_rejected() {
+        let mut plugin = PluginBundle::builtin("computer-use").unwrap();
+        plugin.manifest.tools[0]["approval_display"] = json!({"summary":{"en":"Allow?"}});
+        plugin.digest = plugin.hash().unwrap();
+        assert!(plugin.validate().is_err());
     }
 }

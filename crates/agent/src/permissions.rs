@@ -1,23 +1,20 @@
-//! Agent-owned permission policy. Embedders supply durable grants and owner UI,
-//! never model-generated approval.
+//! Owner approval requests. Machine capability decisions belong to Control.
 use anyhow::{Result, ensure};
 use pot_core::{ExecutionContext, ExecutionRole, Thread, TurnRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::{Component, Path, PathBuf};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Scope {
-    Exact {
-        tool: String,
-        args: Value,
-    },
-    Path {
-        path: PathBuf,
-        write: bool,
-        recursive: bool,
-    },
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum Capability {
+    Host,
+    Sandbox,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+pub struct Scope {
+    pub machine_id: String,
+    pub capability: Capability,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -26,295 +23,152 @@ pub struct Grant {
     pub owner: String,
     pub scope: Scope,
 }
-
-/// User-editable current permissions, independent of execution threads/history.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {
-    pub version: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy: Option<Policy>,
-    pub grants: Vec<ConfiguredGrant>,
-}
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultDecision {
     #[default]
     Ask,
     Allow,
+    Deny,
 }
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Rule {
+    pub assistant_id: String,
+    pub scope: Scope,
+    pub decision: DefaultDecision,
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
-    pub default: DefaultDecision,
+    #[serde(default)]
+    pub machine_epochs: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub rules: Vec<Rule>,
+    #[serde(default)]
+    pub sandbox_limits: std::collections::BTreeMap<String, SandboxLimits>,
+    #[serde(default)]
+    pub sandboxes: Vec<SandboxAccess>,
 }
-impl Policy {
-    pub fn sandbox() -> Self {
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxLimits {
+    pub max_sandboxes: u64,
+    pub cpus: u64,
+    pub memory_gib: u64,
+    pub disk_gib: u64,
+}
+impl Default for SandboxLimits {
+    fn default() -> Self {
         Self {
-            default: DefaultDecision::Allow,
+            max_sandboxes: 16,
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 32,
         }
     }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxAccess {
+    pub machine_id: String,
+    pub sandbox_id: String,
+    pub owner: String,
+    #[serde(default)]
+    pub shared_with: Vec<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    pub version: u32,
+    pub policy: Policy,
+    pub grants: Vec<Grant>,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: 1,
-            policy: None,
+            version: 2,
+            policy: Policy::default(),
             grants: vec![],
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConfiguredGrant {
-    pub id: String,
-    pub agent: String,
-    pub permission: Permission,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Permission {
-    Path {
-        path: PathBuf,
-        access: Access,
-        recursive: bool,
-    },
-    Operation {
-        tool: String,
-        args: Value,
-    },
-}
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Access {
-    Read,
-    ReadWrite,
-}
 impl Config {
     pub fn from_grants(grants: &[Grant]) -> Self {
         Self {
-            version: 1,
-            policy: None,
-            grants: grants
-                .iter()
-                .map(|g| ConfiguredGrant {
-                    id: g.id.clone(),
-                    agent: g.owner.clone(),
-                    permission: match &g.scope {
-                        Scope::Path {
-                            path,
-                            write,
-                            recursive,
-                        } => Permission::Path {
-                            path: path.clone(),
-                            access: if *write {
-                                Access::ReadWrite
-                            } else {
-                                Access::Read
-                            },
-                            recursive: *recursive,
-                        },
-                        Scope::Exact { tool, args } => Permission::Operation {
-                            tool: tool.clone(),
-                            args: args.clone(),
-                        },
-                    },
-                })
-                .collect(),
+            grants: grants.to_vec(),
+            ..Self::default()
         }
     }
     pub fn into_grants(self) -> Result<Vec<Grant>> {
-        ensure!(self.version == 1, "Unsupported permissions.json version");
-        ensure!(self.grants.len() <= 1000, "Persistent grant limit reached");
-        let mut grants: Vec<Grant> = vec![];
-        for g in self.grants {
+        ensure!(
+            self.version == 2,
+            "Unsupported permission format; configure machine capabilities afresh"
+        );
+        ensure!(
+            self.grants.len() <= 1000 && self.policy.rules.len() <= 1000,
+            "Permission limit reached"
+        );
+        let mut ids = std::collections::BTreeSet::new();
+        let mut scopes = std::collections::BTreeSet::new();
+        for g in &self.grants {
+            validate_identity(&g.owner, &g.scope)?;
             ensure!(
-                !g.id.trim().is_empty() && !g.agent.trim().is_empty() && !g.agent.contains('*'),
-                "Grant ID and explicit Agent identity required"
+                !g.id.is_empty() && ids.insert(&g.id) && scopes.insert((&g.owner, &g.scope)),
+                "Duplicate or invalid grant"
             );
-            let scope = match g.permission {
-                Permission::Path {
-                    path,
-                    access,
-                    recursive,
-                } => {
-                    ensure!(
-                        path.is_absolute()
-                            && !path.components().any(|c| matches!(c, Component::ParentDir)),
-                        "Grant path must be absolute without parent components"
-                    );
-                    Scope::Path {
-                        path,
-                        write: matches!(access, Access::ReadWrite),
-                        recursive,
-                    }
-                }
-                Permission::Operation { mut tool, mut args } => {
-                    // Preserve the old Host command semantics when loading existing grants.
-                    if tool == "host_exec_command" {
-                        tool = "exec_command".into();
-                        let object = args.as_object_mut().ok_or_else(|| {
-                            anyhow::anyhow!("Operation arguments must be an object")
-                        })?;
-                        object.entry("shell").or_insert(Value::from("/bin/sh"));
-                        object.entry("login").or_insert(Value::from(false));
-                        object.entry("tty").or_insert(Value::from(false));
-                        object.entry("timeout_ms").or_insert(Value::from(60000));
-                    } else if tool == "pot_manage_sandbox" {
-                        tool = "manage_sandbox".into();
-                    } else if tool == "host_set_sandbox_mappings" {
-                        tool = "set_sandbox_mappings".into();
-                    }
-                    ensure!(
-                        is_execution_tool(&tool)
-                            || pot_core::plugins::is_plugin_tool_name(&tool)
-                            || tool == "manage_sandbox"
-                            || tool == "set_sandbox_mappings",
-                        "Unsupported permission tool"
-                    );
-                    ensure!(args.is_object(), "Operation arguments must be an object");
-                    if tool == "exec_command" {
-                        let defaults = pot_core::ShellSettings::default();
-                        let object = args.as_object_mut().unwrap();
-                        object
-                            .entry("shell")
-                            .or_insert(Value::from(defaults.executable));
-                        object
-                            .entry("login")
-                            .or_insert(Value::from(defaults.allow_login_shell));
-                        object.entry("tty").or_insert(Value::from(false));
-                        if !object.contains_key("yield_time_ms") {
-                            object
-                                .entry("timeout_ms")
-                                .or_insert(Value::from(defaults.default_timeout_ms));
-                        }
-                    }
-                    // Config paths refer to their own environment, never the Runtime filesystem.
-                    if is_execution_tool(&tool) {
-                        pot_core::environment_tools::validate(&tool, &args)?;
-                    }
-                    if let Some(object) = args.as_object_mut() {
-                        object.remove("environment");
-                    }
-                    Scope::Exact { tool, args }
-                }
-            };
-            ensure!(
-                !grants
-                    .iter()
-                    .any(|old| old.id == g.id || (old.owner == g.agent && old.scope == scope)),
-                "Duplicate grant ID or Agent permission scope"
-            );
-            grants.push(Grant {
-                id: g.id,
-                owner: g.agent,
-                scope,
-            });
         }
-        Ok(grants)
+        let mut rules = std::collections::BTreeSet::new();
+        for r in &self.policy.rules {
+            validate_identity(&r.assistant_id, &r.scope)?;
+            ensure!(
+                rules.insert((&r.assistant_id, &r.scope)),
+                "Duplicate machine policy"
+            );
+        }
+        let mut resources = std::collections::BTreeSet::new();
+        for r in &self.policy.sandboxes {
+            ensure!(
+                !r.machine_id.is_empty()
+                    && !r.sandbox_id.is_empty()
+                    && !r.owner.is_empty()
+                    && resources.insert((&r.machine_id, &r.sandbox_id)),
+                "Invalid or duplicate sandbox ownership"
+            );
+        }
+        for limit in self.policy.sandbox_limits.values() {
+            ensure!(
+                limit.max_sandboxes > 0
+                    && limit.cpus > 0
+                    && limit.memory_gib > 0
+                    && limit.disk_gib > 0,
+                "Sandbox limits must be positive"
+            );
+        }
+        Ok(self.grants)
     }
+}
+fn validate_identity(owner: &str, scope: &Scope) -> Result<()> {
+    ensure!(
+        !owner.trim().is_empty() && !owner.contains('*') && !scope.machine_id.trim().is_empty(),
+        "Explicit assistant and machine identities required"
+    );
+    Ok(())
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
     pub owner: String,
-    #[serde(default = "default_environment")]
     pub environment: String,
     pub generation: u64,
     pub turn: String,
     pub call_id: String,
     pub tool: String,
     pub args: Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposed_grant: Option<Scope>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<pot_core::plugins::ApprovalDisplay>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin: Option<pot_core::plugins::PluginIdentity>,
-}
-impl Request {
-    pub fn operation_scope(&self) -> Result<Scope> {
-        scope(&self.tool, &self.args)
-    }
-    pub fn grant_scope(&self) -> Result<Scope> {
-        self.proposed_grant
-            .clone()
-            .map_or_else(|| self.operation_scope(), Ok)
-    }
-}
-
-/// Resolve before review, then execute this exact path without following links.
-/// New files resolve through their existing parent. No filesystem content is read.
-pub fn resolve_path(path: &str) -> Result<PathBuf> {
-    let path = Path::new(path);
-    ensure!(path.is_absolute(), "Host paths must be absolute");
-    ensure!(
-        !path.components().any(|c| matches!(c, Component::ParentDir)),
-        "Parent path components are not allowed"
-    );
-    if path.exists() {
-        Ok(path.canonicalize()?)
-    } else {
-        let parent = path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Missing parent directory"))?
-            .canonicalize()?;
-        Ok(parent.join(
-            path.file_name()
-                .ok_or_else(|| anyhow::anyhow!("Missing filename"))?,
-        ))
-    }
-}
-
-pub fn scope(tool: &str, args: &Value) -> Result<Scope> {
-    Ok(Scope::Exact {
-        tool: tool.into(),
-        args: operation_args(args),
-    })
-}
-
-fn operation_args(args: &Value) -> Value {
-    let mut value = args.clone();
-    if let Some(object) = value.as_object_mut() {
-        object.remove("environment");
-    }
-    value
-}
-
-impl Scope {
-    pub fn covers(&self, requested: &Scope) -> bool {
-        match (self, requested) {
-            (
-                Self::Exact { tool, args },
-                Self::Exact {
-                    tool: other,
-                    args: values,
-                },
-            ) => tool == other && args == values,
-            (
-                Self::Path {
-                    path,
-                    write,
-                    recursive,
-                },
-                Self::Path {
-                    path: other,
-                    write: writes,
-                    ..
-                },
-            ) => (*write || !writes) && (path == other || (*recursive && other.starts_with(path))),
-            _ => false,
-        }
-    }
-}
-
-fn default_environment() -> String {
-    "host".into()
 }
 pub fn is_execution_tool(name: &str) -> bool {
     ["exec_command", "write_stdin", "apply_patch"].contains(&name)
 }
-
 pub async fn authorize(
     context: &ExecutionContext,
     thread: &Thread,
@@ -323,126 +177,50 @@ pub async fn authorize(
     tool: &str,
     args: &Value,
 ) -> Result<()> {
-    if super::environment_tools::instructions_tool(tool) {
-        ensure!(
-            context.role == ExecutionRole::Main,
-            "Only the owning chat assistant can access its instructions"
-        );
-        if tool == "read_agent_instructions" {
-            return Ok(());
-        }
-        ensure!(
-            !context.feedback.cancelled(),
-            "Permission request cancelled"
-        );
-        let request = Request {
-            owner: context.owner.clone(),
-            environment: "host".into(),
-            generation: thread.generation,
-            turn: turn.request_id.clone(),
-            call_id: call_id.into(),
-            tool: tool.into(),
-            args: operation_args(args),
-            proposed_grant: None,
-            display: None,
-            plugin: None,
-        };
-        let expected = serde_json::to_value(&request)?;
-        let decision = tokio::select! {
-            result = context.feedback.request_permission(expected.clone()) => result?,
-            _ = context.feedback.cancellation() => anyhow::bail!("Permission request cancelled"),
-        };
-        ensure!(
-            !context.feedback.cancelled()
-                && decision["request"] == expected
-                && decision["approved"] == true,
-            "Owner denied permission"
-        );
-        return Ok(());
-    }
+    let instructions = super::environment_tools::instructions_tool(tool);
     let execution =
         is_execution_tool(tool) || thread.config.params.agent.plugin_for_tool(tool)?.is_some();
-    if context.role == ExecutionRole::Summary {
-        ensure!(
-            !execution && !["manage_sandbox", "set_sandbox_mappings"].contains(&tool),
-            "Summary is read-only"
-        );
-    }
-    if tool == "manage_sandbox" {
+    let management = tool == "manage_sandbox";
+    if instructions || management {
         ensure!(
             context.role == ExecutionRole::Main,
-            "Only Main can manage Sandboxes"
+            "Only the owning assistant can manage resources and instructions"
         );
     }
-    let environment = args["environment"].as_str().unwrap_or("host");
-    if tool == "set_sandbox_mappings" {
-        ensure!(
-            context.role == ExecutionRole::Main && environment == "host",
-            "Only Main on Host can modify Sandbox mappings"
-        );
-    }
-    // Product management is trusted role-scoped capability. Session input/polls
-    // continue an existing authorized command; the executor checks ownership.
-    if tool == "write_stdin" || (!execution && tool != "set_sandbox_mappings") {
-        return Ok(());
-    }
-    let Some(state) = context.feedback.environment_grants(environment).await? else {
-        return Ok(());
-    };
     ensure!(
-        !context.feedback.cancelled(),
-        "Permission request cancelled"
+        context.role != ExecutionRole::Summary || (!execution && !management && !instructions),
+        "Summary is read-only"
     );
-    // Legacy embedder feedback supplies a grant array and retains ask-by-default.
-    let (policy, grants) = if state.is_array() {
-        (Policy::default(), state)
-    } else {
-        (
-            serde_json::from_value::<Policy>(state["policy"].clone())?,
-            state["grants"].clone(),
-        )
-    };
-    let review = context.feedback.requires_owner_review(tool, args);
-    if !review && policy.default == DefaultDecision::Allow && tool != "set_sandbox_mappings" {
+    if tool == "read_agent_instructions" || (!execution && !management && !instructions) {
         return Ok(());
     }
-    let operation_scope = scope(tool, args)?;
-    let plugin = thread.config.params.agent.plugin_for_tool(tool)?;
-    let display = plugin
-        .as_ref()
-        .map(|plugin| plugin.approval_display(tool))
-        .transpose()?
-        .flatten();
+    // Embedders without machine execution use their own contained executor.
+    if !instructions && !context.feedback.owner_authorization_available()? {
+        return Ok(());
+    }
+    let environment = match args.get("environment") {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => format!("remote:{}", serde_json::to_string(v)?),
+        None => String::new(),
+    };
     let request = Request {
         owner: context.owner.clone(),
-        environment: environment.into(),
+        environment,
         generation: thread.generation,
         turn: turn.request_id.clone(),
         call_id: call_id.into(),
         tool: tool.into(),
-        args: operation_args(args),
-        proposed_grant: None,
-        display,
-        plugin: plugin.map(|plugin| plugin.identity()),
+        args: args.clone(),
     };
-    let grants: Vec<Grant> = serde_json::from_value(grants)?;
-    if !review
-        && grants
-            .iter()
-            .any(|g| g.owner == request.owner && g.scope.covers(&operation_scope))
-    {
-        return Ok(());
-    }
+    let expected = serde_json::to_value(&request)?;
     let decision = tokio::select! {
-        result = context.feedback.request_permission(serde_json::to_value(&request)?) => result?,
+        r = context.feedback.request_permission(expected.clone()) => r?,
         _ = context.feedback.cancellation() => anyhow::bail!("Permission request cancelled"),
     };
     ensure!(
-        !context.feedback.cancelled(),
-        "Permission request cancelled"
-    );
-    ensure!(
-        decision["request"] == serde_json::to_value(&request)? && decision["approved"] == true,
+        !context.feedback.cancelled()
+            && decision["request"] == expected
+            && decision["approved"] == true,
         "Owner denied permission"
     );
     Ok(())
@@ -452,123 +230,23 @@ pub async fn authorize(
 mod tests {
     use super::*;
     #[test]
-    fn legacy_host_commands_keep_their_shell_and_guest_paths_stay_lexical() {
-        let config = serde_json::json!({"version":1,"grants":[{"id":"old","agent":"main","permission":{"type":"operation","tool":"host_exec_command","args":{"cmd":"true","workdir":"/guest-only/nonexistent"}}}]});
-        let grants = serde_json::from_value::<Config>(config)
-            .unwrap()
-            .into_grants()
-            .unwrap();
-        assert_eq!(
-            grants[0].scope,
-            Scope::Exact {
-                tool: "exec_command".into(),
-                args: serde_json::json!({"cmd":"true","workdir":"/guest-only/nonexistent","shell":"/bin/sh","login":false,"tty":false,"timeout_ms":60000})
-            }
-        );
-        let args =
-            serde_json::json!({"path":"/guest-only/nonexistent","environment":"sandbox:one"});
-        assert_eq!(
-            scope("apply_patch", &args).unwrap(),
-            Scope::Exact {
-                tool: "apply_patch".into(),
-                args: serde_json::json!({"path":"/guest-only/nonexistent"})
-            }
-        );
-    }
-    #[test]
-    fn editable_config_roundtrips_and_rejects_ambiguous_permissions() {
-        let valid = serde_json::json!({"version":1,"grants":[
-            {"id":"notes","agent":"main","permission":{"type":"path","path":"/","access":"read","recursive":true}},
-            {"id":"command","agent":"task-123","permission":{"type":"operation","tool":"exec_command","args":{"cmd":"true","workdir":"/"}}}
-        ]});
-        let grants = serde_json::from_value::<Config>(valid.clone())
-            .unwrap()
-            .into_grants()
-            .unwrap();
-        assert_eq!(
-            grants[1].scope,
-            Scope::Exact {
-                tool: "exec_command".into(),
-                args: serde_json::json!({"cmd":"true","workdir":"/","shell":"/bin/bash","login":true,"tty":false,"timeout_ms":120000})
-            }
-        );
-        assert_eq!(Config::from_grants(&grants).into_grants().unwrap(), grants);
-        for change in [
-            serde_json::json!({"version":2,"grants":[]}),
-            serde_json::json!({"version":1,"grants":[],"requests":[]}),
-        ] {
-            assert!(
-                serde_json::from_value::<Config>(change)
-                    .and_then(|c| c.into_grants().map_err(serde::de::Error::custom))
-                    .is_err()
-            );
-        }
-        for (field, value) in [
-            ("agent", serde_json::json!("*")),
-            ("id", serde_json::json!("")),
-        ] {
-            let mut invalid = valid.clone();
-            invalid["grants"][0][field] = value;
-            assert!(
-                serde_json::from_value::<Config>(invalid)
-                    .unwrap()
-                    .into_grants()
-                    .is_err()
-            );
-        }
-        let mut duplicate = valid.clone();
-        duplicate["grants"]
-            .as_array_mut()
-            .unwrap()
-            .push(valid["grants"][0].clone());
+    fn old_operation_grants_are_rejected() {
         assert!(
-            serde_json::from_value::<Config>(duplicate)
-                .unwrap()
-                .into_grants()
-                .is_err()
+            serde_json::from_value::<Config>(serde_json::json!({"version":1,"grants":[]})).is_err()
         );
-        let mut traversal = valid;
-        traversal["grants"][0]["permission"]["path"] = serde_json::json!("/tmp/../secret");
-        assert!(
-            serde_json::from_value::<Config>(traversal)
-                .unwrap()
+        let g = Grant {
+            id: "g".into(),
+            owner: "assistant".into(),
+            scope: Scope {
+                machine_id: "machine".into(),
+                capability: Capability::Sandbox,
+            },
+        };
+        assert_eq!(
+            Config::from_grants(std::slice::from_ref(&g))
                 .into_grants()
-                .is_err()
+                .unwrap(),
+            vec![g]
         );
-    }
-    #[test]
-    fn path_grants_do_not_cover_siblings_shell_or_writes_without_write_access() {
-        let grant = Scope::Path {
-            path: "/tmp/project".into(),
-            write: false,
-            recursive: true,
-        };
-        assert!(grant.covers(&Scope::Path {
-            path: "/tmp/project/sub/file".into(),
-            write: false,
-            recursive: false
-        }));
-        assert!(!grant.covers(&Scope::Path {
-            path: "/tmp/project-two/file".into(),
-            write: false,
-            recursive: false
-        }));
-        assert!(!grant.covers(&Scope::Path {
-            path: "/tmp/project/file".into(),
-            write: true,
-            recursive: false
-        }));
-        assert!(!grant.covers(&Scope::Exact {
-            tool: "exec_command".into(),
-            args: serde_json::json!({"cmd":"cat /tmp/project/file"})
-        }));
-        let exact = Scope::Exact {
-            tool: "exec_command".into(),
-            args: serde_json::json!({"cmd":"true"}),
-        };
-        assert!(!exact.covers(&Scope::Exact {
-            tool: "exec_command".into(),
-            args: serde_json::json!({"cmd":"false"})
-        }));
     }
 }

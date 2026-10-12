@@ -51,8 +51,8 @@ remote Environment execution remain P3.
 Assistant Profile/provider configuration is copied initially and then stored
 independently. Environment inventory, Runtime-wide capacity, permissions policy
 and usage ledger are shared. Rules files include Runtime identity in their path.
-The global Host permissions file retains its existing ownership convention;
-it does not establish cross-Runtime peer authority.
+Authorization storage has since moved to each Control data directory; see the
+current [machine permission contract](../permissions.md).
 
 Rule review detects explicit path references; authorized arbitrary Host shell
 commands are not an OS filesystem confinement boundary. Combined name/rules

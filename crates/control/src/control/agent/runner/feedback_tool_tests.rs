@@ -37,26 +37,19 @@ impl SandboxFixture {
         ));
         let generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
         for target in ["default", "linux-b"] {
-            let config = Arc::new(Mutex::new(json!({"version":1,"grants":[]})));
             let captured = http.clone();
             let inventory = inspect.clone();
             let app = Router::new().fallback(any(
             move |uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
                 let captured = captured.clone();
                 let inventory=inventory.clone();
-                let config=config.clone();
                 async move {
                     let auth = headers.get("authorization").unwrap().to_str().unwrap();
                     assert_eq!(auth,format!("Bearer fixture-{target}"));
                     let body: Value = if body.is_empty() { json!(null) } else { serde_json::from_slice(&body).unwrap() };
                     captured.lock().unwrap().push(json!({"path":uri.path(),"target":target,"auth":auth,"body":body}));
                     Json(match uri.path() {
-                        "/permissions" => {
-                            let mut current = config.lock().unwrap();
-                            if body["action"] == "write" {
-                                assert_eq!(*current, body["expected"]);
-                                *current = body["config"].clone();
-                            }
+                        "/prepare" => {
                             let mut args = body["args"].clone();
                             if body["tool"] == "exec_command" {
                                 args["workdir"] = json!(format!("/guest-only/{target}"));
@@ -65,7 +58,7 @@ impl SandboxFixture {
                                 args["tty"] = json!(false);
                                 if args.get("yield_time_ms").is_none() { args["timeout_ms"] = body["policy"]["default_timeout_ms"].clone(); }
                             }
-                            json!({"config":*current,"args":args})
+                            json!({"args":args})
                         },
                         "/health" => json!({"ok":true}),
                         "/execute" => {
@@ -473,16 +466,15 @@ async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary
 }
 
 #[tokio::test]
-async fn sessions_survive_turns_keep_original_environment_and_cancel_explicitly() {
+async fn completed_work_closes_sessions_and_cannot_reuse_handles_in_another_work() {
     let fixture = SandboxFixture::new().await;
     let s = &fixture.service;
     let request = SandboxFixture::activate(s);
     let thread = thread(s).unwrap();
     let context = make_context(s, &thread, Some(&request)).unwrap();
-    let policy = &thread.config.params.agent.shell;
     let (open, _) = execute(
         &context,
-        policy,
+        &thread.config.params.agent.shell,
         "exec_command",
         json!({"cmd":"bash","tty":true,"login":false,"yield_time_ms":1}),
         "open",
@@ -495,54 +487,16 @@ async fn sessions_survive_turns_keep_original_environment_and_cancel_explicitly(
         .finish(&context)
         .await
         .unwrap();
-    assert!(fixture.requests("/finish").is_empty());
-    crate::environment::drain(s).await.unwrap();
-    s.turn(None);
-    let mut next = request.clone();
-    next.request_id = "second-turn".into();
-    s.save(Message {
-        id: "second-input".into(),
-        conversation_id: "main".into(),
-        role: Role::User,
-        text: "next".into(),
-        status: MessageStatus::Accepted,
-        created_at_ms: now(),
-        request_id: Some(next.request_id.clone()),
-    })
-    .unwrap();
-    s.turn(Some(TurnState {
-        user_message_id: "second-input".into(),
-        cancelling: false,
-    }));
-    crate::sandbox::management(s, &json!({"action":"select","sandbox_id":"linux-b"}))
-        .await
-        .unwrap();
-    let context = make_context(s, &thread, Some(&next)).unwrap();
-    execute(
-        &context,
-        policy,
-        "write_stdin",
-        json!({"session_id":open["session_id"],"chars":"pwd\n","rows":40,"cols":120}),
-        "input",
-    )
-    .await;
-    let calls = fixture.requests("/execute");
-    assert_eq!(calls[0]["body"]["scope"], calls[1]["body"]["scope"]);
-    assert_eq!(calls[1]["target"], "default");
-    assert_eq!(calls[1]["body"]["args"]["rows"], 40);
-    s.turn(Some(TurnState {
-        user_message_id: "second-input".into(),
-        cancelling: true,
-    }));
-    context
-        .tool_executor
-        .as_ref()
-        .unwrap()
-        .finish(&context)
-        .await
-        .unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
     crate::environment::drain(s).await.unwrap();
+    let result = crate::permissions::resolve_operation(
+        s,
+        "write_stdin",
+        json!({"session_id":open["session_id"],"chars":"pwd\n"}),
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(fixture.requests("/execute").len(), 1);
 }
 
 #[tokio::test]
@@ -561,7 +515,11 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     let initial = fixture.requests("/execute")[0]["body"]["scope"].clone();
-    crate::environment::finish_turn(s).await.unwrap();
+    s.environment_service
+        .sandboxes
+        .finish_turn(&s.usage_scope)
+        .await
+        .unwrap();
     let inventory = crate::sandbox::tool(s, "list_environments", "inventory", &json!({}))
         .await
         .unwrap();
@@ -578,11 +536,19 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     assert_eq!(fixture.requests("/execute")[1]["body"]["scope"], initial);
-    crate::environment::finish_turn(s).await.unwrap();
+    s.environment_service
+        .sandboxes
+        .finish_turn(&s.usage_scope)
+        .await
+        .unwrap();
     fixture
         .generation
         .store(2, std::sync::atomic::Ordering::SeqCst);
-    crate::environment::refresh(s).await.unwrap();
+    s.environment_service
+        .sandboxes
+        .finish_turn(&s.usage_scope)
+        .await
+        .unwrap();
     let error = crate::sandbox::tool(
         s,
         "write_stdin",
@@ -683,7 +649,9 @@ async fn malformed_session_inspection_quarantines_active_effects() {
         json!({"sessions":[],"active":"false","ended":false}),
     );
     assert!(
-        crate::environment::finish_turn(s)
+        s.environment_service
+            .sandboxes
+            .finish_turn(&s.usage_scope)
             .await
             .unwrap_err()
             .to_string()
@@ -743,7 +711,7 @@ async fn completed_task_cancellation_closes_retained_resources_without_rewriting
 }
 
 #[tokio::test]
-async fn unified_tools_use_environment_local_grants_and_guest_paths() {
+async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
     let fixture = SandboxFixture::new().await;
     let s = &fixture.service;
     let turn = SandboxFixture::activate(s);
@@ -752,7 +720,7 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
         .await
         .unwrap();
     assert_eq!(host["environment"], "host");
-    assert!(fixture.requests("/permissions").is_empty());
+    assert!(fixture.requests("/prepare").is_empty());
     let args = crate::permissions::prepare(
         s,
         "exec_command",
@@ -768,9 +736,6 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
         turn: turn.request_id.clone(),
         call_id: "guest-read".into(),
         tool: "exec_command".into(),
-        proposed_grant: None,
-        display: None,
-        plugin: None,
         args: args.clone(),
     };
     let wait_service = s.clone();
@@ -805,41 +770,35 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     .await
     .unwrap();
     assert_eq!(waiter.await.unwrap().unwrap()["approved"], true);
-    assert!(
+    assert_eq!(
         s.environment_service
             .permissions
             .grants("main")
             .as_array()
             .unwrap()
-            .is_empty()
+            .len(),
+        1
     );
-    let guest = s
-        .environment_service
-        .permissions
-        .environment("sandbox:linux-b")
-        .unwrap();
-    assert_eq!(guest.grants("main").as_array().unwrap().len(), 1);
+    assert_eq!(
+        s.environment_service.permissions.grants("main")[0]["scope"]["capability"],
+        "sandbox"
+    );
     crate::permissions::prepare(
         s,
         "exec_command",
-        json!({"cmd":"cat notes.txt","environment":"sandbox:default"}),
+        json!({"cmd":"different","environment":"sandbox:default"}),
     )
     .await
     .unwrap();
-    assert!(
+    assert_eq!(
         s.environment_service
             .permissions
-            .environment("sandbox:default")
-            .unwrap()
             .grants("main")
             .as_array()
             .unwrap()
-            .is_empty()
+            .len(),
+        1
     );
-    crate::permissions::prepare(s, "exec_command", args)
-        .await
-        .unwrap();
-    assert_eq!(guest.grants("main").as_array().unwrap().len(), 1);
     let _ = crate::permissions::decide(
         State(s.clone()),
         tasks::tests::headers(),
@@ -847,14 +806,19 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
     )
     .await
     .unwrap();
-    assert!(guest.grants("main").as_array().unwrap().is_empty());
-    assert_eq!(
+    assert!(
+        s.environment_service
+            .permissions
+            .grants("main")
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
         fixture
-            .requests("/permissions")
+            .requests("/prepare")
             .iter()
-            .filter(|r| r["body"]["action"] == "write")
-            .count(),
-        2
+            .all(|r| r["body"]["action"] != "write")
     );
     let mut worker = s.clone();
     worker.is_worker = true;
@@ -886,28 +850,21 @@ async fn unified_tools_use_environment_local_grants_and_guest_paths() {
 #[tokio::test]
 async fn session_continuation_preparation_does_not_boot_guest_or_read_permissions() {
     let fixture = SandboxFixture::new().await;
-    let args = crate::permissions::prepare(
+    let result = crate::permissions::prepare(
         &fixture.service,
         "write_stdin",
         json!({"session_id":"missing-session","environment":"sandbox:linux-b","chars":"yes\n"}),
     )
-    .await
-    .unwrap();
-    assert_eq!(args["environment"], "sandbox:linux-b");
+    .await;
+    assert!(result.is_err());
     assert!(fixture.http.lock().unwrap().is_empty());
     assert!(fixture.helper_calls.lock().unwrap().is_empty());
-    assert!(
-        fixture
-            .service
-            .environment_service
-            .permissions
-            .environment("sandbox:linux-b")
-            .is_err()
-    );
     // Skipping approval/preparation never makes an invalid handle executable.
     SandboxFixture::activate(&fixture.service);
     let thread = thread(&fixture.service).unwrap();
     let context = make_context(&fixture.service, &thread, None).unwrap();
+    let args =
+        json!({"session_id":"missing-session","environment":"sandbox:linux-b","chars":"yes\n"});
     let mut events = vec![];
     assert!(
         context
@@ -952,7 +909,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
         "continue-session",
     )
     .await;
-    assert!(fixture.requests("/permissions").is_empty());
+    assert!(fixture.requests("/prepare").is_empty());
     let mut wrong = continued;
     wrong["environment"] = json!("sandbox:default");
     assert!(

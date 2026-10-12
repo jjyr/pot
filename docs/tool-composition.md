@@ -14,7 +14,7 @@ user agreement; see the repository `AGENTS.md`.
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
-| Environments | `list_environments`; Sandbox-only `manage_sandbox`, `set_sandbox_mappings` | Main |
+| Environments | `list_environments`; Sandbox-only `manage_sandbox` | Main |
 
 Profile filters can narrow visibility. Execution tools accept `environment: "host"`
 or `"sandbox:ID"`; defaults and approval rules are in [Agent permissions](permissions.md).
@@ -52,17 +52,17 @@ replay uncertain calls. Existing receipts prevent duplicate execution.
 
 The isolate has no direct filesystem, network, Node or process APIs. Its tools are
 limited to the current role/profile, with recursive `exec`/`wait` excluded. Each
-child call uses the ordinary dispatcher and its own concrete approval. Composition
+child call uses the ordinary dispatcher and checks the assistant’s current machine capability. Composition
 cannot broaden authority. Code, memory, output, concurrency and execution time
 are bounded; exact limits and schemas live in `crates/agent/src/orchestration.rs`.
 
 Old `pot_` names are not aliases. Update explicit tool filters and custom prompts.
 Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable composition.
 Expanded schemas count toward context limits. Validation and qualification limits:
-[acceptance report](validation/agent-permissions-20261008.md).
+[permission contract](permissions.md).
 
 Remote `manage_sandbox` requires an explicit Runtime and existing Sandbox ID with
-a separate target management grant. Main may start, stop, recover, update, or delete
+the assistant’s machine Sandbox capability. Main may start, stop, recover, update, or delete
 that target; create/select remain local, and desktop access uses separate authority.
 Management cannot acquire execution privileges. Lost operations are inspected by
 original identity and never resent; unresolved receipts block new effects.

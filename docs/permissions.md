@@ -1,152 +1,144 @@
-# Agent permissions
+# Machine permissions
 
-pot-agent owns permission policy and grant matching. Runtime supplies trusted
-Agent identity, owner approval/storage and execution routing. Agent process
-placement on Host does not grant Host execution authority.
+Control owns assistant-to-machine authorization. Execution nodes enforce their OS
+and container boundaries and cannot supply an alternative approval policy.
+Machine membership and model execution authorization are separate contracts.
 
-## Environments and authority
+## Capabilities
 
-Main defaults to Host. Tasks use their fixed typed Host/Sandbox target and the
-same execution tools. Approval cannot switch a task target; Tasks cannot manage
-environments or delegate. Sandbox failure never causes Host fallback.
-
-| Operation | Default policy |
-|---|---|
-| Host command, patch or plugin invocation | Ask unless an Agent-specific grant matches |
-| Ordinary assigned-Sandbox execution | Allow; owner may configure ask |
-| Continue an authorized command session | Allow with session ownership checks |
-| Task, schedule and Sandbox management | Allow within the role's authority |
-| Change Host directory mappings | Owner approval or an exact approved grant, even under allow policy |
-
-Control owns policy/approvals for connected tasks; destination configuration cannot override them. Independent local Sandbox policy may use its environment file. Permanent grants belong to one Agent (`main`
-or a Task ID). Host and Sandbox grants are separate. Allow policy does not bypass
-role, assignment, session or configuration protection. Ordinary guest execution
-cannot modify permission policy to authorize itself. Permission administration
-uses the trusted owner channel. No dedicated built-in web search backend exists.
+A durable grant is `(assistant_id, machine_id, capability)`, where capability is
+`host` or `sandbox`. Stable identities, not display names, are authoritative.
+Host grants allow direct execution with the runtime account's OS privileges.
+Remote grants are bound to an enrollment fingerprint: re-enrollment clears old
+grants, temporary decisions and preallow rules before the next authorization.
+Sandbox grants allow using assigned sandboxes and creating/managing owned
+sandboxes within owner-configured boundaries. A grant covers future sandboxes on
+that machine; sandbox IDs, commands, paths, plugins and arguments are not grant
+scopes. Neither capability implicitly grants the other.
 
 ```text
-tool call -> resolve environment -> role checks -> permission policy
-                                                      |
-                                           allow / matching grant
-                                                      |
-                                           ask -> owner decision
-                                                      |
-                                                 execution
+Assistant + work scope
+        |
+        v
+Resolve fixed machine + Host/Sandbox target (no execution effects)
+        |
+        v
+Control policy / durable grant / work decision
+        |
+        +-- deny ----------> fail without execution
+        +-- ask -----------> one shared owner request
+        +-- allow
+              |
+              v
+Check resource ownership and configuration limits
+              |
+              v
+Prepare resources -> normalize guest arguments -> execute
 ```
 
-See [Agent tools](tool-composition.md) for tool visibility and composition, and
-[command execution](executor.md) for shell/session behavior.
+Shell input, patches and plugins all check current access. Preparation cannot boot
+or contact an execution node before authorization. Tasks are authorized before
+launch, including remote Agent startup. Task targets stay fixed; a failed Sandbox
+never falls back to Host. Internally `EnvironmentRef` identifies an execution
+target; it is not an independently granted product resource.
 
-## Owner decisions
+## Owner decisions and work lifetime
 
-Approval cards identify the Agent, environment and operation. Built-in execution
-tools use localized questions and labeled arguments. Plugins may provide declarative
-`approval_display` text; without it, cards show raw arguments. Display text does not
-change execution or authorization, and plugin code never runs to prepare a prompt.
-Cards show the bound plugin ID (or built-in tool label) and the environment's display
-name. Internal tool names, routing IDs and versions stay out of the card. A supplied
-summary replaces code/argument display; missing summaries fall back to raw arguments.
-Runtime verifies plugin
-identity (including bundle digest) against the Thread configuration; package IDs are not
-publisher authentication.
-The request's outer `environment` identifies the target; `args` excludes this routing field.
-Actions are **Always allow**, **Allow once**, **Deny** (永久允许、允许一次、拒绝).
-`proposed_grant` is optional and normally omitted. Always allow derives the exact
-scope from the reviewed tool and arguments unless an explicit scope is supplied;
-there is no extra directory-grant action.
-Only authenticated owners can approve or revoke grants; Agents cannot self-approve.
+Cards identify the assistant, machine and capability. Actions are **Always allow**,
+**Allow this work**, **Deny**. The API action `allow_once` means this work, not one
+command. The operation envelope remains internal for identity and receipt checks;
+it does not create a command-specific permission.
 
-Requests separate the execution target, actual operation and presentation:
+Main work identity derives from the accepted conversation turn. Tasks created by
+that turn inherit its work identity, which is stored with their queued jobs.
+Guidance to active/queued work shares that identity. Explicitly reopening finished
+or interrupted work creates a new scope; schedule occurrences are independent.
+An answer from Main does not discard a child's work authorization. Temporary
+decisions live only in Control memory and are lost on restart. An ended scope is
+not reused by future inputs. Normal execution cleanup closes sessions; a session
+handle never substitutes for current authorization.
+
+Requests for the same assistant/machine/capability/work are joined. Cancelling one
+waiter does not cancel another Task's request. Denial is remembered for the work,
+so subsequent calls fail without more cards. Durable grant revocation affects
+future checks, including session input; it does not undo effects or stop an
+already executing operation. Interrupt/cancel remains the explicit stop action.
+
+Changes to the assistant's own instructions remain a separate, fresh owner review.
+They cannot receive a permanent machine grant. macOS privacy permissions remain
+operating-system decisions.
+
+## Machine settings
+
+The Machines page configures `ask`, `allow` or `deny` separately for the selected
+assistant's Host and Sandbox capability. Defaults are `ask` for both. Dedicated
+servers may be explicitly preallowed; Linux, remote placement and the Sandbox
+label alone never imply trust. `deny` takes precedence over existing grants.
+
+Machine settings also control Sandbox resource limits and assignments. Default
+limits are 16 sandboxes, 4 CPUs, 8 GiB RAM and 32 GiB disk per sandbox. Creation
+checks the actual provider defaults and total machine inventory before creating
+resources, and is rejected when either exceeds the configured limits. An assistant can change only resource sizing through Sandbox update;
+privileged flags, host sockets, arbitrary mounts and other configuration fields
+are not accepted. Provider-specific limits and busy/lease checks still apply. Podman reports
+`disk_gib: 0` because it does not provide a disk quota; the disk sizing ceiling
+is not a storage quota on that provider.
+
+New assistant-created sandboxes acquire durable ownership before creation.
+Existing owner-created sandboxes must be assigned in Machines. Only their owner
+assistant can manage them; `shared_with` grants use without management. Creation
+reservations remain visible in configuration if provisioning fails and can be
+reassigned by the owner. Deleting a sandbox releases its ownership/quota entry.
+Ownership checks are product access controls; Tasks sharing a sandbox still share
+its OS boundary. Owner-configured Host mappings use the owner Sandbox configuration endpoint;
+there is no model-visible mount-changing tool. Remote management currently
+supports existing sandbox lifecycle operations; provider/transport limitations
+are independent of authorization.
+
+## Storage and owner API
+
+Control stores version 2 `permissions.json` in its data directory, independently
+of the shared Agent home. No guest permissions file,
+per-environment grant store, path grant, exact-operation grant or migration exists.
+Older permission formats and Task jobs without a work scope are rejected; there
+is no import or migration of old authorization/Task state. Rebuild/reprovision guest brokers for the
+new `/prepare` normalization endpoint; it cannot read or write authorization.
 
 ```json
 {
-  "owner": "main",
-  "environment": "host",
-  "generation": 3,
-  "turn": "turn-id",
-  "call_id": "call-id",
-  "tool": "cua_repl",
-  "plugin": {"id": "computer-use", "version": "0.4.0", "digest": "bundle-sha256"},
-  "args": {"code": "let tab = await cua.open('https://example.com');"},
-  "display": {
-    "summary": {"en": "Allow browser use?", "zh-CN": "是否允许使用浏览器？"},
-    "labels": {"code": {"en": "Operation code", "zh-CN": "操作代码"}}
-  }
-}
-```
-
-`display` comes from the pinned plugin's `approval_display` metadata and only
-changes presentation. An explicit `proposed_grant` uses the grant scope format
-(for example `{"kind":"exact","tool":"cua_repl","args":{...}}`) and must cover
-the reviewed operation. Current requests omit this proposal; the UI only shows it
-when supplied. It is not a second copy of the default exact grant.
-
-One-time approval belongs to the concrete call and is consumed before execution.
-Permanent operation grants match the complete normalized tool arguments, including
-command and working directory. They survive restart and configuration changes for the same
-Thread. They do not permit arbitrary commands under an approved directory.
-Revocation affects future checks and does not undo effects or stop an authorized
-session. Ended turns, changed execution generations and shutdown invalidate pending approvals.
-Execution receipts prevent duplicate effects; uncertain calls are not replayed.
-
-## Editable configuration
-
-Control and independent local Host use `~/.pot/agent/permissions.json`, alongside global `AGENTS.md`;
-`POT_AGENT_HOME` overrides the Host Agent directory. Independent local Sandbox execution uses its own
-guest execution HOME's `~/.pot/agent/permissions.json`, retained with that environment.
-
-```json
-{
-  "version": 1,
-  "policy": {"default": "ask"},
-  "grants": [
-    {
-      "id": "main-run-command",
-      "agent": "main",
-      "permission": {
-        "type": "operation",
-        "tool": "exec_command",
-        "args": {
-          "cmd": "git status --short",
-          "workdir": "/Users/jjy/project",
-          "timeout_ms": 60000,
-          "shell": "/bin/bash",
-          "login": true,
-          "tty": false
-        }
+  "version": 2,
+  "policy": {
+    "rules": [
+      {
+        "assistant_id": "assistant-id",
+        "scope": {"machine_id": "server-id", "capability": "sandbox"},
+        "decision": "allow"
       }
-    }
-  ]
+    ],
+    "sandbox_limits": {
+      "server-id": {"max_sandboxes": 16, "cpus": 4, "memory_gib": 8, "disk_gib": 32}
+    },
+    "sandboxes": [
+      {"machine_id": "server-id", "sandbox_id": "dev", "owner": "assistant-id", "shared_with": []}
+    ]
+  },
+  "grants": []
 }
 ```
 
-`policy.default` accepts `ask` or `allow`. Missing files/policy use Host `ask` or
-Sandbox `allow`. Only current permanent grants are stored: no pending requests,
-one-time decisions, denials, revoked entries or approval history. `id` identifies
-a grant for revocation; `agent` does not support wildcards.
+`GET /api/v1/permissions` returns the selected assistant's pending requests, grants,
+identity and owner configuration. `POST` accepts `{id, action}` for decisions and
+revocation. Worker tokens cannot administer permissions. IDs belonging to another
+assistant are rejected.
 
-Host edits require Server restart; guest edits take effect on the next prepared
-operation through trusted administration. UI writes use the same state and reject
-conflicting external edits. Invalid configuration fails explicitly. Previous
-SQLite grants are migrated when JSON is absent; existing JSON is authoritative.
-Legacy path grants do not authorize current execution tools.
+Owner configuration uses `POST` with `action: "configure"`, `machine_id`, and:
 
-Guest execution sees read-only permission storage. Updated guest images/runners
-are required; unsupported guests fail without Host fallback. Protection in live
-Linux/macOS environments still requires qualification.
+- `capability` plus `decision` for the selected assistant's machine policy;
+- `sandbox_limits` for the machine's resource bounds;
+- `sandbox_access` with `machine_id`, `sandbox_id`, `owner`, `shared_with` for assignment.
 
-## Host directory mappings
+Writes are atomic and detect conflicting external file edits. Manual edits require
+restart. Pending requests, temporary grants, denials and history are not persisted.
+Plugin approval display metadata is removed; plugins use the same machine gate.
 
-`set_sandbox_mappings` replaces a stopped supported Sandbox's mapping list after
-owner review. Review shows canonical Host sources, guest destinations and read-only
-flags. Destinations must stay beneath `/mnt/host/` and cannot overlap or replace
-system mounts. The prepared macOS guest provider does not support this operation.
-
-Mappings change the environment and are visible to every Task sharing it.
-Revoking a grant does not remove an existing mapping; removing it requires another
-configuration change. A Task explicitly bound to Host can request owner-approved Host execution; approval
-never switches a Sandbox-bound Task to Host.
-
-Owner API: `GET/POST /api/v1/permissions`. Sources: `crates/agent/src/permissions.rs`,
-`crates/control/src/permissions.rs`. Dated checks and untested scope:
-[validation](validation/agent-permissions-20261008.md).
+Sources: `crates/control/src/permissions.rs`, `crates/agent/src/permissions.rs`.

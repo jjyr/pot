@@ -1119,7 +1119,7 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
         std::fs::create_dir(&directory).unwrap();
         let path = directory.canonicalize().unwrap().join("file.txt");
         let (mut s, mut rx, server, captured) = fixture("openai_chat", vec![json!({"id":"host","name":"exec_command","arguments":{"cmd":"printf owner-approved > file.txt","workdir":directory}})]).await;
-        let permissions_file = s.agent_service.resources.home.join("permissions.json");
+        let permissions_file = s.data.join("permissions.json");
         s.environment_service.permissions =
             Arc::new(crate::permissions::Hub::open(&permissions_file).unwrap());
         let owner = async {
@@ -1199,26 +1199,9 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                         .0;
                 for card in pending["requests"].as_array().unwrap() {
                     assert_eq!(card["request"]["tool"], "cua_repl");
-                    let plugin = thread(&s)
-                        .unwrap()
-                        .config
-                        .params
-                        .agent
-                        .plugin_for_tool("cua_repl")
-                        .unwrap()
-                        .unwrap();
-                    assert_eq!(
-                        card["request"]["plugin"],
-                        serde_json::to_value(plugin.identity()).unwrap()
-                    );
-                    assert_eq!(card["request"]["environment"], "host");
-                    assert_eq!(card["environment_name"], "Host");
-                    assert!(card["request"]["args"].get("environment").is_none());
-                    assert!(card["request"].get("proposed_grant").is_none());
-                    assert_eq!(
-                        card["request"]["display"]["summary"]["zh-CN"],
-                        "是否允许使用或管理浏览器自动化会话？"
-                    );
+                    assert_eq!(card["scope"]["capability"], "host");
+                    assert_eq!(card["scope"]["machine_id"], s.runtime_id);
+                    assert!(card["request"].get("display").is_none());
                     if approvals == 0 {
                         assert_eq!(captured.lock().unwrap().len(), 1);
                         assert!(
@@ -1249,7 +1232,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
         .await
         .unwrap();
         job.await.unwrap();
-        assert_eq!(approvals, if approved { 3 } else { 1 });
+        assert_eq!(approvals, 1);
         {
             let requests = captured.lock().unwrap();
             let continuation = requests[1].to_string();

@@ -21,6 +21,8 @@ is the single phase progress table.
 
 ## Evidence
 
+[Machine capability permissions](validation/machine-permissions-20261012.md).
+
 [Embedded Web assets and compression](validation/embedded-web-assets-20261012.md).
 
 [Contextual onboarding](validation/contextual-onboarding-20261012.md).
