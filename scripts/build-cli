@@ -31,7 +31,7 @@ subprocess.run(
         "--bin",
         "pot",
         "--features",
-        "embedded-web",
+        "web-ui",
         "-j",
         "4",
     ],

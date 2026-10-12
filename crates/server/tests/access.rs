@@ -277,7 +277,7 @@ async fn public_inventory_keeps_broker_secrets_private() {
     }
 }
 
-#[cfg(feature = "embedded-web")]
+#[cfg(feature = "web-ui")]
 #[tokio::test]
 async fn embedded_web_works_without_an_asset_directory() {
     let f = Fixture::new();

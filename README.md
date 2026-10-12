@@ -20,7 +20,7 @@ brew install --cask jjyr/tap/pot
 
 ### Server (Control or execution-only)
 
-On Linux or macOS, install from source with Rust/Cargo and the native build
+On Linux or macOS, install from source with Rust/Cargo, Brotli CLI and the native build
 prerequisites described in the [Server installation guide](docs/deployment.md#install-server):
 
 ```sh
@@ -35,8 +35,10 @@ Both modes use the same CLI:
   a Control and provides explicitly configured Host or Sandbox execution resources.
   It connects outward and needs no model-provider credentials.
 
-Web UI assets are compressed and embedded by default; no separate frontend build
-is needed. macOS Sandbox helpers require separate setup.
+The default `web-ui` feature builds, compresses and embeds the frontend. Install
+Brotli CLI first; the initial build also prepares WASM tools. Execution-only
+installs can use `--no-default-features` to skip these dependencies. macOS Sandbox
+helpers require separate setup.
 
 ## Features
 

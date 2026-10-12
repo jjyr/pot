@@ -54,5 +54,5 @@ ece = "2"
 rcgen = "0.14"
 
 [features]
-default = ["embedded-web"]
-embedded-web = []
+default = ["web-ui"]
+web-ui = []

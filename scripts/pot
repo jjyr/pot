@@ -186,7 +186,10 @@ elif cmd == "bundle":
         REPO / ".local/tailscale/TailscaleDependencyLicenses.txt",
         APP / "Contents/Resources/TailscaleDependencyLicenses.txt",
     )
-    shutil.copytree(REPO / "crates/web-ui/dist", APP / "Contents/Resources/runtime/mobile")
+    shutil.copytree(
+        pathlib.Path(env["CARGO_TARGET_DIR"]) / "pot-web/dist",
+        APP / "Contents/Resources/runtime/mobile",
+    )
     shutil.copytree(
         REPO / "skills",
         APP / "Contents/Resources/runtime/skills",

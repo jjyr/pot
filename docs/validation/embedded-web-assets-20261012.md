@@ -1,9 +1,17 @@
 # Embedded Web assets
 
-Server now embeds prebuilt Brotli assets by default. Cargo installation needs no
-WASM/frontend tools, asset download or external static directory. Maintainers
-rebuild with `mise run build:mobile` and Brotli CLI 1.2.0; CI checks the committed
-source and payload fingerprints with `mise run check:web-assets`.
+Server's optional `web-ui` feature is enabled by default. Cargo builds the WASM
+client and static resources, then invokes the external Brotli CLI to compress
+and embed them. Generated assets are not tracked in Git. Developers use mise's
+`conda:brotli-bin` 1.2.0 tool; standalone Cargo users install the CLI themselves.
+There is no separate compression feature.
+
+The build cache under `<target>/pot-web/` records source/lockfile and payload
+hashes. Valid raw assets skip WASM generation; compression independently reuses
+unchanged files. Missing/corrupt files and changed Brotli versions/parameters
+invalidate the corresponding cache. Nested Cargo uses an isolated target and a
+cache lock serializes concurrent builders. `--no-default-features` does not
+invoke frontend or compression tools.
 
 ## Compression comparison
 
@@ -22,9 +30,9 @@ little after gzip and made Brotli larger. The selected build therefore uses
 Brotli alone; it preserves original JS and license comments and does not add
 Terser or Binaryen to the required build tools.
 
-The newly built October 12 assets total **4,749,294 bytes (4.53 MiB)** in Brotli
-form. The committed manifest records each asset's original/compressed size and
-SHA-256. On this same current build, the previous raw-plus-gzip layout would
+Before the build-cache revision, the October 12 assets totaled **4,749,294 bytes (4.53 MiB)** in Brotli
+form. The generated build-cache manifest now records each asset's original/compressed size and
+SHA-256. On that same build, the previous raw-plus-gzip layout would
 embed 26,691,463 bytes (25.45 MiB), and gzip-only would use 6,936,329 bytes
 (6.62 MiB). Brotli cuts asset storage by **82.2%** versus the previous layout.
 Native binary growth also includes decoder code and alignment. Measured Apple
@@ -48,15 +56,15 @@ both supported representations receive 406. The existing authenticated desktop
 asset boundary is retained. `--no-default-features` omits embedded resources and
 retains external-directory hosting.
 
-The source fingerprint includes the Web client, shared UI/core/protocol,
+The generated cache fingerprint includes the Web client, shared UI/core/protocol,
 localization, desktop templates, icons, Cargo dependency lock and build scripts.
-Changing these inputs requires regenerating and committing the assets.
+Changing these inputs regenerates the assets on the next build.
 
-## Validation
+## Earlier validation (before build-cache revision)
 
 - Fresh Web/WASM build succeeded; Node's `WebAssembly.Module` validated the generated binary.
 - Every asset passed a Brotli compression/decompression round trip.
-- Source/payload checks passed; deliberate source and compressed-payload changes in a disposable copy were rejected.
+- Source/payload checks passed; deliberate source and compressed-payload changes in a disposable copy were rejected by the former checked-in-payload validator.
 - Server access unit tests: 8 passed, 1 existing Tailscale-library test ignored.
 - Public access integration tests: 6 passed, including HTML, JS, WASM, fonts, locales and icons served without an external asset directory.
 - No-default-features encoding test passed.
@@ -67,3 +75,16 @@ Changing these inputs requires regenerating and committing the assets.
 
 These checks cover packaging, encoding and the HTTP asset boundary. They do not
 claim new browser rendering or remote desktop qualification.
+
+## Build-cache revision validation
+
+- Default `web-ui` Cargo build passed, generating WASM/static assets and invoking the external Brotli CLI.
+- A repeated frontend build skipped WASM generation and reused all 101 compressed files (0 recompressed). A subsequent unchanged Cargo check completed in 0.26 seconds.
+- `--no-default-features` Cargo check passed without invoking the frontend build.
+- Four cache tests passed: unchanged reuse, changed/deleted/corrupt input recovery, compressor-profile invalidation, missing CLI diagnostics and nested-Cargo environment isolation.
+- Server access unit tests: 8 passed, 1 existing Tailscale test ignored; access integration tests: 6 passed; CLI tests: 3 passed.
+- Release Cargo Git installation from a source-only temporary repository passed, reusing the valid target cache; the installed CLI reported `web_embedded: true` outside the checkout. No `.br` or generated WASM was present in that repository.
+- Mise resolves Brotli to its managed `conda-brotli-bin/1.2.0/.mise-bins/brotli`, which reports version 1.2.0 and passes the compression tests. The `conda:brotli` metapackage does not expose the dependency executable in mise, so the configuration uses `conda:brotli-bin` explicitly.
+
+The source-only installation check reused WASM/tool caches; it does not claim
+a new empty-machine toolchain download test or browser rendering qualification.

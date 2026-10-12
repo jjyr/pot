@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package checked-in Brotli Web assets, or check source and payload fingerprints."""
+"""Incrementally compress generated Web assets with the external Brotli CLI."""
 
 import argparse
 import hashlib
@@ -7,10 +7,9 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
-DEST = ROOT / "crates/server/web-assets"
 NAMES = [
     "index.html",
     "locales.json",
@@ -67,82 +66,97 @@ def sources():
     return {p.relative_to(ROOT).as_posix(): digest(p.read_bytes()) for p in sorted(set(paths))}
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
-    if args.check:
-        manifest = json.loads((DEST / "manifest.json").read_text())
-        current = sources()
-        previous = manifest["sources"]
-        changed = sorted(
-            name
-            for name in current.keys() | previous.keys()
-            if current.get(name) != previous.get(name)
-        )
-        if changed:
-            raise SystemExit("Stale Web assets; run mise run build:mobile:\n" + "\n".join(changed))
-        actual = {p.relative_to(DEST).as_posix() for p in DEST.rglob("*.br")}
-        assert actual == {name + ".br" for name in manifest["assets"]}, "Asset inventory mismatch"
-        assert set(NAMES) <= manifest["assets"].keys(), "Missing required Web assets"
-        for name, metadata in manifest["assets"].items():
-            data = (DEST / (name + ".br")).read_bytes()
-            assert (
-                len(data) == metadata["compressed_bytes"] and digest(data) == metadata["sha256"]
-            ), name
-        print("Embedded Web assets match sources and checksums")
-        return
+def read_manifest(path):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
 
-    version = subprocess.check_output(["brotli", "--version"], text=True).strip()
-    if version != "brotli 1.2.0":
-        raise SystemExit(f"Expected brotli 1.2.0, got {version}")
-    dist = ROOT / "crates/web-ui/dist"
+
+def write_changed(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_bytes() == data:
+        return
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_bytes(data)
+    temporary.replace(path)
+
+
+def payloads_valid(directory, entries):
+    return bool(entries) and all(
+        (directory / name).is_file() and digest((directory / name).read_bytes()) == value
+        for name, value in entries.items()
+    )
+
+
+def compress(dist, output):
+    executable = shutil.which("brotli")
+    if executable is None:
+        raise SystemExit(
+            "Brotli CLI is required for web-ui. Install brotli (developers: mise install), or use --no-default-features."
+        )
+    version = subprocess.check_output([executable, "--version"], text=True).strip()
+    previous = read_manifest(output / "manifest.json")
+    profile = {"version": version, "quality": 11}
     names = sorted(
         NAMES + [p.relative_to(dist).as_posix() for p in (dist / "desktop-assets").rglob("*.js")]
     )
     assert any(name.startswith("desktop-assets/") for name in names), "Missing noVNC assets"
     manifest = {
-        "format": 1,
         "encoding": "br",
-        "compressor": version,
-        "quality": 11,
+        "profile": profile,
+        "compressor": executable,
         "sources": sources(),
         "assets": {},
     }
-    DEST.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=DEST.parent) as temporary:
-        staging = Path(temporary)
-        for name in names:
-            raw = (dist / name).read_bytes()
-            output = staging / (name + ".br")
-            output.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(
-                [
-                    "brotli",
-                    "--quality=11",
-                    "--no-copy-stat",
-                    str(dist / name),
-                    "--output=" + str(output),
-                ],
-                check=True,
-            )
-            encoded = output.read_bytes()
-            decoded = subprocess.check_output(["brotli", "--decompress", "--stdout", str(output)])
-            assert decoded == raw, f"Compression round-trip failed: {name}"
-            manifest["assets"][name] = {
-                "sha256": digest(encoded),
-                "raw_sha256": digest(raw),
-                "compressed_bytes": len(encoded),
-                "raw_bytes": len(raw),
-            }
-        (staging / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    reused = 0
+    for name in names:
+        raw = (dist / name).read_bytes()
+        raw_hash = digest(raw)
+        dest = output / (name + ".br")
+        old = previous.get("assets", {}).get(name, {})
+        if (
+            previous.get("profile") == profile
+            and old.get("raw_sha256") == raw_hash
+            and dest.is_file()
+            and digest(dest.read_bytes()) == old.get("sha256")
+        ):
+            reused += 1
+            manifest["assets"][name] = old
+            continue
+        # Stream via stdin/stdout so no original file name or mtime is included.
+        encoded = subprocess.check_output([executable, "--quality=11", "--stdout"], input=raw)
+        assert (
+            subprocess.check_output([executable, "--decompress", "--stdout"], input=encoded) == raw
         )
-        if DEST.exists():
-            shutil.rmtree(DEST)
-        shutil.copytree(staging, DEST)
-    total = sum(item["compressed_bytes"] for item in manifest["assets"].values())
-    print(f"Embedded Web assets: {total:,} bytes ({total / 2**20:.2f} MiB)")
+        write_changed(dest, encoded)
+        manifest["assets"][name] = {
+            "sha256": digest(encoded),
+            "raw_sha256": raw_hash,
+            "compressed_bytes": len(encoded),
+            "raw_bytes": len(raw),
+        }
+    for path in output.rglob("*.br"):
+        if path.relative_to(output).as_posix()[:-3] not in manifest["assets"]:
+            path.unlink()
+    write_changed(
+        output / "manifest.json", (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+    )
+    print(
+        f"Web compression: {reused}/{len(names)} cached, {len(names) - reused} compressed",
+        flush=True,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "pot-web",
+    )
+    args = parser.parse_args()
+    compress(args.cache_dir / "dist", args.cache_dir / "compressed")
 
 
 if __name__ == "__main__":

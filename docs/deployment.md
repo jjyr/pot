@@ -14,9 +14,10 @@ Provider credentials are configured on Control and encrypted in SQLite; see
 
 Server is installed from Git with Cargo; no prebuilt Server download is provided.
 Control and execution-only (Runner) use the same `pot` binary on Linux or macOS.
-Install Rust/Cargo (the repository pins Rust 1.98.1 in `mise.toml`), Git, Python 3
+Install Rust/Cargo through rustup (the repository pins Rust 1.98.1 in `mise.toml`), Git, Python 3
 (available as `python3`), a native C/C++ build toolchain, CMake, pkg-config, Make
-and Perl for native dependencies including vendored OpenSSL. On macOS,
+and Perl for native dependencies including vendored OpenSSL. The default Web UI
+also requires Brotli CLI and curl. On macOS,
 install Xcode Command Line Tools. Ensure Cargo's binary directory (normally
 `~/.cargo/bin`) is on PATH.
 
@@ -29,17 +30,27 @@ This builds from the repository's default branch. For reproducible deployments,
 add `--rev COMMIT` using the same commit on Control and Runners. To upgrade,
 repeat the installation with `--force`, then restart the affected services.
 
-Cargo installs the CLI with matching, prebuilt Web UI assets embedded by default.
-No frontend build tools or separate static directory are needed. Resources are
-stored once in Brotli format; clients that do not accept Brotli receive decoded
-responses. Web hosting still requires [explicit Web configuration](#explicit-web-ui);
-plain `pot serve` does not expose a browser endpoint. The macOS App can also
-connect directly to Control.
+The default `web-ui` feature builds the frontend, compresses it with the external
+Brotli CLI and embeds it in the binary. Install `brotli` and `curl` before running
+the command above (for example, `brew install brotli` on macOS). Developers can
+use the repository's `mise install`, which provides Brotli 1.2.0 through the
+`conda:brotli-bin` backend without a separate Conda installation.
 
-For an execution-only binary without Web assets, add `--no-default-features` to
-the install command. Cargo does not install embedded Tailscale libraries, builtin
-skill directories or macOS Sandbox helpers. Execution dependencies such as
-Podman, Sandbox images and tools used by Host tasks must be installed separately.
+The first Web build needs network access to prepare the pinned nightly WASM
+toolchain, wasm-bindgen CLI and verified noVNC sources. This takes longer than a
+backend-only build. Subsequent builds reuse valid generated assets and compress
+only changed or damaged files. No generated WASM, JS or `.br` files are committed
+to Git; no separate static directory is required at runtime.
+
+For an execution-only binary, add `--no-default-features` to the install command.
+This skips all Web asset generation/compression and needs neither Brotli nor the
+WASM tools. To explicitly restore it, use `--features web-ui`. There is no separate
+compression feature. Web hosting still requires [explicit Web configuration](#explicit-web-ui);
+plain `pot serve` does not expose a browser endpoint.
+
+Cargo does not install embedded Tailscale libraries, builtin skill directories
+or macOS Sandbox helpers. Execution dependencies such as Podman, Sandbox images
+and tools used by Host tasks must be installed separately.
 
 Choose one role per data directory:
 
@@ -306,8 +317,7 @@ Runtime data. **HTTPS is required for remote browser access.**
 
 ### Install
 
-The default [Cargo installation](#install-server) includes the Web UI. No
-separate asset download or frontend build is required.
+The default [Cargo installation](#install-server) includes the Web UI. The frontend build and compression run automatically during Cargo installation.
 Linux Sandbox execution also requires rootless Podman and an installed image;
 see [Sandbox providers](sandbox-providers.md).
 

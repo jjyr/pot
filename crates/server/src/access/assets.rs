@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(quality(&headers, "identity"), 0.0);
     }
 
-    #[cfg(feature = "embedded-web")]
+    #[cfg(feature = "web-ui")]
     #[tokio::test]
     async fn embedded_response_round_trip() {
         let mut headers = HeaderMap::new();
