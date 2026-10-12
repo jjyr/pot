@@ -131,7 +131,7 @@ File links appear in Chat only for tasks with deliverables.
 
 ## AI Configuration (#7)
 
-Unconfigured Chat links to AI Configuration; first-time setup and Settings use the same page. The Pot Terminal page, side-rail button, xterm assets and native renderer have been removed. Sandbox remains independently accessible. API setup never requires a Terminal.
+Unconfigured native Chat offers AI Configuration and Connect server. AI Configuration reuses the Settings page; Connect server opens the existing Machines connection form, which offers Open server chat once a Control is configured. The Pot Terminal page, side-rail button, xterm assets and native renderer have been removed. Sandbox remains independently accessible. API setup never requires a Terminal.
 
 AI Configuration contains a compact Main Agent summary, Integrated Agents list and one shared connection panel. The catalog uses colored icons: OpenAI API, Claude API, Gemini API, DeepSeek, OpenCode Go, OpenCode Zen and Custom API. Existing API connections remain editable. Removed native CLI configurations are unsupported and require fresh configuration; no compatibility migration is provided. Main-Agent changes stay in AI Configuration, not the Chat header.
 
@@ -149,7 +149,22 @@ Main Save queues a Thread configuration update. Pending operations disable dupli
 
 Task Configuration preserves existing explicit worker defaults/routing and allows choosing Follow Chat. Advanced profile editing/copy, allowlists, profile/provider caps and allowances remain available. Task-specific Change Agent targets only that task and reuses AI connection management; completion returns to the task. Credential-independent product limits use private `execution-limits.json`, without implicitly selecting Pot or requiring a DeepSeek key.
 
-Unconfigured Chat offers AI Configuration; the user can keep browsing without configuring an Agent. There is no environment/tool installation wizard. Status refresh never selects an Agent or makes paid model probes. Real-account/engine matrices are recorded separately in dated acceptance reports.
+Unconfigured Chat lets the user keep browsing without configuring an Agent. There is no environment/tool installation wizard.
+
+Native assistant Chat adds a compact card beneath a settled, unsuccessful task
+report when its diagnostic identifies a missing desktop environment. It says
+“The task Agent failed because no desktop environment was found” with two actions:
+Create desktop Sandbox and Connect desktop environment. These reuse the existing
+Sandbox creation sheet and Machines connection form. Creation from this card does
+not select an environment, start a desktop, send a message, retry a task or show an
+extra success confirmation. Users ask the assistant to try again themselves.
+Creation errors and required resource-download authorization remain visible.
+Detection uses the product's unsuccessful report wrapper and recognized English
+and Chinese missing-desktop diagnostics; arbitrary model paraphrases are not a
+structured failure signal. Successful/cancelled reports, user text, transport,
+permission and unqualified task-capability errors do not trigger the card.
+
+Status refresh never selects an Agent or makes paid model probes. Real-account/engine matrices are recorded separately in dated acceptance reports.
 
 Global/session usage both show Agent / model usage grouped by model,
 including input/output/input-cache/incomplete records; missing attribution shows Unknown Agent.

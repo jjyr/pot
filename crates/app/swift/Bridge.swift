@@ -870,7 +870,7 @@ var bridge: PotBridge?
         }
     }
 
-    func editSandbox(create: Bool) {
+    func editSandbox(create: Bool, selectCreated: Bool = true) {
         guard !sandboxBusy, let target = localRuntime?.sandboxID else { return }
         let current = selectedSandbox()
         let alert = NSAlert(); alert.messageText = create ? L.text("bridge.new-linux-sandbox") : L
@@ -902,7 +902,9 @@ var bridge: PotBridge?
                 let id = "linux-" + UUID().uuidString.lowercased().prefix(8)
                 self
                     .manageSandbox(["action": "create", "sandbox_id": id, "name": name.stringValue]) {
-                        self.chooseSandbox(id)
+                        if selectCreated {
+                            self.chooseSandbox(id)
+                        }
                     }
             } else {
                 self.manageSandbox(["action": "update", "sandbox_id": target, "name": name.stringValue,
@@ -1410,6 +1412,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage", "sandbox-settings": bridge.editSandbox(create: false)
         case "sandbox-new": bridge.editSandbox(create: true)
+        case "sandbox-onboarding": bridge.editSandbox(create: true, selectCreated: false)
         case "machines-detail": bridge.machinesDetail = v["value"] as? Bool ?? true; bridge.web.isHidden = bridge
             .machinesDetail || bridge.page != 1 || bridge.localRuntime?.displayReady != true
         case "sandbox-view": if let id = v["id"] as? String {

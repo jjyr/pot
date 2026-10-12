@@ -38,3 +38,5 @@ pub mod machines;
 
 #[cfg(feature = "presentation")]
 pub mod machine_connections;
+
+pub mod onboarding;
