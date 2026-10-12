@@ -137,7 +137,6 @@ var bridge: PotBridge?
     var keyMonitor: Any?
     let railHighlight = PlaceholderLabel(labelWithString: "")
     var backMenuItem: NSMenuItem?
-    var forwardMenuItem: NSMenuItem?
     var animation: Timer?
     var events: [[String: Any]] = [] {
         didSet {
@@ -316,7 +315,6 @@ var bridge: PotBridge?
         lastIconState = ""
         installMenu()
         backMenuItem?.isEnabled = (lastUIState["can_back"] as? Bool) ?? false
-        forwardMenuItem?.isEnabled = (lastUIState["can_forward"] as? Bool) ?? false
         let labels = [
             0: "navigation.chat",
             3: "navigation.tasks",
@@ -379,22 +377,13 @@ var bridge: PotBridge?
         }
         let navigationMenu = NSMenu(title: L.text("bridge.navigation")); navigationMenu.autoenablesItems = false
         let navigationItem = NSMenuItem(); navigationItem.submenu = navigationMenu; main.addItem(navigationItem)
-        for (title, action, key) in [
-            (L.text("navigation.back"), #selector(historyBack), "["),
-            (L.text("navigation.forward"), #selector(historyForward), "]"),
-        ] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.target = self; item.isEnabled = false; navigationMenu.addItem(item)
-            if key == "[" {
-                backMenuItem = item
-            } else {
-                forwardMenuItem = item
-            }
-        }
+        let back = NSMenuItem(title: L.text("navigation.back"), action: #selector(navigateUp), keyEquivalent: "[")
+        back.target = self; back.isEnabled = false; navigationMenu.addItem(back)
+        backMenuItem = back
         NSApp.mainMenu = main
     }
 
-    func navigateHistory(_ forward: Bool) {
+    @objc func navigateUp() {
         // The embedded desktop and marked input retain their own shortcuts.
         if let view = host.firstResponder as? NSView,
            view.isDescendant(of: web)
@@ -404,19 +393,11 @@ var bridge: PotBridge?
         if let input = host.firstResponder as? NSTextInputClient, input.hasMarkedText() {
             return
         }
-        events.append(["action": forward ? "history-forward" : "history-back"]); bridgeWake?()
+        events.append(["action": "navigate-up"]); bridgeWake?()
     }
 
     @objc func showAbout() {
         PotAbout.show()
-    }
-
-    @objc func historyBack() {
-        navigateHistory(false)
-    }
-
-    @objc func historyForward() {
-        navigateHistory(true)
     }
 
     @objc func editAction(_ item: NSMenuItem) {
@@ -444,11 +425,11 @@ var bridge: PotBridge?
 
     func layout() {
         let b = rootView.bounds
-        rail.frame = NSRect(x: 0, y: 0, width: 56, height: b.height)
+        rail.frame = NSRect(x: 0, y: 0, width: 56, height: max(0, b.height - 44))
         for (index, button) in navigation.enumerated() {
             button.frame = NSRect(
                 x: 10,
-                y: button.tag == 2 ? 16 : b.height - 60 - CGFloat(index) * 48,
+                y: button.tag == 2 ? 16 : rail.bounds.height - 60 - CGFloat(index) * 48,
                 width: 36,
                 height: 36
             )
@@ -459,8 +440,8 @@ var bridge: PotBridge?
         if gpuiView.frame != b {
             gpuiView.frame = b
         }
-        // Must match ui::SANDBOX_LIST and shared 56 pt navigation header and two 56 pt desktop toolbar rows.
-        let desktopArea = NSRect(x: 280, y: 0, width: max(0, b.width - 280), height: max(0, b.height - 168))
+        // Match the 44 pt titlebar and two 56 pt desktop toolbar rows.
+        let desktopArea = NSRect(x: 280, y: 0, width: max(0, b.width - 280), height: max(0, b.height - 156))
         if web.frame != desktopArea {
             web.frame = desktopArea
         }
@@ -492,8 +473,9 @@ var bridge: PotBridge?
             webDark = dark
             web.evaluateJavaScript("document.documentElement.dataset.theme='" + (dark ? "dark" : "light") + "'")
         }
-        let background = NSColor(white: dark ? 0.125 : 0.992, alpha: 1)
+        let background = NSColor(white: dark ? 32.0 / 255 : 253.0 / 255, alpha: 1)
         let sidebar = NSColor(white: dark ? 0.157 : 0.957, alpha: 1)
+        host.backgroundColor = background
         rootView.layer?.backgroundColor = background.cgColor
         rail.layer?.backgroundColor = sidebar.cgColor
         composerBox.layer?.backgroundColor = NSColor(white: dark ? 0.169 : 1, alpha: 1).cgColor
@@ -1185,7 +1167,6 @@ var bridge: PotBridge?
             }
         }
         backMenuItem?.isEnabled = value["can_back"] as? Bool ?? false
-        forwardMenuItem?.isEnabled = value["can_forward"] as? Bool ?? false
         let next = value["selected"] as? String ?? ""
         let conversationKey = value["conversation"] as? String ?? next
         let nextDraft = conversationKey == "main" ? "" : conversationKey

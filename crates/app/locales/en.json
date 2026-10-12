@@ -7,7 +7,7 @@
   "ui.light": "Light",
   "ui.dark": "Dark",
   "ui.keyboard-shortcuts": "Keyboard shortcuts",
-  "ui.back-forward-d-sandbox-settings-shift-enter": "⌘[ Back · ⌘] Forward · ⌘D Machines · ⌘, Settings · Shift+Enter New line",
+  "ui.back-forward-d-sandbox-settings-shift-enter": "⌘[ Parent page · ⌘D Machines · ⌘, Settings · Shift+Enter New line",
   "ui.concurrent-tasks": "Concurrent tasks",
   "ui.default-5-range-1-1000-apply-global": "Default: 5; range: 1–1000. Apply global limits by restarting the environment.",
   "ui.periodic-token-allowance": "Periodic token allowance",
@@ -78,10 +78,8 @@
   "navigation.usage-limits": "Usage limits",
   "navigation.main-chat": "Main chat",
   "navigation.task-conversation": "Task conversation",
-  "navigation.back": "Back",
-  "navigation.back-11": "Back (⌘[)",
-  "navigation.forward": "Forward",
-  "navigation.forward-13": "Forward (⌘])",
+  "navigation.back": "Go to parent",
+  "navigation.back-11": "Go to parent (⌘[)",
   "schedules-ui.edit-schedule": "Edit schedule",
   "schedules-ui.describe-a-goal-and-time-in-the": "Describe a goal and time in chat to create a schedule. Schedules require their owning Runtime to remain running. In remote mode, closing this App does not stop Control; missed runs follow the schedule policy when the owning Runtime resumes.",
   "schedules-ui.name": "Name",
@@ -806,5 +804,10 @@
   "files.download-failed": "File download failed",
   "files.assistant-changed": "Assistant changed; click the file link again.",
   "machines.tags": "Labels (space-separated)",
-  "machines.save-tags": "Save labels"
+  "machines.save-tags": "Save labels",
+  "navigation.back-tasks": "Back to Tasks (⌘[)",
+  "navigation.back-schedules": "Back to Schedules (⌘[)",
+  "navigation.back-conversation": "Back to conversation (⌘[)",
+  "navigation.back-usage": "Back to Usage (⌘[)",
+  "navigation.conversation-usage": "Conversation Usage"
 }

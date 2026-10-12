@@ -48,7 +48,7 @@ extern "C" fn wake_ui() {
 }
 struct ModeCache {
     client: client::Client,
-    history: navigation::History<navigation::State>,
+    navigation: navigation::Navigation<navigation::State>,
     assistants_ui: pot_ui::assistants::Editor,
     machine_connections: pot_ui::machine_connections::Editor,
     settings: ui::Settings,
@@ -62,8 +62,8 @@ struct Shell {
     client: client::Client,
     scroll: ScrollHandle,
     tasks_scroll: ScrollHandle,
-    history: navigation::History<navigation::State>,
-    pending_history: Option<bool>,
+    navigation: navigation::Navigation<navigation::State>,
+    pending_up: bool,
     pending_offsets: Option<[Point<Pixels>; 5]>,
     pending_task_anchor: Option<(String, f32)>,
     last_content: String,
@@ -96,7 +96,7 @@ impl Shell {
         }
         let mut other = self.other_mode.take().unwrap_or_else(|| ModeCache {
             client: client::Client::start_mode(backend::mode()),
-            history: Default::default(),
+            navigation: Default::default(),
             assistants_ui: Default::default(),
             machine_connections: Default::default(),
             settings: ui::Settings::new(window, cx),
@@ -105,7 +105,7 @@ impl Shell {
             machine_selection: serde_json::Value::Null,
         });
         std::mem::swap(&mut self.client, &mut other.client);
-        std::mem::swap(&mut self.history, &mut other.history);
+        std::mem::swap(&mut self.navigation, &mut other.navigation);
         std::mem::swap(&mut self.assistants_ui, &mut other.assistants_ui);
         std::mem::swap(
             &mut self.machine_connections,
@@ -117,7 +117,7 @@ impl Shell {
         std::mem::swap(&mut self.machine_selection, &mut other.machine_selection);
         self.other_mode = Some(other);
         backend::select_assistant(self.client.view.lock().unwrap().assistant_id());
-        self.pending_history = None;
+        self.pending_up = false;
         self.pending_offsets = None;
         self.pending_task_anchor = None;
         self.last_view = None;
@@ -260,8 +260,7 @@ impl Shell {
                 Some("undo") => cx.dispatch_action(&gpui_kit::base::input::Undo),
                 Some("redo") => cx.dispatch_action(&gpui_kit::base::input::Redo),
                 Some("cancel") => self.client.cancel(),
-                Some("history-back") => self.pending_history = Some(false),
-                Some("history-forward") => self.pending_history = Some(true),
+                Some("navigate-up") => self.pending_up = true,
                 Some("tasks") => {
                     self.show_tasks = true;
                 }
@@ -391,7 +390,7 @@ impl Shell {
         self.last_content = content;
         let state = serde_json::json!({
             "completions": if view.selected.is_empty() { view.completions.clone() } else { serde_json::Value::Null },
-            "can_back":self.history.can_back(),"can_forward":self.history.can_forward(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
+            "can_back":self.route(&view).parent().is_some(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
             "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),
             "model":snapshot.map(|s|s.agent.model.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
@@ -868,8 +867,8 @@ impl Render for Shell {
         if std::mem::take(&mut self.pending_mode) {
             self.switch_mode(window, cx);
         }
-        if let Some(forward) = self.pending_history.take() {
-            self.travel(forward, window, cx);
+        if std::mem::take(&mut self.pending_up) {
+            self.navigate_up(window, cx);
         }
         let restoring_view = self.client.view.lock().unwrap().clone();
         if !restoring_view.tasks_loading
@@ -896,7 +895,7 @@ impl Render for Shell {
             body.into_any_element()
         } else {
             body.with_animation(
-                SharedString::from(format!("route-enter-{}", self.history.generation)),
+                SharedString::from(format!("route-enter-{}", self.navigation.generation)),
                 Animation::new(std::time::Duration::from_millis(180)),
                 |el, t| el.opacity(0.94 + 0.06 * t),
             )
@@ -907,7 +906,7 @@ impl Render for Shell {
             .flex()
             .flex_col()
             .bg(cx.theme().background)
-            .child(self.toolbar(&view, cx))
+            .child(self.titlebar(&view, window, cx))
             .child(body)
     }
 }
@@ -997,7 +996,11 @@ fn main() {
                         cx,
                     ))),
                     window_min_size: Some(size(px(800.), px(700.))),
-                    ..Default::default()
+                    titlebar: Some(TitlebarOptions {
+                        traffic_light_position: Some(point(px(12.), px(15.))),
+                        ..gpui_kit::component::TitleBar::title_bar_options()
+                    }),
+                    ..gpui_kit::component::TitleBar::window_options()
                 },
                 cx,
                 |window, cx| {
@@ -1048,8 +1051,8 @@ fn main() {
                             machine_selection: serde_json::Value::Null,
                             scroll: ScrollHandle::new(),
                             tasks_scroll: ScrollHandle::new(),
-                            history: navigation::History::default(),
-                            pending_history: None,
+                            navigation: navigation::Navigation::default(),
+                            pending_up: false,
                             pending_offsets: None,
                             pending_task_anchor: None,
                             last_content: String::new(),

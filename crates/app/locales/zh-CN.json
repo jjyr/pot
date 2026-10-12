@@ -7,7 +7,7 @@
   "ui.light": "浅色",
   "ui.dark": "深色",
   "ui.keyboard-shortcuts": "快捷键",
-  "ui.back-forward-d-sandbox-settings-shift-enter": "⌘[ 后退 · ⌘] 前进 · ⌘D 机器 · ⌘, 设置 · Shift+Enter 换行",
+  "ui.back-forward-d-sandbox-settings-shift-enter": "⌘[ 返回上一级 · ⌘D 机器 · ⌘, 设置 · Shift+Enter 换行",
   "ui.concurrent-tasks": "同时处理的任务数",
   "ui.default-5-range-1-1000-apply-global": "默认 5；1–1000。修改全局限制需要重启环境。",
   "ui.periodic-token-allowance": "周期 Token 额度",
@@ -78,10 +78,8 @@
   "navigation.usage-limits": "用量限制",
   "navigation.main-chat": "主聊天",
   "navigation.task-conversation": "任务对话",
-  "navigation.back": "后退",
-  "navigation.back-11": "后退（⌘[）",
-  "navigation.forward": "前进",
-  "navigation.forward-13": "前进（⌘]）",
+  "navigation.back": "返回上一级",
+  "navigation.back-11": "返回上一级（⌘[）",
   "schedules-ui.edit-schedule": "编辑定时计划",
   "schedules-ui.describe-a-goal-and-time-in-the": "在聊天中描述目标和时间来创建计划。计划需要所属 Runtime 持续运行。远程模式下退出 App 不会停止 Control；所属 Runtime 恢复后按计划补跑或跳过。",
   "schedules-ui.name": "名称",
@@ -806,5 +804,10 @@
   "files.download-failed": "文件下载失败",
   "files.assistant-changed": "助手已切换，请重新点击文件链接。",
   "machines.tags": "标签（空格分隔）",
-  "machines.save-tags": "保存标签"
+  "machines.save-tags": "保存标签",
+  "navigation.back-tasks": "返回任务列表（⌘[）",
+  "navigation.back-schedules": "返回定时任务列表（⌘[）",
+  "navigation.back-conversation": "返回对话（⌘[）",
+  "navigation.back-usage": "返回用量（⌘[）",
+  "navigation.conversation-usage": "对话用量"
 }

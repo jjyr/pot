@@ -21,6 +21,8 @@ is the single phase progress table.
 
 ## Evidence
 
+[Integrated titlebar and parent navigation](validation/titlebar-parent-navigation-20261012.md).
+
 [Unified Runtime Agent execution](validation/runtime-execution-20261012.md).
 
 [Machine labels and composer references](validation/machine-labels-20261012.md).

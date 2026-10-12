@@ -1,8 +1,8 @@
 # Pot UI specification
 
-Updated: 2026-10-11. Current MVP UI specification; see [Development plan](development-plan.md) for scope.
+Updated: 2026-10-12. Current MVP UI specification; see [Development plan](development-plan.md) for scope.
 
-For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Shared page colors, layouts, the contextual toolbar and navigation history, Chat, the composer and Pot activity/unread icons now follow that direction. The upstream browser-authorization/provider integration and Terminal removal are retained; the new AI panels share these visual tokens and responsive forms.
+For the approved target appearance, components, motion and navigation, see [Design language](design-language.md). Shared page colors, layouts, the integrated titlebar and parent navigation, Chat, the composer and Pot activity/unread icons now follow that direction. The upstream browser-authorization/provider integration and Terminal removal are retained; the new AI panels share these visual tokens and responsive forms.
 
 ## About
 
@@ -19,7 +19,7 @@ Tasks, settings, and Machines use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared la
 | Element | Specification |
 | --- | --- |
 | Sidebar | 56 px, 36 px icon hit areas; Pot is Chat, Settings at bottom; 220 ms moving selection and 140 ms hover feedback |
-| Toolbar | Shared 56 px row with Back/Forward, contextual title and conversation Usage action |
+| Titlebar | One 44 px row integrated with native window controls, matching the chat background without a divider; contextual title, parent chevron on child pages and conversation Usage action |
 | Page | `ui::page(cx)`: reserves sidebar, uses Kit theme background/text |
 | Standard content | `ui::content()`: centered, max 820 px, 32 px padding, 16 px section spacing |
 | Title / hint | `ui::title()`: 24 px semibold; `ui::hint()`: 13 px secondary text |
@@ -35,17 +35,27 @@ Content scrolls while titles/main navigation remain. Minimum window 800 x 700; f
 
 The Chat navigation icon uses the selected [Pot Companion reference](design/pot-brand/d-pot-companion-concept.png): a terracotta pot with small handles, eyes and a restrained smile. The compact 28 px character is drawn natively rather than downsampling the concept board. Opening/revealing the window gives a 360 ms appearance and one blink; hovering raises the character by less than 1 px and changes its smile over 180 ms; pressing compresses it by up to 5% over 280 ms. Actual execution displays gently drifting steam on a three-second cycle, fading across state changes. A newly completed assistant reply gives an 850 ms contented expression once; initial history, failures and cancellation do not trigger it. The navigation hit area and selection highlight stay stable. Animation stops when the window is hidden/occluded, remains static while idle, and respects Reduce Motion. The menu bar uses the same Companion geometry in monochrome, with negative-space eyes, mouth and open rim. Execution adds steam; waiting narrows the eyes. Error and unread indicators remain independent.
 
-## Navigation history
+## Parent navigation
 
-History is window-local. Chat, task lists/details, schedule details, overall/conversation Usage, allowance configuration, Settings and Machines are destinations. Back/Forward buttons and ⌘[ / ⌘] restore task filters/page/scroll anchor, schedule selection/page, Usage range/ranking page, Settings section and scroll offsets. Search/group/tab changes checkpoint the current destination without adding entries; navigating to a new destination after Back discards the forward branch.
+The single left chevron and ⌘[ return to the current page's parent, not the last
+visited page. Task details return to Tasks, schedule details to Schedules,
+conversation Usage to its conversation, and allowance configuration to overall
+Usage. Root pages show no chevron; there is no Forward action or ⌘] binding.
+Tooltips identify the destination. Direct links also have a deterministic parent.
 
-Native conversation drafts and entity-backed unsaved forms remain intact during navigation. History does not send messages, save settings, execute tasks or reclaim desktop control. Returning to Settings changes its section without reopening or resetting an in-progress AI connection panel. Embedded WebView focus and active marked-text composition retain their shortcut handling. Task scroll restoration uses the visible task ID plus inset to tolerate reordering. Missing task destinations show an inline recovery action.
+Window-local route state is scoped to Runtime/assistant and client mode. Returning
+restores filters, pagination, task-ID scroll anchors, Usage ranges and scroll offsets.
+Tasks and Schedules retain separate list state. Conversation drafts and entity-backed
+unsaved forms remain intact. Navigation does not send messages, save settings,
+execute tasks or reclaim desktop control. Embedded WebView focus and active
+marked-text composition retain their shortcut handling. Missing task destinations
+show an inline recovery action.
 
 ## Pages and interactions
 
 - **Chat**: Type `/` at the caret to complete machine, label or Skill references; arrows/Enter insert, Escape dismisses, and click/tap also inserts. References remain editable text and constrain only newly delegated tasks from that message. See [reference scope](agent-context.md#message-references-and-machine-labels). Pot icon opens chat; no central avatar. Blue user/neutral assistant bubbles. Small action bar below messages: Copy left, linked View task right, both with tooltips. Latest assistant actions show when idle; historical/user actions show on hover. Reserve height to avoid movement. Latest messages shares native input width/centering, sits above it, is fully clickable, and hides immediately on click. Preserve native IME/edit shortcuts. Opened conversations show cache before background refresh.
 - **Tasks**: executor brand icons appear in Chat running-task summaries and task-list rows, without additional Agent/model/reason labels; actual model and switching remain in task details. Icons follow Thread configuration snapshots and explicit configuration changes. Click the assistant name to select/create/edit an assistant and explicitly save its AGENTS.md rules; see [Agent context](agent-context.md). Fixed title/three state groups/search above, scrollable task list only, fixed pagination below. Main Agent creates tasks without manual creation. Default Ongoing (queued/running/waiting), Needs attention (failed/interrupted), Archived (completed/cancelled). Lifecycle details: [Task coordination](task-coordination.md). Groups show global counts; title/ID search stays within group; 20 items/page, latest state change first. Within each state tab, Tasks are grouped by assistant; assistants with no matching tasks are hidden. Grouped rows retain stage/pending guidance count; guidance in archived task conversations requeues them. Group/search changes reset page. Distinct error/no-match/loading text. Use Kit Input/Button/ListItem; active-task checks use global counts, not visible page. Task Configuration concurrency defaults to 8.
-- **Task conversation header**: Back/Forward, title and Usage live in the shared toolbar; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore full titles from original task first lines. One row below shows stage/archive and task actions using small icons/secondary text. Header stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
+- **Task conversation header**: A parent chevron, title and Usage live in the integrated titlebar; single-line title with `...` overflow and wrapping Kit Tooltip (max 480 px). Preserve full titles; restore full titles from original task first lines. One row below shows stage/archive and task actions using small icons/secondary text. The status/action row stays fixed, max 760 px aligned with messages. Task list titles share truncation/full tooltips.
 - **Schedules**: reuse Tasks / Schedules navigation, Kit Button/Form/Field/Input/cards. Fixed bottom pagination matches tasks: total/page left, previous/next right. Details show next run/state/paginated history linking to tasks. Main Agent creates schedules; no manual creation. Existing edit forms scroll with fixed save/cancel and include zone/frequency/notification/missed policy. Pause/delete preserves current runs; second click confirms deletion. See [Scheduled tasks](scheduled-tasks.md).
 - **Usage**: overall statistics/charts only, last 7/30/90 days/year. No granularity selector; year automatically aggregates 7-day groups. Task/main usage belongs in each conversation and survives archive. Single-page details: totals, horizontal model stacks (conversation/compaction, real tokens/proportions/hover), tool rankings (estimated tokens/calls, shared scale, top 5 expandable). Hide zero compaction/empty tools; no tabs/per-request lists/Skills stats. Never add tool output to model consumption. Hide allowance cards without periodic limits. See [Token usage](token-usage.md).
 - **Settings**: General starts with Language (English / 简体中文), above Appearance and keyboard shortcuts. First launch matches macOS preferred languages, falling back to English; the resolved choice is saved. Changes apply immediately without restarting or resetting drafts. See [Internationalization](internationalization.md). General / AI Configuration / Task Configuration. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. The provider chooser uses compact branded controls; connection sheets use a 12 px radius, responsive shared labels, compact model/authorization actions, and a 200 ms fade respecting Reduce Motion. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances.

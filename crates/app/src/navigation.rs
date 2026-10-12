@@ -1,9 +1,9 @@
-//! Window-local route history. Filters and presentation state belong to entries,
-//! never to route identity; execution and configuration are not navigation effects.
+//! Window-local route state. Back follows page hierarchy, independently of visit
+//! order; restoring presentation state has no execution or configuration effects.
 use crate::{Shell, client, gpui, ui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable,
+    ActiveTheme, IconName, Sizable, TitleBar,
     button::{Button, ButtonVariants},
 };
 use pot_protocol::TaskQuery;
@@ -13,7 +13,7 @@ use serde_json::json;
 pub enum Route {
     Assistant(String, Box<Route>),
     Chat,
-    Tasks,
+    Tasks(bool),
     Task(String),
     Schedule(String),
     Machines(serde_json::Value),
@@ -40,47 +40,62 @@ pub struct State {
     task_anchor: Option<(String, f32)>,
     machine_selection: serde_json::Value,
 }
-pub struct History<S> {
+impl Route {
+    pub fn parent(&self) -> Option<Self> {
+        match self {
+            Self::Assistant(id, route) => route
+                .parent()
+                .map(|parent| Self::Assistant(id.clone(), Box::new(parent))),
+            Self::Task(_) => Some(Self::Tasks(false)),
+            Self::Schedule(_) => Some(Self::Tasks(true)),
+            Self::ConversationUsage(id) if id.is_empty() => Some(Self::Chat),
+            Self::ConversationUsage(id) => Some(Self::Task(id.clone())),
+            Self::Quota => Some(Self::Usage),
+            _ => None,
+        }
+    }
+    fn back_label(&self) -> &'static str {
+        crate::i18n::text(match self {
+            Self::Task(_) => "navigation.back-tasks",
+            Self::Schedule(_) => "navigation.back-schedules",
+            Self::ConversationUsage(_) => "navigation.back-conversation",
+            Self::Quota => "navigation.back-usage",
+            _ => "navigation.back",
+        })
+    }
+}
+/// A cache, not a visit stack: unrelated visits never change a page's parent.
+pub struct Navigation<S> {
     entries: Vec<(Route, S)>,
-    cursor: usize,
+    current: Option<Route>,
     pub generation: u64,
 }
-impl<S: Clone> Default for History<S> {
+impl<S: Clone> Default for Navigation<S> {
     fn default() -> Self {
         Self {
             entries: Vec::new(),
-            cursor: 0,
+            current: None,
             generation: 0,
         }
     }
 }
-impl<S: Clone> History<S> {
+impl<S: Clone> Navigation<S> {
     pub fn observe(&mut self, route: Route, state: S) {
-        if self.entries.get(self.cursor).is_some_and(|e| e.0 == route) {
-            self.entries[self.cursor].1 = state;
-            return;
+        if self.current.as_ref() != Some(&route) {
+            self.generation += 1;
+            self.current = Some(route.clone());
         }
-        self.entries.truncate(self.cursor + 1);
-        self.entries.push((route, state));
-        self.cursor = self.entries.len() - 1;
-        self.generation += 1;
-    }
-    pub fn can_back(&self) -> bool {
-        self.cursor > 0
-    }
-    pub fn can_forward(&self) -> bool {
-        self.cursor + 1 < self.entries.len()
-    }
-    fn travel(&mut self, forward: bool) -> Option<S> {
-        if forward && self.can_forward() {
-            self.cursor += 1;
-        } else if !forward && self.can_back() {
-            self.cursor -= 1;
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.0 == route) {
+            entry.1 = state;
         } else {
-            return None;
+            self.entries.push((route, state));
         }
-        self.generation += 1;
-        Some(self.entries[self.cursor].1.clone())
+    }
+    fn state(&self, route: &Route) -> Option<S> {
+        self.entries
+            .iter()
+            .find(|entry| &entry.0 == route)
+            .map(|entry| entry.1.clone())
     }
 }
 impl Shell {
@@ -97,7 +112,7 @@ impl Shell {
             _ if self.show_tasks && self.schedule_tab && !view.schedule_selected.is_empty() => {
                 Route::Schedule(view.schedule_selected.clone())
             }
-            _ if self.show_tasks => Route::Tasks,
+            _ if self.show_tasks => Route::Tasks(self.schedule_tab),
             _ if !view.selected.is_empty() => Route::Task(view.selected.clone()),
             _ => Route::Chat,
         }
@@ -120,7 +135,7 @@ impl Shell {
             .tasks
             .get((y / 80.).floor() as usize)
             .map(|t| (t.id.clone(), y % 80.));
-        self.history.observe(
+        self.navigation.observe(
             route,
             State {
                 assistant_id: v.assistant_id().to_owned(),
@@ -150,11 +165,48 @@ impl Shell {
             },
         );
     }
-    pub fn travel(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn navigate_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.observe_navigation();
-        let Some(state) = self.history.travel(forward) else {
+        let view = self.client.view.lock().unwrap().clone();
+        let route = self.route(&view);
+        let Some(parent) = route.parent() else {
             return;
         };
+        let identity = format!(
+            "{}/{}",
+            view.runtime["runtime_id"].as_str().unwrap_or_default(),
+            view.assistant_id()
+        );
+        let scoped = |route| Route::Assistant(identity.clone(), Box::new(route));
+        let Some(mut state) = self
+            .navigation
+            .state(&scoped(parent.clone()))
+            .or_else(|| self.navigation.state(&scoped(route)))
+        else {
+            return;
+        };
+        // Direct links can open a child before its parent was ever visited.
+        match parent {
+            Route::Tasks(scheduled) => {
+                state.page = 3;
+                state.show_tasks = true;
+                state.schedule_tab = scheduled;
+                state.selected.clear();
+                state.schedule_selected.clear();
+            }
+            Route::Chat | Route::Task(_) => {
+                state.page = 0;
+                state.show_tasks = false;
+                state.selected = match parent {
+                    Route::Task(id) => id,
+                    _ => String::new(),
+                };
+            }
+            Route::Usage => {
+                state.page = 4;
+            }
+            _ => unreachable!("parent routes are defined by Route::parent"),
+        }
         self.client.select_assistant(state.assistant_id);
         self.client.select(state.selected);
         self.show_tasks = state.show_tasks;
@@ -219,118 +271,101 @@ impl Shell {
         ui::command(json!({"action":"page","value":state.page}));
         cx.notify();
     }
-    pub fn toolbar(&self, view: &client::View, cx: &mut Context<Self>) -> Div {
+    pub fn titlebar(
+        &self,
+        view: &client::View,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> TitleBar {
         let route = self.route(view);
-        let (context, title) = match route {
-            Route::Assistant(_, _) => unreachable!("history identity only"),
-            Route::Chat => ("", crate::i18n::text("navigation.chat").into()),
-            Route::Tasks => (
-                "",
-                if self.schedule_tab {
-                    crate::i18n::text("navigation.schedules")
-                } else {
-                    crate::i18n::text("navigation.tasks")
-                }
-                .into(),
-            ),
-            Route::Task(_) => (
-                crate::i18n::text("navigation.tasks"),
-                view.selected_task
-                    .as_ref()
-                    .map(|t| t.title.clone())
-                    .unwrap_or(crate::i18n::text("navigation.task-details").into()),
-            ),
-            Route::Schedule(_) => (
-                crate::i18n::text("navigation.schedules"),
-                view.schedules
-                    .selected
-                    .as_ref()
-                    .map(|p| p.spec.title.clone())
-                    .unwrap_or(crate::i18n::text("navigation.schedule-details").into()),
-            ),
-            Route::Settings => ("", crate::i18n::text("ui.settings").into()),
-            Route::Machines(_) => ("", crate::i18n::text("machines.title").into()),
-            Route::Usage => ("", crate::i18n::text("navigation.usage").into()),
-            Route::Quota => (
-                crate::i18n::text("navigation.usage"),
-                crate::i18n::text("navigation.usage-limits").into(),
-            ),
-            Route::ConversationUsage(_) => (
-                crate::i18n::text("navigation.usage"),
-                if view.selected.is_empty() {
-                    crate::i18n::text("navigation.main-chat")
-                } else {
-                    crate::i18n::text("navigation.task-conversation")
-                }
-                .into(),
-            ),
+        let title: String = match &route {
+            Route::Assistant(_, _) => unreachable!("cache identity only"),
+            Route::Chat => crate::i18n::text("navigation.chat").into(),
+            Route::Tasks(scheduled) => crate::i18n::text(if *scheduled {
+                "navigation.schedules"
+            } else {
+                "navigation.tasks"
+            })
+            .into(),
+            Route::Task(_) => view
+                .selected_task
+                .as_ref()
+                .map(|task| task.title.clone())
+                .unwrap_or(crate::i18n::text("navigation.task-details").into()),
+            Route::Schedule(_) => view
+                .schedules
+                .selected
+                .as_ref()
+                .map(|schedule| schedule.spec.title.clone())
+                .unwrap_or(crate::i18n::text("navigation.schedule-details").into()),
+            Route::Settings => crate::i18n::text("ui.settings").into(),
+            Route::Machines(_) => crate::i18n::text("machines.title").into(),
+            Route::Usage => crate::i18n::text("navigation.usage").into(),
+            Route::Quota => crate::i18n::text("navigation.usage-limits").into(),
+            Route::ConversationUsage(_) => {
+                crate::i18n::text("navigation.conversation-usage").into()
+            }
         };
-        div()
-            .h(px(56.))
-            .flex_shrink_0()
-            .pl(px(ui::SIDEBAR + 24.))
-            .pr_6()
-            .bg(crate::design::navigation(cx))
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .flex()
-            .items_center()
-            .gap_3()
+        let actions_width = match route {
+            Route::Chat => 400.,
+            Route::Task(_) => 152.,
+            _ => 0.,
+        };
+        let back_width = if route.parent().is_some() { 36. } else { 0. };
+        let title_width =
+            (window.viewport_size().width - px(112. + back_width + actions_width)).max(px(80.));
+        let visible_title =
+            pot_ui::pages::single_line_title(&title, 14., title_width, true, window, cx);
+        TitleBar::new()
+            .h(px(ui::TITLEBAR))
+            .pl(px(96.))
+            .pr_4()
+            .bg(cx.theme().background)
+            .border_b_0()
             .child(
                 div()
-                    .flex()
-                    .gap_1()
-                    .child(
-                        Button::new("history-back")
-                            .ghost()
-                            .small()
-                            .icon(IconName::ChevronLeft)
-                            .accessibility_label(crate::i18n::text("navigation.back"))
-                            .tooltip(crate::i18n::text("navigation.back-11"))
-                            .disabled(!self.history.can_back())
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.travel(false, window, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("history-forward")
-                            .ghost()
-                            .small()
-                            .icon(IconName::ChevronRight)
-                            .accessibility_label(crate::i18n::text("navigation.forward"))
-                            .tooltip(crate::i18n::text("navigation.forward-13"))
-                            .disabled(!self.history.can_forward())
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.travel(true, window, cx)),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
                     .flex()
                     .items_center()
                     .gap_2()
-                    .when(!context.is_empty(), |el| {
-                        el.child(ui::hint(context, cx)).child(ui::hint("›", cx))
+                    .flex_1()
+                    .min_w_0()
+                    .when(route.parent().is_some(), |el| {
+                        el.child(
+                            Button::new("navigate-up")
+                                .ghost()
+                                .small()
+                                .icon(IconName::ChevronLeft)
+                                .accessibility_label(route.back_label())
+                                .tooltip(route.back_label())
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.navigate_up(window, cx)),
+                                ),
+                        )
                     })
                     .child(
                         div()
-                            .id("route-title")
+                            .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_size(px(14.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(title.clone())
-                            .tooltip(move |window, cx| {
-                                ui::title_tooltip(title.clone(), window, cx)
-                            }),
-                    ),
-            )
-            .when(matches!(self.route(view), Route::Chat), |el| {
-                el.child(div().max_w(px(240.)).truncate().child(ui::hint(
-                    format!(
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("route-title")
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(14.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .max_w(title_width)
+                                    .child(visible_title)
+                                    .tooltip(move |window, cx| {
+                                        ui::title_tooltip(title.clone(), window, cx)
+                                    }),
+                            ),
+                    )
+                    .when(matches!(self.route(view), Route::Chat), |el| {
+                        el.child(div().max_w(px(240.)).truncate().child(ui::hint(
+                            format!(
                             "{} · {}",
                             self.native["settings"]["active_name"]
                                 .as_str()
@@ -339,70 +374,85 @@ impl Shell {
                                 .as_str()
                                 .unwrap_or("")
                         ),
-                    cx,
-                )))
-            })
-            .when(
-                !self.show_tasks && matches!(self.route(view), Route::Chat | Route::Task(_)),
-                |el| el.child(crate::usage_ui::entry(view, cx)),
+                            cx,
+                        )))
+                    })
+                    .when(
+                        !self.show_tasks
+                            && matches!(self.route(view), Route::Chat | Route::Task(_)),
+                        |el| el.child(crate::usage_ui::entry(view, cx)),
+                    ),
             )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{History, Route};
-    use serde_json::json;
-    #[test]
-    fn machine_details_are_distinct_history_destinations() {
-        let machine = Route::Machines(serde_json::json!({"runtime_id":"a"}));
-        let host = Route::Machines(serde_json::json!({"runtime_id":"a","target":{"kind":"host"}}));
-        let sandbox = Route::Machines(
-            json!({"runtime_id":"a","target":{"kind":"sandbox","sandbox_id":"host"}}),
-        );
-        let mut history = History::default();
-        history.observe(machine, 0);
-        history.observe(host, 1);
-        history.observe(sandbox, 2);
-        assert_eq!(history.travel(false), Some(1));
-        assert_eq!(history.travel(false), Some(0));
-        assert_eq!(history.travel(true), Some(1));
+    use super::{Navigation, Route};
+    fn scoped(assistant: &str, route: Route) -> Route {
+        Route::Assistant(assistant.into(), Box::new(route))
     }
     #[test]
-    fn assistant_and_runtime_are_distinct_navigation_destinations() {
-        let mut history = History::default();
-        history.observe(
-            Route::Assistant("runtime-a/assistant-a".into(), Box::new(Route::Chat)),
-            1,
+    fn back_follows_hierarchy_even_when_opened_from_chat() {
+        let mut states = Navigation::default();
+        states.observe(Route::Tasks(false), 1);
+        states.observe(Route::Tasks(false), 2);
+        states.observe(Route::Chat, 3);
+        states.observe(Route::Task("a".into()), 4);
+        let parent = Route::Task("a".into()).parent().unwrap();
+        assert_eq!(parent, Route::Tasks(false));
+        assert_eq!(states.state(&parent), Some(2));
+        assert_eq!(
+            Route::ConversationUsage("a".into()).parent(),
+            Some(Route::Task("a".into()))
         );
-        history.observe(
-            Route::Assistant("runtime-a/assistant-b".into(), Box::new(Route::Chat)),
-            2,
+        assert_eq!(
+            Route::ConversationUsage(String::new()).parent(),
+            Some(Route::Chat)
         );
-        history.observe(
-            Route::Assistant("runtime-b/assistant-a".into(), Box::new(Route::Chat)),
-            3,
+        assert_eq!(
+            Route::Schedule("s".into()).parent(),
+            Some(Route::Tasks(true))
         );
-        assert_eq!(history.travel(false), Some(2));
-        assert_eq!(history.travel(false), Some(1));
-        assert_eq!(history.travel(true), Some(2));
+        assert_eq!(Route::Quota.parent(), Some(Route::Usage));
     }
     #[test]
-    fn local_state_does_not_consume_history_and_new_destination_discards_forward_branch() {
-        let mut h = History::default();
-        h.observe(Route::Chat, 0);
-        assert!(!h.can_back() && !h.can_forward());
-        h.observe(Route::Tasks, 1);
-        h.observe(Route::Tasks, 2); // search/filter/tab updates checkpoint local state.
-        h.observe(Route::Task("a".into()), 3);
-        assert_eq!(h.travel(false), Some(2));
-        assert!(h.can_forward());
-        assert_eq!(h.travel(true), Some(3));
-        assert_eq!(h.travel(false), Some(2));
-        h.observe(Route::Settings, 4);
-        assert!(!h.can_forward());
-        assert_eq!(h.travel(false), Some(2));
-        assert_eq!(h.travel(false), Some(0));
-        assert_eq!(h.travel(false), None);
+    fn root_pages_have_no_back() {
+        for route in [
+            Route::Chat,
+            Route::Tasks(false),
+            Route::Tasks(true),
+            Route::Settings,
+            Route::Usage,
+            Route::Machines(serde_json::json!({"runtime_id":"a"})),
+        ] {
+            assert_eq!(route.parent(), None);
+        }
+        assert_eq!(
+            Route::Task("direct".into()).parent(),
+            Some(Route::Tasks(false))
+        );
+    }
+    #[test]
+    fn route_cache_is_scoped_and_retains_parent_state() {
+        let mut states = Navigation::default();
+        states.observe(scoped("runtime-a/assistant-a", Route::Tasks(false)), 1);
+        states.observe(scoped("runtime-a/assistant-b", Route::Tasks(false)), 2);
+        states.observe(scoped("runtime-b/assistant-a", Route::Tasks(false)), 3);
+        states.observe(scoped("runtime-a/assistant-a", Route::Tasks(true)), 4);
+        states.observe(scoped("runtime-a/assistant-a", Route::Task("t".into())), 5);
+        let parent = scoped("runtime-a/assistant-a", Route::Task("t".into()))
+            .parent()
+            .unwrap();
+        assert_eq!(states.state(&parent), Some(1));
+        states.observe(parent.clone(), 6);
+        let generation = states.generation;
+        states.observe(parent.clone(), 7);
+        assert_eq!(states.generation, generation);
+        assert_eq!(states.state(&parent), Some(7));
+        assert_eq!(
+            states.state(&scoped("runtime-a/assistant-a", Route::Tasks(true))),
+            Some(4)
+        );
     }
 }
