@@ -64,4 +64,4 @@ reclaim storage. Long-inactive unfinished Tasks are not automatically archived.
 An independent archive flag and inactivity rules remain deferred.
 
 Schemas and lifecycle code: `crates/core/src/pot-tools.json`, `crates/control/src/control/tasks.rs`.
-Checks and live qualification limits: [validation](validation/agent-permissions-20261008.md).
+Checks and live qualification limits: [permission contract](permissions.md).

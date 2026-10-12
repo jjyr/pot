@@ -265,6 +265,9 @@ async fn qualify_recovery(
         request["text"] =
             json!("/tag:remote-test /tag:task-runner Write where.txt on the assigned machine");
     }
+    if sandbox {
+        caller.api("/api/v1/permissions",Some(json!({"action":"configure","machine_id":target_id,"sandbox_access":{"machine_id":target_id,"sandbox_id":"remote-test","owner":"main","shared_with":[]}}))).await;
+    }
     let task = caller.api("/api/v1/tasks", Some(request)).await;
     assert_eq!(task["environment_ref"]["runtime_id"], target_id);
     let task_id = task["id"].as_str().unwrap();
@@ -277,15 +280,9 @@ async fn qualify_recovery(
             for card in permissions["requests"].as_array().unwrap() {
                 assert_eq!(card["request"]["owner"], task_id);
                 assert!(card["request"]["tool"] == "exec_command" || (plugin && card["request"]["tool"] == "cua_repl"));
-                if card["request"]["tool"] == "cua_repl" {
-                    assert_eq!(card["request"]["plugin"]["id"], "computer-use");
-                }
-                assert!(
-                    card["request"]["environment"]
-                        .as_str()
-                        .unwrap()
-                        .contains(&target_id)
-                );
+                assert_eq!(card["scope"]["machine_id"],target_id);
+                assert_eq!(card["scope"]["capability"],if sandbox {"sandbox"} else {"host"});
+                assert_eq!(calls.load(Ordering::SeqCst),0,"Task sampled before machine approval");
                 caller
                     .api(
                         "/api/v1/permissions",
@@ -331,7 +328,7 @@ async fn qualify_recovery(
     .unwrap();
     let detail = caller.api(&format!("/api/v1/tasks/{task_id}"), None).await;
     assert_eq!(finished["phase"], "complete", "{finished} {detail}");
-    assert_eq!(reviews, if plugin { 3 } else { 1 });
+    assert_eq!(reviews, 1);
     if before_start {
         assert!(disconnected && recovered);
     }

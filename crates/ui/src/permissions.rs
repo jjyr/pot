@@ -4,66 +4,49 @@ use crate::{
     pages::{self, Handler},
 };
 use gpui::{prelude::*, *};
-use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme, Icon, Sizable,
+    Sizable,
     button::{Button, ButtonVariants},
 };
 use serde_json::{Value, json};
-pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: &mut App) -> Div {
+pub fn cards(
+    book: &Value,
+    directory: &Value,
+    owner: &str,
+    catalog: Catalog,
+    handler: Handler,
+    cx: &mut App,
+) -> Div {
     let mut result = div().flex().flex_col().gap_2();
     for record in book["requests"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|p| owner == "main" || p["request"]["owner"] == owner)
+        .filter(|p| book["assistant_id"] == owner || p["request"]["owner"] == owner)
     {
-        let request = &record["request"];
+        let mut display = record.clone();
+        if let Some(machine) = directory["machines"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|m| m["runtime_id"] == record["scope"]["machine_id"])
+        {
+            display["machine_name"] = machine["name"].clone();
+        }
         let id = record["id"].as_str().unwrap_or("");
-        let mut card = pages::card(cx)
+        let card = pages::card(cx)
             .child(pages::title(catalog.text("permissions.request")))
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(13.))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("{}:", catalog.text("permissions.environment")))
-                    .child(
-                        Icon::new(if request["environment"] == "host" {
-                            IconName::Monitor
-                        } else {
-                            IconName::Box
-                        })
-                        .size(px(16.)),
-                    )
-                    .child(crate::permission_display::environment_name(record)),
-            )
-            .child(pages::hint(
-                crate::permission_display::source(request, catalog),
-                cx,
-            ))
-            .child(div().text_sm().whitespace_normal().child(
-                crate::permission_display::description(request, catalog).unwrap_or_else(|| {
-                    serde_json::to_string_pretty(&request["args"]).unwrap_or_default()
-                }),
-            ));
-        if let Some(scope) = request.get("proposed_grant").filter(|v| !v.is_null()) {
-            card = card
-                .child(pages::hint(catalog.text("permissions.scope"), cx))
-                .child(
-                    div()
-                        .text_sm()
-                        .whitespace_normal()
-                        .child(serde_json::to_string_pretty(scope).unwrap_or_default()),
-                );
-        }
-        if request["tool"] == "exec_command" && request["environment"] == "host" {
-            card = card.child(pages::hint(catalog.text("permissions.shell-effects"), cx));
-        }
+                    .text_sm()
+                    .whitespace_normal()
+                    .child(crate::permission_display::description(&display, catalog)),
+            );
         let mut actions = div().flex().flex_wrap().gap_2();
         for action in ["allow_persistent", "allow_once", "deny"] {
+            if action == "allow_persistent" && record["scope"].is_null() {
+                continue;
+            }
             actions = actions.child(
                 Button::new(SharedString::from(format!("permission-{id}-{action}")))
                     .ghost()
@@ -82,7 +65,7 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|g| owner == "main" || g["owner"] == owner)
+        .filter(|g| book["assistant_id"] == owner || g["owner"] == owner)
     {
         let id = grant["id"].as_str().unwrap_or("");
         result = result.child(
@@ -92,15 +75,17 @@ pub fn cards(book: &Value, owner: &str, catalog: Catalog, handler: Handler, cx: 
                     format!(
                         "{} · {}",
                         grant["owner"].as_str().unwrap_or(""),
-                        grant["environment"].as_str().unwrap_or("host")
+                        grant["scope"]["machine_id"].as_str().unwrap_or("")
                     ),
                     cx,
                 ))
                 .child(
-                    div()
-                        .text_sm()
-                        .whitespace_normal()
-                        .child(serde_json::to_string_pretty(&grant["scope"]).unwrap_or_default()),
+                    div().text_sm().whitespace_normal().child(
+                        grant["scope"]["capability"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_owned(),
+                    ),
                 )
                 .child(
                     Button::new(SharedString::from(format!("permission-revoke-{id}")))

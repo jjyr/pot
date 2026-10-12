@@ -12,6 +12,11 @@ pub struct RemoteBinding {
     pub environment: pot_core::EnvironmentRef,
 }
 pub trait RemoteEnvironment: Send + Sync {
+    /// Non-secret enrollment fingerprint. Re-enrollment must invalidate model grants.
+    fn machine_epoch(&self, _machine: &str) -> Result<String> {
+        bail!("Machine enrollment identity unavailable")
+    }
+
     /// Control-owned routing directory; no capability scoring or fallback.
     fn machines(&self) -> Vec<pot_protocol::MachineRoute> {
         vec![]

@@ -46,10 +46,10 @@ when the process is still running. For such sessions, an explicit `timeout_ms`
 sets a total command timeout; otherwise they live until exit, cancellation,
 termination or inactivity. `session_idle_timeout_ms` defaults to 30 minutes and
 must be positive. A stdin call/poll refreshes activity; output alone does not. `write_stdin` input,
-polling, resizing and stopping continue the authorized session without additional
-permission approval; the same Agent/epoch/environment ownership checks still apply.
+polling, resizing and stopping check current machine capability authorization as
+well as Agent/epoch/target ownership. Work and permanent grants avoid repeated prompts.
 
-Normal turn completion retains sessions. Runtime binds them to owner, Agent
+Normal turn completion closes sessions. Runtime binds them to owner, Agent
 binding epoch, Sandbox and VM generation. A main default selection change does
 not move existing sessions. Workers cannot retarget or access another owner's
 sessions; an old epoch cannot use a new Agent's execution scope. Completed output

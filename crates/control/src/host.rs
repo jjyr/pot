@@ -275,14 +275,7 @@ async fn manage(
 ) -> ApiResult<Json<Value>> {
     host.authorize(&h)?;
     let manager = host.sandboxes()?;
-    // Host mapping approval needs an explicit owner approval service, absent here.
-    if args["action"] == "set_mounts" {
-        return Err(error(
-            StatusCode::FORBIDDEN,
-            "approval_unavailable",
-            "Host mappings require an owner approval service",
-        ));
-    }
+    // This is the authenticated machine-owner configuration channel.
     if matches!(args["action"].as_str(), Some("start" | "desktop")) {
         let target = manager
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))

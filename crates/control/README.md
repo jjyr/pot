@@ -15,8 +15,8 @@ Control injects in-memory services into pot-agent. Snapshot/event schema version
 ## Agent execution
 
 pot-agent runs in-process on Host with an injected ToolExecutor and owner services;
-there is no implicit local backend. It owns [permission policy](../../docs/permissions.md)
-and [tool composition](../../docs/tool-composition.md). Main defaults to Host; Workers
+there is no implicit local backend. Control owns [machine permission policy](../../docs/permissions.md);
+pot-agent owns [tool composition](../../docs/tool-composition.md). Main defaults to Host; Workers
 execute only in their fixed Host/Sandbox Environment, including after approval.
 Agent context, compaction and usage remain owned by the assistant Runtime. Each assistant has independent configuration and AGENTS.md routing rules.
 
@@ -54,7 +54,7 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `POST /api/v1/agent/config` | Copy a profile configuration into an existing Thread at a safe turn boundary |
 | `GET/POST /api/v1/agent/routing` | Worker profile defaults, model-visible allowlist and concurrency policies |
 | `GET/POST /api/v1/sandboxes` | Main/operator inventory and typed lifecycle actions |
-| `GET/POST /api/v1/permissions` | Owner approval decisions, persisted grants and revocation; no worker administration |
+| `GET/POST /api/v1/permissions` | Machine Host/Sandbox decisions, grants, revocation, policy, resource limits and ownership; no worker administration |
 | `POST /api/v1/execution` | Active lane `{name,call_id,args}`; fixed worker scope, durable receipts |
 | `POST /api/v1/mcp`, `POST /api/v1/orchestration` | Role-scoped shared product tool dispatcher |
 | `/gw/{provider}/{*path}` | Internal lane-authorized provider gateway |

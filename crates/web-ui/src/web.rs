@@ -385,6 +385,7 @@ impl Render for Mobile {
         if self.page == "chat" || self.page == "task" {
             content = content.gap_5().child(pot_ui::permissions::cards(
                 &self.data["permissions"],
+                &self.data["machines"],
                 &self.conversation,
                 self.catalog(),
                 self.page_handler(cx),
@@ -508,6 +509,7 @@ impl Render for Mobile {
                 .child(connections)
                 .child(pot_ui::machines::render(
                     pot_ui::machines::MachinesView {
+                        permissions: &self.data["permissions"],
                         directory: &self.data["machines"],
                         preferred: &self.machine_selection,
                         desktop_runtime: None,

@@ -654,7 +654,6 @@ async fn run(
                 "exec_command"
                     | "write_stdin"
                     | "apply_patch"
-                    | "set_sandbox_mappings"
                     | "read_agent_instructions"
                     | "update_agent_instructions"
                     | "exec"
@@ -664,17 +663,10 @@ async fn run(
         "Extension tool conflicts with a reserved built-in name"
     );
     available.extend(custom);
-    if s.role != ExecutionRole::Summary && s.feedback.permission_grants()?.is_some() {
-        available.extend(
-            environment_tools::schemas()
-                .into_iter()
-                .filter(|t| s.role == ExecutionRole::Main || t["name"] != "set_sandbox_mappings"),
-        );
-    }
-    if s.role == ExecutionRole::Main && s.feedback.permission_grants()?.is_some() {
+    if s.role == ExecutionRole::Main && s.feedback.owner_authorization_available()? {
         available.extend(environment_tools::instruction_schemas());
     }
-    if s.feedback.permission_grants()?.is_some() {
+    if s.feedback.owner_authorization_available()? {
         for tool in &mut available {
             if tool["name"].as_str().is_some_and(|name| {
                 permissions::is_execution_tool(name)
@@ -963,6 +955,17 @@ impl Dispatcher<'_> {
         );
         let plugin = settings.plugin_for_tool(&call.name)?.is_some();
         let execution = permissions::is_execution_tool(&call.name) || plugin;
+        if execution {
+            call.arguments = s
+                .feedback
+                .resolve_execution_operation(&call.name, call.arguments)
+                .await?;
+        } else if environment_tools::instructions_tool(&call.name) {
+            call.arguments = s
+                .feedback
+                .prepare_permission_operation(&call.name, call.arguments)?;
+        }
+        permissions::authorize(s, thread, request, &call.id, &call.name, &call.arguments).await?;
         let prepared = if execution {
             let result = tokio::select! {
                 result = s.feedback.prepare_execution_operation(&call.name, call.arguments.clone()) => result,
@@ -971,7 +974,7 @@ impl Dispatcher<'_> {
             result.and_then(|args| {
                 call.arguments = args;
                 // Local opt-in embedders use the same tools and gate as Runtime.
-                if s.feedback.permission_grants()?.is_some()
+                if s.feedback.owner_authorization_available()?
                     && call.arguments.get("environment").is_none()
                 {
                     if !plugin {
@@ -985,16 +988,6 @@ impl Dispatcher<'_> {
                     call.arguments["environment"] = json!("host");
                 }
                 Ok(())
-            })
-        } else if environment_tools::instructions_tool(&call.name) {
-            s.feedback
-                .prepare_permission_operation(&call.name, call.arguments.clone())
-                .map(|args| {
-                    call.arguments = args;
-                })
-        } else if call.name == "set_sandbox_mappings" {
-            environment_tools::normalize_mapping(&mut call.arguments).map(|()| {
-                call.arguments["environment"] = json!("host");
             })
         } else if call.name == "manage_sandbox" {
             s.feedback
@@ -1014,15 +1007,15 @@ impl Dispatcher<'_> {
         })?;
         let result = async {
             prepared?;
-            permissions::authorize(s, thread, request, &call.id, &call.name, &call.arguments).await?;
-            if call.name == "set_sandbox_mappings" || environment_tools::instructions_tool(&call.name) {
+            if environment_tools::instructions_tool(&call.name) {
                 s.feedback
                     .execute_authorized_host(&call.name, call.arguments.clone())
                     .await
             } else if execution {
+                permissions::authorize(s, thread, request, &call.id, &call.name, &call.arguments).await?;
                 if let Some(executor) = &s.tool_executor {
                     let mut execution_args = call.arguments.clone();
-                    if s.feedback.permission_grants()?.is_some()
+                    if s.feedback.owner_authorization_available()?
                         && execution_args["environment"] == "host"
                         && !executor.routes_environments()
                     {

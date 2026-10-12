@@ -14,7 +14,7 @@ and browser authentication remain platform adapters.
 | `tasks` / `page_state` | Task rows, status, search, filters, empty/error states, counts and authoritative pagination; viewing a Sandbox does not alter its execution default |
 | `sandbox` | Environment list/selection, phase/default labels and capability-controlled desktop actions |
 | `usage` / `usage_state` | Statistics, charts, grouping, pagination, quotas, tool output, allowance editing and exact K/M input parsing |
-| `permissions` | Owner approval cards with execution environment, exact arguments/scopes and explicit decision/revocation actions shared by native and Web conversations |
+| `permissions` | Assistant/machine Host or Sandbox approval cards, work/permanent decisions and revocation shared by native and Web; Machines configures policies, limits and ownership |
 | `chat` | User/assistant styling, Markdown, tool folding/status, copy actions, task-report links and message lifecycle labels |
 | `markdown` | Stable text IDs, parsing/selection, code/link styling and HTTP(S) link dispatch |
 | `design` | Existing Pot theme tokens and compact-viewport policy |

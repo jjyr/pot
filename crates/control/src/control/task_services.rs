@@ -45,14 +45,8 @@ impl Service {
                     ledger.clear_wait(&self.usage_scope)?;
                 }
                 drop(ledger);
-                let key = crate::remote_environment::key(&binding.environment)?;
-                let policy = self
-                    .environment_service
-                    .permissions
-                    .remote_hub(&key)?
-                    .state(&self.usage_scope);
                 Ok(
-                    json!({"ready": !paused && allowance, "cancelled": agent::cancelled(self) || self.stopping(), "policy":policy}),
+                    json!({"ready": !paused && allowance, "cancelled": agent::cancelled(self) || self.stopping()}),
                 )
             }
             Operation::Steering { finalizing } => Ok(json!(crate::turn_control::pending(

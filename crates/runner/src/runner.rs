@@ -58,6 +58,37 @@ impl ExecutionFeedback for Feedback {
     fn execution_home(&self) -> Option<PathBuf> {
         self.control.execution_home()
     }
+    fn resolve_execution_operation(
+        &self,
+        name: &str,
+        mut args: Value,
+    ) -> BoxFuture<'_, Result<Value>> {
+        let name = name.to_owned();
+        Box::pin(async move {
+            let run = self.run()?;
+            if let Some(value) = args.get("environment") {
+                let target = if value.is_object() {
+                    serde_json::from_value::<EnvironmentRef>(value.clone())?
+                } else if value == "host" {
+                    EnvironmentRef::host(&run.launch.environment.runtime_id)
+                } else if let Some(id) = value.as_str().and_then(|v| v.strip_prefix("sandbox:")) {
+                    EnvironmentRef::sandbox(&run.launch.environment.runtime_id, id)
+                } else {
+                    anyhow::bail!("Invalid Task Agent target")
+                };
+                ensure!(
+                    target == run.launch.environment,
+                    "Worker cannot change its fixed target"
+                );
+            }
+            ensure!(
+                args.get("sandbox_id").is_none(),
+                "Worker cannot change its sandbox"
+            );
+            args["environment"] = serde_json::to_value(&run.launch.environment)?;
+            self.control.resolve_execution_operation(&name, args).await
+        })
+    }
     fn prepare_execution_operation(
         &self,
         name: &str,
@@ -71,6 +102,10 @@ impl ExecutionFeedback for Feedback {
             if let Some(environment) = args.get("environment") {
                 let requested = if environment.is_object() {
                     serde_json::from_value::<EnvironmentRef>(environment.clone())?
+                } else if let Some(raw) =
+                    environment.as_str().and_then(|v| v.strip_prefix("remote:"))
+                {
+                    serde_json::from_str::<EnvironmentRef>(raw)?
                 } else {
                     let target = match environment.as_str() {
                         Some("host") => pot_core::EnvironmentTarget::Host {},
@@ -105,14 +140,12 @@ impl ExecutionFeedback for Feedback {
             Ok(prepared)
         })
     }
-    fn environment_grants(&self, environment: &str) -> BoxFuture<'_, Result<Option<Value>>> {
-        self.control.environment_grants(environment)
-    }
-    fn permission_grants(&self) -> Result<Option<Value>> {
+
+    fn owner_authorization_available(&self) -> Result<bool> {
         self.run()?;
-        let grants = self.control.permission_grants()?;
-        ensure!(grants.is_some(), "Control approval policy is unavailable");
-        Ok(grants)
+        let available = self.control.owner_authorization_available()?;
+        ensure!(available, "Control authorization is unavailable");
+        Ok(true)
     }
     fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
         self.control.request_permission(request)

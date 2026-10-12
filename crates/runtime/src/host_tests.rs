@@ -389,7 +389,7 @@ async fn environment_executes_without_agent_and_replays_receipts_not_effects() {
         node.post("/api/v1/sandboxes", json!({"action":"set_mounts"}))
             .await
             .status(),
-        StatusCode::FORBIDDEN
+        StatusCode::CONFLICT // Owner channel reaches provider/config validation; no model approval.
     );
     let run = id();
     let op = json!({"run_id":run,"call_id":"command","sandbox_id":"default","name":"exec_command","args":{"cmd":"true"}});

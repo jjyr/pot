@@ -7,7 +7,6 @@ pub(in crate::control) struct Port {
     pub binding: RemoteBinding,
     pub control: String,
     pub lease: String,
-    pub policy: Mutex<Option<Value>>,
     pub cancelled: std::sync::atomic::AtomicBool,
 }
 impl Port {
@@ -160,22 +159,32 @@ impl Port {
     }
 }
 impl pot_core::ExecutionFeedback for Port {
-    fn permission_grants(&self) -> Result<Option<Value>> {
-        Ok(self.policy.lock().unwrap().clone())
+    fn owner_authorization_available(&self) -> Result<bool> {
+        Ok(true)
     }
-    fn environment_grants(
+    fn resolve_execution_operation(
         &self,
-        environment: &str,
-    ) -> futures_util::future::BoxFuture<'_, Result<Option<Value>>> {
-        let valid = environment
-            == format!(
-                "remote:{}",
-                serde_json::to_string(&self.binding.environment).unwrap()
-            );
+        _name: &str,
+        mut args: Value,
+    ) -> futures_util::future::BoxFuture<'_, Result<Value>> {
         Box::pin(async move {
-            ensure!(valid, "Worker cannot change Environment");
-            self.ready().await?;
-            self.permission_grants()
+            if let Some(value) = args.get("environment") {
+                let expected = json!(self.binding.environment);
+                let remote = json!(format!(
+                    "remote:{}",
+                    serde_json::to_string(&self.binding.environment)?
+                ));
+                ensure!(
+                    value == &expected || value == &remote,
+                    "Worker cannot switch its machine target"
+                );
+            }
+            ensure!(args.get("sandbox_id").is_none(), "Worker target is fixed");
+            args["environment"] = json!(format!(
+                "remote:{}",
+                serde_json::to_string(&self.binding.environment)?
+            ));
+            Ok(args)
         })
     }
     fn prepare_execution_operation(
@@ -218,11 +227,20 @@ impl pot_core::ExecutionFeedback for Port {
         request: Value,
     ) -> futures_util::future::BoxFuture<'_, Result<Value>> {
         Box::pin(async move {
-            self.effect(
-                &format!("permission:{}", digest(&request)?),
-                Operation::Permission { request },
-            )
-            .await
+            let original = request.clone();
+            let mut request = request;
+            request["environment"] = json!(format!(
+                "remote:{}",
+                serde_json::to_string(&self.binding.environment)?
+            ));
+            let mut result = self
+                .effect(
+                    &format!("permission:{}", digest(&request)?),
+                    Operation::Permission { request },
+                )
+                .await?;
+            result["request"] = original;
+            Ok(result)
         })
     }
     fn fetch_steering(
@@ -270,7 +288,6 @@ impl pot_core::ExecutionFeedback for Port {
                             .store(true, std::sync::atomic::Ordering::SeqCst);
                         anyhow::bail!("Task Agent cancelled");
                     }
-                    *self.policy.lock().unwrap() = Some(value["policy"].clone());
                     if value["ready"] == true {
                         return Ok(());
                     }

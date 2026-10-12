@@ -23,23 +23,21 @@ async fn signalled(mut receiver: watch::Receiver<bool>) {
     }
 }
 impl ExecutionFeedback for Feedback {
-    fn requires_owner_review(&self, tool: &str, args: &Value) -> bool {
-        self.inner.requires_owner_review(tool, args)
+    fn resolve_execution_operation(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
+        self.inner.resolve_execution_operation(name, args)
     }
     fn prepare_execution_operation(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
         self.inner.prepare_execution_operation(name, args)
     }
-    fn environment_grants(&self, environment: &str) -> BoxFuture<'_, Result<Option<Value>>> {
-        self.inner.environment_grants(environment)
-    }
+
     fn execution_home(&self) -> Option<PathBuf> {
         self.inner.execution_home()
     }
     fn prepare_permission_operation(&self, name: &str, args: Value) -> Result<Value> {
         self.inner.prepare_permission_operation(name, args)
     }
-    fn permission_grants(&self) -> Result<Option<Value>> {
-        self.inner.permission_grants()
+    fn owner_authorization_available(&self) -> Result<bool> {
+        self.inner.owner_authorization_available()
     }
     fn execute_authorized_host(&self, name: &str, args: Value) -> BoxFuture<'_, Result<Value>> {
         self.inner.execute_authorized_host(name, args)

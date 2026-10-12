@@ -226,6 +226,16 @@ fn attempt_id(run: &str, attempt: u64) -> Result<String> {
     Ok(uuid::Uuid::from_bytes(hash.as_ref()[..16].try_into().unwrap()).to_string())
 }
 impl RemoteEnvironment for Authority {
+    fn machine_epoch(&self, machine: &str) -> Result<String> {
+        let book = self.book.lock().unwrap();
+        let member = book
+            .members
+            .get(machine)
+            .filter(|m| m.enabled)
+            .ok_or_else(|| anyhow::anyhow!("Machine membership is inactive"))?;
+        digest(&(&member.identity, &member.token))
+    }
+
     fn machines(&self) -> Vec<pot_protocol::MachineRoute> {
         let mut machines = vec![pot_protocol::MachineRoute {
             runtime_id: self.identity.runtime_id.clone(),

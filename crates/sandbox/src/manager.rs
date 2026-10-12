@@ -230,6 +230,18 @@ impl Manager {
                     .join("workspace/workspace")
             })
     }
+    /// Inspect creation defaults and inventory without starting a provider.
+    pub fn creation_config(&self, provider: Option<&str>) -> Result<Value> {
+        self.providers
+            .lock()
+            .unwrap()
+            .get(provider.unwrap_or(&self.default_provider))
+            .map(|provider| provider.default_config())
+            .ok_or_else(|| anyhow!("Sandbox Provider unavailable"))
+    }
+    pub fn sandbox_count(&self) -> usize {
+        self.book.lock().unwrap().items.len()
+    }
     pub fn describe(&self, target: &str) -> Result<crate::ProviderDescriptor> {
         Ok(self.provider(target)?.descriptor())
     }
@@ -772,9 +784,9 @@ impl Manager {
     }
 }
 impl Manager {
-    /// Trusted control channel for the guest's ~/.pot state; never exposed as a model tool.
-    pub async fn permissions(&self, target: &str, body: &Value) -> Result<Value> {
-        self.request(target, "permissions", body, Duration::from_secs(30))
+    /// Normalize execution arguments inside the guest after Control authorization.
+    pub async fn prepare_operation(&self, target: &str, body: &Value) -> Result<Value> {
+        self.request(target, "prepare", body, Duration::from_secs(30))
             .await
     }
     /// Resolve a live session without booting or retargeting its environment.

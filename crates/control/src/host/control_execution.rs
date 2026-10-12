@@ -457,7 +457,7 @@ impl Host {
                     manager
                         .ready_for_execution(sandbox_id, &|| cancelled())
                         .await?;
-                    let prepared=manager.permissions(sandbox_id,&json!({"action":"prepare","cwd":context["workspace"],"role":"task","tool":operation,"args":if operation == "plugin_call" { &envelope } else { &args },"policy":policy})).await?;
+                    let prepared=manager.prepare_operation(sandbox_id,&json!({"action":"prepare","cwd":context["workspace"],"role":"task","tool":operation,"args":if operation == "plugin_call" { &envelope } else { &args },"policy":policy})).await?;
                     if operation != "plugin_call" {
                         args = prepared["args"].clone();
                     }

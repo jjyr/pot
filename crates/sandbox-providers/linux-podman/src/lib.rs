@@ -516,7 +516,7 @@ impl Provider for LinuxPodmanProvider {
                     "cancel",
                     "inspect",
                     "desktop",
-                    "permissions",
+                    "prepare",
                     "capabilities"
                 ]
                 .contains(&route),

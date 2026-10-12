@@ -27,8 +27,11 @@ impl LocalTools {
         serde_json::json!({"processes":self.0.lock().await.inspect(),
             "plugins":self.1.lock().await.sessions()})
     }
-    pub async fn has_plugin_session(&self, session: &str) -> bool {
+    pub async fn has_session(&self, session: &str) -> bool {
         self.plugin_sessions().await.iter().any(|id| id == session)
+            || self.0.lock().await.inspect()["sessions"]
+                .as_array()
+                .is_some_and(|ids| ids.iter().any(|id| id == session))
     }
     pub async fn plugin_sessions(&self) -> Vec<String> {
         self.1.lock().await.sessions()

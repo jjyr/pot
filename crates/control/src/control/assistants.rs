@@ -443,14 +443,19 @@ mod tests {
             call_id: "isolated-approval".into(),
             tool: "exec_command".into(),
             args: json!({"cmd":"true","workdir":"/"}),
-            proposed_grant: None,
-            display: None,
-            plugin: None,
         };
         let approval_id = sa
             .environment_service
             .permissions
-            .enqueue(approval)
+            .join(
+                approval,
+                &sa.assistant_id,
+                "work",
+                Some(pot_agent::permissions::Scope {
+                    machine_id: sa.runtime_id.clone(),
+                    capability: pot_agent::permissions::Capability::Host,
+                }),
+            )
             .unwrap();
         let Json(own) = permissions::inspect(State(sa.clone()), headers(&sa))
             .await

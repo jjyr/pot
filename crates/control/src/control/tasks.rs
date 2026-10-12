@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Job {
+    work_scope_id: String,
     #[serde(default)]
     order: u64,
     request_id: String,
@@ -333,6 +334,7 @@ fn lane_info(lane: &Lane) -> TaskInfo {
 }
 fn job(request_id: String, text: String, order: u64) -> Job {
     Job {
+        work_scope_id: id(),
         order,
         request_id,
         text,
@@ -632,7 +634,12 @@ fn enqueue_from(
         pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.clone(),
     };
     let task_id = id();
-    let first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
+    let mut first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
+    if matches!(source, agent::routing::Source::Tool)
+        && let Ok(work) = crate::permissions::work_scope(root)
+    {
+        first.work_scope_id = work;
+    }
     let record = Record {
         assignment: Some(pot_core::Assignment::on_environment(
             &root.runtime_id,
@@ -758,7 +765,21 @@ pub async fn input(
         ));
     }
     let before = lane.record.clone();
-    let job = job(req.request_id, req.text, order);
+    let mut job = job(req.request_id, req.text, order);
+    if let Some(active) = &lane.record.active {
+        job.work_scope_id = active.work_scope_id.clone();
+    } else if matches!(
+        lane.record.info.phase,
+        TaskPhase::Waiting | TaskPhase::Queued
+    ) {
+        if let Some(queued) = lane.record.queue.front() {
+            job.work_scope_id = queued.work_scope_id.clone();
+        }
+    } else {
+        for queued in &mut lane.record.queue {
+            queued.work_scope_id = job.work_scope_id.clone();
+        }
+    }
     let result = SendMessageAccepted {
         message_id: job.message_id.clone(),
         duplicate: false,
@@ -1160,6 +1181,7 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
     {
         let mut inner = lane.service.conversation.inner.lock().unwrap();
         inner.model_requests = 0;
+        inner.store.set("permissions.work", &job.work_scope_id)?;
         inner.turn = Some(TurnState {
             user_message_id: job.message_id.clone(),
             cancelling: false,
@@ -1516,6 +1538,25 @@ pub(crate) fn validate_configuration(
         .ok_or_else(|| anyhow!("Task missing"))?;
     agent::routing::check_requirements(spec, &lane.record.create_request.requirements)
 }
+fn reap_work_permissions(root: &Service) {
+    let hub = root.tasks.hub.lock().unwrap();
+    let inner = root.conversation.inner.lock().unwrap();
+    let mut active: std::collections::BTreeSet<String> = hub
+        .lanes
+        .values()
+        .flat_map(|lane| lane.record.active.iter().chain(lane.record.queue.iter()))
+        .map(|job| job.work_scope_id.clone())
+        .collect();
+    if let Some(turn) = &inner.turn {
+        active.insert(format!(
+            "{}:{}:{}",
+            root.assistant_id, root.usage_scope, turn.user_message_id
+        ));
+    }
+    root.environment_service
+        .permissions
+        .retain_work(&root.assistant_id, &active);
+}
 pub(crate) fn start(root: Service) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut workers = tokio::task::JoinSet::new();
@@ -1529,6 +1570,7 @@ pub(crate) fn start(root: Service) -> tokio::task::JoinHandle<()> {
             }
             while workers.try_join_next().is_some() {}
             if tokio::time::Instant::now() >= next_executor_reap {
+                reap_work_permissions(&root);
                 if executor_reaper
                     .as_ref()
                     .is_none_or(|task| task.is_finished())
@@ -1704,6 +1746,59 @@ fn task_references(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[tokio::test]
+    async fn derived_tasks_share_work_scope_and_finished_tasks_resume_in_new_work() {
+        let s = fixture();
+        let mid = id();
+        s.save(Message {
+            id: mid.clone(),
+            conversation_id: s.conversation_id(),
+            role: Role::User,
+            text: "start".into(),
+            status: MessageStatus::Accepted,
+            created_at_ms: now(),
+            request_id: Some(id()),
+        })
+        .unwrap();
+        s.turn(Some(TurnState {
+            user_message_id: mid,
+            cancelling: false,
+        }));
+        let parent = crate::permissions::work_scope(&s).unwrap();
+        let created = create_from(
+            s.clone(),
+            headers(),
+            CreateTask {
+                request_id: id(),
+                text: "task".into(),
+                ..Default::default()
+            },
+            agent::routing::Source::Tool,
+        )
+        .await
+        .unwrap()
+        .0;
+        let (_, worker, _) = claim(&s).unwrap().unwrap();
+        assert_eq!(crate::permissions::work_scope(&worker).unwrap(), parent);
+        s.turn(None);
+        assert_eq!(crate::permissions::work_scope(&worker).unwrap(), parent);
+        finish(&s, &created.id, Err(anyhow!("finished"))).unwrap();
+        let _ = input(
+            State(s.clone()),
+            headers(),
+            Path(created.id.clone()),
+            Json(TaskInput {
+                request_id: id(),
+                text: "new work".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        let (_, worker, _) = claim(&s).unwrap().unwrap();
+        assert_ne!(crate::permissions::work_scope(&worker).unwrap(), parent);
+        finish(&s, &created.id, Err(anyhow!("done"))).unwrap();
+        std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
+    }
     #[tokio::test]
     async fn compaction_events_are_authorized_and_confined_to_the_active_lane() {
         let s = fixture();

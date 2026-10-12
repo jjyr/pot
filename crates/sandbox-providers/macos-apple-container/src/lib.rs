@@ -391,7 +391,7 @@ impl Provider for MacOSAppleContainerProvider {
                     "cancel",
                     "inspect",
                     "desktop",
-                    "permissions",
+                    "prepare",
                     "capabilities"
                 ]
                 .contains(&route),

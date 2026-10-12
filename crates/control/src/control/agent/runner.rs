@@ -8,6 +8,9 @@ pub async fn execute(
     transcript: &mut super::transcript::Transcript,
     resuming: bool,
 ) -> Result<()> {
+    if s.is_worker {
+        crate::permissions::authorize_task(s).await?;
+    }
     let _lease = acquire_local_environment(s).await?;
     let thread = thread(s)?;
     s.conversation

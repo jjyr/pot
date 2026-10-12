@@ -1,4 +1,4 @@
-//! Lightweight machine status. Technical management belongs in Chat.
+//! Machine status and owner-controlled access, limits and sandbox assignments.
 use crate::{
     design,
     localization::Catalog,
@@ -9,10 +9,11 @@ use gpui_kit::component::{
     Disableable,
     button::{Button, ButtonVariants},
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub struct MachinesView<'a> {
     pub directory: &'a Value,
+    pub permissions: &'a Value,
     pub preferred: &'a Value,
     /// A desktop transport is currently available only for this Runtime.
     pub desktop_runtime: Option<&'a str>,
@@ -83,6 +84,83 @@ pub fn render(
                 .join(" · "),
             cx,
         ));
+        for capability in ["sandbox", "host"] {
+            let current = view.permissions["policy"]["rules"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|r| {
+                    r["assistant_id"] == view.permissions["assistant_id"]
+                        && r["scope"]["machine_id"] == runtime
+                        && r["scope"]["capability"] == capability
+                })
+                .and_then(|r| r["decision"].as_str())
+                .unwrap_or("ask");
+            let mut controls = div().flex().flex_wrap().gap_2().child(format!(
+                "{} · {}",
+                view.permissions["assistant_id"].as_str().unwrap_or(""),
+                capability
+            ));
+            for decision in ["ask", "allow", "deny"] {
+                controls=controls.child(Button::new(SharedString::from(format!("policy-{runtime}-{capability}-{decision}")))
+                    .ghost().label(catalog.text(&format!("permissions.policy-{decision}"))).disabled(current==decision)
+                    .on_click(pages::on(&handler,"permission-decision",json!({"action":"configure","machine_id":runtime,"capability":capability,"decision":decision}))));
+            }
+            card = card.child(controls);
+        }
+        for grant in view.permissions["grants"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|g| g["scope"]["machine_id"] == runtime)
+        {
+            card = card.child(
+                Button::new(SharedString::from(format!("revoke-{}", grant["id"])))
+                    .ghost()
+                    .label(format!(
+                        "{} · {}",
+                        catalog.text("permissions.revoke"),
+                        grant["scope"]["capability"].as_str().unwrap_or("")
+                    ))
+                    .on_click(pages::on(
+                        &handler,
+                        "permission-decision",
+                        json!({"id":grant["id"],"action":"revoke"}),
+                    )),
+            );
+        }
+        let limits = view.permissions["policy"]["sandbox_limits"]
+            .get(runtime)
+            .cloned()
+            .unwrap_or(json!({"max_sandboxes":16,"cpus":4,"memory_gib":8,"disk_gib":32}));
+        for key in ["max_sandboxes", "cpus", "memory_gib", "disk_gib"] {
+            let n = limits[key].as_u64().unwrap_or(1);
+            let mut row = div().flex().items_center().gap_2().child(format!(
+                "{}: {n}",
+                catalog.text(&format!("permissions.limit-{key}"))
+            ));
+            for increase in [false, true] {
+                let mut next = limits.clone();
+                next[key] = json!(if increase {
+                    n.saturating_add(1)
+                } else {
+                    n.saturating_sub(1).max(1)
+                });
+                row = row.child(
+                    Button::new(SharedString::from(format!(
+                        "limit-{runtime}-{key}-{increase}"
+                    )))
+                    .ghost()
+                    .label(if increase { "+" } else { "−" })
+                    .on_click(pages::on(
+                        &handler,
+                        "permission-decision",
+                        json!({"action":"configure","machine_id":runtime,"sandbox_limits":next}),
+                    )),
+                );
+            }
+            card = card.child(row);
+        }
         let environments = machine["environments"]
             .as_array()
             .cloned()
@@ -126,6 +204,19 @@ pub fn render(
                     },
                 )),
             );
+            if !host {
+                let sandbox = reference["target"]["sandbox_id"].as_str().unwrap_or("");
+                let access = view.permissions["policy"]["sandboxes"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|r| r["machine_id"] == runtime && r["sandbox_id"] == sandbox);
+                let assistant = view.permissions["assistant_id"].as_str().unwrap_or("");
+                row=row.child(Button::new(SharedString::from(format!("sandbox-owner-{runtime}-{sandbox}"))).ghost()
+                    .label(catalog.text("permissions.assign-sandbox"))
+                    .disabled(access.is_some_and(|r|r["owner"]==assistant))
+                    .on_click(pages::on(&handler,"permission-decision",json!({"action":"configure","machine_id":runtime,"sandbox_access":{"machine_id":runtime,"sandbox_id":sandbox,"owner":assistant,"shared_with":[]}}))));
+            }
             if expanded {
                 let desktop = crate::machine_state::desktop_available(
                     &machine,

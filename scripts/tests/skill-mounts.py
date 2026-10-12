@@ -41,7 +41,7 @@ class SkillMounts(unittest.TestCase):
         self.addCleanup(stat_patch.stop)
 
     def test_permission_backing_and_home_are_readonly_before_skill_mounts(self):
-        backing = self.base / "permission-state"
+        backing = self.base / "protected-resources"
         (backing / "crates/agent/skills").mkdir(parents=True)
         module.skill_namespace(
             "task",

@@ -502,6 +502,7 @@ impl Shell {
                     })
                     .child(pot_ui::machines::render(
                         pot_ui::machines::MachinesView {
+                            permissions: &view.permissions,
                             directory: &view.machines,
                             preferred: &self.machine_selection,
                             desktop_runtime: (backend::mode() == "local")
@@ -735,7 +736,7 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap_5()
-                    .child(pot_ui::permissions::cards(&view.permissions, if view.selected.is_empty() { view.assistant_id() } else { &view.selected }, self.catalog(), self.page_handler(cx), cx))
+                    .child(pot_ui::permissions::cards(&view.permissions, &view.machines, if view.selected.is_empty() { view.assistant_id() } else { &view.selected }, self.catalog(), self.page_handler(cx), cx))
                     .child(pot_ui::resources::cards(&self.native["resource_requests"],self.catalog(),self.page_handler(cx),cx))
                     .when(messages.is_empty(), |el| {
                         el.child(
