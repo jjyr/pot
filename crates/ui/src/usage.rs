@@ -231,13 +231,15 @@ impl UsageUI {
                                     .disabled(v.usage_pending || d.is_null() || !v.controls)
                                     .on_click(pages::on(&handler, "usage-save", Value::Null)),
                             )
-                            .child(
-                                Button::new("quota-back")
-                                    .ghost()
-                                    .small()
-                                    .label(catalog.text("usage-ui.back"))
-                                    .on_click(pages::on(&handler, "usage-page", json!(4))),
-                            ),
+                            .when(!layout.native, |el| {
+                                el.child(
+                                    Button::new("quota-back")
+                                        .ghost()
+                                        .small()
+                                        .label(catalog.text("usage-ui.back"))
+                                        .on_click(pages::on(&handler, "usage-page", json!(4))),
+                                )
+                            }),
                     ),
             );
         }

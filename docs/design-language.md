@@ -6,7 +6,7 @@ This document defines the target visual and interaction language for Pot. It is 
 
 ## Principles
 
-Pot should feel like a refined Mac application: clear typography, compact controls, predictable navigation and responsive feedback. Use a bright, almost white window matching the chat canvas, a quiet light-gray sidebar and toolbar, and soft blue user messages. Distinguish surfaces with small luminance differences, fine dividers and restrained shadows.
+Pot should feel like a refined Mac application: clear typography, compact controls, predictable navigation and responsive feedback. Use a bright, almost white window matching the chat canvas, a quiet light-gray sidebar and a titlebar matching the chat canvas, and soft blue user messages. Distinguish surfaces with small luminance differences, fine dividers and restrained shadows.
 
 Keep color sparse. Blue identifies primary actions and focus; green, amber and red communicate status alongside words or icons. Small touches of playful motion provide liveliness without changing the native foundation. Avoid large contrasting cards, decorative gradients, extensive glass effects and repeated bouncing. Mac styling does not require a darker gray window or saturated message bubbles.
 
@@ -20,7 +20,7 @@ The following values are reference tokens. Validate actual rendered contrast in 
 | --- | --- | --- | --- |
 | Canvas | `#FDFDFD` | `#202020` | Unified window and content background, including Chat |
 | Surface | `#FFFFFF` | `#2B2B2B` | Composer, forms and grouped content |
-| Navigation | `#F4F4F4` | `#282828` | Quiet sidebar and toolbar |
+| Navigation | `#F4F4F4` | `#282828` | Quiet sidebar and embedded desktop controls |
 | Primary text | `#262626` | `#F2F2F2` | Titles and body |
 | Secondary text | `#646464` | `#B7B7B7` | Descriptions and metadata |
 | Divider | `#E8E8E8` | `#414141` | Quiet separators and borders |
@@ -71,23 +71,27 @@ Keep the compact 56 px icon-only sidebar: Chat, Tasks, Machines, Usage and Setti
 
 The target design removes the user-facing Terminal page, consistent with [AI configuration #7](https://github.com/jjyr/pot/issues/7). This does not itself remove shell tools or background agent execution.
 
-Use one shared 56 px toolbar below the native titlebar: Back, Forward, destination title and contextual actions. Keep native window controls. Task details show the task title with a Tasks context, truncation and a full-title tooltip. A task conversation belongs to Tasks for sidebar selection. Do not duplicate a second back row inside the page.
+Use one 44 px titlebar integrated with the native window controls. Its background
+matches the chat canvas exactly in light and dark themes, without a bottom divider.
+Place the destination title and contextual actions in this row; leave empty space
+draggable and retain native double-click behavior. The sidebar starts below it.
+Task details truncate long titles with a full-title tooltip. Task conversations belong
+to Tasks for sidebar selection. Do not add another navigation or duplicate title row.
 
-### History
+### Parent navigation
 
-Maintain window-scoped browser-style navigation history. Start on main Chat with Back and Forward disabled. Store route identity separately from route-local view state.
+Show a single left chevron only on child pages. It and ⌘[ navigate to the page's
+parent, independently of visit order: task → task list, schedule → schedule list,
+conversation Usage → that conversation, allowance configuration → overall Usage.
+Root Chat, Tasks/Schedules, Machines, Usage and Settings have no back button. There
+is no forward button or ⌘] binding. Tooltips name the return destination.
 
-- Primary destination changes, task/schedule details, conversation Usage and deliberate jumps from linked results add entries.
-- Opening the currently active route is a no-op. Going Back and choosing another destination discards the forward branch.
-- Filters, search, pagination, local tabs and expanded groups update local state without adding history entries.
-- Returning restores filters, page, scroll anchor, per-conversation draft and unsaved settings. Prefer a task ID plus offset to a raw list offset when live sorting changes.
-- Settings remembers its selected section; changing sections does not consume history.
-- Navigation never implicitly sends a draft, saves configuration, stops execution or changes desktop-control ownership.
-- History lasts for the current window lifetime; cross-restart history is outside this design.
-
-Provide Back / Forward buttons, disabled states and tooltips with `⌘[` / `⌘]`. Route shortcuts through the native menu/responder chain. Do not override IME composition or embedded desktop shortcuts while that content owns focus.
-
-Open cached content promptly and refresh in the background. Ignore stale responses for destinations that are no longer active. Missing destinations show an unavailable state and a route to the relevant list, without silently substituting another task.
+Cache route-local presentation state per Runtime/assistant and client mode. Returning
+to a parent restores filters, pagination, scroll anchors and view state. Keep separate
+Tasks and Schedules list states. Direct links have a parent even when it has not yet
+been visited. Drafts and unsaved forms survive navigation; navigation does not send,
+save, cancel execution or change desktop ownership. Embedded desktop focus and
+marked-text composition retain their own shortcuts.
 
 ## Components and feedback
 
@@ -214,9 +218,9 @@ Activity cycles are semantic execution indicators, not decorative loops: run the
 
 ## Implementation and validation
 
-2026-10-06 implementation: Chat light/dark colors, pale user bubbles, unboxed assistant messages, the native composer, running-task summary and Pot cooking/unread icons are implemented. The summary displays task titles only; runtime progress remains available in accessible row labels. Summary removal hides finished content immediately and briefly collapses the released space. Shared light/dark tokens, the 56 px contextual toolbar and Back/Forward history, grouped task rows, four Settings categories with compact AI connection choices, responsive forms and stable action footers, Usage styling, and native/embedded Sandbox toolbar styling are also implemented. Existing saved execution settings remain available under a collapsed advanced disclosure. After rebasing onto #10, the upstream browser authorization, provider integration and Terminal removal are preserved. Its provider grid, connection panels, model pickers and task configuration now use the shared design tokens, compact controls and responsive labels. The connection sheet enters with a restrained 200 ms fade, disabled under Reduce Motion.
+2026-10-06 implementation: Chat light/dark colors, pale user bubbles, unboxed assistant messages, the native composer, running-task summary and Pot cooking/unread icons are implemented. The summary displays task titles only; runtime progress remains available in accessible row labels. Summary removal hides finished content immediately and briefly collapses the released space. Shared light/dark tokens, the contextual toolbar and Back/Forward history (superseded by the parent navigation above on 2026-10-12), grouped task rows, four Settings categories with compact AI connection choices, responsive forms and stable action footers, Usage styling, and native/embedded Sandbox toolbar styling are also implemented. Existing saved execution settings remain available under a collapsed advanced disclosure. After rebasing onto #10, the upstream browser authorization, provider integration and Terminal removal are preserved. Its provider grid, connection panels, model pickers and task configuration now use the shared design tokens, compact controls and responsive labels. The connection sheet enters with a restrained 200 ms fade, disabled under Reduce Motion.
 
-Implement shared tokens and shell/history first, then conversation/task patterns, settings/usage and embedded toolbar consistency. Update the current UI specification as behavior ships. Do not change authentication, task bindings, accounting or desktop-control semantics through styling alone.
+Implement shared tokens and shell/navigation first, then conversation/task patterns, settings/usage and embedded toolbar consistency. Update the current UI specification as behavior ships. Do not change authentication, task bindings, accounting or desktop-control semantics through styling alone.
 
 Design previews contain illustrative counts, charts and files, a placeholder desktop and simulated login/save/control feedback. Their approval establishes visual and interaction direction, not real-provider or native-rendering acceptance. Full authorization failures, complete usage details and mobile access still require their own designs and implementation verification.
 

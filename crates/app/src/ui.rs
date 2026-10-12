@@ -14,7 +14,7 @@ use gpui_kit::component::{
 use serde_json::{Value, json};
 use std::ffi::CString;
 
-pub const SIDEBAR: f32 = 56.;
+pub const TITLEBAR: f32 = 44.;
 
 /// Shape against the actual column width: GPUI's intrinsic text measurement can
 /// otherwise clip a child before the inherited ellipsis is painted.
@@ -254,18 +254,6 @@ impl Settings {
 
         page(cx).child(
             content()
-                .child(title(
-                    [
-                        crate::i18n::text("ui.general"),
-                        crate::i18n::text("ui.ai-configuration"),
-                        crate::i18n::text("ui.ai-configuration"),
-                        crate::i18n::text("ui.work-environment"),
-                        crate::i18n::text("ui.task-configuration"),
-                    ]
-                    .get(section as usize)
-                    .copied()
-                    .unwrap_or(crate::i18n::text("ui.settings")),
-                ))
                 .child(
                     segments(cx).flex_wrap().children(
                         [
