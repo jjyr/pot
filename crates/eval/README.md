@@ -41,7 +41,7 @@ The Pi script uses isolated configuration and direct CLI RPC for five sequential
 
 See the [suite design](../../docs/token-evaluation-next-suite.md) and [dated results](../../docs/validation/small-budget-evaluation.md). Capability-generic experiment matrices, parallel scheduling, active-tree restart/cancellation studies, verified pricing and statistical comparisons remain future work.
 
-Only the DeepSeek provider and its configured `deepseek-v4-flash` (or `deepseek-flash`) model are selected. The default configuration source is `~/.pi/agent/models.json`; no Pi runtime/library is loaded and no source configuration is modified. Literal API keys or execution target-variable references are read in memory. Command-based secrets and custom headers are unsupported. Credentials and authorization headers never enter manifests or captured requests.
+Only the DeepSeek provider and its configured `deepseek-v4-flash` (or `deepseek-flash`) model are selected. The default configuration source is `~/.pi/agent/models.json`; no Pi runtime/library is loaded and no source configuration is modified. Literal API keys or environment-variable references are read in memory. Command-based secrets and custom headers are unsupported. Credentials and authorization headers never enter manifests or captured requests.
 
 ```sh
 mise exec -- cargo run --locked -p pot-eval -- live crates/eval/scenarios/deepseek-short-chat.json /tmp/pot-live-chat

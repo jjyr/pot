@@ -36,7 +36,6 @@ is the single phase progress table.
 [Machine labels and composer references](validation/machine-labels-20261012.md).
 
 Current [component boundaries and regression checks](validation/component-boundaries-20261011.md).
-Previous [design cleanup](validation/design-cleanup-20261011.md).
 
 Validation reports record date, method, results and limitations. They establish only
 the tested scope. Current distributed evidence: [membership](validation/control-membership-20261011.md),

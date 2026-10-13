@@ -48,8 +48,11 @@ not exposed as unaudited MCP writes.
 
 ## Reference and tests
 
-Main's built-in delegation prompt is `MAIN_PROMPT` in `crates/assistant/src/orchestration.rs`,
-injected by Runtime. It is not global `AGENTS.md` or a routine scheduler. A custom
+Main's built-in delegation prompt lives in
+[`crates/assistant/src/main_prompt.txt`](../crates/assistant/src/main_prompt.txt).
+`MAIN_PROMPT` in `crates/assistant/src/orchestration.rs` embeds it at compile time
+with `include_str!`; Control supplies it when preparing Main execution context.
+Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default pot-agent prompt.
 
 Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; pot-agent request tests cover all three supported model protocols, custom prompts and history separation. Run `mise run test` and `mise run clippy:backend`.
