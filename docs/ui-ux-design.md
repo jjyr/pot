@@ -18,7 +18,7 @@ the application language.
 
 ## Shared layout
 
-Tasks, settings, and Machines use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared layout lives in `crates/app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
+Tasks, settings, and Machines use **gpui-kit 0.7.3** with the **gpui-fast** backend, configured in the workspace dependency shared by native and Web UI. Shared layout lives in `crates/app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
 
 | Element | Specification |
 | --- | --- |

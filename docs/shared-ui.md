@@ -5,6 +5,13 @@ Native App and Web use shared Chat, Tasks, Machines and Usage components.
 Navigation chrome, native settings, Schedules, the Swift composer, desktop viewer
 and browser authentication remain platform adapters.
 
+The workspace pins `gpui-kit` 0.7.3 with its `gpui-fast` feature. Native App,
+shared presentation and Web/WASM inherit that dependency, selecting GPUI Fast
+for the core, platform, components and assets through the Kit facade. Existing
+`gpui_kit` imports (including the local `gpui` alias) therefore use Fast types.
+Kit still compiles upstream `gpui-pre` dependencies because its Cargo features
+are additive; their presence in the lockfile does not select the upstream backend.
+
 ## Boundaries
 
 | Shared module | Responsibility |

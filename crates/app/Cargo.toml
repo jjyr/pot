@@ -11,7 +11,7 @@ pot-relay.workspace = true
 anyhow = "1"
 futures = "0.3"
 pot-ui = { workspace = true, features = ["presentation"] }
-gpui-kit = "=0.7.1"
+gpui-kit.workspace = true
 rust-i18n = "=4.2.4"
 unicode-segmentation = "=1.13.3"
 pot-protocol.workspace = true

@@ -14,6 +14,6 @@ pot-protocol.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pot-ui = { workspace = true, features = ["presentation"] }
-gpui-kit = "=0.7.1"
+gpui-kit.workspace = true
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
