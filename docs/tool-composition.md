@@ -14,10 +14,16 @@ user agreement; see the repository `AGENTS.md`.
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
-| Environments | `list_environments`; Sandbox-only `manage_sandbox` | Main |
+| Execution targets | `list_execution_targets`; Sandbox-only `manage_sandbox` | Main |
 
-Profile filters can narrow visibility. Execution tools accept `environment: "host"`
-or `"sandbox:ID"`; defaults and approval rules are in [Agent permissions](permissions.md).
+`list_execution_targets` discovers authorized Host/Sandbox destinations without
+starting them. Execution tools use `execution_target` with `"host"`, `"sandbox:ID"`
+or a typed Runtime + Host/Sandbox reference. `create_task` and
+`manage_schedule.spec` use the typed `execution_target` value. These are addresses,
+not independently managed resources; Sandbox lifecycle remains in `manage_sandbox`.
+
+Profile filters can narrow visibility. Target defaults and approval rules are in
+[Agent permissions](permissions.md).
 There are no separate file/list tools: inspect with commands and edit with patches
 or approved commands. Task semantics are in [Task coordination](task-coordination.md).
 
@@ -29,8 +35,8 @@ enters model history; child operations remain visible in events and approval car
 
 ```javascript
 const results = await Promise.all([
-  tools.exec_command({cmd: "git status --short", environment: "sandbox:project"}),
-  tools.exec_command({cmd: "git diff --stat", environment: "sandbox:project"})
+  tools.exec_command({cmd: "git status --short", execution_target: "sandbox:project"}),
+  tools.exec_command({cmd: "git diff --stat", execution_target: "sandbox:project"})
 ]);
 text(results.map(r => ({stdout: r.stdout, exit_code: r.exit_code})));
 ```

@@ -32,7 +32,7 @@ python3 <injected-skill-installer-path>/scripts/install_skill.py --url https://g
 ```
 
 For branch names containing slashes, prefer `--repo`, `--path` and `--ref`.
-GitHub download uses credentials available in the current execution environment
+GitHub download uses credentials available in the current execution target
 through GH_TOKEN or GITHUB_TOKEN if present. Report authentication/download errors;
 do not assume credentials are available or install extra dependencies to retry.
 

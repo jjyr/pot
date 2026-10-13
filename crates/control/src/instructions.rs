@@ -194,10 +194,10 @@ fn project(
     Ok(catalog)
 }
 pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
-    if crate::remote_environment::is_remote(s) {
+    if crate::remote_execution::is_remote(s) {
         let contexts = s.remote_context.lock().unwrap();
         let context = contexts
-            .get(s.environment_ref.as_ref().unwrap())
+            .get(s.execution_target.as_ref().unwrap())
             .ok_or_else(|| anyhow!("Remote project instructions have not been prepared"))?;
         let mut skills: Vec<pot_agent::Skill> = serde_json::from_value(
             context
@@ -231,7 +231,7 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
                 .collect(),
         });
     }
-    let (source, mount, _, cwd) = crate::environment::workspace_view(s)?;
+    let (source, mount, _, cwd) = crate::execution_target::workspace_view(s)?;
     let filesystem = WorkspaceFileSystem { source, mount };
     let (global, warning) = if s.is_worker {
         (String::new(), None)
@@ -258,7 +258,7 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
                 ),
             );
         }
-        catalog.text.insert_str(0, "\n\nYour AGENTS.md belongs to this assistant, independently of execution environment. Use read_agent_instructions to read its current content/revision and update_agent_instructions to propose a full replacement. Updates require owner approval. Include applicable rules in delegated task briefs; workers do not inherit this assistant's AGENTS.md.\n");
+        catalog.text.insert_str(0, "\n\nYour AGENTS.md belongs to this assistant, independently of execution target. Use read_agent_instructions to read its current content/revision and update_agent_instructions to propose a full replacement. Updates require owner approval. Include applicable rules in delegated task briefs; workers do not inherit this assistant's AGENTS.md.\n");
     }
 
     if let Some(warning) = warning {
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(state.refresh(&path), (String::new(), None));
     }
     #[tokio::test]
-    async fn default_changes_refresh_main_but_tasks_keep_instruction_environment() {
+    async fn default_changes_refresh_main_but_tasks_keep_instruction_execution_target() {
         let root = tasks::tests::fixture();
         for (target, text) in [("default", "FIRST"), ("second", "SECOND")] {
             if target == "second" {
@@ -467,7 +467,7 @@ mod tests {
                     .await
                     .unwrap();
             }
-            let base = root.environment_service.sandboxes.workspace(target);
+            let base = root.execution_service.sandboxes.workspace(target);
             fs::create_dir_all(&base).unwrap();
             fs::write(base.join(".git"), "gitdir").unwrap();
             fs::write(base.join("AGENTS.md"), text).unwrap();
@@ -523,7 +523,7 @@ mod tests {
     #[tokio::test]
     async fn macos_worker_instructions_skills_and_artifacts_use_provider_paths() {
         let mut root = tasks::tests::fixture();
-        root.environment_service.sandboxes = Arc::new(
+        root.execution_service.sandboxes = Arc::new(
             sandbox::Manager::with_providers(
                 &root.data,
                 vec![
@@ -542,7 +542,7 @@ mod tests {
         sandbox::management(&root, &json!({"action":"select","sandbox_id":"mac-dev"}))
             .await
             .unwrap();
-        let base = root.environment_service.sandboxes.workspace("mac-dev");
+        let base = root.execution_service.sandboxes.workspace("mac-dev");
         fs::create_dir_all(&base).unwrap();
         fs::write(base.join("AGENTS.md"), "MAC_PROJECT").unwrap();
         fs::write(base.join(".git"), "gitdir").unwrap();

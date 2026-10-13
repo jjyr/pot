@@ -73,7 +73,7 @@
   "backend.the-service-did-not-return-a-valid",
   "backend.the-service-did-not-return-a-model",
   "backend.connected-and-fetched-models-no-model-requests",
-  "ui.command-files-environment",
+  "ui.command-files-sandbox",
   "backend.remote-waiting-receipt",
   "backend.remote-unconfirmed-receipt",
   "backend.remote-waiting-authority",

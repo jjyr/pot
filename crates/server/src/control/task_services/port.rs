@@ -168,11 +168,11 @@ impl pot_core::ExecutionFeedback for Port {
         mut args: Value,
     ) -> futures_util::future::BoxFuture<'_, Result<Value>> {
         Box::pin(async move {
-            if let Some(value) = args.get("environment") {
-                let expected = json!(self.binding.environment);
+            if let Some(value) = args.get("execution_target") {
+                let expected = json!(self.binding.execution_target);
                 let remote = json!(format!(
                     "remote:{}",
-                    serde_json::to_string(&self.binding.environment)?
+                    serde_json::to_string(&self.binding.execution_target)?
                 ));
                 ensure!(
                     value == &expected || value == &remote,
@@ -180,9 +180,9 @@ impl pot_core::ExecutionFeedback for Port {
                 );
             }
             ensure!(args.get("sandbox_id").is_none(), "Worker target is fixed");
-            args["environment"] = json!(format!(
+            args["execution_target"] = json!(format!(
                 "remote:{}",
-                serde_json::to_string(&self.binding.environment)?
+                serde_json::to_string(&self.binding.execution_target)?
             ));
             Ok(args)
         })
@@ -200,7 +200,7 @@ impl pot_core::ExecutionFeedback for Port {
             let object = args
                 .as_object_mut()
                 .ok_or_else(|| anyhow::anyhow!("Tool arguments must be an object"))?;
-            object.remove("environment");
+            object.remove("execution_target");
             object.remove("sandbox_id");
             let mut args = self
                 .authority
@@ -215,9 +215,9 @@ impl pot_core::ExecutionFeedback for Port {
                     None,
                 )
                 .await?;
-            args["environment"] = json!(format!(
+            args["execution_target"] = json!(format!(
                 "remote:{}",
-                serde_json::to_string(&self.binding.environment)?
+                serde_json::to_string(&self.binding.execution_target)?
             ));
             Ok(args)
         })
@@ -229,9 +229,9 @@ impl pot_core::ExecutionFeedback for Port {
         Box::pin(async move {
             let original = request.clone();
             let mut request = request;
-            request["environment"] = json!(format!(
+            request["execution_target"] = json!(format!(
                 "remote:{}",
-                serde_json::to_string(&self.binding.environment)?
+                serde_json::to_string(&self.binding.execution_target)?
             ));
             let mut result = self
                 .effect(
@@ -507,7 +507,7 @@ impl pot_core::ToolExecutor for Port {
                             name: name.into(),
                             args: {
                                 let mut args = args.clone();
-                                args.as_object_mut().unwrap().remove("environment");
+                                args.as_object_mut().unwrap().remove("execution_target");
                                 args.as_object_mut().unwrap().remove("sandbox_id");
                                 args
                             },

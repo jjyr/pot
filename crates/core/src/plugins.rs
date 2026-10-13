@@ -22,6 +22,11 @@ pub struct PluginManifest {
     pub requirements: Vec<String>,
     pub tools: Vec<Value>,
 }
+impl PluginManifest {
+    pub fn supports_host(&self) -> bool {
+        self.execution == "host_or_sandbox"
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginBundle {
@@ -117,7 +122,7 @@ impl PluginBundle {
         ensure!(
             m.schema_version == 1
                 && m.runtime == "node"
-                && matches!(m.execution.as_str(), "sandbox" | "environment"),
+                && (m.execution == "sandbox" || m.supports_host()),
             "Unsupported plugin contract"
         );
         ensure!(
@@ -191,7 +196,7 @@ impl PluginBundle {
             );
             ensure!(
                 input_schema["properties"].get("sandbox_id").is_none()
-                    && input_schema["properties"].get("environment").is_none(),
+                    && input_schema["properties"].get("execution_target").is_none(),
                 "Plugin schema conflicts with execution routing"
             );
             ensure!(
@@ -718,7 +723,7 @@ mod plugin_contract_tests {
             bundle.digest = bundle.hash().unwrap();
             assert!(bundle.validate().is_err(), "{name}");
         }
-        for field in ["environment", "sandbox_id"] {
+        for field in ["execution_target", "sandbox_id"] {
             let mut bundle = original.clone();
             bundle.manifest.tools[0]["inputSchema"]["properties"][field] = json!({"type":"string"});
             bundle.digest = bundle.hash().unwrap();

@@ -3,7 +3,7 @@
 The Host Agent (pot-agent) calls the same role-scoped tools. Runtime validates
 arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. pot-agent also routes these same tool names to
 Host after its [permission gate](permissions.md).
-`environment` selects Host or a Sandbox for pot-agent. Main defaults to Host and
+`execution_target` selects Host or a Sandbox for pot-agent. Main defaults to Host and
 tasks remain bound to their fixed Host/Sandbox target. File tools share the same runner implementation.
 
 ## Commands and shells
@@ -103,7 +103,7 @@ the workspace or product storage.
 `mise run test` includes real JSON-lines runner tests for cwd/export independence,
 login initialization, snapshot reuse/invalidation/fallback, PTY input/resize,
 interrupt, explicit timeout/termination and idle expiry. Runtime HTTP/Helper
-doubles exercise cross-turn routing, original-environment binding, epoch and
+doubles exercise cross-turn routing, original-execution target binding, epoch and
 generation invalidation, parking/reactivation, restart quarantine and cleanup.
 `mise run test:executor` covers broker receipts, failed cleanup, idle expiry and
 orphan drainage using isolated SQLite/cgroup doubles. See the [dated acceptance

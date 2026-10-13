@@ -16,7 +16,7 @@ impl Component {
     }
     pub fn enable_host(&self) {
         self.state
-            .environment_service
+            .execution_service
             .host_enabled
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -44,7 +44,7 @@ impl Component {
         if let Some(mut task) = self.main.take() {
             settle(&mut task).await;
         }
-        if let Err(error) = environment::shutdown(&self.state).await {
+        if let Err(error) = execution_target::shutdown(&self.state).await {
             eprintln!("{error}");
         }
     }
@@ -90,8 +90,8 @@ pub async fn open(
         Some(manager) => manager,
         None => Arc::new(sandbox::Manager::empty(&data, providers)?),
     };
-    if host.host_environment.is_none() {
-        host.attach_host_environment();
+    if host.host_execution.is_none() {
+        host.attach_host_execution();
     }
     host.attach_sandboxes(sandboxes.clone());
     let permissions = Arc::new(permissions::Hub::open(&data.join("permissions.json"))?);
@@ -104,7 +104,7 @@ pub async fn open(
             #[cfg(test)]
             test_tool_executor: None,
             sandbox_id: None,
-            environment_ref: None,
+            execution_target: None,
             usage: Arc::new(Mutex::new(usage::Ledger::open(
                 &data.join("usage-v2.sqlite"),
             )?)),
@@ -142,13 +142,13 @@ pub async fn open(
             extensions: None,
             resources: Arc::new(AgentResources::paths(&data)),
         },
-        environment_service: EnvironmentService {
+        execution_service: ExecutionService {
             remote: Default::default(),
             host_enabled: Arc::new(std::sync::atomic::AtomicBool::new(host.host_enabled)),
             host: host
-                .host_environment
+                .host_execution
                 .clone()
-                .ok_or_else(|| anyhow!("Host Environment not assembled"))?,
+                .ok_or_else(|| anyhow!("Host Execution target not assembled"))?,
             permissions,
             sandboxes,
             terminals: Arc::new(Mutex::new(terminal::Hub::default())),

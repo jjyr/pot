@@ -30,7 +30,7 @@ supported_operations.
 
 - Runtime unit suite: 165 passed.
 - Server unit suite: 26 passed, 1 pre-existing ignored.
-- Remote environment integration: 4 passed, 1 opt-in Linux/Podman ignored.
+- Remote execution target integration: 4 passed, 1 opt-in Linux/Podman ignored.
 - Runtime/Server all-target Clippy with warnings denied; formatting/diff checks.
 - TLS outward two-node fixture runs a Control-modified plugin through an actual Node
   process, preserving mixed observation mode and nondefault Shell timeout. Duplicate

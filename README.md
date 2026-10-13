@@ -6,7 +6,7 @@
 
 Pot is an open-source implementation of the Dot experience.
 
-Pot runs its Agent locally with separately managed Linux sandboxes. Pot manages environments and background tasks—you simply tell it what to do and provide guidance along the way.
+Pot runs its Agent locally with separately managed Linux sandboxes. Pot manages machines, sandboxes and background tasks—you simply tell it what to do and provide guidance along the way.
 
 ## Install
 
@@ -43,8 +43,8 @@ helpers require separate setup.
 ## Features
 
 - **A personal AI assistant** — give instructions, ask questions, and follow up through chat.
-- **Managed sandboxes** — independent Linux environments start on demand, run tools and preserve work across shutdown.
-- **Background tasks** — Pot assigns each task one fixed environment, tracks progress, and reports results.
+- **Managed sandboxes** — independent Linux sandboxes start on demand, run tools and preserve work across shutdown.
+- **Background tasks** — Pot binds each task to a fixed Host or Sandbox, tracks progress, and reports results.
 - **Scheduled work** — ask Pot to run recurring tasks and notify you when something changes.
 - **A visible workspace** — inspect the sandbox desktop and take over when needed.
 

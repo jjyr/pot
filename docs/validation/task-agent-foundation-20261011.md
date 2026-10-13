@@ -17,7 +17,7 @@ This report does not establish end-to-end remote Task Agent delivery.
   input nor a replacement run automatically replays them. Unknown outcomes cannot
   become successful terminal results.
 - Launch validation binds exact model configuration, resource snapshot, observation
-  mode and destination Environment; invalid inputs fail before acceptance.
+  mode and destination Execution target; invalid inputs fail before acceptance.
 - A neutral Runtime with Host enabled and no assistant runs an actual pot-agent
   loop against injected, credential-free fixture services. The Control readiness
   gate blocks its first model request until released.
@@ -25,7 +25,7 @@ This report does not establish end-to-end remote Task Agent delivery.
   the model request. Destination-level instructions do not enter it; assistant
   instruction-edit tools are absent for the worker. No provider or assistant DB
   file is created.
-- A model-requested Environment switch returns the explicit fixed-target error
+- A model-requested Execution target switch returns the explicit fixed-target error
   to the model before reaching the tool executor. Plain text results contain no
   fabricated file link. An exact duplicate run makes no second model request.
 

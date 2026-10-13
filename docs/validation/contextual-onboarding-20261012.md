@@ -31,7 +31,7 @@ light/dark UI acceptance were performed. Report classification recognizes the
 existing unsuccessful product wrapper and a finite set of missing-desktop
 phrases. Arbitrary model paraphrases and logically unsuccessful replies recorded
 as completed tasks are not structured failure signals. Task capability acceptance,
-transport and permission errors are not treated as missing environments.
+transport and permission errors are not treated as missing execution targets.
 
 The actions reuse current creation/connection capabilities; they introduce no
 model-visible tool contract, automatic retry or remote desktop transport.

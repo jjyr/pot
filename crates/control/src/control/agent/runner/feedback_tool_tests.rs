@@ -26,7 +26,7 @@ impl SandboxFixture {
         service.workspace = service.data.join("workspace");
         service.conversation.inner.lock().unwrap().store =
             Store::open(&service.data.join("pot-v2.sqlite")).unwrap();
-        service.environment_service.sandboxes =
+        service.execution_service.sandboxes =
             Arc::new(crate::sandbox::Manager::open(&service.data).unwrap());
         assert!(service.test_tool_executor.is_none());
         let http = Arc::new(Mutex::new(vec![]));
@@ -301,7 +301,7 @@ async fn main_context_routes_commands_patch_and_sessions_through_sandbox() {
     );
     assert!(!context.workspace.join("effects.txt").exists());
     assert!(!s.workspace.join("effects.txt").exists());
-    crate::environment::finish(s).await.unwrap();
+    crate::execution_target::finish(s).await.unwrap();
     let finishes = fixture.requests("/finish");
     assert_eq!(finishes.len(), 2);
     for index in [0, 2] {
@@ -390,7 +390,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
             "manage_sandbox",
             json!({"action":"start","sandbox_id":"linux-b"}),
         ),
-        ("list_environments", json!({})),
+        ("list_execution_targets", json!({})),
     ] {
         let before = fixture.helper_calls.lock().unwrap().len();
         let error = context
@@ -404,7 +404,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
         assert_eq!(fixture.helper_calls.lock().unwrap().len(), before);
         assert_eq!(fixture.requests("/execute").len(), 1);
     }
-    crate::environment::finish(&worker).await.unwrap();
+    crate::execution_target::finish(&worker).await.unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
 }
 
@@ -412,7 +412,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
 async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary() {
     let fixture = SandboxFixture::new().await;
     let main = &fixture.service;
-    let base = main.environment_service.sandboxes.workspace("default");
+    let base = main.execution_service.sandboxes.workspace("default");
     std::fs::create_dir_all(&base).unwrap();
     std::fs::write(base.join(".git"), "gitdir").unwrap();
     std::fs::write(base.join("AGENTS.md"), "PROJECT_FIRST").unwrap();
@@ -488,7 +488,7 @@ async fn completed_work_closes_sessions_and_cannot_reuse_handles_in_another_work
         .await
         .unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
-    crate::environment::drain(s).await.unwrap();
+    crate::execution_target::drain(s).await.unwrap();
     let result = crate::permissions::resolve_operation(
         s,
         "write_stdin",
@@ -515,12 +515,12 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     let initial = fixture.requests("/execute")[0]["body"]["scope"].clone();
-    s.environment_service
+    s.execution_service
         .sandboxes
         .finish_turn(&s.usage_scope)
         .await
         .unwrap();
-    let inventory = crate::sandbox::tool(s, "list_environments", "inventory", &json!({}))
+    let inventory = crate::sandbox::tool(s, "list_execution_targets", "inventory", &json!({}))
         .await
         .unwrap();
     let rows = inventory["items"].as_array().unwrap();
@@ -536,7 +536,7 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     assert_eq!(fixture.requests("/execute")[1]["body"]["scope"], initial);
-    s.environment_service
+    s.execution_service
         .sandboxes
         .finish_turn(&s.usage_scope)
         .await
@@ -544,7 +544,7 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
     fixture
         .generation
         .store(2, std::sync::atomic::Ordering::SeqCst);
-    s.environment_service
+    s.execution_service
         .sandboxes
         .finish_turn(&s.usage_scope)
         .await
@@ -562,11 +562,11 @@ async fn idle_scopes_park_without_leases_and_reactivate_but_generation_and_epoch
         .await
         .unwrap();
     assert_ne!(fixture.requests("/execute")[2]["body"]["scope"], initial);
-    crate::environment::finish_stale(s, thread.generation + 1)
+    crate::execution_target::finish_stale(s, thread.generation + 1)
         .await
         .unwrap();
     assert_eq!(fixture.requests("/finish").len(), 1);
-    crate::environment::drain(s).await.unwrap();
+    crate::execution_target::drain(s).await.unwrap();
 }
 
 #[tokio::test]
@@ -586,7 +586,7 @@ async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
         "default".into(),
         json!({"sessions":[],"active":false,"ended":true}),
     );
-    crate::environment::reap_idle(s).await.unwrap();
+    crate::execution_target::reap_idle(s).await.unwrap();
     let error = crate::sandbox::tool(
         s,
         "write_stdin",
@@ -606,7 +606,7 @@ async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
     .await
     .unwrap();
     let mut restarted = s.clone();
-    restarted.environment_service.sandboxes =
+    restarted.execution_service.sandboxes =
         Arc::new(crate::sandbox::Manager::open(&s.data).unwrap());
     assert!(
         crate::sandbox::tool(
@@ -628,7 +628,7 @@ async fn expired_guest_scope_and_restart_do_not_resume_process_sessions() {
             .to_string()
             .contains("unsettled")
     );
-    crate::environment::finish(s).await.unwrap();
+    crate::execution_target::finish(s).await.unwrap();
 }
 
 #[tokio::test]
@@ -649,7 +649,7 @@ async fn malformed_session_inspection_quarantines_active_effects() {
         json!({"sessions":[],"active":"false","ended":false}),
     );
     assert!(
-        s.environment_service
+        s.execution_service
             .sandboxes
             .finish_turn(&s.usage_scope)
             .await
@@ -657,9 +657,9 @@ async fn malformed_session_inspection_quarantines_active_effects() {
             .to_string()
             .contains("stop unconfirmed")
     );
-    assert!(crate::environment::drain(s).await.is_err());
+    assert!(crate::execution_target::drain(s).await.is_err());
     assert!(
-        s.environment_service
+        s.execution_service
             .sandboxes
             .acquire("default")
             .await
@@ -692,7 +692,7 @@ async fn completed_task_cancellation_closes_retained_resources_without_rewriting
     )
     .await
     .unwrap();
-    crate::environment::finish_turn(&worker).await.unwrap();
+    crate::execution_target::finish_turn(&worker).await.unwrap();
     tasks::tests::succeed(root, &task.id, &worker, &request);
     let reply = tasks::cancel(
         State(root.clone()),
@@ -719,19 +719,19 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
     let host = crate::permissions::prepare(s, "exec_command", json!({"cmd":"cat notes.txt"}))
         .await
         .unwrap();
-    assert_eq!(host["environment"], "host");
+    assert_eq!(host["execution_target"], "host");
     assert!(fixture.requests("/prepare").is_empty());
     let args = crate::permissions::prepare(
         s,
         "exec_command",
-        json!({"cmd":"cat notes.txt","environment":"sandbox:linux-b"}),
+        json!({"cmd":"cat notes.txt","execution_target":"sandbox:linux-b"}),
     )
     .await
     .unwrap();
     assert_eq!(args["workdir"], "/guest-only/linux-b");
     let permission = pot_agent::permissions::Request {
         owner: "main".into(),
-        environment: "sandbox:linux-b".into(),
+        execution_target: "sandbox:linux-b".into(),
         generation: thread.generation,
         turn: turn.request_id.clone(),
         call_id: "guest-read".into(),
@@ -771,7 +771,7 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
     .unwrap();
     assert_eq!(waiter.await.unwrap().unwrap()["approved"], true);
     assert_eq!(
-        s.environment_service
+        s.execution_service
             .permissions
             .grants("main")
             .as_array()
@@ -780,18 +780,18 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
         1
     );
     assert_eq!(
-        s.environment_service.permissions.grants("main")[0]["scope"]["capability"],
+        s.execution_service.permissions.grants("main")[0]["scope"]["capability"],
         "sandbox"
     );
     crate::permissions::prepare(
         s,
         "exec_command",
-        json!({"cmd":"different","environment":"sandbox:default"}),
+        json!({"cmd":"different","execution_target":"sandbox:default"}),
     )
     .await
     .unwrap();
     assert_eq!(
-        s.environment_service
+        s.execution_service
             .permissions
             .grants("main")
             .as_array()
@@ -807,7 +807,7 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
     .await
     .unwrap();
     assert!(
-        s.environment_service
+        s.execution_service
             .permissions
             .grants("main")
             .as_array()
@@ -823,7 +823,7 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
     let mut worker = s.clone();
     worker.is_worker = true;
     worker.sandbox_id = Some("default".into());
-    worker.environment_ref = Some(pot_core::EnvironmentRef::sandbox(
+    worker.execution_target = Some(pot_core::ExecutionTarget::sandbox(
         &worker.runtime_id,
         "default",
     ));
@@ -831,7 +831,7 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
         crate::permissions::prepare(
             &worker,
             "exec_command",
-            json!({"cmd":"true","environment":"sandbox:linux-b"})
+            json!({"cmd":"true","execution_target":"sandbox:linux-b"})
         )
         .await
         .is_err()
@@ -840,7 +840,7 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
         crate::permissions::prepare(
             &worker,
             "exec_command",
-            json!({"cmd":"cat notes.txt","environment":"host"}),
+            json!({"cmd":"cat notes.txt","execution_target":"host"}),
         )
         .await
         .is_err()
@@ -853,7 +853,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
     let result = crate::permissions::prepare(
         &fixture.service,
         "write_stdin",
-        json!({"session_id":"missing-session","environment":"sandbox:linux-b","chars":"yes\n"}),
+        json!({"session_id":"missing-session","execution_target":"sandbox:linux-b","chars":"yes\n"}),
     )
     .await;
     assert!(result.is_err());
@@ -863,8 +863,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
     SandboxFixture::activate(&fixture.service);
     let thread = thread(&fixture.service).unwrap();
     let context = make_context(&fixture.service, &thread, None).unwrap();
-    let args =
-        json!({"session_id":"missing-session","environment":"sandbox:linux-b","chars":"yes\n"});
+    let args = json!({"session_id":"missing-session","execution_target":"sandbox:linux-b","chars":"yes\n"});
     let mut events = vec![];
     assert!(
         context
@@ -890,14 +889,14 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
         &context,
         &thread.config.params.agent.shell,
         "exec_command",
-        json!({"cmd":"true","environment":"sandbox:linux-b"}),
+        json!({"cmd":"true","execution_target":"sandbox:linux-b"}),
         "open-session",
     )
     .await;
     let continued = crate::permissions::prepare(
         &fixture.service,
         "write_stdin",
-        json!({"session_id":opened["session_id"],"environment":"sandbox:linux-b","chars":"yes\n"}),
+        json!({"session_id":opened["session_id"],"execution_target":"sandbox:linux-b","chars":"yes\n"}),
     )
     .await
     .unwrap();
@@ -911,7 +910,7 @@ async fn session_continuation_preparation_does_not_boot_guest_or_read_permission
     .await;
     assert!(fixture.requests("/prepare").is_empty());
     let mut wrong = continued;
-    wrong["environment"] = json!("sandbox:default");
+    wrong["execution_target"] = json!("sandbox:default");
     assert!(
         context
             .tool_executor

@@ -12,7 +12,7 @@ and browser authentication remain platform adapters.
 | `state` | Pending request identity, same-ID retry, authoritative snapshot reconciliation, conversation-bound receipts, editor draft ownership and send eligibility |
 | `pages` | Shared geometry, typography, cards, grouped choices, tooltips, icons and action dispatch |
 | `tasks` / `page_state` | Task rows, status, search, filters, empty/error states, counts and authoritative pagination; viewing a Sandbox does not alter its execution default |
-| `sandbox` | Environment list/selection, phase/default labels and capability-controlled desktop actions |
+| `machines` / `machine_state` | Machine cards with Host/Sandbox status, exact-location task filters and capability-controlled desktop actions |
 | `usage` / `usage_state` | Statistics, charts, grouping, pagination, quotas, tool output, allowance editing and exact K/M input parsing |
 | `permissions` | Assistant/machine Host or Sandbox approval cards, work/permanent decisions and revocation shared by native and Web; Machines configures policies, limits and ownership |
 | `chat` | User/assistant styling, Markdown, tool folding/status, copy actions, task-report links and message lifecycle labels |
@@ -51,7 +51,7 @@ external CDN dependency. Physical phone/IME/accessibility qualification remains
 separate from emulated viewport observations.
 
 Browser Sandbox has a desktop launch action; the scoped viewer opens in a separate
-tab. Environment administration and Usage editing remain owner CLI-only.
+tab. Execution target administration and Usage editing remain owner CLI-only.
 Desktop authority comes from login-bound Server tickets, not shared components.
 Shared locale formatting uses the existing plural catalog and decimal precision,
 while leaving parameter contents literal. Allowance saves read the current

@@ -123,8 +123,8 @@ pub(super) struct Tools {
     pub cleanup_failed: Arc<std::sync::atomic::AtomicBool>,
 }
 impl pot_core::ToolExecutor for Tools {
-    fn routes_environments(&self) -> bool {
-        self.inner.routes_environments()
+    fn routes_execution_targets(&self) -> bool {
+        self.inner.routes_execution_targets()
     }
     fn execute<'a>(
         &'a self,

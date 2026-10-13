@@ -302,7 +302,7 @@ var bridge: PotBridge?
         signal(SIGTERM, SIG_IGN); termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         termination?.setEventHandler { [weak self] in self?.quitApp() }; termination?.resume()
         localRuntime = LocalRuntime(view: rootView, web: web)
-        localRuntime?.onState = { [weak self] state in self?.environmentChanged(state) }
+        localRuntime?.onState = { [weak self] state in self?.runtimeChanged(state) }
         settings.load()
         animation = Timer
             .scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -650,7 +650,7 @@ var bridge: PotBridge?
 
     func sandboxBlocked(_ item: [String: Any]?) -> String? {
         if (item?["active_leases"] as? Int ?? 0) > 0 {
-            return L.text("bridge.tasks-or-tools-are-using-this-environment")
+            return L.text("bridge.tasks-or-tools-are-using-this-sandbox")
         }
         if (item?["unsettled_operations"] as? Int ?? 0) > 0 {
             return L.text("bridge.some-operations-are-unconfirmed-ask-the-main")
@@ -671,13 +671,13 @@ var bridge: PotBridge?
             ),
             ("", ""), (L.text("bridge.open-workspace"), "workspace"), (L.text("bridge.associated-tasks"), "tasks"),
             (L.text("bridge.set-as-execution-default"), "select"), ("", ""),
-            (blocked.map { L.text("bridge.cannot-stop") + $0 } ?? L.text("bridge.stop-environment"), "stop"),
+            (blocked.map { L.text("bridge.cannot-stop") + $0 } ?? L.text("bridge.stop-sandbox"), "stop"),
             (
                 blocked
                     .map { L.text("bridge.cannot-delete") + $0 } ??
                     ((target == "default" || current?["referenced"] as? Bool == true) ? L
-                        .text("bridge.cannot-delete-default-environment-or-referenced-by") :
-                        L.text("bridge.delete-environment")),
+                        .text("bridge.cannot-delete-default-sandbox-or-referenced-by") :
+                        L.text("bridge.delete-sandbox")),
                 "delete"
             ),
         ] {
@@ -729,7 +729,7 @@ var bridge: PotBridge?
         case "tasks":
             let tasks = (sandboxItems.first { $0["id"] as? String == target })?["tasks"] as? [[String: Any]] ?? []
             let alert = NSAlert(); alert.messageText = L.text("bridge.associated-tasks-24")
-            alert.informativeText = tasks.isEmpty ? L.text("bridge.no-tasks-associated-with-this-environment") : tasks
+            alert.informativeText = tasks.isEmpty ? L.text("bridge.no-tasks-associated-with-this-sandbox") : tasks
                 .map { L.format(
                     "bridge.associated-task-row",
                     [
@@ -741,8 +741,8 @@ var bridge: PotBridge?
             alert.addButton(withTitle: L.text("ai.close")); alert.beginSheetModal(for: host)
         case "select": manageSandbox(["action": action, "sandbox_id": target])
         case "stop", "delete":
-            let alert = NSAlert(); alert.messageText = action == "stop" ? L.text("bridge.stop-environment-27") : L
-                .text("bridge.delete-environment-28")
+            let alert = NSAlert(); alert.messageText = action == "stop" ? L.text("bridge.stop-sandbox-27") : L
+                .text("bridge.delete-sandbox-28")
             alert.informativeText = L.text("bridge.only-this-sandbox-is-affected-work-files")
             alert.addButton(withTitle: action == "stop" ? L.text("main.stop") : L.text("bridge.delete")); alert
                 .addButton(withTitle: L.text("schedules-ui.cancel"))
@@ -874,9 +874,9 @@ var bridge: PotBridge?
         guard !sandboxBusy, let target = localRuntime?.sandboxID else { return }
         let current = selectedSandbox()
         let alert = NSAlert(); alert.messageText = create ? L.text("bridge.new-linux-sandbox") : L
-            .text("ui.environment-settings")
-        alert.informativeText = create ? L.text("bridge.the-environment-stays-stopped-until-you-start") : L
-            .text("bridge.stop-this-environment-before-changing-its-name")
+            .text("ui.sandbox-settings")
+        alert.informativeText = create ? L.text("bridge.the-sandbox-stays-stopped-until-you-start") : L
+            .text("bridge.stop-this-sandbox-before-changing-its-name")
         let box = NSStackView(); box.orientation = .vertical; box.alignment = .leading; box.spacing = 8
         let name = NSTextField(string: create ? L.text("native.linux-sandbox") : current?["name"] as? String ?? "Linux")
         name.frame.size = NSSize(width: 300, height: 24)
@@ -1048,7 +1048,7 @@ var bridge: PotBridge?
         }
     }
 
-    func openEnvironmentDesktop(_ target: String) {
+    func openSandboxDesktop(_ target: String) {
         guard let localRuntime, !runtime.remoteMode else { return }
         let client = RuntimeClient(); client.root = localRuntime.root
         Task {
@@ -1096,7 +1096,7 @@ var bridge: PotBridge?
             .removeStatusItem(status)
     }
 
-    func environmentChanged(_ state: [String: Any]) {
+    func runtimeChanged(_ state: [String: Any]) {
         localPhase = state["phase"] as? String ?? "unknown"
         if ["stopped", "failed", "stopping"].contains(localPhase) {
             viewer = [:]; desktopAttempt = nil
@@ -1105,7 +1105,7 @@ var bridge: PotBridge?
         if page == 1 {
             web.isHidden = machinesDetail || localRuntime?.displayReady != true
         }
-        settings.environment = state; settings.refreshStatus()
+        settings.runtimeStatus = state; settings.refreshStatus()
         runtime.root = localRuntime?.root; runtime.ip = "127.0.0.1"
         if Date().timeIntervalSince(sandboxRefreshAt) > 1 {
             refreshSandboxes()
@@ -1257,7 +1257,7 @@ var bridge: PotBridge?
             highlighted: highlighted
         )
         let state = (running ? L.text("client.working") : L.text("bridge.idle")) +
-            (failed ? L.text("bridge.environment-error") : waiting ? L.text("bridge.waiting-for-configuration") : "")
+            (failed ? L.text("bridge.runtime-error") : waiting ? L.text("bridge.waiting-for-configuration") : "")
         let label = "Pot · \(state)" + (unread > 0 ? L.format("bridge.0-unread", [String(describing: unread)]) : "")
         status.button?.title = ""
         status.button?.toolTip = nil
@@ -1423,8 +1423,8 @@ private var bridgeWake: (@convention(c) () -> Void)?
             {
                 bridge.downloadTaskFile(task, path: path, owner: owner)
             }
-        case "environment-desktop": if let id = v["id"] as? String {
-                bridge.openEnvironmentDesktop(id)
+        case "execution-target-desktop": if let id = v["id"] as? String {
+                bridge.openSandboxDesktop(id)
             }
         case "start": bridge.startSandbox()
         case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"

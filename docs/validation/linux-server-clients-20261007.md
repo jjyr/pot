@@ -10,11 +10,11 @@ Provider IDs are `linux.podman`, `macos.apple-containerization`, and
 engine; descriptors report `host_os`, `engine`, and guest `os`. Linux registers
 Podman; macOS registers the Apple engines. No aliases or legacy Provider-ID
 compatibility code remain. Checked local instance directories had no saved old-ID
-inventories requiring migration; task/environment identities are unchanged.
+inventories requiring migration; task/execution target identities are unchanged.
 
 The Podman Provider uses the local rootless CLI without an API daemon, pins an
 already-installed image ID, publishes the authenticated executor on loopback,
-and mounts environment workspace plus skill sources. It requires cgroup v2 and
+and mounts execution target workspace plus skill sources. It requires cgroup v2 and
 systemd delegation. CPU/memory limits are applied; disk quotas are unavailable
 (`disk_gib=0`). Desktop is disabled. Container identity and boot generation are
 checked before reuse; shutdown removes containers while retaining workspace.
@@ -72,7 +72,7 @@ portable regression test; it does not relax the mount or disable seccomp.
 The final qualification checks successful commands and receipt deduplication,
 `apply_patch`, live PTY input after normal turn completion, cancellation of
 detached `setsid` descendants, workspace persistence after stop/restart, separate
-environment workspaces, and removal on Manager shutdown. It also checks that
+execution target workspaces, and removal on Manager shutdown. It also checks that
 execution users cannot read broker credentials/ledgers or raw skill sources,
 and task skill views reject writes to both user and builtin skills. A stricter
 process check found lingering orphan zombies; the pinned init fixes their

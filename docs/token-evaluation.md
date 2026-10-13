@@ -10,10 +10,10 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 
 | Component | Responsibility |
 |---|---|
-| Scenario catalog | Versioned user turns, workspace fixtures, environment, task assertions, resource limits and optional controlled response trace |
+| Scenario catalog | Versioned user turns, workspace fixtures, execution target, task assertions, resource limits and optional controlled response trace |
 | Runner | Run matrix, isolated fresh sessions/workspaces, repeats, ordering, deadlines, lifecycle and artifact collection |
 | Agent executor | Directly invoke pot-agent with Thread configuration, injected services, controls and ordered observations |
-| Environment/tool service | Prepare identical fixtures and, where supported, common tool semantics/results for controlled comparisons |
+| Execution target/tool service | Prepare identical fixtures and, where supported, common tool semantics/results for controlled comparisons |
 | Usage collector | Capture provider usage or native counters and declare what scope/stages are observable |
 | Normalizer/validator | Convert observations into a versioned schema, resolve cumulative snapshots and duplicate sources, preserve missing fields and raw provenance |
 | Evaluator/reporter | Evaluate artifacts/answers, compute comparable metrics, compare baselines and explain regressions by trace |
@@ -24,19 +24,19 @@ Production invocations go through `pot-runtime-execution`; isolated engine evalu
 
 ## Standalone execution services
 
-`ExecutionContext` supplies instructions, environment tools, context persistence and cancellation feedback. `ExecutionServices` injects model transport, product RPC and compaction lifecycle transport. Runtime supplies authenticated Gateway and owner services; eval supplies deterministic or explicitly selected live transport, run-local context storage, tools and controls. Product reservations remain durable before networking; observers cannot authorize requests or replace settlement.
+`ExecutionContext` supplies instructions, execution target tools, context persistence and cancellation feedback. `ExecutionServices` injects model transport, product RPC and compaction lifecycle transport. Runtime supplies authenticated Gateway and owner services; eval supplies deterministic or explicitly selected live transport, run-local context storage, tools and controls. Product reservations remain durable before networking; observers cannot authorize requests or replace settlement.
 
 Core defines ordered Agent events and typed request/usage/compaction observations. Owner/generation/turn/sequence checks reject stale updates. Evaluation adds run/trial identity and provenance without a Driver capability-negotiation layer. Request/attempt IDs link observations; retries have distinct attempts. Collector failures invalidate measurement coverage, and missing measurements remain unknown. Credentials never enter manifests or raw request records.
 
 ## Scenario and run identity
 
-Each scenario pins an ID/version, user input sequence, fixture content hash, environment requirements, expected outcomes, tags and limits. Assertions check task behavior rather than implementation-specific tool names unless the case explicitly tests a tool contract. Optional trace fixtures control model responses/tool results for causal debugging; they do not provide live billing evidence.
+Each scenario pins an ID/version, user input sequence, fixture content hash, execution target requirements, expected outcomes, tags and limits. Assertions check task behavior rather than implementation-specific tool names unless the case explicitly tests a tool contract. Optional trace fixtures control model responses/tool results for causal debugging; they do not provide live billing evidence.
 
 Every immutable run manifest records:
 
 - Schema version, run ID, comparison group/pair ID, scenario version/hash and trial number.
 - Agent version, runtime commit/build, requested/effective model/provider and generation settings.
-- Prompt/tool-set hashes, runtime policy including compaction/retention/output limits, environment/image/fixture hashes.
+- Prompt/tool-set hashes, runtime policy including compaction/retention/output limits, execution target/image/fixture hashes.
 - Collector versions and negotiated observation precision; pricing snapshot ID when cost is calculable.
 - Mode, ordering, seed when supported, timestamps, resource limits and terminal status.
 
@@ -83,8 +83,8 @@ Stage attribution is exact only with corresponding request/lifecycle evidence. T
 |---|---|---|
 | Deterministic contract | Scripted model streams, usage, tools and failures | Correct continuation, receipt handling, usage aggregation and recovery; no empirical efficiency claim |
 | Fixed-context/request comparison | Identical history, tool results and policy; observable encoded requests | Encoding overhead, context growth and trigger differences; token counts are estimated unless a provider supplies them |
-| Aligned live execution | Same effective model, prompts, tools/environment and enforceable policy | Runtime efficiency conditional on equivalent settings and outcomes |
-| Native-policy live execution | Same task/environment, each runtime's recorded defaults | End-to-end product behavior, including its tool/prompt/compaction policy |
+| Aligned live execution | Same effective model, prompts, tools/execution target and enforceable policy | Runtime efficiency conditional on equivalent settings and outcomes |
+| Native-policy live execution | Same task/execution target, each runtime's recorded defaults | End-to-end product behavior, including its tool/prompt/compaction policy |
 
 Forced-compaction cases compare a fixed history and retained suffix. Automatic-compaction cases compare a long task under aligned thresholds or native defaults. Measure the summary request, subsequent requests and quality-driven rework together. Evaluate remembered constraints, artifact paths, completed effects and pending work after several compactions; a short inaccurate summary is a failure.
 

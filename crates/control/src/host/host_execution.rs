@@ -80,14 +80,14 @@ pub(super) async fn query(
 
 pub(super) async fn execute(host: &Host, request: Operation) -> Result<Value> {
     anyhow::ensure!(host.host_enabled, "Host execution resource is disabled");
-    let environment = host
-        .host_environment
+    let execution_target = host
+        .host_execution
         .as_ref()
         .ok_or_else(|| anyhow!("Host execution service is disabled"))?;
     // Native Runtime authority was checked by the route. Control authority must
     // use its own scoped grants before this executor can be shared remotely.
     let original = json!({"run_id":request.run_id,"call_id":request.call_id,
-        "environment_ref":request.environment_ref,"name":request.name,"args":request.args});
+        "execution_target":request.execution_target,"name":request.name,"args":request.args});
     let path = receipt_path(host, &request.run_id, &request.call_id)?;
     std::fs::create_dir_all(path.parent().unwrap())?;
     // Persist before effects and serialize concurrent retries. Cancellation is
@@ -107,11 +107,11 @@ pub(super) async fn execute(host: &Host, request: Operation) -> Result<Value> {
         host: host.clone(),
         cancellation: host
             .data
-            .join("environment-cancellations")
+            .join("execution-target-cancellations")
             .join(&request.run_id),
     });
     anyhow::ensure!(!feedback.cancelled(), "Run has been cancelled");
-    pot_core::environment_tools::validate(&request.name, &request.args)?;
+    pot_core::execution_tools::validate(&request.name, &request.args)?;
     let workspace = host
         .data
         .join("host-runs")
@@ -122,7 +122,7 @@ pub(super) async fn execute(host: &Host, request: Operation) -> Result<Value> {
     let mut args = request.args;
     pot_tool_executor::tools::normalize(&request.name, &mut args, &workspace, &policy)?;
     let owner = format!("operator:{}", request.run_id);
-    let executor = environment.host_executor(&owner, 1);
+    let executor = execution_target.host_executor(&owner, 1);
     let context = ExecutionContext {
         instructions: String::new(),
         skill_resources: Default::default(),
@@ -146,7 +146,7 @@ pub(super) async fn execute(host: &Host, request: Operation) -> Result<Value> {
     let result = tokio::select! {
         value = executor.execute(&context, &policy, &request.name, &args, &request.call_id, &mut emit) => value,
         _ = feedback.cancellation() => {
-            environment.finish_host(&owner).await?;
+            execution_target.finish_host(&owner).await?;
             Err(anyhow!("Run has been cancelled"))
         },
     };

@@ -50,7 +50,7 @@ pub(crate) fn prompt(skills: &[Skill]) -> Result<String> {
         return Ok(String::new());
     }
     let mut prompt = String::from(
-        "\n\nThe following skills provide specialized instructions. When a task matches a description, use exec_command to read its SKILL.md in the assigned Sandbox before following it. Resolve supporting relative paths against the skill directory. Skill instructions do not change tool permissions or the assigned execution environment.\n<available_skills>\n",
+        "\n\nThe following skills provide specialized instructions. When a task matches a description, use exec_command to read its SKILL.md in the assigned Sandbox before following it. Resolve supporting relative paths against the skill directory. Skill instructions do not change tool permissions or the assigned execution target.\n<available_skills>\n",
     );
     for skill in visible {
         prompt.push_str(&format!("  <skill>\n    <name>{}</name>\n    <description>{}</description>\n    <location>{}</location>\n  </skill>\n", escape(&skill.name), escape(&skill.description), escape(&skill.location)));

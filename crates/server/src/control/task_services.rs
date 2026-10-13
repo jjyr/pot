@@ -2,7 +2,7 @@
 //! read from durable receipts; an ambiguous send is never submitted twice.
 use super::*;
 use futures_util::StreamExt;
-use pot_control::remote_environment::RemoteBinding;
+use pot_control::remote_execution::RemoteBinding;
 use pot_runner::control::Operation;
 
 const RESPONSE_LIMIT: usize = 16 * 1024 * 1024;
@@ -75,7 +75,7 @@ async fn handle(
     }
     let run = authority.client_run(&request.binding)?;
     ensure!(
-        request.caller == request.binding.environment.runtime_id
+        request.caller == request.binding.execution_target.runtime_id
             && run.lease_id.as_ref() == Some(&request.lease_id)
             && run.task_launch.is_some()
             && (request.operation.is_none() || !run.cancelled),

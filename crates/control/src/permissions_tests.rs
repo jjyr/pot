@@ -8,7 +8,7 @@ fn scope(capability: Capability) -> Scope {
 fn operation(owner: &str, call: &str) -> Request {
     Request {
         owner: owner.into(),
-        environment: "host".into(),
+        execution_target: "host".into(),
         generation: 1,
         turn: "turn".into(),
         call_id: call.into(),

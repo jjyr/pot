@@ -21,7 +21,7 @@
     }
   ],
   "id": "/",
-  "description": "Your Pot conversations, tasks and environments.",
+  "description": "Your Pot conversations, tasks and machines.",
   "display_override": [
     "standalone"
   ]

@@ -39,7 +39,7 @@ struct Lane {
 #[derive(Default)]
 pub(crate) struct Capacity {
     // Shared across all assistant hubs, held until the run finishes cleanup.
-    active: BTreeMap<String, (agent::ResolvedSpec, Option<pot_core::EnvironmentRef>)>,
+    active: BTreeMap<String, (agent::ResolvedSpec, Option<pot_core::ExecutionTarget>)>,
 }
 #[derive(Default)]
 pub(crate) struct Hub {
@@ -79,38 +79,38 @@ pub(crate) fn remove_uncommitted(hub: &mut Hub, task_id: &str) {
 fn child(
     root: &Service,
     task_id: &str,
-    environment: &pot_core::EnvironmentRef,
+    execution_target: &pot_core::ExecutionTarget,
     skills: Option<Vec<String>>,
 ) -> Result<Service> {
     anyhow::ensure!(
         uuid::Uuid::parse_str(task_id).is_ok(),
         "Invalid persisted task ID"
     );
-    environment.validate()?;
+    execution_target.validate()?;
 
     let data = root.data.join("tasks").join(task_id);
-    let (sandbox_id, workspace) = if !environment.is_local_to(&root.runtime_id) {
+    let (sandbox_id, workspace) = if !execution_target.is_local_to(&root.runtime_id) {
         (
-            match &environment.target {
-                pot_core::EnvironmentTarget::Host {} => None,
-                pot_core::EnvironmentTarget::Sandbox { sandbox_id } => Some(sandbox_id.clone()),
+            match &execution_target.target {
+                pot_core::ExecutionTargetKind::Host {} => None,
+                pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => Some(sandbox_id.clone()),
             },
             data.join("agent-cache"),
         )
     } else {
-        match &environment.target {
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
-                root.environment_service.sandboxes.assignment(sandbox_id)?;
+        match &execution_target.target {
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
+                root.execution_service.sandboxes.assignment(sandbox_id)?;
                 (
                     Some(sandbox_id.clone()),
-                    root.environment_service
+                    root.execution_service
                         .sandboxes
                         .workspace(sandbox_id)
                         .join("tasks")
                         .join(task_id),
                 )
             }
-            pot_core::EnvironmentTarget::Host {} => (None, data.join("agent-workspace")),
+            pot_core::ExecutionTargetKind::Host {} => (None, data.join("agent-workspace")),
         }
     };
     std::fs::create_dir_all(&data)?;
@@ -127,7 +127,7 @@ fn child(
             #[cfg(test)]
             test_tool_executor: root.test_tool_executor.clone(),
             sandbox_id,
-            environment_ref: Some(environment.clone()),
+            execution_target: Some(execution_target.clone()),
             usage: root.usage.clone(),
             usage_scope: task_id.into(),
             token,
@@ -159,13 +159,13 @@ fn child(
             extensions: root.agent_service.extensions.clone(),
             resources: root.agent_service.resources.clone(),
         },
-        environment_service: EnvironmentService {
-            remote: root.environment_service.remote.clone(),
-            host_enabled: root.environment_service.host_enabled.clone(),
-            host: root.environment_service.host.clone(),
-            permissions: root.environment_service.permissions.clone(),
-            sandboxes: root.environment_service.sandboxes.clone(),
-            terminals: root.environment_service.terminals.clone(),
+        execution_service: ExecutionService {
+            remote: root.execution_service.remote.clone(),
+            host_enabled: root.execution_service.host_enabled.clone(),
+            host: root.execution_service.host.clone(),
+            permissions: root.execution_service.permissions.clone(),
+            sandboxes: root.execution_service.sandboxes.clone(),
+            terminals: root.execution_service.terminals.clone(),
         },
         tasks: TaskService {
             hub: Arc::new(Mutex::new(Hub::default())),
@@ -195,28 +195,28 @@ pub(crate) fn restore(root: &Service) -> Result<()> {
             record.info.assistant_id == root.assistant_id,
             "Task assistant ownership mismatch"
         );
-        let environment = record
+        let execution_target = record
             .info
-            .environment_ref
+            .execution_target
             .clone()
-            .ok_or_else(|| anyhow!("Task Environment missing"))?;
-        let projected = match &environment.target {
-            pot_core::EnvironmentTarget::Host {} => "",
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.as_str(),
+            .ok_or_else(|| anyhow!("Task Execution target missing"))?;
+        let projected = match &execution_target.target {
+            pot_core::ExecutionTargetKind::Host {} => "",
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => sandbox_id.as_str(),
         };
         anyhow::ensure!(
             record.info.sandbox_id == projected,
-            "Task Environment projection mismatch"
+            "Task Execution target projection mismatch"
         );
         let assignment = record
             .assignment
             .as_ref()
             .ok_or_else(|| anyhow!("Task assignment missing"))?;
-        assignment.validate_binding(&root.runtime_id, &record.info.id, &environment)?;
-        if let Some(requested) = &record.create_request.environment_ref {
+        assignment.validate_binding(&root.runtime_id, &record.info.id, &execution_target)?;
+        if let Some(requested) = &record.create_request.execution_target {
             anyhow::ensure!(
-                requested == &environment && record.create_request.sandbox_id.is_empty(),
-                "Task request Environment mismatch"
+                requested == &execution_target && record.create_request.sandbox_id.is_empty(),
+                "Task request Execution target mismatch"
             );
         }
     }
@@ -238,7 +238,7 @@ pub(crate) fn restore(root: &Service) -> Result<()> {
             &record.info.id,
             record
                 .info
-                .environment_ref
+                .execution_target
                 .as_ref()
                 .expect("validated binding"),
             record
@@ -247,7 +247,7 @@ pub(crate) fn restore(root: &Service) -> Result<()> {
                 .or_else(|| record.create_request.skills.clone()),
         )?;
         if let Some(job) = record.active.take() {
-            if !record.interrupt_requested && crate::remote_environment::is_remote(&service) {
+            if !record.interrupt_requested && crate::remote_execution::is_remote(&service) {
                 // Recover the original input identity. The remote launch journal
                 // reconciles that run; this never starts a replacement worker.
                 record.queue.push_front(job);
@@ -312,7 +312,7 @@ fn lane_info(lane: &Lane) -> TaskInfo {
     let mut task = info(&lane.record);
     if lane.record.active.is_some()
         && task.phase == TaskPhase::Running
-        && crate::remote_environment::waiting_reason(&lane.service).is_some()
+        && crate::remote_execution::waiting_reason(&lane.service).is_some()
     {
         task.phase = TaskPhase::Waiting;
         task.remote_waiting = true;
@@ -388,22 +388,22 @@ pub(crate) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
             "Invalid scope, query or page size (1–50)",
         ));
     }
-    let environment: Option<pot_core::EnvironmentRef> = if query.environment.is_empty() {
+    let execution_target: Option<pot_core::ExecutionTarget> = if query.execution_target.is_empty() {
         None
     } else {
-        let reference: pot_core::EnvironmentRef = serde_json::from_str(&query.environment)
+        let reference: pot_core::ExecutionTarget = serde_json::from_str(&query.execution_target)
             .map_err(|_| {
                 error(
                     StatusCode::BAD_REQUEST,
                     "invalid_task_query",
-                    "Invalid environment filter",
+                    "Invalid execution target filter",
                 )
             })?;
         reference.validate().map_err(|_| {
             error(
                 StatusCode::BAD_REQUEST,
                 "invalid_task_query",
-                "Invalid environment filter",
+                "Invalid execution target filter",
             )
         })?;
         Some(reference)
@@ -420,9 +420,9 @@ pub(crate) fn page(root: &Service, query: &TaskQuery) -> ApiResult<TaskPage> {
                 .as_ref()
                 .map(|p| p == &i.phase)
                 .unwrap_or(query.scope == "all" || i.phase.scope() == query.scope)
-                && environment
+                && execution_target
                     .as_ref()
-                    .is_none_or(|r| i.environment_ref.as_ref() == Some(r))
+                    .is_none_or(|r| i.execution_target.as_ref() == Some(r))
                 && (needle.is_empty()
                     || i.title.to_lowercase().contains(&needle)
                     || i.id.to_lowercase().contains(&needle))
@@ -573,21 +573,21 @@ fn enqueue_from(
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
-    if req.environment_ref.is_some() && !req.sandbox_id.is_empty() {
+    if req.execution_target.is_some() && !req.sandbox_id.is_empty() {
         return Err(error(
             StatusCode::BAD_REQUEST,
-            "environment_conflict",
-            "Use environment_ref or sandbox_id",
+            "execution_target_conflict",
+            "Use execution_target or sandbox_id",
         ));
     }
     let refs = task_references(root, &req, source)?;
-    let explicit = req.environment_ref.clone().or_else(|| {
+    let explicit = req.execution_target.clone().or_else(|| {
         (!req.sandbox_id.is_empty())
-            .then(|| pot_core::EnvironmentRef::sandbox(&root.runtime_id, &req.sandbox_id))
+            .then(|| pot_core::ExecutionTarget::sandbox(&root.runtime_id, &req.sandbox_id))
     });
     let constrained = refs.machine.is_some() || !refs.tags.is_empty();
     let target = if explicit.is_none() || constrained {
-        let machines = crate::remote_environment::port(root)
+        let machines = crate::remote_execution::port(root)
             .map(|p| p.machines())
             .unwrap_or_default();
         let machines = if machines.is_empty() {
@@ -600,14 +600,14 @@ fn enqueue_from(
         };
         let runtime = pot_protocol::references::select_machine(&machines, &root.runtime_id, &refs)
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_machine", e))?;
-        if let Some(environment) = &explicit {
+        if let Some(execution_target) = &explicit {
             // A label selector constrains membership, not which matching machine the model chooses.
             let mut fixed = refs.clone();
-            fixed.machine = Some(environment.runtime_id.clone());
+            fixed.machine = Some(execution_target.runtime_id.clone());
             if refs
                 .machine
                 .as_ref()
-                .is_some_and(|id| id != &environment.runtime_id)
+                .is_some_and(|id| id != &execution_target.runtime_id)
                 || pot_protocol::references::select_machine(&machines, &root.runtime_id, &fixed)
                     .is_err()
             {
@@ -621,17 +621,17 @@ fn enqueue_from(
         } else if runtime == root.runtime_id {
             None
         } else {
-            Some(pot_core::EnvironmentRef::host(runtime))
+            Some(pot_core::ExecutionTarget::host(runtime))
         }
     } else {
         explicit
     };
-    let environment = resolve_environment(root, target, "")?;
+    let execution_target = resolve_execution_target(root, target, "")?;
     let message_skills = (!refs.skills.is_empty()).then_some(refs.skills);
     let selected_skills = message_skills.clone().or_else(|| req.skills.clone());
-    let sandbox_id = match &environment.target {
-        pot_core::EnvironmentTarget::Host {} => String::new(),
-        pot_core::EnvironmentTarget::Sandbox { sandbox_id } => sandbox_id.clone(),
+    let sandbox_id = match &execution_target.target {
+        pot_core::ExecutionTargetKind::Host {} => String::new(),
+        pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => sandbox_id.clone(),
     };
     let task_id = id();
     let mut first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
@@ -641,14 +641,14 @@ fn enqueue_from(
         first.work_scope_id = work;
     }
     let record = Record {
-        assignment: Some(pot_core::Assignment::on_environment(
+        assignment: Some(pot_core::Assignment::on_execution_target(
             &root.runtime_id,
             &task_id,
-            environment.clone(),
+            execution_target.clone(),
         )),
         info: TaskInfo {
             remote_waiting: false,
-            environment_ref: Some(environment.clone()),
+            execution_target: Some(execution_target.clone()),
             assistant_id: root.assistant_id.clone(),
             sandbox_id: sandbox_id.clone(),
             id: task_id.clone(),
@@ -669,7 +669,7 @@ fn enqueue_from(
         interrupt_requested: false,
         receipts: vec![first],
     };
-    let service = child(root, &task_id, &environment, selected_skills).map_err(internal)?;
+    let service = child(root, &task_id, &execution_target, selected_skills).map_err(internal)?;
     {
         let mut inner = service.conversation.inner.lock().unwrap();
         if agent::current(&inner.store).map_err(internal)?.is_none() {
@@ -837,7 +837,9 @@ async fn stop_task(
     if let Some((service, phase)) = idle_service {
         // A completed task can still own background sessions. Preserve its result
         // while explicitly closing those resources instead of silently doing nothing.
-        environment::finish_idle(&service).await.map_err(internal)?;
+        execution_target::finish_idle(&service)
+            .await
+            .map_err(internal)?;
         return Ok(Json(
             json!({"stopping":false,"phase":phase,"sessions_stopped":true}),
         ));
@@ -904,7 +906,7 @@ async fn stop_task(
         cleanup
     };
     if let Some(service) = cleanup {
-        let result = environment::finish_idle(&service).await;
+        let result = execution_target::finish_idle(&service).await;
         {
             let mut hub = root.tasks.hub.lock().unwrap();
             let lane = hub.lanes.get_mut(&task_id).ok_or_else(missing)?;
@@ -1159,7 +1161,7 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
                 // Let the normal execution path report a corrupt thread visibly.
                 && agent::thread(&l.service)
                     .map(|b| policy.admits(&b.config, &active_specs)).unwrap_or(true)
-                && !(l.record.info.resource == "shared" && capacity.active.values().any(|(_, target)| target.as_ref() == l.record.info.environment_ref.as_ref()))
+                && !(l.record.info.resource == "shared" && capacity.active.values().any(|(_, target)| target.as_ref() == l.record.info.execution_target.as_ref()))
         })
         .min_by_key(|(_, l)| l.record.queue.front().unwrap().order)
         .map(|(id, _)| id.clone());
@@ -1192,7 +1194,7 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         (
             agent::thread(&lane.service)?.config,
             (lane.record.info.resource == "shared")
-                .then(|| lane.record.info.environment_ref.clone())
+                .then(|| lane.record.info.execution_target.clone())
                 .flatten(),
         ),
     );
@@ -1206,77 +1208,79 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         },
     )))
 }
-pub(crate) fn resolve_environment(
+pub(crate) fn resolve_execution_target(
     root: &Service,
-    environment_ref: Option<pot_core::EnvironmentRef>,
+    execution_target: Option<pot_core::ExecutionTarget>,
     sandbox_id: &str,
-) -> ApiResult<pot_core::EnvironmentRef> {
-    let environment = if let Some(environment) = &environment_ref {
+) -> ApiResult<pot_core::ExecutionTarget> {
+    let execution_target = if let Some(execution_target) = &execution_target {
         if !sandbox_id.is_empty() {
             return Err(error(
                 StatusCode::BAD_REQUEST,
-                "environment_conflict",
-                "Use environment_ref or sandbox_id",
+                "execution_target_conflict",
+                "Use execution_target or sandbox_id",
             ));
         }
-        environment
+        execution_target
             .validate()
-            .map_err(|e| error(StatusCode::BAD_REQUEST, "environment", &e.to_string()))?;
-        if !environment.is_local_to(&root.runtime_id) {
-            crate::remote_environment::port(root)
-                .and_then(|port| port.validate(environment))
+            .map_err(|e| error(StatusCode::BAD_REQUEST, "execution_target", &e.to_string()))?;
+        if !execution_target.is_local_to(&root.runtime_id) {
+            crate::remote_execution::port(root)
+                .and_then(|port| port.validate(execution_target))
                 .map_err(|e| {
                     error(
                         StatusCode::CONFLICT,
-                        "environment_unavailable",
+                        "execution_target_unavailable",
                         &e.to_string(),
                     )
                 })?;
         }
-        environment.clone()
+        execution_target.clone()
     } else if sandbox_id.is_empty()
-        && root.environment_service.sandboxes.assignment("").is_err()
+        && root.execution_service.sandboxes.assignment("").is_err()
         && root
-            .environment_service
+            .execution_service
             .host_enabled
             .load(std::sync::atomic::Ordering::SeqCst)
     {
-        pot_core::EnvironmentRef::host(&root.runtime_id)
+        pot_core::ExecutionTarget::host(&root.runtime_id)
     } else {
-        pot_core::EnvironmentRef::sandbox(
+        pot_core::ExecutionTarget::sandbox(
             &root.runtime_id,
             &root
-                .environment_service
+                .execution_service
                 .sandboxes
                 .assignment(sandbox_id)
                 .map_err(internal)?,
         )
     };
-    match &environment.target {
-        pot_core::EnvironmentTarget::Host {} if environment.is_local_to(&root.runtime_id) => {
+    match &execution_target.target {
+        pot_core::ExecutionTargetKind::Host {}
+            if execution_target.is_local_to(&root.runtime_id) =>
+        {
             if !root
-                .environment_service
+                .execution_service
                 .host_enabled
                 .load(std::sync::atomic::Ordering::SeqCst)
             {
                 return Err(error(
                     StatusCode::CONFLICT,
-                    "environment_unavailable",
+                    "execution_target_unavailable",
                     "Host execution resource is disabled",
                 ));
             }
         }
-        pot_core::EnvironmentTarget::Sandbox { sandbox_id }
-            if environment.is_local_to(&root.runtime_id) =>
+        pot_core::ExecutionTargetKind::Sandbox { sandbox_id }
+            if execution_target.is_local_to(&root.runtime_id) =>
         {
-            root.environment_service
+            root.execution_service
                 .sandboxes
                 .assignment(sandbox_id)
                 .map_err(internal)?;
         }
         _ => {}
     }
-    Ok(environment)
+    Ok(execution_target)
 }
 #[cfg(test)]
 pub(crate) fn finish(root: &Service, task_id: &str, result: Result<()>) -> Result<()> {
@@ -1289,7 +1293,7 @@ async fn finish_remote(root: &Service, task_id: &str, result: Result<()>) -> Res
     };
     let service = control_service(root, task_id).map_err(|e| anyhow!(e.1.0.message))?;
     let remote = service
-        .environment_ref
+        .execution_target
         .as_ref()
         .is_some_and(|e| !e.is_local_to(&root.runtime_id));
     let structured = if scheduled && remote && result.is_ok() {
@@ -1553,7 +1557,7 @@ fn reap_work_permissions(root: &Service) {
             root.assistant_id, root.usage_scope, turn.user_message_id
         ));
     }
-    root.environment_service
+    root.execution_service
         .permissions
         .retain_work(&root.assistant_id, &active);
 }
@@ -1580,7 +1584,7 @@ pub(crate) fn start(root: Service) -> tokio::task::JoinHandle<()> {
                     }
                     let service = root.clone();
                     executor_reaper = Some(tokio::spawn(async move {
-                        if let Err(error) = environment::reap_idle(&service).await {
+                        if let Err(error) = execution_target::reap_idle(&service).await {
                             eprintln!("{error}");
                         }
                     }));
@@ -1665,8 +1669,8 @@ pub(crate) fn request_shutdown(root: &Service) {
 pub(crate) fn uses_sandbox(root: &Service, sandbox_id: &str) -> bool {
     let hub = root.tasks.hub.lock().unwrap();
     hub.lanes.values().any(|lane| {
-        lane.record.info.environment_ref.as_ref()
-            == Some(&pot_core::EnvironmentRef::sandbox(
+        lane.record.info.execution_target.as_ref()
+            == Some(&pot_core::ExecutionTarget::sandbox(
                 &root.runtime_id,
                 sandbox_id,
             ))
@@ -1683,8 +1687,8 @@ pub(crate) fn guard_sandbox_delete(
     anyhow::ensure!(
         !hub.lanes
             .values()
-            .any(|lane| lane.record.info.environment_ref.as_ref()
-                == Some(&pot_core::EnvironmentRef::sandbox(
+            .any(|lane| lane.record.info.execution_target.as_ref()
+                == Some(&pot_core::ExecutionTarget::sandbox(
                     &root.runtime_id,
                     sandbox_id
                 )))
@@ -2206,15 +2210,15 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn task_pages_match_exact_environment_before_pagination() {
+    async fn task_pages_match_exact_execution_target_before_pagination() {
         let s = fixture();
         let targets = [
-            pot_core::EnvironmentRef::host("machine-a"),
-            pot_core::EnvironmentRef::sandbox("machine-a", "build"),
-            pot_core::EnvironmentRef::sandbox("machine-b", "build"),
+            pot_core::ExecutionTarget::host("machine-a"),
+            pot_core::ExecutionTarget::sandbox("machine-a", "build"),
+            pot_core::ExecutionTarget::sandbox("machine-b", "build"),
         ];
         for n in 0..9 {
-            let task = add(&s, &format!("Environment task {n}"), "").await;
+            let task = add(&s, &format!("Execution target task {n}"), "").await;
             s.tasks
                 .hub
                 .lock()
@@ -2224,12 +2228,12 @@ pub(crate) mod tests {
                 .unwrap()
                 .record
                 .info
-                .environment_ref = Some(targets[n % 3].clone());
+                .execution_target = Some(targets[n % 3].clone());
         }
         for target in &targets {
             let query = TaskQuery {
                 scope: "all".into(),
-                environment: serde_json::to_string(target).unwrap(),
+                execution_target: serde_json::to_string(target).unwrap(),
                 limit: 2,
                 ..Default::default()
             };
@@ -2240,7 +2244,7 @@ pub(crate) mod tests {
                 first
                     .items
                     .iter()
-                    .all(|i| i.environment_ref.as_ref() == Some(target))
+                    .all(|i| i.execution_target.as_ref() == Some(target))
             );
             let last = page(
                 &s,
@@ -2251,7 +2255,7 @@ pub(crate) mod tests {
             )
             .unwrap();
             assert_eq!(last.items.len(), 1);
-            assert_eq!(last.items[0].environment_ref.as_ref(), Some(target));
+            assert_eq!(last.items[0].execution_target.as_ref(), Some(target));
             assert!(first.items.iter().all(|i| i.id != last.items[0].id));
             assert!(last.next_offset.is_none());
         }
@@ -2260,7 +2264,7 @@ pub(crate) mod tests {
                 page(
                     &s,
                     &TaskQuery {
-                        environment: invalid.into(),
+                        execution_target: invalid.into(),
                         ..Default::default()
                     }
                 )
@@ -3118,8 +3122,8 @@ pub(crate) mod tests {
         .await;
         assert!(bad.is_err());
         assert_eq!(
-            owner(&s, &task.id).unwrap().environment_ref,
-            worker.environment_ref
+            owner(&s, &task.id).unwrap().execution_target,
+            worker.execution_target
         );
         std::fs::remove_dir_all(&s.data).unwrap();
     }
@@ -3129,7 +3133,7 @@ pub(crate) mod tests {
             .join(format!("pot-tasks-{}", id()))
             .join("product");
         s.control_config = Arc::new(crate::model_config::ControlConfig::new(s.data.clone()));
-        s.environment_service.sandboxes = Arc::new(sandbox::Manager::open(&s.data).unwrap());
+        s.execution_service.sandboxes = Arc::new(sandbox::Manager::open(&s.data).unwrap());
         s.agent_service.resources = Arc::new(AgentResources::paths(&s.data));
         s.workspace = s.data.join("workspace");
         std::fs::create_dir_all(&s.workspace).unwrap();
@@ -3183,7 +3187,7 @@ pub(crate) mod tests {
         legacy["tasks"][0]
             .as_object_mut()
             .unwrap()
-            .remove("environment_ref");
+            .remove("execution_target");
         root.conversation
             .inner
             .lock()
@@ -3208,7 +3212,7 @@ pub(crate) mod tests {
             Json(CreateTask {
                 text: "original input".into(),
                 request_id: "original-request".into(),
-                environment_ref: Some(pot_core::EnvironmentRef::host(&root.runtime_id)),
+                execution_target: Some(pot_core::ExecutionTarget::host(&root.runtime_id)),
                 ..Default::default()
             }),
         )
@@ -3216,13 +3220,13 @@ pub(crate) mod tests {
         .unwrap()
         .0;
         let (_, _, request) = claim(&root).unwrap().unwrap();
-        let destination = pot_core::EnvironmentRef::host(&id());
+        let destination = pot_core::ExecutionTarget::host(&id());
         {
             let mut hub = root.tasks.hub.lock().unwrap();
             let lane = hub.lanes.get_mut(&task.id).unwrap();
-            lane.record.info.environment_ref = Some(destination.clone());
-            lane.record.create_request.environment_ref = Some(destination.clone());
-            lane.record.assignment = Some(pot_core::Assignment::on_environment(
+            lane.record.info.execution_target = Some(destination.clone());
+            lane.record.create_request.execution_target = Some(destination.clone());
+            lane.record.assignment = Some(pot_core::Assignment::on_execution_target(
                 &root.runtime_id,
                 &task.id,
                 destination.clone(),
@@ -3237,7 +3241,7 @@ pub(crate) mod tests {
         assert_eq!(lane.record.queue.len(), 1);
         assert_eq!(lane.record.queue[0].request_id, request.request_id);
         assert_eq!(lane.record.queue[0].text, request.text);
-        assert_eq!(lane.service.environment_ref, Some(destination.clone()));
+        assert_eq!(lane.service.execution_target, Some(destination.clone()));
         assert_eq!(
             lane.record.assignment.as_ref().unwrap().agent_runtime_id,
             destination.runtime_id
@@ -3248,9 +3252,9 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn host_task_binding_restores_and_conflicts_fail_before_creation() {
         let root = fixture();
-        let environment = pot_core::EnvironmentRef::host(&root.runtime_id);
+        let execution_target = pot_core::ExecutionTarget::host(&root.runtime_id);
         let request = CreateTask {
-            environment_ref: Some(environment.clone()),
+            execution_target: Some(execution_target.clone()),
             request_id: id(),
             text: "Host task".into(),
             ..Default::default()
@@ -3260,7 +3264,7 @@ pub(crate) mod tests {
             .unwrap()
             .0;
         assert!(task.sandbox_id.is_empty());
-        assert_eq!(task.environment_ref.as_ref(), Some(&environment));
+        assert_eq!(task.execution_target.as_ref(), Some(&execution_target));
         let worker = owner(&root, &task.id).unwrap();
         assert!(worker.sandbox_id.is_none());
         assert_eq!(worker.workspace, worker.data.join("agent-workspace"));
@@ -3279,8 +3283,8 @@ pub(crate) mod tests {
         let _ = crate::skills::resources(&worker).unwrap();
         restore(&root).unwrap();
         assert_eq!(
-            owner(&root, &task.id).unwrap().environment_ref,
-            Some(environment)
+            owner(&root, &task.id).unwrap().execution_target,
+            Some(execution_target)
         );
         let mut conflict = request.clone();
         conflict.request_id = id();
@@ -3292,7 +3296,7 @@ pub(crate) mod tests {
         );
         let mut remote = request;
         remote.request_id = id();
-        remote.environment_ref = Some(pot_core::EnvironmentRef::host("remote"));
+        remote.execution_target = Some(pot_core::ExecutionTarget::host("remote"));
         assert!(
             create(State(root.clone()), headers(), Json(remote))
                 .await
@@ -3301,14 +3305,14 @@ pub(crate) mod tests {
         assert_eq!(root.tasks.hub.lock().unwrap().lanes.len(), 1);
     }
     #[tokio::test]
-    async fn shared_capacity_is_scoped_to_full_environment_target() {
+    async fn shared_capacity_is_scoped_to_full_execution_target_target() {
         let root = fixture();
         let sandbox = add(&root, "Sandbox shared work", "shared").await;
         let host = create(
             State(root.clone()),
             headers(),
             Json(CreateTask {
-                environment_ref: Some(pot_core::EnvironmentRef::host(&root.runtime_id)),
+                execution_target: Some(pot_core::ExecutionTarget::host(&root.runtime_id)),
                 request_id: id(),
                 text: "Host shared work".into(),
                 resource: "shared".into(),

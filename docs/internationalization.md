@@ -32,7 +32,7 @@ Backend state values, request payloads, and stored transcripts remain locale ind
 
 Task-report display translates the generated title/status wrapper only, preserving the user title and model body. Both existing Chinese task-ID markers and English markers are recognized. Activity/allowance checks continue using the backend's canonical state, not translated labels. User-supplied names, saved messages, model responses and tool outputs are not rewritten.
 
-The Pot desktop welcome page reads the current viewer language from the broker's `/api/locale`. This public GET exposes only a language code and permits the loopback welcome-page origin. Updating language requires the viewer token and the existing same-origin policy. It does not control the environment or change Linux/Chromium/third-party application languages. The native viewer sends the app preference after loading and on every language change; stopped environments receive it when their viewer loads.
+The Pot desktop welcome page reads the current viewer language from the broker's `/api/locale`. This public GET exposes only a language code and permits the loopback welcome-page origin. Updating language requires the viewer token and the existing same-origin policy. It does not control the execution target or change Linux/Chromium/third-party application languages. The native viewer sends the app preference after loading and on every language change; stopped execution targets receive it when their viewer loads.
 
 ## Verification
 

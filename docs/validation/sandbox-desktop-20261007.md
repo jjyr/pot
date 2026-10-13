@@ -2,7 +2,7 @@
 
 ## Implementation
 
-`pot-sandbox` owns optional display capabilities, one-hour opaque tickets, boot binding, exclusive control, release acknowledgement and the bounded RFB client gate. Provider crates return private byte streams. Runtime authenticates owner requests; Server mounts the scoped page/status/control/WebSocket routes. Capabilities explicitly declare the currently supported `rfb-3.8` protocol. Native App opens that gateway after an explicit desktop request and closes tickets when switching environments. The pinned noVNC 1.7.0 resource is unpacked and bundled for Host serving. Guest URLs/tokens are absent from the page and public inventory.
+`pot-sandbox` owns optional display capabilities, one-hour opaque tickets, boot binding, exclusive control, release acknowledgement and the bounded RFB client gate. Provider crates return private byte streams. Runtime authenticates owner requests; Server mounts the scoped page/status/control/WebSocket routes. Capabilities explicitly declare the currently supported `rfb-3.8` protocol. Native App opens that gateway after an explicit desktop request and closes tickets when switching execution targets. The pinned noVNC 1.7.0 resource is unpacked and bundled for Host serving. Guest URLs/tokens are absent from the page and public inventory.
 
 Linux retains its broker/RFB gate, browser launch, metrics and clipboard. macOS provides an authenticated pinned-TLS HTTP upgrade to an explicitly configured Guest-loopback RFB service; it does not install a VNC server or qualify Apple's Screen Sharing authentication. Closing a display does not stop a VM or command task.
 

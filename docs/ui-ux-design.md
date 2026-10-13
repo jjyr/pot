@@ -59,16 +59,16 @@ show an inline recovery action.
 - **Schedules**: reuse Tasks / Schedules navigation, Kit Button/Form/Field/Input/cards. Fixed bottom pagination matches tasks: total/page left, previous/next right. Details show next run/state/paginated history linking to tasks. Main Agent creates schedules; no manual creation. Existing edit forms scroll with fixed save/cancel and include zone/frequency/notification/missed policy. Pause/delete preserves current runs; second click confirms deletion. See [Scheduled tasks](scheduled-tasks.md).
 - **Usage**: overall statistics/charts only, last 7/30/90 days/year. No granularity selector; year automatically aggregates 7-day groups. Task/main usage belongs in each conversation and survives archive. Single-page details: totals, horizontal model stacks (conversation/compaction, real tokens/proportions/hover), tool rankings (estimated tokens/calls, shared scale, top 5 expandable). Hide zero compaction/empty tools; no tabs/per-request lists/Skills stats. Never add tool output to model consumption. Hide allowance cards without periodic limits. See [Token usage](token-usage.md).
 - **Settings**: General starts with Language (English / 简体中文), above Appearance and keyboard shortcuts. First launch matches macOS preferred languages, falling back to English; the resolved choice is saved. Changes apply immediately without restarting or resetting drafts. See [Internationalization](internationalization.md). General / AI Configuration / Task Configuration. AI Configuration contains one unified Agent list and the main Chat Agent/model selection; no API vs. CLI sections. The provider chooser uses compact branded controls; connection sheets use a 12 px radius, responsive shared labels, compact model/authorization actions, and a 200 ms fade respecting Reduce Motion. Changes remain drafts until explicit Save. Chat shows informational Agent/model text without switching dropdowns. Task Configuration keeps background defaults, concurrency and allowances.
-- **Machines**: lightweight machine cards group Host and Sandbox environments. Click an environment to expand its status, View Tasks, and an available desktop entry. View Tasks filters by the exact Runtime and target, with a clear-filter action. Desktop is shown only when the client has an implemented transport. Connect machine remains available. Technical management, plugin/session/work-directory inspection and file transfers belong in ordinary Chat; no management shortcut, artifact list or download buttons. Resources are created through the API. Selecting an environment never changes task routing. App local/remote mode selects the conversation owner; it does not follow environment selection.
+- **Machines**: lightweight machine cards group Host and Sandbox rows. Click a Host or Sandbox to expand its status, View Tasks, and an available desktop entry. View Tasks filters by the exact Runtime and target, with a clear-filter action. Desktop is shown only when the client has an implemented transport. Connect machine remains available. Technical management, plugin/session/work-directory inspection and file transfers belong in ordinary Chat; no management shortcut, artifact list or download buttons. Resources are created through the API. Selecting a Host or Sandbox never changes task routing. App local/remote mode selects the conversation owner; it does not follow Host/Sandbox selection.
 - **Chat file downloads**: completion summaries report the task result; file names/download links are optional and appear only when the task has files to deliver. Clicking downloads the task file from its execution machine through Control to the current client. App asks for a save location; Web uses the browser's normal download flow. Control is a relay, not the save destination. The link binds a specific file and its task/assistant; it cannot expose arbitrary Host paths. Offline machines or missing files produce an explicit error. Machines and Task pages have no artifact lists or download buttons. Links use `pot-file://TASK_UUID/encoded/relative/path` in ordinary Markdown; existing tools and their arguments are unchanged. Downloads are limited to regular files within the task workspace (1 GiB maximum); symlinks, traversal and detected changes are rejected. App writes a private temporary file and replaces the chosen destination only after completion.
-- **Remote Task execution**: start a Task Agent on the same machine as its Host/Sandbox; Task details show necessary status and execution machine/environment. Reuse existing guidance, cancel and approval interactions. No Runner management page, Agent migration controls, separate Agent placement selector or global plugin/skill management panel. Global resources are managed by Control through API/Chat; new model-visible tool contracts require explicit agreement.
-- **Tray**: one pot-shaped status icon; click opens window, no menu. Unread count beside icon. Window close keeps background work; Quit stops the environment normally.
+- **Remote Task execution**: start a Task Agent on the same machine as its Host/Sandbox; Task details show status, machine and Host/Sandbox location. Reuse existing guidance, cancel and approval interactions. No Runner management page, Agent migration controls, separate Agent placement selector or global plugin/skill management panel. Global resources are managed by Control through API/Chat; new model-visible tool contracts require explicit agreement.
+- **Tray**: one pot-shaped status icon; click opens window, no menu. Unread count beside icon. Window close keeps background work; Quit stops the local Runtime normally.
 
 ## Implementation boundaries
 
 - Rust / Kit: chat, tasks, settings, Sandbox title/toolbar, unready states.
 - Swift: window/sidebar/tray/native chat input/configuration/lifecycle. `SettingsPanel.swift` is configuration service only, not settings rendering. Restart confirmation uses native sheets; Desktop viewer menus remain confined to the viewer.
-- WKWebView / noVNC: desktop canvas/environment/clipboard/scaling. Standalone viewer retains its web More menu; shared web implementations use neutral colors, 8 px radii, 13-14 px text, synchronized themes. Hide web title bar in App to avoid duplicate toolbars.
+- WKWebView / noVNC: desktop canvas/Sandbox details/clipboard/scaling. Standalone viewer retains its web More menu; shared web implementations use neutral colors, 8 px radii, 13-14 px text, synchronized themes. Hide web title bar in App to avoid duplicate toolbars.
 
 Rust reads nonsensitive state through `pot_bridge_ui` and sends allowlisted operations via `pot_bridge_command`. Saved keys never return to UI; masked Input accepts new keys, blank preserves existing. Sync forms only on configuration revision changes; background refresh must preserve unsaved input. Validate ranges/active tasks/connection before save; after confirmation, stop normally, write atomically, restart.
 
@@ -115,9 +115,9 @@ Deny, in that order; saved grants can be revoked. See [Agent permissions](permis
 
 ## Machines and desktop
 
-Machines is a top-level destination combining machine and environment status.
+Machines is a top-level destination combining machine and Host/Sandbox status.
 Cards show name, connectivity and running Tasks. Expanding shows Host/Sandbox
-rows; selecting an environment shows the Tasks bound to that exact target.
+rows; selecting a Host or Sandbox shows the Tasks bound to that exact target.
 Offline data is marked cached and new operations are disabled. Local supported
 Sandbox desktops reuse the existing viewer entry. Remote desktop transport is
 deferred until its connection design is agreed; no remote desktop entry is added
@@ -126,7 +126,7 @@ in the current #39 scope. Viewing never changes a task target or starts a stoppe
 Technical management stays in ordinary Chat/API. There are no resource creation,
 plugin configuration, session, artifact/download or “ask assistant to manage”
 controls on Machines. Resource creation UI is deferred. Task details keep necessary
-machine/environment status and existing guidance/cancel/approval interactions.
+machine and Host/Sandbox status and existing guidance/cancel/approval interactions.
 File links appear in Chat only for tasks with deliverables.
 
 ## AI Configuration (#7)
@@ -149,14 +149,14 @@ Main Save queues a Thread configuration update. Pending operations disable dupli
 
 Task Configuration preserves existing explicit worker defaults/routing and allows choosing Follow Chat. Advanced profile editing/copy, allowlists, profile/provider caps and allowances remain available. Task-specific Change Agent targets only that task and reuses AI connection management; completion returns to the task. Credential-independent product limits use private `execution-limits.json`, without implicitly selecting Pot or requiring a DeepSeek key.
 
-Unconfigured Chat lets the user keep browsing without configuring an Agent. There is no environment/tool installation wizard.
+Unconfigured Chat lets the user keep browsing without configuring an Agent. There is no Sandbox/tool installation wizard.
 
 Native assistant Chat adds a compact card beneath a settled, unsuccessful task
-report when its diagnostic identifies a missing desktop environment. It says
-“The task Agent failed because no desktop environment was found” with two actions:
-Create desktop Sandbox and Connect desktop environment. These reuse the existing
+report when its diagnostic identifies a missing usable desktop. It says
+“The task Agent failed because no usable desktop was found” with two actions:
+Create desktop Sandbox and Connect desktop machine. These reuse the existing
 Sandbox creation sheet and Machines connection form. Creation from this card does
-not select an environment, start a desktop, send a message, retry a task or show an
+not select an execution target, start a desktop, send a message, retry a task or show an
 extra success confirmation. Users ask the assistant to try again themselves.
 Creation errors and required resource-download authorization remain visible.
 Detection uses the product's unsuccessful report wrapper and recognized English

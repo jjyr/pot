@@ -150,7 +150,7 @@ impl Resources {
             control_allowed,
         )?;
         if let Some(state) = backend.optional_state() {
-            state.set_remote_environment(control.clone());
+            state.set_remote_execution(control.clone());
         }
         let this = Arc::new(Self {
             inner: tokio::sync::Mutex::new(Inner { backend, book }),
@@ -194,9 +194,7 @@ impl Resources {
                 backend
                     .enable_assistant_resources(self.config.clone())
                     .await?;
-                backend
-                    .state()?
-                    .set_remote_environment(self.control.clone());
+                backend.state()?.set_remote_execution(self.control.clone());
                 let hub = backend.assistants().unwrap();
                 if first {
                     if let Some(result) = &entry.result {
@@ -228,7 +226,7 @@ impl Resources {
                     providers.iter().any(|p| p.descriptor().id == *provider),
                     "Sandbox Provider unavailable"
                 );
-                let manager = backend.register_environment_providers(providers)?;
+                let manager = backend.register_sandbox_providers(providers)?;
                 // Ready creation receipts must not undo later rename/config/delete operations.
                 // The current Sandbox inventory is authoritative after creation completes.
                 if let Some(result) = &entry.result {
@@ -292,7 +290,7 @@ impl Resources {
             .lock()
             .await
             .backend
-            .register_environment_providers(vec![provider])
+            .register_sandbox_providers(vec![provider])
             .unwrap();
     }
     pub(super) async fn assistant_hub(&self) -> Option<Arc<pot_control::control::assistants::Hub>> {
@@ -322,12 +320,12 @@ async fn machines(State(s): State<Arc<Resources>>, headers: HeaderMap) -> Respon
     let runtime = s.inner.lock().await.backend.host().describe();
     let routes = s.routes.read().unwrap().clone();
     let request = axum::http::Request::builder()
-        .uri("/api/v1/environments")
+        .uri("/api/v1/execution_targets")
         .header("authorization", format!("Bearer {}", s.token))
         .body(axum::body::Body::empty())
         .unwrap();
     let response = routes.oneshot(request).await.unwrap();
-    let environments = if response.status() == StatusCode::NOT_FOUND {
+    let execution_targets = if response.status() == StatusCode::NOT_FOUND {
         json!({"items":[]})
     } else if response.status().is_success() {
         let bytes = match axum::body::to_bytes(response.into_body(), 1024 * 1024).await {
@@ -342,18 +340,18 @@ async fn machines(State(s): State<Arc<Resources>>, headers: HeaderMap) -> Respon
         return response;
     };
     // The tools inventory includes all connected targets. A machine card must
-    // contain only environments owned by that exact Runtime.
-    let local_environments = environments["items"]
+    // contain only execution targets owned by that exact Runtime.
+    let local_execution_targets = execution_targets["items"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|item| item["environment_ref"]["runtime_id"] == runtime["runtime_id"])
+        .filter(|item| item["execution_target"]["runtime_id"] == runtime["runtime_id"])
         .cloned()
         .collect::<Vec<_>>();
     let mut machines = vec![json!({
         "runtime_id":runtime["runtime_id"],"local":true,"connection":"online",
         "tags":s.control.local_tags(),"capabilities":runtime["capabilities"],"boot_id":runtime["boot_id"],
-        "environments":local_environments,"default":environments["selected"]
+        "execution_targets":local_execution_targets,"default":execution_targets["selected"]
     })];
     machines.extend(s.control.machines().await);
     Json(json!({"schema_version":1,"machines":machines,"control_authority":s.control.metadata()}))
@@ -496,7 +494,7 @@ mod tests {
         .unwrap();
         let identity = directory["machines"][0]["runtime_id"].clone();
         assert_eq!(directory["machines"].as_array().unwrap().len(), 1);
-        assert_eq!(directory["machines"][0]["environments"], json!([]));
+        assert_eq!(directory["machines"][0]["execution_targets"], json!([]));
         assert!(!config.data.join("pot-v2.sqlite").exists());
         assert!(
             create(
@@ -520,14 +518,14 @@ mod tests {
         .unwrap();
         assert_eq!(directory["machines"][0]["runtime_id"], identity);
         assert_eq!(
-            directory["machines"][0]["environments"][0]["environment_ref"],
+            directory["machines"][0]["execution_targets"][0]["execution_target"],
             json!({"runtime_id":identity,"target":{"kind":"host"}})
         );
         assert!(!config.data.join("pot-v2.sqlite").exists());
         let local_id = identity.clone();
-        *resources.routes.write().unwrap() = Router::new().route("/api/v1/environments", axum::routing::get(move || {
+        *resources.routes.write().unwrap() = Router::new().route("/api/v1/execution_targets", axum::routing::get(move || {
             let id = local_id.clone();
-            async move { Json(json!({"items":[{"environment_ref":{"runtime_id":id,"target":{"kind":"host"}}},{"environment_ref":{"runtime_id":"other-runtime","target":{"kind":"host"}}}]})) }
+            async move { Json(json!({"items":[{"execution_target":{"runtime_id":id,"target":{"kind":"host"}}},{"execution_target":{"runtime_id":"other-runtime","target":{"kind":"host"}}}]})) }
         }));
         let response = machines(State(resources.clone()), headers.clone()).await;
         let directory: Value = serde_json::from_slice(
@@ -537,14 +535,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            directory["machines"][0]["environments"]
+            directory["machines"][0]["execution_targets"]
                 .as_array()
                 .unwrap()
                 .len(),
             1
         );
         assert_eq!(
-            directory["machines"][0]["environments"][0]["environment_ref"]["runtime_id"],
+            directory["machines"][0]["execution_targets"][0]["execution_target"]["runtime_id"],
             identity
         );
         // Discovery does not grant resource mutation to requests with an Origin.

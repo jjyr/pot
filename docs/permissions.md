@@ -39,7 +39,7 @@ Prepare resources -> normalize guest arguments -> execute
 Shell input, patches and plugins all check current access. Preparation cannot boot
 or contact an execution node before authorization. Tasks are authorized before
 launch, including remote Agent startup. Task targets stay fixed; a failed Sandbox
-never falls back to Host. Internally `EnvironmentRef` identifies an execution
+never falls back to Host. Internally `ExecutionTarget` identifies an execution
 target; it is not an independently granted product resource.
 
 ## Owner decisions and work lifetime
@@ -99,7 +99,7 @@ are independent of authorization.
 
 Control stores version 2 `permissions.json` in its data directory, independently
 of the shared Agent home. No guest permissions file,
-per-environment grant store, path grant, exact-operation grant or migration exists.
+per-execution target grant store, path grant, exact-operation grant or migration exists.
 Older permission formats and Task jobs without a work scope are rejected; there
 is no import or migration of old authorization/Task state. Rebuild/reprovision guest brokers for the
 new `/prepare` normalization endpoint; it cannot read or write authorization.

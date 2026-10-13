@@ -1,7 +1,7 @@
 //! A standalone Control owns members; execution nodes connect outward to one Control.
 use anyhow::{Result, ensure};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
-use pot_core::{EnvironmentRef, EnvironmentTarget as Target};
+use pot_core::{ExecutionTarget, ExecutionTargetKind as Target};
 use ring::{
     rand::{SecureRandom, SystemRandom},
     signature::{self, KeyPair},
@@ -1307,12 +1307,12 @@ async fn poll(
     }
 }
 async fn require_target(host: &pot_control::host::Host, target: &Target) -> Result<()> {
-    let inventory = host.environment_inventory().await;
+    let inventory = host.execution_target_inventory().await;
     ensure!(
         inventory["items"].as_array().is_some_and(|items| items
             .iter()
-            .any(|item| item["environment_ref"]["target"] == json!(target))),
-        "Environment resource is unavailable"
+            .any(|item| item["execution_target"]["target"] == json!(target))),
+        "Execution target resource is unavailable"
     );
     Ok(())
 }
@@ -1431,7 +1431,7 @@ impl Authority {
                 host.prepare_controlled(
                     pot_control::host::ControlOperation {
                         resources_revision: lease.resources_revision.clone(),
-                        target: EnvironmentRef {
+                        target: ExecutionTarget {
                             runtime_id: self.identity.runtime_id.clone(),
                             target: lease.target.clone(),
                         },
@@ -1459,7 +1459,7 @@ impl Authority {
                     host.controlled_file(&target, &workspace, query).await?,
                 )?)
             }
-            Rpc::Inventory => Ok(host.environment_inventory().await),
+            Rpc::Inventory => Ok(host.execution_target_inventory().await),
             Rpc::Acquire {
                 owner,
                 run_id,
@@ -1572,7 +1572,7 @@ impl Authority {
                                 workspace_scope: workspace,
                                 run_id: lease.run_id,
                                 generation: lease.generation,
-                                target: EnvironmentRef {
+                                target: ExecutionTarget {
                                     runtime_id: authority.identity.runtime_id.clone(),
                                     target: lease.target,
                                 },
@@ -1731,7 +1731,7 @@ impl Authority {
             let current=book.members.get(&control.identity.runtime_id).unwrap_or(&control);
             json!({"runtime_id":current.identity.runtime_id,"identity":current.identity,"local":false,
                 "connection":if online && current.enabled{"online"}else{"offline"},"enabled":current.enabled,"last_seen_ms":current.last_seen_ms,
-                "tags":current.tags,"environments":current.inventory["items"],"default":null})
+                "tags":current.tags,"execution_targets":current.inventory["items"],"default":null})
         })).await
     }
 }
@@ -1986,7 +1986,7 @@ mod tests {
     #[tokio::test]
     async fn outward_global_resources_are_control_selected_and_lease_scoped() {
         use base64::Engine;
-        use pot_control::remote_environment::{RemoteBinding, RemoteEnvironment};
+        use pot_control::remote_execution::{RemoteBinding, RemoteExecution};
         use pot_runner::resources::{GlobalResources, ResourceFile};
         let control = resources().await;
         let node = resources().await;
@@ -2005,7 +2005,7 @@ mod tests {
             owner: uuid::Uuid::new_v4().to_string(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
-            environment: EnvironmentRef::host(&node.control.identity.runtime_id),
+            execution_target: ExecutionTarget::host(&node.control.identity.runtime_id),
         };
         let context = control.control.open(binding.clone()).await.unwrap();
         let workspace = PathBuf::from(context["workspace"].as_str().unwrap());
@@ -2051,7 +2051,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        RemoteEnvironment::cancel(&*control.control, binding.clone())
+        RemoteExecution::cancel(&*control.control, binding.clone())
             .await
             .unwrap();
         assert!(
@@ -2068,7 +2068,7 @@ mod tests {
     }
     #[tokio::test]
     async fn outward_plugins_use_control_bundle_and_scoped_sessions() {
-        use pot_control::remote_environment::{RemoteBinding, RemoteEnvironment};
+        use pot_control::remote_execution::{RemoteBinding, RemoteExecution};
         use pot_runner::resources::GlobalResources;
         let control = resources().await;
         let node = resources().await;
@@ -2087,7 +2087,7 @@ mod tests {
             owner: uuid::Uuid::new_v4().to_string(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
-            environment: EnvironmentRef::host(&node.control.identity.runtime_id),
+            execution_target: ExecutionTarget::host(&node.control.identity.runtime_id),
         };
         let context = control.control.open(binding.clone()).await.unwrap();
         let mut bundle = pot_core::plugins::PluginBundle::builtin("computer-use").unwrap();
@@ -2237,7 +2237,7 @@ mod tests {
             .install_resources(binding.clone(), globals.clone())
             .await
             .unwrap();
-        RemoteEnvironment::cancel(&*control.control, other.clone())
+        RemoteExecution::cancel(&*control.control, other.clone())
             .await
             .unwrap();
         other.owner = uuid::Uuid::new_v4().to_string();
@@ -2259,7 +2259,7 @@ mod tests {
                 .to_string()
                 .contains("Unknown tool")
         );
-        RemoteEnvironment::cancel(&*control.control, other.clone())
+        RemoteExecution::cancel(&*control.control, other.clone())
             .await
             .unwrap();
         other.owner = uuid::Uuid::new_v4().to_string();
@@ -2286,7 +2286,7 @@ mod tests {
                 .to_string()
                 .contains("Unsupported Host plugin dependency")
         );
-        RemoteEnvironment::cancel(&*control.control, other.clone())
+        RemoteExecution::cancel(&*control.control, other.clone())
             .await
             .unwrap();
         other.owner = uuid::Uuid::new_v4().to_string();
@@ -2310,7 +2310,7 @@ mod tests {
                 .to_string()
                 .contains("Sandbox execution only")
         );
-        RemoteEnvironment::cancel(&*control.control, binding.clone())
+        RemoteExecution::cancel(&*control.control, binding.clone())
             .await
             .unwrap();
         assert!(
@@ -2325,7 +2325,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        RemoteEnvironment::cancel(&*control.control, other)
+        RemoteExecution::cancel(&*control.control, other)
             .await
             .unwrap();
         for n in [control, node] {
@@ -2335,7 +2335,7 @@ mod tests {
     }
     #[tokio::test]
     async fn outward_file_download_survives_finished_leases_and_is_scoped() {
-        use pot_control::remote_environment::RemoteEnvironment;
+        use pot_control::remote_execution::RemoteExecution;
         let control = resources().await;
         let node = resources().await;
         native(
@@ -2351,7 +2351,7 @@ mod tests {
             .unwrap();
         let owner = uuid::Uuid::new_v4().to_string();
         let target = Target::Host {};
-        let environment = EnvironmentRef {
+        let execution_target = ExecutionTarget {
             runtime_id: node.control.identity.runtime_id.clone(),
             target: target.clone(),
         };
@@ -2372,7 +2372,7 @@ mod tests {
         };
         let first = control
             .control
-            .read_file(environment.clone(), owner.clone(), query.clone())
+            .read_file(execution_target.clone(), owner.clone(), query.clone())
             .await
             .unwrap();
         let mut actual = base64::engine::general_purpose::STANDARD
@@ -2382,7 +2382,7 @@ mod tests {
         query.revision = first.revision;
         let last = control
             .control
-            .read_file(environment.clone(), owner.clone(), query.clone())
+            .read_file(execution_target.clone(), owner.clone(), query.clone())
             .await
             .unwrap();
         actual.extend(
@@ -2396,7 +2396,7 @@ mod tests {
             control
                 .control
                 .read_file(
-                    environment.clone(),
+                    execution_target.clone(),
                     uuid::Uuid::new_v4().to_string(),
                     query.clone()
                 )
@@ -2407,7 +2407,7 @@ mod tests {
         assert!(
             control
                 .control
-                .read_file(environment.clone(), owner.clone(), query.clone())
+                .read_file(execution_target.clone(), owner.clone(), query.clone())
                 .await
                 .is_err()
         );
@@ -2416,18 +2416,18 @@ mod tests {
         assert!(
             control
                 .control
-                .read_file(environment.clone(), owner.clone(), query.clone())
+                .read_file(execution_target.clone(), owner.clone(), query.clone())
                 .await
                 .is_err()
         );
         control
             .control
-            .remove_member(&environment.runtime_id)
+            .remove_member(&execution_target.runtime_id)
             .unwrap();
         assert!(
             control
                 .control
-                .read_file(environment, owner, query)
+                .read_file(execution_target, owner, query)
                 .await
                 .is_err()
         );

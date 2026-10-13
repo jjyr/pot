@@ -158,18 +158,18 @@ impl Shell {
                         this.machine_selection = event.value.clone();
                         ui::command(serde_json::json!({"action":"machines-detail","value":true}));
                     }
-                    "environment-tasks" => {
-                        this.client.filter_environment(event.value.to_string());
+                    "execution-target-tasks" => {
+                        this.client.filter_execution_target(event.value.to_string());
                         this.show_tasks = true;
                         ui::command(serde_json::json!({"action":"page","value":3}));
                         this.client.refresh();
                     }
-                    "environment-filter-clear" => {
-                        this.client.filter_environment(String::new());
+                    "execution-target-filter-clear" => {
+                        this.client.filter_execution_target(String::new());
                         this.client.refresh();
                     }
-                    "environment-desktop" => {
-                        ui::command(serde_json::json!({"action":"environment-desktop","id":event.value["target"]["sandbox_id"]}));
+                    "execution-target-desktop" => {
+                        ui::command(serde_json::json!({"action":"execution-target-desktop","id":event.value["target"]["sandbox_id"]}));
                     }
                     "sandbox-select" => {
                         ui::command(serde_json::json!({"action":"sandbox-view","id":event.value}))

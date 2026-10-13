@@ -1,6 +1,6 @@
 //! Independent Sandbox management authority and durable, non-replayed effects.
 use super::*;
-use pot_control::remote_environment::RemoteBinding;
+use pot_control::remote_execution::RemoteBinding;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Intent {
@@ -37,7 +37,7 @@ impl Authority {
         for (operation, intent) in intents {
             let receipt = self
                 .call(
-                    &intent.binding.environment.runtime_id,
+                    &intent.binding.execution_target.runtime_id,
                     Rpc::InspectManagement {
                         operation_id: operation.clone(),
                     },
@@ -54,16 +54,19 @@ impl Authority {
         }
         Ok(())
     }
-    pub(super) fn validate_management_target(&self, environment: &EnvironmentRef) -> Result<()> {
-        environment.validate()?;
+    pub(super) fn validate_management_target(
+        &self,
+        execution_target: &ExecutionTarget,
+    ) -> Result<()> {
+        execution_target.validate()?;
         ensure!(
-            matches!(environment.target, Target::Sandbox { .. }),
+            matches!(execution_target.target, Target::Sandbox { .. }),
             "Host cannot be managed as a Sandbox"
         );
         let book = self.book.lock().unwrap();
         let control = book
             .members
-            .get(&environment.runtime_id)
+            .get(&execution_target.runtime_id)
             .filter(|p| p.enabled)
             .ok_or_else(|| anyhow::anyhow!("Remote machine is not connected"))?;
         ensure!(
@@ -71,7 +74,7 @@ impl Authority {
                 .as_array()
                 .is_some_and(|items| items
                     .iter()
-                    .any(|item| item["environment_ref"] == json!(environment))),
+                    .any(|item| item["execution_target"] == json!(execution_target))),
             "Remote Sandbox is not in the Control machine inventory"
         );
         Ok(())
@@ -83,7 +86,7 @@ impl Authority {
         );
         Ok(self
             .data
-            .join("environment-management")
+            .join("sandbox-management")
             .join(digest(&(control, operation))?))
     }
     pub(super) fn inspect_management(
@@ -105,7 +108,7 @@ impl Authority {
     }
     /// Called under the acceptance lock, before acquiring any execution lease.
     pub(super) fn management_busy(&self, target: &Target) -> Result<()> {
-        let dir = self.data.join("environment-management");
+        let dir = self.data.join("sandbox-management");
         if dir.exists() {
             for entry in std::fs::read_dir(dir)? {
                 let receipt: Receipt = serde_json::from_slice(&std::fs::read({
@@ -167,7 +170,7 @@ impl Authority {
         let Target::Sandbox { sandbox_id } = &target else {
             anyhow::bail!("Host cannot be managed as a Sandbox")
         };
-        EnvironmentRef::sandbox(&self.identity.runtime_id, sandbox_id).validate()?;
+        ExecutionTarget::sandbox(&self.identity.runtime_id, sandbox_id).validate()?;
         ensure!(
             args["sandbox_id"] == *sandbox_id,
             "Management target mismatch"
@@ -281,7 +284,7 @@ impl Authority {
             }
         } else {
             self.reconcile_management(&binding.owner).await?;
-            self.validate_management_target(&binding.environment)?;
+            self.validate_management_target(&binding.execution_target)?;
             ensure!(
                 !call.is_empty() && call.len() <= 256,
                 "Invalid management call identity"
@@ -295,7 +298,7 @@ impl Authority {
                     .client_management
                     .values()
                     .any(|i| i.binding.owner == binding.owner
-                        && i.binding.environment == binding.environment
+                        && i.binding.execution_target == binding.execution_target
                         && i.result.is_none()),
                 "Previous management operation needs reconciliation"
             );
@@ -316,11 +319,11 @@ impl Authority {
         let mut receipt = if previous.is_none() {
             match self
                 .call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::ManageSandbox {
                         operation_id: operation.clone(),
                         accept_before_ms,
-                        target: binding.environment.target.clone(),
+                        target: binding.execution_target.target.clone(),
                         args,
                     },
                 )
@@ -354,7 +357,7 @@ impl Authority {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             receipt = self
                 .call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::InspectManagement {
                         operation_id: operation.clone(),
                     },
@@ -369,7 +372,7 @@ impl Authority {
 mod tests {
     use super::super::tests::{native, resources};
     use super::*;
-    use pot_control::remote_environment::RemoteEnvironment;
+    use pot_control::remote_execution::RemoteExecution;
     #[test]
     fn absence_does_not_close_an_inflight_acceptance_window() {
         let receipt = json!({"state":"not_accepted"});
@@ -500,28 +503,29 @@ mod tests {
         let response = native(&target, json!({"request_id":"sandbox","resource":{"kind":"sandbox","sandbox_id":"managed","name":"Managed","provider": if cfg!(target_os="linux") { "linux.podman" } else { "macos.apple-containerization" }}})).await;
         assert!(response.status().is_success(), "{}", response.status());
         super::super::tests::join_nodes(&caller, &target).await;
-        let environment = EnvironmentRef::sandbox(&target.control.identity.runtime_id, "managed");
+        let execution_target =
+            ExecutionTarget::sandbox(&target.control.identity.runtime_id, "managed");
         let binding = RemoteBinding {
             owner: "assistant".into(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
-            environment: environment.clone(),
+            execution_target: execution_target.clone(),
         };
-        let args = json!({"action":"update","runtime_id":environment.runtime_id,"sandbox_id":"managed","name":"Renamed","config":{"cpus":2,"memory_gib":2,"disk_gib":8}});
+        let args = json!({"action":"update","runtime_id":execution_target.runtime_id,"sandbox_id":"managed","name":"Renamed","config":{"cpus":2,"memory_gib":2,"disk_gib":8}});
         caller
             .control
-            .call(&environment.runtime_id, Rpc::Inventory)
+            .call(&execution_target.runtime_id, Rpc::Inventory)
             .await
             .unwrap();
         let lease = caller
             .control
             .call(
-                &environment.runtime_id,
+                &execution_target.runtime_id,
                 Rpc::Acquire {
                     owner: "another-owner".into(),
                     run_id: uuid::Uuid::new_v4().to_string(),
                     generation: 1,
-                    target: environment.target.clone(),
+                    target: execution_target.target.clone(),
                 },
             )
             .await
@@ -543,7 +547,7 @@ mod tests {
         caller
             .control
             .call(
-                &environment.runtime_id,
+                &execution_target.runtime_id,
                 Rpc::Cancel {
                     lease_id: lease["id"].as_str().unwrap().into(),
                 },
@@ -563,7 +567,7 @@ mod tests {
         assert_eq!(result["sandbox_id"], "managed");
         let inventory = caller
             .control
-            .call(&environment.runtime_id, Rpc::Inventory)
+            .call(&execution_target.runtime_id, Rpc::Inventory)
             .await
             .unwrap();
         assert!(inventory.to_string().contains("Renamed"));
@@ -601,11 +605,11 @@ mod tests {
                 caller
                     .control
                     .call(
-                        &environment.runtime_id,
+                        &execution_target.runtime_id,
                         Rpc::ManageSandbox {
                             operation_id: operation.clone(),
                             accept_before_ms: now() + LEASE_MS,
-                            target: environment.target.clone(),
+                            target: execution_target.target.clone(),
                             args: json!({"action":action,"sandbox_id":"managed"})
                         }
                     )
@@ -616,7 +620,7 @@ mod tests {
                 caller
                     .control
                     .call(
-                        &environment.runtime_id,
+                        &execution_target.runtime_id,
                         Rpc::InspectManagement {
                             operation_id: operation
                         }
@@ -669,10 +673,10 @@ mod tests {
         );
         caller
             .control
-            .call(&environment.runtime_id, Rpc::Inventory)
+            .call(&execution_target.runtime_id, Rpc::Inventory)
             .await
             .unwrap();
-        let deletion = restored.manage(binding.clone(), "delete".into(), json!({"action":"delete","sandbox_id":"managed","runtime_id":environment.runtime_id}), Arc::new(||false)).await.unwrap();
+        let deletion = restored.manage(binding.clone(), "delete".into(), json!({"action":"delete","sandbox_id":"managed","runtime_id":execution_target.runtime_id}), Arc::new(||false)).await.unwrap();
         assert_eq!(deletion["sandbox_id"], "managed");
         let response = native(&target, json!({"request_id":"reuse-retired","resource":{"kind":"sandbox","sandbox_id":"managed","name":"Replacement","provider": if cfg!(target_os="linux") { "linux.podman" } else { "macos.apple-containerization" }}})).await;
         assert!(!response.status().is_success());

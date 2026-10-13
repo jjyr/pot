@@ -1120,7 +1120,7 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
         let path = directory.canonicalize().unwrap().join("file.txt");
         let (mut s, mut rx, server, captured) = fixture("openai_chat", vec![json!({"id":"host","name":"exec_command","arguments":{"cmd":"printf owner-approved > file.txt","workdir":directory}})]).await;
         let permissions_file = s.data.join("permissions.json");
-        s.environment_service.permissions =
+        s.execution_service.permissions =
             Arc::new(crate::permissions::Hub::open(&permissions_file).unwrap());
         let owner = async {
             let record = tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -1205,7 +1205,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                     if approvals == 0 {
                         assert_eq!(captured.lock().unwrap().len(), 1);
                         assert!(
-                            s.environment_service
+                            s.execution_service
                                 .host
                                 .host_executor("main", thread(&s).unwrap().generation)
                                 .plugin_sessions()
@@ -1245,7 +1245,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
                 assert!(requests[2].to_string().contains("43"));
             }
         }
-        s.environment_service
+        s.execution_service
             .host
             .finish_host(&s.usage_scope)
             .await
@@ -1262,7 +1262,7 @@ async fn assistant_and_local_worker_invocations_are_tracked_by_runtime() {
         if worker {
             s.is_worker = true;
             s.sandbox_id = None;
-            s.environment_ref = Some(pot_core::EnvironmentRef::host(&s.runtime_id));
+            s.execution_target = Some(pot_core::ExecutionTarget::host(&s.runtime_id));
         }
         turn(&s, &mut rx, "runtime-tracked").await;
         let executions = s.agent_service.executions.snapshot();

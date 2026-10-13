@@ -41,7 +41,7 @@ import Foundation
     var providerAllowance: [String: Any] = [:]
     var providerPeriod = "none", providerTokens = "2000000", providerAutoResume = true
     var apiEndpoint = "", apiModel = "", apiProtocol = "openai_chat", hasAPIKey = false
-    var environment: [String: Any] = [:]
+    var runtimeStatus: [String: Any] = [:]
     var section = 0, revision = 0
     var awaitingBoot: String?
     var cpu = 4, memory = 8, disk = 32
@@ -68,7 +68,7 @@ import Foundation
         if let old = awaitingBoot, let boot = bridge.snapshot["boot_id"] as? String, boot != old,
            bridge.snapshot["connected"] as? Bool == true
         {
-            result = L.text("settingspanel.configuration-applied-environment-ready"); awaitingBoot = nil
+            result = L.text("settingspanel.configuration-applied-runtime-ready"); awaitingBoot = nil
         }
     }
 
@@ -93,7 +93,7 @@ import Foundation
          "provider_period": providerPeriod, "provider_tokens": providerTokens,
          "provider_auto_resume": providerAutoResume,
          "runtime_ready": bridge?.snapshot["connected"] as? Bool ?? false,
-         "environment_phase": environment["phase"] as? String ?? L.text("settingspanel.waiting-to-start"),
+         "runtime_phase": runtimeStatus["phase"] as? String ?? L.text("settingspanel.waiting-to-start"),
          "limit": limit, "tokens": tokens, "per_turn": perTurn, "parallel": parallel, "cpus": cpuField,
          "memory": memoryField, "disk": diskField,
          "selected_model": profile["model"] as? String ?? "",

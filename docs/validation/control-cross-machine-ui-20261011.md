@@ -6,8 +6,8 @@ that Control; production user data was not modified.
 
 - App local/Control switching isolated tasks and restored a remote draft; Control
   downtime disabled new sends without local fallback, preserving cached results.
-- Native and Web Machines showed the remote Host, its details and environment
-  task view. A discovered projection bug duplicated remote environments under
+- Native and Web Machines showed the remote Host, its details and execution target
+  task view. A discovered projection bug duplicated remote execution targets under
   Control; exact Runtime filtering now prevents it, with a regression test.
 - App/Web schedules showed the pinned remote Host. Saving the existing native
   schedule preserved its target without adding a selector. Copy now explains that

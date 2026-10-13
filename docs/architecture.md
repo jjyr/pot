@@ -35,10 +35,11 @@ Control owns remote conversations, assistant instructions, Tasks, schedules,
 global plugins and skills, model configuration, budgets and approvals. Chat
 assistants remain on their local or remote Control. The approved remote
 task design starts a new Task Agent on the selected execution Runtime, alongside
-its Host/Sandbox environment, and reads its durable result after completion.
-Agent, Task and Environment retain separate identities, but the first release
-requires Agent and Environment to belong to the same execution Runtime. No live
-Agent relocation or three-node placement is included. Execution nodes do not need
+its Host or Sandbox, and reads its durable result after completion.
+Agent and Task retain separate identities. An execution target is only a value
+identifying a Runtime and its Host or Sandbox, not a separately managed resource.
+The Task Agent runs on that same Runtime. No live Agent relocation or three-node
+placement is included. Execution nodes do not need
 assistant databases or provider credentials.
 
 Remote Task Agent loops run on the execution Runtime. Control-selected global
@@ -60,14 +61,14 @@ for lifecycle and failure semantics.
 The App connects to one Control as a client. The accepted UI has one icon to switch
 between local and remote. Data, drafts, event cursors and cached results are scoped
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
-UI is deferred. Machines shows lightweight status cards, expandable environments and
+UI is deferred. Machines shows lightweight status cards, expandable Host/Sandbox rows and
 Tasks filtered by the exact execution target. Technical management and file transfers
 belong in ordinary Chat; there is no assistant-management shortcut or Machines/Task
 artifact-download UI. File delivery uses clickable Chat links:
 Control relays a task file from its execution machine to the current client; App
 asks for a save location and Web uses browser downloads. Links use
 `pot-file://TASK_UUID/encoded/relative/path`; owner-scoped reads use the task's
-immutable environment, including finished tasks. Reads are bounded to 192 KiB
+immutable execution target, including finished tasks. Reads are bounded to 192 KiB
 chunks and 1 GiB files; missing files, offline machines and detected changes fail.
 No new model-visible file tool is required. Completion summaries include download
 links only when the task has files to deliver; ordinary results need no download.
@@ -109,17 +110,23 @@ receipts are retained.
 
 ## Execution targets and instructions
 
-Environment references distinguish the owning Runtime and actual target:
+`ExecutionTarget` identifies the execution Runtime and its Host or Sandbox.
+The shared `execution_target` field carries this value in Tasks, schedules,
+assignments and remote launches:
 
 ```json
 {"runtime_id":"RUNTIME-ID","target":{"kind":"host"}}
 {"runtime_id":"RUNTIME-ID","target":{"kind":"sandbox","sandbox_id":"build"}}
 ```
 
-Remote is a relationship, not an Environment kind. Host has execution sessions and
+Remote is a relationship to the caller, not a target kind. Host has execution sessions and
 working directories; VM instance lifecycle belongs only to Sandbox. Default dispatch
 is relative to the Agent Runtime, regardless of which machine renders its UI.
 An explicit task target takes precedence over routing instructions and local defaults.
+API requests and persisted records use `execution_target` exclusively. Unsupported
+Assignment schemas and obsolete selector fields are rejected without migration.
+Restart does not rebind tasks or replay effects.
+App, Control and execution Runtime use the same API revision; upgrade them together.
 
 Each assistant's AGENTS.md is stored in its database and follows its identity.
 `read_agent_instructions({})` and `update_agent_instructions({text})` are self-scoped;
@@ -145,7 +152,7 @@ Internal plugin envelopes are created only from supplied enabled bundles and can
 be invoked through the public named-tool RPC. The current inline snapshot is bounded to 512 KiB and 2048 files
 within the existing 1 MiB transport limit. Oversized or symlinked bundles fail
 explicitly; large-bundle chunked delivery remains unqualified.
-Control specifies the exact model, execution environment and tool configuration.
+Control specifies the exact model, execution target and tool configuration.
 The execution Runtime runs that configuration or returns an explicit unsupported
 configuration/dependency error. It must not replace models, plugins or targets,
 or silently hide tools according to node-local settings.
@@ -183,13 +190,13 @@ task. Control reconciles the accepted run and fetches its result after completio
 including when a completion notification was lost.
 
 Task Agents request models through Control's gateway. Provider credentials,
-budget decisions and usage accounting remain there. Environment-dependent plugins
-execute at the assigned environment from Control-supplied definitions/bundles;
+budget decisions and usage accounting remain there. Execution plugins
+run on the assigned Host or Sandbox from Control-supplied definitions/bundles;
 this does not give the execution node ownership of the global catalog. Model
 behavior approval remains separate from machine membership.
 
-UI remains the existing Chat, Tasks and Machines. Task details need only state
-and execution machine/environment; the co-located Agent does not need a separate
+UI remains the existing Chat, Tasks and Machines. Task details need only status,
+machine and Host/Sandbox location; the co-located Agent does not need a separate
 placement selector or Runner management page. Technical resource operations stay
 API/Chat based, with concrete model-visible changes requiring separate agreement.
 
@@ -232,7 +239,7 @@ Retired Sandbox IDs cannot be silently reused. Host HTTPS, actual Linux Podman
 plugins, independent Linux Control/macOS Host processes and native App/Web
 qualification are recorded in the [production report](validation/task-agent-production-20261011.md)
 and [client report](validation/control-cross-machine-ui-20261011.md). Three-node
-Agent/Environment placement remains deferred beyond this release.
+Agent/Host/Sandbox placement remains deferred beyond this release.
 
 ## Implementation boundaries
 

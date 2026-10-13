@@ -1,13 +1,13 @@
 //! Reusable backend application services. The executable and route assembly live in pot-server.
 pub mod control_resources;
 pub mod desktop;
-pub mod environment;
 pub mod execution;
+pub mod execution_target;
 pub mod files;
 pub mod host;
 mod instructions;
 pub mod permissions;
-pub mod remote_environment;
+pub mod remote_execution;
 pub mod sandbox;
 pub mod sandbox_resources;
 mod skills;
@@ -44,7 +44,7 @@ use tokio::sync::{broadcast, mpsc};
 
 pub mod control;
 pub(crate) use control::services::{
-    AgentResources, AgentService, ConversationService, EnvironmentService, TaskService,
+    AgentResources, AgentService, ConversationService, ExecutionService, TaskService,
 };
 pub(crate) use control::*;
 pub(crate) use control::{assistant_instructions, budget, local_services, model_config};

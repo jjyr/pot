@@ -84,7 +84,7 @@ fn authorize(s: &Service, headers: &HeaderMap) -> ApiResult<()> {
 }
 pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     authorize(&s, &h)?;
-    let hub = s.environment_service.terminals.lock().unwrap();
+    let hub = s.execution_service.terminals.lock().unwrap();
     Ok(Json(
         json!({"boot_id":s.boot,"sessions":hub.sessions.iter().map(|(id,p)|json!({"id":id,"exit_code":*p.exit.borrow(),"attached":p.attached.load(Ordering::SeqCst),"purpose":*p.purpose.lock().unwrap()})).collect::<Vec<_>>()}),
     ))
@@ -113,7 +113,7 @@ pub async fn create(
             "Invalid terminal purpose",
         ));
     }
-    let mut hub = s.environment_service.terminals.lock().unwrap();
+    let mut hub = s.execution_service.terminals.lock().unwrap();
     if hub.sessions.len() >= MAX_SESSIONS {
         return Err(error(
             StatusCode::CONFLICT,
@@ -134,7 +134,7 @@ pub async fn close(
 ) -> ApiResult<Json<Value>> {
     authorize(&s, &h)?;
     let session = s
-        .environment_service
+        .execution_service
         .terminals
         .lock()
         .unwrap()
@@ -155,7 +155,7 @@ pub async fn close(
             break;
         }
     }
-    s.environment_service
+    s.execution_service
         .terminals
         .lock()
         .unwrap()
@@ -171,7 +171,7 @@ pub async fn connect(
 ) -> ApiResult<impl IntoResponse> {
     authorize(&s, &h)?;
     let session = s
-        .environment_service
+        .execution_service
         .terminals
         .lock()
         .unwrap()
@@ -236,7 +236,7 @@ fn kill_groups(pid: i32, fd: i32) {
 }
 pub async fn shutdown(s: &Service) {
     let sessions: Vec<_> = s
-        .environment_service
+        .execution_service
         .terminals
         .lock()
         .unwrap()
@@ -515,7 +515,7 @@ mod lifecycle_tests {
         .await
         .unwrap();
         assert!(
-            s.environment_service
+            s.execution_service
                 .terminals
                 .lock()
                 .unwrap()
@@ -545,7 +545,7 @@ mod lifecycle_tests {
             .await
             .unwrap()
             .0;
-        let session = s.environment_service.terminals.lock().unwrap().sessions
+        let session = s.execution_service.terminals.lock().unwrap().sessions
             [shell["id"].as_str().unwrap()]
         .clone();
         assert!(
@@ -558,12 +558,7 @@ mod lifecycle_tests {
             .is_err()
         );
         assert_eq!(
-            s.environment_service
-                .terminals
-                .lock()
-                .unwrap()
-                .sessions
-                .len(),
+            s.execution_service.terminals.lock().unwrap().sessions.len(),
             1
         );
         // A rejected command-injection request never creates another process or writes PTY input.
@@ -591,7 +586,7 @@ mod lifecycle_tests {
         }
         assert!(create(State(s.clone()), auth(&s), request()).await.is_err());
         let id = s
-            .environment_service
+            .execution_service
             .terminals
             .lock()
             .unwrap()
@@ -604,7 +599,7 @@ mod lifecycle_tests {
             .await
             .unwrap();
         assert!(
-            !s.environment_service
+            !s.execution_service
                 .terminals
                 .lock()
                 .unwrap()
@@ -629,7 +624,7 @@ mod websocket_tests {
         let mut s = crate::tests::service();
         s.workspace = std::env::temp_dir();
         let session = spawn(&s.workspace, &Size { cols: 80, rows: 24 }).unwrap();
-        s.environment_service
+        s.execution_service
             .terminals
             .lock()
             .unwrap()

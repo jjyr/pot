@@ -260,7 +260,7 @@ async fn qualify_recovery(
     let mut request =
         json!({"request_id":"remote-task","text":"Write where.txt on the assigned machine"});
     if sandbox {
-        request["environment_ref"] = json!({"runtime_id":target_id,"target":execution_target});
+        request["execution_target"] = json!({"runtime_id":target_id,"target":execution_target});
     } else {
         request["text"] =
             json!("/tag:remote-test /tag:task-runner Write where.txt on the assigned machine");
@@ -269,7 +269,7 @@ async fn qualify_recovery(
         caller.api("/api/v1/permissions",Some(json!({"action":"configure","machine_id":target_id,"sandbox_access":{"machine_id":target_id,"sandbox_id":"remote-test","owner":"main","shared_with":[]}}))).await;
     }
     let task = caller.api("/api/v1/tasks", Some(request)).await;
-    assert_eq!(task["environment_ref"]["runtime_id"], target_id);
+    assert_eq!(task["execution_target"]["runtime_id"], target_id);
     let task_id = task["id"].as_str().unwrap();
     let mut reviews = 0;
     let mut disconnected = before_start;

@@ -1,16 +1,16 @@
 //! Control-owned model, policy, approval and guidance ports for one assigned run.
-use crate::remote_environment::RemoteBinding;
+use crate::remote_execution::RemoteBinding;
 use crate::*;
 
 use pot_runner::control::Operation;
 impl Service {
     pub fn validate_task_agent_binding(&self, binding: &RemoteBinding) -> Result<()> {
         anyhow::ensure!(
-            self.is_worker && self.environment_ref.as_ref() == Some(&binding.environment),
+            self.is_worker && self.execution_target.as_ref() == Some(&binding.execution_target),
             "Task Agent assignment mismatch"
         );
         anyhow::ensure!(
-            crate::remote_environment::binding(self, binding.environment.clone())? == *binding,
+            crate::remote_execution::binding(self, binding.execution_target.clone())? == *binding,
             "Task Agent run is no longer active"
         );
         Ok(())
@@ -63,8 +63,8 @@ impl Service {
                     request["owner"] == binding.owner
                         && request["turn"] == binding.run_id
                         && request["generation"] == binding.generation
-                        && request["environment"]
-                            == crate::remote_environment::key(&binding.environment)?,
+                        && request["execution_target"]
+                            == crate::remote_execution::key(&binding.execution_target)?,
                     "Remote approval identity mismatch"
                 );
                 let original = request.clone();

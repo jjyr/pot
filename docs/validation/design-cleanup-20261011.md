@@ -33,7 +33,7 @@ paths; connected tasks can edit only applicable project resources.
 
 - Core 17, Agent 71, Runtime 166, Sandbox 18 and Server 27 unit tests passed.
   One existing Server test is ignored.
-- Server access 5, TLS 1, CLI 3, lifecycle 10, multi-client 5 and remote environment
+- Server access 5, TLS 1, CLI 3, lifecycle 10, multi-client 5 and remote execution target
   4 tests passed. Actual rootless Podman execution remains opt-in/ignored.
 - App 22 and UI 13 tests passed; workspace/all-target Clippy passed.
 - Focused final upgrade checks passed (Runtime 3 and Server lifecycle 1).

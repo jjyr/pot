@@ -84,7 +84,7 @@ pub(crate) fn cancelled(s: &Service) -> bool {
 pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
     anyhow::ensure!(
         s.conversation.inner.lock().unwrap().agent.phase != AgentPhase::Failed,
-        "Agent stop was not confirmed; restart the environment before another turn"
+        "Agent stop was not confirmed; restart the execution target before another turn"
     );
     settings::apply_pending(s, true)?;
     let spec = thread(s)?.config;
@@ -196,7 +196,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
             AgentPhase::Ready
         },
         if uncertain {
-            Some("Agent 未确认停止，请 Quit 后重开环境".into())
+            Some("尚未确认 Agent 已停止。请退出并重新打开 Pot。".into())
         } else {
             None
         },

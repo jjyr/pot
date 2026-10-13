@@ -161,23 +161,25 @@ pub fn render(
             }
             card = card.child(row);
         }
-        let environments = machine["environments"]
+        let execution_targets = machine["execution_targets"]
             .as_array()
             .cloned()
             .unwrap_or_default();
-        if environments.is_empty() {
+        if execution_targets.is_empty() {
             card = card.child(pages::hint(catalog.text("machines.empty"), cx));
         }
-        for environment in environments {
-            let reference = &environment["environment_ref"];
+        for execution_target in execution_targets {
+            let reference = &execution_target["execution_target"];
             let host = reference["target"]["kind"] == "host";
             let title = if host {
                 "Host"
             } else {
-                environment["name"].as_str().unwrap_or("Sandbox")
+                execution_target["name"].as_str().unwrap_or("Sandbox")
             };
             let expanded = view.preferred.get("target").is_some() && selected == *reference;
-            let phase = environment["state"]["phase"].as_str().unwrap_or("unknown");
+            let phase = execution_target["state"]["phase"]
+                .as_str()
+                .unwrap_or("unknown");
             let status = if !online {
                 catalog.text("machines.offline")
             } else if host {
@@ -187,7 +189,7 @@ pub fn render(
             };
             let mut row = div().flex().flex_col().gap_2().child(
                 Button::new(SharedString::from(format!(
-                    "environment-{runtime}-{}",
+                    "execution-target-{runtime}-{}",
                     reference["target"]
                 )))
                 .ghost()
@@ -220,7 +222,7 @@ pub fn render(
             if expanded {
                 let desktop = crate::machine_state::desktop_available(
                     &machine,
-                    &environment,
+                    &execution_target,
                     view.desktop_runtime,
                 );
                 row = row.child(
@@ -245,21 +247,21 @@ pub fn render(
                                 .gap_2()
                                 .child(
                                     Button::new(SharedString::from(format!(
-                                        "environment-tasks-{runtime}-{}",
+                                        "execution-target-tasks-{runtime}-{}",
                                         reference["target"]
                                     )))
                                     .ghost()
                                     .label(catalog.text("machines.view-tasks"))
                                     .on_click(pages::on(
                                         &handler,
-                                        "environment-tasks",
+                                        "execution-target-tasks",
                                         reference.clone(),
                                     )),
                                 )
                                 .when(desktop, |el| {
                                     el.child(
                                         Button::new(SharedString::from(format!(
-                                            "environment-desktop-{runtime}-{}",
+                                            "execution-target-desktop-{runtime}-{}",
                                             reference["target"]
                                         )))
                                         .ghost()
@@ -268,7 +270,7 @@ pub fn render(
                                         .on_click(
                                             pages::on(
                                                 &handler,
-                                                "environment-desktop",
+                                                "execution-target-desktop",
                                                 reference.clone(),
                                             ),
                                         ),

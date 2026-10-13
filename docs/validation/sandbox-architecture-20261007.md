@@ -14,4 +14,4 @@ Validation:
 - Clippy on all targets of Sandbox, Linux Provider, Runtime and Server with `-D warnings`: passed.
 - Linux OCI image rebuilt from the migrated recipe; reference `pot.local/sandbox:026f1eea024aed72883e`.
 
-Limits: no macOS execution yet. Installed template catalog, allocation reservations, cross-environment artifacts and display arbitration remain design work. Storage remains atomic private JSON rather than the proposed injected SQLite store. This stage does not add Linux-host VM support or mutual isolation between workers sharing one Linux VM.
+Limits: no macOS execution yet. Installed template catalog, allocation reservations, cross-execution target artifacts and display arbitration remain design work. Storage remains atomic private JSON rather than the proposed injected SQLite store. This stage does not add Linux-host VM support or mutual isolation between workers sharing one Linux VM.

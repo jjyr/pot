@@ -130,7 +130,7 @@ impl Processes {
         call: &str,
         emit: &mut (dyn FnMut(Update) -> Result<()> + Send),
     ) -> Result<Value> {
-        pot_core::environment_tools::validate(name, args)?;
+        pot_core::execution_tools::validate(name, args)?;
         if name == "exec_command" && self.sessions.len() >= policy.max_sessions {
             self.reap().await?;
         }

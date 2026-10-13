@@ -9,9 +9,9 @@ pub struct RemoteBinding {
     pub owner: String,
     pub run_id: String,
     pub generation: u64,
-    pub environment: pot_core::EnvironmentRef,
+    pub execution_target: pot_core::ExecutionTarget,
 }
-pub trait RemoteEnvironment: Send + Sync {
+pub trait RemoteExecution: Send + Sync {
     /// Non-secret enrollment fingerprint. Re-enrollment must invalidate model grants.
     fn machine_epoch(&self, _machine: &str) -> Result<String> {
         bail!("Machine enrollment identity unavailable")
@@ -35,8 +35,8 @@ pub trait RemoteEnvironment: Send + Sync {
     fn ready_owner(&self, _owner: String) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn validate(&self, environment: &pot_core::EnvironmentRef) -> Result<()>;
-    fn validate_management(&self, _environment: &pot_core::EnvironmentRef) -> Result<()> {
+    fn validate(&self, execution_target: &pot_core::ExecutionTarget) -> Result<()>;
+    fn validate_management(&self, _execution_target: &pot_core::ExecutionTarget) -> Result<()> {
         bail!("Remote Sandbox management is unavailable")
     }
     fn manage(
@@ -50,7 +50,7 @@ pub trait RemoteEnvironment: Send + Sync {
     }
     fn read_file(
         &self,
-        _environment: pot_core::EnvironmentRef,
+        _execution_target: pot_core::ExecutionTarget,
         _owner: String,
         _query: pot_protocol::FileQuery,
     ) -> BoxFuture<'_, Result<pot_protocol::FileChunk>> {
@@ -87,33 +87,36 @@ pub(crate) struct RemoteContext {
     pub binding: RemoteBinding,
     pub context: Value,
 }
-pub(crate) fn port(s: &Service) -> Result<Arc<dyn RemoteEnvironment>> {
-    s.environment_service
+pub(crate) fn port(s: &Service) -> Result<Arc<dyn RemoteExecution>> {
+    s.execution_service
         .remote
         .read()
         .unwrap()
         .clone()
-        .ok_or_else(|| anyhow!("Remote Environment transport is not available"))
+        .ok_or_else(|| anyhow!("Remote Execution target transport is not available"))
 }
 pub(crate) fn is_remote(s: &Service) -> bool {
-    s.environment_ref
+    s.execution_target
         .as_ref()
         .is_some_and(|r| !r.is_local_to(&s.runtime_id))
 }
 pub(crate) fn waiting_reason(s: &Service) -> Option<String> {
     port(s).ok()?.waiting_reason(&s.usage_scope)
 }
-pub(crate) fn key(reference: &pot_core::EnvironmentRef) -> Result<String> {
+pub(crate) fn key(reference: &pot_core::ExecutionTarget) -> Result<String> {
     Ok(format!("remote:{}", serde_json::to_string(reference)?))
 }
-pub(crate) fn from_key(key: &str) -> Result<pot_core::EnvironmentRef> {
+pub(crate) fn from_key(key: &str) -> Result<pot_core::ExecutionTarget> {
     serde_json::from_str(
         key.strip_prefix("remote:")
-            .ok_or_else(|| anyhow!("Invalid remote Environment key"))?,
+            .ok_or_else(|| anyhow!("Invalid remote Execution target key"))?,
     )
     .map_err(Into::into)
 }
-pub(crate) fn binding(s: &Service, environment: pot_core::EnvironmentRef) -> Result<RemoteBinding> {
+pub(crate) fn binding(
+    s: &Service,
+    execution_target: pot_core::ExecutionTarget,
+) -> Result<RemoteBinding> {
     let inner = s.conversation.inner.lock().unwrap();
     let thread = agent::current(&inner.store)?.ok_or_else(|| anyhow!("Thread missing"))?;
     let turn = inner
@@ -138,7 +141,7 @@ pub(crate) fn binding(s: &Service, environment: pot_core::EnvironmentRef) -> Res
         owner: s.usage_scope.clone(),
         run_id: uuid::Uuid::from_bytes(bytes).to_string(),
         generation: thread.generation,
-        environment,
+        execution_target,
     })
 }
 pub(crate) async fn open(s: &Service, binding: RemoteBinding) -> Result<()> {
@@ -147,17 +150,17 @@ pub(crate) async fn open(s: &Service, binding: RemoteBinding) -> Result<()> {
     remote.open(binding.clone()).await?;
     let context = remote.install_resources(binding.clone(), resources).await?;
     s.remote_context.lock().unwrap().insert(
-        binding.environment.clone(),
+        binding.execution_target.clone(),
         RemoteContext { binding, context },
     );
     Ok(())
 }
 pub(crate) async fn start(s: &Service) -> Result<()> {
-    let environment = s
-        .environment_ref
+    let execution_target = s
+        .execution_target
         .clone()
         .ok_or_else(|| anyhow!("Remote worker binding missing"))?;
-    let binding = binding(s, environment)?;
+    let binding = binding(s, execution_target)?;
     let mut observed = None;
     loop {
         if agent::cancelled(s) || s.stopping() {
@@ -251,13 +254,13 @@ pub(crate) async fn cancel(s: &Service) -> Result<()> {
         s.remote_context
             .lock()
             .unwrap()
-            .remove(&context.binding.environment);
+            .remove(&context.binding.execution_target);
     }
     result
 }
 impl Service {
-    pub fn set_remote_environment(&self, port: Arc<dyn RemoteEnvironment>) {
-        *self.environment_service.remote.write().unwrap() = Some(port);
+    pub fn set_remote_execution(&self, port: Arc<dyn RemoteExecution>) {
+        *self.execution_service.remote.write().unwrap() = Some(port);
     }
 }
 

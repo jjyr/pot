@@ -9,7 +9,7 @@ scope. Remote Tasks wait for authorization before starting their Agent. Enrollme
 changes invalidate prior machine grants and preallow rules.
 
 Sandbox creation and management enforce ownership and configured sizing/inventory
-limits. Host mappings are owner configuration. Environment references remain
+limits. Host mappings are owner configuration. Execution target references remain
 internal fixed execution targets. Native and Web clients share capability cards
 and machine policy controls. Sharing and mounts are configured through owner APIs;
 this change does not add dedicated sharing or mounts editors.
