@@ -44,7 +44,7 @@ supported_operations.
   remote task model input, with project AGENTS.md/Skills and owner approvals. Existing
   offline-before-sampling and original-receipt recovery regressions remain covered.
 - Full model -> owner review -> remote Node plugin -> model result integration
-  runs cua_repl with owner review. The original cross-turn assertion searched the entire request for “42” and did not establish session continuity; corrected acceptance is documented in [design cleanup](design-cleanup-20261011.md). Review
+  runs cua_repl with owner review. The original cross-turn assertion searched the entire request for “42” and did not establish session continuity; corrected assertions inspect parsed tool-call results: the same accepted run continues 41 to 42, while a later run explicitly rejects the previous session. Review
   includes the fixed computer-use plugin identity and original task owner.
 
 Logs: /private/tmp/pot39-plugins-final-tests.log,
