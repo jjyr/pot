@@ -64,11 +64,11 @@ impl Authority {
             let port = task_services::Port {
                 authority: self.clone(),
                 host: host.clone(),
-                binding: pot_control::remote_environment::RemoteBinding {
+                binding: pot_control::remote_execution::RemoteBinding {
                     owner: task.into(),
                     run_id: run.into(),
                     generation: record.launch.generation,
-                    environment: record.launch.environment.clone(),
+                    execution_target: record.launch.execution_target.clone(),
                 },
                 control: control.into(),
                 lease: lease.id.clone(),
@@ -124,7 +124,7 @@ impl Authority {
             lease.owner == launch.task_id
                 && lease.run_id == launch.run_id
                 && lease.generation == launch.generation
-                && lease.target == launch.environment.target
+                && lease.target == launch.execution_target.target
                 && lease.resources_revision.as_ref() == Some(&launch.resources.revision()?),
             "Launch differs from fixed lease"
         );
@@ -142,11 +142,11 @@ impl Authority {
             let port = Arc::new(task_services::Port {
                 authority: self.clone(),
                 host: host.clone(),
-                binding: pot_control::remote_environment::RemoteBinding {
+                binding: pot_control::remote_execution::RemoteBinding {
                     owner: launch.task_id.clone(),
                     run_id: launch.run_id.clone(),
                     generation: launch.generation,
-                    environment: launch.environment,
+                    execution_target: launch.execution_target,
                 },
                 control: control.into(),
                 lease: lease_id,
@@ -204,7 +204,7 @@ impl Authority {
             record.phase == Phase::Running
                 && record.boot_id == boot
                 && record.launch.generation == old.generation
-                && record.launch.environment.target == old.target
+                && record.launch.execution_target.target == old.target
                 && old.resources_revision.as_ref() == Some(&record.launch.resources.revision()?),
             "Original Task Agent/configuration is no longer live"
         );
@@ -299,7 +299,7 @@ mod tests {
             task_id: uuid::Uuid::new_v4().to_string(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
-            environment: EnvironmentRef::host(&target.control.identity.runtime_id),
+            execution_target: ExecutionTarget::host(&target.control.identity.runtime_id),
             resources: pot_runner::resources::GlobalResources {
                 plugins: config.params.agent.plugins.clone(),
                 shell: config.params.agent.shell.clone(),
@@ -317,7 +317,7 @@ mod tests {
                 &launch.task_id,
                 &launch.run_id,
                 1,
-                &launch.environment.target,
+                &launch.execution_target.target,
                 &boot,
             )
             .unwrap();
@@ -434,7 +434,7 @@ mod tests {
             task_id: uuid::Uuid::new_v4().to_string(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
-            environment: EnvironmentRef::host(&target.control.identity.runtime_id),
+            execution_target: ExecutionTarget::host(&target.control.identity.runtime_id),
             resources: pot_runner::resources::GlobalResources {
                 plugins: config.params.agent.plugins.clone(),
                 shell: config.params.agent.shell.clone(),
@@ -453,7 +453,7 @@ mod tests {
                 &launch.task_id,
                 &launch.run_id,
                 1,
-                &launch.environment.target,
+                &launch.execution_target.target,
                 &boot,
             )
             .unwrap();

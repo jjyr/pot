@@ -120,8 +120,10 @@ impl Mobile {
                         action("permission-decision", &event.value.to_string())
                     }
                     "task-open" => action("task", &event.value.to_string()),
-                    "environment-filter-clear" => action("environment-filter-clear", ""),
-                    "environment-tasks" => action("environment-tasks", &event.value.to_string()),
+                    "execution-target-filter-clear" => action("execution-target-filter-clear", ""),
+                    "execution-target-tasks" => {
+                        action("execution-target-tasks", &event.value.to_string())
+                    }
                     "machine-select" => {
                         this.machine_selection = event.value.clone();
                     }
@@ -563,22 +565,23 @@ impl Render for Mobile {
                                     item["next_label"].as_str().unwrap_or_default().to_owned(),
                                 ))
                                 .child(div().child(format!(
-                                    "{} · {}",
-                                    item["spec"]["environment_ref"]["runtime_id"]
-                                        .as_str()
-                                        .unwrap_or_default(),
-                                    match item["spec"]["environment_ref"]["target"]["kind"].as_str()
-                                    {
-                                        Some("host") => "Host".to_owned(),
-                                        Some("sandbox") => format!(
+                                        "{} · {}",
+                                        item["spec"]["execution_target"]["runtime_id"]
+                                            .as_str()
+                                            .unwrap_or_default(),
+                                        match item["spec"]["execution_target"]["target"]["kind"]
+                                            .as_str()
+                                        {
+                                            Some("host") => "Host".to_owned(),
+                                            Some("sandbox") => format!(
                                             "Sandbox / {}",
-                                            item["spec"]["environment_ref"]["target"]["sandbox_id"]
+                                            item["spec"]["execution_target"]["target"]["sandbox_id"]
                                                 .as_str()
                                                 .unwrap_or_default()
                                         ),
-                                        _ => String::new(),
-                                    }
-                                ))),
+                                            _ => String::new(),
+                                        }
+                                    ))),
                         );
                 }
             }
@@ -624,7 +627,7 @@ impl Render for Mobile {
                         .label(self.label("mobile.schedules"))
                         .on_click(|_, _, _| action("page", "schedules")),
                 )
-                .child(self.label("mobile.owner-access-to-this-pot-instance-and-its-environments"))
+                .child(self.label("mobile.owner-access-to-this-pot-instance-and-its-sandboxs"))
                 .child(
                     Button::new("language")
                         .h(px(44.))

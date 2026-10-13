@@ -4,7 +4,7 @@ Reviewed: 2026-10-07. Proposal for `pot-sandbox-macos`, implementing the [Sandbo
 
 ## Minimum delivery plan after scope reduction
 
-Current scope: Linux remains the existing/default environment, macOS is the only new first-phase Provider, and Android/iOS are deferred. Keep `pot-sandbox` + separate Linux/macOS crates and composition-root registration. Do not build device tooling or require generalized device schemas to deliver macOS.
+Current scope: Linux remains the existing/default sandbox, macOS is the only new first-phase Provider, and Android/iOS are deferred. Keep `pot-sandbox` + separate Linux/macOS crates and composition-root registration. Do not build device tooling or require generalized device schemas to deliver macOS.
 
 The minimum end-to-end result is: main assigns a macOS Sandbox -> Manager starts that exact enrolled VM -> worker runs command/stdin/patch operations as the standard guest user -> Xcode builds/tests a Mac sample project -> artifacts are published on Host -> scope cleanup is confirmed -> ordinary restart preserves disk/workspace without replaying old operations.
 
@@ -24,9 +24,9 @@ The first transport is authenticated guest networking; choose and implement one 
 
 The initial workspace is private native guest storage exposed through bounded file/artifact APIs. Host source inputs are imported as enrolled files/artifacts; do not mount the whole repository home or product data. This keeps Guest development working before shared-directory semantics are qualified. Templates and project VM disks are separate concepts: updating a base does not mutate a project's existing VM automatically.
 
-One running macOS VM accepts one execution/control owner. The UI shows the assigned environment, preparation/starting/ready/busy/stopped/unknown state, guest/Xcode version and declared persistence/cleanup policy. A helper-owned external viewer is sufficient; UI tests require the real logged-in guest session and relevant permissions. Basic command builds do not require general screenshot or Accessibility tools.
+One running macOS VM accepts one execution/control owner. The UI shows the assigned sandbox, preparation/starting/ready/busy/stopped/unknown state, guest/Xcode version and declared persistence/cleanup policy. A helper-owned external viewer is sufficient; UI tests require the real logged-in guest session and relevant permissions. Basic command builds do not require general screenshot or Accessibility tools.
 
-Persistent disk and confirmed process cleanup are distinct guarantees. Until native containment is demonstrated, the conservative first slice can stop the exclusive VM at normal turn closure as well as cancellation; report this explicitly and allow it only under declared policy. Startup latency, build/cache behavior and GUI usability must be measured before promising a permanently running development environment. Published artifacts survive; unsaved application state does not.
+Persistent disk and confirmed process cleanup are distinct guarantees. Until native containment is demonstrated, the conservative first slice can stop the exclusive VM at normal turn closure as well as cancellation; report this explicitly and allow it only under declared policy. Startup latency, build/cache behavior and GUI usability must be measured before promising a permanently running development sandbox. Published artifacts survive; unsaved application state does not.
 
 ## Recommended implementation
 

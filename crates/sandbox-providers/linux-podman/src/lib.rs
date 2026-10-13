@@ -48,7 +48,7 @@ impl LinuxPodmanProvider {
             .kill_on_drop(true);
         tokio::time::timeout(Duration::from_secs(60), cmd.output())
             .await
-            .context("Podman operation timed out; inspect environment before retrying")?
+            .context("Podman operation timed out; inspect Sandbox before retrying")?
             .context("Podman unavailable; install Podman on the Linux Server")
     }
     async fn checked(args: &[String]) -> Result<Value> {
@@ -138,14 +138,9 @@ impl LinuxPodmanProvider {
         )
     }
     async fn endpoint(c: &ProviderContext) -> Result<(String, String)> {
-        let i = Self::load(c)?.context("Podman environment not prepared")?;
-        let row = Self::inspect(&i)
-            .await?
-            .context("Podman environment stopped")?;
-        ensure!(
-            row["State"]["Running"] == true,
-            "Podman environment stopped"
-        );
+        let i = Self::load(c)?.context("Podman Sandbox not prepared")?;
+        let row = Self::inspect(&i).await?.context("Podman Sandbox stopped")?;
+        ensure!(row["State"]["Running"] == true, "Podman Sandbox stopped");
         let port = &row["NetworkSettings"]["Ports"]["17701/tcp"][0];
         ensure!(
             port["HostIp"] == "127.0.0.1",
@@ -166,10 +161,8 @@ impl LinuxPodmanProvider {
             .as_str()
             .context("Desktop credential missing")?
             .to_owned();
-        let i = Self::load(c)?.context("Podman environment not prepared")?;
-        let row = Self::inspect(&i)
-            .await?
-            .context("Podman environment stopped")?;
+        let i = Self::load(c)?.context("Podman Sandbox not prepared")?;
+        let row = Self::inspect(&i).await?.context("Podman Sandbox stopped")?;
         let port = &row["NetworkSettings"]["Ports"]["17681/tcp"][0];
         ensure!(
             port["HostIp"] == "127.0.0.1",
@@ -299,7 +292,7 @@ impl LinuxPodmanProvider {
         let _ = std::fs::remove_file(env_path);
         ensure!(
             result?.status.success(),
-            "Podman run failed; inspect environment locally before retrying"
+            "Podman run failed; inspect Sandbox locally before retrying"
         );
         Self::state(c).await
     }

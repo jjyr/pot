@@ -452,7 +452,7 @@ impl Manager {
             anyhow::ensure!(!cancelled(), "Sandbox preparation cancelled");
             anyhow::ensure!(
                 state["phase"] != "failed",
-                "Sandbox startup failed; inspect environment logs"
+                "Sandbox startup failed; inspect Sandbox logs"
             );
             if state["phase"] == "running"
                 && self
@@ -643,7 +643,7 @@ impl Manager {
             anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
             anyhow::ensure!(
                 state["phase"] == "stopped" || state["phase"] == "failed",
-                "Stop the environment before changing mappings"
+                "Stop the Sandbox before changing mappings"
             );
             std::fs::create_dir_all(path.parent().unwrap())?;
             private_json(&path, &config)?;
@@ -680,7 +680,7 @@ impl Manager {
             anyhow::ensure!(!cancelled(), "Sandbox management cancelled");
             anyhow::ensure!(
                 state["phase"] == "stopped" || state["phase"] == "failed",
-                "Stop the environment before changing settings"
+                "Stop the Sandbox before changing settings"
             );
             let path = self.root.join("sandboxes").join(&id);
             std::fs::create_dir_all(&path)?;
@@ -789,7 +789,7 @@ impl Manager {
         self.request(target, "prepare", body, Duration::from_secs(30))
             .await
     }
-    /// Resolve a live session without booting or retargeting its environment.
+    /// Resolve a live session without booting or retargeting its Sandbox.
     pub fn session_target(&self, owner: &str, epoch: u64, session: &str) -> Result<String> {
         let id = self
             .sessions
@@ -837,7 +837,7 @@ impl Manager {
         if let Some(object) = validated.as_object_mut() {
             object.remove("sandbox_id");
         }
-        pot_core::environment_tools::validate(name, &validated)?;
+        pot_core::execution_tools::validate(name, &validated)?;
         let gate = self.gate(&grant.owner);
         let _gate = gate.read().await;
         let turn = &grant.turn;
@@ -1092,7 +1092,7 @@ impl Manager {
                     if let Some(pending) = self.pending.lock().unwrap().get_mut(&scope.id) {
                         pending.active = false;
                     }
-                    // Durable unknown outcomes still quarantine the environment;
+                    // Durable unknown outcomes still quarantine the Sandbox;
                     // release transient leases so explicit recovery can settle it.
                     release_scope(self, &scope);
                     errors.push(error.to_string());
@@ -1125,7 +1125,7 @@ impl Manager {
                         .unwrap()
                         .values()
                         .any(|v| v.owner == owner && !v.active),
-                    "Sandbox execution outcome unknown; stop unconfirmed, recover environment before continuing"
+                    "Sandbox execution outcome unknown; stop unconfirmed, recover Sandbox before continuing"
                 );
                 return Ok(());
             }
@@ -1199,7 +1199,7 @@ impl Manager {
         }
         anyhow::ensure!(
             state["phase"] == "running",
-            "Executor inspection stop unconfirmed: environment transition in progress"
+            "Executor inspection stop unconfirmed: Sandbox transition in progress"
         );
         let reply = self
             .request(

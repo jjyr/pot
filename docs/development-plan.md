@@ -9,10 +9,10 @@ must be discussed and confirmed before implementation.
 
 ## Delivered
 
-- Optional resources, typed Host/Sandbox environments and multiple assistants.
+- Optional resources, typed Host/Sandbox execution targets and multiple assistants.
 - Assistant-owned DB AGENTS.md, self-scoped approved edits and project context.
 - One Control with outward machine membership, isolated App modes and fixed Web UI.
-- Minimal Machines status/environment views and optional Chat file delivery.
+- Minimal Machines status/execution target views and optional Chat file delivery.
 - Control-selected global snapshots, pinned remote plugin dispatch and receipts.
 
 ## Qualification
@@ -32,7 +32,7 @@ power loss have not been exercised. Keep these verification limits explicit in
 #39; process suspension and encrypted-payload tests do not establish them.
 
 Global resources and exact configuration are selected by Control. Execution nodes
-run the assigned model/environment/tools or report an error. Task results do not
+run the assigned model/execution target/tools or report an error. Task results do not
 require downloads unless files are actual deliverables. No live Agent relocation,
 three-node placement, peer pairing, per-machine capability grants or resource UI
 is planned for this release.

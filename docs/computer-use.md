@@ -53,7 +53,7 @@ Model code cannot change the mode. Canvas or inaccessible content may require vi
 
 ## CUA REPL
 
-`cua_repl` is exposed to pot-agent and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls and turns. Use `environment:"host"` or `"sandbox:ID"` to choose a target; Main may also use `sandbox_id`. Omitted targets follow the Agent default for new sessions and the original environment for existing sessions. Sessions cannot switch environments. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
+`cua_repl` is exposed to pot-agent and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls and turns. Use `execution_target:"host"` or `"sandbox:ID"` to choose a target; Main may also use `sandbox_id`. Omitted targets follow the Agent default for new sessions and the original execution target for existing sessions. Sessions cannot switch execution targets. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
 
 ```javascript
 let tab = await cua.open("https://example.com");
@@ -74,9 +74,9 @@ Closing the tab preserves JS state. End the REPL with `reset:true` and its exist
 
 ## Plugin contract and lifecycle
 
-Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). Version 1 requires `runtime:"node"`, `execution:"environment"` (Host and Sandbox) or `"sandbox"` (Sandbox only), confined package paths, unique tool names, and flat scalar input schemas. Bundles are limited to 32 files / 512 KiB. Plugins export `createPlugin({mode,environment,emit})` with `execute({tool,input})` and `dispose()`.
+Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). Version 1 requires `runtime:"node"`, `execution:"host_or_sandbox"` (Host and Sandbox) or `"sandbox"` (Sandbox only), confined package paths, unique tool names, and flat scalar input schemas. Bundles are limited to 32 files / 512 KiB. Plugins export `createPlugin({mode,execution_target,emit})` with `execute({tool,input})` and `dispose()`.
 
-Control environment adapters resolve the target, check permission, and send the pinned bundle and model-derived mode to the execution backend. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, environment and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
+Control execution target adapters resolve the target, check permission, and send the pinned bundle and model-derived mode to the execution backend. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, execution target and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
 
 Plugin tools use the shared machine capability approval. Tool-specific approval metadata is not accepted.
 

@@ -11,7 +11,7 @@ one-hour tickets, generation checks and exclusive input ownership apply.
 
 The Web Sandbox page opens the existing noVNC viewer in a separate same-origin
 tab. Paired clients can view, explicitly take/return control, use clipboard and
-launch the container browser. Environment administration remains CLI-only.
+launch the container browser. Execution target administration remains CLI-only.
 Pinned noVNC 1.7.0 JS assets are bundled into the embedded-Web CLI, with the
 existing source archive SHA-256 check. Native-only viewer menu items are hidden
 in ordinary browsers. Leaving the viewer closes its ticket, preserving the
@@ -58,7 +58,7 @@ available. Disk quotas remain unsupported.
   viewer preserved its running container.
 - Final-image Sandbox Manager execution qualification passed commands, receipts,
   patches, cross-turn PTY, detached cancellation/reaping, persistence, two
-  environments and shutdown. Desktop readiness/metrics additionally asserted
+  execution targets and shutdown. Desktop readiness/metrics additionally asserted
   the configured 2 GiB memory limit, 2 vCPU and container-relative uptime.
 
 Screenshots and logs are local ignored artifacts under `output/playwright/` and

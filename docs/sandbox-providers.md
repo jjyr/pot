@@ -1,6 +1,6 @@
 # Sandbox providers
 
-Environment references distinguish Host execution from managed Sandbox instances;
+Execution target references distinguish Host execution from managed Sandbox instances;
 remote is a relationship to a Runtime. [Architecture](architecture.md) defines
 ownership, exact configuration and fixed Task targets.
 
@@ -22,10 +22,10 @@ Provider descriptors report shell/files/desktop/shared-execution support. These
 are execution validation, not model tool-catalog selection. Control's configured
 tools stay visible; unsupported calls return explicit errors. No configuration,
 model, target or plugin replacement occurs. Worker calls are fixed to their
-assigned typed Environment and cannot manage lifecycle or switch targets.
+assigned typed Execution target and cannot manage lifecycle or switch targets.
 
 Start completes only after authenticated execution readiness. Runtime may prepare
-an already bound environment; it cannot allocate a different one as fallback.
+the already bound Sandbox; it cannot allocate a different one as fallback.
 Stop/delete respect active scopes and uncertain outcomes. Deleted IDs are retired;
 workspace artifacts remain. Cooperative tasks can share a Sandbox but separate
 directories do not provide mutual isolation.

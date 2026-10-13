@@ -39,12 +39,16 @@ pub fn render(
     pages::page(layout, cx).child(
         pages::content(layout)
             .child(view.navigation)
-            .when(!view.task_query.environment.is_empty(), |body| {
+            .when(!view.task_query.execution_target.is_empty(), |body| {
                 body.child(
-                    Button::new("clear-environment-filter")
+                    Button::new("clear-execution-target-filter")
                         .ghost()
                         .label(catalog.text("machines.clear-task-filter"))
-                        .on_click(pages::on(&handler, "environment-filter-clear", Value::Null)),
+                        .on_click(pages::on(
+                            &handler,
+                            "execution-target-filter-clear",
+                            Value::Null,
+                        )),
                 )
             })
             .when_some(view.parallel, |body, parallel| {

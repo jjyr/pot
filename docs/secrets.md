@@ -53,7 +53,7 @@ configuration. Gateway and Secrets are separate libraries in the Control process
 there is no extra service to deploy.
 
 A future task-secret delivery protocol must bind references to the selected
-run/environment and inject values into tools rather than model context. The
+run/execution target and inject values into tools rather than model context. The
 current secret store does not imply an export API or Runner access to all secrets.
 
 No plaintext `providers.json` reader, import or fallback exists. Old files are

@@ -334,7 +334,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .query("offset", query.offset.to_string())
         .query("limit", query.limit.to_string())
         .query("selected", &selected)
-        .query("environment", &query.environment)
+        .query("execution_target", &query.execution_target)
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
@@ -512,7 +512,7 @@ impl Client {
     pub fn start_mode(mode: &str) -> Self {
         let view = Arc::new(Mutex::new(View {
             client_mode: mode.into(),
-            error: crate::i18n::text("client.connecting-to-environment").into(),
+            error: crate::i18n::text("client.connecting-to-runtime").into(),
             task_query: TaskQuery {
                 limit: 20,
                 ..Default::default()
@@ -860,9 +860,9 @@ impl Client {
         let _ = self.refresh.try_send(());
         crate::wake_ui();
     }
-    pub fn filter_environment(&self, environment: String) {
+    pub fn filter_execution_target(&self, execution_target: String) {
         let mut v = self.view.lock().unwrap();
-        v.task_query.environment = environment;
+        v.task_query.execution_target = execution_target;
         v.task_query.scope = "active".into();
         v.task_query.q.clear();
         v.task_query.offset = 0;
@@ -1094,10 +1094,10 @@ mod tests {
     }
 
     #[test]
-    fn late_environment_page_cannot_replace_the_current_environment() {
+    fn late_execution_target_page_cannot_replace_the_current_execution_target() {
         let mut v = View::default();
         let old = v.task_query.clone();
-        v.task_query.environment =
+        v.task_query.execution_target =
             serde_json::json!({"runtime_id":"other-machine","target":{"kind":"host"}}).to_string();
         v.tasks_loading = true;
         v.apply_task_page(

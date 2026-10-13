@@ -34,7 +34,7 @@ impl Hub {
             format!("Bearer {}", service.token).parse().unwrap(),
         );
     }
-    /// Hold all assistant assignment locks while removing a shared Environment identity.
+    /// Hold all assistant assignment locks while removing a shared Execution target identity.
     pub fn guard_sandbox_delete(&self, id: &str, delete: &dyn Fn() -> Result<()>) -> Result<()> {
         let owners = self.owners.lock().unwrap();
         let services = std::iter::once(&self.root)
@@ -200,7 +200,7 @@ impl Hub {
                 commands,
             },
             agent_service: self.root.agent_service.clone(),
-            environment_service: self.root.environment_service.clone(),
+            execution_service: self.root.execution_service.clone(),
             tasks: TaskService {
                 hub: Arc::new(Mutex::new(tasks::Hub::default())),
                 capacity: self.root.tasks.capacity.clone(),
@@ -437,7 +437,7 @@ mod tests {
         let (_, worker, request) = tasks::claim(&sa).unwrap().unwrap();
         let approval = pot_agent::permissions::Request {
             owner: ta.id.clone(),
-            environment: "host".into(),
+            execution_target: "host".into(),
             generation: agent::thread(&worker).unwrap().generation,
             turn: request.request_id,
             call_id: "isolated-approval".into(),
@@ -445,7 +445,7 @@ mod tests {
             args: json!({"cmd":"true","workdir":"/"}),
         };
         let approval_id = sa
-            .environment_service
+            .execution_service
             .permissions
             .join(
                 approval,
@@ -477,7 +477,7 @@ mod tests {
             .unwrap();
         assert!(
             tasks::claim(&sb).unwrap().is_none(),
-            "shared environment cannot be concurrently claimed across assistants"
+            "shared execution target cannot be concurrently claimed across assistants"
         );
         tasks::finish(&sa, &ta.id, Err(anyhow!("test finished"))).unwrap();
         assert!(tasks::claim(&sb).unwrap().is_some());

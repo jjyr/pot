@@ -25,7 +25,7 @@ fn main() -> Result<()> {
         pot_server::default_root()
     };
     let root = std::path::absolute(root)?;
-    // Configuration/environment is established before any async worker exists.
+    // Configuration/execution target is established before any async worker exists.
     unsafe {
         std::env::set_var("POT_LOCAL_ROOT", &root);
         std::env::set_var("POT_DATA_DIR", root.join("product"));

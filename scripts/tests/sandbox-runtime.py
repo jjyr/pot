@@ -196,7 +196,7 @@ def prompt(actions, worker=False):
         for action in actions:
             if action["name"] in {"exec_command", "write_stdin", "apply_patch"}:
                 action["args"].setdefault(
-                    "environment", "sandbox:" + action["args"].get("sandbox_id", "default")
+                    "execution_target", "sandbox:" + action["args"].get("sandbox_id", "default")
                 )
     return "PROBE:" + json.dumps({"actions": actions, "worker": worker})
 
@@ -423,7 +423,7 @@ async def run(args):
             assert (second / "pot.txt").read_text() == "POT_SECOND\n"
             assert (default / "os.txt").read_text().strip() == "Linux"
             assert not (root / "product/agent-workspace/pot.txt").exists()
-            report["pot_main_two_environments"] = True
+            report["pot_main_two_sandboxes"] = True
             await turn(
                 [
                     action(
@@ -647,7 +647,7 @@ SKILLS""",
                 raise AssertionError(info)
             assert (default / "tasks" / task2_id / "api-worker.txt").read_text() == "API_WORKER\n"
             report["api_profile_worker_loadout"] = True
-            # Exercise the real read-only summary before restoring main environment tools.
+            # Exercise the real read-only summary before restoring main execution tools.
             for _ in range(400):
                 if model.summary_requests and (await api("snapshot"))["turn"] is None:
                     break
@@ -720,7 +720,7 @@ SKILLS""",
                     break
                 await asyncio.sleep(0.05)
             else:
-                raise AssertionError("Worker did not resume in its assigned environment")
+                raise AssertionError("Worker did not resume in its assigned Sandbox")
             assert (
                 next(
                     t

@@ -197,7 +197,7 @@ actor Runtime {
                 metadata["image_bytes"] = manifest.layers.reduce(Int64(0)) { $0 + $1.size }
             }
             try JSONSerialization.data(withJSONObject: metadata).write(
-                to: workspace.appendingPathComponent("environment.json"),
+                to: workspace.appendingPathComponent("sandbox.json"),
                 options: .atomic
             )
             var creatingManager = manager!

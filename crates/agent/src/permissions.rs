@@ -159,7 +159,7 @@ fn validate_identity(owner: &str, scope: &Scope) -> Result<()> {
 #[serde(deny_unknown_fields)]
 pub struct Request {
     pub owner: String,
-    pub environment: String,
+    pub execution_target: String,
     pub generation: u64,
     pub turn: String,
     pub call_id: String,
@@ -177,7 +177,7 @@ pub async fn authorize(
     tool: &str,
     args: &Value,
 ) -> Result<()> {
-    let instructions = super::environment_tools::instructions_tool(tool);
+    let instructions = super::instruction_tools::instructions_tool(tool);
     let execution =
         is_execution_tool(tool) || thread.config.params.agent.plugin_for_tool(tool)?.is_some();
     let management = tool == "manage_sandbox";
@@ -198,14 +198,14 @@ pub async fn authorize(
     if !instructions && !context.feedback.owner_authorization_available()? {
         return Ok(());
     }
-    let environment = match args.get("environment") {
+    let execution_target = match args.get("execution_target") {
         Some(Value::String(s)) => s.clone(),
         Some(v) => format!("remote:{}", serde_json::to_string(v)?),
         None => String::new(),
     };
     let request = Request {
         owner: context.owner.clone(),
-        environment,
+        execution_target,
         generation: thread.generation,
         turn: turn.request_id.clone(),
         call_id: call_id.into(),

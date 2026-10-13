@@ -1,4 +1,4 @@
-//! Managed environment state and execution, independent of product orchestration.
+//! Managed Sandbox state and execution, independent of product orchestration.
 mod desktop;
 mod files;
 pub use desktop::{

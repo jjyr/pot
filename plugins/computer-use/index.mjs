@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import { inspect } from 'node:util';
 import { operation, close } from './browser.mjs';
 
-export function createPlugin({ mode, environment = "sandbox", emit }) {
+export function createPlugin({ mode, execution_target = "sandbox", emit }) {
   const vision = mode === 'mixed';
   let active, latest;
   let calls = [];
@@ -22,7 +22,7 @@ Use cua.getTab(tabId) to retrieve the current tab; cua.getState() observes it.
 Each browser operation automatically emits the fresh observation. Its return value is the parsed observation, so assign it to state. Element actions require the latest sequence. Variables (let/const/var) and top-level await persist across calls. Redeclaring a let/const binding fails; reuse or rename it.
 nodeRepl.write(value) emits text; console.log does the same. Unreturned values are not automatically printed. JS errors preserve the REPL and any completed page effects. reset=true with the existing session_id ends the entire REPL; timeout or cancellation invalidates it.
 ${vision ? 'Mixed mode returns a viewport screenshot with observations. tab.click also accepts {x,y,sequence} using the 1280x800 viewport.' : 'Text mode returns AX observations only. Coordinates and image emission are unavailable. Canvas/image-only content requires a vision-capable model.'}
-The REPL controls a separate headless Chromium in ${environment === "host" ? "Host" : "the Linux Sandbox"}. Native apps, existing browser profiles, full CDP access, arbitrary page evaluation, popups and multiple tabs are not exposed by this API.`;
+The REPL controls a separate headless Chromium in ${execution_target === "host" ? "Host" : "the Linux Sandbox"}. Native apps, existing browser profiles, full CDP access, arbitrary page evaluation, popups and multiple tabs are not exposed by this API.`;
   let rejectEvaluation;
   const r = repl.start({ input: new PassThrough(), output: new PassThrough(), terminal: false, prompt: '', useGlobal: false });
   // Node's default REPL evaluator reports runtime errors outside its eval callback.
@@ -45,7 +45,7 @@ The REPL controls a separate headless Chromium in ${environment === "host" ? "Ho
     if (['click', 'fill', 'press'].includes(action) && args.x === undefined && typeof args.element !== 'string') throw new Error('Observed element required');
     if (['click', 'fill', 'press', 'scroll'].includes(action) && args.sequence !== latest?.sequence) throw new Error('Use the latest observation sequence');
     let result;
-    try { result = await operation({ ...args, action, session_id: active, screenshot: vision, environment }); }
+    try { result = await operation({ ...args, action, session_id: active, screenshot: vision, execution_target }); }
     catch (error) { if (action === 'open') { await close(); active = undefined; latest = undefined; } throw error; }
     if (action === 'close') { active = undefined; latest = undefined; write({ closed: true }); return { closed: true }; }
     active = result.session_id;

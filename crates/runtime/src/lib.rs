@@ -73,10 +73,10 @@ impl Backend {
             control.enable_host();
         }
     }
-    pub fn environment_manager(&self) -> Option<Arc<Manager>> {
-        self.host.environment_manager()
+    pub fn sandbox_manager(&self) -> Option<Arc<Manager>> {
+        self.host.sandbox_manager()
     }
-    pub fn register_environment_providers(
+    pub fn register_sandbox_providers(
         &mut self,
         providers: Vec<Arc<dyn pot_sandbox::Provider>>,
     ) -> Result<Arc<Manager>> {

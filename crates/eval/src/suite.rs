@@ -307,7 +307,7 @@ pub async fn run_small_suite(
     };
     write_json(
         &directory.join("suite-manifest.json"),
-        &json!({"schema_version":1,"suite":"small-budget-v1","mode":mode,"trials":1,"limits":budget.snapshot(),"model":"deepseek-v4-flash","thinking":"off","environment":"local fixture; no VM sandbox","faults":"deterministic only","tree_policy":"directed, serial, depth=1, children=2","system_prompt":"Complete the task. Return only the requested output."}),
+        &json!({"schema_version":1,"suite":"small-budget-v1","mode":mode,"trials":1,"limits":budget.snapshot(),"model":"deepseek-v4-flash","thinking":"off","execution_target":"local fixture; no VM sandbox","faults":"deterministic only","tree_policy":"directed, serial, depth=1, children=2","system_prompt":"Complete the task. Return only the requested output."}),
     )?;
     let mut memory = memory_scenario();
     memory.responses = vec![text_response("ok"); 4];

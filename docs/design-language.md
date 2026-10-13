@@ -160,7 +160,7 @@ Retain global Ongoing / Needs attention / Archived counts, 20 items per page and
 
 ### Settings and first connection
 
-Use General / AI Configuration / Task Configuration / Work Environment, aligned with #7. General contains appearance and shortcuts. AI Configuration shows the main Agent/model first and saved connections below. Task Configuration groups concurrency and allowances. Work Environment contains Sandbox resources and lifecycle.
+Use General / AI Configuration / Task Configuration. General contains language, appearance and shortcuts. AI Configuration shows the main Agent/model first and saved connections below. Task Configuration groups concurrency and allowances. Machines shows Host and Sandbox status; technical Sandbox management belongs in Chat. There is no separate execution-location settings page.
 
 Use one compact provider grid and shared connection panel. Browser authorization progresses from Not connected to Waiting for authorization to verified account/model selection in the same panel. Keep Reopen browser / Cancel available while waiting. Unknown status is not Connected.
 

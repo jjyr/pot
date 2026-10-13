@@ -1,4 +1,4 @@
-//! Assistant-owned instructions. Execution environments never own this record.
+//! Assistant-owned instructions. Execution execution targets never own this record.
 use crate::*;
 use pot_assistant::instructions::load;
 
@@ -129,7 +129,7 @@ mod tests {
             initial["revision"].as_str().unwrap(),
         )
         .unwrap();
-        let project = root.environment_service.sandboxes.workspace("default");
+        let project = root.execution_service.sandboxes.workspace("default");
         let host_project = root.data.join("agent-workspace");
         std::fs::create_dir_all(&host_project).unwrap();
         std::fs::write(host_project.join("AGENTS.md"), "HOST_FIRST").unwrap();
@@ -186,7 +186,7 @@ mod tests {
     async fn host_project_instructions_remain_filesystem_based_without_sandboxes() {
         let mut root = tasks::tests::fixture();
         let empty = root.data.join("empty-inventory");
-        root.environment_service.sandboxes =
+        root.execution_service.sandboxes =
             Arc::new(crate::sandbox::Manager::empty(&empty, vec![]).unwrap());
         let rules = read(&root).unwrap();
         save(
@@ -221,8 +221,8 @@ mod tests {
         .unwrap()
         .0;
         assert!(matches!(
-            task.environment_ref.unwrap().target,
-            pot_core::EnvironmentTarget::Host {}
+            task.execution_target.unwrap().target,
+            pot_core::ExecutionTargetKind::Host {}
         ));
         let worker = tasks::owner(&root, &task.id).unwrap();
         std::fs::write(worker.workspace.join("AGENTS.md"), "HOST_TASK_PROJECT_FILE").unwrap();

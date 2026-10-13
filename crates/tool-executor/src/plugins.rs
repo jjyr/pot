@@ -14,7 +14,7 @@ struct Instance {
     directory: PathBuf,
     digest: String,
     mode: String,
-    environment: &'static str,
+    execution_target: &'static str,
     group: i32,
     touched: tokio::time::Instant,
     idle_ms: u64,
@@ -23,7 +23,7 @@ impl Instance {
     async fn start(
         bundle: &PluginBundle,
         mode: &str,
-        environment: &'static str,
+        execution_target: &'static str,
         idle_ms: u64,
     ) -> Result<Self> {
         let directory = std::env::temp_dir().join(format!("pot-plugin-{}", uuid::Uuid::new_v4()));
@@ -43,7 +43,7 @@ impl Instance {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::null())
                 .kill_on_drop(true);
-            if environment == "host" {
+            if execution_target == "host" {
                 command.env_clear();
                 for key in [
                     "PATH",
@@ -81,7 +81,7 @@ impl Instance {
             directory,
             digest: bundle.digest.clone(),
             mode: mode.into(),
-            environment,
+            execution_target,
             group,
             touched: tokio::time::Instant::now(),
             idle_ms,
@@ -93,7 +93,7 @@ impl Instance {
             .write_all(
                 format!(
                     "{}\n",
-                    json!({"tool":args["tool"],"input":args["input"],"mode":args["mode"],"environment":self.environment})
+                    json!({"tool":args["tool"],"input":args["input"],"mode":args["mode"],"execution_target":self.execution_target})
                 )
                 .as_bytes(),
             )
@@ -166,20 +166,20 @@ impl Drop for Instance {
 
 pub struct Plugins {
     instances: BTreeMap<String, Instance>,
-    environment: &'static str,
+    execution_target: &'static str,
 }
 impl Default for Plugins {
     fn default() -> Self {
         Self {
             instances: BTreeMap::new(),
-            environment: "sandbox",
+            execution_target: "sandbox",
         }
     }
 }
 impl Plugins {
     pub fn host() -> Self {
         Self {
-            environment: "host",
+            execution_target: "host",
             ..Self::default()
         }
     }
@@ -206,7 +206,7 @@ impl Plugins {
     pub async fn execute_with_idle(&mut self, args: &Value, idle_ms: u64) -> Result<Value> {
         let bundle = validate_call(args)?;
         ensure!(
-            self.environment != "host" || bundle.manifest.execution == "environment",
+            self.execution_target != "host" || bundle.manifest.supports_host(),
             "This plugin supports Sandbox execution only"
         );
         self.reap_idle().await?;
@@ -228,7 +228,7 @@ impl Plugins {
                 Instance::start(
                     &bundle,
                     args["mode"].as_str().unwrap(),
-                    self.environment,
+                    self.execution_target,
                     idle_ms,
                 )
                 .await?,
@@ -403,12 +403,25 @@ mod host_tests {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         runner.reap_idle().await.unwrap();
         assert!(runner.sessions().is_empty());
-        let mut legacy = bundle;
-        legacy.manifest.execution = "sandbox".into();
-        legacy.digest = legacy.hash().unwrap();
+        let mut unsupported = bundle.clone();
+        unsupported.manifest.execution = "environment".into();
+        unsupported.digest = unsupported.hash().unwrap();
         assert!(
             runner
-                .execute(&pot_core::plugins::call(legacy, "cua_repl", json!({}), false).unwrap())
+                .execute(
+                    &pot_core::plugins::call(unsupported, "cua_repl", json!({}), false).unwrap()
+                )
+                .await
+                .is_err()
+        );
+        let mut sandbox_only = bundle;
+        sandbox_only.manifest.execution = "sandbox".into();
+        sandbox_only.digest = sandbox_only.hash().unwrap();
+        assert!(
+            runner
+                .execute(
+                    &pot_core::plugins::call(sandbox_only, "cua_repl", json!({}), false).unwrap()
+                )
                 .await
                 .is_err()
         );

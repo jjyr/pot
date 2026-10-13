@@ -1,7 +1,7 @@
 //! Caller journal and runtime port; effects are never retried automatically.
 use super::*;
 use futures_util::future::BoxFuture;
-use pot_control::remote_environment::{RemoteBinding, RemoteEnvironment};
+use pot_control::remote_execution::{RemoteBinding, RemoteExecution};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct ClientRun {
@@ -45,7 +45,7 @@ impl Authority {
             .ok_or_else(|| anyhow::anyhow!("Remote run has not been opened"))
     }
     pub(super) async fn ensure_run(&self, binding: &RemoteBinding) -> Result<ClientRun> {
-        self.validate(&binding.environment)?;
+        self.validate(&binding.execution_target)?;
         let key = run_key(binding)?;
         // Do not replace an unsettled older run, including after caller restart.
         let previous = self
@@ -56,7 +56,7 @@ impl Authority {
             .values()
             .filter(|r| {
                 r.binding.owner == binding.owner
-                    && r.binding.environment == binding.environment
+                    && r.binding.execution_target == binding.execution_target
                     && r.binding != *binding
             })
             .cloned()
@@ -65,7 +65,7 @@ impl Authority {
             if old.task_launch.is_some() && old.task_result.is_none() {
                 let receipt = self
                     .call(
-                        &old.binding.environment.runtime_id,
+                        &old.binding.execution_target.runtime_id,
                         Rpc::InspectTask {
                             task_id: old.binding.owner.clone(),
                             run_id: old.binding.run_id.clone(),
@@ -93,7 +93,7 @@ impl Authority {
                     })?;
                     let receipt = self
                         .call(
-                            &old.binding.environment.runtime_id,
+                            &old.binding.execution_target.runtime_id,
                             Rpc::Inspect {
                                 lease_id: lease.clone(),
                                 call_id: call.clone(),
@@ -107,7 +107,7 @@ impl Authority {
                 }
             }
             if !old.cancelled {
-                RemoteEnvironment::cancel(self, old.binding).await?;
+                RemoteExecution::cancel(self, old.binding).await?;
             }
         }
         self.update(|book| {
@@ -137,7 +137,7 @@ impl Authority {
         if run.lease_id.is_none() {
             let lease = self
                 .call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::Acquire {
                         owner: binding.owner.clone(),
                         run_id: if run.attempt == 0 {
@@ -146,7 +146,7 @@ impl Authority {
                             attempt_id(&binding.run_id, run.attempt)?
                         },
                         generation: binding.generation,
-                        target: binding.environment.target.clone(),
+                        target: binding.execution_target.target.clone(),
                     },
                 )
                 .await?;
@@ -206,7 +206,7 @@ impl Authority {
             );
             match self
                 .call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::Inspect {
                         lease_id: lease.into(),
                         call_id: call.into(),
@@ -225,7 +225,7 @@ fn attempt_id(run: &str, attempt: u64) -> Result<String> {
     let hash = ring::digest::digest(&ring::digest::SHA256, &serde_json::to_vec(&(run, attempt))?);
     Ok(uuid::Uuid::from_bytes(hash.as_ref()[..16].try_into().unwrap()).to_string())
 }
-impl RemoteEnvironment for Authority {
+impl RemoteExecution for Authority {
     fn machine_epoch(&self, machine: &str) -> Result<String> {
         let book = self.book.lock().unwrap();
         let member = book
@@ -266,13 +266,13 @@ impl RemoteEnvironment for Authority {
                 owner: launch.task_id.clone(),
                 run_id: launch.run_id.clone(),
                 generation: launch.generation,
-                environment: launch.environment.clone(),
+                execution_target: launch.execution_target.clone(),
             };
             if let Ok(run) = self.client_run(&binding)
                 && let Some(result) = run.task_result
             {
                 while !self.client_run(&binding)?.cancelled {
-                    if RemoteEnvironment::cancel(self, binding.clone())
+                    if RemoteExecution::cancel(self, binding.clone())
                         .await
                         .is_err()
                     {
@@ -310,7 +310,7 @@ impl RemoteEnvironment for Authority {
             let fresh = run.task_launch.is_none();
             if fresh {
                 loop {
-                    match RemoteEnvironment::install_resources(
+                    match RemoteExecution::install_resources(
                         self,
                         binding.clone(),
                         launch.resources.clone(),
@@ -345,7 +345,7 @@ impl RemoteEnvironment for Authority {
                     Ok(())
                 })?;
             }
-            let remote = &binding.environment.runtime_id;
+            let remote = &binding.execution_target.runtime_id;
             let mut receipt = if fresh {
                 self.call(
                     remote,
@@ -382,7 +382,7 @@ impl RemoteEnvironment for Authority {
                         Ok(())
                     })?;
                     while !self.client_run(&binding)?.cancelled {
-                        if RemoteEnvironment::cancel(self, binding.clone())
+                        if RemoteExecution::cancel(self, binding.clone())
                             .await
                             .is_err()
                         {
@@ -406,7 +406,7 @@ impl RemoteEnvironment for Authority {
                     )?;
                 }
                 if cancelled() {
-                    RemoteEnvironment::cancel(self, binding.clone()).await?;
+                    RemoteExecution::cancel(self, binding.clone()).await?;
                 }
                 if receipt.is_none() {
                     self.waiting(
@@ -414,7 +414,7 @@ impl RemoteEnvironment for Authority {
                         Some("等待远程 Task Agent 原 run 回执；不会重新启动"),
                     )?;
                 }
-                let _ = RemoteEnvironment::renew(self, binding.clone()).await;
+                let _ = RemoteExecution::renew(self, binding.clone()).await;
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                 receipt = self
                     .call(
@@ -443,12 +443,12 @@ impl RemoteEnvironment for Authority {
     }
     fn read_file(
         &self,
-        environment: EnvironmentRef,
+        execution_target: ExecutionTarget,
         owner: String,
         query: pot_protocol::FileQuery,
     ) -> BoxFuture<'_, Result<pot_protocol::FileChunk>> {
         Box::pin(async move {
-            self.validate(&environment)?;
+            self.validate(&execution_target)?;
             uuid::Uuid::parse_str(&owner)?;
             anyhow::ensure!(
                 pot_protocol::valid_file_path(&query.path),
@@ -456,10 +456,10 @@ impl RemoteEnvironment for Authority {
             );
             let result = self
                 .call(
-                    &environment.runtime_id,
+                    &execution_target.runtime_id,
                     Rpc::ReadFile {
                         owner,
-                        target: environment.target,
+                        target: execution_target.target,
                         query,
                     },
                 )
@@ -471,8 +471,8 @@ impl RemoteEnvironment for Authority {
     fn ready_owner(&self, owner: String) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { self.reconcile_management(&owner).await })
     }
-    fn validate_management(&self, environment: &EnvironmentRef) -> Result<()> {
-        self.validate_management_target(environment)
+    fn validate_management(&self, execution_target: &ExecutionTarget) -> Result<()> {
+        self.validate_management_target(execution_target)
     }
     fn manage(
         &self,
@@ -502,12 +502,12 @@ impl RemoteEnvironment for Authority {
             .filter(|run| run.binding.owner == owner && !run.cancelled)
             .find_map(|run| run.waiting_reason.clone())
     }
-    fn validate(&self, environment: &EnvironmentRef) -> Result<()> {
-        environment.validate()?;
+    fn validate(&self, execution_target: &ExecutionTarget) -> Result<()> {
+        execution_target.validate()?;
         let book = self.book.lock().unwrap();
         let remote = book
             .members
-            .get(&environment.runtime_id)
+            .get(&execution_target.runtime_id)
             .filter(|p| p.enabled)
             .ok_or_else(|| anyhow::anyhow!("Remote machine is not connected"))?;
         ensure!(
@@ -515,8 +515,8 @@ impl RemoteEnvironment for Authority {
                 .as_array()
                 .is_some_and(|items| items
                     .iter()
-                    .any(|item| item["environment_ref"] == json!(environment))),
-            "Remote Environment is not in the Control machine inventory"
+                    .any(|item| item["execution_target"] == json!(execution_target))),
+            "Remote Execution target is not in the Control machine inventory"
         );
         Ok(())
     }
@@ -525,7 +525,7 @@ impl RemoteEnvironment for Authority {
             let machines = self.machines().await;
             let mut items = vec![];
             for machine in machines {
-                for mut item in machine["environments"]
+                for mut item in machine["execution_targets"]
                     .as_array()
                     .cloned()
                     .unwrap_or_default()
@@ -548,7 +548,7 @@ impl RemoteEnvironment for Authority {
             let run = self.ensure_run(&binding).await?;
             let response = self
                 .call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::Resources {
                         lease_id: run
                             .lease_id
@@ -628,7 +628,7 @@ impl RemoteEnvironment for Authority {
             };
             let context = self
                 .call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::Context {
                         lease_id: run.lease_id.unwrap(),
                     },
@@ -663,7 +663,7 @@ impl RemoteEnvironment for Authority {
         Box::pin(async move {
             let run = self.ensure_run(&binding).await?;
             self.call(
-                &binding.environment.runtime_id,
+                &binding.execution_target.runtime_id,
                 Rpc::Prepare {
                     lease_id: run.lease_id.unwrap(),
                     name,
@@ -685,7 +685,7 @@ impl RemoteEnvironment for Authority {
                 .ok_or_else(|| anyhow::anyhow!("Remote lease acceptance unconfirmed"))?;
             if self
                 .call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::Renew {
                         lease_id: lease.clone(),
                     },
@@ -711,7 +711,7 @@ impl RemoteEnvironment for Authority {
                 }
                 let next = self
                     .call(
-                        &binding.environment.runtime_id,
+                        &binding.execution_target.runtime_id,
                         Rpc::RecoverTaskLease { lease_id: lease },
                     )
                     .await?;
@@ -737,7 +737,7 @@ impl RemoteEnvironment for Authority {
                 if operation.result.is_none() {
                     let receipt = match self
                         .call(
-                            &binding.environment.runtime_id,
+                            &binding.execution_target.runtime_id,
                             Rpc::Inspect {
                                 lease_id: run.lease_id.clone().unwrap(),
                                 call_id: call.clone(),
@@ -761,7 +761,7 @@ impl RemoteEnvironment for Authority {
                     );
                 }
             }
-            if let Err(error) = RemoteEnvironment::renew(self, binding.clone()).await {
+            if let Err(error) = RemoteExecution::renew(self, binding.clone()).await {
                 self.waiting(
                     &binding,
                     Some("等待远程连接或租约核对；已过期的租约不会自动替换，可取消任务"),
@@ -811,7 +811,7 @@ impl RemoteEnvironment for Authority {
                     Ok(())
                 })?;
             }
-            let remote = &binding.environment.runtime_id;
+            let remote = &binding.execution_target.runtime_id;
             let mut receipt = if previous.is_none() {
                 // An uncertain send is followed only by inspect, never by another execute.
                 match self
@@ -850,10 +850,7 @@ impl RemoteEnvironment for Authority {
                     }
                 }
                 if renewed.elapsed() >= std::time::Duration::from_secs(5) {
-                    if RemoteEnvironment::renew(self, binding.clone())
-                        .await
-                        .is_err()
-                    {
+                    if RemoteExecution::renew(self, binding.clone()).await.is_err() {
                         self.waiting(&binding, Some("远程租约无法续期，等待核对原操作；不会重放"))?;
                     }
                     renewed = std::time::Instant::now();
@@ -882,7 +879,7 @@ impl RemoteEnvironment for Authority {
             }
             if let Some(lease) = run.lease_id {
                 self.call(
-                    &binding.environment.runtime_id,
+                    &binding.execution_target.runtime_id,
                     Rpc::Cancel { lease_id: lease },
                 )
                 .await?;
@@ -962,7 +959,7 @@ mod tests {
             owner: "offline-owner".into(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
-            environment: EnvironmentRef::host(&target.control.identity.runtime_id),
+            execution_target: ExecutionTarget::host(&target.control.identity.runtime_id),
         };
         let context = caller.control.open(binding.clone()).await.unwrap();
         let workspace = PathBuf::from(context["workspace"].as_str().unwrap());
@@ -1011,7 +1008,7 @@ mod tests {
         );
         caller.control.ready(binding.clone()).await.unwrap();
         // Cancel fences the old lease; re-open uses a distinct attempt after reconciliation.
-        RemoteEnvironment::cancel(&*caller.control, binding.clone())
+        RemoteExecution::cancel(&*caller.control, binding.clone())
             .await
             .unwrap();
         let reopened = caller.control.open(binding.clone()).await.unwrap();
@@ -1032,7 +1029,7 @@ mod tests {
             std::fs::read_to_string(workspace.join("once.txt")).unwrap(),
             "X"
         );
-        RemoteEnvironment::cancel(&*caller.control, binding)
+        RemoteExecution::cancel(&*caller.control, binding)
             .await
             .unwrap();
         for node in [caller, target] {
@@ -1050,7 +1047,7 @@ mod tests {
             owner: "task-owner".into(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
-            environment: EnvironmentRef::host(&uuid::Uuid::new_v4().to_string()),
+            execution_target: ExecutionTarget::host(&uuid::Uuid::new_v4().to_string()),
         };
         let key = run_key(&binding).unwrap();
         authority
@@ -1076,7 +1073,7 @@ mod tests {
             })
             .unwrap();
         assert!(
-            RemoteEnvironment::cancel(&*authority, binding.clone())
+            RemoteExecution::cancel(&*authority, binding.clone())
                 .await
                 .is_err()
         );
@@ -1087,7 +1084,7 @@ mod tests {
         let restored = Authority::open(&path, &id).unwrap();
         assert!(restored.client_run(&binding).unwrap().cancel_requested);
         assert!(
-            RemoteEnvironment::renew(&*restored, binding)
+            RemoteExecution::renew(&*restored, binding)
                 .await
                 .unwrap_err()
                 .to_string()

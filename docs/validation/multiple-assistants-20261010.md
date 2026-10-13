@@ -14,7 +14,7 @@ No production conversation, model credentials or VM were used.
   and packaged with wasm-bindgen 0.2.129; compressed assets were regenerated.
 - Independent owners preserve context/configuration/rules after restart.
   Actual task creation and claiming tests reject foreign task control, scope
-  approvals to the assistant and its workers, and serialize shared Environment
+  approvals to the assistant and its workers, and serialize shared Execution target
   occupancy across assistants. Foreign approval inspection must not cancel an
   unrelated owner's pending request.
 - Rules edits compare definition/file revisions; stale saves fail. Explicit
@@ -46,10 +46,10 @@ Native App source compiled and navigation/client safety tests passed; physical
 native interaction was not exercised. Real model chat/worker execution and real
 VM startup were not requalified in this phase. Remote adapter origin/reply
 validation is a client foundation; peer enrollment, identity pinning, grants and
-remote Environment execution remain P3.
+remote Execution target execution remain P3.
 
 Assistant Profile/provider configuration is copied initially and then stored
-independently. Environment inventory, Runtime-wide capacity, permissions policy
+independently. Execution target inventory, Runtime-wide capacity, permissions policy
 and usage ledger are shared. Rules files include Runtime identity in their path.
 Authorization storage has since moved to each Control data directory; see the
 current [machine permission contract](../permissions.md).

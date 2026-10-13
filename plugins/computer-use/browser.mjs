@@ -31,7 +31,7 @@ async function close() {
   pending.clear(); nodes.clear(); session = undefined; ownerSession = undefined;
   if (profile) { await rm(profile, { recursive: true, force: true }); profile = undefined; }
 }
-async function open(environment) {
+async function open(execution_target) {
   profile = await mkdtemp(join(tmpdir(), 'pot-browser-'));
   const executable = process.env.POT_BROWSER_EXECUTABLE || [
     '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
@@ -39,9 +39,9 @@ async function open(environment) {
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   ].find(path => existsSync(path));
-  if (!executable) throw new Error('Chromium/Chrome unavailable in this execution environment; install it or configure POT_BROWSER_EXECUTABLE');
+  if (!executable) throw new Error('Chromium/Chrome unavailable in this execution target; install it or configure POT_BROWSER_EXECUTABLE');
   chrome = spawn(executable, [
-    '--headless=new', ...(environment === 'host' ? [] : ['--no-sandbox']), '--disable-dev-shm-usage', '--no-first-run',
+    '--headless=new', ...(execution_target === 'host' ? [] : ['--no-sandbox']), '--disable-dev-shm-usage', '--no-first-run',
     '--disable-background-networking', '--disable-sync', '--remote-debugging-pipe',
     `--user-data-dir=${profile}`, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
@@ -93,7 +93,7 @@ async function operation(args) {
   const action = args.action;
   if (action === 'open') {
     if (ownerSession) throw new Error('Browser already open; use its session_id or close it');
-    await open(args.environment);
+    await open(args.execution_target);
   } else if (!ownerSession || args.session_id !== ownerSession) throw new Error('Browser session expired or foreign');
   if (action === 'close') { await close(); return { closed: true }; }
   if (action === 'navigate' || (action === 'open' && args.url)) {

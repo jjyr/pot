@@ -21,6 +21,8 @@ is the single phase progress table.
 
 ## Evidence
 
+[Execution target terminology and binding validation](validation/execution-targets-20261013.md).
+
 [Machine capability permissions](validation/machine-permissions-20261012.md).
 
 [Embedded Web assets and compression](validation/embedded-web-assets-20261012.md).

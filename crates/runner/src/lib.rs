@@ -1,6 +1,6 @@
 //! Destination-owned Task Agent runs. No assistant store or local global catalog.
 use anyhow::{Result, anyhow, ensure};
-use pot_core::{EnvironmentRef, Outcome, ResolvedSpec};
+use pot_core::{ExecutionTarget, Outcome, ResolvedSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -23,7 +23,7 @@ pub struct Launch {
     pub task_id: String,
     pub run_id: String,
     pub generation: u64,
-    pub environment: EnvironmentRef,
+    pub execution_target: ExecutionTarget,
     pub config: ResolvedSpec,
     pub resources: crate::resources::GlobalResources,
     pub skills: Option<Vec<String>>,
@@ -35,17 +35,17 @@ impl Launch {
         uuid::Uuid::parse_str(control)?;
         Ok(
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(
-                serde_json::to_vec(&(control, &self.task_id, &self.environment.target))?,
+                serde_json::to_vec(&(control, &self.task_id, &self.execution_target.target))?,
             )),
         )
     }
     pub fn validate(&self, runtime_id: &str) -> Result<()> {
         uuid::Uuid::parse_str(&self.task_id)?;
         uuid::Uuid::parse_str(&self.run_id)?;
-        self.environment.validate()?;
+        self.execution_target.validate()?;
         ensure!(
-            self.environment.is_local_to(runtime_id),
-            "Task Agent and Environment must belong to the destination Runtime"
+            self.execution_target.is_local_to(runtime_id),
+            "Task Agent and Execution target must belong to the destination Runtime"
         );
         ensure!(
             self.generation > 0 && !self.text.trim().is_empty() && self.text.len() <= 256 * 1024,
@@ -230,7 +230,7 @@ impl Journal {
             .filter(|r| {
                 r.result.is_some()
                     && r.launch.generation == launch.generation
-                    && r.launch.environment == launch.environment
+                    && r.launch.execution_target == launch.execution_target
                     && serde_json::to_value(&r.launch.config).ok()
                         == serde_json::to_value(&launch.config).ok()
                     && r.launch.resources.revision().ok() == launch.resources.revision().ok()
@@ -371,3 +371,72 @@ impl std::fmt::Display for Interrupted {
     }
 }
 impl std::error::Error for Interrupted {}
+
+#[cfg(test)]
+mod target_storage_tests {
+    use super::*;
+    struct Config;
+    impl pot_core::ProfileConfig for Config {
+        fn model(&self) -> &str {
+            "fixture"
+        }
+        fn max_tokens(&self) -> u64 {
+            4096
+        }
+    }
+    #[test]
+    fn journal_rejects_old_fields_and_mismatched_checksums() {
+        let id = || uuid::Uuid::new_v4().to_string();
+        let runtime = id();
+        let control = id();
+        let data = std::env::temp_dir().join(format!("pot-target-storage-{}", id()));
+        let config = pot_core::Profile::api(&Config).resolve().unwrap();
+        let vision = config
+            .params
+            .agent
+            .model_descriptor(&config.provider, &config.model)
+            .unwrap()
+            .vision();
+        let launch = Launch {
+            task_id: id(),
+            run_id: id(),
+            generation: 1,
+            execution_target: ExecutionTarget::host(&runtime),
+            resources: resources::GlobalResources {
+                plugins: config.params.agent.plugins.clone(),
+                shell: config.params.agent.shell.clone(),
+                vision,
+                ..Default::default()
+            },
+            config,
+            skills: None,
+            text: "produce a result".into(),
+        };
+        let journal = Journal::open(&data, &runtime, &id()).unwrap();
+        journal.accept(&control, launch.clone()).unwrap();
+        let old = serde_json::to_string(&launch).unwrap().replacen(
+            "\"execution_target\":",
+            "\"environment\":",
+            1,
+        );
+        let digest: String = Sha256::digest(old.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_ne!(launch.digest().unwrap(), digest);
+        let path = data.join("task-agent-runs").join(format!(
+            "{}.json",
+            Journal::key(&control, &launch.task_id, &launch.run_id).unwrap()
+        ));
+        let mut record: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        record["launch"] = serde_json::from_str(&old).unwrap();
+        record["launch_digest"] = Value::String(digest.clone());
+        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        drop(journal);
+        assert!(Journal::open(&data, &runtime, &id()).is_err());
+        record["launch"] = serde_json::to_value(&launch).unwrap();
+        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        assert!(Journal::open(&data, &runtime, &id()).is_err());
+        std::fs::remove_dir_all(data).unwrap();
+    }
+}

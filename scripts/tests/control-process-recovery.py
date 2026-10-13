@@ -372,7 +372,7 @@ def qualify(args):
             {
                 "request_id": "control-crash-task",
                 "text": "Execute once",
-                "environment_ref": binding,
+                "execution_target": binding,
             },
         )
 
@@ -411,7 +411,7 @@ def qualify(args):
             {
                 "request_id": "execution-crash-task",
                 "text": "Execute once on second task",
-                "environment_ref": binding,
+                "execution_target": binding,
             },
         )
         cards = wait_for(lambda: api("/api/v1/permissions")["requests"])
@@ -461,7 +461,7 @@ def qualify(args):
             print("PASS finished cross-machine task file read through Control", flush=True)
             guided = api(
                 "/api/v1/tasks",
-                {"request_id": "guided-task", "text": "GUIDE_CASE", "environment_ref": binding},
+                {"request_id": "guided-task", "text": "GUIDE_CASE", "execution_target": binding},
             )
             wait_for(lambda: api("/api/v1/permissions")["requests"])
             snapshot = api(f"/api/v1/tasks/{guided['id']}")
@@ -484,7 +484,11 @@ def qualify(args):
             print("PASS live guidance fetched/acknowledged once at destination", flush=True)
             cancelled = api(
                 "/api/v1/tasks",
-                {"request_id": "cancelled-task", "text": "CANCEL_CASE", "environment_ref": binding},
+                {
+                    "request_id": "cancelled-task",
+                    "text": "CANCEL_CASE",
+                    "execution_target": binding,
+                },
             )
             wait_for(lambda: api("/api/v1/permissions")["requests"])
             before = control.call("stats")["count"]
@@ -516,7 +520,7 @@ def qualify(args):
             print("PASS offline cancellation settles without executing pending command", flush=True)
             pinned = api(
                 "/api/v1/tasks",
-                {"request_id": "plugin-task", "text": "PLUGIN_CASE", "environment_ref": binding},
+                {"request_id": "plugin-task", "text": "PLUGIN_CASE", "execution_target": binding},
             )
 
             def plugin_done():
@@ -551,7 +555,7 @@ def qualify(args):
                         "kind": "interval",
                         "every_minutes": 60,
                         "enabled": False,
-                        "environment_ref": binding,
+                        "execution_target": binding,
                     },
                 },
             )
@@ -575,13 +579,13 @@ def qualify(args):
 
             wait_for(schedule_done)
             detail = api(f"/api/v1/schedules?selected={schedule['id']}")
-            assert detail["selected"]["spec"]["environment_ref"] == binding
+            assert detail["selected"]["spec"]["execution_target"] == binding
             assert detail["selected"]["baseline"] == "remote-stable", detail
             assert len(detail["runs"]) == 1
             assert detail["runs"][0]["changed"] is True
             assert "Verified remote schedule" in detail["runs"][0]["summary"]
             print(
-                "PASS remote schedule fixes environment, deduplicates trigger, reads destination result",
+                "PASS remote schedule fixes execution_target, deduplicates trigger, reads destination result",
                 flush=True,
             )
             stats = control.call("stats")

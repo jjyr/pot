@@ -92,17 +92,17 @@ pub(crate) async fn task_chunk(
     query: &FileQuery,
 ) -> Result<FileChunk> {
     let task = tasks::control_service(root, task_id).map_err(|e| anyhow!(e.1.0.message))?;
-    let environment = task
-        .environment_ref
+    let execution_target = task
+        .execution_target
         .as_ref()
-        .ok_or_else(|| anyhow!("Task has no environment"))?;
-    if environment.is_local_to(&root.runtime_id) {
+        .ok_or_else(|| anyhow!("Task has no execution target"))?;
+    if execution_target.is_local_to(&root.runtime_id) {
         let workspace = task.workspace.clone();
         let query = query.clone();
         tokio::task::spawn_blocking(move || read_chunk(&workspace, &query)).await?
     } else {
-        crate::remote_environment::port(root)?
-            .read_file(environment.clone(), task_id.into(), query.clone())
+        crate::remote_execution::port(root)?
+            .read_file(execution_target.clone(), task_id.into(), query.clone())
             .await
     }
 }

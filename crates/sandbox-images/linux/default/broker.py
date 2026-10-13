@@ -13,7 +13,7 @@ state = {
     "owner": "none",
     "phase": "disconnected",
     "epoch": 0,
-    "environment": "local-swift-vm" if LOCAL else "remote-docker-p2",
+    "execution_target": "local-swift-vm" if LOCAL else "remote-docker-p2",
     "observed": None,
 }
 lock = None
@@ -121,8 +121,8 @@ async def metrics(request):
         storage_cache["at"] = time.monotonic()
         storage_cache["bytes"] = await asyncio.to_thread(workspace_size)
     metadata = (
-        json.loads((ROOT / "environment.json").read_text())
-        if (ROOT / "environment.json").exists()
+        json.loads((ROOT / "execution_target.json").read_text())
+        if (ROOT / "execution_target.json").exists()
         else {}
     )
     if os.environ.get("POT_CONTAINER") == "podman":

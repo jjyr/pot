@@ -1,4 +1,4 @@
-//! Assistant-owned instructions persisted in SQLite; never environment files.
+//! Assistant-owned instructions persisted in SQLite; never execution target files.
 use anyhow::Result;
 use pot_storage::{Store, id};
 use serde::{Deserialize, Serialize};

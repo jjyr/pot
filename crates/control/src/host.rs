@@ -37,20 +37,17 @@ pub struct Host {
     stop: tokio::sync::watch::Sender<bool>,
     sandboxes: Option<Arc<sandbox::Manager>>,
     host_operations: Arc<tokio::sync::Mutex<()>>,
-    pub(crate) host_environment: Option<Arc<environment::HostEnvironment>>,
+    pub(crate) host_execution: Option<Arc<execution_target::HostExecution>>,
 }
 impl Host {
     pub fn enable_execution(&mut self) {
         self.host_enabled = true;
-        if self.host_environment.is_none() {
-            self.attach_host_environment();
+        if self.host_execution.is_none() {
+            self.attach_host_execution();
         }
     }
     pub fn advertise_control(&mut self) {
         self.resource_capabilities(true);
-    }
-    pub fn environment_manager(&self) -> Option<Arc<sandbox::Manager>> {
-        self.sandbox_manager()
     }
     pub fn register_providers(
         &mut self,
@@ -118,16 +115,16 @@ impl Host {
             stop: tokio::sync::watch::channel(false).0,
             sandboxes: None,
             host_operations: Arc::new(tokio::sync::Mutex::new(())),
-            host_environment: None,
+            host_execution: None,
         })
     }
-    pub(crate) fn attach_host_environment(&mut self) {
-        self.host_environment = Some(Arc::new(environment::HostEnvironment::default()));
+    pub(crate) fn attach_host_execution(&mut self) {
+        self.host_execution = Some(Arc::new(execution_target::HostExecution::default()));
     }
     pub(crate) fn attach_sandboxes(&mut self, manager: Arc<sandbox::Manager>) {
         self.sandboxes = Some(manager);
     }
-    pub(crate) fn sandbox_manager(&self) -> Option<Arc<sandbox::Manager>> {
+    pub fn sandbox_manager(&self) -> Option<Arc<sandbox::Manager>> {
         self.sandboxes.clone()
     }
     pub(crate) fn resource_capabilities(&mut self, assistant: bool) {
@@ -201,10 +198,13 @@ impl Host {
         let mut routes = Router::new().route("/api/v1/runtime", get(describe));
         if !self.assistant_enabled && (self.host_enabled || self.sandboxes.is_some()) {
             routes = routes
-                .route("/api/v1/environments", get(environment_inventory))
+                .route("/api/v1/execution_targets", get(execution_target_inventory))
                 .route("/api/v1/execution", post(execute))
-                .route("/api/v1/environment/cancel", post(cancel))
-                .route("/api/v1/environment/operations", get(host_execution::query));
+                .route("/api/v1/execution_target/cancel", post(cancel))
+                .route(
+                    "/api/v1/execution_target/operations",
+                    get(host_execution::query),
+                );
         }
         if !self.assistant_enabled && self.sandboxes.is_some() {
             routes = routes
@@ -223,11 +223,11 @@ impl Host {
                 .await
                 .map_err(anyhow::Error::from)
                 .and_then(|result| result);
-        if let Some(host) = &self.host_environment {
+        if let Some(host) = &self.host_execution {
             host.shutdown_host().await?;
         }
-        if let Some(environment) = &self.sandboxes {
-            environment.shutdown().await?;
+        if let Some(execution_target) = &self.sandboxes {
+            execution_target.shutdown().await?;
         }
         agents
     }
@@ -251,18 +251,21 @@ async fn inventory(State(host): State<Host>, h: HeaderMap) -> ApiResult<Json<Val
     host.authorize(&h)?;
     Ok(Json(host.sandboxes()?.inventory().await))
 }
-async fn environment_inventory(State(host): State<Host>, h: HeaderMap) -> ApiResult<Json<Value>> {
+async fn execution_target_inventory(
+    State(host): State<Host>,
+    h: HeaderMap,
+) -> ApiResult<Json<Value>> {
     host.authorize(&h)?;
     let mut items = vec![];
-    if host.host_enabled && host.host_environment.is_some() {
-        items.push(json!({"environment_ref":pot_core::EnvironmentRef::host(&host.runtime_id),"kind":"host","management":false,"workspace":host.data.join("host-runs"),"execution_authority":"native_operator"}));
+    if host.host_enabled && host.host_execution.is_some() {
+        items.push(json!({"execution_target":pot_core::ExecutionTarget::host(&host.runtime_id),"kind":"host","management":false,"workspace":host.data.join("host-runs"),"execution_authority":"native_operator"}));
     }
     if let Some(manager) = &host.sandboxes {
         let inventory = manager.inventory().await;
         for mut item in inventory["items"].as_array().cloned().unwrap_or_default() {
             let target = item["id"].as_str().unwrap_or("");
-            item["environment_ref"] =
-                json!(pot_core::EnvironmentRef::sandbox(&host.runtime_id, target));
+            item["execution_target"] =
+                json!(pot_core::ExecutionTarget::sandbox(&host.runtime_id, target));
             items.push(item);
         }
     }
@@ -297,7 +300,7 @@ async fn manage(
         .map_err(|e| {
             error(
                 StatusCode::CONFLICT,
-                "environment_management",
+                "execution_target_management",
                 &e.to_string(),
             )
         })?;
@@ -351,7 +354,7 @@ struct Operation {
     #[serde(default)]
     sandbox_id: String,
     #[serde(default)]
-    environment_ref: Option<pot_core::EnvironmentRef>,
+    execution_target: Option<pot_core::ExecutionTarget>,
     name: String,
     args: Value,
 }
@@ -379,21 +382,21 @@ async fn execute(
         return Err(error(
             StatusCode::BAD_REQUEST,
             "operation",
-            "Unsupported Environment operation",
+            "Unsupported Execution target operation",
         ));
     }
-    if let Some(reference) = &request.environment_ref {
+    if let Some(reference) = &request.execution_target {
         reference
             .validate()
-            .map_err(|e| error(StatusCode::BAD_REQUEST, "environment", &e.to_string()))?;
+            .map_err(|e| error(StatusCode::BAD_REQUEST, "execution_target", &e.to_string()))?;
         if !reference.is_local_to(&host.runtime_id) || !request.sandbox_id.is_empty() {
             return Err(error(
                 StatusCode::BAD_REQUEST,
-                "environment",
-                "Conflicting or nonlocal Environment target",
+                "execution_target",
+                "Conflicting or nonlocal Execution target target",
             ));
         }
-        if matches!(reference.target, pot_core::EnvironmentTarget::Host {}) {
+        if matches!(reference.target, pot_core::ExecutionTargetKind::Host {}) {
             return host_execution::execute(&host, request)
                 .await
                 .map(Json)
@@ -401,10 +404,10 @@ async fn execute(
         }
     }
     let sandbox_id = request
-        .environment_ref
+        .execution_target
         .as_ref()
         .and_then(|reference| match &reference.target {
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => Some(sandbox_id.as_str()),
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => Some(sandbox_id.as_str()),
             _ => None,
         })
         .unwrap_or(&request.sandbox_id);
@@ -420,7 +423,7 @@ async fn execute(
     let owner = format!("operator:{}", request.run_id);
     let cancellation_path = host
         .data
-        .join("environment-cancellations")
+        .join("execution-target-cancellations")
         .join(&request.run_id);
     let cancelled = || *host.stop.borrow() || cancellation_path.exists();
     if cancelled() {
@@ -430,7 +433,7 @@ async fn execute(
             "Run has been cancelled",
         ));
     }
-    pot_core::environment_tools::validate(&request.name, &request.args)
+    pot_core::execution_tools::validate(&request.name, &request.args)
         .map_err(|e| error(StatusCode::BAD_REQUEST, "operation", &e.to_string()))?;
     if request.name != "write_stdin" {
         manager
@@ -455,7 +458,7 @@ async fn execute(
         .map_err(|e| {
             error(
                 StatusCode::CONFLICT,
-                "environment_execution",
+                "execution_target_execution",
                 &e.to_string(),
             )
         })?;
@@ -480,14 +483,14 @@ async fn cancel(
         )
     })?;
     let owner = format!("operator:{}", request.run_id);
-    let directory = host.data.join("environment-cancellations");
+    let directory = host.data.join("execution-target-cancellations");
     std::fs::create_dir_all(&directory).map_err(|e| internal(e.into()))?;
     execution::private_json(
         &directory.join(&request.run_id),
         &json!({"run_id":request.run_id,"cancel_requested":true}),
     )
     .map_err(internal)?;
-    if let Some(executor) = &host.host_environment {
+    if let Some(executor) = &host.host_execution {
         executor.finish_host(&owner).await.map_err(internal)?;
     }
     if let Some(manager) = &host.sandboxes {
@@ -512,7 +515,7 @@ impl pot_runner::Destination for Host {
     }
     fn install_resources<'a>(
         &'a self,
-        target: &'a pot_core::EnvironmentTarget,
+        target: &'a pot_core::ExecutionTargetKind,
         workspace: &'a str,
         resources: pot_runner::resources::GlobalResources,
     ) -> futures::future::BoxFuture<'a, Result<Value>> {
