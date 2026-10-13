@@ -24,7 +24,7 @@ def load(name):
 
 
 package = load("package-web-assets")
-mobile = load("build-mobile")
+web_ui = load("build-web-ui")
 
 
 def fixture(dist):
@@ -73,21 +73,21 @@ class WebAssets(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
             with (
-                patch("sys.argv", ["build-mobile", "--cache-dir", directory]),
-                patch.object(mobile, "sources", return_value={"source": "v1"}) as sources,
+                patch("sys.argv", ["build-web-ui", "--cache-dir", directory]),
+                patch.object(web_ui, "sources", return_value={"source": "v1"}) as sources,
                 patch.object(
-                    mobile, "build", side_effect=lambda cache, dist: fixture(dist)
+                    web_ui, "build", side_effect=lambda cache, dist: fixture(dist)
                 ) as build,
-                patch.dict(mobile.helpers, {"compress": lambda *_: None}),
+                patch.dict(web_ui.helpers, {"compress": lambda *_: None}),
             ):
-                mobile.main()
-                mobile.main()
+                web_ui.main()
+                web_ui.main()
                 self.assertEqual(build.call_count, 1)
                 (cache / "dist/auth.js").unlink()
-                mobile.main()
+                web_ui.main()
                 self.assertEqual(build.call_count, 2)
                 sources.return_value = {"source": "v2"}
-                mobile.main()
+                web_ui.main()
                 self.assertEqual(build.call_count, 3)
 
     def test_missing_brotli_has_actionable_error(self):
@@ -105,7 +105,7 @@ class WebAssets(unittest.TestCase):
                 "MAKEFLAGS": "jobserver",
             },
         ):
-            env = mobile.child_environment(Path("/web-cache"))
+            env = web_ui.child_environment(Path("/web-cache"))
         self.assertEqual(env["CARGO_TARGET_DIR"], "/web-cache/cargo")
         for name in ["RUSTC", "CARGO_ENCODED_RUSTFLAGS", "MAKEFLAGS"]:
             self.assertNotIn(name, env)

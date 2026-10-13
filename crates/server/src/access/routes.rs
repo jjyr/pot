@@ -358,8 +358,8 @@ async fn assets(State(a): State<Access>, req: Request) -> Response {
         "/install.js" => ("install.js", "text/javascript"),
         "/auth.js" => ("auth.js", "text/javascript"),
         "/style.css" => ("style.css", "text/css"),
-        "/pkg/pot_mobile.js" => ("pkg/pot_mobile.js", "text/javascript"),
-        "/pkg/pot_mobile_bg.wasm" => ("pkg/pot_mobile_bg.wasm", "application/wasm"),
+        "/pkg/pot_web_ui.js" => ("pkg/pot_web_ui.js", "text/javascript"),
+        "/pkg/pot_web_ui_bg.wasm" => ("pkg/pot_web_ui_bg.wasm", "application/wasm"),
         "/font.ttf" => ("font.ttf", "font/ttf"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -371,7 +371,7 @@ async fn assets(State(a): State<Access>, req: Request) -> Response {
         .get("accept-encoding")
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.split(',').any(|v| v.trim() == "gzip"))
-        && matches!(file, "pkg/pot_mobile_bg.wasm" | "pkg/pot_mobile.js");
+        && matches!(file, "pkg/pot_web_ui_bg.wasm" | "pkg/pot_web_ui.js");
     let path = if gzip {
         format!("{file}.gz")
     } else {

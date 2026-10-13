@@ -6144,7 +6144,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pot-mobile"
+name = "pot-web-ui"
 version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",

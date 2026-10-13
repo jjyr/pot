@@ -21,7 +21,7 @@ fn main() {
     let cache = out.ancestors().nth(4).unwrap().join("pot-web");
     println!("cargo:rerun-if-env-changed=PATH");
     let status = Command::new("python3")
-        .arg(root.join("scripts/build-mobile"))
+        .arg(root.join("scripts/build-web-ui"))
         .arg("--cache-dir")
         .arg(&cache)
         .current_dir(&root)

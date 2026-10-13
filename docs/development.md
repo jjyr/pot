@@ -81,7 +81,7 @@ This installs the actual Brotli CLI, not a Rust compression implementation, and
 requires no separately installed Conda. Standalone Cargo users must install the
 CLI themselves. Missing Brotli produces an actionable error.
 
-`mise run build:mobile` and Cargo's build script use the same cache under
+`mise run build:web-ui` and Cargo's build script use the same cache under
 `<Cargo target directory>/pot-web/`. Source/lockfile fingerprints validate the
 WASM/static asset cache; raw and compressed payload hashes detect missing or
 corrupt files. Brotli version and quality are part of the compression cache key.
@@ -114,7 +114,7 @@ MacOS Sandbox helpers/resources require additional provider setup.
 
 ## Mobile browser pilot
 
-See [Mobile access](deployment.md) for the optional owner-controlled HTTPS listener, QR/Token administration and `mise run build:mobile`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
+See [Mobile access](deployment.md) for the optional owner-controlled HTTPS listener, QR/Token administration and `mise run build:web-ui`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
 
 ## Validation
 
@@ -168,7 +168,7 @@ Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk r
 
 ## Code entry points
 
-Rust workspace members and their bundled assets live under `crates/`. The browser client is `crates/web-ui/` (Cargo package `pot-mobile`); build task and deployed asset names remain unchanged. Shared localization build code lives in `crates/localization/`. Swift Helper, plugins, skills, scripts and release packaging remain outside the Cargo workspace.
+Rust workspace members and their bundled assets live under `crates/`. The browser client is `crates/web-ui/` (Cargo package `pot-web-ui`); build with `mise run build:web-ui`, producing `pot_web_ui.js` and `pot_web_ui_bg.wasm`. Shared localization build code lives in `crates/localization/`. Swift Helper, plugins, skills, scripts and release packaging remain outside the Cargo workspace.
 
 | Directory | Responsibility |
 |---|---|

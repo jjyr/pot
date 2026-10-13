@@ -284,8 +284,8 @@ async fn embedded_web_works_without_an_asset_directory() {
     // The fixture has no frontend files: every response must come from the binary.
     for (path, mime) in [
         ("/", "text/html; charset=utf-8"),
-        ("/pkg/pot_mobile.js", "text/javascript"),
-        ("/pkg/pot_mobile_bg.wasm", "application/wasm"),
+        ("/pkg/pot_web_ui.js", "text/javascript"),
+        ("/pkg/pot_web_ui_bg.wasm", "application/wasm"),
         ("/font.ttf", "font/ttf"),
         ("/locales.json", "application/json"),
         ("/icon.png", "image/png"),

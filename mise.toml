@@ -158,9 +158,9 @@ run = "cargo run --locked -p pot-server --bin pot -- serve"
 description = "Build desktop templates and page-specific translation resources"
 run = "python scripts/localize-web"
 
-[tasks."build:mobile"]
+[tasks."build:web-ui"]
 description = "Build the pinned nightly GPUI Web/WASM app and browser assets"
-run = "python scripts/build-mobile"
+run = "python scripts/build-web-ui"
 
 [tasks."test:web-assets"]
 description = "Test Web build and compression cache invalidation"

@@ -87,7 +87,7 @@ async function refresh(){
 async function start(){
   pushStatus=await api('/access/status');authenticated=pushStatus.authenticated;el('configure-token').disabled=false;if(authenticated)el('auth').hidden=true;
   if(pushStatus.authenticated&&!module){
-    module=await import('/pkg/pot_mobile.js');await module.default();module.run();
+    module=await import('/pkg/pot_web_ui.js');await module.default();module.run();
     history.replaceState({page,task,scope,query,offset,assistantId,environment},'');
     await refresh();setInterval(refresh,1500);
     setInterval(()=>{if(authenticated&&pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});},10000);

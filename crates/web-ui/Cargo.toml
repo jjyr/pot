@@ -1,5 +1,5 @@
 [package]
-name = "pot-mobile"
+name = "pot-web-ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
