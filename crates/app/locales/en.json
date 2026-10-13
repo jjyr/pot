@@ -797,5 +797,16 @@
   "onboarding.desktop-failure": "The task Agent failed because no desktop environment was found.",
   "onboarding.create-desktop": "Create desktop Sandbox",
   "onboarding.connect-desktop": "Connect desktop environment",
-  "onboarding.server-chat": "Open server chat"
+  "onboarding.server-chat": "Open server chat",
+  "spaces.local": "Local",
+  "spaces.cloud": "Cloud",
+  "spaces.this-mac": "This Mac",
+  "spaces.assistants": "Assistants",
+  "spaces.edit-assistant": "Edit assistant",
+  "spaces.location": "Location",
+  "spaces.all": "All locations",
+  "spaces.stale": "Status not updated",
+  "spaces.identity-changed": "Space identity changed. Reopen the object from its Space.",
+  "spaces.reply": "Reply from assistant",
+  "spaces.wait-send": "Wait for the current message to finish sending."
 }

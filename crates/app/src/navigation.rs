@@ -166,6 +166,15 @@ impl Shell {
         );
     }
     pub fn navigate_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.assistant_list
+            && !self.show_tasks
+            && self.client.view.lock().unwrap().selected.is_empty()
+            && self.native["page"] == 0
+        {
+            self.assistant_list = true;
+            cx.notify();
+            return;
+        }
         self.observe_navigation();
         let view = self.client.view.lock().unwrap().clone();
         let route = self.route(&view);
@@ -280,7 +289,20 @@ impl Shell {
         let route = self.route(view);
         let title: String = match &route {
             Route::Assistant(_, _) => unreachable!("cache identity only"),
-            Route::Chat => crate::i18n::text("navigation.chat").into(),
+            Route::Chat => {
+                if self.assistant_list {
+                    crate::i18n::text("spaces.assistants").into()
+                } else {
+                    view.assistants["assistants"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|a| a["id"] == view.assistant_id())
+                        .and_then(|a| a["name"].as_str())
+                        .unwrap_or("Pot")
+                        .to_owned()
+                }
+            }
             Route::Tasks(scheduled) => crate::i18n::text(if *scheduled {
                 "navigation.schedules"
             } else {
@@ -311,7 +333,12 @@ impl Shell {
             Route::Task(_) => 152.,
             _ => 0.,
         };
-        let back_width = if route.parent().is_some() { 36. } else { 0. };
+        let chat_back = matches!(route, Route::Chat) && !self.assistant_list;
+        let back_width = if route.parent().is_some() || chat_back {
+            36.
+        } else {
+            0.
+        };
         let title_width =
             (window.viewport_size().width - px(112. + back_width + actions_width)).max(px(80.));
         let visible_title =
@@ -329,7 +356,7 @@ impl Shell {
                     .gap_2()
                     .flex_1()
                     .min_w_0()
-                    .when(route.parent().is_some(), |el| {
+                    .when(route.parent().is_some() || chat_back, |el| {
                         el.child(
                             Button::new("navigate-up")
                                 .ghost()
@@ -363,9 +390,34 @@ impl Shell {
                                     }),
                             ),
                     )
-                    .when(matches!(self.route(view), Route::Chat), |el| {
-                        el.child(div().max_w(px(240.)).truncate().child(ui::hint(
-                            format!(
+                    .when(
+                        matches!(self.route(view), Route::Chat) && !self.assistant_list,
+                        |el| {
+                            let owner = view.assistant_id().to_owned();
+                            el.when_some(
+                                self.space_directory.spaces.get(&view.client_mode),
+                                |el, s| el.child(crate::spaces_ui::badge(s, "titlebar")),
+                            )
+                            .child(
+                                Button::new("edit-chat-assistant")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::Settings)
+                                    .tooltip(crate::i18n::text("spaces.edit-assistant"))
+                                    .accessibility_label(crate::i18n::text("spaces.edit-assistant"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.assistants_ui.form_only = true;
+                                        this.assistants_ui.select(&owner);
+                                        cx.notify();
+                                    })),
+                            )
+                        },
+                    )
+                    .when(
+                        matches!(self.route(view), Route::Chat) && !self.assistant_list,
+                        |el| {
+                            el.child(div().max_w(px(240.)).truncate().child(ui::hint(
+                                format!(
                             "{} · {}",
                             self.native["settings"]["active_name"]
                                 .as_str()
@@ -374,12 +426,14 @@ impl Shell {
                                 .as_str()
                                 .unwrap_or("")
                         ),
-                            cx,
-                        )))
-                    })
+                                cx,
+                            )))
+                        },
+                    )
                     .when(
                         !self.show_tasks
-                            && matches!(self.route(view), Route::Chat | Route::Task(_)),
+                            && matches!(self.route(view), Route::Chat | Route::Task(_))
+                            && !self.assistant_list,
                         |el| el.child(crate::usage_ui::entry(view, cx)),
                     ),
             )

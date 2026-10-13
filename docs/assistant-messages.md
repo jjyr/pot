@@ -78,7 +78,9 @@ persisted before model invocation. Restart marks incomplete attempts interrupted
 instead of replaying potentially effective tools. Failed/interrupted attempts
 fence later inputs in that local conversation; another conversation can proceed.
 Unknown outcomes require investigation. An unconfigured receiver retains queued
-messages. Diagnostics are available through history; UI treatment is deferred.
+messages. Diagnostics remain available through history. Native Chat projects the
+latest inbound peer reply for conversations initiated by its assistant; there is
+no separate mailbox or handoff UI. See [Multi-Space UI](multi-space-ui.md).
 
 ## API
 

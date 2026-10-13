@@ -60,7 +60,7 @@ pub enum RelayRequest {
     Acknowledge { receipt: Receipt },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Record {
     pub sequence: i64,

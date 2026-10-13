@@ -25,20 +25,22 @@ pub fn render(
     handler: Handler,
     cx: &mut App,
 ) -> Div {
+    pages::page(layout, cx).flex().flex_col().child(
+        div()
+            .id("machine-status-list")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(content(view, catalog, handler, cx)),
+    )
+}
+pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &mut App) -> Div {
     let machines = view.directory["machines"]
         .as_array()
         .cloned()
         .unwrap_or_default();
     let selected = crate::machine_state::selection(view.directory, view.preferred);
-    let mut body = div()
-        .id("machine-status-list")
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
-        .p_4()
-        .flex()
-        .flex_col()
-        .gap_4();
+    let mut body = div().p_4().flex().flex_col().gap_4();
     if machines.is_empty() {
         body = body.child(pages::hint(catalog.text("machines.loading"), cx));
     }
@@ -84,7 +86,10 @@ pub fn render(
                 .join(" · "),
             cx,
         ));
-        for capability in ["sandbox", "host"] {
+        for capability in ["sandbox", "host"]
+            .into_iter()
+            .filter(|_| !view.permissions.is_null())
+        {
             let current = view.permissions["policy"]["rules"]
                 .as_array()
                 .into_iter()
@@ -133,7 +138,10 @@ pub fn render(
             .get(runtime)
             .cloned()
             .unwrap_or(json!({"max_sandboxes":16,"cpus":4,"memory_gib":8,"disk_gib":32}));
-        for key in ["max_sandboxes", "cpus", "memory_gib", "disk_gib"] {
+        for key in ["max_sandboxes", "cpus", "memory_gib", "disk_gib"]
+            .into_iter()
+            .filter(|_| !view.permissions.is_null())
+        {
             let n = limits[key].as_u64().unwrap_or(1);
             let mut row = div().flex().items_center().gap_2().child(format!(
                 "{}: {n}",
@@ -204,7 +212,7 @@ pub fn render(
                     },
                 )),
             );
-            if !host {
+            if !host && !view.permissions.is_null() {
                 let sandbox = reference["target"]["sandbox_id"].as_str().unwrap_or("");
                 let access = view.permissions["policy"]["sandboxes"]
                     .as_array()
@@ -281,5 +289,5 @@ pub fn render(
         }
         body = body.child(card);
     }
-    pages::page(layout, cx).flex().flex_col().child(body)
+    body
 }

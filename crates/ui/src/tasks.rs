@@ -13,6 +13,7 @@ use gpui_kit::component::{
 };
 use serde_json::{Value, json};
 pub struct TasksView<'a> {
+    pub locations: &'a Value,
     pub local_runtime: &'a str,
     pub search: &'a Entity<InputState>,
     pub scroll: &'a ScrollHandle,
@@ -244,11 +245,17 @@ pub fn render(
                                             })
                                             .child(format!(
                                                 " · {}",
-                                                crate::machine_state::task_location(
-                                                    task,
-                                                    catalog,
-                                                    view.local_runtime
-                                                )
+                                                view.locations
+                                                    .get(&task.id)
+                                                    .and_then(Value::as_str)
+                                                    .map(str::to_owned)
+                                                    .unwrap_or_else(|| {
+                                                        crate::machine_state::task_location(
+                                                            task,
+                                                            catalog,
+                                                            view.local_runtime,
+                                                        )
+                                                    })
                                             )),
                                     )
                                     .when(task.pending > 0, |el| {
@@ -282,7 +289,41 @@ pub fn render(
                                     div()
                                         .p_4()
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .child(name.to_owned()),
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(name.to_owned())
+                                        .when_some(
+                                            view.assistant_names["assistants"].as_array().and_then(
+                                                |items| {
+                                                    items.iter().find(|d| {
+                                                        d["id"] == task.assistant_id
+                                                            && d["space_label"].is_string()
+                                                    })
+                                                },
+                                            ),
+                                            |el, d| {
+                                                el.child(
+                                                    Button::new(SharedString::from(format!(
+                                                        "task-owner-{}",
+                                                        task.id
+                                                    )))
+                                                    .ghost()
+                                                    .small()
+                                                    .icon(if d["space_mode"] == "local" {
+                                                        gpui_kit::assets::IconName::Monitor
+                                                    } else {
+                                                        gpui_kit::assets::IconName::Cloud
+                                                    })
+                                                    .tooltip(
+                                                        d["space_label"]
+                                                            .as_str()
+                                                            .unwrap_or_default()
+                                                            .to_owned(),
+                                                    ),
+                                                )
+                                            },
+                                        ),
                                 )
                             })
                             .child(row)

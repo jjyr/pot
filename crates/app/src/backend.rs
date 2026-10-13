@@ -215,6 +215,19 @@ fn request_mode(
         path.into()
     };
     runtime().block_on(async {
+        if let Some(config) = &control {
+            let identity = tokio::time::timeout(timeout, client.request("/api/v1/runtime", None))
+                .await
+                .map_err(|_| "Space identity check timed out".to_string())?
+                .map_err(|e| e.to_string())?;
+            if !identity.status.is_success() {
+                return Err("Space identity check rejected".into());
+            }
+            let value: Value = serde_json::from_slice(&identity.body).map_err(|e| e.to_string())?;
+            if value["runtime_id"] != config.runtime_id {
+                return Err("Configured Control identity changed".into());
+            }
+        }
         let reply = tokio::time::timeout(timeout, client.request(&path, body))
             .await
             .map_err(|_| "Backend request timed out".to_string())?
@@ -341,7 +354,8 @@ impl Requests {
         self
     }
     fn scoped(&self, path: &str) -> String {
-        if path.starts_with("/api/v1/assistants")
+        if path == pot_protocol::message::API
+            || path.starts_with("/api/v1/assistants")
             || path.starts_with("/api/v1/assistant-tasks")
             || path == "/api/v1/runtime"
             || path.starts_with("/api/v1/runtime/")

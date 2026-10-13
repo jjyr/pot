@@ -126,7 +126,6 @@ var bridge: PotBridge?
     var settings = SettingsPanel()
     var otherSettings: SettingsPanel?
     var navigation: [NSButton] = []
-    let modeButton = NSButton()
     var page = 0
     var composerDark: Bool?
     var webDark: Bool?
@@ -213,9 +212,6 @@ var bridge: PotBridge?
             button.wantsLayer = true; button.layer?.cornerRadius = 10
             rail.addSubview(button); navigation.append(button)
         }
-        modeButton.target = self; modeButton.action = #selector(toggleMode)
-        modeButton.isBordered = false; modeButton.imageScaling = .scaleProportionallyDown
-        rail.addSubview(modeButton)
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
@@ -419,10 +415,6 @@ var bridge: PotBridge?
         }
     }
 
-    @objc func toggleMode() {
-        events.append(["action": "mode-toggle"]); bridgeWake?()
-    }
-
     func layout() {
         let b = rootView.bounds
         rail.frame = NSRect(x: 0, y: 0, width: 56, height: max(0, b.height - 44))
@@ -434,7 +426,6 @@ var bridge: PotBridge?
                 height: 36
             )
         }
-        modeButton.frame = NSRect(x: 10, y: 64, width: 36, height: 36)
         let area = NSRect(x: 56, y: 0, width: max(0, b.width - 56), height: b.height)
         // GPUI uses window coordinates; reserve the rail in Rust layout.
         if gpuiView.frame != b {
@@ -1147,12 +1138,6 @@ var bridge: PotBridge?
     func update(_ value: [String: Any]) {
         runtime.assistantID = value["assistant_id"] as? String ?? "main"
         runtime.remoteMode = value["client_mode"] as? String == "remote"
-        let modeLabel = L.text(runtime.remoteMode ? "machines.remote-mode" : "machines.local-mode")
-        modeButton.image = NSImage(
-            systemSymbolName: runtime.remoteMode ? "cloud" : "laptopcomputer",
-            accessibilityDescription: modeLabel
-        )
-        modeButton.toolTip = modeLabel; modeButton.setAccessibilityLabel(modeLabel)
         lastUIState = value
         snapshot = value
         running = value["running"] as? Bool ?? false
@@ -1180,7 +1165,9 @@ var bridge: PotBridge?
             }
             textDidChange(Notification(name: NSText.didChangeNotification))
         }
-        composerBox.isHidden = (page != 0 && page != 3) || value["task_list"] as? Bool == true
+        composerBox
+            .isHidden = (page != 0 && page != 3) || value["task_list"] as? Bool == true ||
+            value["assistant_list"] as? Bool == true
         placeholder.stringValue = next == "new" ? L.text("bridge.describe-the-goal-of-a-new-task") : next.isEmpty ? L
             .text("bridge.message-pot") : L.text("bridge.add-instructions-interrupted-tasks-resume-next-turn")
         if page == 0 && value["needs_configuration"] as? Bool == true {
@@ -1408,7 +1395,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
             bridge.settings = bridge.otherSettings ?? SettingsPanel()
             bridge.settings.bridge = bridge; bridge.otherSettings = previous
             bridge.localRuntime?.viewGeneration += 1; bridge.web.stopLoading(); bridge.web.isHidden = true
-            bridge.selectPage(0)
+            bridge.settings.refreshStatus()
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage", "sandbox-settings": bridge.editSandbox(create: false)
         case "sandbox-new": bridge.editSandbox(create: true)

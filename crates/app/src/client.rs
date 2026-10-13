@@ -63,6 +63,7 @@ pub struct View {
     pub selected_assistant: String,
     pub assistant_rules: Value,
     pub assistant_saved_owner: Option<String>,
+    pub created_assistant: Option<String>,
     pub assistant_pending: bool,
     pub permissions: Value,
     pub usage_query: Option<(String, u32, usize, String)>,
@@ -334,7 +335,13 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .query("offset", query.offset.to_string())
         .query("limit", query.limit.to_string())
         .query("selected", &selected)
-        .query("environment", &query.environment)
+        .query(
+            "environment",
+            serde_json::from_str::<Value>(&query.environment)
+                .ok()
+                .and_then(|v| v.get("environment").map(Value::to_string))
+                .unwrap_or_else(|| query.environment.clone()),
+        )
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
@@ -966,6 +973,9 @@ impl Client {
                     }
                     v.command_error.clear();
                     v.assistant_saved_owner = value["owner"].as_str().map(str::to_owned);
+                    if value["owner"] == "new" {
+                        v.created_assistant = definition["id"].as_str().map(str::to_owned);
+                    }
                 }
                 Err(e) => v.command_error = e,
             }

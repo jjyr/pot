@@ -68,14 +68,6 @@ impl Editor {
                     client["url"].as_str().unwrap_or("").to_owned(),
                     cx,
                 ));
-                if client["mode"] == "local" {
-                    body = body.child(
-                        Button::new("control-chat")
-                            .primary()
-                            .label(catalog.text("onboarding.server-chat"))
-                            .on_click(pages::on(&handler, "control-chat", Value::Null)),
-                    );
-                }
             } else {
                 let fields = self.fields.get_or_insert_with(|| Fields {
                     address: cx.new(|cx| InputState::new(window, cx)),
