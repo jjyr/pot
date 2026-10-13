@@ -765,3 +765,110 @@ async fn sandbox_creation_receipts_do_not_undo_later_inventory_changes() {
         std::fs::write(path, serde_json::to_vec(&inventory).unwrap()).unwrap();
     }
 }
+
+#[tokio::test]
+async fn assistant_mail_requires_owner_and_deduplicates_cross_control_delivery() {
+    use pot_protocol::message::*;
+    let fixture = Fixture::new();
+    let server = fixture.start().await;
+    let native = server.local_client();
+    let endpoint = server.endpoint().unwrap();
+    let base = format!("http://{}", server.local_addr().unwrap());
+    let (stop, shutdown) = tokio::sync::oneshot::channel();
+    let serving = tokio::spawn(server.serve(async {
+        let _ = shutdown.await;
+    }));
+    let http = reqwest::Client::new();
+    let directory_request = serde_json::to_value(RelayRequest::Directory).unwrap();
+    assert_eq!(
+        http.post(format!("{base}{API}"))
+            .json(&directory_request)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        401
+    );
+    assert_eq!(
+        http.post(format!("{base}{API}"))
+            .bearer_auth("wrong")
+            .json(&directory_request)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        401
+    );
+    let reply = native.request(API, Some(directory_request)).await.unwrap();
+    assert!(reply.status.is_success());
+    let directory: Directory = serde_json::from_slice(&reply.body).unwrap();
+    let source = AssistantRef {
+        control_id: "remote-control".into(),
+        assistant_id: "main".into(),
+    };
+    let message = Envelope {
+        id: "delivered-message".into(),
+        from: source.clone(),
+        to: directory.assistants[0].address.clone(),
+        conversation_id: uuid::Uuid::new_v4().to_string(),
+        reply_to: None,
+        text: "Please coordinate".into(),
+        hops: 0,
+    };
+    let deliver = serde_json::to_value(RelayRequest::Deliver {
+        message: message.clone(),
+    })
+    .unwrap();
+    assert_eq!(
+        native
+            .request(API, Some(deliver.clone()))
+            .await
+            .unwrap()
+            .status
+            .as_u16(),
+        409
+    );
+    let register = RelayRequest::Register {
+        directory: Directory {
+            control_id: source.control_id.clone(),
+            assistants: vec![Assistant {
+                address: source,
+                name: "Remote".into(),
+            }],
+        },
+    };
+    assert!(
+        native
+            .request(API, Some(serde_json::to_value(register).unwrap()))
+            .await
+            .unwrap()
+            .status
+            .is_success()
+    );
+    for _ in 0..2 {
+        let response = http
+            .post(format!("{base}{API}"))
+            .bearer_auth(&endpoint.token)
+            .json(&deliver)
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert_eq!(response.json::<Receipt>().await.unwrap().message, message);
+    }
+    let history = RelayRequest::History {
+        assistant_id: message.to.assistant_id,
+        after: 0,
+    };
+    let response = native
+        .request(API, Some(serde_json::to_value(history).unwrap()))
+        .await
+        .unwrap();
+    let records: Vec<Record> = serde_json::from_slice(&response.body).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].state, "queued"); // Unconfigured assistants must not make model requests.
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}

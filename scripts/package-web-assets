@@ -22,8 +22,8 @@ NAMES = [
     "install.js",
     "auth.js",
     "style.css",
-    "pkg/pot_mobile.js",
-    "pkg/pot_mobile_bg.wasm",
+    "pkg/pot_web_ui.js",
+    "pkg/pot_web_ui_bg.wasm",
     "font.ttf",
 ]
 
@@ -38,7 +38,7 @@ def sources():
         for name in [
             "Cargo.toml",
             "Cargo.lock",
-            "scripts/build-mobile",
+            "scripts/build-web-ui",
             "scripts/localize-web",
             "scripts/package-web-assets",
             "mise.toml",

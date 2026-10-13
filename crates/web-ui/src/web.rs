@@ -465,6 +465,7 @@ impl Render for Mobile {
             );
             content = content.p_0().gap_0().child(pot_ui::tasks::render(
                 pot_ui::tasks::TasksView {
+                    locations: &Value::Null,
                     local_runtime: self.data["runtime"]["runtime_id"]
                         .as_str()
                         .unwrap_or_default(),

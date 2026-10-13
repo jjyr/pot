@@ -278,7 +278,14 @@ mod tests {
                     );
                 }
             }
-            for name in ["send_message", "wait_task", "interrupt", "cancel_task"] {
+            for name in [
+                "send_message",
+                "wait_task",
+                "interrupt",
+                "cancel_task",
+                "list_assistants",
+                "send_assistant_message",
+            ] {
                 assert_eq!(names.contains(name), !summary && !worker);
             }
             assert!(names.iter().all(|n| !n.starts_with("pot_sandbox_")));
@@ -290,7 +297,14 @@ mod tests {
             let mut s = lane(summary);
             s.is_worker = worker;
             let h = init(&s).await;
-            for name in ["send_message", "wait_task", "interrupt", "cancel_task"] {
+            for name in [
+                "send_message",
+                "wait_task",
+                "interrupt",
+                "cancel_task",
+                "list_assistants",
+                "send_assistant_message",
+            ] {
                 let call = json!({"jsonrpc":"2.0","id":name,"method":"tools/call",
                     "params":{"name":name,"arguments":{"task_id":"target"}}});
                 assert_eq!(

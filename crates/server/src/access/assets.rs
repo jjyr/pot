@@ -116,7 +116,7 @@ mod tests {
     async fn embedded_response_round_trip() {
         let mut headers = HeaderMap::new();
         headers.insert("accept-encoding", HeaderValue::from_static("gzip, br"));
-        let encoded = response("pkg/pot_mobile_bg.wasm", "application/wasm", &headers).unwrap();
+        let encoded = response("pkg/pot_web_ui_bg.wasm", "application/wasm", &headers).unwrap();
         assert_eq!(encoded.headers()["content-encoding"], "br");
         assert_eq!(encoded.headers()["vary"], "Accept-Encoding");
         let bytes = axum::body::to_bytes(encoded.into_body(), 32 * 1024 * 1024)
@@ -128,7 +128,7 @@ mod tests {
             .unwrap();
         assert!(decoded.starts_with(b"\0asm"));
         headers.insert("accept-encoding", HeaderValue::from_static("br;q=0, gzip"));
-        let raw = response("pkg/pot_mobile_bg.wasm", "application/wasm", &headers).unwrap();
+        let raw = response("pkg/pot_web_ui_bg.wasm", "application/wasm", &headers).unwrap();
         assert!(raw.headers().get("content-encoding").is_none());
         assert_eq!(
             axum::body::to_bytes(raw.into_body(), 32 * 1024 * 1024)

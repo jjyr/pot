@@ -55,7 +55,7 @@ test_key_dir=$(mktemp -d)
 trap 'rm -rf "$test_key_dir"' EXIT
 export POT_SECRET_KEY_FILE="$test_key_dir/key"
 python -c 'import os, secrets; p = os.environ["POT_SECRET_KEY_FILE"]; fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(fd, secrets.token_bytes(32)); os.close(fd)'
-cargo test --locked -p pot-core -p pot-storage -p pot-usage -p pot-agent -p pot-tool-executor -p pot-gateway -p pot-model-protocol -p pot-assistant -p pot-secrets -p pot-runner -p pot-control -p pot-runtime -p pot-runtime-execution -p pot-server -p pot-protocol -p pot-eval -p pot-sandbox -p pot-sandbox-macos-apple-container -p pot-sandbox-macos-apple-vm -p pot-sandbox-linux-podman -p pot-resource -p pot-sandbox-images -j 4
+cargo test --locked -p pot-core -p pot-storage -p pot-usage -p pot-agent -p pot-tool-executor -p pot-gateway -p pot-model-protocol -p pot-assistant -p pot-relay -p pot-secrets -p pot-runner -p pot-control -p pot-runtime -p pot-runtime-execution -p pot-server -p pot-protocol -p pot-eval -p pot-sandbox -p pot-sandbox-macos-apple-container -p pot-sandbox-macos-apple-vm -p pot-sandbox-linux-podman -p pot-resource -p pot-sandbox-images -j 4
 '''
 
 [tasks."test:executor"]
@@ -158,9 +158,9 @@ run = "cargo run --locked -p pot-server --bin pot -- serve"
 description = "Build desktop templates and page-specific translation resources"
 run = "python scripts/localize-web"
 
-[tasks."build:mobile"]
+[tasks."build:web-ui"]
 description = "Build the pinned nightly GPUI Web/WASM app and browser assets"
-run = "python scripts/build-mobile"
+run = "python scripts/build-web-ui"
 
 [tasks."test:web-assets"]
 description = "Test Web build and compression cache invalidation"

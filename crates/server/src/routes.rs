@@ -127,6 +127,7 @@ pub fn router(s: Service) -> Router {
 pub fn assistant_routes(hub: std::sync::Arc<pot_control::control::assistants::Hub>) -> Router {
     Router::new()
         .route("/api/v1/assistant-tasks", get(assistant_tasks))
+        .route(pot_protocol::message::API, post(assistant_mail))
         .route(
             "/api/v1/assistant-notifications",
             post(assistant_notifications),
@@ -361,5 +362,23 @@ async fn assistant_tasks(
     match hub.tasks_page(&query) {
         Ok(v) => axum::Json(v).into_response(),
         Err(e) => rejected(axum::http::StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+async fn assistant_mail(
+    axum::extract::State(hub): AssistantState,
+    headers: axum::http::HeaderMap,
+    axum::Json(request): axum::Json<pot_protocol::message::RelayRequest>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !hub.authorize(&headers) {
+        return rejected(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Owner authority required",
+        );
+    }
+    match hub.relay(request) {
+        Ok(value) => axum::Json(value).into_response(),
+        Err(error) => rejected(axum::http::StatusCode::CONFLICT, &error.to_string()),
     }
 }

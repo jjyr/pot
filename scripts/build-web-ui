@@ -114,7 +114,7 @@ def build(cache, dist):
             "--release",
             "--locked",
             "-p",
-            "pot-mobile",
+            "pot-web-ui",
             "--target",
             "wasm32-unknown-unknown",
             "-j",
@@ -169,18 +169,18 @@ def build(cache, dist):
     subprocess.run(
         [
             tool,
-            target / "wasm32-unknown-unknown/release/pot_mobile.wasm",
+            target / "wasm32-unknown-unknown/release/pot_web_ui.wasm",
             "--target",
             "web",
             "--out-dir",
             dist / "pkg",
             "--out-name",
-            "pot_mobile",
+            "pot_web_ui",
         ],
         check=True,
     )
 
-    for name in ["pkg/pot_mobile_bg.wasm", "pkg/pot_mobile.js"]:
+    for name in ["pkg/pot_web_ui_bg.wasm", "pkg/pot_web_ui.js"]:
         path = dist / name
         path.with_suffix(path.suffix + ".gz").write_bytes(
             gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)

@@ -457,7 +457,7 @@ Home Screen, browser/notification and login branding use the selected terracotta
 Pot Companion. `scripts/make-icons.swift` generates both the rounded Mac icon
 (`crates/app/assets/Pot.png` / `Pot.icns`) and an opaque, square cream-background master
 (`PotHomeScreen.png`) so mobile operating systems can apply their own masks.
-`scripts/build-mobile` produces the touch icon and 192/512 px `any maskable` icons
+`scripts/build-web-ui` produces the touch icon and 192/512 px `any maskable` icons
 from that master. Versioned icon URLs distinguish this design from previously
 installed icons without changing the manifest's stable application ID. Mobile's
 GPUI header embeds the matching Mac image. README uses the same application icon.

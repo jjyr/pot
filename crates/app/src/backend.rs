@@ -8,6 +8,7 @@ use std::{
 };
 struct Host {
     client: pot_server::ClientTransport,
+    relay: tokio::task::JoinHandle<()>,
     stop: tokio::sync::oneshot::Sender<()>,
     task: tokio::task::JoinHandle<anyhow_result::Result>,
 }
@@ -48,7 +49,13 @@ fn client() -> Result<pot_server::ClientTransport, String> {
                 .await
                 .map_err(|e| e.into())
         });
-        *host = Some(Host { client, stop, task });
+        let relay = runtime().spawn(crate::relay::run(client.clone()));
+        *host = Some(Host {
+            client,
+            relay,
+            stop,
+            task,
+        });
     }
     let host = host.as_ref().unwrap();
     if host.task.is_finished() {
@@ -197,6 +204,7 @@ fn request_mode(
         && path.starts_with("/api/v1/")
         && !path.starts_with("/api/v1/assistants")
         && !path.starts_with("/api/v1/assistant-tasks")
+        && path != pot_protocol::message::API
         && path != "/api/v1/runtime"
         && !path.starts_with("/api/v1/runtime/")
         && path != "/api/v1/machines"
@@ -207,6 +215,19 @@ fn request_mode(
         path.into()
     };
     runtime().block_on(async {
+        if let Some(config) = &control {
+            let identity = tokio::time::timeout(timeout, client.request("/api/v1/runtime", None))
+                .await
+                .map_err(|_| "Space identity check timed out".to_string())?
+                .map_err(|e| e.to_string())?;
+            if !identity.status.is_success() {
+                return Err("Space identity check rejected".into());
+            }
+            let value: Value = serde_json::from_slice(&identity.body).map_err(|e| e.to_string())?;
+            if value["runtime_id"] != config.runtime_id {
+                return Err("Configured Control identity changed".into());
+            }
+        }
         let reply = tokio::time::timeout(timeout, client.request(&path, body))
             .await
             .map_err(|_| "Backend request timed out".to_string())?
@@ -230,6 +251,7 @@ fn request_mode(
 fn shutdown() {
     let mut host = HOST.lock().unwrap();
     if let Some(host) = host.take() {
+        host.relay.abort();
         let _ = host.stop.send(());
         let _ = runtime().block_on(host.task);
     }
@@ -332,7 +354,8 @@ impl Requests {
         self
     }
     fn scoped(&self, path: &str) -> String {
-        if path.starts_with("/api/v1/assistants")
+        if path == pot_protocol::message::API
+            || path.starts_with("/api/v1/assistants")
             || path.starts_with("/api/v1/assistant-tasks")
             || path == "/api/v1/runtime"
             || path.starts_with("/api/v1/runtime/")
@@ -455,6 +478,14 @@ impl BodyBuilder {
     pub fn data(self, s: impl AsRef<str>) -> Body {
         Body(s.as_ref().as_bytes().to_vec())
     }
+}
+
+pub(crate) fn relay_remote() -> Option<crate::relay::Connection> {
+    let config = control_config().ok()?;
+    Some(crate::relay::Connection {
+        client: remote_client(&config).ok()?,
+        id: config.runtime_id,
+    })
 }
 
 #[cfg(test)]

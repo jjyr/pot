@@ -107,7 +107,7 @@ if cmd == "prepare":
         call(["tar", "xzf", node_archive, "-C", RES])
         (RES / node_name).rename(RES / "node")
 elif cmd == "build":
-    call([sys.executable, REPO / "scripts/build-mobile"], cwd=REPO, env=env)
+    call([sys.executable, REPO / "scripts/build-web-ui"], cwd=REPO, env=env)
     call([sys.executable, REPO / "scripts/build-tailscale"], cwd=REPO, env=env)
     call(
         ["cargo", "build", "--locked", "-p", "pot-app", "-p", "pot-server", "-j", "4"]

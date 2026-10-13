@@ -10,14 +10,22 @@ struct Owner {
     coordinator: tokio::task::JoinHandle<()>,
 }
 pub struct Hub {
-    root: Service,
+    pub(crate) root: Service,
     registry: Registry,
+    pub(crate) mailbox: pot_assistant::message::Mailbox,
+    pub(crate) mail_sessions: Mutex<BTreeMap<String, Service>>,
     owners: Mutex<BTreeMap<String, Owner>>,
 }
 impl Hub {
     pub fn open(root: Service) -> Result<Self> {
         let registry = Registry::open(&root.data.join("pot-v2.sqlite"), &root.usage_scope)?;
+        let mailbox = pot_assistant::message::Mailbox::open(
+            &root.data.join("assistant-mail.sqlite"),
+            &root.runtime_id,
+        )?;
         let hub = Self {
+            mailbox,
+            mail_sessions: Default::default(),
             root,
             registry,
             owners: Mutex::new(BTreeMap::new()),
@@ -113,6 +121,14 @@ impl Hub {
             .values()
             .find(|o| tasks::execution_service(&o.service, headers).is_ok())
             .map(|o| o.service.clone())
+            .or_else(|| {
+                self.mail_sessions
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .find(|s| tasks::execution_service(s, headers).is_ok())
+                    .cloned()
+            })
     }
     /// Used only after a member request has been authenticated and bound to an assignment.
     pub fn task_service(&self, task: &str) -> Result<Service> {

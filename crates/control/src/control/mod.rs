@@ -2,6 +2,7 @@
 use crate::*;
 pub mod agent;
 pub(crate) mod assistant_instructions;
+pub mod assistant_message;
 pub mod assistants;
 pub(crate) mod budget;
 pub mod gateway;

@@ -4,6 +4,9 @@ rust_i18n::i18n!("locales", fallback = "en");
 mod artifacts;
 mod backend;
 mod client;
+mod relay;
+mod spaces;
+mod spaces_ui;
 use pot_ui::design;
 mod i18n;
 
@@ -25,6 +28,24 @@ use std::{
     collections::HashSet,
     ffi::{CStr, CString},
 };
+
+gpui_kit::assets::icon_assets!(SpaceIcons, [Cloud, Monitor]);
+struct AppAssets;
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        if let Some(bytes) = SpaceIcons.load(path)? {
+            return Ok(Some(bytes));
+        }
+        gpui_kit::assets::Assets.load(path)
+    }
+    fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
+        let mut paths = gpui_kit::assets::Assets.list(path)?;
+        paths.extend(SpaceIcons.list(path)?);
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+}
 
 unsafe extern "C" {
     fn pot_bridge_startup_error(message: *const std::ffi::c_char);
@@ -58,7 +79,11 @@ struct ModeCache {
 }
 struct Shell {
     other_mode: Option<ModeCache>,
-    pending_mode: bool,
+    assistant_list: bool,
+    space_directory: spaces::Directory,
+    usage_location: String,
+    settings_return: Option<(spaces::Owner, String)>,
+    notifications: Vec<(spaces::Owner, pot_protocol::TaskInfo)>,
     client: client::Client,
     scroll: ScrollHandle,
     tasks_scroll: ScrollHandle,
@@ -142,14 +167,13 @@ impl Shell {
                     return;
                 };
                 match event.kind {
-                    "assistant-edit" => this.assistants_ui.select(event.value.as_str().unwrap_or("main")),
-                    "assistant-new" => this.assistants_ui.select("new"),
+                    "assistant-edit" => { this.assistants_ui.form_only = true; this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
+                    "assistant-new" => { this.assistants_ui.form_only = true; this.assistants_ui.select("new"); },
                     "assistant-select" => { this.client.select_assistant(event.value.as_str().unwrap_or("main").into()); this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
                     "assistant-reload" => this.assistants_ui.reload(event.value.as_str().unwrap_or("main")),
                     "assistant-close" => this.assistants_ui.open = false,
                     "machine-connections-toggle" => this.machine_connections.open = !this.machine_connections.open,
                     "machine-command" => this.client.machine_command(event.value),
-                    "control-chat" => this.pending_mode = backend::mode() == "local",
                     "assistant-save" => this.client.assistant_save(event.value),
                     "assistant-model" => ui::command(serde_json::json!({"action":"ai-open","owner":event.value,"return_to_chat":true})),
                     "permission-decision" => this.client.permission_decision(event.value),
@@ -176,7 +200,8 @@ impl Shell {
                     }
                     "refresh" => this.client.refresh(),
                     "task-filter" | "task-clear-search" | "task-previous" | "task-next" => {
-                        let v = this.client.view.lock().unwrap().clone();
+                        let mut v = this.client.view.lock().unwrap().clone();
+                        v.task_page = this.space_directory.task_page(&v.task_query);
                         let Some(q) = pot_ui::page_state::task_query(
                             event.kind,
                             &event.value,
@@ -192,12 +217,22 @@ impl Shell {
                         this.client.filter_tasks(q.scope, q.q, q.offset);
                     }
                     "task-open" => {
+                        if let Some((owner, id)) = this.space_directory.task_owner(event.value["id"].as_str().unwrap_or("")) {
+                            if this.activate_owner(&owner, window, cx) { this.client.select(id); this.show_tasks = false; this.assistant_list = false; ui::command(serde_json::json!({"action":"page","value":3})); }
+                            cx.notify(); return;
+                        }
                         this.show_tasks = false;
                         this.client
                             .select(event.value["id"].as_str().or(event.value.as_str()).unwrap_or("").into());
                         this.first = true;
                     }
                     "usage-page" => {
+                        if event.value == 6 && this.native["page"] == 4 {
+                            if this.usage_location.is_empty() { return; }
+                            let Some(owner)=this.space_directory.spaces.get(&this.usage_location).map(|s|s.owner("main")) else{return;};
+                            this.settings_return=this.capture_chat();
+                            if !this.activate_owner(&owner,window,cx){return;}
+                        }
                         ui::command(serde_json::json!({"action":"page","value":event.value}))
                     }
                     "usage-policy" => this.client.usage_action("policy", event.value),
@@ -217,6 +252,36 @@ impl Shell {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let directory = spaces::directory().lock().unwrap().clone();
+        let directory_changed = directory != self.space_directory;
+        for space in directory.spaces.values() {
+            if let Some(previous) = self
+                .space_directory
+                .spaces
+                .get(&space.mode)
+                .filter(|s| s.id == space.id)
+            {
+                for task in &space.tasks {
+                    if matches!(
+                        task.phase,
+                        pot_protocol::TaskPhase::Complete
+                            | pot_protocol::TaskPhase::Failed
+                            | pot_protocol::TaskPhase::Interrupted
+                    ) && previous.tasks.iter().any(|t| {
+                        t.id == task.id
+                            && t.assistant_id == task.assistant_id
+                            && t.phase != task.phase
+                    }) {
+                        self.notifications
+                            .push((space.owner(&task.assistant_id), task.clone()));
+                    }
+                }
+            }
+        }
+        if self.notifications.len() > 20 {
+            self.notifications.drain(..self.notifications.len() - 20);
+        }
+        self.space_directory = directory;
         if let Some(owner) = self
             .client
             .view
@@ -226,6 +291,16 @@ impl Shell {
             .take()
         {
             self.assistants_ui.saved(&owner);
+        }
+        let created = self.client.view.lock().unwrap().created_assistant.take();
+        if let Some(owner) = created {
+            self.client.select_assistant(owner.clone());
+            self.client.select(String::new());
+            self.assistant_list = false;
+            self.show_tasks = false;
+            self.assistants_ui.form_only = true;
+            self.assistants_ui.select(&owner);
+            ui::command(serde_json::json!({"action":"page","value":0}));
         }
         let old_tasks = self.show_tasks;
         {
@@ -248,7 +323,6 @@ impl Shell {
                 serde_json::from_slice(unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes())
                     .unwrap_or_default();
             match event["action"].as_str() {
-                Some("mode-toggle") => self.pending_mode = true,
                 Some("send") => {
                     if let Some(text) = event["text"].as_str() {
                         self.client.send(text.into());
@@ -266,6 +340,7 @@ impl Shell {
                     self.show_tasks = true;
                 }
                 Some("main") => {
+                    self.assistant_list = true;
                     self.show_tasks = false;
                     self.client.select(String::new());
                     self.first = true;
@@ -349,7 +424,7 @@ impl Shell {
         if removal_finished || cx.reduce_motion() {
             self.summary_removal = None;
         }
-        let mut changed = self.pending_mode
+        let mut changed = directory_changed
             || summary_changed
             || removal_finished
             || native_changed
@@ -391,7 +466,7 @@ impl Shell {
         self.last_content = content;
         let state = serde_json::json!({
             "completions": if view.selected.is_empty() { view.completions.clone() } else { serde_json::Value::Null },
-            "can_back":self.route(&view).parent().is_some(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
+            "assistant_list":self.assistant_list,"can_back":(!self.assistant_list && !self.show_tasks && view.selected.is_empty()) || self.route(&view).parent().is_some(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
             "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),
             "model":snapshot.map(|s|s.agent.model.as_str()).unwrap_or(crate::i18n::text("main.connecting")),
@@ -408,7 +483,42 @@ impl Shell {
 }
 impl Shell {
     fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let view = self.client.view.lock().unwrap().clone();
+        let mut view = self.client.view.lock().unwrap().clone();
+        if self.native["page"] == 4 {
+            let query = (
+                self.usage_ui.days,
+                self.native["timezone"]
+                    .as_str()
+                    .unwrap_or("Asia/Shanghai")
+                    .to_owned(),
+            );
+            spaces::directory().lock().unwrap().usage_query = Some(query.clone());
+            view.usage = self.space_directory.usage(
+                &self.usage_location,
+                &query,
+                self.usage_ui.group_offset,
+            );
+            view.usage_error = self
+                .space_directory
+                .spaces
+                .values()
+                .filter(|s| self.usage_location.is_empty() || self.usage_location == s.mode)
+                .filter_map(|s| {
+                    if !s.error.is_empty() {
+                        Some(format!("{}: {}", s.label(), s.error))
+                    } else if s.usage_query.as_ref() != Some(&query) {
+                        Some(format!(
+                            "{} · {}",
+                            s.label(),
+                            crate::i18n::text("client.loading")
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+        }
         let snapshot = view.snapshot.as_ref();
         let running = snapshot.is_some_and(|s| s.turn.is_some());
         let stopping = snapshot
@@ -445,14 +555,20 @@ impl Shell {
         match self.native["page"].as_u64() {
             Some(4..=6) => {
                 let handler = self.page_handler(cx);
-                return self.usage_ui.render(
+                let content = self.usage_ui.render(
                     pot_ui::usage::UsageView {
                         page: self.native["page"].as_u64().unwrap(),
                         usage: &view.usage,
                         usage_error: &view.usage_error,
                         usage_notice: &view.usage_notice,
                         usage_pending: view.usage_pending,
-                        controls: true,
+                        controls: self.native["page"] != 4
+                            || (!self.usage_location.is_empty()
+                                && self
+                                    .space_directory
+                                    .spaces
+                                    .get(&self.usage_location)
+                                    .is_some_and(|s| s.connected && s.error.is_empty())),
                         selected_title: view.selected_task.as_ref().map(|t| t.title.as_str()),
                     },
                     pot_ui::pages::Layout::NATIVE,
@@ -461,9 +577,20 @@ impl Shell {
                     window,
                     cx,
                 );
+                return if self.native["page"] == 4 {
+                    div()
+                        .h_full()
+                        .flex()
+                        .flex_col()
+                        .child(self.location_bar("usage", cx))
+                        .child(self.usage_breakdown(cx))
+                        .child(content)
+                } else {
+                    content
+                };
             }
             Some(2) => {
-                return self.settings.render(&self.native["settings"], cx).child(
+                let content = self.settings.render(&self.native["settings"], cx).child(
                     Button::new("settings-resource-cache")
                         .ghost()
                         .label(crate::i18n::text("resources.cache"))
@@ -471,52 +598,47 @@ impl Shell {
                             ui::command(serde_json::json!({"action":"resource-cache"}))
                         }),
                 );
-            }
-            Some(1) => {
-                let catalog = self.catalog();
-                let handler = self.page_handler(cx);
-                let connections = self.machine_connections.render(
-                    pot_ui::machine_connections::View {
-                        client: Some(&backend::control_projection()),
-                        directory: &view.machines,
-                        selected: &self.machine_selection,
-                        reply: &view.machine_reply,
-                        pending: view.machine_pending,
-                    },
-                    catalog,
-                    handler.clone(),
-                    window,
-                    cx,
-                );
                 return div()
                     .h_full()
                     .flex()
                     .flex_col()
-                    .child(div().ml(px(56.)).child(connections))
-                    .when(!view.error.is_empty(), |el| {
-                        el.child(
-                            div()
-                                .ml(px(56.))
-                                .p_3()
-                                .child(crate::i18n::message(&view.error)),
-                        )
+                    .when(self.native["settings"]["section"] != 0, |el| {
+                        el.child(self.location_bar("settings", cx))
                     })
-                    .child(pot_ui::machines::render(
-                        pot_ui::machines::MachinesView {
-                            permissions: &view.permissions,
-                            directory: &view.machines,
-                            preferred: &self.machine_selection,
-                            desktop_runtime: (backend::mode() == "local")
-                                .then(|| view.runtime["runtime_id"].as_str())
-                                .flatten(),
-                        },
-                        pot_ui::pages::Layout::NATIVE,
-                        self.catalog(),
-                        handler,
-                        cx,
-                    ));
+                    .child(content);
             }
+            Some(1) => return self.render_spaces_machines(window, cx),
             _ => {}
+        }
+        if !self.show_tasks && view.selected.is_empty() && self.assistant_list {
+            return self.render_assistant_list(window, cx);
+        }
+        if !self.show_tasks && view.selected.is_empty() && self.assistants_ui.open {
+            self.assistants_ui.form_only = true;
+            let handler = self.page_handler(cx);
+            let form = self.assistants_ui.render(
+                pot_ui::assistants::View {
+                    assistants: &view.assistants,
+                    current: view.assistant_id(),
+                    rules: &view.assistant_rules,
+                },
+                self.catalog(),
+                handler,
+                window,
+                cx,
+            );
+            return ui::page(cx).child(
+                ui::content()
+                    .child(
+                        div()
+                            .id("assistant-edit-scroll")
+                            .overflow_y_scroll()
+                            .child(form),
+                    )
+                    .when(!view.command_error.is_empty(), |el| {
+                        el.child(ui::notice(view.command_error.clone(), true, cx))
+                    }),
+            );
         }
         if !self.show_tasks
             && view.selected.is_empty()
@@ -588,13 +710,23 @@ impl Shell {
             crate::i18n::message(&view.error)
         };
         if self.show_tasks && self.schedule_tab {
+            if view.schedule_selected.is_empty() && !self.schedules_ui.open {
+                return self.render_space_schedules(cx);
+            }
             return self.schedules_ui.render(&view, cx);
         }
         if self.show_tasks {
+            view.task_page = self.space_directory.task_page(&view.task_query);
+            view.task_query.offset = view.task_page.offset;
+            view.tasks = view.task_page.items.clone();
+            view.assistants = self.space_directory.assistants();
+            view.error = self.space_directory.error();
+            view.tasks_loading = self.space_directory.spaces.is_empty();
             let handler = self.page_handler(cx);
             let navigation = schedules_ui::navigation(false, cx);
             return pot_ui::tasks::render(
                 pot_ui::tasks::TasksView {
+                    locations: &self.space_directory.task_locations(),
                     local_runtime: view.runtime["runtime_id"].as_str().unwrap_or_default(),
                     assistant_names: &view.assistants,
                     search: &self.task_search,
@@ -615,18 +747,6 @@ impl Shell {
                 cx,
             );
         }
-        let assistant_handler = self.page_handler(cx);
-        let assistant_header = self.assistants_ui.render(
-            pot_ui::assistants::View {
-                assistants: &view.assistants,
-                current: view.assistant_id(),
-                rules: &view.assistant_rules,
-            },
-            self.catalog(),
-            assistant_handler,
-            window,
-            cx,
-        );
         let latest_assistant = messages.iter().rposition(|m| m.role == Role::Assistant);
         div()
             .size_full()
@@ -637,7 +757,7 @@ impl Shell {
             .text_color(rgb(ink))
             .text_size(px(15.))
             .font_family(".AppleSystemUIFont")
-            .when(view.selected.is_empty(), |el| el.child(assistant_header))
+
             .when(!view.selected.is_empty(), |el| {
                 let task = view
                     .selected_task
@@ -652,6 +772,11 @@ impl Shell {
                             .flex()
                             .flex_col()
                             .gap_2()
+                            .when_some(self.space_directory.spaces.get(backend::mode()), |el, space| {
+                                el.child(div().flex().items_center().gap_2()
+                                    .child(space.assistant_name(view.assistant_id()).to_owned())
+                                    .child(spaces_ui::badge(space, "task-owner")))
+                            })
                             .child(
                                 div()
                                     .flex()
@@ -678,7 +803,7 @@ impl Shell {
                                                     .size(px(13.)),
                                                 )
                                                 .child(if task.remote_waiting { crate::i18n::text("main.waiting-for-remote-machine") } else { task_phase(&task.phase) })
-                                                .child(format!(" · {}", pot_ui::machine_state::task_location(task, self.catalog(), view.runtime["runtime_id"].as_str().unwrap_or_default()))),
+                                                .child(format!(" · {}", self.space_directory.spaces.get(backend::mode()).and_then(|s| self.space_directory.task_locations()[s.owner(view.assistant_id()).object(&task.id)].as_str().map(str::to_owned)).unwrap_or_else(|| pot_ui::machine_state::task_location(task, self.catalog(), view.runtime["runtime_id"].as_str().unwrap_or_default())))),
                                         )
                                         .when(
                                             task.phase.scope() == "archived",
@@ -827,7 +952,8 @@ impl Shell {
                                     .when(view.running_total > 3, |el| el.child(Button::new("running-overflow").ghost().small().text_color(rgb(muted)).accessibility_label(crate::i18n::tr!("main.more-running-view-tasks", view.running_total-3)).child(div().w_full().text_size(px(12.)).font_weight(FontWeight::NORMAL).child(crate::i18n::tr!("main.more-running", view.running_total-3)))
                                         .on_click(cx.listener(|this, _, window, cx| { this.task_search.update(cx, |field, cx| field.set_value("", window, cx)); ui::command(serde_json::json!({"action":"page", "value":3})); this.show_tasks=true; this.schedule_tab=false; this.client.filter_tasks("active".into(), String::new(), 0); cx.notify(); })))))
                             })
-                    })),
+                    }))
+                    .child(self.collaboration_updates(&view,cx)),
             )
             .child(
                 div().w_full().px_8().flex_shrink_0().child(
@@ -889,8 +1015,15 @@ impl Shell {
 }
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if std::mem::take(&mut self.pending_mode) {
-            self.switch_mode(window, cx);
+        if self.native["page"] != 2
+            && self.native["page"] != 6
+            && let Some((owner, selected)) = self.settings_return.take()
+        {
+            let destination = (self.show_tasks, self.schedule_tab);
+            if self.activate_owner(&owner, window, cx) {
+                self.client.select(selected);
+            }
+            (self.show_tasks, self.schedule_tab) = destination;
         }
         if std::mem::take(&mut self.pending_up) {
             self.navigate_up(window, cx);
@@ -932,6 +1065,7 @@ impl Render for Shell {
             .flex_col()
             .bg(cx.theme().background)
             .child(self.titlebar(&view, window, cx))
+            .child(self.notification_banner(cx))
             .child(body)
     }
 }
@@ -1003,7 +1137,7 @@ fn main() {
         startup_error(&error);
     }
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(AppAssets)
         .run(|cx: &mut App| {
             gpui_kit::init(cx);
             crate::i18n::set_locale(if unsafe { pot_bridge_chinese() } {
@@ -1069,7 +1203,11 @@ fn main() {
                         .detach();
                         Shell {
                             other_mode: None,
-                            pending_mode: false,
+                            assistant_list: true,
+                            space_directory: Default::default(),
+                            usage_location: String::new(),
+                            settings_return: None,
+                            notifications: Vec::new(),
                             client: client::Client::start(),
                             assistants_ui: Default::default(),
                             machine_connections: Default::default(),

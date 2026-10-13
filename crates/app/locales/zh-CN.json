@@ -796,5 +796,16 @@
   "onboarding.desktop-failure": "任务 Agent 执行失败：未找到可用桌面。",
   "onboarding.create-desktop": "创建桌面 Sandbox",
   "onboarding.connect-desktop": "连接桌面机器",
-  "onboarding.server-chat": "打开服务器聊天"
+  "onboarding.server-chat": "打开服务器聊天",
+  "spaces.local": "本地",
+  "spaces.cloud": "云端",
+  "spaces.this-mac": "这台 Mac",
+  "spaces.assistants": "助手",
+  "spaces.edit-assistant": "编辑助手",
+  "spaces.location": "所属位置",
+  "spaces.all": "全部位置",
+  "spaces.stale": "状态未更新",
+  "spaces.identity-changed": "Space 身份已改变，请从所属 Space 重新打开。",
+  "spaces.reply": "助手回复",
+  "spaces.wait-send": "请等待当前消息发送完成。"
 }

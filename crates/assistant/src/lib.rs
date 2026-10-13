@@ -1,6 +1,7 @@
 //! Assistant identity, instructions and conversation state, independent of execution hosts.
 pub mod driver;
 pub mod instructions;
+pub mod message;
 pub mod orchestration;
 pub mod registry;
 pub mod threads;

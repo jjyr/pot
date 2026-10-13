@@ -12,6 +12,7 @@ user agreement; see the repository `AGENTS.md`.
 | Computer use | `cua_repl` | Main, Worker; Host or Linux Sandbox |
 | Composition | `exec`, `wait` | Main, Worker |
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
+| Assistant messages | `list_assistants`, `send_assistant_message` | Main |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
 | Execution targets | `list_execution_targets`; Sandbox-only `manage_sandbox` | Main |

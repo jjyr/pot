@@ -58,8 +58,16 @@ Agent slot. Runtime composition and its execution kernel are separate crates to
 keep business components independent of composition. See [Runtime](../crates/runtime/README.md)
 for lifecycle and failure semantics.
 
-The App connects to one Control as a client. The accepted UI has one icon to switch
-between local and remote. Data, drafts, event cursors and cached results are scoped
+The App owns its local Control connection and can also connect to a remote Control.
+The current UI selects one conversation Space at a time with a local/remote icon;
+its selection does not affect background Assistant message relay. App alone runs
+`pot-relay`, reusing those connections to transfer messages between independent
+Controls. Same-Space delivery stays within Control. Assistant communication has
+no special handoff or task-migration operation: agents coordinate through ordinary
+messages. Protocol types live in `pot-protocol::message`, durable mailboxes in
+`pot-assistant::message`. See [Assistant messages](assistant-messages.md) for the
+single message contract, processing isolation and recovery rules.
+Data, drafts, event cursors and cached results are scoped
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
 UI is deferred. Machines shows lightweight status cards, expandable Host/Sandbox rows and
 Tasks filtered by the exact execution target. Technical management and file transfers
@@ -247,7 +255,9 @@ Runtime assembles components, manages their lifetime and owns the shared Agent
 execution manager. Server hosts native
 APIs, outward Control transport and explicit Web hosting. Control coordinates
 Tasks/schedules, approval and model policy through component APIs. Assistant owns
-identities, SQLite AGENTS.md records, conversation Threads and the chat driver.
+identities, SQLite AGENTS.md records, conversation Threads, the chat driver and
+durable Assistant mailboxes. Relay owns only cross-Control message transport
+coordination and is currently composed by App.
 Runner owns destination Task run journals and context adaptation. Assistant and
 Task adapters submit to the Runtime execution manager, which invokes pot-agent,
 the injected model/tool engine. Model protocol encoding is a pure shared library;

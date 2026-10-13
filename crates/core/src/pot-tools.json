@@ -591,5 +591,52 @@
       ],
       "additionalProperties": false
     }
+  },
+  {
+    "name": "list_assistants",
+    "description": "List addressable assistants in this Control and Spaces connected through the App relay. A listed remote assistant may be offline. Does not start work.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "send_assistant_message",
+    "description": "Send a durable message to another assistant and wake its separate message conversation. Returns acceptance, not completion. Cross-Space delivery waits for App relay connectivity. Use for coordination and replies; no task migration or permissions are implied. Replies to the current correspondent automatically retain the conversation; reply_to can explicitly reference a received message. Automatic exchanges are bounded; do not send unnecessary acknowledgements.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "object",
+          "properties": {
+            "control_id": {
+              "type": "string"
+            },
+            "assistant_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "control_id",
+            "assistant_id"
+          ],
+          "additionalProperties": false
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "reply_to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "text"
+      ],
+      "additionalProperties": false
+    }
   }
 ]

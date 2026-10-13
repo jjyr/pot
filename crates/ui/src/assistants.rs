@@ -21,6 +21,7 @@ struct Draft {
 #[derive(Default)]
 pub struct Editor {
     pub open: bool,
+    pub form_only: bool,
     selected: String,
     saved_owner: String,
     drafts: HashMap<String, Draft>,
@@ -66,34 +67,39 @@ impl Editor {
         if !self.open {
             return body;
         }
-        body = body.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_2()
-                .children(list.iter().map(|d| {
-                    Button::new(SharedString::from(format!(
-                        "assistant-{}",
-                        d["id"].as_str().unwrap_or_default()
-                    )))
-                    .ghost()
-                    .small()
-                    .label(d["name"].as_str().unwrap_or_default().to_owned())
-                    .toggled(d["id"] == current)
-                    .on_click(pages::on(
-                        &handler,
-                        "assistant-select",
-                        d["id"].clone(),
-                    ))
-                }))
-                .child(
-                    Button::new("assistant-new")
+        if self.form_only {
+            body = div().flex().flex_col().gap_3().p_4();
+        }
+        if !self.form_only {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .children(list.iter().map(|d| {
+                        Button::new(SharedString::from(format!(
+                            "assistant-{}",
+                            d["id"].as_str().unwrap_or_default()
+                        )))
                         .ghost()
                         .small()
-                        .label(catalog.text("assistant.new"))
-                        .on_click(pages::on(&handler, "assistant-new", Value::Null)),
-                ),
-        );
+                        .label(d["name"].as_str().unwrap_or_default().to_owned())
+                        .toggled(d["id"] == current)
+                        .on_click(pages::on(
+                            &handler,
+                            "assistant-select",
+                            d["id"].clone(),
+                        ))
+                    }))
+                    .child(
+                        Button::new("assistant-new")
+                            .ghost()
+                            .small()
+                            .label(catalog.text("assistant.new"))
+                            .on_click(pages::on(&handler, "assistant-new", Value::Null)),
+                    ),
+            );
+        }
         let owner = if self.selected.is_empty() {
             current
         } else {

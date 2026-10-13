@@ -11,15 +11,21 @@ is the single phase progress table.
 | Delivered scope and remaining work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Chat, Tasks, Machines and configuration interactions | [UI specification](ui-ux-design.md), [design language](design-language.md) |
+| Native multi-Space UI (#47) | [Multi-Space UI](multi-space-ui.md) |
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
 | Backend responsibilities and API contracts | [Crates](backend-crates.md), [Runtime](../crates/runtime/README.md), [Control](../crates/control/README.md) |
 | Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
+| Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
 | Sandbox execution and resources | [Providers](sandbox-providers.md), [executor](executor.md), [resources](sandbox-resources.md), [images](sandbox-image.md), [macOS](macos-sandbox.md) |
 | Shared UI, language and licenses | [Shared UI](shared-ui.md), [internationalization](internationalization.md), [licenses](licenses-and-about.md) |
 | Product goals | [Product](product-design.md) |
 
 ## Evidence
+
+[Native multi-Space UI](validation/multi-space-ui-20261013.md).
+
+[Assistant messages and App relay](validation/assistant-messages-20261013.md).
 
 [Execution target terminology and binding validation](validation/execution-targets-20261013.md).
 
