@@ -106,17 +106,37 @@ pub async fn invoke(
             .mark_routing_turn(&turn_id)
             .map_err(internal)?;
     }
+    // Scheduled work belongs to the assistant, not the transient mail conversation.
+    let schedule_owner = if matches!(
+        call.name.as_str(),
+        "list_schedules" | "get_schedule" | "manage_schedule"
+    ) {
+        Some(assistant_message::owner(&s).map_err(internal)?)
+    } else {
+        None
+    };
     let result = match call.name.as_str() {
+        "list_assistants" => {
+            let contacts = assistant_message::hub(&s)
+                .and_then(|h| h.message_contacts())
+                .map_err(internal)?;
+            Ok(json!({"assistants":contacts}))
+        }
+        "send_assistant_message" => {
+            let input =
+                serde_json::from_value(call.args.clone()).map_err(|e| internal(e.into()))?;
+            Ok(assistant_message::send(&s, &request_id, input).map_err(internal)?)
+        }
         "list_schedules" => {
             let mut q: schedules::QueryPage =
                 serde_json::from_value(call.args.clone()).map_err(|e| internal(e.into()))?;
             if q.limit.is_none() {
                 q.limit = Some(10);
             }
-            serde_json::to_value(schedules::page(&s, q)?)
+            serde_json::to_value(schedules::page(schedule_owner.as_ref().unwrap(), q)?)
         }
         "get_schedule" => serde_json::to_value(schedules::page(
-            &s,
+            schedule_owner.as_ref().unwrap(),
             schedules::QueryPage {
                 selected: field(&call.args, "schedule_id")?,
                 runs_offset: call.args["offset"].as_u64().unwrap_or(0) as usize,
@@ -131,7 +151,11 @@ pub async fn invoke(
                 agent::routing::allow_hint(&s, args["spec"]["profile"].as_str())
                     .map_err(|e| error(StatusCode::BAD_REQUEST, "profile_hint", &e.to_string()))?;
             }
-            Ok(schedules::apply(&s, args, now())?)
+            Ok(schedules::apply(
+                schedule_owner.as_ref().unwrap(),
+                args,
+                now(),
+            )?)
         }
         "create_task" => serde_json::to_value(
             tasks::create_from(

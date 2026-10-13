@@ -1,5 +1,9 @@
 # Task coordination and lifecycle
 
+Assistant communication is separate from Task reference messages; see
+[Assistant messages](assistant-messages.md). Handoff is agent coordination, not a
+Task migration operation.
+
 Main manages Tasks; Workers cannot create, message, wait for, interrupt or cancel
 other Tasks. Summary sessions only inspect Tasks.
 

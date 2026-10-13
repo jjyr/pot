@@ -10,12 +10,22 @@ fn ensure_assistant(s: &Service) -> Result<()> {
     Ok(())
 }
 pub(crate) fn read(s: &Service) -> Result<Value> {
+    if super::assistant_message::current(s)?.is_some() {
+        return read(&super::assistant_message::hub(s)?.service(&s.assistant_id)?);
+    }
     ensure_assistant(s)?;
     let inner = s.conversation.inner.lock().unwrap();
     let rules = load(&inner.store)?;
     Ok(json!({"text":rules.text,"revision":rules.revision}))
 }
 pub(crate) fn save(s: &Service, text: &str, expected_revision: &str) -> Result<Value> {
+    if super::assistant_message::current(s)?.is_some() {
+        return save(
+            &super::assistant_message::hub(s)?.service(&s.assistant_id)?,
+            text,
+            expected_revision,
+        );
+    }
     ensure_assistant(s)?;
     let inner = s.conversation.inner.lock().unwrap();
     let rules = pot_assistant::instructions::save(&inner.store, text, expected_revision)?;
@@ -23,6 +33,13 @@ pub(crate) fn save(s: &Service, text: &str, expected_revision: &str) -> Result<V
 }
 
 pub(crate) fn validate_tool(s: &Service, name: &str, args: &Value) -> Result<()> {
+    if super::assistant_message::current(s)?.is_some() {
+        return validate_tool(
+            &super::assistant_message::hub(s)?.service(&s.assistant_id)?,
+            name,
+            args,
+        );
+    }
     ensure_assistant(s)?;
     let fields: &[&str] = match name {
         "read_agent_instructions" => &[],

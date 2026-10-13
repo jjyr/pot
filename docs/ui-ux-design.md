@@ -173,10 +173,13 @@ Category pages do not change totals/trends/allowances; range/session/zone change
 
 ## App modes and Web hosting
 
-App's local Runtime starts/exits with App and cannot become Control. Users first
-add one independently deployed Control; additional machines join that Control.
+App's local Runtime includes an embedded Control and starts/exits with App; it
+cannot open the standalone Control listener. Users may also connect an independently
+deployed remote Control; additional execution machines join that Control.
 A single icon switches local/remote mode. Drafts, caches and cursors are scoped by
 mode/Runtime/assistant. Remote failure never selects local execution.
+Assistant message relay operates
+independently of the selected mode; see [Assistant messages](assistant-messages.md).
 
 Web UI is explicitly enabled by `pot serve --ui --control URL` and remains fixed
 to that Control. It has no local/remote switch. App has no Web UI/Tailscale hosting

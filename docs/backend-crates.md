@@ -7,7 +7,8 @@
 | pot-core | Shared profiles, typed environments, execution feedback and tool contracts |
 | pot-agent | Injected model/tool loop, context, compaction and Skill discovery |
 | pot-storage | Message/event storage and SQLite transaction primitives |
-| pot-assistant | Assistant identities, database instructions, conversation Threads and chat driver |
+| pot-assistant | Assistant identities, instructions, conversation Threads, chat driver and durable assistant mailboxes |
+| pot-relay | Transport-independent cross-Control Assistant message relay; composed only by App |
 | pot-usage | Request reservations, allowances, usage settlement and provider budgets |
 | pot-secrets | Encrypted SQLite secrets with separately supplied master keys |
 | pot-model-protocol | Pure model messages, wire codecs and response parsing |
@@ -18,7 +19,7 @@
 | pot-runtime-execution | Destination-local Agent invocation, queue, concurrency, cancellation and execution tracing |
 | pot-tool-executor | Production Host/guest commands, patches and process sessions |
 | pot-server | Standalone/App adapters, authenticated APIs, Control and Web transport |
-| pot-protocol | Public client DTOs and API constants |
+| pot-protocol | Public client DTOs, Assistant message contracts and API constants |
 | pot-sandbox | Definitions, lifecycle, scopes, leases, receipts and recovery |
 | pot-sandbox-linux-podman | Rootless Linux Podman lifecycle and guest transport |
 | pot-sandbox-macos-apple-container | Apple Containerization Helper and Linux guest transport |
@@ -43,7 +44,7 @@ no provider credentials or product management authority. Shared Sandbox workspac
 do not establish isolation between Tasks.
 
 Component boundaries are checked by `mise run test:architecture`. Assistant,
-Gateway, Usage, Secrets, Agent, Runner and Runtime Execution cannot depend on Control, Runtime or
+Relay, Gateway, Usage, Secrets, Agent, Runner and Runtime Execution cannot depend on Control, Runtime or
 Server. Runtime has no direct database or HTTP dependencies. Control contains
 adapters that bind product state to the independently testable components; it is
 not a second Agent implementation. Gateway remains in the Control process.

@@ -1277,3 +1277,98 @@ async fn assistant_and_local_worker_invocations_are_tracked_by_runtime() {
         std::fs::remove_dir_all(&s.data).unwrap();
     }
 }
+
+#[tokio::test]
+async fn assistant_mail_uses_separate_context_and_real_runtime_execution() {
+    use pot_protocol::message::{AssistantRef, Send};
+    let (mut s, _rx, server, captured) = fixture(
+        "openai_chat",
+        vec![json!({"id":"discover", "name":"list_assistants", "arguments":{}}), json!({"id":"reply", "name":"send_assistant_message", "arguments":{"to":{"control_id":"mail-test-control","assistant_id":"main"},"text":"I can investigate this"}})],
+    )
+    .await;
+    s.scope.runtime_id = "mail-test-control".into();
+    let hub = Arc::new(assistants::Hub::open(s.clone()).unwrap());
+    *s.agent_service.resources.assistants.lock().unwrap() = Arc::downgrade(&hub);
+    let target = hub.create("second", "Second").unwrap();
+    let before = s
+        .conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .messages()
+        .unwrap();
+    let message = hub
+        .mailbox
+        .send(
+            "mail-test",
+            AssistantRef {
+                control_id: s.runtime_id.clone(),
+                assistant_id: s.assistant_id.clone(),
+            },
+            Send {
+                to: AssistantRef {
+                    control_id: s.runtime_id.clone(),
+                    assistant_id: target.id.clone(),
+                },
+                text: "Please inspect who you can contact".into(),
+                reply_to: None,
+            },
+            None,
+        )
+        .unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        crate::control::assistant_message::process_next(&hub),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let records = hub.mailbox.history(&target.id, 0).unwrap();
+    assert_eq!(records[0].state, "processed", "{:?}", records);
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records[1].message.reply_to.as_deref(),
+        Some(message.id.as_str())
+    );
+    assert_eq!(records[1].message.conversation_id, message.conversation_id);
+    assert_eq!(
+        s.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .messages()
+            .unwrap()
+            .len(),
+        before.len()
+    );
+    {
+        let calls = captured.lock().unwrap();
+        assert!(calls.len() >= 2);
+        let serialized = serde_json::to_string(&*calls).unwrap();
+        assert!(serialized.contains("list_assistants"));
+        assert!(serialized.contains(&message.id));
+    }
+    crate::control::assistant_message::process_next(&hub)
+        .await
+        .unwrap();
+    assert_eq!(hub.mailbox.history(&target.id, 0).unwrap().len(), 2);
+    let last = captured.lock().unwrap().last().unwrap().to_string();
+    assert!(last.contains("Please inspect who you can contact"));
+    assert!(last.contains("I can investigate this"));
+    assert_eq!(
+        s.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .messages()
+            .unwrap()
+            .len(),
+        before.len()
+    );
+    s.scope.stop.send_replace(true);
+    hub.shutdown().await;
+    server.abort();
+}

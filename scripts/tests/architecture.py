@@ -16,6 +16,7 @@ class ComponentBoundaries(unittest.TestCase):
     def test_domain_components_do_not_depend_on_composition(self):
         for component in (
             "assistant",
+            "relay",
             "gateway",
             "secrets",
             "usage",
@@ -35,6 +36,22 @@ class ComponentBoundaries(unittest.TestCase):
                 self.assertFalse(
                     dependencies(component) & {"pot-gateway", "pot-secrets", "reqwest"}
                 )
+
+    def test_relay_only_uses_shared_protocol_and_injected_endpoints(self):
+        self.assertFalse(
+            dependencies("relay")
+            & {
+                "pot-assistant",
+                "pot-app",
+                "pot-runtime",
+                "pot-server",
+                "pot-control",
+                "reqwest",
+                "rusqlite",
+                "pot-storage",
+                "pot-secrets",
+            }
+        )
 
     def test_model_protocol_has_no_network_or_storage(self):
         self.assertFalse(

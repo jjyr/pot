@@ -7,6 +7,9 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+pot-relay.workspace = true
+anyhow = "1"
+futures = "0.3"
 pot-ui = { workspace = true, features = ["presentation"] }
 gpui-kit = "=0.7.1"
 rust-i18n = "=4.2.4"

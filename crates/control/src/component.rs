@@ -4,6 +4,7 @@ pub struct Component {
     assistants: Arc<assistants::Hub>,
     state: Service,
     main: Option<tokio::task::JoinHandle<()>>,
+    mail: Mutex<Option<tokio::task::JoinHandle<()>>>,
     coordinator: Mutex<Option<tokio::task::JoinHandle<()>>>,
     activated: std::sync::atomic::AtomicBool,
 }
@@ -30,12 +31,20 @@ impl Component {
         orchestration::initialize(&self.state)?;
         tasks::restore(&self.state)?;
         *self.coordinator.lock().unwrap() = Some(tasks::start(self.state.clone()));
-        self.assistants.activate()
+        self.assistants.activate()?;
+        *self.mail.lock().unwrap() = Some(crate::control::assistant_message::start(
+            self.assistants.clone(),
+        ));
+        Ok(())
     }
     pub async fn shutdown(&mut self) {
         self.state.stop.send_replace(true);
         tasks::request_shutdown(&self.state);
         terminal::shutdown(&self.state).await;
+        let mail = self.mail.lock().unwrap().take();
+        if let Some(mut task) = mail {
+            settle(&mut task).await;
+        }
         self.assistants.shutdown().await;
         let coordinator = self.coordinator.lock().unwrap().take();
         if let Some(mut task) = coordinator {
@@ -52,6 +61,9 @@ impl Component {
 impl Drop for Component {
     fn drop(&mut self) {
         self.state.stop.send_replace(true);
+        if let Some(task) = self.mail.get_mut().unwrap().take() {
+            task.abort();
+        }
         if let Some(task) = self.main.take() {
             task.abort();
         }
@@ -177,11 +189,13 @@ pub async fn open(
     }
     agent::initialize(&s)?;
     let assistants = Arc::new(assistants::Hub::open(s.clone())?);
+    *s.agent_service.resources.assistants.lock().unwrap() = Arc::downgrade(&assistants);
     let main = start_main(s.clone(), rx);
     Ok(Component {
         assistants,
         state: s,
         main: Some(main),
+        mail: Default::default(),
         coordinator: Mutex::new(None),
         activated: Default::default(),
     })

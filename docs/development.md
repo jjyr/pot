@@ -177,6 +177,8 @@ Rust workspace members and their bundled assets live under `crates/`. The browse
 | `crates/web-ui/` | WASM/browser shell, authenticated transport, PWA and push |
 | `helper/` | Swift Containerization, VM lifecycle |
 | `crates/server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
+| `crates/assistant/` | Assistant identity, instructions, conversations and durable mailboxes |
+| `crates/relay/` | Cross-Control message forwarding through injected endpoints; currently App-only |
 | `crates/runtime/` | Runtime composition and execution management |
 | `crates/runtime-execution/` | Shared Agent invocation, concurrency and metadata tracing |
 | `crates/core/` | Immutable Agent models, execution contracts, shared tool schema |

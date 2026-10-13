@@ -58,6 +58,8 @@ pub(crate) struct AgentService {
 
 /// Agent resource paths are independent of Environment inventory/lifecycle.
 pub(crate) struct AgentResources {
+    pub(crate) assistants: Mutex<std::sync::Weak<assistants::Hub>>,
+    pub(crate) mail_work: Mutex<std::collections::BTreeSet<String>>,
     pub(crate) home: PathBuf,
     pub(crate) skill_user: PathBuf,
     pub(crate) skill_builtin: PathBuf,
@@ -89,6 +91,8 @@ impl AgentResources {
             skill_user,
             skill_builtin,
             global_instructions: Mutex::new(Default::default()),
+            assistants: Default::default(),
+            mail_work: Default::default(),
         }
     }
 }

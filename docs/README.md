@@ -14,12 +14,15 @@ is the single phase progress table.
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
 | Backend responsibilities and API contracts | [Crates](backend-crates.md), [Runtime](../crates/runtime/README.md), [Control](../crates/control/README.md) |
 | Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
+| Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
 | Sandbox execution and resources | [Providers](sandbox-providers.md), [executor](executor.md), [resources](sandbox-resources.md), [images](sandbox-image.md), [macOS](macos-sandbox.md) |
 | Shared UI, language and licenses | [Shared UI](shared-ui.md), [internationalization](internationalization.md), [licenses](licenses-and-about.md) |
 | Product goals | [Product](product-design.md) |
 
 ## Evidence
+
+[Assistant messages and App relay](validation/assistant-messages-20261013.md).
 
 [Machine capability permissions](validation/machine-permissions-20261012.md).
 

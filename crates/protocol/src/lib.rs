@@ -5,6 +5,7 @@
 //! `snapshot.cursor`. Durable events carry a cursor; ephemeral streaming
 //! updates carry `cursor: None` and are superseded by the next snapshot.
 
+pub mod message;
 pub mod references;
 pub use references::MachineRoute;
 use serde::{Deserialize, Serialize};

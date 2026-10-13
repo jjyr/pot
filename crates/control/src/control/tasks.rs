@@ -63,6 +63,7 @@ pub(crate) fn serialized(hub: &Hub) -> Result<String> {
     )?)
 }
 pub(crate) fn persist(root: &Service, hub: &Hub) -> Result<()> {
+    let root = assistant_message::owner(root)?;
     root.conversation
         .inner
         .lock()
@@ -1514,6 +1515,12 @@ pub(crate) fn owner(root: &Service, owner: &str) -> ApiResult<Service> {
     if owner == root.usage_scope {
         return Ok(root.clone());
     }
+    if let Ok(hub) = assistant_message::hub(root)
+        && let Some(session) = hub.mail_sessions.lock().unwrap().get(owner)
+        && session.assistant_id == root.assistant_id
+    {
+        return Ok(session.clone());
+    }
     root.tasks
         .hub
         .lock()
@@ -1553,6 +1560,15 @@ fn reap_work_permissions(root: &Service) {
             root.assistant_id, root.usage_scope, turn.user_message_id
         ));
     }
+    active.extend(
+        root.agent_service
+            .resources
+            .mail_work
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned(),
+    );
     root.environment_service
         .permissions
         .retain_work(&root.assistant_id, &active);

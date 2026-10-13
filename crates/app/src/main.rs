@@ -4,6 +4,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 mod artifacts;
 mod backend;
 mod client;
+mod relay;
 use pot_ui::design;
 mod i18n;
 
