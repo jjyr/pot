@@ -465,7 +465,7 @@ var bridge: PotBridge?
             web.evaluateJavaScript("document.documentElement.dataset.theme='" + (dark ? "dark" : "light") + "'")
         }
         let background = NSColor(white: dark ? 32.0 / 255 : 253.0 / 255, alpha: 1)
-        let sidebar = NSColor(white: dark ? 0.157 : 0.957, alpha: 1)
+        let sidebar = NSColor(white: dark ? 40.0 / 255 : 244.0 / 255, alpha: 1)
         host.backgroundColor = background
         rootView.layer?.backgroundColor = background.cgColor
         rail.layer?.backgroundColor = sidebar.cgColor

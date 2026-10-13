@@ -6,7 +6,7 @@ This document defines the target visual and interaction language for Pot. It is 
 
 ## Principles
 
-Pot should feel like a refined Mac application: clear typography, compact controls, predictable navigation and responsive feedback. Use a bright, almost white window matching the chat canvas, a quiet light-gray sidebar and a titlebar matching the chat canvas, and soft blue user messages. Distinguish surfaces with small luminance differences, fine dividers and restrained shadows.
+Pot should feel like a refined Mac application: clear typography, compact controls, predictable navigation and responsive feedback. Use a bright, almost white window matching the chat canvas, a quiet light-gray sidebar and a titlebar matching the sidebar, and soft blue user messages. Distinguish surfaces with small luminance differences, fine dividers and restrained shadows.
 
 Keep color sparse. Blue identifies primary actions and focus; green, amber and red communicate status alongside words or icons. Small touches of playful motion provide liveliness without changing the native foundation. Avoid large contrasting cards, decorative gradients, extensive glass effects and repeated bouncing. Mac styling does not require a darker gray window or saturated message bubbles.
 
@@ -72,7 +72,7 @@ Keep the compact 56 px icon-only sidebar: Chat, Tasks, Machines, Usage and Setti
 The target design removes the user-facing Terminal page, consistent with [AI configuration #7](https://github.com/jjyr/pot/issues/7). This does not itself remove shell tools or background agent execution.
 
 Use one 44 px titlebar integrated with the native window controls. Its background
-matches the chat canvas exactly in light and dark themes, without a bottom divider.
+matches the sidebar exactly in light and dark themes, without a bottom divider.
 Place the destination title and contextual actions in this row; leave empty space
 draggable and retain native double-click behavior. The sidebar starts below it.
 Task details truncate long titles with a full-title tooltip. Task conversations belong

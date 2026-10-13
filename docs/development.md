@@ -232,3 +232,10 @@ Control Cargo builds generate and embed their own fresh assets automatically.
 Image/prepare entry points also run the generator and copy the Sandbox output.
 Use `mise run test:i18n` to verify catalog parity, template defaults, independent
 resources, asynchronous startup and automatic third-language discovery.
+
+### Brand assets
+
+Run `mise run icons` on macOS to regenerate the ICNS, application/README PNGs,
+opaque maskable Home Screen PNGs, monochrome menu-bar exports and Sandbox wallpaper.
+The generator links `crates/app/swift/PotIcon.swift`, the same vector master used by
+native navigation and menu-bar rendering. See [brand design](design/pot-brand/README.md).

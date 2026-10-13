@@ -3,7 +3,7 @@
 use crate::{Shell, client, gpui, ui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, IconName, Sizable, TitleBar,
+    IconName, Sizable, TitleBar,
     button::{Button, ButtonVariants},
 };
 use pot_protocol::TaskQuery;
@@ -347,7 +347,7 @@ impl Shell {
             .h(px(ui::TITLEBAR))
             .pl(px(96.))
             .pr_4()
-            .bg(cx.theme().background)
+            .bg(pot_ui::design::navigation(cx))
             .border_b_0()
             .child(
                 div()

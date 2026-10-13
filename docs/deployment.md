@@ -453,8 +453,8 @@ The Token configuration page has no installation action. Installation does not r
 The manifest uses a stable origin-scoped app ID, standalone display and dedicated
 192/512 px icons. iOS also receives Apple Home Screen metadata and its touch icon.
 
-Home Screen, browser/notification and login branding use the selected terracotta
-Pot Companion. `scripts/make-icons.swift` generates both the rounded Mac icon
+Home Screen, browser/notification and login branding use the selected ochre
+Pot Companion. `mise run icons` generates both the rounded Mac icon
 (`crates/app/assets/Pot.png` / `Pot.icns`) and an opaque, square cream-background master
 (`PotHomeScreen.png`) so mobile operating systems can apply their own masks.
 `scripts/build-web-ui` produces the touch icon and 192/512 px `any maskable` icons

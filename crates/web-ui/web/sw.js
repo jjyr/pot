@@ -13,7 +13,7 @@ self.addEventListener('push',event=>{
   event.waitUntil((async()=>{
     const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});
     if(windows.some(c=>c.visibilityState==='visible'&&new URL(c.url).origin===self.location.origin&&!new URL(c.url).searchParams.has('task')&&['chat',null].includes(new URL(c.url).searchParams.get('page'))))return;
-    await self.registration.showNotification('Pot',{body:data.body,tag:data.tag,renotify:false,icon:'/icon.png?v=pot-companion-1',data:{message_id:data.message_id}});
+    await self.registration.showNotification('Pot',{body:data.body,tag:data.tag,renotify:false,icon:'/icon.png?v=pot-klee-2',data:{message_id:data.message_id}});
   })());
 });
 self.addEventListener('notificationclick',event=>{

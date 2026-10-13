@@ -23,7 +23,7 @@ Tasks, settings, and Machines use **gpui-kit 0.7.1** (gpui-pre 0.3.8). Shared la
 | Element | Specification |
 | --- | --- |
 | Sidebar | 56 px, 36 px icon hit areas; Pot is Chat, Settings at bottom; 220 ms moving selection and 140 ms hover feedback |
-| Titlebar | One 44 px row integrated with native window controls, matching the chat background without a divider; contextual title, parent chevron on child pages and conversation Usage action |
+| Titlebar | One 44 px row integrated with native window controls, matching the sidebar background in light and dark modes without a divider; contextual title, parent chevron on child pages and conversation Usage action |
 | Page | `ui::page(cx)`: reserves sidebar, uses Kit theme background/text |
 | Standard content | `ui::content()`: centered, max 820 px, 32 px padding, 16 px section spacing |
 | Title / hint | `ui::title()`: 24 px semibold; `ui::hint()`: 13 px secondary text |
@@ -37,7 +37,7 @@ Prefer `cx.theme()` background, foreground, muted_foreground, border, secondary;
 
 Content scrolls while titles/main navigation remain. Minimum window 800 x 700; forms scroll while Settings and schedule Save/Cancel actions remain outside the scrolling region. Page entry uses a 180 ms opacity transition; Reduce Motion disables it.
 
-The Chat navigation icon uses the selected [Pot Companion reference](design/pot-brand/d-pot-companion-concept.png): a terracotta pot with small handles, eyes and a restrained smile. The compact 28 px character is drawn natively rather than downsampling the concept board. Opening/revealing the window gives a 360 ms appearance and one blink; hovering raises the character by less than 1 px and changes its smile over 180 ms; pressing compresses it by up to 5% over 280 ms. Actual execution displays gently drifting steam on a three-second cycle, fading across state changes. A newly completed assistant reply gives an 850 ms contented expression once; initial history, failures and cancellation do not trigger it. The navigation hit area and selection highlight stay stable. Animation stops when the window is hidden/occluded, remains static while idle, and respects Reduce Motion. The menu bar uses the same Companion geometry in monochrome, with negative-space eyes, mouth and open rim. Execution adds steam; waiting narrows the eyes. Error and unread indicators remain independent.
+The Chat navigation icon uses the selected [Pot Companion reference](design/pot-brand/klee-app-menu-concept.png): an ochre asymmetric vessel with a tilted open rim, one eye, a curling smile and two short feet. The compact 28 px character is drawn natively rather than downsampling the concept board. Opening/revealing the window gives a 360 ms appearance and one blink; hovering raises the character by less than 1 px and changes its smile over 180 ms; pressing compresses it by up to 5% over 280 ms. Actual execution displays gently drifting steam on a three-second cycle, fading across state changes. A newly completed assistant reply gives an 850 ms contented expression once; initial history, failures and cancellation do not trigger it. The navigation hit area and selection highlight stay stable. Animation stops when the window is hidden/occluded, remains static while idle, and respects Reduce Motion. The menu bar uses the same Companion geometry in monochrome, with negative-space eye, simplified smile and open rim. Execution adds steam; waiting narrows the eye. Error and unread indicators remain independent.
 
 ## Parent navigation
 

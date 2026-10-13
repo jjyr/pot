@@ -1,57 +1,57 @@
-# Pot companion brand exploration
+# Pot Companion identity
 
-## Selected visual direction
+## Selected direction
 
-On 2026-10-07, the user selected concept D (Pot Companion) for retention and requested exploration of subtle animation for the left navigation icon.
+On 2026-10-13, the user approved the Klee-inspired companion and requested replacement
+across the product. The [approved App/menu-bar concept](klee-app-menu-concept.png)
+was generated with the built-in image generation tool. It is a visual reference;
+production assets are an editable native vector interpretation.
 
-Reference: [D concept board](d-pot-companion-concept.png). This is a raster concept reference, not a production icon asset. The board was generated with the built-in image generation tool.
+Keep the ochre asymmetric body, tilted open rim, one eye, curling smile and two
+short feet. The App tile is warm ivory. Compact monochrome artwork uses transparent
+cutouts and a simplified nose/smile without the tight curl. There are no side handles.
 
-Keep the warm terracotta pot, rounded body, small side handles, two simple eyes and restrained smile. Use a dimensional ceramic treatment for the application icon and simplify the same character for the compact navigation and monochrome menu-bar icons.
+## Source and exports
 
-## Implemented navigation motion
+`crates/app/swift/PotIcon.swift` is the single character geometry master. The native
+navigation and menu bar render it directly; `scripts/make-icons.swift` links it to
+export the App ICNS, PNG sizes, README image, Home Screen images, menu-bar PNGs and
+Sandbox wallpaper. Run `mise run icons` to regenerate everything.
 
-- Opening the window: one short settling/appearance transition, optionally with one blink.
-- Hover or keyboard focus: a small expression or highlight change; pressing gives restrained tactile feedback.
-- Executing work: slow steam movement, with a stable pot body. Execution follows actual main-chat or background-task state.
-- Work ends: steam fades; a brief contented expression may mark completion.
-- Idle: static.
+Home Screen images have an opaque square background and inset artwork for OS masks.
+Mac images have a rounded ivory tile and transparent outer corners. Menu-bar PNGs
+are black alpha templates at 22/44 pixels, without a tile. Native AppKit templates
+adapt to appearance; unread and failure overlays retain their existing semantics.
+The README uses the 384-pixel image at 128 CSS pixels.
 
-Respect Reduce Motion with static expressions and execution indicators. Stop navigation animation when the window is hidden. Preserve readable state without animation. Existing error and unread accounting remain authoritative.
+Web login, favicon, notifications, manifest and embedded navigation use these assets.
+Icon URLs use `pot-klee-2` to invalidate the previous identity while preserving the
+manifest app ID. Existing installed Home Screen icons may require an OS refresh.
 
-The user authorized implementation on 2026-10-07. The left navigation uses a native vector interpretation of the character, with the above motion. After rebasing onto `origin/main` fa3483b, the application bundle, Mobile login/header, Home Screen icons and README also use this character. The editable application/Home Screen vector master lives in `scripts/make-icons.swift`; the compact animated character lives in `crates/app/swift/PotIcon.swift`. Home Screen assets have an opaque cream background with no pre-applied corner mask. See the [UI specification](../../ui-ux-design.md) for exact timing and state semantics.
+## Motion
 
-The README displays `crates/app/assets/Pot384.png` at 128 × 128 CSS pixels to preserve
-detail on 2x/3x displays without loading the 1024 px application master. Regenerate
-it with `swift scripts/make-icons.swift --readme-only`, or alongside the other
-brand assets by omitting the flag.
+Opening/revealing, hover, press and successful-completion expressions keep their
+existing timings. Execution adds a gentle steam indicator; waiting narrows the single
+eye. Idle remains static. Reduce Motion and hidden-window behavior remain unchanged.
+See the [UI specification](../../ui-ux-design.md) for exact state semantics.
 
-## Validation (2026-10-07)
+## Reference generation
 
-- `mise exec -- cargo build --locked -p pot-app -j 4`: passed.
-- `mise run test:app`: all 17 tests passed.
-- Existing native tray-icon checks: static execution states, independent unread count, fixed width and `9+` cap passed.
-- Native CompanionButton window exercised idle, hover, cooking, successful-completion and hidden-window transitions; rendered at actual navigation size.
-- A separately packaged App preview displayed the new character and successfully navigated Chat → Tasks → Chat. No Helper, Sandbox or model calls were used.
-- Swift formatting and Git whitespace checks passed. The Reduce Motion branch was reviewed, but the user's system preference was not changed for this check.
+Built-in image generation edited the selected Klee concept into an App/menu-bar board:
+retain the ochre open vessel, one eye, continuous nose/smile and two feet; use an ivory
+macOS tile for the App and a simplified monochrome alpha silhouette for the menu bar;
+show light/dark treatments and small-size previews. Production geometry is drawn in
+Swift rather than extracted from the raster board.
 
-After the rebase onto `origin/main` fa3483b:
+## Validation (2026-10-13)
 
-- App/shared UI/mobile portable tests: 24 tests passed (16 App, 8 shared UI).
-- `mise run build:mobile`: passed, including the GPUI/WASM brand image.
-- App and Server build with `pot-server/embedded-web`: passed, including generated mobile assets.
-- Browser fixture displayed the new icon in the running GPUI header.
-- Touch/Home Screen PNGs decode at 1024/192/512 px with fully opaque background corners; the touch icon exactly matches its master. The generated Mac ICNS decodes successfully.
-- Physical iOS/Android installation and existing installed-icon refresh were not tested.
-
-Brand cleanup on 2026-10-07:
-
-- The menu bar now renders the shared Companion geometry in monochrome, with negative-space facial features. Cooking steam, waiting expression, errors and unread badges retain their state semantics.
-- The Sandbox wallpaper uses the same character as a subdued terracotta watermark.
-- The unused old `PotTray.png` and its generator were removed. Packaging deletes an obsolete copy from existing bundles.
-- Native tray checks passed and light/dark renderings were inspected. The wallpaper was rendered with macOS Quick Look; the editable icon generator still reproduces the existing application/Home Screen assets.
-
-- App tests: 16 passed. Full App/Helper/Mobile build and Sandbox image rebundle passed; bundle signing verification passed. Packaged ICNS, mobile touch icon and Sandbox wallpaper match their sources; the App executable UUID matches the new build. The unused tray asset and welcome page are absent. A new interactive Sandbox session was not exercised.
-
-## Generation prompt
-
-Use case: logo-brand. Create a polished landscape concept board for "pot", a personal AI assistant Mac app performing background work. Warm almost-white background, generous whitespace. Display a flat symbol with lowercase pot wordmark, a macOS rounded-square app icon, and miniature idle/working menu-bar symbols. Title: "D / POT COMPANION". Design a warm little pot assistant with rounded terracotta body, tiny side handles, open rim, two dark dot eyes and a small smile; no limbs, chef hat or utensils. App icon: cream rounded square with a gently dimensional terracotta ceramic pot and soft warm light. Menu-bar version: simplified black pot with two negative-space eyes, adding small steam curves while working. Palette: terracotta #CB704E, cream #FFF5E9, charcoal #303030. Maintain the same character across applications. Exact additional text: "pot", "LOGO", "APP ICON", "MENU BAR", "IDLE", "WORKING". No marketing copy or watermarks.
+- `mise run icons`: generated all PNGs, the ICNS and wallpaper successfully.
+- `cargo build --locked -p pot-app -j 4`: passed through the pinned mise toolchain.
+- `cargo test --locked -p pot-app -j 4`: all 29 tests passed.
+- Existing native tray tests passed: distinct idle/execution rendering, independent
+  unread indicator, fixed width and `9+` cap. Light/dark output was visually inspected.
+- A separately signed preview App using isolated data launched successfully; the
+  actual navigation showed the new ochre companion at its native size.
+- Swift formatting and Git whitespace checks passed.
+- This validates source/assets and native App rendering. A full release bundle,
+  installed mobile-icon refresh and a running Sandbox wallpaper were not exercised.
