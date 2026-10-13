@@ -66,7 +66,7 @@ impl Provider for Executor {
             if route == "execute" {
                 self.dispatches.fetch_add(1, Ordering::SeqCst);
                 Ok(
-                    json!({"result": {"stdout":"environment-only", "session_id":"fixture-session"}, "events":[]}),
+                    json!({"result": {"stdout":"execution-target-only", "session_id":"fixture-session"}, "events":[]}),
                 )
             } else {
                 Ok(json!({"settled":true}))
@@ -98,7 +98,7 @@ impl Node {
         }
         if !providers.is_empty() {
             let provider_id = providers[0].descriptor().id;
-            let manager = backend.register_environment_providers(providers).unwrap();
+            let manager = backend.register_sandbox_providers(providers).unwrap();
             manager
                 .management(
                     &json!({"action":"create","sandbox_id":"default","provider":provider_id}),
@@ -172,10 +172,15 @@ async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
         node.get("/api/v1/sandboxes").await.status(),
         StatusCode::NOT_FOUND
     );
-    let inventory: Value = node.get("/api/v1/environments").await.json().await.unwrap();
+    let inventory: Value = node
+        .get("/api/v1/execution_targets")
+        .await
+        .json()
+        .await
+        .unwrap();
     assert_eq!(inventory["items"].as_array().unwrap().len(), 1);
     let run = id();
-    let op = json!({"run_id":run,"call_id":"write","environment_ref":inventory["items"][0]["environment_ref"],"name":"exec_command","args":{"cmd":"printf once >> result.txt"}});
+    let op = json!({"run_id":run,"call_id":"write","execution_target":inventory["items"][0]["execution_target"],"name":"exec_command","args":{"cmd":"printf once >> result.txt"}});
     let response = node.post("/api/v1/execution", op.clone()).await;
     assert_eq!(response.status(), StatusCode::OK);
     let first: Value = response.json().await.unwrap();
@@ -189,7 +194,7 @@ async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
     assert_eq!(first, duplicate);
     let receipt: Value = node
         .get(&format!(
-            "/api/v1/environment/operations?run_id={run}&call_id=write"
+            "/api/v1/execution_target/operations?run_id={run}&call_id=write"
         ))
         .await
         .json()
@@ -237,7 +242,7 @@ async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
     execution::private_json(&receipt_path, &interrupted).unwrap();
     let receipt: Value = node
         .get(&format!(
-            "/api/v1/environment/operations?run_id={run}&call_id=write"
+            "/api/v1/execution_target/operations?run_id={run}&call_id=write"
         ))
         .await
         .json()
@@ -258,7 +263,7 @@ async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
         "once"
     );
     assert_eq!(
-        node.post("/api/v1/environment/cancel", json!({"run_id":run}))
+        node.post("/api/v1/execution_target/cancel", json!({"run_id":run}))
             .await
             .status(),
         StatusCode::OK
@@ -271,10 +276,10 @@ async fn host_only_executes_and_restores_receipts_without_sandbox_or_agent() {
 async fn host_cancel_cleans_only_its_run_and_prevents_new_effects() {
     let root = root();
     let node = Node::start(&root, true, vec![]).await;
-    let environment = pot_core::EnvironmentRef::host(node.backend.host().runtime_id());
+    let execution_target = pot_core::ExecutionTarget::host(node.backend.host().runtime_id());
     let run = id();
     let sibling = id();
-    let start = |run: &str| json!({"run_id":run,"call_id":"start","environment_ref":environment,"name":"exec_command","args":{"cmd":"sleep 60","yield_time_ms":1}});
+    let start = |run: &str| json!({"run_id":run,"call_id":"start","execution_target":execution_target,"name":"exec_command","args":{"cmd":"sleep 60","yield_time_ms":1}});
     let first: Value = node
         .post("/api/v1/execution", start(&run))
         .await
@@ -290,12 +295,12 @@ async fn host_cancel_cleans_only_its_run_and_prevents_new_effects() {
     assert!(first["result"]["session_id"].is_string(), "{first}");
     assert!(second["result"]["session_id"].is_string(), "{second}");
     assert_eq!(
-        node.post("/api/v1/environment/cancel", json!({"run_id":run}))
+        node.post("/api/v1/execution_target/cancel", json!({"run_id":run}))
             .await
             .status(),
         StatusCode::OK
     );
-    let poll = |run: &str, session: &Value| json!({"run_id":run,"call_id":"poll","environment_ref":environment,"name":"write_stdin","args":{"session_id":session,"yield_time_ms":1}});
+    let poll = |run: &str, session: &Value| json!({"run_id":run,"call_id":"poll","execution_target":execution_target,"name":"write_stdin","args":{"session_id":session,"yield_time_ms":1}});
     assert_eq!(
         node.post(
             "/api/v1/execution",
@@ -316,7 +321,7 @@ async fn host_cancel_cleans_only_its_run_and_prevents_new_effects() {
         .unwrap();
     assert!(live.get("error").is_none(), "{live}");
     assert_eq!(live["result"]["session_id"], second["result"]["session_id"]);
-    let foreign = json!({"run_id":sibling,"call_id":"foreign","environment_ref":environment,"name":"write_stdin","args":{"session_id":first["result"]["session_id"],"yield_time_ms":1}});
+    let foreign = json!({"run_id":sibling,"call_id":"foreign","execution_target":execution_target,"name":"write_stdin","args":{"session_id":first["result"]["session_id"],"yield_time_ms":1}});
     let denied: Value = node
         .post("/api/v1/execution", foreign)
         .await
@@ -325,7 +330,7 @@ async fn host_cancel_cleans_only_its_run_and_prevents_new_effects() {
         .unwrap();
     assert_eq!(denied["isError"], true);
     assert_eq!(
-        node.post("/api/v1/environment/cancel", json!({"run_id":sibling}))
+        node.post("/api/v1/execution_target/cancel", json!({"run_id":sibling}))
             .await
             .status(),
         StatusCode::OK
@@ -376,7 +381,7 @@ async fn bare_startup_is_idle_and_identity_survives_restart() {
 }
 
 #[tokio::test]
-async fn environment_executes_without_agent_and_replays_receipts_not_effects() {
+async fn execution_target_executes_without_agent_and_replays_receipts_not_effects() {
     let root = root();
     let executor = Arc::new(Executor::default());
     let node = Node::start(&root, true, vec![executor.clone()]).await;
@@ -410,7 +415,7 @@ async fn environment_executes_without_agent_and_replays_receipts_not_effects() {
         let response = node.post("/api/v1/execution", op.clone()).await;
         assert_eq!(response.status(), StatusCode::OK);
         let value: Value = response.json().await.unwrap();
-        assert_eq!(value["result"]["stdout"], "environment-only");
+        assert_eq!(value["result"]["stdout"], "execution-target-only");
     }
     assert_eq!(executor.dispatches.load(Ordering::SeqCst), 1);
     let mut conflicting = op.clone();
@@ -420,7 +425,7 @@ async fn environment_executes_without_agent_and_replays_receipts_not_effects() {
         StatusCode::CONFLICT
     );
     let response = node
-        .post("/api/v1/environment/cancel", json!({"run_id":run}))
+        .post("/api/v1/execution_target/cancel", json!({"run_id":run}))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -484,7 +489,7 @@ async fn control_cancel_closes_sandbox_scope_and_preserves_other_owner() {
     let root = root();
     let node = Node::start(&root, true, vec![Arc::new(Executor::default())]).await;
     let host = node.backend.host();
-    let target = pot_core::EnvironmentRef::sandbox(host.runtime_id(), "default");
+    let target = pot_core::ExecutionTarget::sandbox(host.runtime_id(), "default");
     for scope in ["control-a", "control-b"] {
         host.execute_controlled(
             ControlOperation {
@@ -503,7 +508,7 @@ async fn control_cancel_closes_sandbox_scope_and_preserves_other_owner() {
         .await
         .unwrap();
     }
-    let manager = node.backend.environment_manager().unwrap();
+    let manager = node.backend.sandbox_manager().unwrap();
     assert_eq!(manager.inventory().await["items"][0]["active_leases"], 2);
     host.cancel_controlled("control-a", &target.target)
         .await

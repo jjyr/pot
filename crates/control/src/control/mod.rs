@@ -16,7 +16,7 @@ pub mod tasks;
 pub mod turn_control;
 pub mod usage;
 pub use services::OwnerScope;
-use services::{AgentService, ConversationService, EnvironmentService, TaskService};
+use services::{AgentService, ConversationService, ExecutionService, TaskService};
 pub mod api {
     pub use super::usage as accounting;
     pub use super::{Service, cancel, events_handler, send, snapshot, usage};
@@ -34,7 +34,7 @@ pub struct Service {
     pub(crate) scope: OwnerScope,
     pub(crate) conversation: ConversationService,
     pub(crate) agent_service: AgentService,
-    pub(crate) environment_service: EnvironmentService,
+    pub(crate) execution_service: ExecutionService,
     pub(crate) tasks: TaskService,
 }
 impl Service {
@@ -104,7 +104,7 @@ impl Service {
                     agent.detail = Some("等待 Pot 额度恢复".into());
                 }
                 if s.turn.is_some()
-                    && let Some(reason) = crate::remote_environment::waiting_reason(self)
+                    && let Some(reason) = crate::remote_execution::waiting_reason(self)
                 {
                     agent.detail = Some(reason);
                 }
@@ -231,7 +231,7 @@ pub async fn send(
         return Err(error(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_exited",
-            "Restart environment",
+            "Restart execution target",
         ));
     }
     pot_protocol::references::References::parse(&req.text)
@@ -330,7 +330,7 @@ pub async fn send(
         error(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_exited",
-            "Restart environment",
+            "Restart execution target",
         )
     })?;
     Ok(Json(SendMessageAccepted {
@@ -454,7 +454,7 @@ pub async fn completions(
             detail: skill.description,
         });
     }
-    if let Ok(port) = crate::remote_environment::port(&s) {
+    if let Ok(port) = crate::remote_execution::port(&s) {
         let mut tags = std::collections::BTreeSet::new();
         for machine in port.machines() {
             items.push(pot_protocol::references::Completion {
@@ -510,7 +510,7 @@ pub(crate) mod tests {
                 remote_context: Default::default(),
                 test_tool_executor: None,
                 sandbox_id: None,
-                environment_ref: None,
+                execution_target: None,
                 usage: Arc::new(Mutex::new(
                     usage::Ledger::open(std::path::Path::new(":memory:")).unwrap(),
                 )),
@@ -552,10 +552,10 @@ pub(crate) mod tests {
                 extensions: None,
                 resources: Arc::new(AgentResources::paths(&data)),
             },
-            environment_service: EnvironmentService {
+            execution_service: ExecutionService {
                 remote: Default::default(),
                 host_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-                host: Arc::new(environment::HostEnvironment::default()),
+                host: Arc::new(execution_target::HostExecution::default()),
                 permissions: Arc::new(permissions::Hub::memory()),
                 sandboxes: Arc::new(sandbox::Manager::open(&data).unwrap()),
                 terminals: Arc::new(Mutex::new(terminal::Hub::default())),

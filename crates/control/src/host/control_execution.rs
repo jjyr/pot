@@ -8,7 +8,7 @@ pub struct ControlOperation {
     pub workspace_scope: String,
     pub run_id: String,
     pub generation: u64,
-    pub target: pot_core::EnvironmentRef,
+    pub target: pot_core::ExecutionTarget,
     pub call_id: String,
     pub name: String,
     pub args: Value,
@@ -133,10 +133,10 @@ impl Host {
         });
         anyhow::ensure!(!feedback.cancelled(), "Control execution authority expired");
         match &request.target.target {
-            pot_core::EnvironmentTarget::Host {} => {
+            pot_core::ExecutionTargetKind::Host {} => {
                 anyhow::ensure!(self.host_enabled, "Host resource is disabled");
-                let environment = self
-                    .host_environment
+                let execution_target = self
+                    .host_execution
                     .as_ref()
                     .ok_or_else(|| anyhow!("Host service unavailable"))?;
                 let workspace = self
@@ -150,7 +150,7 @@ impl Host {
                         &operation, &mut args, &workspace, &policy,
                     )?;
                 }
-                let executor = environment.host_executor(&request.scope, request.generation);
+                let executor = execution_target.host_executor(&request.scope, request.generation);
                 let context = ExecutionContext {
                     instructions: String::new(),
                     skill_resources: Default::default(),
@@ -166,10 +166,10 @@ impl Host {
                 let mut emit = |_| Ok(());
                 tokio::select! {
                     result=executor.execute(&context,&policy,&operation,&args,&request.call_id,&mut emit)=>result.map(|value|json!({"result":value})),
-                    _=feedback.cancellation()=>{environment.finish_host(&request.scope).await?;bail!("Control lease expired or was revoked")}
+                    _=feedback.cancellation()=>{execution_target.finish_host(&request.scope).await?;bail!("Control lease expired or was revoked")}
                 }
             }
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
                 let manager = self
                     .sandboxes
                     .as_ref()
@@ -204,15 +204,15 @@ impl Host {
     pub async fn cancel_controlled(
         &self,
         scope: &str,
-        target: &pot_core::EnvironmentTarget,
+        target: &pot_core::ExecutionTargetKind,
     ) -> Result<()> {
         match target {
-            pot_core::EnvironmentTarget::Host {} => {
-                if let Some(environment) = &self.host_environment {
-                    environment.finish_host(scope).await?;
+            pot_core::ExecutionTargetKind::Host {} => {
+                if let Some(execution_target) = &self.host_execution {
+                    execution_target.finish_host(scope).await?;
                 }
             }
-            pot_core::EnvironmentTarget::Sandbox { .. } => {
+            pot_core::ExecutionTargetKind::Sandbox { .. } => {
                 if let Some(manager) = &self.sandboxes {
                     manager.finish(scope).await?;
                     manager.drain(scope).await?;
@@ -221,18 +221,18 @@ impl Host {
         }
         Ok(())
     }
-    pub async fn environment_inventory(&self) -> Value {
+    pub async fn execution_target_inventory(&self) -> Value {
         let mut items = vec![];
-        if self.host_enabled && self.host_environment.is_some() {
-            items.push(json!({"environment_ref":pot_core::EnvironmentRef::host(&self.runtime_id),"kind":"host","management":false,
+        if self.host_enabled && self.host_execution.is_some() {
+            items.push(json!({"execution_target":pot_core::ExecutionTarget::host(&self.runtime_id),"kind":"host","management":false,
                 "workspace":self.data.join("execution-workspaces"),"supported_operations":["exec_command","write_stdin","apply_patch"]}));
         }
         if let Some(manager) = &self.sandboxes {
             let inventory = manager.inventory().await;
             for mut item in inventory["items"].as_array().cloned().unwrap_or_default() {
                 let target = item["id"].as_str().unwrap_or("");
-                item["environment_ref"] =
-                    json!(pot_core::EnvironmentRef::sandbox(&self.runtime_id, target));
+                item["execution_target"] =
+                    json!(pot_core::ExecutionTarget::sandbox(&self.runtime_id, target));
                 items.push(item);
             }
         }
@@ -243,7 +243,7 @@ impl Host {
 impl Host {
     fn controlled_tool(
         &self,
-        target: &pot_core::EnvironmentTarget,
+        target: &pot_core::ExecutionTargetKind,
         workspace_scope: &str,
         name: &str,
         args: Value,
@@ -261,10 +261,10 @@ impl Host {
             "Internal plugin envelopes cannot be called directly"
         );
         let workspace = match target {
-            pot_core::EnvironmentTarget::Host {} => {
+            pot_core::ExecutionTargetKind::Host {} => {
                 self.data.join("execution-workspaces").join(workspace_scope)
             }
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
                 let manager = self
                     .sandboxes
                     .as_ref()
@@ -299,11 +299,11 @@ impl Host {
             };
             if let Some(plugin) = settings.plugin_for_tool(name)? {
                 anyhow::ensure!(
-                    !matches!(target, pot_core::EnvironmentTarget::Host {})
-                        || plugin.manifest.execution == "environment",
+                    !matches!(target, pot_core::ExecutionTargetKind::Host {})
+                        || plugin.manifest.supports_host(),
                     "This plugin supports Sandbox execution only"
                 );
-                if matches!(target, pot_core::EnvironmentTarget::Host {}) {
+                if matches!(target, pot_core::ExecutionTargetKind::Host {}) {
                     anyhow::ensure!(
                         plugin
                             .manifest
@@ -320,21 +320,21 @@ impl Host {
                 ));
             }
         }
-        pot_core::environment_tools::validate(name, &args)?;
+        pot_core::execution_tools::validate(name, &args)?;
         Ok((name.into(), args, policy))
     }
     pub async fn install_controlled_resources(
         &self,
-        target: &pot_core::EnvironmentTarget,
+        target: &pot_core::ExecutionTargetKind,
         workspace_scope: &str,
         resources: pot_runner::resources::GlobalResources,
     ) -> Result<Value> {
         let context = self.controlled_context(target, workspace_scope).await?;
         let workspace = match target {
-            pot_core::EnvironmentTarget::Host {} => {
+            pot_core::ExecutionTargetKind::Host {} => {
                 self.data.join("execution-workspaces").join(workspace_scope)
             }
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => self
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => self
                 .sandboxes
                 .as_ref()
                 .ok_or_else(|| anyhow!("Sandbox service unavailable"))?
@@ -356,7 +356,7 @@ impl Host {
     }
     pub async fn controlled_context(
         &self,
-        target: &pot_core::EnvironmentTarget,
+        target: &pot_core::ExecutionTargetKind,
         workspace_scope: &str,
     ) -> Result<Value> {
         anyhow::ensure!(
@@ -367,7 +367,7 @@ impl Host {
             "Invalid workspace scope"
         );
         let (source, mount, cwd) = match target {
-            pot_core::EnvironmentTarget::Host {} => {
+            pot_core::ExecutionTargetKind::Host {} => {
                 anyhow::ensure!(self.host_enabled, "Host resource is disabled");
                 let workspace = self.data.join("execution-workspaces").join(workspace_scope);
                 std::fs::create_dir_all(&workspace)?;
@@ -378,7 +378,7 @@ impl Host {
                     .to_path_buf();
                 (root.clone(), root, workspace)
             }
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
                 let manager = self
                     .sandboxes
                     .as_ref()
@@ -396,7 +396,7 @@ impl Host {
             &source,
             &mount,
             &cwd,
-            matches!(target, pot_core::EnvironmentTarget::Host {}),
+            matches!(target, pot_core::ExecutionTargetKind::Host {}),
         )?;
         let catalog = crate::instructions::project_workspace(source, mount, cwd.clone())?;
         Ok(
@@ -437,7 +437,7 @@ impl Host {
             .await?;
         let mut args = args;
         match &target.target {
-            pot_core::EnvironmentTarget::Host {} if operation != "plugin_call" => {
+            pot_core::ExecutionTargetKind::Host {} if operation != "plugin_call" => {
                 pot_tool_executor::tools::normalize(
                     &name,
                     &mut args,
@@ -445,7 +445,7 @@ impl Host {
                     &policy,
                 )?
             }
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
                 let manager = self
                     .sandboxes
                     .as_ref()
@@ -463,7 +463,7 @@ impl Host {
                     }
                 }
             }
-            pot_core::EnvironmentTarget::Host {} => {}
+            pot_core::ExecutionTargetKind::Host {} => {}
         }
         anyhow::ensure!(!cancelled(), "Control lease expired or revoked");
         Ok(args)
@@ -473,7 +473,7 @@ impl Host {
 impl Host {
     pub async fn controlled_file(
         &self,
-        target: &pot_core::EnvironmentTarget,
+        target: &pot_core::ExecutionTargetKind,
         workspace_scope: &str,
         query: pot_protocol::FileQuery,
     ) -> Result<pot_protocol::FileChunk> {
@@ -485,11 +485,11 @@ impl Host {
             "Invalid workspace scope"
         );
         let workspace = match target {
-            pot_core::EnvironmentTarget::Host {} => {
+            pot_core::ExecutionTargetKind::Host {} => {
                 anyhow::ensure!(self.host_enabled, "Host resource is disabled");
                 self.data.join("execution-workspaces").join(workspace_scope)
             }
-            pot_core::EnvironmentTarget::Sandbox { sandbox_id } => {
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
                 let manager = self
                     .sandboxes
                     .as_ref()

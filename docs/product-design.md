@@ -2,7 +2,7 @@
 
 Pot is a personal assistant with persistent conversations and background Tasks.
 Multiple chat assistants own their conversations, rules, Tasks and schedules.
-Task Agents execute a concrete brief in one fixed environment; they have no
+Task Agents execute a concrete brief on one fixed Host or Sandbox; they have no
 independent assistant persona or assistant AGENTS.md.
 
 The App starts/exits with its own Runtime and supports independent local use or
@@ -11,7 +11,7 @@ global resources and approvals. [Architecture](architecture.md) defines ownershi
 [UI specification](ui-ux-design.md) defines the minimal Chat/Tasks/Machines flows.
 
 Short questions can be answered directly. Longer work can be delegated with an
-explicit model, environment and goal. Guidance is marked received, then applied;
+explicit model, execution target and goal. Guidance is marked received, then applied;
 completion reports describe the result and include file links only when needed.
 Files, history and task bindings survive restart. Unknown external effects are
 reconciled rather than repeated. Model changes preserve context at safe boundaries.

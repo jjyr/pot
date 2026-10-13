@@ -41,7 +41,7 @@ running ----cancel_task----> stopping --cleanup confirmed--> cancelled
 queue in order, followed by the new guidance. Interrupted executing input is never
 replayed, including suspended allowance-waiting input. Restart does not auto-resume
 an interrupted Task. Control restart reconciles an accepted remote run using its
-original input identity. It does not relaunch the Agent or change its environment.
+original input identity. It does not relaunch the Agent or change its execution target.
 Execution Runtime restart interrupts after known receipts and scopes are settled;
 unknown outcomes block replacement. See [failure rules](architecture.md#failure-and-receipt-rules).
 

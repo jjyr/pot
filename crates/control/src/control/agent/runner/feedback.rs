@@ -73,7 +73,7 @@ impl ExecutionFeedback for Feedback {
         if name == "manage_sandbox" && args["action"] != "create" {
             args["sandbox_id"] = json!(
                 self.service
-                    .environment_service
+                    .execution_service
                     .sandboxes
                     .assignment(args["sandbox_id"].as_str().unwrap_or(""))?
             );
@@ -89,7 +89,7 @@ impl ExecutionFeedback for Feedback {
             self.check()?;
             #[cfg(test)]
             if self.service.test_tool_executor.is_some()
-                && !self.service.environment_service.permissions.configured()
+                && !self.service.execution_service.permissions.configured()
             {
                 return Ok(args);
             }
@@ -102,7 +102,7 @@ impl ExecutionFeedback for Feedback {
             self.check()?;
             #[cfg(test)]
             if self.service.test_tool_executor.is_some()
-                && !self.service.environment_service.permissions.configured()
+                && !self.service.execution_service.permissions.configured()
             {
                 return Ok(args);
             }
@@ -113,7 +113,7 @@ impl ExecutionFeedback for Feedback {
         self.check()?;
         #[cfg(test)]
         if self.service.test_tool_executor.is_some()
-            && !self.service.environment_service.permissions.configured()
+            && !self.service.execution_service.permissions.configured()
         {
             return Ok(false);
         }
@@ -136,7 +136,7 @@ impl ExecutionFeedback for Feedback {
     fn ready(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async {
             self.check()?;
-            crate::remote_environment::ready(&self.service).await?;
+            crate::remote_execution::ready(&self.service).await?;
             crate::turn_control::ready(&self.service).await
         })
     }
@@ -239,28 +239,28 @@ fn make_context(
         tool_executor: {
             #[cfg(test)]
             if let Some(executor) = &s.test_tool_executor
-                && !s.environment_service.permissions.configured()
+                && !s.execution_service.permissions.configured()
             {
                 Some(executor.clone())
             } else {
-                Some(Arc::new(crate::environment::Tools {
+                Some(Arc::new(crate::execution_target::Tools {
                     service: s.clone(),
                     generation: thread.generation,
                 }))
             }
             #[cfg(not(test))]
             {
-                Some(Arc::new(crate::environment::Tools {
+                Some(Arc::new(crate::execution_target::Tools {
                     service: s.clone(),
                     generation: thread.generation,
                 }))
             }
         },
         data: s.data.clone(),
-        workspace: if crate::remote_environment::is_remote(s) {
+        workspace: if crate::remote_execution::is_remote(s) {
             let contexts = s.remote_context.lock().unwrap();
             let context = contexts
-                .get(s.environment_ref.as_ref().unwrap())
+                .get(s.execution_target.as_ref().unwrap())
                 .ok_or_else(|| anyhow!("Remote context missing"))?;
             PathBuf::from(
                 context.context["workspace"]
@@ -272,14 +272,14 @@ fn make_context(
             let path = if s.test_tool_executor.is_some() {
                 s.workspace.clone()
             } else {
-                if s.is_worker || s.environment_service.sandboxes.assignment("").is_err() {
+                if s.is_worker || s.execution_service.sandboxes.assignment("").is_err() {
                     s.workspace.clone()
                 } else {
                     s.data.join("agent-workspace")
                 }
             };
             #[cfg(not(test))]
-            let path = if s.is_worker || s.environment_service.sandboxes.assignment("").is_err() {
+            let path = if s.is_worker || s.execution_service.sandboxes.assignment("").is_err() {
                 s.workspace.clone()
             } else {
                 s.data.join("agent-workspace")

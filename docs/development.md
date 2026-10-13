@@ -14,7 +14,7 @@ mise run bundle
 mise run open
 ```
 
-`build:sandbox-image` preinstalls guest dependencies in a separate VM and builds the Sandbox OCI image for resource publication. `bundle` packages Host binaries. End users authorize downloads of the pinned kernel, boot and OCI assets before the first environment startup. See Sandbox image for caches, fonts, and sizes.
+`build:sandbox-image` preinstalls guest dependencies in a separate VM and builds the Sandbox OCI image for resource publication. `bundle` packages Host binaries. End users authorize downloads of the pinned kernel, boot and OCI assets before the first Sandbox startup. See Sandbox image for caches, fonts, and sizes.
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
@@ -66,7 +66,7 @@ mise exec -- cargo build --locked -p pot-server
 POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants and execution environments through the resource API; enable Web UI explicitly with its fixed Control address. Unconfigured assistants offer AI Configuration. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants, enable Host execution and define sandboxes through the resource API; enable Web UI explicitly with its fixed Control address. Unconfigured assistants offer AI Configuration. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
 
 App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](deployment.md) for CLI installation, local OS authority and packaging.
 
@@ -137,7 +137,7 @@ Current real CLI/VM acceptance (build and bundle first; no paid model calls):
 mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/Contents/Helpers/PotHelper --resources .local/d1/Pot.app/Contents/Resources/runtime --output /tmp/pot-sandbox-acceptance.json
 ```
 
-Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host pot-agent and local mock models, validates lazy startup, worker scope, environment independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/host-pot-agent-20261006.md).
+Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host pot-agent and local mock models, validates lazy startup, worker scope, Sandbox independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/host-pot-agent-20261006.md).
 
 ### CI cache behavior
 

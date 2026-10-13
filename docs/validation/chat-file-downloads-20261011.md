@@ -4,7 +4,7 @@
 
 Ordinary assistant Markdown can contain `pot-file://TASK_UUID/encoded/relative/path`
 links. The client captures the assistant and Runtime mode when clicked. Reads bind
-to the task's immutable Host/Sandbox environment, never a local cache fallback.
+to the task's immutable Host/Sandbox execution target, never a local cache fallback.
 Control relays joined-machine reads over the existing signed outward connection.
 Completed tasks need no active execution lease to read their retained workspace.
 No model-visible tool name, argument or responsibility changed.

@@ -514,7 +514,7 @@ impl Hub {
     }
 }
 fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
-    let base = s.environment_service.sandboxes.guest_workspace(target)?;
+    let base = s.execution_service.sandboxes.guest_workspace(target)?;
     let cwd = if owner == "main" {
         base
     } else {
@@ -522,23 +522,23 @@ fn guest_body(s: &Service, target: &str, owner: &str) -> Result<Value> {
     };
     Ok(json!({"cwd":cwd,"role":if owner=="main" {"main"} else {"task"}}))
 }
-async fn execution_environment(
+async fn execution_execution_target(
     s: &Service,
     generation: u64,
     plugin: bool,
     args: &Value,
 ) -> Result<String> {
     anyhow::ensure!(
-        args.get("environment").is_none() || args.get("sandbox_id").is_none(),
-        "Use environment or sandbox_id"
+        args.get("execution_target").is_none() || args.get("sandbox_id").is_none(),
+        "Use execution_target or sandbox_id"
     );
-    let requested = if let Some(value) = args.get("environment") {
-        Some(crate::environment::resolve(s, value)?)
+    let requested = if let Some(value) = args.get("execution_target") {
+        Some(crate::execution_target::resolve(s, value)?)
     } else if let Some(value) = args.get("sandbox_id") {
         let id = value
             .as_str()
             .ok_or_else(|| anyhow!("Invalid sandbox_id"))?;
-        Some(pot_core::EnvironmentRef::sandbox(&s.runtime_id, id))
+        Some(pot_core::ExecutionTarget::sandbox(&s.runtime_id, id))
     } else {
         None
     };
@@ -546,10 +546,10 @@ async fn execution_environment(
     let remote_session = requested
         .as_ref()
         .is_some_and(|r| !r.is_local_to(&s.runtime_id))
-        || crate::remote_environment::is_remote(s);
-    let session_environment = if plugin && !remote_session {
+        || crate::remote_execution::is_remote(s);
+    let session_execution_target = if plugin && !remote_session {
         if let Some(session) = args["session_id"].as_str() {
-            if s.environment_service
+            if s.execution_service
                 .host
                 .host_session(&s.usage_scope, generation, session)
                 .await
@@ -558,7 +558,7 @@ async fn execution_environment(
             } else {
                 Some(format!(
                     "sandbox:{}",
-                    s.environment_service.sandboxes.session_target(
+                    s.execution_service.sandboxes.session_target(
                         &s.usage_scope,
                         generation,
                         session
@@ -573,45 +573,46 @@ async fn execution_environment(
     };
     let reference = if let Some(reference) = requested {
         reference
-    } else if let Some(value) = &session_environment {
-        crate::environment::resolve(s, &json!(value))?
+    } else if let Some(value) = &session_execution_target {
+        crate::execution_target::resolve(s, &json!(value))?
     } else if s.is_worker {
-        s.environment_ref
+        s.execution_target
             .clone()
-            .ok_or_else(|| anyhow!("Worker Environment binding missing"))?
+            .ok_or_else(|| anyhow!("Worker Execution target binding missing"))?
     } else {
-        pot_core::EnvironmentRef::host(&s.runtime_id)
+        pot_core::ExecutionTarget::host(&s.runtime_id)
     };
-    crate::environment::check_binding(s, &reference)?;
-    let environment = if reference.is_local_to(&s.runtime_id) {
-        crate::environment::local_key(s, &reference)?
+    crate::execution_target::check_binding(s, &reference)?;
+    let execution_target = if reference.is_local_to(&s.runtime_id) {
+        crate::execution_target::local_key(s, &reference)?
     } else {
-        crate::remote_environment::port(s)?.validate(&reference)?;
-        crate::remote_environment::key(&reference)?
+        crate::remote_execution::port(s)?.validate(&reference)?;
+        crate::remote_execution::key(&reference)?
     };
-    if let Some(original) = &session_environment {
+    if let Some(original) = &session_execution_target {
         anyhow::ensure!(
-            &environment == original,
-            "Session operation cannot switch execution environment"
+            &execution_target == original,
+            "Session operation cannot switch execution target"
         );
     }
-    Ok(environment)
+    Ok(execution_target)
 }
 pub(crate) async fn resolve_operation(s: &Service, name: &str, mut args: Value) -> Result<Value> {
     let thread = agent::thread(s)?;
     let plugin = thread.config.params.agent.plugin_for_tool(name)?.is_some();
     let env =
-        execution_environment(s, thread.generation, plugin || name == "write_stdin", &args).await?;
+        execution_execution_target(s, thread.generation, plugin || name == "write_stdin", &args)
+            .await?;
     args.as_object_mut()
         .ok_or_else(|| anyhow!("Arguments must be an object"))?
         .remove("sandbox_id");
-    args["environment"] = json!(env);
+    args["execution_target"] = json!(env);
     Ok(args)
 }
 pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<Value> {
     let thread = agent::thread(s)?;
     let plugin = thread.config.params.agent.plugin_for_tool(name)?;
-    let environment = execution_environment(
+    let execution_target = execution_execution_target(
         s,
         thread.generation,
         plugin.is_some() || name == "write_stdin",
@@ -621,28 +622,28 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
     let object = args
         .as_object_mut()
         .ok_or_else(|| anyhow!("Arguments must be an object"))?;
-    object.remove("environment");
+    object.remove("execution_target");
     object.remove("sandbox_id");
     if let Some(plugin) = &plugin {
         plugin.validate_input(name, &args)?;
     } else {
-        pot_core::environment_tools::validate(name, &args)?;
+        pot_core::execution_tools::validate(name, &args)?;
     }
-    if environment.starts_with("remote:") {
-        let reference = crate::remote_environment::from_key(&environment)?;
-        let binding = crate::remote_environment::binding(s, reference)?;
-        crate::remote_environment::open(s, binding.clone()).await?;
-        args = crate::remote_environment::port(s)?
+    if execution_target.starts_with("remote:") {
+        let reference = crate::remote_execution::from_key(&execution_target)?;
+        let binding = crate::remote_execution::binding(s, reference)?;
+        crate::remote_execution::open(s, binding.clone()).await?;
+        args = crate::remote_execution::port(s)?
             .prepare(binding, name.into(), args)
             .await?;
-        args["environment"] = json!(environment);
+        args["execution_target"] = json!(execution_target);
         return Ok(args);
     }
-    if environment == "host" {
+    if execution_target == "host" {
         let workspace = if s.is_worker {
             s.workspace.clone()
         } else {
-            if s.environment_service.sandboxes.assignment("").is_err() {
+            if s.execution_service.sandboxes.assignment("").is_err() {
                 s.workspace.clone()
             } else {
                 s.data.join("agent-workspace")
@@ -651,7 +652,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         std::fs::create_dir_all(&workspace)?;
         if let Some(plugin) = &plugin {
             anyhow::ensure!(
-                plugin.manifest.execution == "environment",
+                plugin.manifest.supports_host(),
                 "This plugin supports Sandbox execution only"
             );
         } else {
@@ -663,11 +664,11 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
             )?;
         }
     } else {
-        let target = environment
+        let target = execution_target
             .strip_prefix("sandbox:")
             .filter(|s| !s.is_empty())
             .ok_or_else(|| anyhow!("Use host or sandbox:ID"))?;
-        let target = s.environment_service.sandboxes.assignment(target)?;
+        let target = s.execution_service.sandboxes.assignment(target)?;
         anyhow::ensure!(
             !s.is_worker || s.sandbox_id.as_deref() == Some(target.as_str()),
             "Workers cannot switch Sandboxes"
@@ -675,7 +676,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         if name == "write_stdin" {
             // Existing session handles are resolved and checked by the dispatcher.
             // Polling/input must not boot a guest or reload permission state.
-            args["environment"] = json!(environment);
+            args["execution_target"] = json!(execution_target);
             return Ok(args);
         }
         let turn = {
@@ -690,7 +691,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
                 .and_then(|m| m.request_id)
                 .ok_or_else(|| anyhow!("Turn identity missing"))?
         };
-        s.environment_service
+        s.execution_service
             .sandboxes
             .prepare(&target, &s.usage_scope, Some(&turn), &|| {
                 agent::cancelled(s) || s.stopping()
@@ -702,7 +703,7 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         body["args"] = args;
         body["policy"] = json!(thread.config.params.agent.shell);
         let prepared = s
-            .environment_service
+            .execution_service
             .sandboxes
             .prepare_operation(&target, &body)
             .await?;
@@ -710,11 +711,11 @@ pub(crate) async fn prepare(s: &Service, name: &str, mut args: Value) -> Result<
         if let Some(plugin) = &plugin {
             plugin.validate_input(name, &args)?;
         } else {
-            pot_core::environment_tools::validate(name, &args)?;
+            pot_core::execution_tools::validate(name, &args)?;
         }
         // Canonicalization occurs in the guest. Host paths are never used to normalize it.
     }
-    args["environment"] = json!(environment);
+    args["execution_target"] = json!(execution_target);
     Ok(args)
 }
 
@@ -762,12 +763,12 @@ pub(crate) fn work_scope(s: &Service) -> Result<String> {
         s.assistant_id, s.usage_scope, turn.user_message_id
     ))
 }
-fn capability(reference: &pot_core::EnvironmentRef) -> Scope {
+fn capability(reference: &pot_core::ExecutionTarget) -> Scope {
     Scope {
         machine_id: reference.runtime_id.clone(),
         capability: match reference.target {
-            pot_core::EnvironmentTarget::Host {} => Capability::Host,
-            pot_core::EnvironmentTarget::Sandbox { .. } => Capability::Sandbox,
+            pot_core::ExecutionTargetKind::Host {} => Capability::Host,
+            pot_core::ExecutionTargetKind::Sandbox { .. } => Capability::Sandbox,
         },
     }
 }
@@ -818,10 +819,10 @@ pub(crate) async fn request(
             "Unsupported execution permission"
         );
         let mut args = request.args.clone();
-        if !request.environment.is_empty() {
-            args["environment"] = json!(request.environment);
+        if !request.execution_target.is_empty() {
+            args["execution_target"] = json!(request.execution_target);
         }
-        let env = execution_environment(
+        let env = execution_execution_target(
             s,
             generation,
             plugin || request.tool == "write_stdin",
@@ -829,12 +830,12 @@ pub(crate) async fn request(
         )
         .await?;
         let reference = if env.starts_with("remote:") {
-            crate::remote_environment::from_key(&env)?
+            crate::remote_execution::from_key(&env)?
         } else {
-            crate::environment::resolve(s, &json!(env))?
+            crate::execution_target::resolve(s, &json!(env))?
         };
-        if let pot_core::EnvironmentTarget::Sandbox { sandbox_id } = &reference.target {
-            s.environment_service.permissions.sandbox_access(
+        if let pot_core::ExecutionTargetKind::Sandbox { sandbox_id } = &reference.target {
+            s.execution_service.permissions.sandbox_access(
                 &s.assistant_id,
                 &reference.runtime_id,
                 sandbox_id,
@@ -846,13 +847,13 @@ pub(crate) async fn request(
     if let Some(scope) = &scope
         && scope.machine_id != s.runtime_id
     {
-        let epoch = crate::remote_environment::port(s)?.machine_epoch(&scope.machine_id)?;
-        s.environment_service
+        let epoch = crate::remote_execution::port(s)?.machine_epoch(&scope.machine_id)?;
+        s.execution_service
             .permissions
             .sync_machine_epoch(&scope.machine_id, &epoch)?;
     }
     let work = work_scope(s)?;
-    let hub = &s.environment_service.permissions;
+    let hub = &s.execution_service.permissions;
     if let Some(scope) = &scope {
         let key = WorkKey {
             assistant: s.assistant_id.clone(),
@@ -885,7 +886,7 @@ pub(crate) fn ensure_current_access(
     capability: Capability,
 ) -> Result<()> {
     #[cfg(test)]
-    if !s.environment_service.permissions.configured() {
+    if !s.execution_service.permissions.configured() {
         return Ok(());
     }
     let key = WorkKey {
@@ -897,17 +898,14 @@ pub(crate) fn ensure_current_access(
         },
     };
     anyhow::ensure!(
-        Hub::allowed(
-            &s.environment_service.permissions.book.lock().unwrap(),
-            &key
-        ) == Some(true),
+        Hub::allowed(&s.execution_service.permissions.book.lock().unwrap(), &key) == Some(true),
         "Machine access changed before execution; retry to authorize"
     );
     Ok(())
 }
 pub(crate) async fn authorize_task(s: &Service) -> Result<()> {
     #[cfg(test)]
-    if !s.environment_service.permissions.configured() {
+    if !s.execution_service.permissions.configured() {
         return Ok(());
     }
     let (generation, turn) = {
@@ -934,7 +932,7 @@ pub(crate) async fn authorize_task(s: &Service) -> Result<()> {
         &turn,
         json!(Request {
             owner: s.usage_scope.clone(),
-            environment: String::new(),
+            execution_target: String::new(),
             generation,
             turn: turn.clone(),
             call_id: "task-launch".into(),
@@ -955,7 +953,7 @@ pub async fn inspect(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<V
             "Owner administration required",
         ));
     }
-    let book = s.environment_service.permissions.book.lock().unwrap();
+    let book = s.execution_service.permissions.book.lock().unwrap();
     let requests:Vec<_>=book.requests.iter().filter(|p|p.assistant==s.assistant_id && p.decision.is_none()).map(|p|json!({"id":p.id,"request":p.request,"assistant_id":p.assistant,"work_scope_id":p.work,"scope":p.scope})).collect();
     Ok(Json(
         json!({"assistant_id":s.assistant_id,"requests":requests,"grants":book.grants.iter().filter(|g|g.owner==s.assistant_id).collect::<Vec<_>>(),"policy":book.policy}),
@@ -992,7 +990,7 @@ pub async fn decide(
         ));
     }
     if body.action == "configure" {
-        let hub = &s.environment_service.permissions;
+        let hub = &s.execution_service.permissions;
         let _mutation = hub.sandbox_mutations.lock().await;
         let machine = body.machine_id.filter(|v| !v.is_empty()).ok_or_else(|| {
             error(
@@ -1002,7 +1000,7 @@ pub async fn decide(
             )
         })?;
         if machine != s.runtime_id {
-            let epoch = crate::remote_environment::port(&s)
+            let epoch = crate::remote_execution::port(&s)
                 .and_then(|p| p.machine_epoch(&machine))
                 .map_err(internal)?;
             hub.sync_machine_epoch(&machine, &epoch).map_err(internal)?;
@@ -1063,7 +1061,7 @@ pub async fn decide(
     }
     if body.action != "revoke" {
         let requests = s
-            .environment_service
+            .execution_service
             .permissions
             .book
             .lock()
@@ -1086,7 +1084,7 @@ pub async fn decide(
             ));
         }
     }
-    s.environment_service
+    s.execution_service
         .permissions
         .decide(&s.assistant_id, &body.id, &body.action)
         .map_err(|e| error(StatusCode::CONFLICT, "permission_decision", &e.to_string()))?;

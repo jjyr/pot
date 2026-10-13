@@ -9,7 +9,7 @@ Chat / tasks -> schedules
 Runtime scheduler -> SQLite tasks.v2 (schedules + triggers + task queue)
              | Due: create one run transactionally
              ▼
-Shared task queue (default concurrency 8) -> independent Task / fixed Host or Sandbox environment
+Shared task queue (default concurrency 8) -> independent Task / fixed Host or Sandbox execution target
              │ .pot-schedule-result.json
              ▼
 Validate result -> compare fingerprint -> save history
@@ -34,7 +34,7 @@ Schedules require their owning Runtime to remain running. Local App Quit/sleep/s
 
 DST: choose the earlier occurrence of repeated hours and trigger once; skip nonexistent daily/weekly times for that day; reject nonexistent one-off times on save.
 
-Creation fixes `spec.environment_ref` to a typed Runtime + Host/Sandbox target, using the same resolution as `create_task`. The local `sandbox_id` string remains an input shorthand; supplying both is rejected. An update without either target preserves the saved environment. Triggers never follow later default changes. Existing schedules are upgraded once to their original local Sandbox reference. Remote targets restore while offline; triggering requires the configured target to be available.
+Creation fixes `spec.execution_target` to a typed Runtime + Host/Sandbox target, using the same resolution as `create_task`. The local `sandbox_id` string remains an input shorthand; supplying both is rejected. An update without either target preserves the saved execution target. Triggers never follow later default changes. Remote targets restore while offline; triggering requires the configured target to be available.
 
 ## Results and storage
 
@@ -46,7 +46,7 @@ API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `reques
 
 ## Validation
 
-Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and fixed environment assignment. The current Host pot-agent and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/host-pot-agent-20261006.md).
+Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and fixed execution target assignment. The current Host pot-agent and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/host-pot-agent-20261006.md).
 
 ```sh
 mise run test

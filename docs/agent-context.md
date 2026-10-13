@@ -1,6 +1,6 @@
 # Agent context
 
-Control/environment adapters own AGENTS.md discovery, execution-environment selection, refresh and error policy. pot-agent receives caller-provided text through `ExecutionContext.instructions` and `AgentExtensions::instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
+Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. pot-agent receives caller-provided text through `ExecutionContext.instructions` and `AgentExtensions::instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
 
 ## Sources and scope
 
@@ -19,7 +19,7 @@ not Main's Host project context. Workers use their fixed Host/Sandbox task works
 
 Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Sandbox discovery stops at its workspace mount boundary. Host discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 
-Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignored. Each chat assistant owns a versioned AGENTS.md text record in its own database. This record is independent of execution environments and travels with the assistant's state. There is no legacy assistant-file import or saved-preference conversion. Project AGENTS.md discovery remains filesystem-based. UI edits and assistant tools operate on the same DB record. Every successful save creates a new revision, including reverting to identical text.
+Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignored. Each chat assistant owns a versioned AGENTS.md text record in its own database. This record is independent of execution targets and travels with the assistant's state. There is no legacy assistant-file import or saved-preference conversion. Project AGENTS.md discovery remains filesystem-based. UI edits and assistant tools operate on the same DB record. Every successful save creates a new revision, including reverting to identical text.
 
 Main contexts load global instructions, assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor global Agent-home rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
 
@@ -36,7 +36,7 @@ pot-agent appends the injected text for Main and Worker, including custom system
 `read_agent_instructions({})` returns this chat assistant's `text` and `revision`.
 `update_agent_instructions({text})` replaces the complete text
 only after owner approval. The assistant identity comes from the execution owner;
-neither tool accepts an assistant ID or environment selector. These tools are
+neither tool accepts an assistant ID or execution target selector. These tools are
 Main-only and remain subject to the configured tool allow-list. Updates always
 request fresh review, even with allow-by-default policy or matching grants. The
 Runtime snapshots the DB revision when preparing review and checks it at commit,
@@ -48,8 +48,12 @@ not exposed as unaudited MCP writes.
 
 ## Reference and tests
 
-Main's built-in delegation prompt is `MAIN_PROMPT` in `crates/assistant/src/orchestration.rs`,
-injected by Runtime. It is not global `AGENTS.md` or a routine scheduler. A custom
+Assistant prompt text is kept in `crates/assistant/prompts/`.
+Main's built-in delegation prompt lives in
+[`crates/assistant/prompts/main_prompt.txt`](../crates/assistant/prompts/main_prompt.txt).
+`MAIN_PROMPT` in `crates/assistant/src/orchestration.rs` embeds it at compile time
+with `include_str!`; Control supplies it when preparing Main execution context.
+Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default pot-agent prompt.
 
 Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; pot-agent request tests cover all three supported model protocols, custom prompts and history separation. Run `mise run test` and `mise run clippy:backend`.
@@ -66,7 +70,7 @@ globals. Project AGENTS.md and Skills remain execution-workspace resources.
 
 Each conversational assistant owns AGENTS.md text in its database, with an
 opaque revision that changes on every save. It is part of the assistant's state,
-independent of execution environment. Main contexts receive their own rules;
+independent of execution target. Main contexts receive their own rules;
 workers receive task briefs and applicable project directory instructions, not
 assistant or global Agent-home rules. 
 The built-in dispatch instructions and fresh eligible Profile catalog remain
@@ -148,7 +152,7 @@ ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved nam
 
 Task creation accepts optional `skills: ["name", ...]`: omitted discovers all skills, a list narrows discovery, and an empty list disables injection. Local tasks preserve selections; connected tasks additionally pin Control's global bundle snapshot across turns and restart. Unavailable selected skills fail visibly when preparing a turn.
 
-Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual Host working directory; task environment bindings remain fixed.
+Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual Host working directory; task execution target bindings remain fixed.
 
 ## Creation, installation and validation
 
@@ -156,7 +160,7 @@ Builtin skill-creator describes format, concise instruction design, supporting r
 
 The creator's scripts/quick_validate.py validates YAML metadata and scaffolds, and checks ordinary resource files and inline local Markdown links. Authored bundles require explicit names and matching directory names. Standard license/metadata/allowed-tools fields may be preserved but do not grant tool permissions. Shared format fixtures exercise Rust discovery and Python validation. Validation does not execute scripts or establish behavioral quality.
 
-The installer uses the adjacent creator validator. It accepts a local bundle, GitHub repo/path/ref or tree URL. Downloads use only credentials available in the current execution environment. Archive extraction rejects traversal and special files. Installation preserves resource contents and executable permissions, normalizes readable permissions, validates before publishing, and refuses replacement without --replace. Ordinary publication failures restore the previous directory; crash recovery and concurrent installers are not transactional.
+The installer uses the adjacent creator validator. It accepts a local bundle, GitHub repo/path/ref or tree URL. Downloads use only credentials available in the current execution target. Archive extraction rejects traversal and special files. Installation preserves resource contents and executable permissions, normalizes readable permissions, validates before publishing, and refuses replacement without --replace. Ordinary publication failures restore the previous directory; crash recovery and concurrent installers are not transactional.
 
 apply_patch remains workspace-scoped. Global installation/update is performed on the owning Control, or the independent local Runtime in App local mode. Connected tasks cannot modify supplied global bundles. Use injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for project installation.
 

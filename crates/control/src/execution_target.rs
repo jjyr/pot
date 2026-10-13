@@ -1,4 +1,4 @@
-//! Environment implementations are independent from authorization storage.
+//! Execution target implementations are independent from authorization storage.
 use crate::sandbox::{guest_output, tool};
 use crate::*;
 use std::collections::BTreeMap;
@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 /// Host processes and plugins belong to the target Runtime, not a Sandbox or
 /// a permissions file. Callers must authorize before obtaining an executor.
 #[derive(Default)]
-pub(crate) struct HostEnvironment {
+pub(crate) struct HostExecution {
     executors: Mutex<BTreeMap<String, (u64, Arc<pot_tool_executor::LocalTools>)>>,
 }
-impl HostEnvironment {
+impl HostExecution {
     pub fn host_executor(
         &self,
         owner: &str,
@@ -117,11 +117,11 @@ fn host_workspace_view(workspace: &std::path::Path) -> (PathBuf, PathBuf, PathBu
 /// Source and execution-visible roots for local instruction/skill discovery.
 pub(crate) fn workspace_view(s: &Service) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf)> {
     if s.is_worker
-        && s.environment_ref
+        && s.execution_target
             .as_ref()
-            .is_some_and(|r| matches!(r.target, pot_core::EnvironmentTarget::Host {}))
+            .is_some_and(|r| matches!(r.target, pot_core::ExecutionTargetKind::Host {}))
     {
-        let reference = s.environment_ref.as_ref().unwrap();
+        let reference = s.execution_target.as_ref().unwrap();
         anyhow::ensure!(
             reference.is_local_to(&s.runtime_id),
             "Remote workspace discovery requires destination transport"
@@ -129,7 +129,7 @@ pub(crate) fn workspace_view(s: &Service) -> Result<(PathBuf, PathBuf, PathBuf, 
         return Ok(host_workspace_view(&s.workspace));
     }
     if !s.is_worker {
-        let workspace = if s.environment_service.sandboxes.assignment("").is_err() {
+        let workspace = if s.execution_service.sandboxes.assignment("").is_err() {
             s.workspace.clone()
         } else {
             s.data.join("agent-workspace")
@@ -140,8 +140,8 @@ pub(crate) fn workspace_view(s: &Service) -> Result<(PathBuf, PathBuf, PathBuf, 
         .sandbox_id
         .clone()
         .ok_or_else(|| anyhow!("Worker Sandbox binding missing"))?;
-    let base = s.environment_service.sandboxes.workspace(&target);
-    let visible_base = PathBuf::from(s.environment_service.sandboxes.guest_workspace(&target)?);
+    let base = s.execution_service.sandboxes.workspace(&target);
+    let visible_base = PathBuf::from(s.execution_service.sandboxes.guest_workspace(&target)?);
     let cwd = base.join("tasks").join(&s.usage_scope);
     let visible = visible_base.join("tasks").join(&s.usage_scope);
     Ok((base, visible_base, cwd, visible))
@@ -157,22 +157,22 @@ pub(crate) async fn inventory(s: &Service) -> Value {
     if let Some(items) = value["items"].as_array_mut() {
         for item in items.iter_mut() {
             let id = item["id"].as_str().unwrap_or("");
-            item["environment_ref"] = json!(pot_core::EnvironmentRef::sandbox(&s.runtime_id, id));
+            item["execution_target"] = json!(pot_core::ExecutionTarget::sandbox(&s.runtime_id, id));
         }
-        if s.environment_service
+        if s.execution_service
             .host_enabled
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            items.insert(0, json!({"environment_ref":pot_core::EnvironmentRef::host(&s.runtime_id),"kind":"host","workspace":s.workspace,"management":false,"execution_policy":"owner_approval","sessions":s.environment_service.host.sessions().await}));
+            items.insert(0, json!({"execution_target":pot_core::ExecutionTarget::host(&s.runtime_id),"kind":"host","workspace":s.workspace,"management":false,"execution_policy":"owner_approval","sessions":s.execution_service.host.sessions().await}));
         }
     }
-    if let Ok(port) = crate::remote_environment::port(s) {
+    if let Ok(port) = crate::remote_execution::port(s) {
         let machines = port.machines();
         if let Some(items) = value["items"].as_array_mut() {
             for item in items {
                 if let Some(machine) = machines
                     .iter()
-                    .find(|m| item["environment_ref"]["runtime_id"] == m.runtime_id)
+                    .find(|m| item["execution_target"]["runtime_id"] == m.runtime_id)
                 {
                     item["machine_tags"] = json!(machine.tags);
                 }
@@ -192,18 +192,20 @@ pub(crate) async fn inventory(s: &Service) -> Value {
 }
 
 /// Resolve public local strings or a complete typed destination before effects.
-pub(crate) fn resolve(s: &Service, value: &Value) -> Result<pot_core::EnvironmentRef> {
+pub(crate) fn resolve(s: &Service, value: &Value) -> Result<pot_core::ExecutionTarget> {
     let reference = if let Some(value) = value.as_str() {
         if value.starts_with("remote:") {
-            crate::remote_environment::from_key(value)?
+            crate::remote_execution::from_key(value)?
         } else if value == "host" {
-            pot_core::EnvironmentRef::host(&s.runtime_id)
+            pot_core::ExecutionTarget::host(&s.runtime_id)
         } else {
             let sandbox_id = value
                 .strip_prefix("sandbox:")
                 .filter(|id| !id.is_empty())
-                .ok_or_else(|| anyhow!("Use host, sandbox:ID or a typed Environment reference"))?;
-            pot_core::EnvironmentRef::sandbox(&s.runtime_id, sandbox_id)
+                .ok_or_else(|| {
+                    anyhow!("Use host, sandbox:ID or a typed Execution target reference")
+                })?;
+            pot_core::ExecutionTarget::sandbox(&s.runtime_id, sandbox_id)
         }
     } else {
         serde_json::from_value(value.clone())?
@@ -211,28 +213,28 @@ pub(crate) fn resolve(s: &Service, value: &Value) -> Result<pot_core::Environmen
     reference.validate()?;
     Ok(reference)
 }
-pub(crate) fn local_key(s: &Service, reference: &pot_core::EnvironmentRef) -> Result<String> {
+pub(crate) fn local_key(s: &Service, reference: &pot_core::ExecutionTarget) -> Result<String> {
     anyhow::ensure!(
         reference.is_local_to(&s.runtime_id),
-        "Remote Environment transport is not available"
+        "Remote Execution target transport is not available"
     );
     Ok(match &reference.target {
-        pot_core::EnvironmentTarget::Host {} => {
+        pot_core::ExecutionTargetKind::Host {} => {
             anyhow::ensure!(
-                s.environment_service
+                s.execution_service
                     .host_enabled
                     .load(std::sync::atomic::Ordering::SeqCst),
                 "Host execution resource is disabled"
             );
             "host".into()
         }
-        pot_core::EnvironmentTarget::Sandbox { sandbox_id } => format!("sandbox:{sandbox_id}"),
+        pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => format!("sandbox:{sandbox_id}"),
     })
 }
-pub(crate) fn check_binding(s: &Service, reference: &pot_core::EnvironmentRef) -> Result<()> {
+pub(crate) fn check_binding(s: &Service, reference: &pot_core::ExecutionTarget) -> Result<()> {
     anyhow::ensure!(
-        !s.is_worker || s.environment_ref.as_ref() == Some(reference),
-        "Workers cannot switch Environment targets"
+        !s.is_worker || s.execution_target.as_ref() == Some(reference),
+        "Workers cannot switch Execution target targets"
     );
     Ok(())
 }
@@ -243,7 +245,7 @@ pub struct Tools {
     pub generation: u64,
 }
 impl pot_core::ToolExecutor for Tools {
-    fn routes_environments(&self) -> bool {
+    fn routes_execution_targets(&self) -> bool {
         true
     }
     fn execute<'a>(
@@ -260,16 +262,16 @@ impl pot_core::ToolExecutor for Tools {
                 agent::thread(&self.service)?.generation == self.generation,
                 "Execution thread changed"
             );
-            let environment = args["environment"].as_str().unwrap_or("");
-            if environment.starts_with("remote:") {
-                let reference = crate::remote_environment::from_key(environment)?;
+            let execution_target = args["execution_target"].as_str().unwrap_or("");
+            if execution_target.starts_with("remote:") {
+                let reference = crate::remote_execution::from_key(execution_target)?;
                 check_binding(&self.service, &reference)?;
-                let binding = crate::remote_environment::binding(&self.service, reference)?;
+                let binding = crate::remote_execution::binding(&self.service, reference)?;
                 let mut args = args.clone();
                 args.as_object_mut()
                     .ok_or_else(|| anyhow!("Arguments must be an object"))?
-                    .remove("environment");
-                let mut value = crate::remote_environment::port(&self.service)?
+                    .remove("execution_target");
+                let mut value = crate::remote_execution::port(&self.service)?
                     .execute(binding, call.into(), name.into(), args)
                     .await?;
                 if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
@@ -282,15 +284,18 @@ impl pot_core::ToolExecutor for Tools {
             }
             let mut execution_args = args.clone();
             if let Some(object) = execution_args.as_object_mut() {
-                object.remove("environment");
+                object.remove("execution_target");
             }
-            if !environment.is_empty() {
-                check_binding(&self.service, &resolve(&self.service, &json!(environment))?)?;
+            if !execution_target.is_empty() {
+                check_binding(
+                    &self.service,
+                    &resolve(&self.service, &json!(execution_target))?,
+                )?;
             }
-            if environment == "host" {
+            if execution_target == "host" {
                 anyhow::ensure!(
                     self.service
-                        .environment_service
+                        .execution_service
                         .host_enabled
                         .load(std::sync::atomic::Ordering::SeqCst),
                     "Host execution resource is disabled"
@@ -298,7 +303,7 @@ impl pot_core::ToolExecutor for Tools {
                 let thread = agent::thread(&self.service)?;
                 if let Some(plugin) = thread.config.params.agent.plugin_for_tool(name)? {
                     anyhow::ensure!(
-                        plugin.manifest.execution == "environment",
+                        plugin.manifest.supports_host(),
                         "This plugin supports Sandbox execution only"
                     );
                     let descriptor = thread
@@ -316,7 +321,7 @@ impl pot_core::ToolExecutor for Tools {
                 }
                 let executor = self
                     .service
-                    .environment_service
+                    .execution_service
                     .host
                     .host_executor(&self.service.usage_scope, self.generation);
                 return pot_core::ToolExecutor::execute(
@@ -334,7 +339,7 @@ impl pot_core::ToolExecutor for Tools {
                 )
                 .await;
             }
-            if let Some(target) = environment.strip_prefix("sandbox:") {
+            if let Some(target) = execution_target.strip_prefix("sandbox:") {
                 execution_args["sandbox_id"] = json!(target);
             }
             let mut value = tool(&self.service, name, call, &execution_args).await?;
@@ -367,39 +372,39 @@ pub async fn refresh(s: &Service) -> Result<()> {
     finish_turn(s).await
 }
 pub async fn reap_idle(s: &Service) -> Result<()> {
-    s.environment_service.host.reap_host_plugins().await?;
-    s.environment_service.sandboxes.reap_idle().await
+    s.execution_service.host.reap_host_plugins().await?;
+    s.execution_service.sandboxes.reap_idle().await
 }
 pub async fn finish_stale(s: &Service, generation: u64) -> Result<()> {
-    s.environment_service
+    s.execution_service
         .host
         .finish_stale_host(&s.usage_scope, generation)
         .await?;
-    s.environment_service
+    s.execution_service
         .sandboxes
         .finish_stale(&s.usage_scope, generation)
         .await
 }
 pub async fn shutdown(s: &Service) -> Result<()> {
-    s.environment_service.host.shutdown_host().await?;
-    s.environment_service.sandboxes.shutdown().await
+    s.execution_service.host.shutdown_host().await?;
+    s.execution_service.sandboxes.shutdown().await
 }
 pub async fn finish_idle(s: &Service) -> Result<()> {
-    s.environment_service
+    s.execution_service
         .sandboxes
         .finish_idle(&s.usage_scope)
         .await
 }
 pub async fn finish(s: &Service) -> Result<()> {
-    let remote = crate::remote_environment::cancel(s).await;
-    let host = s.environment_service.host.finish_host(&s.usage_scope).await;
-    let sandbox = s.environment_service.sandboxes.finish(&s.usage_scope).await;
+    let remote = crate::remote_execution::cancel(s).await;
+    let host = s.execution_service.host.finish_host(&s.usage_scope).await;
+    let sandbox = s.execution_service.sandboxes.finish(&s.usage_scope).await;
     remote.and(host).and(sandbox)
 }
 pub async fn drain(s: &Service) -> Result<()> {
-    let remote = crate::remote_environment::cancel(s).await;
-    let host = s.environment_service.host.finish_host(&s.usage_scope).await;
-    let sandbox = s.environment_service.sandboxes.drain(&s.usage_scope).await;
+    let remote = crate::remote_execution::cancel(s).await;
+    let host = s.execution_service.host.finish_host(&s.usage_scope).await;
+    let sandbox = s.execution_service.sandboxes.drain(&s.usage_scope).await;
     remote.and(host).and(sandbox)
 }
 
@@ -410,8 +415,8 @@ mod tests {
     fn worker_binding_checks_full_runtime_and_target() {
         let mut worker = crate::tests::service();
         worker.is_worker = true;
-        let binding = pot_core::EnvironmentRef::sandbox(&worker.runtime_id, "default");
-        worker.environment_ref = Some(binding.clone());
+        let binding = pot_core::ExecutionTarget::sandbox(&worker.runtime_id, "default");
+        worker.execution_target = Some(binding.clone());
         assert!(check_binding(&worker, &binding).is_ok());
         for value in [
             json!("host"),
@@ -420,9 +425,9 @@ mod tests {
             let target = resolve(&worker, &value).unwrap();
             assert!(check_binding(&worker, &target).is_err());
         }
-        worker.environment_ref = Some(pot_core::EnvironmentRef::host(&worker.runtime_id));
+        worker.execution_target = Some(pot_core::ExecutionTarget::host(&worker.runtime_id));
         assert!(check_binding(&worker, &resolve(&worker, &json!("host")).unwrap()).is_ok());
         assert!(check_binding(&worker, &binding).is_err());
-        assert!(local_key(&worker, &pot_core::EnvironmentRef::host("other")).is_err());
+        assert!(local_key(&worker, &pot_core::ExecutionTarget::host("other")).is_err());
     }
 }

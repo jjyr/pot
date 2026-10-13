@@ -17,7 +17,7 @@ use tokio::sync::Notify;
 #[derive(Default)]
 struct Feedback {
     authorization: Mutex<bool>,
-    prepared_environment: Mutex<Option<String>>,
+    prepared_execution_target: Mutex<Option<String>>,
     permission_requests: Mutex<Vec<Value>>,
     permission_decision: Mutex<Option<bool>>,
     permission_changed: Notify,
@@ -40,10 +40,11 @@ impl ExecutionFeedback for Feedback {
         mut args: Value,
     ) -> BoxFuture<'_, Result<Value>> {
         Box::pin(async move {
-            if let Some(environment) = &*self.prepared_environment.lock().unwrap() {
-                args["environment"] = json!(environment);
-            } else if args.get("environment").is_none() && *self.authorization.lock().unwrap() {
-                args["environment"] = json!("host");
+            if let Some(execution_target) = &*self.prepared_execution_target.lock().unwrap() {
+                args["execution_target"] = json!(execution_target);
+            } else if args.get("execution_target").is_none() && *self.authorization.lock().unwrap()
+            {
+                args["execution_target"] = json!("host");
             }
             Ok(args)
         })
@@ -1676,8 +1677,8 @@ async fn host_write_waits_for_owner_and_denial_has_no_effect() {
         assert!(!path.exists(), "Host write occurred before approval");
         let request = f.feedback.permission_requests.lock().unwrap()[0].clone();
         assert_eq!(request["owner"], "unit");
-        assert_eq!(request["environment"], "host");
-        assert_eq!(request["args"]["environment"], "host");
+        assert_eq!(request["execution_target"], "host");
+        assert_eq!(request["args"]["execution_target"], "host");
         assert!(request.get("proposed_grant").is_none());
         assert_eq!(
             request["args"]["cmd"],
@@ -1879,7 +1880,7 @@ async fn composition_reuses_parent_receipts_and_routes_product_calls_across_prot
 
 struct CountPluginExecutor(Arc<std::sync::atomic::AtomicUsize>, &'static str);
 impl ToolExecutor for CountPluginExecutor {
-    fn routes_environments(&self) -> bool {
+    fn routes_execution_targets(&self) -> bool {
         true
     }
     fn execute<'a>(
@@ -1893,7 +1894,7 @@ impl ToolExecutor for CountPluginExecutor {
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             assert_eq!(name, "cua_repl");
-            assert_eq!(args["environment"], self.1);
+            assert_eq!(args["execution_target"], self.1);
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(json!({"status":"observed"}))
         })
@@ -1975,16 +1976,19 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
                 f.services.rpc_tools = Some(vec![]);
                 f.thread.config.params.agent.builtin_tools = vec!["exec".into(), "wait".into()];
                 *f.feedback.authorization.lock().unwrap() = true;
-                let environment = if role == ExecutionRole::Main {
+                let execution_target = if role == ExecutionRole::Main {
                     "host"
                 } else {
                     "sandbox:default"
                 };
-                *f.feedback.prepared_environment.lock().unwrap() = Some(environment.into());
+                *f.feedback.prepared_execution_target.lock().unwrap() =
+                    Some(execution_target.into());
                 *f.feedback.permission_decision.lock().unwrap() = Some(approved);
                 let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-                f.context.tool_executor =
-                    Some(Arc::new(CountPluginExecutor(count.clone(), environment)));
+                f.context.tool_executor = Some(Arc::new(CountPluginExecutor(
+                    count.clone(),
+                    execution_target,
+                )));
                 let (name, arguments) = if composed {
                     (
                         "exec",
@@ -2008,7 +2012,7 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
                 let requests = f.feedback.permission_requests.lock().unwrap();
                 assert_eq!(requests.len(), 1);
                 assert_eq!(requests[0]["tool"], "cua_repl");
-                assert_eq!(requests[0]["environment"], environment);
+                assert_eq!(requests[0]["execution_target"], execution_target);
                 assert_eq!(
                     requests[0]["call_id"],
                     if composed { "plugin:js:1" } else { "plugin" }
@@ -2030,7 +2034,7 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
                 );
                 assert!(
                     plugin["function"]["parameters"]["properties"]
-                        .get("environment")
+                        .get("execution_target")
                         .is_some()
                 );
             }

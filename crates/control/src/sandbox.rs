@@ -22,15 +22,15 @@ pub(crate) fn guest_output(
         text,
     })
 }
-/// Product context is kept outside the environment Manager.
+/// Product context is kept outside the Sandbox Manager.
 pub struct Manager {
     pub(crate) resources: Option<Arc<crate::sandbox_resources::Hub>>,
-    environment: Arc<pot_sandbox::Manager>,
+    sandboxes: Arc<pot_sandbox::Manager>,
 }
 impl std::ops::Deref for Manager {
     type Target = Arc<pot_sandbox::Manager>;
     fn deref(&self) -> &Self::Target {
-        &self.environment
+        &self.sandboxes
     }
 }
 impl Manager {
@@ -53,7 +53,7 @@ impl Manager {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<()> {
         if let Some(hub) = &self.resources {
-            hub.wait(&self.environment, id, owner, turn, cancelled)
+            hub.wait(&self.sandboxes, id, owner, turn, cancelled)
                 .await?;
         }
         Ok(())
@@ -64,7 +64,7 @@ impl Manager {
         providers: Vec<Arc<dyn pot_sandbox::Provider>>,
     ) -> Result<Self> {
         Ok(Self {
-            environment: Arc::new(pot_sandbox::Manager::open_empty(data, providers)?),
+            sandboxes: Arc::new(pot_sandbox::Manager::open_empty(data, providers)?),
             resources: Some(crate::sandbox_resources::Hub::open(data)?),
         })
     }
@@ -73,7 +73,7 @@ impl Manager {
         providers: Vec<Arc<dyn pot_sandbox::Provider>>,
     ) -> Result<Self> {
         Ok(Self {
-            environment: Arc::new(pot_sandbox::Manager::open(data, providers)?),
+            sandboxes: Arc::new(pot_sandbox::Manager::open(data, providers)?),
             resources: Some(crate::sandbox_resources::Hub::open(data)?),
         })
     }
@@ -83,7 +83,7 @@ pub async fn list(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Valu
     Ok(Json(inventory(&s).await))
 }
 pub(crate) async fn inventory(s: &Service) -> Value {
-    let mut value = s.environment_service.sandboxes.inventory().await;
+    let mut value = s.execution_service.sandboxes.inventory().await;
     let tasks = tasks::sandbox_tasks(s);
     if let Some(rows) = value["items"].as_array_mut() {
         for row in rows {
@@ -91,8 +91,8 @@ pub(crate) async fn inventory(s: &Service) -> Value {
             let assigned: Vec<_> = tasks
                 .iter()
                 .filter(|task| {
-                    task.environment_ref.as_ref()
-                        == Some(&pot_core::EnvironmentRef::sandbox(&s.runtime_id, &id))
+                    task.execution_target.as_ref()
+                        == Some(&pot_core::ExecutionTarget::sandbox(&s.runtime_id, &id))
                 })
                 .collect();
             row["running_tasks"] = json!(
@@ -104,7 +104,7 @@ pub(crate) async fn inventory(s: &Service) -> Value {
             row["tasks"] = json!(assigned);
             row["referenced"] = json!(tasks::uses_sandbox(s, &id));
             row["resource_request"] = s
-                .environment_service
+                .execution_service
                 .sandboxes
                 .resources
                 .as_ref()
@@ -113,7 +113,7 @@ pub(crate) async fn inventory(s: &Service) -> Value {
         }
     }
     value["resource_requests"] = s
-        .environment_service
+        .execution_service
         .sandboxes
         .resources
         .as_ref()
@@ -134,7 +134,7 @@ pub async fn manage(
 pub(crate) fn remote_management_target(
     s: &Service,
     args: &Value,
-) -> Result<Option<pot_core::EnvironmentRef>> {
+) -> Result<Option<pot_core::ExecutionTarget>> {
     let Some(runtime) = args.get("runtime_id") else {
         return Ok(None);
     };
@@ -155,9 +155,9 @@ pub(crate) fn remote_management_target(
     let id = args["sandbox_id"]
         .as_str()
         .ok_or_else(|| anyhow!("Explicit remote Sandbox identity required"))?;
-    let target = pot_core::EnvironmentRef::sandbox(runtime, id);
+    let target = pot_core::ExecutionTarget::sandbox(runtime, id);
     target.validate()?;
-    remote_environment::port(s)?.validate_management(&target)?;
+    remote_execution::port(s)?.validate_management(&target)?;
     Ok(Some(target))
 }
 pub async fn management(s: &Service, args: &Value) -> Result<Value> {
@@ -168,7 +168,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     );
     if args["action"] == "delete" {
         let id = s
-            .environment_service
+            .execution_service
             .sandboxes
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
         anyhow::ensure!(
@@ -179,12 +179,12 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
     let action = args["action"].as_str().unwrap_or("");
     if matches!(action, "start" | "desktop") {
         let id = s
-            .environment_service
+            .execution_service
             .sandboxes
             .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
-        if let Some(hub) = &s.environment_service.sandboxes.resources
+        if let Some(hub) = &s.execution_service.sandboxes.resources
             && let Some(key) = hub
-                .inspect(&s.environment_service.sandboxes, &id, &s.usage_scope, None)
+                .inspect(&s.execution_service.sandboxes, &id, &s.usage_scope, None)
                 .await?
         {
             return Ok(
@@ -193,9 +193,9 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         }
     }
     let mut result = s
-        .environment_service
+        .execution_service
         .sandboxes
-        .environment
+        .sandboxes
         .management(
             args,
             s.is_worker,
@@ -205,9 +205,9 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         .await?;
     if action == "create" {
         let id = result["sandbox_id"].as_str().unwrap_or("").to_owned();
-        if let Some(hub) = &s.environment_service.sandboxes.resources
+        if let Some(hub) = &s.execution_service.sandboxes.resources
             && let Some(key) = hub
-                .inspect(&s.environment_service.sandboxes, &id, &s.usage_scope, None)
+                .inspect(&s.execution_service.sandboxes, &id, &s.usage_scope, None)
                 .await?
         {
             result["resource_request_id"] = json!(key);
@@ -215,7 +215,7 @@ pub async fn management(s: &Service, args: &Value) -> Result<Value> {
         }
     }
     if action == "delete"
-        && let Some(hub) = &s.environment_service.sandboxes.resources
+        && let Some(hub) = &s.execution_service.sandboxes.resources
     {
         hub.forget(args["sandbox_id"].as_str().unwrap_or(""))?;
     }
@@ -243,14 +243,14 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         !turn.starts_with(pot_assistant::orchestration::RESULT_PREFIX),
         "Summary is read-only"
     );
-    if name == "list_environments" {
+    if name == "list_execution_targets" {
         anyhow::ensure!(!s.is_worker, "Workers cannot list Sandbox inventory");
-        return Ok(crate::environment::inventory(s).await);
+        return Ok(crate::execution_target::inventory(s).await);
     }
     if name == "manage_sandbox" {
         let generation = agent::thread(s)?.generation;
         #[cfg(test)]
-        let gated = s.environment_service.permissions.configured();
+        let gated = s.execution_service.permissions.configured();
         #[cfg(not(test))]
         let gated = true;
         if gated {
@@ -260,7 +260,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
                 &turn,
                 json!(pot_agent::permissions::Request {
                     owner: s.usage_scope.clone(),
-                    environment: String::new(),
+                    execution_target: String::new(),
                     generation,
                     turn: turn.clone(),
                     call_id: call_id.into(),
@@ -272,7 +272,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             anyhow::ensure!(response["approved"] == true, "Owner denied sandbox access");
         }
         let _mutation = s
-            .environment_service
+            .execution_service
             .permissions
             .sandbox_mutations
             .lock()
@@ -283,18 +283,18 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             machine,
             pot_agent::permissions::Capability::Sandbox,
         )?;
-        s.environment_service
+        s.execution_service
             .permissions
             .validate_sandbox_change(machine, args)?;
         if args["action"] != "create" {
             let sandbox = if machine == s.runtime_id {
-                s.environment_service
+                s.execution_service
                     .sandboxes
                     .assignment(args["sandbox_id"].as_str().unwrap_or(""))?
             } else {
                 args["sandbox_id"].as_str().unwrap_or("").into()
             };
-            s.environment_service.permissions.sandbox_access(
+            s.execution_service.permissions.sandbox_access(
                 &s.assistant_id,
                 machine,
                 &sandbox,
@@ -303,19 +303,17 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         } else {
             let sandbox = args["sandbox_id"].as_str().unwrap_or("");
             anyhow::ensure!(
-                s.environment_service.sandboxes.assignment(sandbox).is_err(),
+                s.execution_service.sandboxes.assignment(sandbox).is_err(),
                 "Sandbox already exists"
             );
-            let manager = &s.environment_service.sandboxes;
-            s.environment_service
-                .permissions
-                .validate_sandbox_creation(
-                    machine,
-                    manager.creation_config(args["provider"].as_str())?,
-                    manager.sandbox_count(),
-                )?;
+            let manager = &s.execution_service.sandboxes;
+            s.execution_service.permissions.validate_sandbox_creation(
+                machine,
+                manager.creation_config(args["provider"].as_str())?,
+                manager.sandbox_count(),
+            )?;
             // Reserve ownership durably before creation; failures leave an owner-visible reservation.
-            s.environment_service
+            s.execution_service
                 .permissions
                 .record_sandbox(&s.assistant_id, machine, sandbox)?;
         }
@@ -324,14 +322,14 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             "Host mappings are configured only by the machine owner"
         );
         if let Some(target) = remote_management_target(s, args)? {
-            let binding = remote_environment::binding(s, target)?;
+            let binding = remote_execution::binding(s, target)?;
             let service = s.clone();
             let cancelled = Arc::new(move || agent::cancelled(&service) || service.stopping());
-            let result = remote_environment::port(s)?
+            let result = remote_execution::port(s)?
                 .manage(binding, call_id.to_owned(), args.clone(), cancelled)
                 .await?;
             if args["action"] == "delete" {
-                s.environment_service
+                s.execution_service
                     .permissions
                     .forget_sandbox(machine, args["sandbox_id"].as_str().unwrap_or(""))?;
             }
@@ -339,7 +337,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         }
         let result = management(s, args).await?;
         if args["action"] == "delete" {
-            s.environment_service
+            s.execution_service
                 .permissions
                 .forget_sandbox(machine, result["sandbox_id"].as_str().unwrap_or(""))?;
         }
@@ -348,10 +346,10 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
             Some("create" | "start" | "desktop")
         ) {
             let id = s
-                .environment_service
+                .execution_service
                 .sandboxes
                 .assignment(args["sandbox_id"].as_str().unwrap_or(""))?;
-            s.environment_service
+            s.execution_service
                 .sandboxes
                 .prepare(&id, &s.usage_scope, Some(&turn), &|| {
                     !turn_alive(s, &turn) || s.stopping()
@@ -370,13 +368,13 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     }
     if s.is_worker {
         let reference = s
-            .environment_ref
+            .execution_target
             .as_ref()
-            .ok_or_else(|| anyhow!("Worker Environment binding missing"))?;
+            .ok_or_else(|| anyhow!("Worker Execution target binding missing"))?;
         anyhow::ensure!(
             reference.is_local_to(&s.runtime_id)
-                && matches!(&reference.target, pot_core::EnvironmentTarget::Sandbox { sandbox_id } if Some(sandbox_id.as_str()) == s.sandbox_id.as_deref()),
-            "Workers cannot switch Environment targets"
+                && matches!(&reference.target, pot_core::ExecutionTargetKind::Sandbox { sandbox_id } if Some(sandbox_id.as_str()) == s.sandbox_id.as_deref()),
+            "Workers cannot switch Execution target targets"
         );
     }
     let thread = agent::thread(s)?;
@@ -401,7 +399,7 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
     if let Some(plugin) = &plugin {
         plugin.validate_input(name, &validated)?;
     } else {
-        pot_core::environment_tools::validate(name, &validated)?;
+        pot_core::execution_tools::validate(name, &validated)?;
     }
 
     // Pipe sessions already belong to a prepared scope; their Manager validation
@@ -414,12 +412,12 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
                 "Workers cannot switch Sandboxes"
             );
         }
-        let id = s.environment_service.sandboxes.assignment(if s.is_worker {
+        let id = s.execution_service.sandboxes.assignment(if s.is_worker {
             s.sandbox_id.as_deref().unwrap_or("")
         } else {
             requested
         })?;
-        s.environment_service
+        s.execution_service
             .sandboxes
             .prepare(&id, &s.usage_scope, Some(&turn), &|| {
                 !turn_alive(s, &turn) || s.stopping()
@@ -449,9 +447,9 @@ pub async fn tool(s: &Service, name: &str, call_id: &str, args: &Value) -> Resul
         worker: s.is_worker,
         policy: thread.config.params.agent.shell.clone(),
     };
-    s.environment_service
+    s.execution_service
         .sandboxes
-        .environment
+        .sandboxes
         .execute(&grant, name, call_id, args, &|| {
             !turn_alive(s, &turn) || s.stopping()
         })
@@ -533,7 +531,7 @@ mod tests {
         let mut worker = s.clone();
         worker.is_worker = true;
         worker.sandbox_id = Some("default".into());
-        worker.environment_ref = Some(pot_core::EnvironmentRef::sandbox(
+        worker.execution_target = Some(pot_core::ExecutionTarget::sandbox(
             &worker.runtime_id,
             "default",
         ));
@@ -544,7 +542,7 @@ mod tests {
                 .is_err()
         );
         assert!(
-            tool(&worker, "list_environments", "list", &json!({}))
+            tool(&worker, "list_execution_targets", "list", &json!({}))
                 .await
                 .is_err()
         );
@@ -573,7 +571,7 @@ mod tests {
         std::fs::remove_dir_all(&s.data).unwrap();
     }
     #[tokio::test]
-    async fn settings_validate_before_io_and_refuse_busy_environment() {
+    async fn settings_validate_before_io_and_refuse_busy_execution_target() {
         let s = tasks::tests::fixture();
         let args = json!({"action":"update","sandbox_id":"default","name":"Linux","config":{"cpus":2,"memory_gib":2,"disk_gib":8}});
         let mut invalid = args.clone();
@@ -595,7 +593,7 @@ mod tests {
                 .contains("Name")
         );
         let lease = s
-            .environment_service
+            .execution_service
             .sandboxes
             .acquire("default")
             .await

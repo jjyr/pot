@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow};
 use futures::{StreamExt, future::BoxFuture};
-use pot_core::{EnvironmentRef, Outcome};
 use pot_core::{
     ExecutionContext, ExecutionFeedback, ExecutionServices, ModelRequest, ShellSettings,
     ToolExecutor, Update,
 };
+use pot_core::{ExecutionTarget, Outcome};
 use pot_runner::*;
 use serde_json::Value;
 use serde_json::json;
@@ -32,7 +32,7 @@ fn launch(runtime: &str) -> Launch {
         task_id: id(),
         run_id: id(),
         generation: 1,
-        environment: EnvironmentRef::host(runtime),
+        execution_target: ExecutionTarget::host(runtime),
         resources: pot_runner::resources::GlobalResources {
             plugins: config.params.agent.plugins.clone(),
             shell: config.params.agent.shell.clone(),
@@ -195,7 +195,7 @@ struct Control {
     ready: AtomicBool,
     cancelled: AtomicBool,
     turns: AtomicUsize,
-    switch_environment: AtomicBool,
+    switch_execution_target: AtomicBool,
 }
 impl ExecutionFeedback for Control {
     fn owner_authorization_available(&self) -> Result<bool> {
@@ -235,8 +235,8 @@ impl ExecutionServices for Control {
         Box::pin(async move {
             assert_eq!(request.model, "fixture");
             self.requests.lock().unwrap().push(request.body);
-            let event = if self.switch_environment.swap(false, Ordering::SeqCst) {
-                json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"switch","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"touch forbidden\",\"environment\":\"sandbox:other\"}"}}]},"finish_reason":"tool_calls"}]})
+            let event = if self.switch_execution_target.swap(false, Ordering::SeqCst) {
+                json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"switch","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"touch forbidden\",\"execution_target\":\"sandbox:other\"}"}}]},"finish_reason":"tool_calls"}]})
             } else {
                 json!({"choices":[{"index":0,"delta":{"content":"Task result without a download"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}})
             };
@@ -400,7 +400,9 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
     let mut next = launch.clone();
     next.run_id = id();
     journal.accept(&control_id, next.clone()).unwrap();
-    control.switch_environment.store(true, Ordering::SeqCst);
+    control
+        .switch_execution_target
+        .store(true, Ordering::SeqCst);
     let blocked = pot_runner::execute(
         Arc::new(host.clone()),
         journal.clone(),

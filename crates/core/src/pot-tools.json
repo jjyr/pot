@@ -46,7 +46,7 @@
         },
         "sandbox_id": {
           "type": "string",
-          "description": "Local Sandbox selection; use environment_ref for a full Host or Sandbox destination. Cannot combine both. Omitted snapshots the Agent Runtime execution default."
+          "description": "Local Sandbox selection; use execution_target for a full Host or Sandbox destination. Cannot combine both. Omitted snapshots the Agent Runtime execution default."
         },
         "skills": {
           "type": "array",
@@ -55,7 +55,7 @@
           },
           "description": "Optional skill names restricting this task. Omitted automatically discovers global task/shared and project skills."
         },
-        "environment_ref": {
+        "execution_target": {
           "type": "object",
           "properties": {
             "runtime_id": {
@@ -340,7 +340,7 @@
   },
   {
     "name": "manage_schedule",
-    "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. All times use the specified IANA timezone. Control triggers an independent task in the fixed Host/Sandbox environment. Omit the target on update to preserve it; defaults never retarget a saved schedule. Creation/update requires spec. Deletion is soft and keeps execution history.",
+    "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. All times use the specified IANA timezone. Control triggers an independent task in the fixed Host/Sandbox target. Omit the target on update to preserve it; defaults never retarget a saved schedule. Creation/update requires spec. Deletion is soft and keeps execution history.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -448,9 +448,9 @@
             },
             "sandbox_id": {
               "type": "string",
-              "description": "Creation snapshots the current execution default when omitted. Update retains the saved environment when omitted."
+              "description": "Creation snapshots the current execution default when omitted. Update retains the saved execution target when omitted."
             },
-            "environment_ref": {
+            "execution_target": {
               "type": "object",
               "properties": {
                 "runtime_id": {
@@ -512,8 +512,8 @@
     }
   },
   {
-    "name": "list_environments",
-    "description": "Inspect authorized Host and Sandbox environments grouped by Runtime; does not start an environment.",
+    "name": "list_execution_targets",
+    "description": "Inspect authorized Host and Sandbox execution targets grouped by Runtime; does not start a Sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -523,7 +523,7 @@
   },
   {
     "name": "manage_sandbox",
-    "description": "Main-only Sandbox lifecycle and selection. Workers cannot manage or switch environments. Busy environments cannot be stopped. Creating a definition does not boot a VM. Update requires name and config, and a stopped or failed environment with no active operations. Resources apply at next start.",
+    "description": "Main-only Sandbox lifecycle and selection. Workers cannot manage or switch execution targets. Busy execution targets cannot be stopped. Creating a definition does not boot a VM. Update requires name and config, and a stopped or failed Sandbox with no active operations. Resources apply at next start.",
     "inputSchema": {
       "type": "object",
       "properties": {

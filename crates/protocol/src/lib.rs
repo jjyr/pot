@@ -201,12 +201,13 @@ pub enum TaskPhase {
     Interrupted,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct TaskInfo {
     /// Active remote work is awaiting connectivity, authority or its original receipt.
     #[serde(default)]
     pub remote_waiting: bool,
     #[serde(default)]
-    pub environment_ref: Option<pot_core::EnvironmentRef>,
+    pub execution_target: Option<pot_core::ExecutionTarget>,
     #[serde(default)]
     pub assistant_id: String,
     pub sandbox_id: String,
@@ -247,9 +248,10 @@ pub struct TaskRequirements {
     pub live_steering: bool,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CreateTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment_ref: Option<pot_core::EnvironmentRef>,
+    pub execution_target: Option<pot_core::ExecutionTarget>,
     #[serde(default)]
     pub skills: Option<Vec<String>>,
     #[serde(default)]
@@ -288,10 +290,11 @@ fn task_page_limit() -> usize {
     10
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct TaskQuery {
-    /// Client-only environment filter, encoded as an EnvironmentRef JSON value.
+    /// Client-only execution target filter, encoded as an ExecutionTarget JSON value.
     #[serde(default)]
-    pub environment: String,
+    pub execution_target: String,
     #[serde(default = "active_scope")]
     pub scope: String,
     #[serde(default)]
@@ -309,7 +312,7 @@ pub struct TaskQuery {
 impl Default for TaskQuery {
     fn default() -> Self {
         Self {
-            environment: String::new(),
+            execution_target: String::new(),
             scope: active_scope(),
             phase: None,
             q: String::new(),
@@ -348,9 +351,10 @@ fn enabled() -> bool {
     true
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduleSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment_ref: Option<pot_core::EnvironmentRef>,
+    pub execution_target: Option<pot_core::ExecutionTarget>,
     #[serde(default)]
     pub sandbox_id: String,
     pub title: String,
@@ -452,6 +456,48 @@ pub struct FileQuery {
     #[serde(default)]
     pub revision: String,
 }
+#[cfg(test)]
+mod execution_target_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn targets_roundtrip_and_old_selectors_are_rejected() {
+        let target = pot_core::ExecutionTarget::sandbox("remote", "build");
+        let current = json!({"request_id":"request", "text":"build", "execution_target":target});
+        let request: CreateTask = serde_json::from_value(current).unwrap();
+        assert_eq!(request.execution_target, Some(target.clone()));
+        assert_eq!(
+            serde_json::to_value(request).unwrap()["execution_target"],
+            json!(target)
+        );
+        assert!(
+            serde_json::from_value::<CreateTask>(json!({
+                "request_id":"request", "text":"build", "environment_ref":target
+            }))
+            .is_err()
+        );
+        let current = json!({
+            "title":"build", "goal":"build", "kind":"interval", "every_minutes":60,
+            "execution_target":target
+        });
+        let schedule: ScheduleSpec = serde_json::from_value(current.clone()).unwrap();
+        assert_eq!(schedule.execution_target, Some(target.clone()));
+        assert_eq!(
+            serde_json::to_value(schedule).unwrap()["execution_target"],
+            json!(target)
+        );
+        let mut old = current;
+        old["environment_ref"] = old
+            .as_object_mut()
+            .unwrap()
+            .remove("execution_target")
+            .unwrap();
+        assert!(serde_json::from_value::<ScheduleSpec>(old).is_err());
+        assert!(serde_json::from_value::<TaskQuery>(json!({"environment_ref":target})).is_err());
+    }
+}
+
 #[cfg(test)]
 mod file_link_tests {
     #[test]

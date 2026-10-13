@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 /// The server supplies authenticated, run-bound Control ports and receipt-backed
 /// destination execution. There is deliberately no local model or approval fallback.
-/// Environment capabilities supplied by Runtime assembly. No assistant or database access.
+/// Execution target capabilities supplied by Runtime assembly. No assistant or database access.
 pub trait Destination: Send + Sync {
     fn executions(&self) -> &pot_runtime_execution::Manager;
     fn runtime_id(&self) -> &str;
@@ -17,7 +17,7 @@ pub trait Destination: Send + Sync {
     fn stopping(&self) -> bool;
     fn install_resources<'a>(
         &'a self,
-        target: &'a pot_core::EnvironmentTarget,
+        target: &'a pot_core::ExecutionTargetKind,
         workspace: &'a str,
         resources: crate::resources::GlobalResources,
     ) -> BoxFuture<'a, Result<Value>>;
@@ -66,18 +66,18 @@ impl ExecutionFeedback for Feedback {
         let name = name.to_owned();
         Box::pin(async move {
             let run = self.run()?;
-            if let Some(value) = args.get("environment") {
+            if let Some(value) = args.get("execution_target") {
                 let target = if value.is_object() {
-                    serde_json::from_value::<EnvironmentRef>(value.clone())?
+                    serde_json::from_value::<ExecutionTarget>(value.clone())?
                 } else if value == "host" {
-                    EnvironmentRef::host(&run.launch.environment.runtime_id)
+                    ExecutionTarget::host(&run.launch.execution_target.runtime_id)
                 } else if let Some(id) = value.as_str().and_then(|v| v.strip_prefix("sandbox:")) {
-                    EnvironmentRef::sandbox(&run.launch.environment.runtime_id, id)
+                    ExecutionTarget::sandbox(&run.launch.execution_target.runtime_id, id)
                 } else {
                     anyhow::bail!("Invalid Task Agent target")
                 };
                 ensure!(
-                    target == run.launch.environment,
+                    target == run.launch.execution_target,
                     "Worker cannot change its fixed target"
                 );
             }
@@ -85,7 +85,7 @@ impl ExecutionFeedback for Feedback {
                 args.get("sandbox_id").is_none(),
                 "Worker cannot change its sandbox"
             );
-            args["environment"] = serde_json::to_value(&run.launch.environment)?;
+            args["execution_target"] = serde_json::to_value(&run.launch.execution_target)?;
             self.control.resolve_execution_operation(&name, args).await
         })
     }
@@ -99,43 +99,47 @@ impl ExecutionFeedback for Feedback {
             let run = self.run()?;
             ensure!(args.is_object(), "Tool arguments must be an object");
             // This check is independent of any owner approval.
-            if let Some(environment) = args.get("environment") {
-                let requested = if environment.is_object() {
-                    serde_json::from_value::<EnvironmentRef>(environment.clone())?
-                } else if let Some(raw) =
-                    environment.as_str().and_then(|v| v.strip_prefix("remote:"))
+            if let Some(execution_target) = args.get("execution_target") {
+                let requested = if execution_target.is_object() {
+                    serde_json::from_value::<ExecutionTarget>(execution_target.clone())?
+                } else if let Some(raw) = execution_target
+                    .as_str()
+                    .and_then(|v| v.strip_prefix("remote:"))
                 {
-                    serde_json::from_str::<EnvironmentRef>(raw)?
+                    serde_json::from_str::<ExecutionTarget>(raw)?
                 } else {
-                    let target = match environment.as_str() {
-                        Some("host") => pot_core::EnvironmentTarget::Host {},
+                    let target = match execution_target.as_str() {
+                        Some("host") => pot_core::ExecutionTargetKind::Host {},
                         Some(value) if value.starts_with("sandbox:") => {
-                            pot_core::EnvironmentTarget::Sandbox {
+                            pot_core::ExecutionTargetKind::Sandbox {
                                 sandbox_id: value[8..].into(),
                             }
                         }
-                        _ => return Err(anyhow!("Invalid Task Agent environment selector")),
+                        _ => return Err(anyhow!("Invalid Task Agent execution target selector")),
                     };
-                    EnvironmentRef {
-                        runtime_id: run.launch.environment.runtime_id.clone(),
+                    ExecutionTarget {
+                        runtime_id: run.launch.execution_target.runtime_id.clone(),
                         target,
                     }
                 };
                 ensure!(
-                    requested == run.launch.environment,
-                    "Worker cannot switch its assigned Environment"
+                    requested == run.launch.execution_target,
+                    "Worker cannot switch its assigned Execution target"
                 );
             }
-            args["environment"] = serde_json::to_value(&run.launch.environment)?;
+            args["execution_target"] = serde_json::to_value(&run.launch.execution_target)?;
             let prepared = self
                 .control
                 .prepare_execution_operation(&name, args)
                 .await?;
             ensure!(
-                prepared["environment"] == serde_json::to_value(&run.launch.environment)?
-                    || prepared["environment"]
-                        == format!("remote:{}", serde_json::to_string(&run.launch.environment)?),
-                "Control preparation changed the fixed Task Agent environment"
+                prepared["execution_target"] == serde_json::to_value(&run.launch.execution_target)?
+                    || prepared["execution_target"]
+                        == format!(
+                            "remote:{}",
+                            serde_json::to_string(&run.launch.execution_target)?
+                        ),
+                "Control preparation changed the fixed Task Agent execution target"
             );
             Ok(prepared)
         })
@@ -267,7 +271,7 @@ pub async fn execute(
     let mut text = String::new();
     let execution = async {
             feedback.ready().await?;
-            let context = host.install_resources(&accepted.launch.environment.target, &workspace_scope, accepted.launch.resources.clone()).await?;
+            let context = host.install_resources(&accepted.launch.execution_target.target, &workspace_scope, accepted.launch.resources.clone()).await?;
             let mut skills: Vec<pot_agent::Skill> = serde_json::from_value(context["skills"].clone())?;
             if let Some(selection) = &accepted.launch.skills {
                 ensure!(selection.iter().all(|name|skills.iter().any(|skill|&skill.name==name)),"Selected task skill is unavailable at the fixed destination");

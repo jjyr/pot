@@ -174,7 +174,7 @@ assistant resource or model-provider key. Keep its data directory to retain memb
 
 Both examples run in the foreground. For unattended operation, arrange for your
 OS service manager to run the same command with the same service account, root
-and environment. Shut down cleanly before upgrading and restarting the binary.
+and execution target. Shut down cleanly before upgrading and restarting the binary.
 
 `pot serve` runs in the foreground without Web UI, even when listener settings
 exist. Enable it with `pot serve --ui --control https://CONTROL:19443` and
@@ -252,7 +252,7 @@ Runtime; Control retains model credentials, budgets and approvals. See
 
 Web listener configuration remains separately explicit. Resource creation does
 not automatically start Web access. Lazy macOS Helper lifecycle and real VM
-qualification remain part of the outstanding environment deployment work.
+qualification remain part of the outstanding execution target deployment work.
 
 ## Control listener and membership
 

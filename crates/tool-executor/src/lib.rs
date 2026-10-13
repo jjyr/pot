@@ -55,7 +55,7 @@ impl ToolExecutor for LocalTools {
         emit: &'a mut (dyn FnMut(Update) -> Result<()> + Send),
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
-            pot_core::environment_tools::validate(name, args)?;
+            pot_core::execution_tools::validate(name, args)?;
             if name == "apply_patch" {
                 tools::patch(context, args)
             } else if name == "plugin_call" {

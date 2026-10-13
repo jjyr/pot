@@ -8,7 +8,7 @@ Both builds used the same isolated `com.jjyr.pot.ui-check` bundle/root, window,
 language, appearance, synthetic transcript and API data. No production profile,
 credential, model call or VM was used.
 
-`pot-ui` now owns the native-derived Tasks list, Sandbox environment page and
+`pot-ui` now owns the native-derived Tasks list, Sandbox execution target page and
 complete Usage presentation (including native conversation statistics, tool
 output and allowance form). App and WASM call these renderers. Shared page
 primitives also serve native Settings/Schedules; those whole pages, navigation,
@@ -29,7 +29,7 @@ unmodified images without alignment, scaling, retouching or masking. “Body” 
 | Usage statistics/chart | 2303 | 0 | None |
 | Allowance form | 1478 | 793 | `(1792, 248, 1840, 280)` — cursor/click effect from opening limits |
 | Sandbox default | 2067 | 0 | None |
-| Sandbox other environment | 1692 | 1039 | `(320, 536, 360, 577)` — cursor/click effect over environment row |
+| Sandbox other execution target | 1692 | 1039 | `(320, 536, 360, 577)` — cursor/click effect over execution target row |
 
 All changed regions were inspected. Native Chat/Tasks/Sandbox/Usage controls,
 labels, geometry and styles remained consistent in these fixtures. Task paging
@@ -45,7 +45,7 @@ size, locale, OS version or physical display.
 | Usage | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-usage-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-usage-after.png) |
 | Allowance | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-quota-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-quota-after.png) |
 | Sandbox | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-after.png) |
-| Other environment | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-other-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-other-after.png) |
+| Other execution target | [Before](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-other-before.png) | [After](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-sandbox-other-after.png) |
 
 Actual native allowance input/save controls were exercised. Entering `0` and
 immediately saving displayed an error and generated no policy HTTP request.
@@ -68,7 +68,7 @@ qualify actual Passkey/TLS/push security.
   reset offset to `0` when changing to attention tasks.
 - Actual GPUI keyboard input and Search submitted the typed query, rendering the
   shared empty-result state. Clicking Clear search restored the rows and placeholder.
-- Actual Sandbox navigation and environment-row clicks changed the viewing
+- Actual Sandbox navigation and execution target-row clicks changed the viewing
   selection, retained the execution default, and made no browser POST requests.
 - More → Usage used the shared totals/model cards and chart. The actual Last 30
   days button fetched `days=30`; scrolling revealed chart and quota statistics.
@@ -83,7 +83,7 @@ qualify actual Passkey/TLS/push security.
 Evidence: [Tasks](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-tasks.png),
 [search](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-task-search.png),
 [Sandbox](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-sandbox.png),
-[another environment](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-sandbox-other.png),
+[another execution target](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-sandbox-other.png),
 [Usage](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-usage.png),
 [chart](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-usage-chart.png),
 [360 px Chinese/dark Tasks](https://github.com/jjyr/pot/blob/2c4ca8a16abdc2192f6da6ea7670a0460e5f46af/output/playwright/shared-pages/pot-pages-mobile-dark.png).

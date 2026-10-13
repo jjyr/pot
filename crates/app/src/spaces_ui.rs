@@ -59,7 +59,8 @@ impl Shell {
                 crate::i18n::text("spaces.wait-send").into();
             return false;
         }
-        self.client.view.lock().unwrap().task_query.environment = query.environment.clone();
+        self.client.view.lock().unwrap().task_query.execution_target =
+            query.execution_target.clone();
         self.client.select(String::new());
         self.client
             .filter_tasks(query.scope, query.q.clone(), query.offset);
@@ -457,7 +458,7 @@ impl Shell {
                 .cloned()
                 .unwrap_or(Value::Null);
             let selected = if self.machine_selection["space_id"] == space.id {
-                self.machine_selection["environment"].clone()
+                self.machine_selection["execution_target"].clone()
             } else {
                 Value::Null
             };
@@ -465,13 +466,14 @@ impl Shell {
                 move |this, event: &pot_ui::pages::PageAction, window, cx| {
                     if event.kind == "machine-select" {
                         this.machine_selection =
-                            json!({"space_id":source.id,"environment":event.value});
+                            json!({"space_id":source.id,"execution_target":event.value});
                         cx.notify();
                         return;
                     }
-                    if event.kind == "environment-tasks" {
-                        this.client.filter_environment(
-                            json!({"space_id":source.id,"environment":event.value}).to_string(),
+                    if event.kind == "execution-target-tasks" {
+                        this.client.filter_execution_target(
+                            json!({"space_id":source.id,"execution_target":event.value})
+                                .to_string(),
                         );
                         this.task_search
                             .update(cx, |f, cx| f.set_value("", window, cx));

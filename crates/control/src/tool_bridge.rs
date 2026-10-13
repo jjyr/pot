@@ -20,6 +20,10 @@ fn configured_schemas(
         .iter()
         .filter_map(|t| t["name"].as_str().map(str::to_owned))
         .collect();
+    for tool in &mut execution {
+        tool["inputSchema"]["properties"]["execution_target"] =
+            pot_core::execution_tools::selector_schema();
+    }
     if !worker {
         for tool in &mut execution {
             if tool["name"] != "write_stdin" {
@@ -147,7 +151,7 @@ pub(crate) async fn dispatch(
             let name = call["params"]["name"].as_str().unwrap_or("");
             let settings = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?.map(|b| b.config.params.agent).unwrap_or_default();
             if !configured_schemas(turn.starts_with(pot_assistant::orchestration::RESULT_PREFIX),s.is_worker,&settings).map_err(internal)?.iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
-            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || matches!(name,"list_environments" | "manage_sandbox") {
+            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || matches!(name,"list_execution_targets" | "manage_sandbox") {
                 let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));
                 let operation = tokio::spawn(async move { sandbox::tool(&s,&name,&id,&args).await });
                 let result = operation.await.map_err(|e|internal(e.into()))?;
@@ -249,12 +253,23 @@ mod tests {
                 );
             } else {
                 assert!(names.contains("manage_sandbox"));
-                assert!(names.contains("list_environments"));
+                assert!(names.contains("list_execution_targets"));
+                assert!(!names.contains("list_environments"));
                 assert!(names.contains("create_task"));
             }
             if !summary {
                 for name in ["exec_command", "write_stdin", "apply_patch"] {
                     let schema = tools.iter().find(|t| t["name"] == name).unwrap();
+                    assert!(
+                        schema["inputSchema"]["properties"]
+                            .get("execution_target")
+                            .is_some()
+                    );
+                    assert!(
+                        schema["inputSchema"]["properties"]
+                            .get("environment")
+                            .is_none()
+                    );
                     assert_eq!(
                         schema["inputSchema"]["properties"]
                             .get("sandbox_id")

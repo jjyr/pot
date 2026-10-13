@@ -52,7 +52,7 @@ tasks = [
         resource="",
         sandbox_id="",
         executor_icon="openai",
-        environment_ref=dict(runtime_id=control, target=dict(kind="host")),
+        execution_target=dict(runtime_id=control, target=dict(kind="host")),
     )
 ]
 schedule = dict(
@@ -142,9 +142,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             local=True,
                             connection="online",
                             tags=[],
-                            environments=[
+                            execution_targets=[
                                 dict(
-                                    environment_ref=dict(
+                                    execution_target=dict(
                                         runtime_id=control, target=dict(kind="host")
                                     ),
                                     name="Host",

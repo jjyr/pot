@@ -382,7 +382,7 @@ async fn local_socket_authorizes_without_tokens_and_refuses_browser_origin() {
 }
 
 #[tokio::test]
-async fn bare_server_exposes_identity_without_assistant_or_environment_storage() {
+async fn bare_server_exposes_identity_without_assistant_or_execution_target_storage() {
     let fixture = Fixture::new();
     let config = fixture.config();
     let server = Server::bind(config).await.unwrap();
@@ -528,8 +528,8 @@ async fn caller_created_resources_are_idle_idempotent_isolated_and_restored() {
                 .await
                 .unwrap();
             assert_eq!(original["definition"]["id"], "main");
-            let environments: Value = client
-                .get(format!("{base}/api/v1/environments"))
+            let execution_targets: Value = client
+                .get(format!("{base}/api/v1/execution_targets"))
                 .bearer_auth(&endpoint.token)
                 .send()
                 .await
@@ -539,7 +539,7 @@ async fn caller_created_resources_are_idle_idempotent_isolated_and_restored() {
                 .json()
                 .await
                 .unwrap();
-            assert!(environments["items"].as_array().unwrap().is_empty());
+            assert!(execution_targets["items"].as_array().unwrap().is_empty());
             assert!(!fixture.0.join("data/sandboxes.json").exists());
             let runtime: Value = client
                 .get(format!("{base}/api/v1/runtime"))
@@ -585,8 +585,8 @@ async fn caller_created_resources_are_idle_idempotent_isolated_and_restored() {
             .await
             .unwrap();
         assert_eq!(assistants["assistants"].as_array().unwrap().len(), 1);
-        let environments: Value = client
-            .get(format!("{base}/api/v1/environments"))
+        let execution_targets: Value = client
+            .get(format!("{base}/api/v1/execution_targets"))
             .bearer_auth(&endpoint.token)
             .send()
             .await
@@ -596,8 +596,8 @@ async fn caller_created_resources_are_idle_idempotent_isolated_and_restored() {
             .json()
             .await
             .unwrap();
-        assert_eq!(environments["items"].as_array().unwrap().len(), 1);
-        assert_eq!(environments["items"][0]["kind"], "host");
+        assert_eq!(execution_targets["items"].as_array().unwrap().len(), 1);
+        assert_eq!(execution_targets["items"][0]["kind"], "host");
         assert!(!fixture.0.join("data/sandboxes.json").exists());
         let snapshot: Snapshot = client
             .get(format!("{base}{PATH_SNAPSHOT}"))
@@ -668,8 +668,8 @@ async fn resource_manifest_restores_current_assistants_rules_and_sandbox_definit
                 .unwrap();
         } else {
             assert_eq!(rules, original_rules);
-            let environments: Value = client
-                .get(format!("{base}/api/v1/environments"))
+            let execution_targets: Value = client
+                .get(format!("{base}/api/v1/execution_targets"))
                 .bearer_auth(&endpoint.token)
                 .send()
                 .await
@@ -680,14 +680,14 @@ async fn resource_manifest_restores_current_assistants_rules_and_sandbox_definit
                 .await
                 .unwrap();
             assert!(
-                environments["items"]
+                execution_targets["items"]
                     .as_array()
                     .unwrap()
                     .iter()
                     .any(|e| e["kind"] == "host")
             );
             assert!(
-                environments["items"]
+                execution_targets["items"]
                     .as_array()
                     .unwrap()
                     .iter()

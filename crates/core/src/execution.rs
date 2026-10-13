@@ -271,10 +271,10 @@ pub trait ExecutionServices: Send + Sync {
     fn compaction(&self, event: Value) -> BoxFuture<'_, Result<()>>;
 }
 
-/// Environment effects are dispatched by the embedder, never implicitly executed by the Agent.
+/// Execution target effects are dispatched by the embedder, never implicitly executed by the Agent.
 pub trait ToolExecutor: Send + Sync {
-    /// A routed executor consumes Environment selectors; a direct executor does not.
-    fn routes_environments(&self) -> bool {
+    /// A routed executor consumes Execution target selectors; a direct executor does not.
+    fn routes_execution_targets(&self) -> bool {
         false
     }
     fn execute<'a>(

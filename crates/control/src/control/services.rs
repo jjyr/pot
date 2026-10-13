@@ -12,13 +12,13 @@ pub struct OwnerScope {
     pub(crate) remote_context: Arc<
         Mutex<
             std::collections::BTreeMap<
-                pot_core::EnvironmentRef,
-                crate::remote_environment::RemoteContext,
+                pot_core::ExecutionTarget,
+                crate::remote_execution::RemoteContext,
             >,
         >,
     >,
     pub(crate) sandbox_id: Option<String>,
-    pub(crate) environment_ref: Option<pot_core::EnvironmentRef>,
+    pub(crate) execution_target: Option<pot_core::ExecutionTarget>,
     pub(crate) usage: Arc<Mutex<usage::Ledger>>,
     pub(crate) usage_scope: String,
     pub(crate) token: String,
@@ -56,7 +56,7 @@ pub(crate) struct AgentService {
     pub(crate) resources: Arc<AgentResources>,
 }
 
-/// Agent resource paths are independent of Environment inventory/lifecycle.
+/// Agent resource paths are independent of Execution target inventory/lifecycle.
 pub(crate) struct AgentResources {
     pub(crate) assistants: Mutex<std::sync::Weak<assistants::Hub>>,
     pub(crate) mail_work: Mutex<std::collections::BTreeSet<String>>,
@@ -98,10 +98,10 @@ impl AgentResources {
 }
 
 #[derive(Clone)]
-pub(crate) struct EnvironmentService {
+pub(crate) struct ExecutionService {
     pub(crate) remote:
-        Arc<std::sync::RwLock<Option<Arc<dyn crate::remote_environment::RemoteEnvironment>>>>,
-    pub(crate) host: Arc<environment::HostEnvironment>,
+        Arc<std::sync::RwLock<Option<Arc<dyn crate::remote_execution::RemoteExecution>>>>,
+    pub(crate) host: Arc<execution_target::HostExecution>,
     pub(crate) host_enabled: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) sandboxes: Arc<sandbox::Manager>,
     pub(crate) permissions: Arc<permissions::Hub>,

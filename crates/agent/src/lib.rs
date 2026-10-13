@@ -8,7 +8,7 @@ pub use skills::{Skill, SkillCatalog, discover_skills, format_skills_for_prompt}
 mod processes {
     pub use pot_tool_executor::Processes;
 }
-mod environment_tools;
+mod instruction_tools;
 pub mod permissions;
 #[cfg(test)]
 mod tests;
@@ -622,7 +622,7 @@ async fn run(
         let mut plugins = settings.plugin_tools()?;
         if s.role == ExecutionRole::Main {
             for tool in &mut plugins {
-                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string","description":"Explicit Sandbox target; use environment for Host or Sandbox selection. Existing sessions retain their original target."});
+                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string","description":"Explicit Sandbox target; use execution_target for Host or Sandbox selection. Existing sessions retain their original target."});
             }
         }
         available.extend(plugins);
@@ -664,7 +664,7 @@ async fn run(
     );
     available.extend(custom);
     if s.role == ExecutionRole::Main && s.feedback.owner_authorization_available()? {
-        available.extend(environment_tools::instruction_schemas());
+        available.extend(instruction_tools::instruction_schemas());
     }
     if s.feedback.owner_authorization_available()? {
         for tool in &mut available {
@@ -672,8 +672,8 @@ async fn run(
                 permissions::is_execution_tool(name)
                     || settings.plugin_for_tool(name).is_ok_and(|p| p.is_some())
             }) {
-                tool["inputSchema"]["properties"]["environment"] =
-                    pot_core::environment_tools::selector_schema();
+                tool["inputSchema"]["properties"]["execution_target"] =
+                    pot_core::execution_tools::selector_schema();
             }
         }
     }
@@ -725,7 +725,7 @@ async fn run(
         prompt.clone()
     } else {
         format!(
-            "You are Pot. Your execution tools run in the selected execution environment with network access. Use exec_command to inspect files and retrieve sources; cite URLs for current facts. Use apply_patch for file edits. Report observed failures accurately. {}",
+            "You are Pot. Your execution tools run on the selected execution target with network access. Use exec_command to inspect files and retrieve sources; cite URLs for current facts. Use apply_patch for file edits. Report observed failures accurately. {}",
             if s.role == ExecutionRole::Worker {
                 "Complete the assigned task. You cannot delegate."
             } else {
@@ -960,7 +960,7 @@ impl Dispatcher<'_> {
                 .feedback
                 .resolve_execution_operation(&call.name, call.arguments)
                 .await?;
-        } else if environment_tools::instructions_tool(&call.name) {
+        } else if instruction_tools::instructions_tool(&call.name) {
             call.arguments = s
                 .feedback
                 .prepare_permission_operation(&call.name, call.arguments)?;
@@ -975,7 +975,7 @@ impl Dispatcher<'_> {
                 call.arguments = args;
                 // Local opt-in embedders use the same tools and gate as Runtime.
                 if s.feedback.owner_authorization_available()?
-                    && call.arguments.get("environment").is_none()
+                    && call.arguments.get("execution_target").is_none()
                 {
                     if !plugin {
                         pot_tool_executor::tools::normalize(
@@ -985,7 +985,7 @@ impl Dispatcher<'_> {
                             &settings.shell,
                         )?;
                     }
-                    call.arguments["environment"] = json!("host");
+                    call.arguments["execution_target"] = json!("host");
                 }
                 Ok(())
             })
@@ -994,7 +994,7 @@ impl Dispatcher<'_> {
                 .prepare_permission_operation(&call.name, call.arguments.clone())
                 .map(|args| {
                     call.arguments = args;
-                    call.arguments["environment"] = json!("host");
+                    call.arguments["execution_target"] = json!("host");
                 })
         } else {
             Ok(())
@@ -1007,7 +1007,7 @@ impl Dispatcher<'_> {
         })?;
         let result = async {
             prepared?;
-            if environment_tools::instructions_tool(&call.name) {
+            if instruction_tools::instructions_tool(&call.name) {
                 s.feedback
                     .execute_authorized_host(&call.name, call.arguments.clone())
                     .await
@@ -1016,13 +1016,13 @@ impl Dispatcher<'_> {
                 if let Some(executor) = &s.tool_executor {
                     let mut execution_args = call.arguments.clone();
                     if s.feedback.owner_authorization_available()?
-                        && execution_args["environment"] == "host"
-                        && !executor.routes_environments()
+                        && execution_args["execution_target"] == "host"
+                        && !executor.routes_execution_targets()
                     {
                         execution_args
                             .as_object_mut()
                             .unwrap()
-                            .remove("environment");
+                            .remove("execution_target");
                     }
                     executor
                         .execute(

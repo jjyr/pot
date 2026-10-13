@@ -513,7 +513,6 @@ impl Settings {
                             (0, crate::i18n::text("ui.general")),
                             (1, crate::i18n::text("ui.ai-configuration")),
                             (4, crate::i18n::text("ui.task-configuration")),
-                            (3, crate::i18n::text("ui.work-environment")),
                             (5, crate::i18n::text("web.title")),
                             (6, crate::i18n::text("tailscale.title")),
                         ]

@@ -283,8 +283,8 @@ impl Directory {
         let mut labels = serde_json::Map::new();
         for s in self.spaces.values() {
             for task in &s.tasks {
-                if let Some(environment) = task
-                    .environment_ref
+                if let Some(execution_target) = task
+                    .execution_target
                     .as_ref()
                     .and_then(|e| serde_json::to_value(e).ok())
                 {
@@ -292,13 +292,13 @@ impl Directory {
                         .as_array()
                         .into_iter()
                         .flatten()
-                        .find(|m| m["runtime_id"] == environment["runtime_id"])
+                        .find(|m| m["runtime_id"] == execution_target["runtime_id"])
                         .and_then(|m| m["name"].as_str())
-                        .unwrap_or_else(|| environment["runtime_id"].as_str().unwrap_or(""));
-                    let target = if environment["target"]["kind"] == "host" {
+                        .unwrap_or_else(|| execution_target["runtime_id"].as_str().unwrap_or(""));
+                    let target = if execution_target["target"]["kind"] == "host" {
                         "Host"
                     } else {
-                        environment["target"]["sandbox_id"]
+                        execution_target["target"]["sandbox_id"]
                             .as_str()
                             .unwrap_or("Sandbox")
                     };
@@ -336,22 +336,22 @@ impl Directory {
                 {
                     continue;
                 }
-                if !query.environment.is_empty() {
+                if !query.execution_target.is_empty() {
                     let filter: Value =
-                        serde_json::from_str(&query.environment).unwrap_or(Value::Null);
-                    let environment = if filter.get("space_id").is_some() {
+                        serde_json::from_str(&query.execution_target).unwrap_or(Value::Null);
+                    let execution_target = if filter.get("space_id").is_some() {
                         if filter["space_id"] != s.id {
                             continue;
                         }
-                        &filter["environment"]
+                        &filter["execution_target"]
                     } else {
                         &filter
                     };
-                    if t.environment_ref
+                    if t.execution_target
                         .as_ref()
                         .and_then(|e| serde_json::to_value(e).ok())
                         .as_ref()
-                        != Some(environment)
+                        != Some(execution_target)
                     {
                         continue;
                     }
@@ -653,14 +653,16 @@ mod tests {
     #[test]
     fn machine_filter_keeps_space_identity_when_execution_ids_match() {
         let mut d = directory_fixture();
-        let environment = json!({"runtime_id":"same-machine", "target":{"kind":"host"}});
+        let execution_target = json!({"runtime_id":"same-machine", "target":{"kind":"host"}});
         for space in d.spaces.values_mut() {
             for task in &mut space.tasks {
-                task.environment_ref = Some(serde_json::from_value(environment.clone()).unwrap());
+                task.execution_target =
+                    Some(serde_json::from_value(execution_target.clone()).unwrap());
             }
         }
         let query = TaskQuery {
-            environment: json!({"space_id":"remote-id", "environment":environment}).to_string(),
+            execution_target: json!({"space_id":"remote-id", "execution_target":execution_target})
+                .to_string(),
             ..Default::default()
         };
         let page = d.task_page(&query);

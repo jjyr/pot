@@ -14,23 +14,23 @@ adds no model-visible tools or file-transfer behavior. New transport/tool
 contracts remain work in #39. Resource creation remains API-only.
 
 The old shared Sandbox renderer, Web Sandbox navigation handlers, native workspace
-menu entry and work-environment settings tab have been removed. Desktop session
+menu entry and Sandbox settings tab have been removed. Desktop session
 cleanup is explicitly sent to the local Runtime even after a client mode change.
 
 ## Automated validation
 
 - Runtime task-page tests: exact Runtime/Host/Sandbox matching before pagination,
-  invalid environment reference rejection, and existing scope/search pagination.
+  invalid execution target reference rejection, and existing scope/search pagination.
 - Shared UI: 13 tests including desktop transport availability.
-- App: 22 tests including rejection of a late task page from a previous environment;
+- App: 22 tests including rejection of a late task page from a previous execution target;
   existing Swift/client safety checks.
 - Localization: 803 keys and native/browser language switching.
 - App, Server, UI and Mobile all-target Clippy with warnings denied.
 - Fresh pinned-toolchain release WASM build.
 
-The environment filter is an HTTP/UI TaskQuery field. The existing list_tasks model
+The execution target filter is an HTTP/UI TaskQuery field. The existing list_tasks model
 tool schema and behavior remain unchanged. Global task activity counts remain
-available independently of the visible environment filter.
+available independently of the visible execution target filter.
 
 ## Limits
 
@@ -45,7 +45,7 @@ qualification remain incomplete in #39.
 
 After Chrome site access was allowed, the latest Control Web fixture passed
 login, named Control assistant rendering, Machines Host expansion, View Tasks
-navigation and clearing the environment filter. The empty task list was used;
+navigation and clearing the execution target filter. The empty task list was used;
 Runtime tests establish populated-set filtering and pagination. The earlier
 ERR_BLOCKED_BY_CLIENT is resolved. See [Control Web acceptance](control-web-20261011.md#browser-acceptance-after-site-access-was-allowed)
 for the plugin digest fix and exact validation scope. Native click-through,

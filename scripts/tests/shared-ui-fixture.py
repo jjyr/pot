@@ -107,7 +107,7 @@ page_inventory = dict(
         ),
         dict(
             id="other",
-            name="Second environment 中文",
+            name="Second execution_target 中文",
             state=dict(phase="stopped", generation=1),
             running_tasks=0,
             active_leases=0,
@@ -218,9 +218,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             local=True,
                             connection="online",
                             tags=machine_labels,
-                            environments=[
+                            execution_targets=[
                                 dict(
-                                    environment_ref=dict(
+                                    execution_target=dict(
                                         runtime_id="fixture", target=dict(kind="host")
                                     ),
                                     name="Host",
@@ -238,7 +238,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         dict(
                             spec=dict(
                                 title="Daily check",
-                                environment_ref=dict(
+                                execution_target=dict(
                                     runtime_id="fixture", target=dict(kind="host")
                                 ),
                             ),

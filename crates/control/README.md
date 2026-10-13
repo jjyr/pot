@@ -1,6 +1,6 @@
 # Control service contract
 
-Control owns product commands, Thread configuration, environment routing and projection. `pot-core` defines immutable execution contracts, `pot-storage` persists messages, `pot-assistant` owns Threads, `pot-usage` owns accounting, `pot-agent` runs the Host Agent, and `pot-gateway` implements Provider transport and registry; `pot-model-protocol` owns codecs. Server owns listener/route assembly. See [architecture](../../docs/architecture.md) and [development](../../docs/development.md).
+Control owns product commands, Thread configuration, execution target routing and projection. `pot-core` defines immutable execution contracts, `pot-storage` persists messages, `pot-assistant` owns Threads, `pot-usage` owns accounting, `pot-agent` runs the Host Agent, and `pot-gateway` implements Provider transport and registry; `pot-model-protocol` owns codecs. Server owns listener/route assembly. See [architecture](../../docs/architecture.md) and [development](../../docs/development.md).
 
 ## Configuration and startup
 
@@ -17,7 +17,7 @@ Control injects in-memory services into pot-agent. Snapshot/event schema version
 pot-agent runs in-process on Host with an injected ToolExecutor and owner services;
 there is no implicit local backend. Control owns [machine permission policy](../../docs/permissions.md);
 pot-agent owns [tool composition](../../docs/tool-composition.md). Main defaults to Host; Workers
-execute only in their fixed Host/Sandbox Environment, including after approval.
+execute only in their fixed Host/Sandbox Execution target, including after approval.
 Agent context, compaction and usage remain owned by the assistant Runtime. Each assistant has independent configuration and AGENTS.md routing rules.
 
 Main manages Tasks, schedules and Sandboxes; Workers cannot delegate, manage or
@@ -25,17 +25,17 @@ switch Sandboxes. Summary turns inspect Tasks only. Guest workspaces contain
 artifacts rather than credentials or Helper sockets. Owner-reviewed Host mappings
 are visible to every Task sharing the Sandbox.
 
-Cancellation settles the active turn and drains remote operations. Executor subprocesses run as an ordinary guest user inside root-owned cgroups, including detached descendants. Unknown outcomes quarantine the environment until explicit main-only recovery; commands are never replayed automatically. Quit settles Host work and stops VMs. Artifacts and Thread history persist.
+Cancellation settles the active turn and drains remote operations. Executor subprocesses run as an ordinary guest user inside root-owned cgroups, including detached descendants. Unknown outcomes quarantine the execution target until explicit main-only recovery; commands are never replayed automatically. Quit settles Host work and stops VMs. Artifacts and Thread history persist.
 
-## Environment selection and lifecycle
+## Execution target selection and lifecycle
 
-Main may create/start/stop/delete/select/recover environments or open their desktops. Inventory is limited to 16 Linux definitions. Fresh Runtime roots have no environments. Callers explicitly create resources.
+Main may create/start/stop/delete/select/recover execution targets or open their desktops. Inventory is limited to 16 Linux definitions. Fresh Runtime roots have no execution targets. Callers explicitly create resources.
 
-Task creation uses a typed `environment_ref` or the approved local selectors. Omitted targets resolve on the dispatching Agent Runtime: the selected Sandbox when configured, otherwise its enabled Host. It does not allocate a VM per task or balance across environments. Three unspecified tasks share the selected Sandbox, with separate `/data/workspace/tasks/TASK_ID` directories. To split tasks, main creates definitions and passes different IDs. Selection changes through the main management tool affect future creations and main tools; existing task bindings and saved schedules remain fixed across turns/restart. The Sandbox environment sidebar selects the displayed environment only.
+Task creation uses a typed `execution_target` or the approved local selectors. Omitted targets resolve on the dispatching Agent Runtime: the selected Sandbox when configured, otherwise its enabled Host. It does not allocate a VM per task or balance across execution targets. Three unspecified tasks share the selected Sandbox, with separate `/data/workspace/tasks/TASK_ID` directories. To split tasks, main creates definitions and passes different IDs. Selection changes through the main management tool affect future creations and main tools; existing task bindings and saved schedules remain fixed across turns/restart. The Sandbox execution target sidebar selects the displayed execution target only.
 
-Agent profile routing determines provider/model, not environment. Global/profile/provider concurrency limits determine dispatch capacity, not placement. Runtime starts a bound environment when needed and never falls back to Host or retargets a worker. Task turns and operations hold leases; stop/delete rejects occupied or quarantined environments. Definitions referenced by tasks/schedules cannot be deleted, and deleted IDs cannot be reused. Deletion retains workspace artifacts.
+Agent profile routing determines provider/model, not execution target. Global/profile/provider concurrency limits determine dispatch capacity, not placement. Runtime starts a bound execution target when needed and never falls back to Host or retargets a worker. Task turns and operations hold leases; stop/delete rejects occupied or quarantined execution targets. Definitions referenced by tasks/schedules cannot be deleted, and deleted IDs cannot be reused. Deletion retains workspace artifacts.
 
-Tasks in one Sandbox share its guest account. Separate directories do not establish mutual filesystem/process isolation. Command groups are drained on completion/timeout; the owner/session cgroup drains all descendants, including detached setsid processes, on cancellation, failure or shutdown. Pipe/PTY sessions survive normal turns, retain their original Sandbox and Thread execution generation, and expire when idle. Empty runners keep shell initialization caches without execution leases. See [command execution](../../docs/executor.md) for shell/login, PTY controls, explicit timeout and snapshot policies. The HTTP executor currently batches output per execution/poll response; use yield_time_ms and write_stdin for bounded progress polling. Desktop starts explicitly and stops with its environment.
+Tasks in one Sandbox share its guest account. Separate directories do not establish mutual filesystem/process isolation. Command groups are drained on completion/timeout; the owner/session cgroup drains all descendants, including detached setsid processes, on cancellation, failure or shutdown. Pipe/PTY sessions survive normal turns, retain their original Sandbox and Thread execution generation, and expire when idle. Empty runners keep shell initialization caches without execution leases. See [command execution](../../docs/executor.md) for shell/login, PTY controls, explicit timeout and snapshot policies. The HTTP executor currently batches output per execution/poll response; use yield_time_ms and write_stdin for bounded progress polling. Desktop starts explicitly and stops with its execution target.
 
 ## Control API
 
@@ -78,7 +78,7 @@ it, requiring explicit guidance. Neither path replays external effects. Automati
 
 Explicit task profiles take precedence over configured worker defaults. With no explicit worker default, new tasks snapshot the active Main Agent. Saved profile changes do not rewrite existing task configurations. Explicit Change Agent copies a new configuration into the same Thread at a safe turn boundary, preserving its complete context and Sandbox assignment. The configuration update and pending-update removal commit together. Events and permission requests are filtered by owner/generation/turn to reject stale updates. Provider-specific replay is retained in stored history and sent only to its original provider/model/protocol; other routes receive portable text and paired tool calls/results.
 
-Schedules persist an environment at save time; each occurrence resolves its Agent profile independently. Occurrence dispatch and deduplication are atomic, nonoverlapping and bounded; catch-up/skip, time zones and change notifications are documented in [scheduled tasks](../../docs/scheduled-tasks.md).
+Schedules persist an execution target at save time; each occurrence resolves its Agent profile independently. Occurrence dispatch and deduplication are atomic, nonoverlapping and bounded; catch-up/skip, time zones and change notifications are documented in [scheduled tasks](../../docs/scheduled-tasks.md).
 
 ## Gateway, accounting and storage
 
@@ -102,7 +102,7 @@ mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/
 
 Real CLI/VM tests use isolated Host homes and local mock models, require Apple Virtualization privileges, and make no paid model calls. See [dated acceptance](../../docs/validation/host-pot-agent-20261006.md) for tested scope. Real-provider login/inference and full interactive UI matrices require separate acceptance.
 
-Sandbox management also supports `update` with `name` and `config` (`cpus`, `memory_gib`, `disk_gib`). Updates require a stopped/failed environment without active leases or unsettled operations; resources apply on the next start. Inventory exposes per-environment configuration, running-task counts, associated tasks and durable-reference status for the native UI.
+Sandbox management also supports `update` with `name` and `config` (`cpus`, `memory_gib`, `disk_gib`). Updates require a stopped/failed execution target without active leases or unsettled operations; resources apply on the next start. Inventory exposes per-execution target configuration, running-task counts, associated tasks and durable-reference status for the native UI.
 
 ## Runtime resources and task bindings
 
@@ -111,11 +111,11 @@ neutral; callers create assistants, Host execution and Sandbox definitions throu
 the [resource API](../../docs/deployment.md#runtime-resources). The durable manifest
 restores these resources. App creates its initial assistant through the same API.
 
-Conversation, Task, Agent and Environment service state remain separate. Typed
-Environment references are the execution target; Assignment stores run/owner and
+Conversation, Task, Agent and Execution target service state remain separate. Typed
+Execution target references are the execution target; Assignment stores run/owner and
 workspace bindings. Assistant and local Task adapters submit fixed context and
 services to the local Runtime execution manager. Remote Tasks deliver a launch to
 the destination Runner adapter, which submits to that destination's same manager
 and persists the terminal result. Control never invokes the Agent engine directly.
-Control's task admission, provider budgets and shared-environment rules are business
+Control's task admission, provider budgets and shared-execution target rules are business
 policy; Runtime separately limits actual concurrent Agents on its machine.

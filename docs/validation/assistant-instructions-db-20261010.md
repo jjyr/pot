@@ -7,7 +7,7 @@ recorded in the earlier multiple-assistant acceptance report.
 `read_agent_instructions({})` reads content and revision without approval.
 `update_agent_instructions({text, expected_revision})` proposes a full replacement
 and always requests owner approval. Both are Main-only and accept no owner or
-Environment selector. The Agent dispatcher uses the same authorization path for
+Execution target selector. The Agent dispatcher uses the same authorization path for
 direct and composed calls; Runtime executes against the invoking assistant store.
 The UI continues to use its existing rule editor and the same DB record.
 

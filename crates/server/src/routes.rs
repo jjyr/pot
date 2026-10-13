@@ -35,7 +35,10 @@ pub fn router(s: Service) -> Router {
         )
         .route("/desktop/{id}/rfb", get(pot_control::desktop::connect))
         .route("/desktop-assets/{*path}", get(pot_control::desktop::asset))
-        .route("/api/v1/environments", get(pot_control::environment::list))
+        .route(
+            "/api/v1/execution_targets",
+            get(pot_control::execution_target::list),
+        )
         .route(
             "/api/v1/sandboxes",
             get(sandbox::list).post(sandbox::manage),

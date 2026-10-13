@@ -16,7 +16,7 @@ use local product state. Remote desktop returns an explicit pending-feature erro
 local notification state is never used for remote browser notifications.
 
 Validation passed: Server unit 22 (one existing ignored), access 5, TLS 1, CLI 3,
-lifecycle 10, remote environment 3 (one real Podman opt-in ignored), App 21, 800
+lifecycle 10, remote execution target 3 (one real Podman opt-in ignored), App 21, 800
 translation keys, workspace all-target compilation, App/Server Clippy, and fresh
 WASM build. The TLS process test verifies authenticated browser API reads return
 Control's Runtime identity while the Web host has no assistant database. Fixed
@@ -52,7 +52,7 @@ re-pinning stored bundles. No real model call was made.
 
 Machines browser acceptance used a Host definition created through the resource
 API in the disposable Control fixture: expand/collapse, status, View Tasks,
-environment-filter indicator and clearing the filter passed. Host has no desktop
+execution target-filter indicator and clearing the filter passed. Host has no desktop
 entry. No management shortcut, plugin/session/work-directory details, artifact
 list, download or resource-creation controls appeared. The task list was empty;
 exact matching against populated task sets is covered by the Runtime tests.

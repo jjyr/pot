@@ -41,10 +41,10 @@ pub(crate) fn destination_catalog(
 }
 
 pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
-    if crate::remote_environment::is_remote(s) {
+    if crate::remote_execution::is_remote(s) {
         return Ok(SkillResources::default());
     }
-    let (base, _, cwd, visible) = crate::environment::workspace_view(s)?;
+    let (base, _, cwd, visible) = crate::execution_target::workspace_view(s)?;
     let host = !s.is_worker || s.sandbox_id.is_none();
     let mut roots = vec![];
     let mut project = cwd.as_path();
@@ -169,7 +169,7 @@ mod tests {
             .0;
             let worker = tasks::owner(&root, &task.id).unwrap();
             let base = root
-                .environment_service
+                .execution_service
                 .sandboxes
                 .workspace(worker.sandbox_id.as_ref().unwrap());
             bundle(&base.join(".agents/skills"), "outside", "sandbox ancestor");
@@ -219,11 +219,11 @@ mod tests {
         let worker = tasks::owner(&root, &task.id).unwrap();
         bundle(
             &root
-                .environment_service
+                .execution_service
                 .sandboxes
                 .workspace("default")
                 .join(".agents/skills"),
-            "environment",
+            "execution-target",
             "original sandbox",
         );
         sandbox::management(&root, &json!({"action":"create","sandbox_id":"second"}))
@@ -231,11 +231,11 @@ mod tests {
             .unwrap();
         bundle(
             &root
-                .environment_service
+                .execution_service
                 .sandboxes
                 .workspace("second")
                 .join(".agents/skills"),
-            "environment",
+            "execution-target",
             "new default",
         );
         sandbox::management(&root, &json!({"action":"select","sandbox_id":"second"}))
@@ -243,7 +243,7 @@ mod tests {
             .unwrap();
         bundle(
             &root.data.join("agent-workspace/.agents/skills"),
-            "environment",
+            "execution-target",
             "actual Host project",
         );
         for (service, expected) in [
@@ -255,7 +255,7 @@ mod tests {
                 catalog
                     .skills
                     .iter()
-                    .find(|s| s.name == "environment")
+                    .find(|s| s.name == "execution-target")
                     .unwrap()
                     .description,
                 expected

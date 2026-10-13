@@ -32,6 +32,25 @@ pub async fn invoke(
             "Workers cannot invoke orchestration",
         ));
     }
+    if call.name == "create_task" {
+        let schemas: Vec<Value> =
+            serde_json::from_str(pot_core::TOOL_SCHEMA).map_err(|e| internal(e.into()))?;
+        let properties = &schemas
+            .iter()
+            .find(|schema| schema["name"] == "create_task")
+            .unwrap()["inputSchema"]["properties"];
+        if call
+            .args
+            .as_object()
+            .is_none_or(|args| args.keys().any(|key| properties.get(key).is_none()))
+        {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_tool_argument",
+                "Unknown task argument; specify execution_target for the destination",
+            ));
+        }
+    }
     let (request, turn_id) = {
         let inner = s.conversation.inner.lock().unwrap();
         let turn = inner
@@ -162,10 +181,10 @@ pub async fn invoke(
                 s,
                 h,
                 CreateTask {
-                    environment_ref: serde_json::from_value(call.args["environment_ref"].clone())
+                    execution_target: serde_json::from_value(call.args["execution_target"].clone())
                         .map_err(|e| {
-                        error(StatusCode::BAD_REQUEST, "environment", &e.to_string())
-                    })?,
+                            error(StatusCode::BAD_REQUEST, "execution_target", &e.to_string())
+                        })?,
                     skills: serde_json::from_value(
                         call.args.get("skills").cloned().unwrap_or(Value::Null),
                     )
@@ -204,8 +223,8 @@ pub async fn invoke(
                     "Invalid task query",
                 )
             })?;
-            // The UI environment filter is not part of the model tool contract.
-            query.environment.clear();
+            // The UI execution target filter is not part of the model tool contract.
+            query.execution_target.clear();
             serde_json::to_value(tasks::page(&s, &query)?)
         }
         "get_task" => {

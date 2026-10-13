@@ -4,24 +4,24 @@
 
 Core defines the injected ToolExecutor contract and shared exec_command/write_stdin/apply_patch schemas and validation. Runtime controls roles and Sandbox routing; the guest Rust executor implements patch and pipe sessions behind the authenticated root broker. Product code has no implicit local execution backend. Eval and isolated unit/model tests explicitly inject LocalTools.
 
-Main can manage Sandbox inventory/default selection and choose execution targets. Workers receive one persisted Sandbox, cannot manage/delegate/retarget, and use its task directory. Saved schedules retain their environment across default changes and omitted-target updates. Invalid persisted assignments fail visibly rather than receiving a replacement. Guest output can only produce bounded stdout/stderr events; it cannot forge Agent lifecycle events, and output IDs are remapped to the model invocation.
+Main can manage Sandbox inventory/default selection and choose execution targets. Workers receive one persisted Sandbox, cannot manage/delegate/retarget, and use its task directory. Saved schedules retain their execution target across default changes and omitted-target updates. Invalid persisted assignments fail visibly rather than receiving a replacement. Guest output can only produce bounded stdout/stderr events; it cannot forge Agent lifecycle events, and output IDs are remapped to the model invocation.
 
 Concurrent calls durably initialize one scope before dispatch. Sessions remain bound to owner, turn, Sandbox and VM generation. Active calls include preparation in the cleanup barrier. Cancellation/turn completion drains root-owned cgroups, including setsid descendants. Failed cleanup leaves an unknown-operation record and blocks execution/stop until explicit recovery.
 
 ## Verification
 
 - `mise run check`: formatting/script checks, workspace Rust compilation and Swift Helper compilation passed.
-- `mise run test`: **193 passed**, one existing live-provider test ignored. Coverage includes model protocols/context/compaction/accounting, preference routing, missing-backend rejection, worker tool restrictions, stale/foreign sessions, generation changes, serialized scope initialization, guest-event validation, schedule environment persistence and shutdown during active model requests.
+- `mise run test`: **193 passed**, one existing live-provider test ignored. Coverage includes model protocols/context/compaction/accounting, preference routing, missing-backend rejection, worker tool restrictions, stale/foreign sessions, generation changes, serialized scope initialization, guest-event validation, schedule execution target persistence and shutdown during active model requests.
 - `mise run test:app`: **14 passed**.
 - `mise run test:eval`: deterministic suite, short-chat/tool-round/compaction records, validation and repeat comparison passed.
 - `mise run clippy`: every workspace target passed with warnings treated as errors. Final Runtime refinements were rebuilt/retested and formatting/script lint passed.
 
 Verified behaviors:
 
-2. Main patch/command tools execute in two selected/explicit environments, never the Host Agent directory.
+2. Main patch/command tools execute in two selected/explicit execution targets, never the Host Agent directory.
 3. Changing the default moves subsequent commands/patches; an existing live stdin session continues in its original Sandbox.
 5. Busy stop/settings changes are rejected. Cancellation kills detached setsid descendants before reporting settlement.
-7. Stopping environment A does not stop worker B; artifacts persist.
+7. Stopping execution target A does not stop worker B; artifacts persist.
 8. Optional desktop startup/shutdown succeeds; shell code cannot read the root broker ledger/token, and desktop HTTP cannot expose executor credentials.
 
 Local evidence: `/tmp/pot-host-agent-acceptance.json`, `/tmp/pot-host-e2e.log`, `/tmp/pot-host-agent-acceptance.helper.log`, and the corresponding `/tmp/pot-host-{test,app-test,check,clippy,eval,build,bundle,lint}.log` files.
@@ -39,7 +39,7 @@ Date: 2026-10-06. Five additional regression tests cover the requested injection
 - `main_and_worker_model_loadouts_and_dispatch_use_injected_tools` inspects actual model requests for Chat, Responses and Anthropic protocols. Main receives product control tools plus exactly one copy of each execution tool; workers receive execution tools only. It checks target-selector schemas, policy-derived limits, exact executor arguments/role/owner/call IDs, control-tool dispatch, worker management/delegation rejection, and absence of Host file effects.
 - `configured_loadout_restricts_model_tools_and_dispatch` checks that configured builtins and the allow-list narrow both model-visible tools and actual dispatch, even when MCP advertises execution tools.
 - `main_context_routes_commands_patch_and_sessions_through_sandbox` uses the default Runtime context injection, an isolated Unix Helper double and two independent authenticated HTTP executor doubles. It verifies lazy preparation, default/explicit routing, command/patch arguments and policy, target-selector removal, guest cwd, output ID remapping and result unwrapping, receipt deduplication, stdin routing after default changes, scope reuse, cleanup and expired-session rejection. Host workspaces receive no command or patch effects.
-- `task_context_keeps_assigned_sandbox_and_rejects_control_calls` creates and claims a real Runtime task, checks Worker role injection and task cwd, verifies its persisted environment after main changes the default, and rejects management/inventory/retarget calls before Helper or guest dispatch.
+- `task_context_keeps_assigned_sandbox_and_rejects_control_calls` creates and claims a real Runtime task, checks Worker role injection and task cwd, verifies its persisted execution target after main changes the default, and rejects management/inventory/retarget calls before Helper or guest dispatch.
 
 The doubles exercise production authorization, durable receipts and HTTP dispatch; they do not inject `LocalTools`. Only test builds can override executor addresses to use per-fixture ephemeral ports. Production continues to use guest port 17701.
 
@@ -64,7 +64,7 @@ Initial real runs exposed missing broker mount capabilities and umask-restricted
 
 Local evidence: `/tmp/pot-skills-acceptance.json`, `/tmp/pot-skills-acceptance.helper.log`, and `/tmp/pot-skills-{all-test,mount-test,app-test,clippy,lint,eval,build,bundle,e2e}.log`.
 
-Limits: explicit `/skill:name` command expansion, a skills UI and mutually isolated task project files are not part of this change. Main project discovery reflects the default environment at turn preparation; default changes or another explicitly targeted environment refresh the catalog next turn. Skills follow current files rather than immutable version snapshots.
+Limits: explicit `/skill:name` command expansion, a skills UI and mutually isolated task project files are not part of this change. Main project discovery reflects the default execution target at turn preparation; default changes or another explicitly targeted execution target refresh the catalog next turn. Skills follow current files rather than immutable version snapshots.
 
 ## Additional skills unit tests
 

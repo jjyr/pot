@@ -3,7 +3,7 @@ use pot_core::ExecutionContext;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-pub use pot_core::environment_tools::{schemas, validate};
+pub use pot_core::execution_tools::{schemas, validate};
 pub fn normalize(
     name: &str,
     args: &mut Value,

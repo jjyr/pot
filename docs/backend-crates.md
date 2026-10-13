@@ -4,7 +4,7 @@
 
 | Crate | Responsibility |
 |---|---|
-| pot-core | Shared profiles, typed environments, execution feedback and tool contracts |
+| pot-core | Shared profiles, typed execution targets, execution feedback and tool contracts |
 | pot-agent | Injected model/tool loop, context, compaction and Skill discovery |
 | pot-storage | Message/event storage and SQLite transaction primitives |
 | pot-assistant | Assistant identities, instructions, conversation Threads, chat driver and durable assistant mailboxes |
@@ -13,7 +13,7 @@
 | pot-secrets | Encrypted SQLite secrets with separately supplied master keys |
 | pot-model-protocol | Pure model messages, wire codecs and response parsing |
 | pot-gateway | Provider HTTP transport and SQLite Provider registry with secret references |
-| pot-control | Owner/task coordination, model policy, API adapters and environment integration |
+| pot-control | Owner/task coordination, model policy, API adapters and execution target integration |
 | pot-runner | Destination Task Agent execution, immutable launch manifests and run journals |
 | pot-runtime | Runtime composition, shared execution manager and component lifecycle |
 | pot-runtime-execution | Destination-local Agent invocation, queue, concurrency, cancellation and execution tracing |

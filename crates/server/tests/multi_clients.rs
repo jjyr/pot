@@ -35,9 +35,7 @@ impl Host {
         let mut backend = pot_runtime::initialize(config.clone()).await.unwrap();
         backend.enable_host_resource();
         let provider_id = provider.descriptor().id;
-        let manager = backend
-            .register_environment_providers(vec![provider])
-            .unwrap();
+        let manager = backend.register_sandbox_providers(vec![provider]).unwrap();
         if manager.assignment("default").is_err() {
             manager
                 .management(
