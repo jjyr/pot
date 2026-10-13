@@ -9,7 +9,7 @@ default = []
 presentation = ["dep:gpui-kit", "dep:uuid"]
 
 [dependencies]
-gpui-kit = { version = "=0.7.1", optional = true }
+gpui-kit = { workspace = true, optional = true }
 pot-protocol.workspace = true
 pot-core.workspace = true
 serde = { workspace = true, features = ["derive"] }
