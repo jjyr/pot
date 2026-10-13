@@ -48,8 +48,9 @@ not exposed as unaudited MCP writes.
 
 ## Reference and tests
 
+Assistant prompt text is kept in `crates/assistant/prompts/`.
 Main's built-in delegation prompt lives in
-[`crates/assistant/src/main_prompt.txt`](../crates/assistant/src/main_prompt.txt).
+[`crates/assistant/prompts/main_prompt.txt`](../crates/assistant/prompts/main_prompt.txt).
 `MAIN_PROMPT` in `crates/assistant/src/orchestration.rs` embeds it at compile time
 with `include_str!`; Control supplies it when preparing Main execution context.
 Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
