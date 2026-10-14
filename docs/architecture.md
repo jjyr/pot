@@ -82,7 +82,8 @@ chunks and 1 GiB files; missing files, offline machines and detected changes fai
 No new model-visible file tool is required. Completion summaries include download
 links only when the task has files to deliver; ordinary results need no download.
 A desktop entry requires an implemented client transport (currently local App only).
-Web UI requires `pot serve --ui --control URL`, a server-held
+The web-ui-server component serves Web assets, browser authentication and APIs.
+It requires `pot serve --ui --control URL`, a server-held
 Control credential and explicit browser listener settings. It has no local/remote
 switch. App no longer hosts or configures a browser endpoint. Remote desktop
 transport is deferred until its connection design is agreed and is outside the
@@ -95,13 +96,18 @@ separately. See #39 for acceptance status.
 
 ## Membership and transport
 
-Only standalone Control opens the HTTPS connection listener. Operators create a
+Only standalone Control opens the connection listener. Operators choose HTTP
+(no certificate/key) or HTTPS (both certificate and key). Web, App and member
+connection URLs independently select their transport; deployment may protect
+HTTP with Tailscale or another deployment-managed network layer. web-ui-server's
+public Origin and listener TLS are independent settings. Business authorization,
+signatures and receipts do not depend on the chosen transport. Operators create a
 short-lived single-use invitation. An execution machine confirms the Control's
 stable identity and joins it. Exact retries keep the request identity; conflicting
 retries fail. Persisted credentials and private keys never appear in directory
 projections. Native client credentials are separate from member credentials.
 
-The execution machine polls outward over authenticated HTTPS. Control queues signed
+The execution machine polls outward over authenticated HTTP or HTTPS. Control queues signed
 commands; the machine verifies the bound Control, recipient and time window, then
 returns a signed reply bound to the command digest. No execution node needs an
 inbound execution listener. Responses are bounded and redirects are forbidden.
@@ -264,7 +270,7 @@ Agent/Host/Sandbox placement remains deferred beyond this release.
 
 Runtime assembles components, manages their lifetime and owns the shared Agent
 execution manager. Server hosts native
-APIs, outward Control transport and explicit Web hosting. Control coordinates
+APIs, outward Control transport and the explicitly enabled web-ui-server. Control coordinates
 Tasks/schedules, approval and model policy through component APIs. Assistant owns
 identities, SQLite AGENTS.md records, conversation Threads, the chat driver and
 durable Assistant mailboxes. Relay owns only cross-Control message transport

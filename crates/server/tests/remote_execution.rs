@@ -131,6 +131,20 @@ async fn qualify_recovery(
     plugin: bool,
     expiry: bool,
 ) {
+    qualify_transport(sandbox, outage, before_start, plugin, expiry, true).await;
+}
+#[tokio::test]
+async fn destination_task_agent_runs_over_http_without_certificates() {
+    qualify_transport(false, true, false, false, false, false).await;
+}
+async fn qualify_transport(
+    sandbox: bool,
+    outage: bool,
+    before_start: bool,
+    plugin: bool,
+    expiry: bool,
+    tls: bool,
+) {
     let caller = Node::start().await;
     let target = Node::start().await;
     caller
@@ -186,16 +200,34 @@ async fn qualify_recovery(
     } else {
         json!({"kind":"host"})
     };
-    let rcgen::CertifiedKey { cert, signing_key } =
-        rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let certificate = caller.root.join("cert.pem");
-    let private_key = caller.root.join("key.pem");
-    std::fs::write(&certificate, cert.pem()).unwrap();
-    std::fs::write(&private_key, signing_key.serialize_pem()).unwrap();
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = reservation.local_addr().unwrap();
     drop(reservation);
-    caller.api("/api/v1/runtime/control",Some(json!({"action":"enable_control","config":{"address":address,"certificate":certificate,"private_key":private_key}}))).await;
+    let (config, control_url, ca_pem) = if tls {
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let certificate = caller.root.join("cert.pem");
+        let private_key = caller.root.join("key.pem");
+        std::fs::write(&certificate, cert.pem()).unwrap();
+        std::fs::write(&private_key, signing_key.serialize_pem()).unwrap();
+        (
+            json!({"address":address,"certificate":certificate,"private_key":private_key}),
+            format!("https://localhost:{}", address.port()),
+            Some(cert.pem()),
+        )
+    } else {
+        (
+            json!({"address":address}),
+            format!("http://{address}"),
+            None,
+        )
+    };
+    caller
+        .api(
+            "/api/v1/runtime/control",
+            Some(json!({"action":"enable_control","config":config})),
+        )
+        .await;
     let enrollment = caller
         .api(
             "/api/v1/runtime/control",
@@ -206,7 +238,7 @@ async fn qualify_recovery(
         .as_str()
         .unwrap()
         .to_owned();
-    target.api("/api/v1/runtime/control",Some(json!({"action":"join","request":{"request_id":uuid::Uuid::new_v4(),"url":format!("https://localhost:{}",address.port()),"invitation":enrollment["invitation"],"expected_runtime_id":enrollment["identity"]["runtime_id"],"expected_fingerprint":enrollment["identity"]["fingerprint"],"ca_pem":cert.pem()}}))).await;
+    target.api("/api/v1/runtime/control",Some(json!({"action":"join","request":{"request_id":uuid::Uuid::new_v4(),"url":control_url,"invitation":enrollment["invitation"],"expected_runtime_id":enrollment["identity"]["runtime_id"],"expected_fingerprint":enrollment["identity"]["fingerprint"],"ca_pem":ca_pem}}))).await;
     caller.api("/api/v1/machine-connections", Some(json!({"action":"set_tags","runtime_id":target_id,"tags":["remote-test","task-runner"]}))).await;
     let machines = caller.api("/api/v1/machines", None).await;
     assert_eq!(machines["machines"].as_array().unwrap().len(), 2);
@@ -280,10 +312,19 @@ async fn qualify_recovery(
             let permissions = caller.api("/api/v1/permissions", None).await;
             for card in permissions["requests"].as_array().unwrap() {
                 assert_eq!(card["request"]["owner"], task_id);
-                assert!(card["request"]["tool"] == "exec_command" || (plugin && card["request"]["tool"] == "cua_repl"));
-                assert_eq!(card["scope"]["machine_id"],target_id);
-                assert_eq!(card["scope"]["capability"],if sandbox {"sandbox"} else {"host"});
-                assert!(calls.load(Ordering::SeqCst) > 0, "Host approval must describe a real sampled operation");
+                assert!(
+                    card["request"]["tool"] == "exec_command"
+                        || (plugin && card["request"]["tool"] == "cua_repl")
+                );
+                assert_eq!(card["scope"]["machine_id"], target_id);
+                assert_eq!(
+                    card["scope"]["capability"],
+                    if sandbox { "sandbox" } else { "host" }
+                );
+                assert!(
+                    calls.load(Ordering::SeqCst) > 0,
+                    "Host approval must describe a real sampled operation"
+                );
                 caller
                     .api(
                         "/api/v1/permissions",
@@ -300,21 +341,49 @@ async fn qualify_recovery(
                 .find(|item| item["id"] == task_id)
                 .unwrap()
                 .clone();
-            if outage && !disconnected && std::fs::read_dir(&workspace).unwrap()
-                .filter_map(Result::ok).any(|entry| entry.path().join("once.txt").exists()) {
-                caller.api("/api/v1/runtime/control", Some(json!({"action":"disable_control"}))).await;
+            if outage
+                && !disconnected
+                && std::fs::read_dir(&workspace)
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .any(|entry| entry.path().join("once.txt").exists())
+            {
+                caller
+                    .api(
+                        "/api/v1/runtime/control",
+                        Some(json!({"action":"disable_control"})),
+                    )
+                    .await;
                 disconnected = true;
             }
             if (outage || before_start) && current["remote_waiting"] == true && !recovered {
                 assert_eq!(current["phase"], "waiting");
-                assert_eq!(calls.load(Ordering::SeqCst), usize::from(!before_start), "sampled before receipt reconciliation");
+                assert_eq!(
+                    calls.load(Ordering::SeqCst),
+                    usize::from(!before_start),
+                    "sampled before receipt reconciliation"
+                );
                 let snapshot = caller.api(&format!("/api/v1/tasks/{task_id}"), None).await;
-                assert!(snapshot["agent"]["detail"].as_str().unwrap().contains("等待远程"));
+                assert!(
+                    snapshot["agent"]["detail"]
+                        .as_str()
+                        .unwrap()
+                        .contains("等待远程")
+                );
                 if expiry {
                     tokio::time::sleep(Duration::from_secs(32)).await;
-                    assert_eq!(calls.load(Ordering::SeqCst),1,"sampled after disconnected lease expiry");
+                    assert_eq!(
+                        calls.load(Ordering::SeqCst),
+                        1,
+                        "sampled after disconnected lease expiry"
+                    );
                 }
-                caller.api("/api/v1/runtime/control",Some(json!({"action":"enable_control","config":{"address":address,"certificate":certificate,"private_key":private_key}}))).await;
+                caller
+                    .api(
+                        "/api/v1/runtime/control",
+                        Some(json!({"action":"enable_control","config":config})),
+                    )
+                    .await;
                 recovered = true;
             }
             if ["complete", "failed", "interrupted"]

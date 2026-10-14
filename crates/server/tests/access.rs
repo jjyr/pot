@@ -250,6 +250,14 @@ async fn origin_boundary_and_public_shell() {
     );
     for origin in [
         "http://remote.test",
+        "http://100.64.0.20:17701",
+        "https://100.64.0.20:17701",
+        "http://[::1]:17701",
+    ] {
+        assert!(AccessConfig::validate_origin(&Url::parse(origin).unwrap()).is_ok());
+    }
+    for origin in [
+        "ftp://remote.test",
         "https://user@pot.test",
         "https://pot.test/?token=x",
     ] {

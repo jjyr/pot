@@ -109,12 +109,12 @@ mise exec -- python scripts/build-cli
 The local archive under `.local/releases/` contains `bin/pot`, the Tailscale
 library and builtin skills. Extract it into a chosen prefix and add its `bin`
 directory to PATH. This is a developer build artifact, not a published Server
-download. Enable Web hosting through the [explicit Web UI setup](deployment.md#explicit-web-ui).
+download. Enable web-ui-server through the [explicit Web UI setup](deployment.md#explicit-web-ui).
 MacOS Sandbox helpers/resources require additional provider setup.
 
 ## Mobile browser pilot
 
-See [Mobile access](deployment.md) for the optional owner-controlled HTTPS listener, QR/Token administration and `mise run build:web-ui`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
+See [Web UI deployment](deployment.md#explicit-web-ui) and [Tailscale HTTPS](deployment.md#tailscale-https) for the configurable web-ui-server listener, QR/Token administration and `mise run build:web-ui`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
 
 ## Validation
 

@@ -52,7 +52,7 @@ impl Authority {
     pub(super) fn is_member(&self) -> bool {
         self.book.lock().unwrap().control.is_some()
     }
-    // Only the explicit Control HTTPS listener accepts this durable client authority.
+    // Only the explicit Control listener accepts this durable client authority.
     // Local process tokens, boot identities and member credentials remain independent.
     fn client_token(&self) -> Result<String> {
         let path = self.data.join("control-client-credential.json");
@@ -776,7 +776,9 @@ use axum::{
 #[serde(deny_unknown_fields)]
 pub(super) struct Listen {
     address: std::net::SocketAddr,
+    #[serde(default)]
     certificate: PathBuf,
+    #[serde(default)]
     private_key: PathBuf,
 }
 #[derive(Deserialize)]
@@ -889,17 +891,17 @@ pub(super) async fn operator(
     )
 }
 fn client(url: &str, ca: Option<&str>) -> Result<(reqwest::Client, url::Url)> {
-    let url =
-        url::Url::parse(url).map_err(|_| anyhow::anyhow!("Enter a valid HTTPS machine address"))?;
+    let url = url::Url::parse(url)
+        .map_err(|_| anyhow::anyhow!("Enter a valid HTTP or HTTPS machine address"))?;
     ensure!(
-        url.scheme() == "https"
+        matches!(url.scheme(), "http" | "https")
             && url.host_str().is_some()
             && url.username().is_empty()
             && url.password().is_none()
             && url.path() == "/"
             && url.query().is_none()
             && url.fragment().is_none(),
-        "Control address must be an HTTPS origin"
+        "Control address must be an HTTP or HTTPS origin"
     );
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -1679,16 +1681,7 @@ impl Authority {
             guard.is_none(),
             "Control listener is already active; stop it before reconfiguration"
         );
-        ensure!(
-            config.certificate.is_absolute() && config.private_key.is_absolute(),
-            "TLS files must use absolute paths"
-        );
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(
-            &config.certificate,
-            &config.private_key,
-        )
-        .await?;
+        let tls = crate::tls::config(&config.certificate, &config.private_key).await?;
         let listener = std::net::TcpListener::bind(config.address)?;
         listener.set_nonblocking(true)?;
         let address = listener.local_addr()?;
@@ -1714,13 +1707,19 @@ impl Authority {
             .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
             .with_state(resources.clone())
             .merge(client_routes);
-        let server = axum_server::from_tcp_rustls(listener, tls)?;
-        let task = tokio::spawn(async move {
-            if let Err(error) = server
+        use futures_util::FutureExt;
+        let serving = match tls {
+            Some(tls) => axum_server::from_tcp_rustls(listener, tls)?
                 .handle(serving)
                 .serve(router.into_make_service())
-                .await
-            {
+                .boxed(),
+            None => axum_server::from_tcp(listener)?
+                .handle(serving)
+                .serve(router.into_make_service())
+                .boxed(),
+        };
+        let task = tokio::spawn(async move {
+            if let Err(error) = serving.await {
                 eprintln!("Control listener failed: {error}");
             }
         });
@@ -1810,6 +1809,58 @@ impl Authority {
 mod tests {
     use super::*;
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn http_control_listener_restores_and_requires_client_authority() {
+        let resources = resources().await;
+        let config: Listen = serde_json::from_value(json!({"address":"127.0.0.1:0"})).unwrap();
+        resources
+            .control
+            .start_listener(resources.clone(), config)
+            .await
+            .unwrap();
+        let saved: Option<Listen> = serde_json::from_slice(
+            &std::fs::read(resources.control.data.join("control-listener.json")).unwrap(),
+        )
+        .unwrap();
+        let url = format!("http://{}", saved.unwrap().address);
+        let token = resources.control.client_token().unwrap();
+        let client = crate::RemoteClient::new(&url, token.clone()).unwrap();
+        assert!(
+            client
+                .request("/api/v1/runtime", None)
+                .await
+                .unwrap()
+                .status
+                .is_success()
+        );
+        let rejected = crate::RemoteClient::new(&url, "invalid".into()).unwrap();
+        assert_eq!(
+            rejected
+                .request("/api/v1/runtime", None)
+                .await
+                .unwrap()
+                .status,
+            StatusCode::UNAUTHORIZED
+        );
+        resources.control.stop_listener(false).await.unwrap();
+        resources
+            .control
+            .restore_listener(resources.clone())
+            .await
+            .unwrap();
+        assert!(
+            client
+                .request("/api/v1/runtime", None)
+                .await
+                .unwrap()
+                .status
+                .is_success()
+        );
+        assert_eq!(token, resources.control.client_token().unwrap());
+        resources.shutdown().await;
+        std::fs::remove_dir_all(resources.control.data.parent().unwrap()).unwrap();
+    }
+
     #[tokio::test]
     async fn control_client_credential_survives_restart_without_local_authority() {
         let authority = authority();

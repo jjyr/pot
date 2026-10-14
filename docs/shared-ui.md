@@ -75,7 +75,7 @@ content revisions. Shared task rows carry assistant identity and group matching
 Tasks beneath assistant names. Native and browser transports capture the owner
 before asynchronous writes; late snapshots are discarded on owner changes.
 App navigation history includes Runtime and owner identity. The Server exposes
-bounded in-process and HTTPS client adapters; Control membership, client transports and App mode isolation are implemented.
+bounded in-process and HTTP/HTTPS client adapters; Control membership, client transports and App mode isolation are implemented.
 Remote desktop transport remains deferred.
 
 ## Machines

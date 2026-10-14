@@ -1,7 +1,10 @@
 # Deployment
 
 This page covers local App hosting, standalone Runtime resources, Control membership
-and explicit Web hosting. Remote browser access requires HTTPS.
+and explicit web-ui-server hosting. Browser access and Control client/member
+connections independently accept HTTP or HTTPS. Deployment owners choose the
+transport and network protection, including Tailscale. HTTP itself does not
+encrypt credentials or content.
 
 Pot has one backend with two hosts: `pot serve` runs it independently; the macOS
 App owns it inside its own process. App requests, including the Swift settings
@@ -45,7 +48,7 @@ to Git; no separate static directory is required at runtime.
 For an execution-only binary, add `--no-default-features` to the install command.
 This skips all Web asset generation/compression and needs neither Brotli nor the
 WASM tools. To explicitly restore it, use `--features web-ui`. There is no separate
-compression feature. Web hosting still requires [explicit Web configuration](#explicit-web-ui);
+compression feature. web-ui-server still requires [explicit Web configuration](#explicit-web-ui);
 plain `pot serve` does not expose a browser endpoint.
 
 Cargo does not install embedded Tailscale libraries, builtin skill directories
@@ -57,7 +60,7 @@ Choose one role per data directory:
 | Role | Configuration | Client / connection |
 |---|---|---|
 | Control | Enable the Control listener; create assistants and configure models | macOS App or explicitly enabled Web UI |
-| Execution-only (Runner) | Create execution resources; join one Control; no assistants | Outward HTTPS to Control |
+| Execution-only (Runner) | Create execution resources; join one Control; no assistants | Outward HTTP or HTTPS to Control |
 
 Plain `pot serve` starts neutral infrastructure; it does not select a role or
 create resources. A joined Runner cannot also enable Control or create assistants.
@@ -74,8 +77,16 @@ pot --root "$HOME/.pot-control" serve
 ```
 
 Keep it running and use a second terminal for the following operator commands.
-Provision a TLS certificate and private key for the Control hostname, readable
-by the service account. Save this as `enable-control.json`, replacing the paths:
+Choose the Control listener's transport. For HTTP, save this as `enable-control.json`,
+using the intended LAN, VPN or Tailscale interface address (or a wildcard address):
+
+```json
+{"action":"enable_control","config":{"address":"0.0.0.0:19443"}}
+```
+
+For HTTPS, provision a certificate and private key for the Control hostname,
+readable by the service account. See [Tailscale HTTPS](#tailscale-https) for
+certificate issuance. Include both absolute paths instead:
 
 ```json
 {"action":"enable_control","config":{"address":"0.0.0.0:19443","certificate":"/absolute/control.crt","private_key":"/absolute/control.key"}}
@@ -85,7 +96,7 @@ by the service account. Save this as `enable-control.json`, replacing the paths:
 pot --root "$HOME/.pot-control" api /api/v1/runtime/control "$PWD/enable-control.json"
 ```
 
-Allow clients and Runners to reach the HTTPS listener. Certificate identity and
+Allow clients and Runners to reach the configured listener. Connection identity and
 membership details are in [Control listener and membership](#control-listener-and-membership).
 Create an assistant by saving this as `assistant.json`:
 
@@ -98,7 +109,7 @@ pot --root "$HOME/.pot-control" api /api/v1/runtime/resources "$PWD/assistant.js
 pot --root "$HOME/.pot-control" api /api/v1/runtime/control
 ```
 
-Connect the macOS App to this remote Control using its HTTPS URL and the durable
+Connect the macOS App to this remote Control using its HTTP or HTTPS URL and the durable
 client credential in `.pot-control/product/control-client-credential.json` under
 your home directory. This is a client credential, not a machine invitation.
 Configure the model connection on Control through the App. For unattended
@@ -142,7 +153,7 @@ Sandbox definition alone does not make it ready or start it.
 Save a Control identity preview request as `preview-control.json`:
 
 ```json
-{"action":"preview","url":"https://control.example:19443","ca_pem":null}
+{"action":"preview","url":"http://100.64.0.10:19443","ca_pem":null}
 ```
 
 ```sh
@@ -150,12 +161,14 @@ pot --root "$HOME/.pot-runner" api /api/v1/runtime/control "$PWD/preview-control
 ```
 
 Verify the returned identity and fingerprint against the intended Control.
-For a private CA, set `ca_pem` to the trusted CA's PEM contents in both preview
+These examples use HTTP to a Control on Tailscale. The URL scheme selects the
+client transport; use the Control's HTTPS URL instead when its listener enables TLS.
+For HTTPS with a private CA, set `ca_pem` to the trusted CA's PEM contents in both preview
 and join requests. Save the join request as `join-control.json`, replacing all
 placeholders and using a fresh UUID for `request_id`:
 
 ```json
-{"action":"join","request":{"request_id":"UUID","url":"https://control.example:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
+{"action":"join","request":{"request_id":"UUID","url":"http://100.64.0.10:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
 ```
 
 ```sh
@@ -177,17 +190,19 @@ OS service manager to run the same command with the same service account, root
 and execution target. Shut down cleanly before upgrading and restarting the binary.
 
 `pot serve` runs in the foreground without Web UI, even when listener settings
-exist. Enable it with `pot serve --ui --control https://CONTROL:19443` and
+exist. Enable it with `pot serve --ui --control http://100.64.0.10:19443` and
 `POT_CONTROL_TOKEN`; optionally supply a private CA file through `POT_CONTROL_CA`.
 The destination must authenticate as a standalone Control. Web requests always
 use this Control and never fall back to the hosting Runtime. The separately
-configured `POT_ACCESS_ORIGIN` controls the browser listener. Once explicitly
-started, run `pot open` for automatic browser configuration,
+configured `POT_ACCESS_ORIGIN` describes the browser-visible origin;
+`POT_ACCESS_BIND` selects the listening address and certificate/key settings
+select listener TLS. Once explicitly started, run `pot open` for automatic browser configuration,
 or `pot access token` to configure the browser manually. `pot access qr` prints
 a connection QR containing the Token; do not share it.
-Localhost HTTP is a local secure-context
-convenience, not remote encryption: remote access requires owner-terminated
-HTTPS. HTTP listeners cannot bind outside loopback.
+Browser and Control connections have independent transport settings. HTTP Web
+listeners can bind loopback, LAN or VPN/Tailscale interfaces. Localhost HTTP is
+also a browser secure-context convenience; remote HTTP has browser feature limits.
+Configure TLS in Pot or an external proxy when the browser needs HTTPS.
 
 Use `pot --root /absolute/instance/path ...` for a separate instance. Defaults
 are `~/Library/Application Support/pot` on macOS and `$XDG_DATA_HOME/pot` (or
@@ -259,7 +274,14 @@ qualification remain part of the outstanding execution target deployment work.
 Use native operator `pot api /api/v1/runtime/control` for Control identity and
 membership. POST exact JSON commands with `pot api PATH /absolute/path/request.json`.
 
-Enable Control on a standalone Runtime (never the embedded App Runtime):
+Enable Control on a standalone Runtime (never the embedded App Runtime).
+Omit both `certificate` and `private_key` for HTTP:
+
+```json
+{"action":"enable_control","config":{"address":"0.0.0.0:19443"}}
+```
+
+Include both absolute paths for HTTPS; configuring only one file is rejected:
 
 ```json
 {"action":"enable_control","config":{"address":"0.0.0.0:19443","certificate":"/absolute/control.crt","private_key":"/absolute/control.key"}}
@@ -267,16 +289,22 @@ Enable Control on a standalone Runtime (never the embedded App Runtime):
 
 Control exposes `/control/v1/identity`, `/control/v1/join`, and
 `/control/v1/poll`, plus authenticated product APIs. There is no inbound execution
-RPC on members. HTTPS certificates must match the Control hostname and permit server authentication.
+RPC on members. Preview, join, App and web-ui-server connections accept HTTP or
+HTTPS origins with a hostname or IP address, without credentials, paths, queries
+or fragments. Listener transport is selected by its certificate/key pair;
+client transport is selected by its URL scheme. Authentication, signing identities,
+command signatures and receipts apply to both transports. Pot does not detect
+or require an external VPN. When using HTTPS, certificates must match the Control
+hostname or IP and permit server authentication.
 Private fixture certificates also require `extendedKeyUsage=serverAuth`; a bare
 self-signed certificate may be rejected by the TLS client.
 
 Create an invitation on Control with `{"action":"create_invitation"}`. Preview
-its identity from the joining machine with `{"action":"preview","url":"https://control.example:19443","ca_pem":null}`.
+its identity from the joining machine with `{"action":"preview","url":"http://100.64.0.10:19443","ca_pem":null}`.
 Then submit the confirmed identity and invitation on the execution machine:
 
 ```json
-{"action":"join","request":{"request_id":"UUID","url":"https://control.example:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
+{"action":"join","request":{"request_id":"UUID","url":"http://100.64.0.10:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
 ```
 
 The machine opens an outward authenticated connection and restores it on restart.
@@ -302,18 +330,30 @@ explicit fixed-Control Web startup, and remaining remote transports.
 
 ## Explicit Web UI
 
-Explicitly host Pot Web UI for one standalone Control. Plain `pot serve` starts
+The web-ui-server component serves Pot Web UI, authenticates browser clients and
+provides browser APIs by forwarding product requests to one standalone Control.
+It is hosted by `pot serve --ui`, not a separately installed binary. Explicitly
+configure that Control destination. Plain `pot serve` starts
 Runtime infrastructure without UI, regardless of saved listener settings. All
 product requests use the configured Control; failed connections never load local
-Runtime data. **HTTPS is required for remote browser access.**
+Runtime data. Browser access and the backend Control connection each use their
+own HTTP or HTTPS configuration.
 
-### Choose access
+### Connection configuration
 
-| Mode | Use | Status |
-|---|---|---|
-| Tailscale HTTPS | Devices on the same tailnet | Supported; provision certificates on Host |
-| Own-domain HTTPS | LAN, VPN or public access | Supported; provision certificates on Host |
-| Local HTTP | Browser on Host or through an SSH local tunnel | Supported |
+| Connection | Configuration |
+|---|---|
+| Browser → web-ui-server | `POT_ACCESS_ORIGIN` is the public browser origin; `POT_ACCESS_BIND` is the listener address |
+| web-ui-server listener | `POT_ACCESS_CERT` and `POT_ACCESS_KEY` together enable TLS; omit or clear both for HTTP |
+| web-ui-server → Control | `--control URL` selects HTTP or HTTPS independently of browser access |
+| App / Runner → Control | Each client uses the configured Control URL's scheme |
+
+Origins accept domain names, IPv4 and IPv6 addresses. The public browser Origin
+and listener TLS are independent settings. Browser Cookie security follows the
+public Origin's scheme. Configuring only a certificate or only a private key is
+rejected. Authentication, Origin checks, member identities, command signatures
+and receipts apply regardless of transport. Remote HTTP does not provide the
+browser secure context required for Service Workers and push notifications.
 
 ### Install
 
@@ -331,62 +371,46 @@ Expose only the Web UI listener. Keep native Runtime and guest service ports pri
 
 ### HTTP
 
-Start an independently configured Control first (see [Control membership](deployment.md)). Obtain its durable client credential from `product/control-client-credential.json` using operator access after enabling the Control listener. The private file is mode 0600 and survives Control restarts. It is accepted only by the Control HTTPS listener; local Runtime process tokens still rotate on every boot. This is distinct from the browser login Token and machine invitations. Store it in the service environment as `POT_CONTROL_TOKEN`, never in a browser URL or command-line argument. A private Control CA can be supplied with `POT_CONTROL_CA=/absolute/control-ca.pem`.
+Start an independently configured Control first (see [Control membership](deployment.md)). Obtain its durable client credential from `product/control-client-credential.json` using operator access after enabling the Control listener. The private file is mode 0600 and survives Control restarts. It is accepted only by the explicit Control listener; local Runtime process tokens still rotate on every boot. This is distinct from the browser login Token and machine invitations. Store it in the service environment as `POT_CONTROL_TOKEN`, never in a browser URL or command-line argument. A private Control CA can be supplied with `POT_CONTROL_CA=/absolute/control-ca.pem`.
 
-Start the explicit Web host and open `http://localhost:17701`:
-
-```sh
-POT_ACCESS_ORIGIN=http://localhost:17701 pot --root /absolute/instance serve --ui --control https://CONTROL:19443
-```
-
-For a browser on another desktop, create a local tunnel and open the same URL:
+Start web-ui-server and open `http://localhost:17701`:
 
 ```sh
-ssh -N -L 17701:127.0.0.1:17701 USER@HOST
+POT_ACCESS_ORIGIN=http://localhost:17701 pot --root /absolute/instance serve --ui --control http://100.64.0.10:19443
 ```
 
-Manual CLI HTTP configuration is localhost-only. The App is a native client and
-its embedded Runtime does not host Web UI.
-The localhost tunnel is not a general iPhone access method.
+For direct LAN or Tailscale access, set the browser-visible address and bind the
+appropriate interface. For example, with a Control also using HTTP over Tailscale:
 
-### HTTPS
+```sh
+POT_ACCESS_ORIGIN=http://100.64.0.20:17701 POT_ACCESS_BIND=100.64.0.20:17701 pot --root /absolute/instance serve --ui --control http://100.64.0.10:19443
+```
 
-#### Tailscale certificate
+Omit `POT_ACCESS_CERT` and `POT_ACCESS_KEY` for an HTTP listener. The App is a
+native client and its embedded Runtime does not host Web UI.
 
-Join Host and clients to the same tailnet. Enable MagicDNS and HTTPS Certificates
-in [Tailscale DNS settings](https://login.tailscale.com/admin/dns). Get Host's
+### Tailscale HTTPS
+
+Join the web-ui-server machine and browser devices to the same tailnet. Enable
+MagicDNS and HTTPS Certificates in
+[Tailscale DNS settings](https://login.tailscale.com/admin/dns). Get the server's
 actual DNS name and Tailscale IP from `tailscale status`.
 
-Create a private certificate directory, then issue on Host:
+Create a private certificate directory, then issue the certificate on that machine:
 
 ```sh
 tailscale cert --cert-file=/private/tls/server.crt --key-file=/private/tls/server.key HOST.TAILNET.ts.net
 ```
 
 Use administrator authority if required and give the Pot service account ownership
-of the files. Configure the origin below as `https://HOST.TAILNET.ts.net:17701`
-and bind as `TAILSCALE_IP:17701`. No router port forwarding is required.
-
-#### Own-domain certificate
-
-Point a domain such as `pot.example.com` to Host's LAN, VPN or public address.
-Use an ACME client with DNS-01 validation and a scoped DNS-provider API credential.
-DNS-01 needs no public Host IP or inbound router ports. Ensure clients resolve
-the domain correctly; some home routers require a private-address DNS exception.
-Outside-home access additionally needs a VPN or public network path.
-
-Provide the full certificate chain and private key on Host. Pot terminates TLS;
-any TCP relay must forward TLS unchanged. See [Mobile access](deployment.md).
-
-#### Configure and start
-
-Make both certificate files readable by the Pot service account with mode `0600`.
-Save the following in `/private/listener-settings.json` using your actual values:
+of both files. Make them readable by that account with mode `0600`. Save the
+following in `/private/listener-settings.json`, replacing the hostname, Tailscale
+IP and file paths with the machine's actual values:
 
 ```json
 {
-  "POT_ACCESS_ORIGIN": "https://pot.example.com:17701",
-  "POT_ACCESS_BIND": "192.168.1.10:17701",
+  "POT_ACCESS_ORIGIN": "https://HOST.TAILNET.ts.net:17701",
+  "POT_ACCESS_BIND": "100.64.0.20:17701",
   "POT_ACCESS_CERT": "/private/tls/server.crt",
   "POT_ACCESS_KEY": "/private/tls/server.key"
 }
@@ -394,12 +418,21 @@ Save the following in `/private/listener-settings.json` using your actual values
 
 ```sh
 pot --root /absolute/instance config server /private/listener-settings.json
-pot --root /absolute/instance serve --ui --control https://CONTROL:19443
+pot --root /absolute/instance serve --ui --control http://100.64.0.10:19443
 ```
 
-Environment overrides saved settings. Arrange certificate renewal through
-Tailscale or the ACME client, then restart Pot to load renewed files. Pot currently
-automates neither issuance nor certificate reload.
+Open `https://HOST.TAILNET.ts.net:17701` from a device on the tailnet. No router
+port forwarding is required. This example uses HTTPS for browser access and HTTP
+over Tailscale for the independent Control connection. Use the Control's HTTPS
+URL instead if that listener enables TLS.
+
+The certificate procedure also applies to a Control listener: issue for the
+Control machine's Tailscale hostname, set its `certificate` and `private_key` in
+`enable_control`, and use that hostname in App, web-ui-server and Runner HTTPS URLs.
+
+Environment overrides saved settings. Renew the certificate with `tailscale cert`,
+then restart Pot to load the renewed files. Pot automates neither certificate
+issuance nor reload.
 
 ### Connect and verify
 
@@ -418,19 +451,19 @@ browser connections.
 
 ### Embedded Tailscale
 
-A standalone Web host may use embedded Tailscale with explicit listener settings.
+A standalone web-ui-server may use embedded Tailscale with explicit listener settings.
 The native App hosts no Web endpoint. Browser configuration cannot change the
-fixed Control destination. Manual localhost and HTTPS procedures above remain
-available independently.
+fixed Control destination. The manual HTTP and Tailscale HTTPS procedures above
+remain available independently.
 
 ### Current limits
 
-The Web host keeps Control credentials on the server and streams SSE updates.
-Browser Tokens and cookies authenticate only the Web host and are not forwarded
+web-ui-server keeps Control credentials on the server and streams SSE updates.
+Browser Tokens and cookies authenticate only web-ui-server and are not forwarded
 to Control. There is no local/remote switch. Native-only APIs remain excluded by
 the browser route allowlist. Remote desktop is deferred in #39.
 
-Push notifications use the Web host's VAPID configuration and server-held Control
+Push notifications use the web-ui-server's VAPID configuration and server-held Control
 credential. One subscription covers
 all assistants; per-owner cursors are durable and scoped to the Control identity.
 Only finalized assistant replies notify; Task results wait for the assistant's actual
@@ -440,7 +473,7 @@ cursors and do not fall back to local messages.
 
 ## Browser authentication and Home Screen
 
-The browser Token authenticates the Web host, separately from Control credentials.
+The browser Token authenticates web-ui-server, separately from Control credentials.
 It is saved in origin-scoped IndexedDB; URL fragments are removed after configuration.
 Signed HttpOnly cookies support navigation; Token rotation invalidates browser
 connections. Native APIs are excluded by a public allowlist. No offline transcript
