@@ -1,6 +1,15 @@
 # Computer use plugin
 
-The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaScript session and a dedicated headless Chromium on **Host or Linux Sandbox**. It follows the shared [permissions](permissions.md): Main defaults to Host with owner approval; Worker remains bound to its assigned Host/Sandbox. Control owns connected-task configuration and approvals; destination globals cannot override them. Host and Sandbox each use the assistant’s machine capability policy. Native desktop automation is not supported.
+The default-enabled `computer-use` plugin provides a persistent `cua_repl`
+JavaScript session and a dedicated headless Chromium on Host or Linux Sandbox.
+Control applies machine execution policy and exact Host operation approval.
+Remote configuration and pinned bundles come from Control; execution-node
+configuration cannot override them. Native desktop automation is not supported.
+
+Sharing the machine Sandbox does not share browser sessions. Each REPL starts its
+own Chromium and temporary profile. GUI/noVNC viewer ownership is a separate
+mechanism; headless browser sessions do not acquire desktop control. Task cleanup
+closes its sessions and leaves other Tasks' browsers and the GUI alive.
 
 ## Configuration
 
@@ -8,8 +17,7 @@ For connected tasks, Control is the source of global plugin definitions and
 implementations. Launches contain selected plugin names only. Before starting the
 Agent, the execution Runtime synchronizes current bundles from Control and
 registers their tool definitions; it never discovers node-local global plugins.
-The prepared bundles remain stable for the run, and explicit continuation
-synchronizes again. See [resource synchronization](architecture.md).
+The prepared bundles remain stable for the run; new Tasks synchronize again. See [resource synchronization](architecture.md).
 
 Use owner-only `pot config get/set agent` (`GET/POST /api/v1/agent`). The default `params.agent.plugins` is:
 
@@ -25,7 +33,7 @@ Import or replace a trusted package from an absolute Host directory:
 {"computer-use": {"enabled": true, "source": "/absolute/path/computer-use"}}
 ```
 
-Saving imports the manifest and files into an immutable bundle pinned by version and SHA-256 digest. Existing tasks keep their saved bundle. Re-import with a new profile revision to apply package changes; disabling retains the imported bundle.
+Saving imports the manifest and files into an immutable bundle pinned by version and SHA-256 digest. Running tasks keep their prepared bundle. Later executions synchronize the current bundle from the selected source Profile; unavailable or disabled selected plugins fail before sampling.
 
 ### Model capabilities
 
@@ -54,7 +62,7 @@ Model code cannot change the mode. Canvas or inaccessible content may require vi
 
 ## CUA REPL
 
-`cua_repl` is exposed to pot-agent and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls and turns. Use `execution_target:"host"` or `"sandbox:ID"` to choose a target; Main may also use `sandbox_id`. Omitted targets follow the Agent default for new sessions and the original execution target for existing sessions. Sessions cannot switch execution targets. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
+`cua_repl` is exposed to pot-agent and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls during the active execution. Use `execution_target:"host"` or `"sandbox:ID"` to choose a target; Omitted targets follow the Agent default for new sessions and the original execution target for existing sessions. Sessions cannot switch execution targets. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
 
 ```javascript
 let tab = await cua.open("https://example.com");
@@ -79,7 +87,7 @@ Packages own their instructions, tool schemas and implementation. See the [bundl
 
 Control execution target adapters resolve the target, check permission, and send the pinned bundle and model-derived mode to the execution backend. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, execution target and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
 
-Plugin tools use the shared machine capability approval. Tool-specific approval metadata is not accepted.
+Host plugin calls use the same exact-operation approval as built-in execution tools. Sandbox calls use machine membership and their execution scope. Tool-specific approval metadata is not accepted.
 
 Host needs Node and an installed Chrome/Chromium; the App supplies Node. Standard Linux and macOS browser paths are discovered automatically, or set `POT_BROWSER_EXECUTABLE`. Host uses temporary profiles, process-group cleanup and Chrome's native sandbox. Plugin children receive a restricted environment without inherited model credentials. Host approval authorizes code execution with the user's OS privileges; the JS context is not an isolation boundary.
 

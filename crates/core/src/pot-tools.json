@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using eligible configured Profiles. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Temporary sandboxes are automatically destroyed after execution; files remain available.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using eligible configured Profiles. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks use the selected machine's Host or shared development Sandbox according to its current policy at dispatch. Task completion closes its own processes and sessions; installed tools and files remain. Shared environment changes affect other tasks.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -28,7 +28,8 @@
               "type": "boolean"
             },
             "desktop": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Native desktop automation is currently unsupported. Independent headless browser automation does not require desktop=true."
             },
             "exact_budget": {
               "type": "boolean"
@@ -295,7 +296,7 @@
   },
   {
     "name": "manage_schedule",
-    "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. All times use the specified IANA timezone. Control triggers an independent task in the fixed Host/Sandbox target. Omit the target on update to preserve it; defaults never retarget a saved schedule. Creation/update requires spec. Deletion is soft and keeps execution history.",
+    "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. All times use the specified IANA timezone. Control triggers a new task on the saved machine; each dispatch reads that machine's current execution policy. Omit machine_id on update to preserve the selected machine. Creation/update requires spec. Deletion is soft and keeps execution history.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -390,7 +391,8 @@
                   "type": "boolean"
                 },
                 "desktop": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Native desktop automation is currently unsupported. Independent headless browser automation does not require desktop=true."
                 },
                 "exact_budget": {
                   "type": "boolean"

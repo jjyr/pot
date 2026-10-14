@@ -70,11 +70,12 @@ impl Authority {
             .filter(|p| p.enabled)
             .ok_or_else(|| anyhow::anyhow!("Remote machine is not connected"))?;
         ensure!(
-            control.inventory["items"]
-                .as_array()
-                .is_some_and(|items| items
-                    .iter()
-                    .any(|item| item["execution_target"] == json!(execution_target))),
+            matches!(&execution_target.target, Target::Sandbox { sandbox_id } if pot_sandbox::Manager::is_shared(sandbox_id))
+                || control.inventory["items"]
+                    .as_array()
+                    .is_some_and(|items| items
+                        .iter()
+                        .any(|item| item["execution_target"] == json!(execution_target))),
             "Remote Sandbox is not in the Control machine inventory"
         );
         Ok(())
@@ -178,7 +179,7 @@ impl Authority {
         ensure!(
             matches!(
                 args["action"].as_str(),
-                Some("start" | "stop" | "recover" | "update" | "delete")
+                Some("start" | "stop" | "recover" | "update" | "delete" | "rebuild")
             ),
             "Unsupported remote Sandbox management action"
         );
@@ -320,7 +321,7 @@ impl Authority {
             match self
                 .call(
                     &binding.execution_target.runtime_id,
-                    Rpc::ManageSandbox {
+                    Rpc::SandboxLifecycle {
                         operation_id: operation.clone(),
                         accept_before_ms,
                         target: binding.execution_target.target.clone(),
@@ -606,7 +607,7 @@ mod tests {
                     .control
                     .call(
                         &execution_target.runtime_id,
-                        Rpc::ManageSandbox {
+                        Rpc::SandboxLifecycle {
                             operation_id: operation.clone(),
                             accept_before_ms: now() + LEASE_MS,
                             target: execution_target.target.clone(),

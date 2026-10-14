@@ -121,16 +121,91 @@ pub(crate) async fn inventory(s: &Service) -> Value {
         .unwrap_or(json!([]));
     value
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedLifecycle {
+    pub request_id: String,
+    #[serde(default)]
+    pub runtime_id: String,
+    pub action: String,
+}
+/// Browser-accessible owner control is limited to starting/stopping the default
+/// environment; arbitrary Sandbox administration remains a native owner API.
+pub async fn shared_lifecycle(
+    State(s): State<Service>,
+    h: HeaderMap,
+    Json(request): Json<SharedLifecycle>,
+) -> ApiResult<Json<Value>> {
+    if !matches!(request.action.as_str(), "start" | "stop") {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "sandbox_action",
+            "Only shared Sandbox start/stop is supported",
+        ));
+    }
+    uuid::Uuid::parse_str(&request.request_id)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, "request_id", &e.to_string()))?;
+    let runtime = if request.runtime_id.is_empty() {
+        s.runtime_id.clone()
+    } else {
+        request.runtime_id
+    };
+    manage(
+        State(s),
+        h,
+        Json(json!({"request_id":request.request_id,"runtime_id":runtime,
+        "sandbox_id":pot_sandbox::Manager::SHARED_ID,"action":request.action})),
+    )
+    .await
+}
 pub async fn manage(
     State(s): State<Service>,
     h: HeaderMap,
     Json(args): Json<Value>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    Ok(Json(management(&s, &args).await.map_err(|e| {
+    if s.is_worker {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "Owner administration required",
+        ));
+    }
+    let result = async {
+        if let Some(target) = remote_management_target(&s, &args)? {
+            let request = args["request_id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Owner operation request_id required"))?;
+            uuid::Uuid::parse_str(request)?;
+            let mut command = args.clone();
+            command.as_object_mut().unwrap().remove("request_id");
+            let service = s.clone();
+            crate::remote_execution::port(&s)?
+                .manage(
+                    crate::remote_execution::RemoteBinding {
+                        owner: format!("machine-settings:{}", s.assistant_id),
+                        run_id: request.into(),
+                        generation: 0,
+                        execution_target: target,
+                    },
+                    request.into(),
+                    command,
+                    Arc::new(move || service.stopping()),
+                )
+                .await
+        } else {
+            if args["sandbox_id"] == pot_sandbox::Manager::SHARED_ID {
+                s.execution_service.sandboxes.ensure_shared()?;
+            }
+            management(&s, &args).await
+        }
+    }
+    .await;
+    Ok(Json(result.map_err(|e| {
         error(StatusCode::CONFLICT, "sandbox_management", &e.to_string())
     })?))
 }
+
 pub(crate) fn remote_management_target(
     s: &Service,
     args: &Value,
@@ -148,7 +223,7 @@ pub(crate) fn remote_management_target(
     anyhow::ensure!(
         matches!(
             args["action"].as_str(),
-            Some("start" | "stop" | "recover" | "update" | "delete")
+            Some("start" | "stop" | "recover" | "update" | "delete" | "rebuild")
         ),
         "Remote management supports existing Sandbox lifecycle only; create/select are local and desktop needs separate authority"
     );
@@ -371,6 +446,44 @@ fn turn_alive(s: &Service, request: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn shared_web_lifecycle_rejects_rebuild_and_workers_without_effects() {
+        let service = tasks::tests::fixture();
+        let request = SharedLifecycle {
+            request_id: id(),
+            runtime_id: service.runtime_id.clone(),
+            action: "rebuild".into(),
+        };
+        let rejected = shared_lifecycle(
+            State(service.clone()),
+            tasks::tests::headers(),
+            Json(request),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(rejected.0, StatusCode::BAD_REQUEST);
+        assert!(
+            service
+                .execution_service
+                .sandboxes
+                .assignment(pot_sandbox::Manager::SHARED_ID)
+                .is_err()
+        );
+        let mut worker = service;
+        worker.is_worker = true;
+        let request = SharedLifecycle {
+            request_id: id(),
+            runtime_id: worker.runtime_id.clone(),
+            action: "stop".into(),
+        };
+        assert_eq!(
+            shared_lifecycle(State(worker), tasks::tests::headers(), Json(request))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::FORBIDDEN
+        );
+    }
     fn active(s: &Service) {
         s.save(Message {
             id: "input".into(),

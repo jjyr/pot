@@ -140,7 +140,7 @@ impl Hub {
             read(path)?.as_deref() == expected,
             "permissions.json changed externally; restart Server before editing permissions in the UI"
         );
-        let config = Config { version: 3, policy };
+        let config = Config { version: 4, policy };
         config.validate()?;
         let mut bytes = serde_json::to_vec_pretty(&config)?;
         bytes.push(b'\n');
@@ -211,7 +211,7 @@ impl Hub {
     }
     fn save_policy(&self, book: &mut Book, policy: Policy) -> Result<()> {
         Config {
-            version: 3,
+            version: 4,
             policy: policy.clone(),
         }
         .validate()?;
@@ -444,9 +444,9 @@ pub(crate) async fn resolve_operation(s: &Service, name: &str, mut args: Value) 
         .remove("sandbox_id");
     args["execution_target"] = json!(env);
     if let Some(target) = env.strip_prefix("sandbox:")
-        && pot_sandbox::Manager::is_managed(target)
+        && pot_sandbox::Manager::is_shared(target)
     {
-        s.execution_service.sandboxes.ensure_managed(target)?;
+        s.execution_service.sandboxes.ensure_shared()?;
     }
     if env == "host" {
         return prepare(s, name, args).await;
@@ -821,20 +821,43 @@ pub async fn decide(
                 .map_err(internal)?;
             hub.sync_machine_epoch(&machine, &epoch).map_err(internal)?;
         }
+        if body.machine_policy.is_some() == body.sandbox_limits.is_some() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "configuration_scope",
+                "Configure either machine policy or Sandbox resources in one request",
+            ));
+        }
+        if let Some(policy) = &body.machine_policy {
+            let mut proposed = hub.book.lock().unwrap().policy.clone();
+            proposed.machines.insert(machine.clone(), policy.clone());
+            Config {
+                version: 4,
+                policy: proposed,
+            }
+            .validate()
+            .map_err(internal)?;
+        }
         if let Some(limits) = &body.sandbox_limits {
             let budget = json!(limits);
             if machine == s.runtime_id {
                 s.execution_service
                     .sandboxes
-                    .configure_budget(&budget)
+                    .configure_resources(&budget)
+                    .await
                     .map_err(internal)?;
             } else {
                 crate::remote_execution::port(&s)
                     .map_err(internal)?
-                    .configure_sandbox_budget(machine.clone(), budget)
+                    .configure_sandbox_resources(machine.clone(), budget)
                     .await
                     .map_err(internal)?;
             }
+        }
+        if body.sandbox_limits.is_some() {
+            // Runtime owns the resource configuration; Control stores only authority.
+            hub.ui_changed.notify();
+            return Ok(Json(json!({"ok":true})));
         }
         let mut book = hub.book.lock().unwrap();
         let mut policy = book.policy.clone();
@@ -850,9 +873,6 @@ pub async fn decide(
                     pending.decision = Some(false);
                 }
             }
-        }
-        if let Some(limits) = body.sandbox_limits {
-            policy.sandbox_limits.insert(machine.clone(), limits);
         }
         hub.save_policy(&mut book, policy).map_err(internal)?;
         return Ok(Json(json!({"ok":true})));

@@ -380,8 +380,7 @@ pub async fn refresh(s: &Service) -> Result<()> {
 }
 pub async fn reap_idle(s: &Service) -> Result<()> {
     s.execution_service.host.reap_host_plugins().await?;
-    s.execution_service.sandboxes.reap_idle().await?;
-    s.execution_service.sandboxes.reap_managed().await
+    s.execution_service.sandboxes.reap_idle().await
 }
 pub async fn finish_stale(s: &Service, generation: u64) -> Result<()> {
     s.execution_service

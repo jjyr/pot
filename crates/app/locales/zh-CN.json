@@ -788,9 +788,8 @@
   "permissions.policy-ask": "询问",
   "permissions.policy-allow": "允许",
   "permissions.policy-deny": "禁用",
-  "permissions.limit-max_sandboxes": "沙盒数量上限",
-  "permissions.limit-cpus": "沙盒 CPU 总预算",
-  "permissions.limit-memory_gib": "沙盒内存总预算（GiB）",
+  "permissions.limit-cpus": "共享沙盒 CPU",
+  "permissions.limit-memory_gib": "共享沙盒内存（GiB）",
   "permissions.limit-disk_gib": "环境磁盘规格上限（GiB，取决于 Provider）",
   "permissions.assign-sandbox": "分配给此助手管理",
   "onboarding.start": "开始使用 Pot",
@@ -821,9 +820,12 @@
   "machines.execution-host": "直接在机器上运行（Host）",
   "machines.execution-sandbox": "沙盒内运行",
   "machines.execution-host-detail": "使用 Runtime 账户权限，可以直接修改这台机器上的文件和配置。",
-  "machines.execution-sandbox-detail": "使用独立临时环境，执行结束后销毁环境，保留任务文件。",
+  "machines.execution-sandbox-detail": "使用这台机器的共享开发环境，复用已安装的工具和依赖；任务结束后只清理自己的进程和会话。",
   "machines.host-access": "Host 操作权限",
   "machines.host-ask": "每次操作前确认",
   "machines.host-allow": "直接允许",
-  "machines.host-deny": "禁止"
+  "machines.host-deny": "禁止",
+  "machines.start-shared": "启动共享沙盒",
+  "machines.stop-shared": "停止共享沙盒",
+  "machines.shared-resources-detail": "停止环境后可修改资源。停止保留工具和文件；重建会重置已安装的工具。"
 }

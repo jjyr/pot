@@ -209,6 +209,7 @@ window.potAction=async(action,value)=>{
     if(action==='execution-target-tasks'){execution_target=value;page='tasks';task='';scope='active';query='';offset=0;navigate();}
     if(action==='execution-target-filter-clear'){execution_target='';offset=0;}
     if(action==='task-query'){const q=JSON.parse(value);scope=q.scope;query=q.q;offset=q.offset;execution_target=q.execution_target||'';}
+    if(action==='sandbox-lifecycle'){const body=JSON.parse(value);body.request_id=crypto.randomUUID();delete body.sandbox_id;await api('/api/v1/sandboxes/shared',body);}
     if(action==='permission-decision')await api('/api/v1/permissions',JSON.parse(value));
     if(action==='usage-query'){const q=JSON.parse(value);usageDays=q.days;usageOffset=q.offset;}
     if(action==='search'){query=value;offset=0;}

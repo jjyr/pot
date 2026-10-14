@@ -19,9 +19,10 @@ actual context; changing policy does not move a process or its files. Host acces
 is checked for each subsequent operation, so tightening policy affects active
 work. Revocation does not undo effects; cancellation stops running work.
 
-Sandbox work does not require a separate assistant grant. Managed environments
-are private to their execution workspace and cannot be shared by selecting an
-existing Sandbox. Missing Sandbox support fails explicitly; there is no Host
+Sandbox work does not require a separate assistant grant. Each machine owns one shared Linux development Sandbox. Assistants and Tasks
+use that environment with separate execution scopes and work directories. They
+share installed software, toolchain caches and the guest filesystem; this is not
+mutual security isolation between Tasks. Missing Sandbox support fails explicitly; there is no Host
 fallback. Host execution uses the Runtime service account, not implicit root.
 Operating-system privacy and administrative permissions remain independent.
 
@@ -52,8 +53,10 @@ Re-enrollment clears the old machine's policy and temporary decisions.
 
 ## Persistence and owner API
 
-`permissions.json` version 3 contains `policy.machines`, machine enrollment epochs,
-and Sandbox budgets. Previous permission formats are rejected without migration.
+`permissions.json` version 4 contains `policy.machines` and machine enrollment
+epochs. Sandbox resource settings live on their execution Runtime and are reported
+through machine inventory; they are not duplicated in authorization policy.
+Previous permission formats are rejected without migration.
 No assistant allowlists or capability grants are imported.
 
 `GET /api/v1/permissions` returns machine policies and pending requests for the
@@ -71,12 +74,14 @@ selected conversation owner. `POST` accepts `{id, action}` with `allow_once` or
 }
 ```
 
-The owner can also configure `sandbox_limits`. CPU and memory are aggregate
-managed-environment reservation budgets, `max_sandboxes` bounds concurrent managed
-environments, and disk sizing is provider-dependent. Resource reservations live
-on the execution Runtime and remain held until destruction is confirmed. These
-are not Host process quotas. Unsupported disk enforcement must not be represented
-as a hard storage quota (Podman does not provide it).
+The owner can send `sandbox_limits` (`cpus`, `memory_gib`, `disk_gib`) for the
+machine's shared Sandbox. CPU and memory apply to the environment as a whole;
+Task concurrency is configured separately. Configure machine policy and resources
+in separate requests so each write has one authority. Changes require a stopped environment
+with no active execution leases or unsettled operations and apply on next start.
+The Runtime validates the Provider's resource bounds. Disk sizing depends on the
+Provider: Podman does not enforce a disk quota; Apple disk resizing requires an
+explicit rebuild. These settings do not constrain Host processes.
 
 Sources: `crates/control/src/permissions.rs`, `crates/agent/src/permissions.rs`,
 `crates/sandbox/src/manager.rs`.

@@ -154,6 +154,11 @@ Machines expose **Run inside a sandbox** and **Run directly on this machine
 (Host)**, with separate Host options **Ask before each operation**, **Allow
 directly**, and **Never allow**. Copy explains that Host operations use the Runtime
 account and can change machine files/configuration. Machine pages do not display
-assistant access lists or Sandbox assignments. Managed stopped workspace records
-are hidden from the ordinary instance list. Host approval cards display the full
+assistant access lists or Sandbox assignments. The shared development environment remains visible when stopped. Machine
+settings offer start/stop; active work disables stopping and resource changes. Host approval cards display the full
 operation and offer a single-operation decision rather than permanent grants.
+
+Start/stop uses owner-only `POST /api/v1/sandboxes/shared` with `request_id`,
+`runtime_id` and `action` (`start` or `stop`). The authenticated Web boundary
+allows only this narrow endpoint; arbitrary creation, mounts and rebuild remain
+native owner administration. Remote actions use signed, durable lifecycle receipts.

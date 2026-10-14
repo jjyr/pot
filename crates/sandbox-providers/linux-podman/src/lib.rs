@@ -134,7 +134,7 @@ impl LinuxPodmanProvider {
         let row = Self::inspect(&i).await?;
         let running = row.as_ref().is_some_and(|r| r["State"]["Running"] == true);
         Ok(
-            json!({"phase":if running {"running"} else if row.is_some() {"failed"} else {"stopped"}, "generation":row.as_ref().map(boot_generation).unwrap_or(i.generation)}),
+            json!({"phase":if running {"running"} else {"stopped"}, "generation":row.as_ref().map(boot_generation).unwrap_or(i.generation)}),
         )
     }
     async fn endpoint(c: &ProviderContext) -> Result<(String, String)> {
@@ -183,7 +183,24 @@ impl LinuxPodmanProvider {
             if row["State"]["Running"] == true {
                 return Self::state(c).await;
             }
-            self.remove(&i).await?;
+            // Apply resource changes without replacing the writable layer.
+            let path = Self::directory(c).join("sandbox.json");
+            if path.exists() {
+                let config: Value = serde_json::from_slice(&std::fs::read(path)?)?;
+                self.validate_config(&config)?;
+                let out = Self::command(&[
+                    "update".into(),
+                    format!("--cpus={}", config["cpus"]),
+                    format!("--memory={}g", config["memory_gib"]),
+                    i.name.clone(),
+                ])
+                .await?;
+                ensure!(out.status.success(), "Podman resource update failed");
+            }
+            // Restart the existing writable layer rather than replacing it.
+            let result = Self::command(&["start".into(), i.name.clone()]).await?;
+            ensure!(result.status.success(), "Podman restart failed");
+            return Self::state(c).await;
         }
         let dir = Self::directory(c);
         let config_path = dir.join("sandbox.json");
@@ -473,12 +490,31 @@ impl Provider for LinuxPodmanProvider {
                     if let Some(i) = Self::load(c)?
                         && Self::inspect(&i).await?.is_some()
                     {
-                        self.remove(&i).await?;
+                        let out =
+                            Self::command(&["stop".into(), "--time=15".into(), i.name.clone()])
+                                .await?;
+                        ensure!(out.status.success(), "Podman stop unconfirmed");
                     }
-                    Self::state(c).await
+                    let state = Self::state(c).await?;
+                    ensure!(state["phase"] == "stopped", "Podman is still running");
+                    Ok(state)
                 }
                 _ => bail!("Unsupported Podman lifecycle operation"),
             }
+        })
+    }
+    fn destroy<'a>(&'a self, c: &'a ProviderContext) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            if let Some(i) = Self::load(c)?
+                && Self::inspect(&i).await?.is_some()
+            {
+                self.remove(&i).await?;
+            }
+            let path = Self::directory(c).join("podman.json");
+            if path.exists() {
+                std::fs::remove_file(path)?;
+            }
+            Ok(json!({"phase":"stopped"}))
         })
     }
     fn health<'a>(&'a self, c: &'a ProviderContext) -> BoxFuture<'a, Result<bool>> {

@@ -892,7 +892,7 @@ mod tests {
             page.items[0].execution_target.as_ref().unwrap().runtime_id,
             target.runtime_id
         );
-        assert!(pot_sandbox::Manager::is_managed(&page.items[0].sandbox_id));
+        assert!(pot_sandbox::Manager::is_shared(&page.items[0].sandbox_id));
         let mut conflict = spec();
         conflict.machine_id = "invalid/machine".into();
         assert!(
@@ -1198,7 +1198,7 @@ mod tests {
             .items
             .remove(0);
         assert_eq!(task.execution_target.unwrap().runtime_id, s.runtime_id);
-        assert!(pot_sandbox::Manager::is_managed(&task.sandbox_id));
+        assert!(pot_sandbox::Manager::is_shared(&task.sandbox_id));
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
 }

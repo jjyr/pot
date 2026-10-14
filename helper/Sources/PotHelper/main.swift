@@ -153,7 +153,7 @@ actor Runtime {
     }
 
     func start() -> [String: Any] {
-        if phase == "starting" || phase == "running" || phase == "stopping" {
+        if phase == "starting" || phase == "running" || phase == "stopping" || phase == "cleanup_failed" {
             return status()
         }
         generation += 1; let gen = generation; phase = "starting"; error = nil; ip = ""
@@ -164,7 +164,7 @@ actor Runtime {
         do {
             try loadConfiguration(); try await prepare(); try Task.checkCancellation()
             guard gen == generation else { return }
-            try? manager?.delete(id)
+            try? manager?.releaseNetwork(id)
             let workspace = root.appendingPathComponent("workspace")
             try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
             try? FileManager.default.removeItem(at: workspace.appendingPathComponent("browser-stopped"))
@@ -201,16 +201,7 @@ actor Runtime {
                 options: .atomic
             )
             var creatingManager = manager!
-            let c = try await creatingManager.create(
-                id,
-                image: image,
-                rootfsSizeInBytes: UInt64(diskGiB) * 1024 * 1024 * 1024,
-                networking: true,
-                vm: VMResources(
-                    cpus: cpus,
-                    memoryInBytes: UInt64(memoryGiB) * 1024 * 1024 * 1024 + VMResources.guestMemoryOverhead
-                )
-            ) { config in
+            let configure: (inout LinuxContainer.Configuration) throws -> Void = { [self] config in
                 config.cpus = cpus; config.memoryInBytes = UInt64(memoryGiB) * 1024 * 1024 * 1024
                 config.process.arguments = ["/bin/sh", "/opt/pot/sandbox.sh"]
                 // Only the root broker creates per-scope mounts. Tool children
@@ -237,6 +228,25 @@ actor Runtime {
                 }
                 config.dns = DNS(nameservers: ["1.1.1.1"])
             }
+            let rootfs = creatingManager.imageStore.path.appendingPathComponent("containers")
+                .appendingPathComponent(id).appendingPathComponent("rootfs.ext4")
+            let vm = VMResources(cpus: cpus,
+                                 memoryInBytes: UInt64(memoryGiB) * 1024 * 1024 * 1024 + VMResources
+                                     .guestMemoryOverhead)
+            let c: LinuxContainer = if FileManager.default.fileExists(atPath: rootfs.path) {
+                try await creatingManager.create(id, image: image,
+                                                 rootfs: .block(
+                                                     format: "ext4",
+                                                     source: rootfs.path,
+                                                     destination: "/",
+                                                     options: []
+                                                 ),
+                                                 networking: true, vm: vm, configuration: configure)
+            } else {
+                try await creatingManager.create(id, image: image,
+                                                 rootfsSizeInBytes: UInt64(diskGiB) * 1024 * 1024 * 1024,
+                                                 networking: true, vm: vm, configuration: configure)
+            }
             manager = creatingManager
             container = c
             try Task.checkCancellation(); try await c.create(); try Task.checkCancellation(); try await c.start()
@@ -247,7 +257,8 @@ actor Runtime {
             if gen ==
                 generation
             {
-                try? await c.stop(); try? manager?.delete(id); container = nil; phase = "stopped"; ip = ""; if result
+                try? await c.stop(); try? manager?
+                    .releaseNetwork(id); container = nil; phase = "stopped"; ip = ""; if result
                     .exitCode !=
                     0
                 {
@@ -257,7 +268,7 @@ actor Runtime {
         } catch {
             if let c = container {
                 try? await c.stop()
-            }; try? manager?.delete(id); container = nil
+            }; try? manager?.releaseNetwork(id); container = nil
             if gen == generation {
                 phase = "failed"; self.error = String(describing: error); event(
                     "runtime.failed",
@@ -314,7 +325,7 @@ actor Runtime {
             await task.value
         }
         do {
-            try manager?.delete(id)
+            try manager?.releaseNetwork(id)
         } catch {
             phase = "cleanup_failed"
             event("runtime.cleanup_failed", ["error": String(describing: error)])
@@ -326,6 +337,24 @@ actor Runtime {
         ); return status()
     }
 
+    func destroy() async throws -> [String: Any] {
+        let state = await stop()
+        guard state["phase"] as? String == "stopped" else {
+            throw NSError(domain: "pot", code: 7,
+                          userInfo: [NSLocalizedDescriptionKey: "Sandbox stop unconfirmed; environment retained"])
+        }
+        let directory = root.appendingPathComponent("store/containers").appendingPathComponent(id)
+        if FileManager.default.fileExists(atPath: directory.path) {
+            if manager != nil {
+                try manager?.delete(id)
+            } else {
+                try FileManager.default.removeItem(at: directory)
+            }
+        }
+        event("runtime.rebuilt", status())
+        return status()
+    }
+
     func request(_ object: [String: Any]) async -> [String: Any] {
         let rid = object["id"] as? String ?? UUID().uuidString
         do {
@@ -335,6 +364,7 @@ actor Runtime {
             case "start": value = start()
             case "status": value = status()
             case "stop": value = await stop()
+            case "delete": value = try await destroy()
             case "shutdown": value = await stop(); Task {
                     try? await Task.sleep(nanoseconds: 200_000_000); unlink(socketPath); exit(0)
                 }

@@ -22,7 +22,7 @@ default; Host access is independently configured as ask, allow or deny. A Task m
 request a single Host operation on its execution machine through Control's exact
 operation approval without changing its normal execution context.
 
-Main manages Tasks and schedules. Runtime manages disposable Sandbox lifecycle;
+Main manages Tasks and schedules. Runtime manages shared Sandbox lifecycle;
 models do not create or share containers. Guest workspaces contain artifacts,
 not Control credentials or Helper sockets. Agent context, compaction and usage
 remain owned by the assistant Runtime.
@@ -34,12 +34,12 @@ subject to message routing constraints. Tasks read current policy at dispatch;
 schedules create a new Task on every occurrence. The recorded `execution_target`
 is the actual run context, not a persistent selection for future work.
 
-Sandbox Tasks receive independent workspaces and disposable Linux containers.
-Runtime reserves aggregate CPU/memory and concurrency capacity before starting,
-holds a run lease across model/tool waits, drains process scopes, then destroys
-the instance. Cleanup failures retain reservations. Files and execution records
-remain available. Completed, failed, interrupted and cancelled Tasks cannot be
-reopened: rerun creates a new Task and reads current machine policy.
+Sandbox Tasks receive separate work directories and process/session scopes inside
+one shared machine environment. CPU/memory limits apply to that environment;
+Task concurrency is controlled separately. A run lease spans model/tool waits.
+Completion/cancellation drains only that execution. Installed software, Rust
+caches and the GUI remain available. Explicit stop preserves the writable layer;
+owner rebuild resets it. Ended Tasks cannot reopen; rerun creates a new Task.
 
 Prepared macOS VMs remain operator-managed. No missing-provider failure falls
 back to Host. Agent model/profile routing and execution-machine placement are

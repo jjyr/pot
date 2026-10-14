@@ -15,6 +15,63 @@ from unittest.mock import MagicMock, patch
 SOURCE = Path(__file__).resolve().parents[2] / "crates/sandbox-images/linux/default/executor.py"
 
 
+class DevelopmentEnvironmentTests(unittest.TestCase):
+    def test_task_directories_share_toolchain_without_sharing_home_or_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = ast.parse(SOURCE.read_text())
+            module.body = [
+                node
+                for node in module.body
+                if isinstance(node, ast.FunctionDef)
+                and node.name in {"development_environment", "runner_environment"}
+            ]
+            env = {"ROOT": root, "Path": Path, "USER": None}
+            exec(compile(module, str(SOURCE), "exec"), env)
+            first = env["runner_environment"](root / "workspace/tasks/first")
+            cargo = Path(first["CARGO_HOME"])
+            (cargo / "installed-marker").write_text("toolchain installed")
+            second = env["runner_environment"](root / "workspace/tasks/second")
+            self.assertNotEqual(first["HOME"], second["HOME"])
+            self.assertEqual(first["CARGO_HOME"], second["CARGO_HOME"])
+            self.assertEqual(first["RUSTUP_HOME"], second["RUSTUP_HOME"])
+            self.assertEqual(
+                (Path(second["CARGO_HOME"]) / "installed-marker").read_text(), "toolchain installed"
+            )
+            self.assertTrue(second["PATH"].startswith(str(cargo / "bin")))
+            self.assertEqual(
+                set(second), {"PATH", "HOME", "CARGO_HOME", "RUSTUP_HOME", "LANG", "TMPDIR"}
+            )
+            (root / "development/.rustup").rmdir()
+            (root / "development/.rustup").symlink_to(root / "workspace")
+            with self.assertRaises(ValueError):
+                env["runner_environment"](root / "workspace/tasks/third")
+
+    def test_main_and_task_drop_to_same_unprivileged_development_user(self):
+        module = ast.parse(SOURCE.read_text())
+        module.body = [
+            node
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "demote"
+        ]
+        operations = SimpleNamespace(
+            setgroups=MagicMock(), setgid=MagicMock(), setuid=MagicMock(), umask=MagicMock()
+        )
+        env = {
+            "USER": SimpleNamespace(pw_uid=1000, pw_gid=1000),
+            "os": operations,
+            "ctypes": SimpleNamespace(
+                CDLL=lambda *args, **kwargs: SimpleNamespace(prctl=lambda *args: 0)
+            ),
+        }
+        exec(compile(module, str(SOURCE), "exec"), env)
+        for role in ["main", "task"]:
+            env["demote"](role)
+            operations.setuid.assert_called_with(1000)
+            operations.setgid.assert_called_with(1000)
+            operations.umask.assert_called_with(0o002)
+
+
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="pot-executor-test-")

@@ -8,9 +8,11 @@ Updated: 2026-10-06. The separately distributed Linux ARM64 OCI image contains t
 
 The image builder uses a separate Apple VM with no user workspace or credentials, pinned Alpine/system packages, and `/opt/pot` executor/desktop resources. The guest Rust binary is cross-compiled for Linux ARM64 musl. Build hashes include guest sources and that binary; identical inputs reuse the immutable image. The image builder is invoked separately with `mise run build:sandbox-image`. Client bundles contain Host binaries; kernel/vminit/image are separate checksum-pinned Release assets. See [Sandbox resource delivery](sandbox-resources.md). VM networking requires Apple Virtualization permissions.
 
-Helper starts Host Server immediately and imports/boots each Linux image only when requested. `/opt/pot/sandbox.sh` mounts cgroup v2 and starts the authenticated executor on port 17701. Shell/file subprocesses run as `potdesktop` with a minimal environment. Each owner/Agent-epoch/Sandbox scope uses a root-owned cgroup and a credential-free Rust tool runner. Live pipe sessions share that scope; cancellation, failure and shutdown drain it, including detached descendants. Live pipe/PTY sessions survive normal turns and expire when idle; empty runners retain shell initialization caches without execution leases. See [command execution](executor.md). The executor token stays on Host outside the mount and is injected into the root executor at startup, then removed from child environments. The guest ledger/output live in root-private `/run/pot-executor`, outside virtiofs. Host receipts remain the durable authority across VM recreation. Desktop starts separately through the Sandbox desktop action.
+Helper starts Host Server immediately and imports/boots each Linux image only when requested. `/opt/pot/sandbox.sh` mounts cgroup v2 and starts the authenticated executor on port 17701. Shell/file subprocesses run as `potdesktop` with a minimal environment. Each owner/Agent-epoch/Sandbox scope uses a root-owned cgroup and a credential-free Rust tool runner. Live pipe sessions share that scope; cancellation, failure and shutdown drain it, including detached descendants. Live pipe/PTY sessions close when their execution ends and expire when idle; empty runners retain shell initialization caches without execution leases. See [command execution](executor.md). The executor token stays on Host outside the mount and is injected into the root executor at startup, then removed from child environments. The guest ledger/output live in root-private `/run/pot-executor`, outside virtiofs. Host receipts remain the durable authority across VM recreation. Desktop starts separately through the Sandbox desktop action.
 
-Each Sandbox mounts only `root/sandboxes/ID/workspace` at `/data`; files live beneath `/data/workspace`. No Host product database, CLI sessions, provider secrets or Helper socket are mounted. Artifacts survive VM shutdown. Temporary rootfs changes disappear on a new instance.
+Each Sandbox mounts only `root/sandboxes/ID/workspace` at `/data`; files live beneath `/data/workspace`. No Host product database, CLI sessions, provider secrets or Helper socket are mounted. Artifacts survive VM shutdown. The shared environment retains its writable rootfs across stop/start. Explicit
+rebuild resets installed software and shared toolchain directories while preserving
+Task work files. See [execution lifecycle](executor.md#shared-machine-execution-environment).
 
 Resources and build caches are under `.local/d1/`; rebuild/export the image and embedded catalog before building clients after guest source changes. The new acceptance entry is `scripts/tests/sandbox-runtime.py`, documented in [Development](development.md), with [dated results](validation/host-pot-agent-20261006.md).
 
@@ -41,3 +43,8 @@ executor bootstrap label. It builds ARM64 or AMD64; package availability for eac
 architecture is validated by a real build, not assumed from the ARM64 lockfile.
 The Apple export/kernel/vminit pipeline is retained; it has not been replaced by
 an unqualified OCI import path. Images contain no Server, model keys or Host Agent.
+
+The default GUI image also includes pinned C/C++ build tools and Git, so user-level
+Rust installations have a linker and common native build dependencies. Rustup
+versions themselves remain installed in the shared development directory; a Task
+can install a required version once and subsequent Tasks reuse it.

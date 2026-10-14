@@ -298,7 +298,7 @@ pub(super) enum Rpc {
         target: Target,
         query: pot_protocol::FileQuery,
     },
-    ManageSandbox {
+    SandboxLifecycle {
         operation_id: String,
         accept_before_ms: i64,
         target: Target,
@@ -308,7 +308,7 @@ pub(super) enum Rpc {
         operation_id: String,
     },
     Inventory,
-    ConfigureSandboxBudget {
+    ConfigureSandboxResources {
         budget: Value,
     },
     Resources {
@@ -1266,9 +1266,18 @@ impl Authority {
                             serde_json::from_value(response.payload["command"].clone())?;
                         let control = authority.authorize(&binding.token, &command)?;
                         let key = protocol_digest(&command.payload)?;
+                        let shared = match &command.payload.body {
+                            Rpc::Acquire { target, .. } | Rpc::SandboxLifecycle { target, .. } | Rpc::ReadFile { target, .. } =>
+                                matches!(target, Target::Sandbox { sandbox_id } if pot_sandbox::Manager::is_shared(sandbox_id)),
+                            Rpc::LaunchTask { launch, .. } => matches!(&launch.execution_target.target,
+                                Target::Sandbox { sandbox_id } if pot_sandbox::Manager::is_shared(sandbox_id)),
+                            Rpc::ConfigureSandboxResources { .. } => true,
+                            _ => false,
+                        };
+                        let host = resources.execution_host(shared).await?;
                         let result = authority
                             .dispatch_with_hub(
-                                &resources.host().await,
+                                &host,
                                 &control,
                                 command.payload.body,
                                 resources.assistant_hub().await,
@@ -1328,7 +1337,7 @@ async fn poll(
     }
 }
 async fn require_target(host: &pot_control::host::Host, target: &Target) -> Result<()> {
-    host.ensure_managed_target(target)?;
+    host.ensure_shared_target(target)?;
     let inventory = host.execution_target_inventory().await;
     ensure!(
         inventory["items"].as_array().is_some_and(|items| items
@@ -1379,7 +1388,7 @@ impl Authority {
             Rpc::RecoverTaskLease { lease_id } => {
                 self.recover_task_lease(host, control, &lease_id).await
             }
-            Rpc::ManageSandbox {
+            Rpc::SandboxLifecycle {
                 operation_id,
                 accept_before_ms,
                 target,
@@ -1482,8 +1491,8 @@ impl Authority {
                 )?)
             }
             Rpc::Inventory => Ok(host.execution_target_inventory().await),
-            Rpc::ConfigureSandboxBudget { budget } => {
-                host.configure_sandbox_budget(&budget)?;
+            Rpc::ConfigureSandboxResources { budget } => {
+                host.configure_sandbox_resources(&budget).await?;
                 Ok(json!({"ok":true}))
             }
             Rpc::Acquire {

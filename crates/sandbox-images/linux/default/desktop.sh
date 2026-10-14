@@ -2,6 +2,8 @@
 set -eu
 umask 077
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
+export CARGO_HOME=/data/development/.cargo RUSTUP_HOME=/data/development/.rustup
+export PATH="$CARGO_HOME/bin:$PATH"
 exec >/data/desktop.log 2>&1
 # Immutable software comes from the bundled OCI image; /data holds user state.
 for name in desktop-config.sh desktop-session.sh pot-wallpaper.svg packages.lock test.html driver.py broker.py index.html i18n.js locales.json close-browser.py open-browser.sh; do

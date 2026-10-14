@@ -59,7 +59,7 @@ fn next_order(hub: &Hub) -> u64 {
 pub(crate) fn serialized(hub: &Hub) -> Result<String> {
     let records: Vec<_> = hub.lanes.values().map(|l| &l.record).collect();
     Ok(serde_json::to_string(
-        &json!({"version":3,"tasks":records,"schedules":hub.schedules}),
+        &json!({"version":4,"tasks":records,"schedules":hub.schedules}),
     )?)
 }
 pub(crate) fn persist(root: &Service, hub: &Hub) -> Result<()> {
@@ -103,10 +103,8 @@ fn child(
     } else {
         match &execution_target.target {
             pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
-                if pot_sandbox::Manager::is_managed(sandbox_id) {
-                    root.execution_service
-                        .sandboxes
-                        .ensure_managed(sandbox_id)?;
+                if pot_sandbox::Manager::is_shared(sandbox_id) {
+                    root.execution_service.sandboxes.ensure_shared()?;
                 }
                 root.execution_service.sandboxes.assignment(sandbox_id)?;
                 (
@@ -191,8 +189,8 @@ pub(crate) fn restore(root: &Service) -> Result<()> {
         Some(value) => {
             let value: Value = serde_json::from_str(&value)?;
             anyhow::ensure!(
-                value["version"] == 3,
-                "Unsupported task persistence schema; machine-policy Tasks require version 3"
+                value["version"] == 4,
+                "Unsupported task persistence schema; machine-policy Tasks require version 4"
             );
             (
                 serde_json::from_value(value["tasks"].clone())?,
@@ -632,7 +630,7 @@ fn enqueue_from(
         .as_ref()
         .map(|t| t.runtime_id.as_str())
         .unwrap_or(&root.runtime_id);
-    let execution_target = machine_execution_target(root, machine, &task_id)?;
+    let execution_target = machine_execution_target(root, machine)?;
     let message_skills = (!refs.skills.is_empty()).then_some(refs.skills);
     let selected_skills = message_skills.clone().or_else(|| req.skills.clone());
     let sandbox_id = match &execution_target.target {
@@ -1194,7 +1192,7 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         .ok_or_else(|| anyhow!("Task machine missing"))?
         .runtime_id
         .clone();
-    let target = machine_execution_target(root, &machine, &task_id)
+    let target = machine_execution_target(root, &machine)
         .map_err(|e| anyhow!("Cannot prepare task execution: {e:?}"))?;
     lane.record.info.execution_target = Some(target.clone());
     lane.record.info.sandbox_id = match &target.target {
@@ -1259,20 +1257,16 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
         },
     )))
 }
-fn machine_execution_target(
-    root: &Service,
-    machine: &str,
-    task: &str,
-) -> ApiResult<pot_core::ExecutionTarget> {
+fn machine_execution_target(root: &Service, machine: &str) -> ApiResult<pot_core::ExecutionTarget> {
     let policy = root.execution_service.permissions.machine_policy(machine);
     let target = match policy.execution_mode {
         pot_agent::permissions::ExecutionMode::Host => pot_core::ExecutionTarget::host(machine),
         pot_agent::permissions::ExecutionMode::Sandbox => {
-            let id = pot_sandbox::Manager::managed_id(task);
+            let id = pot_sandbox::Manager::SHARED_ID.to_owned();
             if machine == root.runtime_id {
                 root.execution_service
                     .sandboxes
-                    .ensure_managed(&id)
+                    .ensure_shared()
                     .map_err(internal)?;
             }
             pot_core::ExecutionTarget::sandbox(machine, &id)
@@ -1948,7 +1942,7 @@ pub(crate) mod tests {
             worker.execution_target.as_ref().unwrap().target,
             pot_core::ExecutionTargetKind::Host {}
         ));
-        assert!(pot_sandbox::Manager::is_managed(&created.sandbox_id));
+        assert!(pot_sandbox::Manager::is_shared(&created.sandbox_id));
         finish(&s, &rerun.id, Err(anyhow!("done"))).unwrap();
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
@@ -1956,7 +1950,7 @@ pub(crate) mod tests {
     async fn queued_task_reads_policy_at_dispatch_and_active_context_stays_fixed() {
         let root = fixture();
         let first = add(&root, "queued before policy change", "").await;
-        assert!(pot_sandbox::Manager::is_managed(&first.sandbox_id));
+        assert!(pot_sandbox::Manager::is_shared(&first.sandbox_id));
         root.execution_service.permissions.set_machine_policy(
             &root.runtime_id,
             pot_agent::permissions::ExecutionMode::Host,
@@ -1975,13 +1969,13 @@ pub(crate) mod tests {
             Some(host)
         );
         let second = add(&root, "independent execution", "").await;
-        assert_ne!(first.sandbox_id, second.sandbox_id);
+        assert_eq!(first.sandbox_id, second.sandbox_id);
         let (_, second_worker, _) = claim(&root).unwrap().unwrap();
         assert!(
             second_worker
                 .sandbox_id
                 .as_ref()
-                .is_some_and(|id| pot_sandbox::Manager::is_managed(id))
+                .is_some_and(|id| pot_sandbox::Manager::is_shared(id))
         );
         finish(&root, &first.id, Err(anyhow!("done"))).unwrap();
         finish(&root, &second.id, Err(anyhow!("done"))).unwrap();

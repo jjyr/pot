@@ -131,6 +131,7 @@ impl Mobile {
                     "permission-decision" => {
                         action("permission-decision", &event.value.to_string())
                     }
+                    "sandbox-lifecycle" => action("sandbox-lifecycle", &event.value.to_string()),
                     "task-open" => action("task", &event.value.to_string()),
                     "execution-target-filter-clear" => action("execution-target-filter-clear", ""),
                     "execution-target-tasks" => {
