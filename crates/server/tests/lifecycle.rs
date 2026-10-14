@@ -246,7 +246,7 @@ async fn shutdown_settles_active_main_and_worker_model_requests_without_host_exe
             "/api/v1/permissions",
             Some(json!({
                 "action":"configure", "machine_id":identity["runtime_id"],
-                "capability":"host", "decision":"allow"
+                "machine_policy":{"execution_mode":"host", "host_access":"allow"}
             })),
         )
         .await
