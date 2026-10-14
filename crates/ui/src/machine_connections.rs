@@ -420,7 +420,7 @@ impl TagInput {
             text.char_indices()
                 .filter(|(_, c)| c.is_whitespace() || *c == ',')
                 .map(|(i, c)| i + c.len_utf8())
-                .last()
+                .next_back()
                 .unwrap_or(0)
         };
         if end == 0 {
@@ -509,7 +509,8 @@ impl Render for TagInput {
                             .xsmall()
                             .icon(IconName::Close)
                             .accessibility_label(
-                                self.catalog.format("machines.remove-tag", &[tag.clone()]),
+                                self.catalog
+                                    .format("machines.remove-tag", std::slice::from_ref(tag)),
                             )
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.tags.remove(index);
