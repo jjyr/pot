@@ -301,13 +301,26 @@ actor Runtime {
                         .fileExists(atPath: root.appendingPathComponent("workspace/browser-stopped").path)]
                 )
             }
-            try? await c.stop()
+            do {
+                try await c.stop()
+            } catch {
+                phase = "cleanup_failed"
+                event("runtime.cleanup_failed", ["error": String(describing: error)])
+                return status()
+            }
         }
         task?.cancel()
         if let task {
             await task.value
         }
-        container = nil; task = nil; try? manager?.delete(id); phase = "stopped"; ip = ""; event(
+        do {
+            try manager?.delete(id)
+        } catch {
+            phase = "cleanup_failed"
+            event("runtime.cleanup_failed", ["error": String(describing: error)])
+            return status()
+        }
+        container = nil; task = nil; phase = "stopped"; ip = ""; event(
             "runtime.stopped",
             status()
         ); return status()

@@ -11,12 +11,12 @@ other Tasks. Summary sessions only inspect Tasks.
 
 | Tool | Purpose |
 |---|---|
-| `guide_task` | Queue work after the current turn, or explicitly resume a stopped Task |
+| `guide_task` | Queue guidance for an active Task |
 | `send_message` | Deliver reference information at a model boundary without starting or resuming work |
 | `wait_task` | Bounded wait for any selected Task to complete or need attention; cursors suppress unchanged results |
 
 Messages retain trusted sender identity, are consumed once and remain pending for
-idle Tasks until explicitly continued. They do not grant owner authority. Delivery
+ended Tasks as retained history. They do not grant owner authority. Delivery
 uses pot-agent.
 
 `wait_task` returns Task metadata, not transcripts. Complete, failed, interrupted,
@@ -28,27 +28,20 @@ Approval requests are not separate Task states. `wait` collects JavaScript resul
 
 ```text
 running --interrupt--> stopping --cleanup confirmed--> interrupted
-                                                          |
-                                                      guide_task
-                                                          v
-                                                       queued --> running
-
+running --cancel_task--> stopping --cleanup confirmed--> cancelled
 interrupted --cancel_task--> cancelled (Archived)
-running ----cancel_task----> stopping --cleanup confirmed--> cancelled
+ended Task --create_task--> new Task ID + current machine policy
 ```
 
-`interrupt` preserves never-started guidance. Explicit `guide_task` resumes that
-queue in order, followed by the new guidance. Interrupted executing input is never
-replayed, including suspended allowance-waiting input. Restart does not auto-resume
-an interrupted Task. Control restart reconciles an accepted remote run using its
-original input identity. It does not relaunch the Agent or change its execution target.
-Execution Runtime restart interrupts after known receipts and scopes are settled;
-unknown outcomes block replacement. See [failure rules](architecture.md#failure-and-receipt-rules).
+`interrupt` retains never-started guidance as history. It does not replay executing
+input, including suspended allowance-waiting input. Ended Tasks reject guidance;
+a rerun is a new Task. Control restart reconciles an accepted remote run by its
+original input identity, without relaunching it or changing its execution context.
+Execution Runtime restart settles known receipts and scopes; unknown outcomes
+block replacement. See [failure rules](architecture.md#failure-and-receipt-rules).
 
-`cancel_task` discards pending guidance and abandons the Task, including an
-interrupted Task with an empty queue. History/files survive; completed results stay
-complete. Explicit new guidance can reopen a cancelled Task without replaying the
-discarded queue.
+`cancel_task` discards pending guidance and abandons the Task. History/files survive;
+completed results stay complete. No terminal phase can be reopened.
 
 Both operations reject guidance during cleanup. Running Tasks hold capacity and
 leases until shutdown is confirmed; unconfirmed shutdown fails visibly and retains
@@ -69,3 +62,17 @@ An independent archive flag and inactivity rules remain deferred.
 
 Schemas and lifecycle code: `crates/core/src/pot-tools.json`, `crates/control/src/control/tasks.rs`.
 Checks and live qualification limits: [permission contract](permissions.md).
+
+## Execution policy and reruns
+
+New tasks use the selected machine's current execution policy when dispatched.
+The actual Host/Sandbox context is retained as execution information for the active
+run, receipts and file retrieval. It is not reused as a default for future tasks.
+Guidance is accepted only while a task remains active. Complete, failed, cancelled
+and interrupted tasks require a new task to run again; retained files are not
+implicitly imported into that new task. Managed Sandbox instances are private and
+destroyed after confirmed execution cleanup; task records and files remain.
+
+Task persistence uses schema version 3. Earlier task/schedule records with fixed
+container selection are rejected without implicit migration; use an independent
+data directory for development builds of this schema. Existing files are not deleted.

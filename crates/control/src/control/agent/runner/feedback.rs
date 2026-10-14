@@ -52,7 +52,7 @@ impl ExecutionFeedback for Feedback {
             anyhow::bail!("Unsupported owner operation")
         })
     }
-    fn prepare_permission_operation(&self, name: &str, mut args: Value) -> Result<Value> {
+    fn prepare_permission_operation(&self, name: &str, args: Value) -> Result<Value> {
         self.check()?;
         if ["read_agent_instructions", "update_agent_instructions"].contains(&name) {
             crate::assistant_instructions::validate_tool(&self.service, name, &args)?;
@@ -64,19 +64,6 @@ impl ExecutionFeedback for Feedback {
                 );
             }
             return Ok(args);
-        }
-        if name == "manage_sandbox"
-            && crate::sandbox::remote_management_target(&self.service, &args)?.is_some()
-        {
-            return Ok(args);
-        }
-        if name == "manage_sandbox" && args["action"] != "create" {
-            args["sandbox_id"] = json!(
-                self.service
-                    .execution_service
-                    .sandboxes
-                    .assignment(args["sandbox_id"].as_str().unwrap_or(""))?
-            );
         }
         Ok(args)
     }

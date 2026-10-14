@@ -111,13 +111,32 @@ impl SandboxFixture {
                 let mut line = String::new();
                 socket.read_line(&mut line).await.unwrap();
                 let call: Value = serde_json::from_str(&line).unwrap();
-                assert!(matches!(call["method"].as_str(), Some("start" | "status")));
                 assert!(matches!(
-                    call["sandbox_id"].as_str(),
-                    Some("default" | "linux-b")
+                    call["method"].as_str(),
+                    Some("start" | "status" | "stop")
                 ));
+                let target = call["sandbox_id"].as_str().unwrap();
+                assert!(
+                    matches!(target, "default" | "linux-b")
+                        || pot_sandbox::Manager::is_managed(target)
+                );
+                let port_target = if ports.contains_key(target) {
+                    target
+                } else {
+                    "default"
+                };
+                if pot_sandbox::Manager::is_managed(target) {
+                    let directory = root.join("sandboxes").join(target);
+                    std::fs::create_dir_all(&directory).unwrap();
+                    std::fs::write(directory.join("executor-token"), "fixture-default\n").unwrap();
+                }
                 captured.lock().unwrap().push(call.clone());
-                let reply = json!({"result":{"phase":"running","ip":"127.0.0.1","executor_port":ports[call["sandbox_id"].as_str().unwrap()],"generation":helper_generation.load(std::sync::atomic::Ordering::SeqCst)}});
+                let phase = if call["method"] == "stop" {
+                    "stopped"
+                } else {
+                    "running"
+                };
+                let reply = json!({"result":{"phase":phase,"ip":"127.0.0.1","executor_port":ports[port_target],"generation":helper_generation.load(std::sync::atomic::Ordering::SeqCst)}});
                 socket
                     .get_mut()
                     .write_all(format!("{reply}\n").as_bytes())
@@ -349,7 +368,6 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
         State(root.clone()),
         tasks::tests::headers(),
         Json(CreateTask {
-            sandbox_id: "default".into(),
             request_id: "task-fixture".into(),
             text: "fixture".into(),
             ..Default::default()
@@ -375,7 +393,7 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
         "worker-exec",
     )
     .await;
-    assert_eq!(result["sandbox_id"], "default");
+    assert_eq!(result["sandbox_id"], task.sandbox_id);
     let dispatched = fixture.requests("/execute");
     assert_eq!(dispatched.len(), 1);
     assert_eq!(
@@ -400,7 +418,12 @@ async fn task_context_keeps_assigned_sandbox_and_rejects_control_calls() {
             .execute(&context, policy, name, &args, name, &mut |_| Ok(()))
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("Worker"));
+        let expected = if name == "manage_sandbox" {
+            "Unknown execution operation"
+        } else {
+            "Worker"
+        };
+        assert!(error.to_string().contains(expected), "{error}");
         assert_eq!(fixture.helper_calls.lock().unwrap().len(), before);
         assert_eq!(fixture.requests("/execute").len(), 1);
     }
@@ -432,6 +455,8 @@ async fn runtime_injects_fresh_instructions_for_main_and_workers_but_not_summary
     .unwrap()
     .0;
     let worker = tasks::owner(main, &task.id).unwrap();
+    let base = main.execution_service.sandboxes.workspace(&task.sandbox_id);
+    std::fs::write(base.join(".git"), "gitdir").unwrap();
     std::fs::write(worker.workspace.join("AGENTS.md"), "WORKER_LOCAL").unwrap();
     {
         for service in [main, &worker] {
@@ -711,7 +736,7 @@ async fn completed_task_cancellation_closes_retained_resources_without_rewriting
 }
 
 #[tokio::test]
-async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
+async fn sandbox_tools_need_no_assistant_grant_and_keep_guest_paths() {
     let fixture = SandboxFixture::new().await;
     let s = &fixture.service;
     let turn = SandboxFixture::activate(s);
@@ -748,72 +773,12 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
         )
         .await
     });
-    let pending = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        loop {
-            let state = crate::permissions::inspect(State(s.clone()), tasks::tests::headers())
-                .await
-                .unwrap()
-                .0;
-            if !state["requests"].as_array().unwrap().is_empty() {
-                break state["requests"][0]["id"].clone();
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    let _ = crate::permissions::decide(
-        State(s.clone()),
-        tasks::tests::headers(),
-        Json(serde_json::from_value(json!({"id":pending,"action":"allow_persistent"})).unwrap()),
-    )
-    .await
-    .unwrap();
     assert_eq!(waiter.await.unwrap().unwrap()["approved"], true);
-    assert_eq!(
-        s.execution_service
-            .permissions
-            .grants("main")
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        s.execution_service.permissions.grants("main")[0]["scope"]["capability"],
-        "sandbox"
-    );
-    crate::permissions::prepare(
-        s,
-        "exec_command",
-        json!({"cmd":"different","execution_target":"sandbox:default"}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        s.execution_service
-            .permissions
-            .grants("main")
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    let _ = crate::permissions::decide(
-        State(s.clone()),
-        tasks::tests::headers(),
-        Json(serde_json::from_value(json!({"id":pending,"action":"revoke"})).unwrap()),
-    )
-    .await
-    .unwrap();
-    assert!(
-        s.execution_service
-            .permissions
-            .grants("main")
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    let state = crate::permissions::inspect(State(s.clone()), tasks::tests::headers())
+        .await
+        .unwrap()
+        .0;
+    assert!(state["requests"].as_array().unwrap().is_empty());
     assert!(
         fixture
             .requests("/prepare")
@@ -843,7 +808,7 @@ async fn unified_tools_use_machine_sandbox_grants_and_guest_paths() {
             json!({"cmd":"cat notes.txt","execution_target":"host"}),
         )
         .await
-        .is_err()
+        .is_ok()
     );
 }
 

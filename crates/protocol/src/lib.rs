@@ -250,13 +250,11 @@ pub struct TaskRequirements {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CreateTask {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_target: Option<pot_core::ExecutionTarget>,
+    #[serde(default)]
+    pub machine_id: String,
     #[serde(default)]
     /// Explicit global skills; absent or empty selects none. Project discovery is independent.
     pub skills: Option<Vec<String>>,
-    #[serde(default)]
-    pub sandbox_id: String,
     pub request_id: String,
     pub text: String,
     #[serde(default)]
@@ -354,10 +352,8 @@ fn enabled() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduleSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_target: Option<pot_core::ExecutionTarget>,
     #[serde(default)]
-    pub sandbox_id: String,
+    pub machine_id: String,
     pub title: String,
     pub goal: String,
     #[serde(default = "default_zone")]

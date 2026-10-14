@@ -1376,9 +1376,11 @@ async fn main_and_worker_model_loadouts_and_dispatch_use_injected_tools() {
                 }
             } else {
                 let external: Vec<_> = rpc.iter().filter(|r| r["method"] == "tools/call").collect();
-                assert_eq!(external.len(), 2);
-                assert_eq!(external[0]["params"]["name"], "manage_sandbox");
-                assert_eq!(external[1]["params"]["name"], "create_task");
+                assert_eq!(external.len(), 1);
+                assert_eq!(external[0]["params"]["name"], "create_task");
+                assert!(updates.iter().any(
+                    |u| matches!(u, Update::ToolFinished { id, failed: true, .. } if id == "manage")
+                ));
             }
             assert!(
                 !f.dir.join("effects.txt").exists(),
@@ -2026,11 +2028,10 @@ async fn main_and_worker_plugin_calls_share_direct_and_composed_permissions() {
                     .iter()
                     .find(|tool| tool["function"]["name"] == "cua_repl")
                     .unwrap();
-                assert_eq!(
+                assert!(
                     plugin["function"]["parameters"]["properties"]
                         .get("sandbox_id")
-                        .is_some(),
-                    role == ExecutionRole::Main
+                        .is_none()
                 );
                 assert!(
                     plugin["function"]["parameters"]["properties"]
@@ -2170,7 +2171,7 @@ fn stopped_context_reconciliation_pairs_known_results_without_replaying_unknown_
 }
 
 #[tokio::test]
-async fn sessions_and_sandbox_management_check_current_authority_and_keep_role_boundaries() {
+async fn execution_checks_current_authority_and_keeps_role_boundaries() {
     let mut f = Fixture::new("openai_chat");
     f.context.role = ExecutionRole::Main;
     *f.feedback.authorization.lock().unwrap() = true;
@@ -2179,19 +2180,14 @@ async fn sessions_and_sandbox_management_check_current_authority_and_keep_role_b
         request_id: "work".into(),
         text: String::new(),
     };
-    for tool in [
-        "exec_command",
-        "write_stdin",
-        "apply_patch",
-        "manage_sandbox",
-    ] {
+    for tool in ["exec_command", "write_stdin", "apply_patch"] {
         assert!(
             permissions::authorize(&f.context, &f.thread, &turn, tool, tool, &json!({}))
                 .await
                 .is_err()
         );
     }
-    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 4);
+    assert_eq!(f.feedback.permission_requests.lock().unwrap().len(), 3);
     *f.feedback.permission_decision.lock().unwrap() = Some(true);
     f.context.role = ExecutionRole::Worker;
     assert!(
@@ -2200,7 +2196,7 @@ async fn sessions_and_sandbox_management_check_current_authority_and_keep_role_b
             &f.thread,
             &turn,
             "manage",
-            "manage_sandbox",
+            "update_agent_instructions",
             &json!({})
         )
         .await

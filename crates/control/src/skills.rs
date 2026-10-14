@@ -281,7 +281,7 @@ mod tests {
             &root
                 .execution_service
                 .sandboxes
-                .workspace("default")
+                .workspace(&task.sandbox_id)
                 .join(".agents/skills"),
             "execution-target",
             "original sandbox",

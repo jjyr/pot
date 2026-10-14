@@ -108,8 +108,7 @@ inbound execution listener. Responses are bounded and redirects are forbidden.
 
 An execution Runtime binds one Control. Joining allows that Control to operate all
 configured Host/Sandbox resources. There are no discovery, execution, management,
-artifact or desktop grants, expiry controls or grant/revoke APIs. Assistant authorization remains independent: Control grants each assistant Host
-and Sandbox capabilities per machine, for one work scope or permanently.
+artifact or desktop grants, expiry controls or grant/revoke APIs. Execution policy is machine-wide: Control selects the default execution mode and checks Host operations individually or allows them according to the configured machine policy. There is no assistant-to-machine authorization relationship.
 Instruction edits retain fresh owner review. See [machine permissions](permissions.md).
 
 Removing a member invalidates its connection credential. Leaving fences local
@@ -120,8 +119,8 @@ receipts are retained.
 ## Execution targets and instructions
 
 `ExecutionTarget` identifies the execution Runtime and its Host or Sandbox.
-The shared `execution_target` field carries this value in Tasks, schedules,
-assignments and remote launches:
+The `execution_target` field records this value in Task execution information,
+assignments and remote launches. Task and schedule creation select `machine_id`:
 
 ```json
 {"runtime_id":"RUNTIME-ID","target":{"kind":"host"}}
@@ -131,8 +130,8 @@ assignments and remote launches:
 Remote is a relationship to the caller, not a target kind. Host has execution sessions and
 working directories; VM instance lifecycle belongs only to Sandbox. Default dispatch
 is relative to the Agent Runtime, regardless of which machine renders its UI.
-An explicit task target takes precedence over routing instructions and local defaults.
-API requests and persisted records use `execution_target` exclusively. Unsupported
+An explicit machine selection must satisfy message routing constraints. Its current
+policy determines Host or Sandbox at dispatch. Running contexts remain fixed. Unsupported
 Assignment schemas and obsolete selector fields are rejected without migration.
 Restart does not rebind tasks or replay effects.
 App, Control and execution Runtime use the same API revision; upgrade them together.
@@ -294,3 +293,17 @@ A stopped Sandbox does not stop Chat. Shared Sandbox task directories organize
 work; they do not establish mutual task isolation. Cancellation settles the target
 scope, without stopping unrelated tasks or the shared VM. Unknown outcomes require
 reconciliation before new conflicting operations. Restart restores current-schema data; obsolete presets do not create resources.
+
+## Machine policy and execution records
+
+The machine policy is the execution default. Tasks record actual execution
+information for receipts, results and file retrieval; this record is not a future
+container binding. Dispatch reads the current machine policy. Finished work is
+rerun as a new task, never by reviving its previous container. A running operation
+retains its context while subsequent Host authorization checks use current policy.
+
+Control owns policy, routing and approval. The target Runtime owns resource
+reservations, execution leases, process cleanup and disposable container destruction.
+The UI uses existing backend state events and does not own lifecycle timers.
+Managed workspace definitions preserve files independently of disposable runtime
+instances. Prepared macOS VMs remain an explicit operator facility.

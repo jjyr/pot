@@ -717,7 +717,7 @@ mod plugin_contract_tests {
     #[test]
     fn plugins_cannot_shadow_new_product_tools_or_routing_arguments() {
         let original = PluginBundle::builtin("computer-use").unwrap();
-        for name in ["exec", "wait", "create_task", "manage_sandbox"] {
+        for name in ["exec", "wait", "create_task", "list_execution_targets"] {
             let mut bundle = original.clone();
             bundle.manifest.tools[0]["name"] = json!(name);
             bundle.digest = bundle.hash().unwrap();

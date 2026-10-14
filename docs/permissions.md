@@ -1,144 +1,82 @@
-# Machine permissions
+# Machine execution policy
 
-Control owns assistant-to-machine authorization. Execution nodes enforce their OS
-and container boundaries and cannot supply an alternative approval policy.
-Machine membership and model execution authorization are separate contracts.
+Control owns machine policy and owner approval. The policy is machine-wide; there
+is no assistant-to-machine allowlist, Sandbox assignment or persistent
+assistant capability grant. Enrollment authorizes a machine to accept its
+Control's commands. It does not make arbitrary guest input an authorized command.
 
-## Capabilities
+## Defaults and operations
 
-A durable grant is `(assistant_id, machine_id, capability)`, where capability is
-`host` or `sandbox`. Stable identities, not display names, are authoritative.
-Host grants allow direct execution with the runtime account's OS privileges.
-Remote grants are bound to an enrollment fingerprint: re-enrollment clears old
-grants, temporary decisions and preallow rules before the next authorization.
-Sandbox grants allow using assigned sandboxes and creating/managing owned
-sandboxes within owner-configured boundaries. A grant covers future sandboxes on
-that machine; sandbox IDs, commands, paths, plugins and arguments are not grant
-scopes. Neither capability implicitly grants the other.
+Each machine has `execution_mode` (`sandbox` or `host`) and `host_access` (`ask`,
+`allow`, or `deny`). New machines default to Sandbox execution and Host approval.
+Host mode with denied Host access is invalid. The UI names these choices **Run
+inside a sandbox** and **Run directly on this machine (Host)**. Selecting a mode
+does not silently grant persistent Host authority.
 
-```text
-Assistant + work scope
-        |
-        v
-Resolve fixed machine + Host/Sandbox target (no execution effects)
-        |
-        v
-Control policy / durable grant / work decision
-        |
-        +-- deny ----------> fail without execution
-        +-- ask -----------> one shared owner request
-        +-- allow
-              |
-              v
-Check resource ownership and configuration limits
-              |
-              v
-Prepare resources -> normalize guest arguments -> execute
-```
+Assistants resolve their local machine policy for each turn. Tasks resolve the
+selected machine's current policy at dispatch. A running execution retains its
+actual context; changing policy does not move a process or its files. Host access
+is checked for each subsequent operation, so tightening policy affects active
+work. Revocation does not undo effects; cancellation stops running work.
 
-Shell input, patches and plugins all check current access. Preparation cannot boot
-or contact an execution node before authorization. Tasks are authorized before
-launch, including remote Agent startup. Task targets stay fixed; a failed Sandbox
-never falls back to Host. Internally `ExecutionTarget` identifies an execution
-target; it is not an independently granted product resource.
+Sandbox work does not require a separate assistant grant. Managed environments
+are private to their execution workspace and cannot be shared by selecting an
+existing Sandbox. Missing Sandbox support fails explicitly; there is no Host
+fallback. Host execution uses the Runtime service account, not implicit root.
+Operating-system privacy and administrative permissions remain independent.
 
-## Owner decisions and work lifetime
+## Exact Host approval
 
-Cards identify the assistant, machine and capability. Actions are **Always allow**,
-**Allow this work**, **Deny**. The API action `allow_once` means this work, not one
-command. The operation envelope remains internal for identity and receipt checks;
-it does not create a command-specific permission.
+A Host request identifies its assistant, task/turn, generation, call ID, machine,
+tool and full arguments. Temporary decisions are keyed by this complete request,
+not by a work-wide Host capability. Different calls or arguments do not inherit
+approval. Approval cards show the actual operation and offer allow-once or deny;
+persistent access is configured only in machine settings.
 
-Main work identity derives from the accepted conversation turn. Tasks created by
-that turn inherit its work identity, which is stored with their queued jobs.
-Guidance to active/queued work shares that identity. Explicitly reopening finished
-or interrupted work creates a new scope; schedule occurrences are independent.
-An answer from Main does not discard a child's work authorization. Temporary
-decisions live only in Control memory and are lost on restart. An ended scope is
-not reused by future inputs. Normal execution cleanup closes sessions; a session
-handle never substitutes for current authorization.
+For shell commands this approves the command, not a guarantee about which files
+it can affect. Arbitrary shell programs are not constrained by parsing command
+text. Single-operation Host access does not permit an interactive terminal or
+additional input into a running session; output polling and cancellation remain
+available and must pass executor session ownership checks. Persistent Host
+access allows normal interactive execution.
 
-Requests for the same assistant/machine/capability/work are joined. Cancelling one
-waiter does not cancel another Task's request. Denial is remembered for the work,
-so subsequent calls fail without more cards. Durable grant revocation affects
-future checks, including session input; it does not undo effects or stop an
-already executing operation. Interrupt/cancel remains the explicit stop action.
+Remote task Host requests return through authenticated Control services. Control
+resolves the same-machine Host context, authorizes the operation, and dispatches
+it through the existing signed transport and receipts. Guest code receives no
+Control credentials. Unknown results are inspected by original identity, never
+replayed as a new operation. A task's normal Sandbox context is unchanged.
 
-Changes to the assistant's own instructions remain a separate, fresh owner review.
-They cannot receive a permanent machine grant. macOS privacy permissions remain
-operating-system decisions.
+Instruction edits always require their own review, independently of machine policy.
+Temporary approvals are memory-only and expire with their work context/restart.
+Re-enrollment clears the old machine's policy and temporary decisions.
 
-## Machine settings
+## Persistence and owner API
 
-The Machines page configures `ask`, `allow` or `deny` separately for the selected
-assistant's Host and Sandbox capability. Defaults are `ask` for both. Dedicated
-servers may be explicitly preallowed; Linux, remote placement and the Sandbox
-label alone never imply trust. `deny` takes precedence over existing grants.
+`permissions.json` version 3 contains `policy.machines`, machine enrollment epochs,
+and Sandbox budgets. Previous permission formats are rejected without migration.
+No assistant allowlists or capability grants are imported.
 
-Machine settings also control Sandbox resource limits and assignments. Default
-limits are 16 sandboxes, 4 CPUs, 8 GiB RAM and 32 GiB disk per sandbox. Creation
-checks the actual provider defaults and total machine inventory before creating
-resources, and is rejected when either exceeds the configured limits. An assistant can change only resource sizing through Sandbox update;
-privileged flags, host sockets, arbitrary mounts and other configuration fields
-are not accepted. Provider-specific limits and busy/lease checks still apply. Podman reports
-`disk_gib: 0` because it does not provide a disk quota; the disk sizing ceiling
-is not a storage quota on that provider.
-
-New assistant-created sandboxes acquire durable ownership before creation.
-Existing owner-created sandboxes must be assigned in Machines. Only their owner
-assistant can manage them; `shared_with` grants use without management. Creation
-reservations remain visible in configuration if provisioning fails and can be
-reassigned by the owner. Deleting a sandbox releases its ownership/quota entry.
-Ownership checks are product access controls; Tasks sharing a sandbox still share
-its OS boundary. Owner-configured Host mappings use the owner Sandbox configuration endpoint;
-there is no model-visible mount-changing tool. Remote management currently
-supports existing sandbox lifecycle operations; provider/transport limitations
-are independent of authorization.
-
-## Storage and owner API
-
-Control stores version 2 `permissions.json` in its data directory, independently
-of the shared Agent home. No guest permissions file,
-per-execution target grant store, path grant, exact-operation grant or migration exists.
-Older permission formats and Task jobs without a work scope are rejected; there
-is no import or migration of old authorization/Task state. Rebuild/reprovision guest brokers for the
-new `/prepare` normalization endpoint; it cannot read or write authorization.
+`GET /api/v1/permissions` returns machine policies and pending requests for the
+selected conversation owner. `POST` accepts `{id, action}` with `allow_once` or
+`deny`. Machine configuration uses:
 
 ```json
 {
-  "version": 2,
-  "policy": {
-    "rules": [
-      {
-        "assistant_id": "assistant-id",
-        "scope": {"machine_id": "server-id", "capability": "sandbox"},
-        "decision": "allow"
-      }
-    ],
-    "sandbox_limits": {
-      "server-id": {"max_sandboxes": 16, "cpus": 4, "memory_gib": 8, "disk_gib": 32}
-    },
-    "sandboxes": [
-      {"machine_id": "server-id", "sandbox_id": "dev", "owner": "assistant-id", "shared_with": []}
-    ]
-  },
-  "grants": []
+  "action": "configure",
+  "machine_id": "runtime-id",
+  "machine_policy": {
+    "execution_mode": "host",
+    "host_access": "allow"
+  }
 }
 ```
 
-`GET /api/v1/permissions` returns the selected assistant's pending requests, grants,
-identity and owner configuration. `POST` accepts `{id, action}` for decisions and
-revocation. Worker tokens cannot administer permissions. IDs belonging to another
-assistant are rejected.
+The owner can also configure `sandbox_limits`. CPU and memory are aggregate
+managed-environment reservation budgets, `max_sandboxes` bounds concurrent managed
+environments, and disk sizing is provider-dependent. Resource reservations live
+on the execution Runtime and remain held until destruction is confirmed. These
+are not Host process quotas. Unsupported disk enforcement must not be represented
+as a hard storage quota (Podman does not provide it).
 
-Owner configuration uses `POST` with `action: "configure"`, `machine_id`, and:
-
-- `capability` plus `decision` for the selected assistant's machine policy;
-- `sandbox_limits` for the machine's resource bounds;
-- `sandbox_access` with `machine_id`, `sandbox_id`, `owner`, `shared_with` for assignment.
-
-Writes are atomic and detect conflicting external file edits. Manual edits require
-restart. Pending requests, temporary grants, denials and history are not persisted.
-Plugin approval display metadata is removed; plugins use the same machine gate.
-
-Sources: `crates/control/src/permissions.rs`, `crates/agent/src/permissions.rs`.
+Sources: `crates/control/src/permissions.rs`, `crates/agent/src/permissions.rs`,
+`crates/sandbox/src/manager.rs`.

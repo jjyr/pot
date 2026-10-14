@@ -334,7 +334,6 @@ async def run(args):
             )
             await turn(
                 [
-                    action("manage_sandbox", action="select", sandbox_id="linux-b"),
                     action(
                         "write_stdin",
                         session_id="$last_session",
@@ -343,7 +342,6 @@ async def run(args):
                         chars=f"stty size > {prefix}-terminal; printf BOUND >> {prefix}-terminal; exit\n",
                         yield_time_ms=1000,
                     ),
-                    action("manage_sandbox", action="select", sandbox_id="default"),
                     action("exec_command", login=False, cmd="rm .bash_profile"),
                 ]
             )
@@ -396,14 +394,11 @@ async def run(args):
             )
             await turn([])
             assert (await api("sandboxes"))["items"][0]["state"]["phase"] == "stopped"
+            await api(
+                "sandboxes", {"action": "create", "sandbox_id": "linux-b", "name": "Second Linux"}
+            )
             await turn(
                 [
-                    action(
-                        "manage_sandbox",
-                        action="create",
-                        sandbox_id="linux-b",
-                        name="Second Linux",
-                    ),
                     action(
                         "apply_patch",
                         patch="*** Begin Patch\n*** Add File: pot.txt\n+POT_DEFAULT\n*** End Patch",
@@ -471,7 +466,6 @@ SKILLS""",
                         cmd='read value; printf "%s" "$value" > session.txt',
                         yield_time_ms=10,
                     ),
-                    action("manage_sandbox", action="select", sandbox_id="linux-b"),
                     action(
                         "write_stdin",
                         session_id="$last_session",
@@ -482,14 +476,14 @@ SKILLS""",
                     action(
                         "apply_patch",
                         patch="*** Begin Patch\n*** Add File: selected.txt\n+SECOND\n*** End Patch",
+                        sandbox_id="linux-b",
                     ),
-                    action("manage_sandbox", action="select", sandbox_id="default"),
                 ]
             )
             assert (default / "session.txt").read_text() == "BOUND"
             assert not (second / "session.txt").exists()
             assert (second / "selected.txt").read_text() == "SECOND\n"
-            report["pot_sessions_stay_bound_across_default_change"] = True
+            report["pot_sessions_stay_bound_with_explicit_targets"] = True
             await exercise_shell_sessions("pot")
             # Persistent worker credential and immutable assignment, including API bypass attempts.
             task = await api(
@@ -594,8 +588,7 @@ SKILLS""",
             report["api_profile_chat_without_sandbox"] = True
             await turn(
                 [
-                    action("list_sandboxes"),
-                    action("manage_sandbox", action="select", sandbox_id="default"),
+                    action("list_execution_targets"),
                     action(
                         "apply_patch",
                         patch="*** Begin Patch\n*** Add File: api-fixture.txt\n+API_DEFAULT\n*** End Patch",

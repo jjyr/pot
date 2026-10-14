@@ -21,7 +21,7 @@ are additive; their presence in the lockfile does not select the upstream backen
 | `tasks` / `page_state` | Task rows, status, search, filters, empty/error states, counts and authoritative pagination; viewing a Sandbox does not alter its execution default |
 | `machines` / `machine_state` | Machine cards with Host/Sandbox status, exact-location task filters and capability-controlled desktop actions |
 | `usage` / `usage_state` | Statistics, charts, grouping, pagination, quotas, tool output, allowance editing and exact K/M input parsing |
-| `permissions` | Assistant/machine Host or Sandbox approval cards, work/permanent decisions and revocation shared by native and Web; Machines configures policies, limits and ownership |
+| `permissions` | Exact Host operation approval cards shared by native and Web; Machines configures machine-wide execution policy and resource budgets |
 | `chat` | User/assistant styling, Markdown, tool folding/status, copy actions, task-report links and message lifecycle labels |
 | `markdown` | Stable text IDs, parsing/selection, code/link styling and HTTP(S) link dispatch |
 | `design` | Existing Pot theme tokens and compact-viewport policy |
@@ -147,3 +147,13 @@ collapsed behind the machine settings disclosure. Resource creation stays API-on
 Native and Web use coalesced Control invalidations and conversation SSE instead of
 healthy-state UI polling. See [UI events](ui-events.md) for scope, cursor/snapshot
 ordering, cancellation, recovery and the remaining backend lifecycle monitor.
+
+## Machine execution settings
+
+Machines expose **Run inside a sandbox** and **Run directly on this machine
+(Host)**, with separate Host options **Ask before each operation**, **Allow
+directly**, and **Never allow**. Copy explains that Host operations use the Runtime
+account and can change machine files/configuration. Machine pages do not display
+assistant access lists or Sandbox assignments. Managed stopped workspace records
+are hidden from the ordinary instance list. Host approval cards display the full
+operation and offer a single-operation decision rather than permanent grants.

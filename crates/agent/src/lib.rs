@@ -619,12 +619,7 @@ async fn run(
             .collect()
     };
     if s.role != ExecutionRole::Summary {
-        let mut plugins = settings.plugin_tools()?;
-        if s.role == ExecutionRole::Main {
-            for tool in &mut plugins {
-                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string","description":"Explicit Sandbox target; use execution_target for Host or Sandbox selection. Existing sessions retain their original target."});
-            }
-        }
+        let plugins = settings.plugin_tools()?;
         available.extend(plugins);
         available.extend(orchestration::schemas().into_iter().filter(|t| {
             settings
@@ -989,13 +984,6 @@ impl Dispatcher<'_> {
                 }
                 Ok(())
             })
-        } else if call.name == "manage_sandbox" {
-            s.feedback
-                .prepare_permission_operation(&call.name, call.arguments.clone())
-                .map(|args| {
-                    call.arguments = args;
-                    call.arguments["execution_target"] = json!("host");
-                })
         } else {
             Ok(())
         };

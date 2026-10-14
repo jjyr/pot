@@ -16,26 +16,36 @@ Control injects in-memory services into pot-agent. Snapshot/event schema version
 
 pot-agent runs in-process on Host with an injected ToolExecutor and owner services;
 there is no implicit local backend. Control owns [machine permission policy](../../docs/permissions.md);
-pot-agent owns [tool composition](../../docs/tool-composition.md). Main defaults to Host; Workers
-execute only in their fixed Host/Sandbox Execution target, including after approval.
-Agent context, compaction and usage remain owned by the assistant Runtime. Each assistant has independent configuration and AGENTS.md routing rules.
+pot-agent owns [tool composition](../../docs/tool-composition.md). Control resolves
+machine policy for each assistant turn and each Task dispatch. Sandbox is the
+default; Host access is independently configured as ask, allow or deny. A Task may
+request a single Host operation on its execution machine through Control's exact
+operation approval without changing its normal execution context.
 
-Main manages Tasks, schedules and Sandboxes; Workers cannot delegate, manage or
-switch Sandboxes. Summary turns inspect Tasks only. Guest workspaces contain
-artifacts rather than credentials or Helper sockets. Owner-reviewed Host mappings
-are visible to every Task sharing the Sandbox.
+Main manages Tasks and schedules. Runtime manages disposable Sandbox lifecycle;
+models do not create or share containers. Guest workspaces contain artifacts,
+not Control credentials or Helper sockets. Agent context, compaction and usage
+remain owned by the assistant Runtime.
 
-Cancellation settles the active turn and drains remote operations. Executor subprocesses run as an ordinary guest user inside root-owned cgroups, including detached descendants. Unknown outcomes quarantine the execution target until explicit main-only recovery; commands are never replayed automatically. Quit settles Host work and stops VMs. Artifacts and Thread history persist.
+## Machine selection and execution lifecycle
 
-## Execution target selection and lifecycle
+Task and schedule creation accept `machine_id`. Omission selects the local machine
+subject to message routing constraints. Tasks read current policy at dispatch;
+schedules create a new Task on every occurrence. The recorded `execution_target`
+is the actual run context, not a persistent selection for future work.
 
-Main may create/start/stop/delete/select/recover execution targets or open their desktops. Inventory is limited to 16 Linux definitions. Fresh Runtime roots have no execution targets. Callers explicitly create resources.
+Sandbox Tasks receive independent workspaces and disposable Linux containers.
+Runtime reserves aggregate CPU/memory and concurrency capacity before starting,
+holds a run lease across model/tool waits, drains process scopes, then destroys
+the instance. Cleanup failures retain reservations. Files and execution records
+remain available. Completed, failed, interrupted and cancelled Tasks cannot be
+reopened: rerun creates a new Task and reads current machine policy.
 
-Task creation uses a typed `execution_target` or the approved local selectors. Omitted targets resolve on the dispatching Agent Runtime: the selected Sandbox when configured, otherwise its enabled Host. It does not allocate a VM per task or balance across execution targets. Three unspecified tasks share the selected Sandbox, with separate `/data/workspace/tasks/TASK_ID` directories. To split tasks, main creates definitions and passes different IDs. Selection changes through the main management tool affect future creations and main tools; existing task bindings and saved schedules remain fixed across turns/restart. The Sandbox execution target sidebar selects the displayed execution target only.
-
-Agent profile routing determines provider/model, not execution target. Global/profile/provider concurrency limits determine dispatch capacity, not placement. Runtime starts a bound execution target when needed and never falls back to Host or retargets a worker. Task turns and operations hold leases; stop/delete rejects occupied or quarantined execution targets. Definitions referenced by tasks/schedules cannot be deleted, and deleted IDs cannot be reused. Deletion retains workspace artifacts.
-
-Tasks in one Sandbox share its guest account. Separate directories do not establish mutual filesystem/process isolation. Command groups are drained on completion/timeout; the owner/session cgroup drains all descendants, including detached setsid processes, on cancellation, failure or shutdown. Pipe/PTY sessions survive normal turns, retain their original Sandbox and Thread execution generation, and expire when idle. Empty runners keep shell initialization caches without execution leases. See [command execution](../../docs/executor.md) for shell/login, PTY controls, explicit timeout and snapshot policies. The HTTP executor currently batches output per execution/poll response; use yield_time_ms and write_stdin for bounded progress polling. Desktop starts explicitly and stops with its execution target.
+Prepared macOS VMs remain operator-managed. No missing-provider failure falls
+back to Host. Agent model/profile routing and execution-machine placement are
+independent. See [permissions](../../docs/permissions.md),
+[Task lifecycle](../../docs/task-coordination.md) and
+[command execution](../../docs/executor.md).
 
 ## Control API
 
@@ -54,7 +64,7 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `POST /api/v1/agent/config` | Copy a profile configuration into an existing Thread at a safe turn boundary |
 | `GET/POST /api/v1/agent/routing` | Worker profile defaults, model-visible allowlist and concurrency policies |
 | `GET/POST /api/v1/sandboxes` | Main/operator inventory and typed lifecycle actions |
-| `GET/POST /api/v1/permissions` | Machine Host/Sandbox decisions, grants, revocation, policy, resource limits and ownership; no worker administration |
+| `GET/POST /api/v1/permissions` | Machine policy, exact Host approvals and Runtime resource budgets |
 | `POST /api/v1/execution` | Active lane `{name,call_id,args}`; fixed worker scope, durable receipts |
 | `POST /api/v1/mcp`, `POST /api/v1/orchestration` | Role-scoped shared product tool dispatcher |
 | `/gw/{provider}/{*path}` | Internal lane-authorized provider gateway |
@@ -70,11 +80,12 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 
 ## Tasks, profiles and schedules
 
-Every task has a private product transcript and fixed Host/Sandbox assignment.
+Every task has a private product transcript and records its actual Host/Sandbox
+execution context when dispatched.
 Remote Task Agent context and run journals live on the execution Runtime; Control
 keeps the task transcript, launch intent and terminal result. Guidance receipts are durable and consumed in order. FIFO dispatch respects configured concurrency and cooperative resource locks; one lane cannot cancel another. Local restart marks started work interrupted. Control restart reconciles the
 original remote run; execution Runtime restart waits for receipts and interrupts
-it, requiring explicit guidance. Neither path replays external effects. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. See [Task coordination](../../docs/task-coordination.md) for guidance, messages, waiting, stopping and archive semantics.
+it; retry requires a new Task. Neither path replays external effects. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. See [Task coordination](../../docs/task-coordination.md) for guidance, messages, waiting, stopping and archive semantics.
 
 Explicit task profiles take precedence over configured worker defaults. With no explicit worker default, new tasks snapshot the active Main Agent. Saved profile changes do not rewrite existing task model settings or plugin selections. Before each execution, selected plugin names resolve to the current implementations in the owning assistant’s source Profile; Skills synchronize by name as described in [Agent context](../../docs/agent-context.md). Explicit Change Agent copies a new configuration into the same Thread at a safe turn boundary, preserving its complete context and Sandbox assignment. The configuration update and pending-update removal commit together. Events and permission requests are filtered by owner/generation/turn to reject stale updates. Provider-specific replay is retained in stored history and sent only to its original provider/model/protocol; other routes receive portable text and paired tool calls/results.
 

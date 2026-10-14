@@ -138,6 +138,9 @@ impl Authority {
         }
         let record = journal.accept(control, launch.clone())?;
         if record.phase == Phase::Accepted {
+            let run_lease = host.acquire_controlled_run(&lease.target).await?;
+            let cleanup_scope = scope(&lease)?;
+            let cleanup_target = lease.target.clone();
             let port = Arc::new(task_services::Port {
                 authority: self.clone(),
                 host: host.clone(),
@@ -170,6 +173,13 @@ impl Authority {
                 .await
                 {
                     eprintln!("Task Agent remains unresolved: {error}");
+                }
+                drop(run_lease);
+                if let Err(error) = host
+                    .cancel_controlled(&cleanup_scope, &cleanup_target)
+                    .await
+                {
+                    eprintln!("Task environment cleanup remains unresolved: {error}");
                 }
             }));
         }

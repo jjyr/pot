@@ -168,10 +168,38 @@ impl pot_core::ExecutionFeedback for Port {
     }
     fn resolve_execution_operation(
         &self,
-        _name: &str,
+        name: &str,
         mut args: Value,
     ) -> futures_util::future::BoxFuture<'_, Result<Value>> {
+        let name = name.to_owned();
         Box::pin(async move {
+            let host = json!(format!(
+                "remote:{}",
+                serde_json::to_string(&pot_core::ExecutionTarget::host(
+                    &self.binding.execution_target.runtime_id
+                ))?
+            ));
+            let requested_host = (args.get("execution_target").is_none()
+                && matches!(
+                    self.binding.execution_target.target,
+                    pot_core::ExecutionTargetKind::Host {}
+                ))
+                || args.get("execution_target").is_some_and(|v| {
+                    v == "host"
+                        || v == &host
+                        || v == &json!(pot_core::ExecutionTarget::host(
+                            &self.binding.execution_target.runtime_id
+                        ))
+                });
+            if requested_host {
+                args["execution_target"] = host;
+                return self
+                    .effect(
+                        &format!("prepare-host:{}", digest(&(&name, &args))?),
+                        Operation::PrepareHost { name, args },
+                    )
+                    .await;
+            }
             if let Some(value) = args.get("execution_target") {
                 let expected = json!(self.binding.execution_target);
                 let remote = json!(format!(
@@ -199,6 +227,15 @@ impl pot_core::ExecutionFeedback for Port {
         let name = name.to_owned();
         Box::pin(async move {
             self.ready().await?;
+            let host = json!(format!(
+                "remote:{}",
+                serde_json::to_string(&pot_core::ExecutionTarget::host(
+                    &self.binding.execution_target.runtime_id
+                ))?
+            ));
+            if args["execution_target"] == host {
+                return Ok(args);
+            }
             let lease = self.current_lease()?;
             let mut args = args;
             let object = args
@@ -232,11 +269,6 @@ impl pot_core::ExecutionFeedback for Port {
     ) -> futures_util::future::BoxFuture<'_, Result<Value>> {
         Box::pin(async move {
             let original = request.clone();
-            let mut request = request;
-            request["execution_target"] = json!(format!(
-                "remote:{}",
-                serde_json::to_string(&self.binding.execution_target)?
-            ));
             let mut result = self
                 .effect(
                     &format!("permission:{}", digest(&request)?),
@@ -475,6 +507,25 @@ impl pot_core::ToolExecutor for Port {
                 "Task execution owner mismatch"
             );
             self.ready().await?;
+            let host = json!(format!(
+                "remote:{}",
+                serde_json::to_string(&pot_core::ExecutionTarget::host(
+                    &self.binding.execution_target.runtime_id
+                ))?
+            ));
+            if args["execution_target"] == host {
+                let value = self
+                    .effect(
+                        &format!("host:{call}"),
+                        Operation::ExecuteHost {
+                            call_id: call.into(),
+                            name: name.into(),
+                            args: args.clone(),
+                        },
+                    )
+                    .await?;
+                return Ok(value.get("result").cloned().unwrap_or(value));
+            }
             let path = self.authority.data.join("task-tool-intents").join(digest(&(
                 &self.control,
                 &self.binding,

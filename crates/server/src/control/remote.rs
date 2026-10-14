@@ -226,6 +226,17 @@ fn attempt_id(run: &str, attempt: u64) -> Result<String> {
     Ok(uuid::Uuid::from_bytes(hash.as_ref()[..16].try_into().unwrap()).to_string())
 }
 impl RemoteExecution for Authority {
+    fn configure_sandbox_budget(
+        &self,
+        machine: String,
+        budget: Value,
+    ) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            self.call(&machine, Rpc::ConfigureSandboxBudget { budget })
+                .await?;
+            Ok(())
+        })
+    }
     fn machine_epoch(&self, machine: &str) -> Result<String> {
         let book = self.book.lock().unwrap();
         let member = book
@@ -487,11 +498,12 @@ impl RemoteExecution for Authority {
             .filter(|p| p.enabled)
             .ok_or_else(|| anyhow::anyhow!("Remote machine is not connected"))?;
         ensure!(
-            remote.inventory["items"]
-                .as_array()
-                .is_some_and(|items| items
-                    .iter()
-                    .any(|item| item["execution_target"] == json!(execution_target))),
+            matches!(&execution_target.target, pot_core::ExecutionTargetKind::Sandbox { sandbox_id } if pot_sandbox::Manager::is_managed(sandbox_id))
+                || remote.inventory["items"]
+                    .as_array()
+                    .is_some_and(|items| items
+                        .iter()
+                        .any(|item| item["execution_target"] == json!(execution_target))),
             "Remote Execution target is not in the Control machine inventory"
         );
         Ok(())

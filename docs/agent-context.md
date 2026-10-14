@@ -109,10 +109,11 @@ injected independently. A custom system prompt still receives file instructions.
 
 Explicit task choices take precedence over saved rules. Without an explicit target,
 Control selects a machine labelled `task-runner`, preferring its own Runtime and
-then stable Runtime ID order. The selected machine's execution target is fixed
-when the task is created; local execution retains the configured Host/Sandbox
-default, while an implicit remote target uses Host. Explicit Host/Sandbox references
-remain available. Labels describe routing intent, not a capability guarantee;
+then stable Runtime ID order. Task and schedule requests select `machine_id`.
+At dispatch, the selected machine's current policy determines direct Host or
+private Sandbox execution. The actual context is recorded for this execution;
+reruns create new Tasks. Same-machine Host exceptions require machine policy
+approval and do not change the Task's normal context. Labels describe routing intent, not a capability guarantee;
 execution fails normally if the selected target cannot do the work. Rules cannot enable a
 service, allow a Profile or grant execution authority. `create_task` retains
 `selection_reason`; dedicated preference tools and `preference_revision` have
