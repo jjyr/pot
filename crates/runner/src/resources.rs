@@ -1,4 +1,4 @@
-//! Immutable Control-selected resource manifest. No node-local discovery.
+//! Prepared resource contents fetched from Control before a run. Never part of Launch.
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use pot_core::plugins::PluginConfig;

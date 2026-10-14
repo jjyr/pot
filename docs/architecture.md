@@ -32,7 +32,7 @@ enable Control. A joined execution Runtime cannot become Control simultaneously 
 A local Control with assistants cannot join as a Runner; use a separate data root.
 
 Control owns remote conversations, assistant instructions, Tasks, schedules,
-global plugins and skills, model configuration, budgets and approvals. Chat
+global plugin and skill sources, model configuration, budgets and approvals. Chat
 assistants remain on their local or remote Control. The approved remote
 task design starts a new Task Agent on the selected execution Runtime, alongside
 its Host or Sandbox, and reads its durable result after completion.
@@ -43,8 +43,9 @@ placement is included. Execution nodes do not need
 assistant databases or provider credentials.
 
 Remote Task Agent loops run on the execution Runtime. Control-selected global
-Skills and pinned plugin configuration are delivered through the authenticated
-outward connection. Named remote plugin calls execute the supplied pinned bundle
+Skill and plugin names travel with the launch; the execution Runtime synchronizes
+their current contents through the authenticated outward connection before starting
+the Agent. Named remote plugin calls execute the supplied pinned bundle
 in Host/Sandbox through the existing owner approval and receipt path. The Task
 Agent uses outward signed Control service calls for models, policy, approvals and
 guidance; provider secrets remain at Control. Main assistants stay at their owner.
@@ -141,25 +142,35 @@ Each assistant's AGENTS.md is stored in its database and follows its identity.
 updates request approval. Server-side approval baselines protect intervening user
 edits. Main also reads public/project AGENTS.md from the actual working directory.
 Task Agents have no assistant-level instructions; they use the task brief and the
-execution destination's project rules. In Control-connected execution, global
-plugins, skills and other global Agent resources are selected and versioned by
-Control. Execution nodes receive the selected bundles and may cache immutable
-versions; they do not discover global resources from their own home directories
-or packaged catalogs. Project AGENTS.md and project skills continue to be read
-from the actual execution workspace with their existing scope/precedence rules.
-Control snapshots global bundles before the first remote context and persists
-the snapshot with the task; follow-up turns and restart reuse it. Cache files
-retain executable bits and are exposed read-only; digest/contents are verified
-before reuse. Snapshots also bind Shell settings and the model observation mode.
-The execution lease stores the accepted resource digest outside the task workspace;
-prepare/execute reject a different cache revision, even if its own digest is valid.
-Changing configuration on an accepted run fails. Model-visible tool definitions
-remain Control-selected; the destination capability list does not filter them. Plugin sessions are scoped to
-the accepted run; a new run cannot reuse a previous run's session ID.
-Internal plugin envelopes are created only from supplied enabled bundles and cannot
-be invoked through the public named-tool RPC. The current inline snapshot is bounded to 512 KiB and 2048 files
-within the existing 1 MiB transport limit. Oversized or symlinked bundles fail
-explicitly; large-bundle chunked delivery remains unqualified.
+execution destination's project rules. Task launches contain skill/plugin names
+and model/execution settings, never Skill files or plugin bundles (including
+inside the model configuration). After acceptance, the destination Runtime
+queries the owning Control by name through its authenticated, run-bound resource
+service. It synchronizes the current bundles before constructing tools or sampling
+the model. No resource version is requested. Skills come from Control's current
+global directories; plugin implementations come from the owning assistant's current
+source Profile, limited to the task's selected plugin names. Missing/disabled
+resources, unavailable profiles and failed synchronization stop execution.
+
+Each explicit continuation synchronizes again. Resource contents remain stable
+within one run; an in-flight run does not refresh. Control does not persist a
+per-task resource archive. Destination caches use content digests for verification,
+retain executable bits, expose files read-only, and keep only the workspace's
+active materialization. The execution lease binds the synchronized digest outside
+the task workspace; prepare/execute reject changed caches. Digests are internal
+integrity checks, not task resource-version selectors.
+
+Independent local tasks use the same pre-execution materialization against their
+owning Runtime. Project AGENTS.md and project Skills continue to be discovered
+from the actual workspace independently. Omitted/empty task skills load no global
+Skills. Agent context contains Skill metadata and ordinary absolute file paths;
+cat, scripts and supporting relative paths continue to work without a new tool.
+Plugins are synchronized before their tool schemas are registered, so definitions
+and implementations come from the same prepared bundle. Plugin sessions remain
+run-scoped. Internal plugin envelopes cannot be invoked through public named-tool
+RPCs. Resource synchronization currently transfers up to 512 KiB / 2048 Skill
+files per response; large-bundle chunked delivery remains unqualified.
+
 Control specifies the exact model, execution target and tool configuration.
 The execution Runtime runs that configuration or returns an explicit unsupported
 configuration/dependency error. It must not replace models, plugins or targets,

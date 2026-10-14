@@ -12,6 +12,12 @@ pub async fn execute(
         crate::permissions::authorize_task(s).await?;
     }
     let _lease = acquire_local_execution_target(s).await?;
+    if s.is_worker && !crate::remote_execution::is_remote(s) {
+        crate::control_resources::refresh_plugins(s)?;
+        let (_, _, cwd, _) = crate::execution_target::workspace_view(s)?;
+        std::fs::create_dir_all(&cwd)?;
+        crate::control_resources::install(&cwd, &crate::control_resources::current(s)?)?;
+    }
     let thread = thread(s)?;
     s.conversation
         .inner
@@ -30,6 +36,17 @@ pub async fn execute(
     if s.is_worker && crate::remote_execution::is_remote(s) {
         let binding = crate::remote_execution::binding(s, s.execution_target.clone().unwrap())?;
         let worker = s.clone();
+        let plugins = thread
+            .config
+            .params
+            .agent
+            .plugins
+            .iter()
+            .filter(|(_, plugin)| plugin.enabled)
+            .map(|(name, _)| name.clone())
+            .collect();
+        let mut config = thread.config.clone();
+        config.set_plugins(Default::default())?;
         let result = crate::remote_execution::port(s)?
             .run_task(
                 pot_runner::Launch {
@@ -37,8 +54,8 @@ pub async fn execute(
                     run_id: binding.run_id,
                     generation: binding.generation,
                     execution_target: binding.execution_target,
-                    config: thread.config.clone(),
-                    resources: crate::control_resources::snapshot(s)?,
+                    config,
+                    plugins,
                     skills: s.skill_selection.clone(),
                     text: request.text.clone(),
                 },

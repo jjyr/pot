@@ -53,7 +53,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Optional skill names restricting this task. Omitted automatically discovers global task/shared and project skills."
+          "description": "Global skill names to include in this task. Omitted or empty loads no global skills. Project skills are always discovered independently."
         },
         "execution_target": {
           "type": "object",

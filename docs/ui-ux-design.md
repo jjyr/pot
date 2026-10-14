@@ -149,7 +149,7 @@ For an empty main configuration, the final connection action also sets the Main 
 
 The existing Runtime PTY subsystem is retained; removal of this separate subsystem was also rejected by automatic review. This is separate from the deleted product Terminal UI and from Agent shell/tool execution.
 
-Main Save queues a Thread configuration update. Pending operations disable duplicate submission and explain current-turn/paused-request waits; only the applied Thread configuration is displayed as effective. Context is preserved across provider/model changes. Existing task configurations remain pinned. New tasks following Chat use its active snapshot rather than an unapplied profile edit.
+Main Save queues a Thread configuration update. Pending operations disable duplicate submission and explain current-turn/paused-request waits; only the applied Thread configuration is displayed as effective. Context is preserved across provider/model changes. Existing task model settings and plugin selections remain fixed; selected plugin implementations synchronize from Control before each new execution. New tasks following Chat use its active snapshot rather than an unapplied profile edit.
 
 Task Configuration preserves existing explicit worker defaults/routing and allows choosing Follow Chat. Advanced profile editing/copy, allowlists, profile/provider caps and allowances remain available. Task-specific Change Agent targets only that task and reuses AI connection management; completion returns to the task. Credential-independent product limits use private `execution-limits.json`, without implicitly selecting Pot or requiring a DeepSeek key.
 

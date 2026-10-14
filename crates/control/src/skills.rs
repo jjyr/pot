@@ -64,6 +64,13 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
         project = parent;
         location = visible_parent;
     }
+    if s.is_worker
+        && let Some(mut installed) = crate::control_resources::installed_resources(&cwd, &visible)?
+    {
+        roots.append(&mut installed.roots);
+        installed.roots = roots;
+        return Ok(installed);
+    }
     let global_location = visible.join(".pot/agent/skills");
     let builtin_root = SkillRoot {
         path: s.agent_service.resources.skill_builtin.clone(),
@@ -74,7 +81,7 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
         },
         builtin: true,
     };
-    let reserved_names = pot_agent::discover_skills(&SkillResources {
+    let mut reserved_names: Vec<String> = pot_agent::discover_skills(&SkillResources {
         roots: vec![builtin_root.clone()],
         ..Default::default()
     })?
@@ -82,21 +89,74 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
     .into_iter()
     .map(|skill| skill.name)
     .collect();
-    roots.push(SkillRoot {
-        path: s.agent_service.resources.skill_user.clone(),
-        location: if host {
-            s.agent_service.resources.skill_user.clone()
-        } else {
-            global_location
+    let globals = vec![
+        SkillRoot {
+            path: s.agent_service.resources.skill_user.clone(),
+            location: if host {
+                s.agent_service.resources.skill_user.clone()
+            } else {
+                global_location
+            },
+            builtin: false,
         },
-        builtin: false,
-    });
-    roots.push(builtin_root);
+        builtin_root,
+    ];
+    if s.is_worker {
+        let selected = selected_global_roots(
+            globals,
+            &reserved_names,
+            s.skill_selection.clone().unwrap_or_default(),
+        )?;
+        reserved_names.retain(|name| {
+            s.skill_selection
+                .as_ref()
+                .is_some_and(|names| names.contains(name))
+        });
+        roots.extend(selected);
+    } else {
+        roots.extend(globals);
+    }
     Ok(SkillResources {
         roots,
         reserved_names,
-        selection: s.skill_selection.clone(),
+        selection: None,
     })
+}
+
+/// Select only global bundles before merging the independently discovered project roots.
+fn selected_global_roots(
+    roots: Vec<SkillRoot>,
+    reserved_names: &[String],
+    selection: Vec<String>,
+) -> Result<Vec<SkillRoot>> {
+    let catalog = pot_agent::discover_skills(&SkillResources {
+        roots: roots
+            .iter()
+            .map(|root| SkillRoot {
+                location: root.path.clone(),
+                ..root.clone()
+            })
+            .collect(),
+        reserved_names: reserved_names.to_vec(),
+        selection: Some(selection),
+    })?;
+    catalog
+        .skills
+        .into_iter()
+        .map(|skill| {
+            let location = PathBuf::from(skill.location);
+            let root = roots
+                .iter()
+                .find(|root| location.starts_with(&root.path))
+                .ok_or_else(|| anyhow!("Selected global skill has no resource root"))?;
+            let relative = location.strip_prefix(&root.path)?;
+            Ok(SkillRoot {
+                path: root.path.join(relative).parent().unwrap().to_path_buf(),
+                location: root.location.join(relative).parent().unwrap().to_path_buf(),
+                builtin: root.builtin,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -264,7 +324,30 @@ mod tests {
         std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }
     #[tokio::test]
-    async fn runtime_shares_flat_skills_project_priority_and_restores_task_filter() {
+    async fn completions_offer_globals_without_project_selectors() {
+        let root = tasks::tests::fixture();
+        bundle(
+            &root.data.join("agent-workspace/.agents/skills"),
+            "project-only",
+            "project",
+        );
+        bundle(
+            &root.agent_service.resources.skill_user,
+            "global-only",
+            "global",
+        );
+        let response = crate::control::completions(State(root.clone()), tasks::tests::headers())
+            .await
+            .unwrap()
+            .0;
+        let text = response.to_string();
+        assert!(text.contains("/skill:global-only"));
+        assert!(text.contains("/skill:skill-creator"));
+        assert!(!text.contains("/skill:project-only"));
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
+    #[tokio::test]
+    async fn task_selects_globals_independently_of_project_skills_and_restores_selection() {
         let root = tasks::tests::fixture();
         bundle(
             &root.agent_service.resources.skill_user,
@@ -310,8 +393,13 @@ mod tests {
             "collision",
             "project wins",
         );
+        bundle(
+            &worker.workspace.join(".agents/skills"),
+            "project-only",
+            "always discovered",
+        );
         let catalog = pot_agent::discover_skills(&resources(&worker).unwrap()).unwrap();
-        assert_eq!(catalog.skills.len(), 1);
+        assert_eq!(catalog.skills.len(), 2);
         assert_eq!(catalog.skills[0].description, "project wins");
         assert_eq!(
             catalog.skills[0].location,
@@ -323,20 +411,33 @@ mod tests {
         let mut unfiltered = worker.clone();
         unfiltered.skill_selection = None;
         let automatic = pot_agent::discover_skills(&resources(&unfiltered).unwrap()).unwrap();
-        for name in ["user-skill", "skill-creator", "skill-installer"] {
-            let skill = automatic
+        assert_eq!(automatic.skills.len(), 2);
+        assert_eq!(automatic.skills[0].name, "collision");
+        unfiltered.skill_selection = Some(vec![]);
+        assert_eq!(
+            pot_agent::discover_skills(&resources(&unfiltered).unwrap())
+                .unwrap()
+                .skills,
+            automatic.skills
+        );
+        unfiltered.skill_selection = Some(vec!["skill-creator".into()]);
+        let builtin = pot_agent::discover_skills(&resources(&unfiltered).unwrap()).unwrap();
+        assert!(
+            builtin
                 .skills
                 .iter()
-                .find(|skill| skill.name == name)
-                .unwrap();
-            assert_eq!(
-                skill.location,
-                format!(
-                    "/data/workspace/tasks/{}/.pot/agent/skills/{name}/SKILL.md",
-                    task.id
-                )
-            );
-        }
+                .any(|skill| skill.name == "skill-creator")
+        );
+        assert!(
+            builtin
+                .skills
+                .iter()
+                .any(|skill| skill.name == "project-only")
+        );
+        unfiltered.skill_selection = Some(vec!["project-only".into()]);
+        assert!(resources(&unfiltered).is_err());
+        unfiltered.skill_selection = Some(vec!["missing-global".into()]);
+        assert!(resources(&unfiltered).is_err());
         tasks::restore(&root).unwrap();
         assert_eq!(
             tasks::owner(&root, &task.id).unwrap().skill_selection,

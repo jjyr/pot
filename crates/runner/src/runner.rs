@@ -23,7 +23,16 @@ pub trait Destination: Send + Sync {
     ) -> BoxFuture<'a, Result<Value>>;
 }
 
+pub trait ResourceProvider: Send + Sync {
+    /// Resolve names against Control once, before any model sampling.
+    fn synchronize<'a>(
+        &'a self,
+        launch: &'a Launch,
+    ) -> BoxFuture<'a, Result<crate::resources::GlobalResources>>;
+}
+
 pub struct RunServices {
+    pub resources: Arc<dyn ResourceProvider>,
     pub model: Arc<dyn ExecutionServices>,
     pub control: Arc<dyn ExecutionFeedback>,
     pub tools: Arc<dyn ToolExecutor>,
@@ -271,11 +280,17 @@ pub async fn execute(
     let mut text = String::new();
     let execution = async {
             feedback.ready().await?;
-            let context = host.install_resources(&accepted.launch.execution_target.target, &workspace_scope, accepted.launch.resources.clone()).await?;
-            let mut skills: Vec<pot_agent::Skill> = serde_json::from_value(context["skills"].clone())?;
+            let resources = services.resources.synchronize(&accepted.launch).await?;
+            resources.validate()?;
+            ensure!(resources.plugins.keys().cloned().collect::<std::collections::BTreeSet<_>>() == accepted.launch.plugins.iter().cloned().collect(), "Synchronized plugins differ from task selection");
+            ensure!(resources.shell == accepted.launch.config.params.agent.shell, "Synchronized shell differs from task");
+            let mut config = accepted.launch.config.clone();
+            config.set_plugins(resources.plugins.clone())?;
+            ensure!(resources.vision == config.params.agent.model_descriptor(&config.provider, &config.model)?.vision(), "Synchronized observation mode differs from task");
+            let context = host.install_resources(&accepted.launch.execution_target.target, &workspace_scope, resources).await?;
+            let skills: Vec<pot_agent::Skill> = serde_json::from_value(context["skills"].clone())?;
             if let Some(selection) = &accepted.launch.skills {
                 ensure!(selection.iter().all(|name|skills.iter().any(|skill|&skill.name==name)),"Selected task skill is unavailable at the fixed destination");
-                skills.retain(|s| selection.contains(&s.name));
             }
             let data = journal.data.join(Journal::key(control_id, task_id, run_id)?);
             std::fs::create_dir_all(&data)?;
@@ -295,7 +310,7 @@ pub async fn execute(
             host.executions().execute(
                 pot_runtime_execution::Invocation {
                     context: &context,
-                    thread: &Thread { owner: task_id.into(), generation: accepted.launch.generation, config: accepted.launch.config },
+                    thread: &Thread { owner: task_id.into(), generation: accepted.launch.generation, config },
                     request: &TurnRequest { request_id: run_id.into(), text: accepted.launch.text },
                     resuming: false,
                     services: services.model,

@@ -16,29 +16,19 @@ fn id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 fn launch(runtime: &str) -> Launch {
-    let config = pot_core::Profile::api(&pot_control::execution::Config {
+    let mut config = pot_core::Profile::api(&pot_control::execution::Config {
         model: "fixture".into(),
         ..Default::default()
     })
     .resolve()
     .unwrap();
-    let vision = config
-        .params
-        .agent
-        .model_descriptor(&config.provider, &config.model)
-        .unwrap()
-        .vision();
+    config.set_plugins(Default::default()).unwrap();
     Launch {
         task_id: id(),
         run_id: id(),
         generation: 1,
         execution_target: ExecutionTarget::host(runtime),
-        resources: pot_runner::resources::GlobalResources {
-            plugins: config.params.agent.plugins.clone(),
-            shell: config.params.agent.shell.clone(),
-            vision,
-            ..Default::default()
-        },
+        plugins: vec![],
         config,
         skills: None,
         text: "Produce a plain text result; no file needed".into(),
@@ -179,7 +169,8 @@ fn invalid_configuration_is_rejected_before_acceptance() {
     let mut request = launch(&runtime);
     assert!(request.validate(&runtime).is_ok());
     assert!(request.validate(&id()).is_err());
-    request.resources.shell.allow_login_shell = !request.resources.shell.allow_login_shell;
+    request.config.params.agent.shell.allow_login_shell =
+        !request.config.params.agent.shell.allow_login_shell;
     assert!(request.validate(&runtime).is_err());
     request = launch(&runtime);
     request.config.model = "substitute".into();
@@ -191,11 +182,14 @@ fn invalid_configuration_is_rejected_before_acceptance() {
 
 #[derive(Default)]
 struct Control {
+    resources: Mutex<pot_runner::resources::GlobalResources>,
     requests: Mutex<Vec<Value>>,
     ready: AtomicBool,
     cancelled: AtomicBool,
     turns: AtomicUsize,
     switch_execution_target: AtomicBool,
+    resource_calls: AtomicUsize,
+    resource_failure: AtomicBool,
 }
 impl ExecutionFeedback for Control {
     fn owner_authorization_available(&self) -> Result<bool> {
@@ -278,6 +272,7 @@ impl ToolExecutor for NoTools {
 }
 fn services(control: &Arc<Control>) -> RunServices {
     RunServices {
+        resources: control.clone(),
         model: control.clone(),
         control: control.clone(),
         tools: Arc::new(NoTools),
@@ -304,6 +299,7 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
     let journal = Arc::new(Journal::open(&data, host.runtime_id(), host.boot_id()).unwrap());
     let control_id = id();
     let mut launch = launch(host.runtime_id());
+    launch.skills = Some(vec!["control-skill".into()]);
     let scope = launch.workspace_scope(&control_id).unwrap();
     let workspace = data.join("execution-workspaces").join(&scope);
     std::fs::create_dir_all(workspace.join(".agents/skills/project-skill")).unwrap();
@@ -329,11 +325,11 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
     .unwrap();
     std::fs::create_dir_all(node_resources.skill_user.join("node-skill")).unwrap();
     std::fs::write(node_resources.skill_user.join("node-skill/SKILL.md"), "---\nname: node-skill\ndescription: Node global skill must not appear\n---\nNode instructions").unwrap();
-    launch.resources.files.insert("skills/user/control-skill/SKILL.md".into(), pot_runner::resources::ResourceFile {
+    let control = Arc::new(Control::default());
+    control.resources.lock().unwrap().files.insert("skills/user/control-skill/SKILL.md".into(), pot_runner::resources::ResourceFile {
         data: base64::engine::general_purpose::STANDARD.encode("---\nname: control-skill\ndescription: Control supplied skill\n---\nControl instructions"), executable: false,
     });
     journal.accept(&control_id, launch.clone()).unwrap();
-    let control = Arc::new(Control::default());
     let result = pot_runner::execute(
         Arc::new(host.clone()),
         journal.clone(),
@@ -397,6 +393,16 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
         Some(terminal)
     );
     assert_eq!(control.requests.lock().unwrap().len(), 1);
+    assert_eq!(control.resource_calls.load(Ordering::SeqCst), 1);
+    control
+        .resources
+        .lock()
+        .unwrap()
+        .files
+        .get_mut("skills/user/control-skill/SKILL.md")
+        .unwrap()
+        .data = base64::engine::general_purpose::STANDARD
+        .encode("---\nname: control-skill\ndescription: UPDATED_CONTROL_SKILL\n---\nNew contents");
     let mut next = launch.clone();
     next.run_id = id();
     journal.accept(&control_id, next.clone()).unwrap();
@@ -418,6 +424,12 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
     {
         let requests = control.requests.lock().unwrap();
         assert_eq!(requests.len(), 3);
+        assert!(
+            requests[1]["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("UPDATED_CONTROL_SKILL")
+        );
         let tool_result = requests[2]["messages"]
             .as_array()
             .unwrap()
@@ -432,6 +444,28 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
         );
     }
     assert!(!workspace.join("forbidden").exists());
+    assert_eq!(control.resource_calls.load(Ordering::SeqCst), 2);
+    let mut offline = next.clone();
+    offline.run_id = id();
+    control.resource_failure.store(true, Ordering::SeqCst);
+    journal.accept(&control_id, offline.clone()).unwrap();
+    let before = control.requests.lock().unwrap().len();
+    let failed = pot_runner::execute(
+        Arc::new(host.clone()),
+        journal.clone(),
+        &control_id,
+        &offline.task_id,
+        &offline.run_id,
+        services(&control),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        matches!(failed.outcome, Outcome::Failed(ref reason) if reason.contains("Control resources unavailable"))
+    );
+    assert_eq!(control.requests.lock().unwrap().len(), before);
+    control.resource_failure.store(false, Ordering::SeqCst);
     let mut missing = next.clone();
     missing.run_id = id();
     missing.skills = Some(vec!["node-skill".into()]);
@@ -557,4 +591,28 @@ async fn cancelled_control_error_persists_cancelled_terminal() {
     );
     assert!(control.requests.lock().unwrap().is_empty());
     std::fs::remove_dir_all(root).unwrap();
+}
+
+impl pot_runner::ResourceProvider for Control {
+    fn synchronize<'a>(
+        &'a self,
+        launch: &'a Launch,
+    ) -> BoxFuture<'a, Result<pot_runner::resources::GlobalResources>> {
+        Box::pin(async move {
+            self.resource_calls.fetch_add(1, Ordering::SeqCst);
+            anyhow::ensure!(
+                !self.resource_failure.load(Ordering::SeqCst),
+                "Control resources unavailable"
+            );
+            let mut resources = self.resources.lock().unwrap().clone();
+            resources.shell = launch.config.params.agent.shell.clone();
+            resources.vision = launch
+                .config
+                .params
+                .agent
+                .model_descriptor(&launch.config.provider, &launch.config.model)?
+                .vision();
+            Ok(resources)
+        })
+    }
 }

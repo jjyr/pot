@@ -23,6 +23,8 @@ is the single phase progress table.
 
 ## Evidence
 
+[Pre-execution resource synchronization](validation/resource-sync-20261014.md).
+
 [Native multi-Space UI](validation/multi-space-ui-20261013.md).
 
 [Assistant messages and App relay](validation/assistant-messages-20261013.md).

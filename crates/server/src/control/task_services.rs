@@ -100,13 +100,26 @@ async fn handle(
     let boot = host.describe()["boot_id"].as_str().unwrap().to_owned();
     if request.query {
         ensure!(
-            matches!(request.operation, Some(Operation::Ready)),
-            "Only readiness is a query"
+            matches!(
+                request.operation,
+                Some(Operation::Ready | Operation::Resources { .. })
+            ),
+            "Only readiness and resource synchronization are queries"
         );
+        if matches!(request.operation, Some(Operation::Resources { .. })) {
+            ensure!(
+                !run.cancel_requested && request.accept_before_ms > now(),
+                "Resource synchronization authority expired"
+            );
+        }
         return worker
-            .task_agent_operation(&request.binding, Operation::Ready)
+            .task_agent_operation(&request.binding, request.operation.clone().unwrap())
             .await;
     }
+    ensure!(
+        !matches!(request.operation, Some(Operation::Resources { .. })),
+        "Resource synchronization must use the read-only query path"
+    );
     let _guard = authority.operations.lock().await;
     if path.exists() {
         let receipt: Receipt = serde_json::from_slice(&std::fs::read(&path)?)?;

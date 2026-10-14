@@ -10,7 +10,7 @@ pub mod references;
 pub use references::MachineRoute;
 use serde::{Deserialize, Serialize};
 
-pub const API_VERSION: u32 = 2;
+pub const API_VERSION: u32 = 3;
 pub const RUNTIME_PORT: u16 = 17700;
 /// Written by the runtime into the shared data directory; read by the helper.
 pub const RUNTIME_ENDPOINT_FILE: &str = "runtime.json";
@@ -253,6 +253,7 @@ pub struct CreateTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_target: Option<pot_core::ExecutionTarget>,
     #[serde(default)]
+    /// Explicit global skills; absent or empty selects none. Project discovery is independent.
     pub skills: Option<Vec<String>>,
     #[serde(default)]
     pub sandbox_id: String,
