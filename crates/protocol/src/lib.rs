@@ -459,38 +459,33 @@ mod execution_target_tests {
     use serde_json::json;
 
     #[test]
-    fn targets_roundtrip_and_old_selectors_are_rejected() {
+    fn machines_roundtrip_and_fixed_environment_selectors_are_rejected() {
         let target = pot_core::ExecutionTarget::sandbox("remote", "build");
-        let current = json!({"request_id":"request", "text":"build", "execution_target":target});
+        let current = json!({"request_id":"request", "text":"build", "machine_id":"remote"});
         let request: CreateTask = serde_json::from_value(current).unwrap();
-        assert_eq!(request.execution_target, Some(target.clone()));
+        assert_eq!(request.machine_id, "remote");
         assert_eq!(
-            serde_json::to_value(request).unwrap()["execution_target"],
-            json!(target)
-        );
-        assert!(
-            serde_json::from_value::<CreateTask>(json!({
-                "request_id":"request", "text":"build", "environment_ref":target
-            }))
-            .is_err()
+            serde_json::to_value(request).unwrap()["machine_id"],
+            json!("remote")
         );
         let current = json!({
             "title":"build", "goal":"build", "kind":"interval", "every_minutes":60,
-            "execution_target":target
+            "machine_id":"remote"
         });
         let schedule: ScheduleSpec = serde_json::from_value(current.clone()).unwrap();
-        assert_eq!(schedule.execution_target, Some(target.clone()));
+        assert_eq!(schedule.machine_id, "remote");
         assert_eq!(
-            serde_json::to_value(schedule).unwrap()["execution_target"],
-            json!(target)
+            serde_json::to_value(schedule).unwrap()["machine_id"],
+            json!("remote")
         );
-        let mut old = current;
-        old["environment_ref"] = old
-            .as_object_mut()
-            .unwrap()
-            .remove("execution_target")
-            .unwrap();
-        assert!(serde_json::from_value::<ScheduleSpec>(old).is_err());
+        for selector in ["execution_target", "environment_ref"] {
+            let mut old_task = json!({"request_id":"request", "text":"build"});
+            old_task[selector] = json!(target);
+            assert!(serde_json::from_value::<CreateTask>(old_task).is_err());
+            let mut old_schedule = current.clone();
+            old_schedule[selector] = json!(target);
+            assert!(serde_json::from_value::<ScheduleSpec>(old_schedule).is_err());
+        }
         assert!(serde_json::from_value::<TaskQuery>(json!({"environment_ref":target})).is_err());
     }
 }
