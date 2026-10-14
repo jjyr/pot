@@ -1,5 +1,9 @@
 # Destination Task Agent production integration — 2026-10-11
 
+Historical validation: task-carried resource snapshots described below were replaced
+by [pre-execution resource synchronization](../architecture.md) on 2026-10-14.
+These results establish the earlier implementation only.
+
 ## Delivered and checked
 
 Production remote Worker dispatch starts a new Agent at the fixed execution

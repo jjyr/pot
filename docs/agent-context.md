@@ -62,9 +62,40 @@ Tests cover repository/worktree markers, nested repositories, absent roots, igno
 ## Global ownership
 
 Control selects global plugins and Skills for connected Tasks. Execution machines
-consume the fixed snapshot, never their own global catalogs. Missing resources or
+synchronize the selected names from Control before each run, never using their
+own global catalogs. Requests contain names, not versions. Missing resources or
 unsupported configuration fail explicitly. Independent local mode uses its own
 globals. Project AGENTS.md and Skills remain execution-workspace resources.
+
+## Pre-execution resource synchronization
+
+```text
+Control task launch
+  brief + model settings + skill names + plugin names
+                         |
+                         v
+Execution Runtime accepts the run
+                         |
+             authenticated request by name
+                         |
+                         v
+Control current Skills / owning assistant's plugin Profile
+                         |
+                         v
+Runtime verifies and materializes the selected bundles
+  + discovers local project Skills and AGENTS.md
+  + registers synchronized plugin tool definitions
+                         |
+                         v
+Task Agent starts: ordinary cat / scripts / tool calls
+```
+
+No Skill-loading tool, virtual filesystem or resource version parameter is
+introduced. Synchronization failure stops the run before model sampling. Runtime
+cache digests only check content integrity and bind one execution; they are not
+task resource selectors. Local tasks prepare the same resource layout without a
+network hop. Global Skill metadata and paths are injected; full instructions
+remain lazy reads of ordinary files.
 
 ## Routing rules
 
@@ -120,19 +151,19 @@ skills/<name>/                    # Packaged builtin bundles in this repo
 PROJECT/.agents/skills/<name>/    # Project-specific bundles
 ```
 
-There are no shared/main/task categories. Standalone Main and task agents discover
-their owning Runtime's global user and builtin skills. Connected tasks instead
-use the global versions selected by Control. Every bundle contains UTF-8 SKILL.md
+Main discovers its owning Runtime's global user and builtin skills. Tasks load
+only explicitly selected global skills. Connected tasks use the selected global
+versions supplied by Control. Every bundle contains UTF-8 SKILL.md
 with YAML frontmatter and optional scripts, references and assets. Only metadata
 is advertised during discovery; full instructions are read on demand.
 
-Runtime supplies ordered roots. Project directories are discovered from the assigned workspace upwards, stopping at a repository root or the Sandbox workspace boundary. The nearest project wins, then global user skills, then builtins. Names discovered in the packaged builtin catalog are reserved: user/project attempts to shadow them are diagnosed and ignored. Bundle names match their directory names in authored and packaged skills.
+Runtime supplies ordered roots. Project directories are discovered from the assigned workspace upwards, stopping at a repository root or the Sandbox workspace boundary. The nearest project wins, then global user skills, then builtins. Names in the included builtin catalog are reserved: user/project attempts to shadow them are diagnosed and ignored. Bundle names match their directory names in authored and packaged skills.
 
 Malformed bundles produce diagnostics and are omitted. Symlink directories and SKILL.md symlinks are skipped. Supporting assets inside a bundle are not recursively discovered as additional skills. Catalog ordering and conflict resolution are deterministic.
 
 ## Unified execution view and permissions
 
-Independent local Host execution advertises the real user/builtin source paths. Local Sandbox execution exposes global bundles at `~/.pot/agent/skills/<name>`. Connected execution exposes the read-only Control cache at the absolute paths injected into context. Runtime injects resolved absolute paths, so models do not have to expand `~`. In the Linux provider, the executor sets HOME to its assigned execution workspace; the scope mount view is installed beneath that home. A main scope uses `/data/workspace`, and a task scope uses `/data/workspace/tasks/<task-id>`. Different providers must implement the same home-relative convention.
+Main Host execution advertises the real user/builtin source paths. Tasks materialize their selected global bundles under the execution workspace’s `.pot/control-resources/<digest>/` before starting; both local and connected execution advertise these read-only files through injected absolute paths. The digest identifies cache content, not a requested version. Local Sandbox global source mounts remain at `~/.pot/agent/skills/<name>`. Runtime injects resolved absolute paths, so models do not have to expand `~`. In the Linux provider, the executor sets HOME to its assigned execution workspace; the scope mount view is installed beneath that home. A main scope uses `/data/workspace`, and a task scope uses `/data/workspace/tasks/<task-id>`. Different providers must implement the same home-relative convention.
 
 | Resource | Main scope | Task scope |
 |---|---|---|
@@ -144,15 +175,15 @@ Helper shares the Host user directory and packaged builtin root into root-only g
 
 Main/task runners remain separate unprivileged Unix users; task scopes cannot access raw writable shares or another main scope's writable view through `/proc`. Tool children drop effective capabilities and set no_new_privs. Shared workspace group permissions retain desktop access to task files, but do not provide mutual isolation between tasks in one Sandbox. Skills grant no extra tools or Sandbox lifecycle authority.
 
-Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and POT_BUILTIN_SKILLS_DIR for packaged builtin files. Helper supplies the latter to Server. Standalone development defaults to this repo's flat skills directory. Changing the configured source root requires restarting the Sandbox; directory contents remain live through the share. No compatibility layer for the previous role-specific directory layout is provided.
+Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and POT_BUILTIN_SKILLS_DIR for packaged builtin files. Helper supplies the latter to Server. Standalone development defaults to this repo's flat skills directory. Changing the configured source root requires restarting the Sandbox; directory contents remain live through the share.
 
 ## Injection and task selection
 
 ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved names and optional selections. pot-agent discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. AgentExtensions::skills(context) is the shared override for main/task callers.
 
-Task creation accepts optional `skills: ["name", ...]`: omitted discovers all skills, a list narrows discovery, and an empty list disables injection. Local tasks preserve selections; connected tasks additionally pin Control's global bundle snapshot across turns and restart. Unavailable selected skills fail visibly when preparing a turn.
+Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution (including explicit continuation) synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
-Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual Host working directory; task execution target bindings remain fixed.
+Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual Host working directory; task execution target bindings remain fixed.
 
 ## Creation, installation and validation
 
@@ -168,7 +199,8 @@ apply_patch remains workspace-scoped. Global installation/update is performed on
 
 App and Web autocomplete standalone `/` words at the caret using authenticated,
 assistant-scoped `/api/v1/completions` metadata. Candidates include registered
-machines, Control-managed labels, and the assistant's current Skill catalog.
+machines, Control-managed labels, and the assistant's current global Skill catalog. Project Skills are discovered by the
+task and are not offered as global selectors.
 References are editable message text: `/machine:RUNTIME_ID`, `/tag:desktop`,
 `/skill:skill-creator`. Their identifiers survive drafts, retries and history.
 Use spaces around tokens; backtick-quoted examples are not selectors.

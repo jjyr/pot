@@ -1,4 +1,4 @@
-//! Control-selected global bundles. Execution nodes only materialize supplied versions.
+//! Current Control resources, synchronized by name before each execution.
 use crate::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use pot_core::{SkillResources, SkillRoot};
@@ -51,13 +51,71 @@ fn collect(
     }
     Ok(())
 }
-pub(crate) fn snapshot(s: &Service) -> Result<GlobalResources> {
-    let path = s.data.join("control-global-resources.json");
-    if s.is_worker && path.exists() {
-        let snapshot: GlobalResources = serde_json::from_slice(&std::fs::read(path)?)?;
-        snapshot.validate()?;
-        return Ok(snapshot);
+/// Resolve current plugin contents from the owning assistant's profile catalog.
+pub(crate) fn refresh_plugins(s: &Service) -> Result<()> {
+    let mut thread = agent::thread(s)?;
+    let names: Vec<_> = thread
+        .config
+        .params
+        .agent
+        .plugins
+        .iter()
+        .filter(|(_, plugin)| plugin.enabled)
+        .map(|(name, _)| name.clone())
+        .collect();
+    if names.is_empty() {
+        thread.config.set_plugins(Default::default())?;
+        s.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set(agent::THREAD, &serde_json::to_string(&thread)?)?;
+        return Ok(());
     }
+    let owner = s
+        .agent_service
+        .resources
+        .assistants
+        .lock()
+        .unwrap()
+        .upgrade()
+        .map(|hub| hub.service(&s.assistant_id))
+        .transpose()?;
+    let mut settings = if let Some(owner) = owner {
+        let profiles = agent::profiles(&owner.conversation.inner.lock().unwrap().store)?;
+        profiles
+            .into_iter()
+            .find(|profile| profile.id == thread.config.source_profile_id)
+            .ok_or_else(|| anyhow!("Task plugin source profile is unavailable"))?
+            .params
+            .agent
+    } else {
+        // Independent callers without an assistant hub own their configuration directly.
+        thread.config.params.agent.clone()
+    };
+    for name in &names {
+        anyhow::ensure!(
+            settings
+                .plugins
+                .get(name)
+                .is_some_and(|plugin| plugin.enabled),
+            "Selected plugin unavailable: {name}"
+        );
+    }
+    settings.plugins.retain(|name, _| names.contains(name));
+    settings.pin_plugins()?;
+    thread.config.set_plugins(settings.plugins)?;
+    s.conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .set(agent::THREAD, &serde_json::to_string(&thread)?)?;
+    Ok(())
+}
+
+pub(crate) fn current(s: &Service) -> Result<GlobalResources> {
     let resources = &s.agent_service.resources;
     let builtin = SkillRoot {
         path: resources.skill_builtin.clone(),
@@ -82,7 +140,9 @@ pub(crate) fn snapshot(s: &Service) -> Result<GlobalResources> {
             builtin,
         ],
         reserved_names,
-        selection: None,
+        selection: s
+            .is_worker
+            .then(|| s.skill_selection.clone().unwrap_or_default()),
     })?;
     let thread = agent::thread(s)?;
     let descriptor = thread
@@ -93,7 +153,14 @@ pub(crate) fn snapshot(s: &Service) -> Result<GlobalResources> {
     let mut result = GlobalResources {
         shell: thread.config.params.agent.shell.clone(),
         vision: descriptor.vision(),
-        plugins: thread.config.params.agent.plugins,
+        plugins: thread
+            .config
+            .params
+            .agent
+            .plugins
+            .into_iter()
+            .filter(|(_, plugin)| plugin.enabled)
+            .collect(),
         ..Default::default()
     };
     for skill in catalog.skills {
@@ -124,9 +191,6 @@ pub(crate) fn snapshot(s: &Service) -> Result<GlobalResources> {
     }
     result.reserved_names.sort();
     result.validate()?;
-    if s.is_worker {
-        execution::private_json(&path, &json!(result))?;
-    }
     Ok(result)
 }
 /// Called only after bound Control identity and execution lease checks.
@@ -176,6 +240,19 @@ pub fn install(workspace: &Path, snapshot: &GlobalResources) -> Result<String> {
         result?;
     }
     execution::private_json(&parent.join("active.json"), &json!({"revision":revision}))?;
+    // Each workspace keeps only its active materialization, not a history of versions.
+    for entry in std::fs::read_dir(&parent)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name != revision
+            && name.len() == 64
+            && name.bytes().all(|b| b.is_ascii_hexdigit())
+            && entry.file_type()?.is_dir()
+        {
+            std::fs::remove_dir_all(entry.path())?;
+        }
+    }
     Ok(revision)
 }
 fn verify(root: &Path, snapshot: &GlobalResources) -> Result<()> {
@@ -382,7 +459,119 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn control_task_snapshot_remains_fixed_after_global_changes() {
+    fn task_sync_supplies_only_selected_globals_and_keeps_destination_projects() {
+        let root = tasks::tests::fixture();
+        let mut worker = root.clone();
+        worker.scope.is_worker = true;
+        worker.scope.data = root.data.join("selection-fixture");
+        std::fs::create_dir_all(&worker.data).unwrap();
+        let project = worker.data.join(".agents/skills/project-only");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("SKILL.md"),
+            "---\nname: project-only\ndescription: local project\n---\n",
+        )
+        .unwrap();
+        for selection in [None, Some(vec![]), Some(vec!["skill-creator".into()])] {
+            worker.skill_selection = selection.clone();
+            let supplied = current(&worker).unwrap();
+            let has_global = selection.as_ref().is_some_and(|names| !names.is_empty());
+            assert_eq!(!supplied.files.is_empty(), has_global);
+            assert!(
+                !supplied
+                    .files
+                    .keys()
+                    .any(|path| path.contains("skill-installer"))
+            );
+            install(&worker.data, &supplied).unwrap();
+            let catalog = crate::skills::destination_catalog(
+                &root.data,
+                &worker.data,
+                &worker.data,
+                &worker.data,
+                true,
+            )
+            .unwrap();
+            assert!(
+                catalog
+                    .skills
+                    .iter()
+                    .any(|skill| skill.name == "project-only")
+            );
+            assert_eq!(
+                catalog
+                    .skills
+                    .iter()
+                    .any(|skill| skill.name == "skill-creator"),
+                has_global
+            );
+        }
+        worker.skill_selection = Some(vec!["project-only".into()]);
+        assert!(current(&worker).is_err());
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn plugin_sync_uses_current_owner_profile_and_rejects_removed_plugins() {
+        let root = tasks::tests::fixture();
+        let initial = agent::thread(&root).unwrap();
+        let hub = Arc::new(crate::assistants::Hub::open(root.clone()).unwrap());
+        *root.agent_service.resources.assistants.lock().unwrap() = Arc::downgrade(&hub);
+        let mut worker = root.clone();
+        worker.is_worker = true;
+        worker.assistant_id = root.usage_scope.clone();
+        let mut profiles = agent::profiles(&root.conversation.inner.lock().unwrap().store).unwrap();
+        let profile = profiles
+            .iter_mut()
+            .find(|profile| profile.id == initial.config.source_profile_id)
+            .unwrap();
+        profile.params.agent.pin_plugins().unwrap();
+        let plugin = profile
+            .params
+            .agent
+            .plugins
+            .get_mut("computer-use")
+            .unwrap();
+        let bundle = plugin.bundle.as_mut().unwrap();
+        bundle.manifest.tools[0]["description"] = json!("CURRENT_PLUGIN_DEFINITION");
+        let entrypoint = bundle.manifest.entrypoint.clone();
+        bundle
+            .files
+            .get_mut(&entrypoint)
+            .unwrap()
+            .push_str("\n// CURRENT_PLUGIN_IMPLEMENTATION\n");
+        bundle.digest = bundle.hash().unwrap();
+        let expected = bundle.clone();
+        root.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set(agent::PROFILES, &serde_json::to_string(&profiles).unwrap())
+            .unwrap();
+        refresh_plugins(&worker).unwrap();
+        let prepared = current(&worker).unwrap();
+        assert_eq!(
+            prepared.plugins["computer-use"].bundle.as_ref(),
+            Some(&expected)
+        );
+        profiles[0].params.agent.plugins.clear();
+        root.conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set(agent::PROFILES, &serde_json::to_string(&profiles).unwrap())
+            .unwrap();
+        assert!(
+            refresh_plugins(&worker)
+                .unwrap_err()
+                .to_string()
+                .contains("Selected plugin unavailable")
+        );
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn task_resources_refresh_after_global_changes() {
         let root = tasks::tests::fixture();
         let user = root.agent_service.resources.skill_user.join("fixed-global");
         std::fs::create_dir_all(&user).unwrap();
@@ -393,21 +582,44 @@ mod tests {
         .unwrap();
         let mut worker = root.clone();
         worker.scope.is_worker = true;
+        worker.skill_selection = Some(vec!["fixed-global".into()]);
         worker.scope.data = root.data.join("resource-fixture");
         std::fs::create_dir_all(&worker.data).unwrap();
-        let first = snapshot(&worker).unwrap();
+        let first = current(&worker).unwrap();
+        let first_digest = install(&worker.data, &first).unwrap();
+        let first_file = worker
+            .data
+            .join(".pot/control-resources")
+            .join(&first_digest)
+            .join("skills/user/fixed-global/SKILL.md");
         std::fs::write(
             user.join("SKILL.md"),
             "---\nname: fixed-global\ndescription: updated\n---\n",
         )
         .unwrap();
-        assert_eq!(
-            first.revision().unwrap(),
-            snapshot(&worker).unwrap().revision().unwrap()
+        assert!(
+            std::fs::read_to_string(&first_file)
+                .unwrap()
+                .contains("original")
         );
+        let latest = current(&worker).unwrap();
+        assert_ne!(first.revision().unwrap(), latest.revision().unwrap());
+        let next_digest = install(&worker.data, &latest).unwrap();
+        assert!(!first_file.exists());
+        let next_file = worker
+            .data
+            .join(".pot/control-resources")
+            .join(next_digest)
+            .join("skills/user/fixed-global/SKILL.md");
+        assert!(
+            std::fs::read_to_string(next_file)
+                .unwrap()
+                .contains("updated")
+        );
+        assert!(!worker.data.join("control-global-resources.json").exists());
         assert_ne!(
             first.revision().unwrap(),
-            snapshot(&root).unwrap().revision().unwrap()
+            current(&root).unwrap().revision().unwrap()
         );
         std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }

@@ -199,7 +199,7 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
         let context = contexts
             .get(s.execution_target.as_ref().unwrap())
             .ok_or_else(|| anyhow!("Remote project instructions have not been prepared"))?;
-        let mut skills: Vec<pot_agent::Skill> = serde_json::from_value(
+        let skills: Vec<pot_agent::Skill> = serde_json::from_value(
             context
                 .context
                 .get("skills")
@@ -213,7 +213,6 @@ pub(crate) fn load(s: &Service) -> Result<InstructionCatalog> {
                     .all(|name| skills.iter().any(|skill| &skill.name == name)),
                 "Selected skill is not installed on the destination machine"
             );
-            skills.retain(|skill| selection.contains(&skill.name));
         }
         let skill_prompt = pot_agent::format_skills_for_prompt(&skills)?;
         return Ok(InstructionCatalog {

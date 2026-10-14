@@ -308,30 +308,6 @@ impl RemoteExecution for Authority {
                 return Ok(result);
             }
             let fresh = run.task_launch.is_none();
-            if fresh {
-                loop {
-                    match RemoteExecution::install_resources(
-                        self,
-                        binding.clone(),
-                        launch.resources.clone(),
-                    )
-                    .await
-                    {
-                        Ok(_) => break,
-                        Err(error) if error.downcast_ref::<RemoteRejection>().is_some() => {
-                            return Err(error);
-                        }
-                        Err(_) => {
-                            self.waiting(
-                                &binding,
-                                Some("等待远程机器核对资源；尚未启动 Task Agent"),
-                            )?;
-                            ensure!(!cancelled(), "Task cancelled before launch acceptance");
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-            }
             if let Some(old) = &run.task_launch {
                 ensure!(
                     serde_json::to_value(old)? == serde_json::to_value(&launch)?,

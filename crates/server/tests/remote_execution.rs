@@ -230,7 +230,7 @@ async fn qualify_recovery(
             async move {
                 let command = if number == 0 {
                     let skills = if sandbox { "cat ../../.agents/skills/remote-fixture/SKILL.md" } else { "cat ../.agents/skills/remote-fixture/SKILL.md" };
-                    format!("{}printf REMOTE > where.txt; cat where.txt; {skills}", if outage { "printf X >> once.txt; sleep 3; " } else { "" })
+                    format!("{}printf REMOTE > where.txt; cat where.txt; {skills}; cat .pot/control-resources/*/skills/builtin/skill-creator/SKILL.md | head -n 3", if outage { "printf X >> once.txt; sleep 3; " } else { "" })
                 } else { "cat where.txt; printf FOLLOWUP >> where.txt".into() };
                 let command_turn = number == 0 || number == if plugin { 3 } else { 2 };
                 let plugin_continuation = plugin && number == 1;
@@ -257,8 +257,7 @@ async fn qualify_recovery(
             )
             .await;
     }
-    let mut request =
-        json!({"request_id":"remote-task","text":"Write where.txt on the assigned machine"});
+    let mut request = json!({"request_id":"remote-task","text":"Write where.txt on the assigned machine","skills":["skill-creator"]});
     if sandbox {
         request["execution_target"] = json!({"runtime_id":target_id,"target":execution_target});
     } else {
@@ -351,6 +350,14 @@ async fn qualify_recovery(
         .collect::<Vec<_>>();
     assert_eq!(journals.len(), 1);
     assert_eq!(journals[0]["phase"], "complete");
+    let launch = &journals[0]["launch"];
+    assert!(
+        launch.get("resources").is_none(),
+        "Launch carried resource files"
+    );
+    assert_eq!(launch["skills"], json!(["skill-creator"]));
+    assert_eq!(launch["plugins"], json!(["computer-use"]));
+    assert_eq!(launch["config"]["params"]["agent"]["plugins"], json!({}));
     assert!(
         journals[0]["context"]
             .to_string()
@@ -381,6 +388,23 @@ async fn qualify_recovery(
     assert!(!body.contains("ASSISTANT_PRIVATE_RULE"));
     assert!(!body.contains("LOCAL_PRIVATE_PROJECT_RULE"));
     assert!(body.contains("REMOTE_INSTALLED_SKILL"));
+    assert!(body.contains("skill-creator"));
+    assert!(
+        captured
+            .lock()
+            .unwrap()
+            .iter()
+            .any(
+                |request| request["messages"].as_array().unwrap().iter().any(
+                    |message| message["role"] == "tool"
+                        && message["content"]
+                            .as_str()
+                            .is_some_and(|text| text.contains("name: skill-creator"))
+                )
+            ),
+        "Ordinary cat did not read the synchronized Skill"
+    );
+    assert!(!body.contains("skill-installer"));
     assert!(!body.contains("CALLER_PRIVATE_SKILL"));
     let workspaces = std::fs::read_dir(&workspace).unwrap();
     let files = workspaces

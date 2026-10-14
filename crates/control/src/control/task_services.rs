@@ -22,6 +22,25 @@ impl Service {
     ) -> Result<Value> {
         self.validate_task_agent_binding(binding)?;
         match operation {
+            Operation::Resources { skills, plugins } => {
+                anyhow::ensure!(
+                    skills == self.skill_selection.clone().unwrap_or_default(),
+                    "Skill selection differs from task"
+                );
+                let thread = agent::thread(self)?;
+                let expected: Vec<_> = thread
+                    .config
+                    .params
+                    .agent
+                    .plugins
+                    .iter()
+                    .filter(|(_, plugin)| plugin.enabled)
+                    .map(|(name, _)| name.clone())
+                    .collect();
+                anyhow::ensure!(plugins == expected, "Plugin selection differs from task");
+                crate::control_resources::refresh_plugins(self)?;
+                Ok(json!(crate::control_resources::current(self)?))
+            }
             Operation::Ready => {
                 let paused = {
                     let inner = self.conversation.inner.lock().unwrap();

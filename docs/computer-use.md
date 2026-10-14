@@ -4,11 +4,12 @@ The default-enabled `computer-use` plugin provides a persistent `cua_repl` JavaS
 
 ## Configuration
 
-For Control-owned remote tasks, the approved design makes Control the sole source
-of global plugin definitions and pinned bundles; execution nodes run supplied
-bundles without discovering their own global plugins. That delivery/invocation
-work is pending in #39. The configuration below describes delivered owner-local
-plugin management and remains the source format for Control-owned configuration.
+For connected tasks, Control is the source of global plugin definitions and
+implementations. Launches contain selected plugin names only. Before starting the
+Agent, the execution Runtime synchronizes current bundles from Control and
+registers their tool definitions; it never discovers node-local global plugins.
+The prepared bundles remain stable for the run, and explicit continuation
+synchronizes again. See [resource synchronization](architecture.md).
 
 Use owner-only `pot config get/set agent` (`GET/POST /api/v1/agent`). The default `params.agent.plugins` is:
 

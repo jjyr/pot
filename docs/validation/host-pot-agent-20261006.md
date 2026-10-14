@@ -47,25 +47,6 @@ Verification: `mise run test` passed **198 tests**, with the existing live-provi
 
 Local evidence: `/tmp/pot-injection-{test,agent,runtime,clippy,lint}.log`.
 
-## Role-scoped filesystem skills follow-up
-
-Date: 2026-10-06. Implemented repo `skills/{shared,main,task}`, Host `~/.pot/agent/skills/{shared,main,task}`, and project `.agents/skills` discovery. Runtime supplies ordered roots and optional task selections; pot-agent uses the same filesystem loader for main and task roles, without mount or Sandbox knowledge. Project overrides user, user overrides builtin, and role-specific overrides shared. Reserved skill-manager overrides are diagnosed and ignored. Metadata refreshes each turn and full instructions remain lazy. No skill registry/content/version database was introduced; the normal task request record preserves an optional selected-name list.
-
-The packaged builtin `main/skill-manager` manages Host user bundles through existing Sandbox tools. Helper shares the user source and readonly builtin source under a root-only guest directory. Broker scopes get private mount views: main can manage all user role directories, tasks see only shared/task as read-only, and builtins remain read-only. Main/task UID separation prevents writable-view access through another role's `/proc` root. Shared workspace group permissions retain desktop access to task files. Root broker mount preparation uses CAP_SYS_ADMIN; tool children have zero effective capabilities and no_new_privs. Failed mount preparation returns a visible error without an unrestricted fallback.
-
-Verification:
-
-- Backend tests: **204 passed**, one existing live-provider test ignored. Added common model skill injection, discovery/priority/YAML/diagnostics/reserved-name/refresh tests and Runtime role-root/task-selection restoration tests. Existing Sandbox adapter tests also check authoritative main/task role transport.
-- `mise run test:skills`: **3 passed**, covering role mount views, readonly remount policy, traversable view parents and fail-closed syscall behavior.
-- `mise run test:app`: **14 passed**.
-- Clippy, source/script lint, deterministic evaluation, Rust/App/Swift build and bundle passed.
-
-Initial real runs exposed missing broker mount capabilities and umask-restricted view parent directories. Both were corrected before the final successful run. The final acceptance stopped its test VMs/Helper and used isolated user/data directories.
-
-Local evidence: `/tmp/pot-skills-acceptance.json`, `/tmp/pot-skills-acceptance.helper.log`, and `/tmp/pot-skills-{all-test,mount-test,app-test,clippy,lint,eval,build,bundle,e2e}.log`.
-
-Limits: explicit `/skill:name` command expansion, a skills UI and mutually isolated task project files are not part of this change. Main project discovery reflects the default execution target at turn preparation; default changes or another explicitly targeted execution target refresh the catalog next turn. Skills follow current files rather than immutable version snapshots.
-
 ## Additional skills unit tests
 
 Date: 2026-10-06. Added nine Rust tests and four portable Python tests without changing production behavior.
@@ -96,7 +77,7 @@ Limits: remote GitHub behavior uses a local HTTP response double in unit tests, 
 
 ## Unified global skills directory follow-up
 
-Date: 2026-10-06. Removed shared/main/task resource categories and flattened repo builtin bundles. Both agent roles now discover global user and builtin skills in one execution view: `~/.pot/agent/skills/<name>`. Project `.agents/skills` discovery and explicit task selections remain. Runtime resolves injected paths against the execution home and derives reserved names from the builtin catalog. The installer defaults to the execution home without an audience parameter; skill instructions use the unified path and omit source/mount details.
+Date: 2026-10-06. Verified the flat global skill bundle layout. Both agent roles now discover global user and builtin skills in one execution view: `~/.pot/agent/skills/<name>`. Project `.agents/skills` discovery and explicit task selections remain. Runtime resolves injected paths against the execution home and derives reserved names from the builtin catalog. The installer defaults to the execution home using a flat destination; skill instructions use the unified path and omit source/mount details.
 
 Helper creates only the global user root. Each guest scope binds that root under its assigned HOME, then overlays each builtin bundle with a readonly bind mount. Task scopes also remount the entire user root readonly. Empty builtin mountpoints in the user backing store contain no builtin content. Setup rejects missing/symlink sources or redirected views and fails on syscall errors. Main/task Unix identities and authorization remain unchanged.
 
@@ -109,4 +90,4 @@ Verification:
 
 Evidence: `/tmp/pot-flat-skills-acceptance.json`, `/tmp/pot-flat-skills-acceptance.helper.log` and `/tmp/pot-flat-skills-{test,authoring,discovery,clippy,lint,build,bundle,e2e}.log`.
 
-Limits: global task skills are readonly, but project skill files retain existing workspace permissions. There is no migration for prior audience directories. Direct Host execution and additional Sandbox providers remain outside this acceptance; they must implement the same home-relative path contract when introduced.
+Limits: global task skills are readonly, but project skill files retain existing workspace permissions. Direct Host execution and additional Sandbox providers remain outside this acceptance; they must implement the same home-relative path contract when introduced.

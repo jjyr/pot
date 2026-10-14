@@ -10,11 +10,11 @@ use std::{
     sync::Mutex,
 };
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 pub mod control;
 pub mod resources;
 mod runner;
-pub use runner::{Destination, RunServices, execute};
+pub use runner::{Destination, ResourceProvider, RunServices, execute};
 
 /// Credential-free, immutable input selected by Control, distinct from a chat session.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,7 +25,8 @@ pub struct Launch {
     pub generation: u64,
     pub execution_target: ExecutionTarget,
     pub config: ResolvedSpec,
-    pub resources: crate::resources::GlobalResources,
+    pub plugins: Vec<String>,
+    /// Explicit global skills; absent or empty selects none. Project discovery is independent.
     pub skills: Option<Vec<String>>,
     pub text: String,
 }
@@ -52,22 +53,28 @@ impl Launch {
             "Invalid Task Agent input"
         );
         self.config.validate()?;
-        self.resources.validate()?;
         ensure!(
-            self.config.params.agent.plugins == self.resources.plugins
-                && self.config.params.agent.shell == self.resources.shell,
-            "Task configuration differs from Control resource snapshot"
+            self.config.params.agent.plugins.is_empty(),
+            "Task launches carry plugin names, not bundles"
         );
-        let descriptor = self
-            .config
-            .params
-            .agent
-            .model_descriptor(&self.config.provider, &self.config.model)?;
-        ensure!(
-            descriptor.vision() == self.resources.vision,
-            "Task observation mode differs from Control snapshot"
-        );
-        // Transport bounds include the task brief and configuration as well as bundles.
+        for names in [&self.plugins, self.skills.as_ref().unwrap_or(&Vec::new())] {
+            ensure!(
+                names.len() <= 128
+                    && names.iter().all(|name| !name.is_empty()
+                        && name.len() <= 64
+                        && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')),
+                "Invalid resource selection"
+            );
+            ensure!(
+                names
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    == names.len(),
+                "Duplicate resource name"
+            );
+        }
+        // Transport bounds cover only the brief, resource names and model settings.
         ensure!(
             serde_json::to_vec(self)?.len() <= 768 * 1024,
             "Task Agent launch exceeds transport limit"
@@ -233,7 +240,8 @@ impl Journal {
                     && r.launch.execution_target == launch.execution_target
                     && serde_json::to_value(&r.launch.config).ok()
                         == serde_json::to_value(&launch.config).ok()
-                    && r.launch.resources.revision().ok() == launch.resources.revision().ok()
+                    && r.launch.plugins == launch.plugins
+                    && r.launch.skills == launch.skills
             })
             .and_then(|r| r.context.clone());
         let run = Run {
@@ -319,7 +327,16 @@ impl Journal {
                 record.context = Some(pot_agent::reconcile_context(
                     context,
                     receipts,
-                    record.launch.resources.vision,
+                    record
+                        .launch
+                        .config
+                        .params
+                        .agent
+                        .model_descriptor(
+                            &record.launch.config.provider,
+                            &record.launch.config.model,
+                        )?
+                        .vision(),
                 )?);
             }
             Ok(())
@@ -390,28 +407,32 @@ mod target_storage_tests {
         let runtime = id();
         let control = id();
         let data = std::env::temp_dir().join(format!("pot-target-storage-{}", id()));
-        let config = pot_core::Profile::api(&Config).resolve().unwrap();
-        let vision = config
-            .params
-            .agent
-            .model_descriptor(&config.provider, &config.model)
-            .unwrap()
-            .vision();
+        let mut config = pot_core::Profile::api(&Config).resolve().unwrap();
+        config.set_plugins(Default::default()).unwrap();
         let launch = Launch {
             task_id: id(),
             run_id: id(),
             generation: 1,
             execution_target: ExecutionTarget::host(&runtime),
-            resources: resources::GlobalResources {
-                plugins: config.params.agent.plugins.clone(),
-                shell: config.params.agent.shell.clone(),
-                vision,
-                ..Default::default()
-            },
+            plugins: vec![],
             config,
             skills: None,
             text: "produce a result".into(),
         };
+        let serialized = serde_json::to_value(&launch).unwrap();
+        assert!(serialized.get("resources").is_none());
+        assert!(
+            serialized["config"]["params"]["agent"]["plugins"]
+                .as_object()
+                .unwrap()
+                .is_empty()
+        );
+        let mut embedded = launch.clone();
+        embedded
+            .config
+            .set_plugins(pot_core::plugins::defaults())
+            .unwrap();
+        assert!(embedded.validate(&runtime).is_err());
         let journal = Journal::open(&data, &runtime, &id()).unwrap();
         journal.accept(&control, launch.clone()).unwrap();
         let old = serde_json::to_string(&launch).unwrap().replacen(

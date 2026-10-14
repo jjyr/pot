@@ -124,8 +124,7 @@ impl Authority {
             lease.owner == launch.task_id
                 && lease.run_id == launch.run_id
                 && lease.generation == launch.generation
-                && lease.target == launch.execution_target.target
-                && lease.resources_revision.as_ref() == Some(&launch.resources.revision()?),
+                && lease.target == launch.execution_target.target,
             "Launch differs from fixed lease"
         );
         let journal = self.journal(host)?;
@@ -162,6 +161,7 @@ impl Authority {
                     &launch.task_id,
                     &launch.run_id,
                     RunServices {
+                        resources: port.clone(),
                         model: port.clone(),
                         control: port.clone(),
                         tools: port,
@@ -204,8 +204,7 @@ impl Authority {
             record.phase == Phase::Running
                 && record.boot_id == boot
                 && record.launch.generation == old.generation
-                && record.launch.execution_target.target == old.target
-                && old.resources_revision.as_ref() == Some(&record.launch.resources.revision()?),
+                && record.launch.execution_target.target == old.target,
             "Original Task Agent/configuration is no longer live"
         );
         let directory = self.data.join("execution-operations");
@@ -283,29 +282,19 @@ mod tests {
         let host = target.host().await;
         let boot = host.describe()["boot_id"].as_str().unwrap().to_owned();
         let control_id = &control.control.identity.runtime_id;
-        let config = pot_core::Profile::api(&pot_control::execution::Config {
+        let mut config = pot_core::Profile::api(&pot_control::execution::Config {
             model: "fixture".into(),
             ..Default::default()
         })
         .resolve()
         .unwrap();
-        let vision = config
-            .params
-            .agent
-            .model_descriptor(&config.provider, &config.model)
-            .unwrap()
-            .vision();
+        config.set_plugins(Default::default()).unwrap();
         let launch = Launch {
             task_id: uuid::Uuid::new_v4().to_string(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
             execution_target: ExecutionTarget::host(&target.control.identity.runtime_id),
-            resources: pot_runner::resources::GlobalResources {
-                plugins: config.params.agent.plugins.clone(),
-                shell: config.params.agent.shell.clone(),
-                vision,
-                ..Default::default()
-            },
+            plugins: vec![],
             config,
             skills: None,
             text: "fixture".into(),
@@ -331,7 +320,7 @@ mod tests {
             .control
             .update(|book| {
                 let lease = book.leases.get_mut(id).unwrap();
-                lease.resources_revision = Some(launch.resources.revision()?);
+                lease.resources_revision = Some("fixture-resource-digest".into());
                 lease.expires_at_ms = now() - 1;
                 Ok(())
             })
@@ -418,29 +407,19 @@ mod tests {
         let host = target.host().await;
         let boot = uuid::Uuid::new_v4().to_string();
         let control_id = &control.control.identity.runtime_id;
-        let config = pot_core::Profile::api(&pot_control::execution::Config {
+        let mut config = pot_core::Profile::api(&pot_control::execution::Config {
             model: "fixture".into(),
             ..Default::default()
         })
         .resolve()
         .unwrap();
-        let vision = config
-            .params
-            .agent
-            .model_descriptor(&config.provider, &config.model)
-            .unwrap()
-            .vision();
+        config.set_plugins(Default::default()).unwrap();
         let launch = Launch {
             task_id: uuid::Uuid::new_v4().to_string(),
             run_id: uuid::Uuid::new_v4().to_string(),
             generation: 1,
             execution_target: ExecutionTarget::host(&target.control.identity.runtime_id),
-            resources: pot_runner::resources::GlobalResources {
-                plugins: config.params.agent.plugins.clone(),
-                shell: config.params.agent.shell.clone(),
-                vision,
-                ..Default::default()
-            },
+            plugins: vec![],
             config,
             skills: None,
             text: "fixture".into(),

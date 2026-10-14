@@ -13,7 +13,7 @@ must be discussed and confirmed before implementation.
 - Assistant-owned DB AGENTS.md, self-scoped approved edits and project context.
 - One Control with outward machine membership, isolated App modes and fixed Web UI.
 - Minimal Machines status/execution target views and optional Chat file delivery.
-- Control-selected global snapshots, pinned remote plugin dispatch and receipts.
+- Control-owned global resources synchronized before execution, remote plugin dispatch and receipts.
 
 ## Qualification
 

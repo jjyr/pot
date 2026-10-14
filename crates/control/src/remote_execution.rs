@@ -145,7 +145,7 @@ pub(crate) fn binding(
     })
 }
 pub(crate) async fn open(s: &Service, binding: RemoteBinding) -> Result<()> {
-    let resources = crate::control_resources::snapshot(s)?;
+    let resources = crate::control_resources::current(s)?;
     let remote = port(s)?;
     remote.open(binding.clone()).await?;
     let context = remote.install_resources(binding.clone(), resources).await?;

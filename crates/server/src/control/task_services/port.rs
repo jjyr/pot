@@ -58,10 +58,7 @@ impl Port {
             .json(&request)
             .send()
             .await?;
-        ensure!(
-            response.status().is_success(),
-            "Control service unavailable"
-        );
+        let status = response.status();
         let mut stream = response.bytes_stream();
         let mut bytes = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -71,6 +68,13 @@ impl Port {
                 "Task service response exceeds limit"
             );
             bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            let message = serde_json::from_slice::<Value>(&bytes)
+                .ok()
+                .and_then(|value| value["error"].as_str().map(str::to_owned))
+                .unwrap_or_else(|| format!("HTTP {status}"));
+            anyhow::bail!("Control service rejected request: {message}");
         }
         let reply: Signed<Value> = serde_json::from_slice(&bytes)?;
         binding.identity.verify(&reply.payload, &reply.signature)?;
@@ -562,6 +566,50 @@ impl pot_core::ToolExecutor for Port {
             self.host
                 .cancel_controlled(&scope(&lease)?, &lease.target)
                 .await
+        })
+    }
+}
+
+// Resource reads are run-bound queries, not durable effect receipts containing bundle history.
+impl pot_runner::ResourceProvider for Port {
+    fn synchronize<'a>(
+        &'a self,
+        launch: &'a pot_runner::Launch,
+    ) -> futures_util::future::BoxFuture<'a, Result<pot_runner::resources::GlobalResources>> {
+        Box::pin(async move {
+            let value = self
+                .send(
+                    "resources",
+                    Some(Operation::Resources {
+                        skills: launch.skills.clone().unwrap_or_default(),
+                        plugins: launch.plugins.clone(),
+                    }),
+                    true,
+                )
+                .await?;
+            let resources: pot_runner::resources::GlobalResources = serde_json::from_value(value)?;
+            resources.validate()?;
+            let revision = resources.revision()?;
+            let lease = self.current_lease()?;
+            let boot = self.host.describe()["boot_id"].as_str().unwrap().to_owned();
+            self.authority
+                .lease(&self.control, &lease.id, &boot, true)?;
+            self.authority.update(|book| {
+                let accepted = book
+                    .leases
+                    .get_mut(&lease.id)
+                    .ok_or_else(|| anyhow::anyhow!("Lease missing"))?;
+                ensure!(
+                    accepted
+                        .resources_revision
+                        .as_ref()
+                        .is_none_or(|old| old == &revision),
+                    "Resources changed during an accepted run"
+                );
+                accepted.resources_revision = Some(revision);
+                Ok(())
+            })?;
+            Ok(resources)
         })
     }
 }

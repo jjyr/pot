@@ -434,14 +434,18 @@ pub async fn events_handler(
     events(s, h, q).await
 }
 
-/// Composer metadata is owner-scoped and comes from the same catalog as the assistant.
+/// Composer skill selections are owner-scoped global resources; projects discover their own.
 pub async fn completions(
     State(s): State<Service>,
     h: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     s.authorized(&h)?;
-    let skills = pot_agent::discover_skills(&crate::skills::resources(&s).map_err(internal)?)
-        .map_err(internal)?;
+    let mut resources = crate::skills::resources(&s).map_err(internal)?;
+    resources.roots.retain(|root| {
+        root.path == s.agent_service.resources.skill_user
+            || root.path == s.agent_service.resources.skill_builtin
+    });
+    let skills = pot_agent::discover_skills(&resources).map_err(internal)?;
     let mut items = vec![];
     for skill in skills
         .skills

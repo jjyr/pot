@@ -139,6 +139,16 @@ pub struct ResolvedSpec {
     pub spec_hash: String,
 }
 impl ResolvedSpec {
+    /// Replace execution-time plugins while preserving the selected model configuration.
+    pub fn set_plugins(
+        &mut self,
+        plugins: std::collections::BTreeMap<String, crate::plugins::PluginConfig>,
+    ) -> Result<()> {
+        self.params.agent.plugins = plugins;
+        self.params.agent.validate()?;
+        self.spec_hash = self.hash()?;
+        Ok(())
+    }
     pub fn supports_checkpoint(&self) -> bool {
         self.gateway_protocol != "unknown"
     }

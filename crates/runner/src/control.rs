@@ -4,9 +4,23 @@ use serde_json::Value;
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Ready,
-    Steering { finalizing: bool },
-    Acknowledge { ids: Vec<String> },
-    Permission { request: Value },
-    Compaction { event: Value },
-    Model { request: pot_core::ModelRequest },
+    Resources {
+        skills: Vec<String>,
+        plugins: Vec<String>,
+    },
+    Steering {
+        finalizing: bool,
+    },
+    Acknowledge {
+        ids: Vec<String>,
+    },
+    Permission {
+        request: Value,
+    },
+    Compaction {
+        event: Value,
+    },
+    Model {
+        request: pot_core::ModelRequest,
+    },
 }
