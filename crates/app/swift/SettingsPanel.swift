@@ -27,7 +27,15 @@ import Foundation
         connectionModel = ""
     var secretRevision = 0, draftRevision = 0
     var connectionDraftID = ""
-    var returnToChat = false, aiBusy = false, draftInitialized = false
+    var returnToChat = false, draftInitialized = false
+    var aiBusy = false {
+        didSet {
+            if oldValue != aiBusy {
+                wakeNativeUI()
+            }
+        }
+    }
+
     var activeSpec: [String: Any] = [:], connections: [[String: Any]] = [], modelOptions: [String] = []
     @LocalizedMessage var checkMessage = ""
     var profile: [String: Any] = [:]
@@ -35,14 +43,27 @@ import Foundation
     var routingPolicy: [String: Any] = [:]
     var routingProfile = "", routingName = "", routingModel = ""
     var routingProfileLimit = "", routingProviderLimit = ""
-    var routingBusy = false
+    var aiRefreshAgain = false, routingRefreshAgain = false
+    var pendingRoutingOwner: String?
+    var routingBusy = false {
+        didSet {
+            if oldValue != routingBusy {
+                wakeNativeUI()
+            }
+        }
+    }
+
     var routingOwner = "main", routingOwnerName = L.text("routing.main-conversation")
     var providerAllowances: [[String: Any]] = []
     var providerAllowance: [String: Any] = [:]
     var providerPeriod = "none", providerTokens = "2000000", providerAutoResume = true
     var apiEndpoint = "", apiModel = "", apiProtocol = "openai_chat", hasAPIKey = false
     var runtimeStatus: [String: Any] = [:]
-    var section = 0, revision = 0
+    var section = 0
+    var revision = 0 {
+        didSet { wakeNativeUI() }
+    }
+
     var awaitingBoot: String?
     var cpu = 4, memory = 8, disk = 32
     var key = "", limit = "10000", tokens = "8192", perTurn = "100", parallel = "8"
@@ -104,7 +125,17 @@ import Foundation
     func refreshAI(owner: String? = nil) {
         bindAssistant(owner: owner)
         guard bridge?.snapshot["connected"] as? Bool == true else { return }
+        if aiBusy {
+            aiRefreshAgain = true; return
+        }
+        aiBusy = true
         Task {
+            defer {
+                aiBusy = false
+                if aiRefreshAgain {
+                    aiRefreshAgain = false; refreshAI()
+                }
+            }
             do { try await reloadAI() }
             catch { result = error.localizedDescription }
         }
@@ -167,12 +198,20 @@ import Foundation
         } catch { result = L.text("settingspanel.save-failed-previous-configuration-kept") }
     }
 
-    func refreshRouting() {
+    func refreshRouting(preserveDraft: Bool = false) {
         bindAssistant()
-        guard let bridge, !routingBusy else { return }
+        guard let bridge else { return }
+        if routingBusy {
+            routingRefreshAgain = true; return
+        }
         routingBusy = true
         Task {
-            defer { routingBusy = false }
+            defer {
+                routingBusy = false
+                if routingRefreshAgain {
+                    routingRefreshAgain = false; refreshRouting(preserveDraft: true)
+                }
+            }
             do {
                 let state = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent")
                 savedProfiles = state["profiles"] as? [[String: Any]] ?? []
@@ -182,7 +221,9 @@ import Foundation
                 if !savedProfiles.contains(where: { $0["id"] as? String == routingProfile }) {
                     routingProfile = savedProfiles.first?["id"] as? String ?? ""
                 }
-                editRoutingProfile(routingProfile)
+                if !preserveDraft {
+                    editRoutingProfile(routingProfile)
+                }
                 result = L.text("settingspanel.configuration-loaded-existing-tasks-keep-their-original")
             } catch { result = L.format(
                 "settingspanel.unable-to-load-configuration-0",
@@ -290,6 +331,20 @@ import Foundation
         }
     }
 
+    func configurationChanged() {
+        guard let bridge, let owner = pendingRoutingOwner else { return }
+        let runtime = configurationRuntime ?? bridge.runtime
+        Task {
+            guard let response = try? await runtime.request("api/v1/agent?owner=" + owner),
+                  pendingRoutingOwner == owner else { return }
+            if response["pending_config"] is NSNull || response["pending_config"] == nil {
+                pendingRoutingOwner = nil
+                result = L.text("settingspanel.this-task-s-agent-changed-other-tasks")
+                wakeNativeUI()
+            }
+        }
+    }
+
     func useProfileForOwner() {
         guard let bridge, !routingBusy, !routingProfile.isEmpty else { return }
         routingBusy = true
@@ -298,21 +353,17 @@ import Foundation
         Task {
             defer { routingBusy = false }
             do {
-                _ = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent/config", body: [
-                    "request_id": UUID().uuidString, "profile": target,
-                    "owner": owner,
+                let response = try await (configurationRuntime ?? bridge.runtime).request("api/v1/agent/config", body: [
+                    "request_id": UUID().uuidString, "profile": target, "owner": owner,
                 ])
-                while true {
-                    let response = try await (configurationRuntime ?? bridge.runtime)
-                        .request("api/v1/agent?owner=" + owner)
-                    if response["pending_config"] is NSNull || response["pending_config"] == nil {
-                        break
-                    }
+                if response["pending"] as? Bool == true {
+                    pendingRoutingOwner = owner
+                    configurationChanged()
                     result = L.text("settingspanel.this-task-is-waiting-for-configuration")
-                    try await Task.sleep(nanoseconds: 750_000_000)
+                } else {
+                    result = L.text("settingspanel.this-task-s-agent-changed-other-tasks")
+                    bridge.selectPage(3)
                 }
-                result = L.text("settingspanel.this-task-s-agent-changed-other-tasks")
-                bridge.selectPage(3)
             } catch { result = L.text("settingspanel.task-agent-unchanged-check-the-connection-finish") }
         }
     }

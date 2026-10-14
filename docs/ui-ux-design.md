@@ -189,3 +189,23 @@ Web UI is explicitly enabled by `pot serve --ui --control URL` and remains fixed
 to that Control. It has no local/remote switch. App has no Web UI/Tailscale hosting
 settings. Browser Token controls belong to the standalone host; see
 [deployment](deployment.md).
+
+### Interaction feedback
+
+Settings uses one consistent three-section header across General, AI Configuration
+and Task Configuration. General separates preferences from keyboard help; the
+footer is reserved for pages with explicit save actions. Settings navigation and
+appearance choices use raised neutral selection surfaces. Language has a visible
+pop-up affordance. A reserved header activity indicator accompanies configuration
+requests without shifting navigation.
+
+Shared buttons and list rows have distinct hover and pressed colors in both
+appearances. Native sidebar selection remains visible at rest, with separate hover
+and immediate pressed feedback. Reduced Motion continues to disable sidebar fades.
+
+Native configuration busy/revision changes and client pending/completion states
+wake the renderer directly. Geometry and appearance changes also wake presentation;
+the 200 ms fallback has been removed. Native and Web follow the
+[event-driven update contract](ui-events.md). Schedule retry backoff
+releases the presentation mutex before waiting so disconnected requests cannot
+block rendering or input for the one-second retry interval.

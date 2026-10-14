@@ -6,7 +6,7 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    Disableable,
+    ActiveTheme, Disableable, IconName, Sizable,
     button::{Button, ButtonVariants},
 };
 use serde_json::{Value, json};
@@ -40,7 +40,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
         .cloned()
         .unwrap_or_default();
     let selected = crate::machine_state::selection(view.directory, view.preferred);
-    let mut body = div().p_4().flex().flex_col().gap_4();
+    let mut body = div().flex().flex_col().gap_4();
     if machines.is_empty() {
         body = body.child(pages::hint(catalog.text("machines.loading"), cx));
     }
@@ -54,28 +54,58 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             } else {
                 runtime
             });
-        let mut card = div()
-            .p_4()
-            .rounded_lg()
-            .bg(design::navigation(cx))
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(name.to_owned())
-                    .child(pages::hint(
+        let settings_open = view.preferred["settings_machine"].as_str() == Some(runtime);
+        let mut card = pages::card(cx).child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(gpui_kit::component::Icon::new(
+                    gpui_kit::assets::IconName::Monitor,
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(name.to_owned()),
+                )
+                .child(
+                    pages::hint(
                         catalog.text(if online {
                             "machines.online"
                         } else {
                             "machines.offline"
                         }),
                         cx,
-                    )),
-            );
+                    )
+                    .text_color(if online {
+                        cx.theme().success
+                    } else {
+                        cx.theme().muted_foreground
+                    }),
+                )
+                .when(!view.permissions.is_null(), |el| {
+                    el.child(pages::action_tooltip(
+                        SharedString::from(format!("machine-settings-tip-{runtime}")),
+                        catalog.text("ui.settings"),
+                        Button::new(SharedString::from(format!("machine-settings-{runtime}")))
+                            .ghost()
+                            .small()
+                            .icon(IconName::Settings)
+                            .toggled(settings_open)
+                            .accessibility_label(catalog.text("ui.settings"))
+                            .on_click(pages::on(
+                                &handler,
+                                "machine-select",
+                                if settings_open {
+                                    Value::Null
+                                } else {
+                                    json!({"settings_machine":runtime})
+                                },
+                            )),
+                    ))
+                }),
+        );
         card = card.child(pages::hint(
             machine["tags"]
                 .as_array()
@@ -86,9 +116,18 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                 .join(" · "),
             cx,
         ));
+        if settings_open {
+            card = card.child(
+                Button::new(SharedString::from(format!("edit-tags-{runtime}")))
+                    .ghost()
+                    .small()
+                    .label(catalog.text("machines.edit-tags"))
+                    .on_click(pages::on(&handler, "machine-labels", json!(runtime))),
+            );
+        }
         for capability in ["sandbox", "host"]
             .into_iter()
-            .filter(|_| !view.permissions.is_null())
+            .filter(|_| settings_open && !view.permissions.is_null())
         {
             let current = view.permissions["policy"]["rules"]
                 .as_array()
@@ -101,14 +140,21 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                 })
                 .and_then(|r| r["decision"].as_str())
                 .unwrap_or("ask");
-            let mut controls = div().flex().flex_wrap().gap_2().child(format!(
-                "{} · {}",
-                view.permissions["assistant_id"].as_str().unwrap_or(""),
-                capability
-            ));
+            let mut controls =
+                div()
+                    .flex()
+                    .items_center()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(div().flex_1().child(format!(
+                        "{} · {}",
+                        view.permissions["assistant_id"].as_str().unwrap_or(""),
+                        capability
+                    )));
             for decision in ["ask", "allow", "deny"] {
                 controls=controls.child(Button::new(SharedString::from(format!("policy-{runtime}-{capability}-{decision}")))
-                    .ghost().label(catalog.text(&format!("permissions.policy-{decision}"))).disabled(current==decision)
+                    .ghost().small().label(catalog.text(&format!("permissions.policy-{decision}"))).toggled(current==decision)
+                    .when(current==decision, |b| b.bg(design::navigation(cx)).font_weight(FontWeight::MEDIUM))
                     .on_click(pages::on(&handler,"permission-decision",json!({"action":"configure","machine_id":runtime,"capability":capability,"decision":decision}))));
             }
             card = card.child(controls);
@@ -117,7 +163,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|g| g["scope"]["machine_id"] == runtime)
+            .filter(|g| settings_open && g["scope"]["machine_id"] == runtime)
         {
             card = card.child(
                 Button::new(SharedString::from(format!("revoke-{}", grant["id"])))
@@ -140,13 +186,17 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             .unwrap_or(json!({"max_sandboxes":16,"cpus":4,"memory_gib":8,"disk_gib":32}));
         for key in ["max_sandboxes", "cpus", "memory_gib", "disk_gib"]
             .into_iter()
-            .filter(|_| !view.permissions.is_null())
+            .filter(|_| settings_open && !view.permissions.is_null())
         {
             let n = limits[key].as_u64().unwrap_or(1);
-            let mut row = div().flex().items_center().gap_2().child(format!(
-                "{}: {n}",
-                catalog.text(&format!("permissions.limit-{key}"))
-            ));
+            let mut row = div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().flex_1().child(format!(
+                    "{}: {n}",
+                    catalog.text(&format!("permissions.limit-{key}"))
+                )));
             for increase in [false, true] {
                 let mut next = limits.clone();
                 next[key] = json!(if increase {
@@ -158,7 +208,9 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                     Button::new(SharedString::from(format!(
                         "limit-{runtime}-{key}-{increase}"
                     )))
-                    .ghost()
+                    .small()
+                    .w(px(28.))
+                    .disabled(!increase && n <= 1)
                     .label(if increase { "+" } else { "−" })
                     .on_click(pages::on(
                         &handler,
@@ -202,7 +254,13 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                 )))
                 .ghost()
                 .w_full()
-                .h_auto()
+                .h(px(36.))
+                .justify_start()
+                .icon(if expanded {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronRight
+                })
                 .label(format!("{title} · {status}"))
                 .on_click(pages::on(
                     &handler,
@@ -214,7 +272,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                     },
                 )),
             );
-            if !host && !view.permissions.is_null() {
+            if expanded && !host && !view.permissions.is_null() {
                 let sandbox = reference["target"]["sandbox_id"].as_str().unwrap_or("");
                 let access = view.permissions["policy"]["sandboxes"]
                     .as_array()

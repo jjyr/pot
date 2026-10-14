@@ -105,6 +105,7 @@ pub async fn configure(
             &serde_json::to_string(&p).map_err(|e| internal(e.into()))?,
         )
         .map_err(internal)?;
+    root.invalidate("settings");
     Ok(Json(p))
 }
 pub fn allow_hint(root: &Service, hint: Option<&str>) -> Result<()> {

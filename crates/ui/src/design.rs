@@ -61,8 +61,8 @@ pub fn install(cx: &mut App) {
         colors.blue_light = c(0xe7f2ff, 0x243a52);
         colors.button = colors.popover;
         colors.button_foreground = colors.foreground;
-        colors.button_hover = c(0xf4f4f4, 0x353535);
-        colors.button_active = colors.secondary;
+        colors.button_hover = c(0xebeff5, 0x383e47);
+        colors.button_active = c(0xdde5ef, 0x444e5c);
         colors.button_primary = colors.primary;
         colors.button_primary_foreground = colors.primary_foreground;
         colors.button_primary_hover = colors.primary_hover;
@@ -72,7 +72,7 @@ pub fn install(cx: &mut App) {
         colors.button_secondary_hover = colors.secondary_hover;
         colors.button_secondary_active = colors.secondary_active;
         colors.list = colors.popover;
-        colors.list_hover = c(0xf6f7f8, 0x333333);
+        colors.list_hover = c(0xf0f3f7, 0x343a43);
         colors.list_active = colors.secondary;
         colors.list_active_border = colors.border;
         colors.list_head = colors.muted;
@@ -105,8 +105,8 @@ pub fn install(cx: &mut App) {
         theme.radius_lg = px(12.);
         theme.font_family = ".AppleSystemUIFont".into();
         theme.font_size = px(14.);
-        theme.motion.duration_fast = Duration::from_millis(140);
-        theme.motion.duration_normal = Duration::from_millis(180);
+        theme.motion.duration_fast = Duration::from_millis(90);
+        theme.motion.duration_normal = Duration::from_millis(140);
         theme.motion.duration_slow = Duration::from_millis(220);
     });
 }

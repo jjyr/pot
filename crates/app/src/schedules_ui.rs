@@ -19,7 +19,10 @@ pub fn navigation(scheduled: bool, cx: &mut Context<Shell>) -> Div {
                 .ghost()
                 .small()
                 .label(label)
-                .when(value == scheduled, |b| b.bg(cx.theme().secondary))
+                .toggled(value == scheduled)
+                .when(value == scheduled, |b| {
+                    b.bg(pot_ui::design::surface(cx)).shadow_sm()
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.schedule_tab = value;
                     cx.notify();
@@ -305,8 +308,8 @@ impl SchedulesUI {
                         .when(task.is_some(),|el|el.child(Button::new(SharedString::from(format!("run-{}",run.id))).ghost().small().label(crate::i18n::text("schedules-ui.view-task")).on_click(cx.listener(move|this,_,_,cx|{this.show_tasks=false;this.client.select(task.clone().unwrap());this.first=true;cx.notify();}))))
                 })))
                 .child(div().flex().gap_2()
-                    .child(Button::new("runs-newer").ghost().small().label(crate::i18n::text("schedules-ui.newer-entries")).disabled(v.runs_offset==0).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();v.runs_offset=v.runs_offset.saturating_sub(20);cx.notify();})))
-                    .child(Button::new("runs-older").ghost().small().label(crate::i18n::text("schedules-ui.older-entries")).disabled(v.schedules.runs_next_offset.is_none()).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();if let Some(offset)=v.schedules.runs_next_offset{v.runs_offset=offset;}cx.notify();})))
+                    .child(Button::new("runs-newer").ghost().small().label(crate::i18n::text("schedules-ui.newer-entries")).disabled(v.runs_offset==0).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();v.runs_offset=v.runs_offset.saturating_sub(20);drop(v);this.client.refresh();cx.notify();})))
+                    .child(Button::new("runs-older").ghost().small().label(crate::i18n::text("schedules-ui.older-entries")).disabled(v.schedules.runs_next_offset.is_none()).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();if let Some(offset)=v.schedules.runs_next_offset{v.runs_offset=offset;}drop(v);this.client.refresh();cx.notify();})))
                 );
         } else {
             body = body
@@ -388,6 +391,8 @@ impl SchedulesUI {
                                             let mut v = this.client.view.lock().unwrap();
                                             v.schedule_offset =
                                                 v.schedule_offset.saturating_sub(20);
+                                            drop(v);
+                                            this.client.refresh();
                                             cx.notify();
                                         })),
                                 )
@@ -402,6 +407,8 @@ impl SchedulesUI {
                                             if let Some(offset) = v.schedules.next_offset {
                                                 v.schedule_offset = offset;
                                             }
+                                            drop(v);
+                                            this.client.refresh();
                                             cx.notify();
                                         })),
                                 ),

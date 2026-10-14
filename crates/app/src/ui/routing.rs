@@ -6,12 +6,33 @@ impl Settings {
         let busy = state["routing_busy"] == true;
         let selected = state["routing_profile"].as_str().unwrap_or("");
         let profiles = state["profiles"].as_array().cloned().unwrap_or_default();
+        if profiles.is_empty() {
+            return form(_cx)
+                .child(
+                    field(crate::i18n::text("routing.background-task-agent"))
+                        .child(hint(crate::i18n::text("routing.follow-chat"), _cx)),
+                )
+                .child(
+                    field(crate::i18n::text("routing.no-configurations-yet"))
+                        .description(crate::i18n::text(
+                            "routing.add-an-agent-in-ai-configuration-first",
+                        ))
+                        .child(
+                            Button::new("routing-connect-agent")
+                                .small()
+                                .max_w(px(240.))
+                                .label(crate::i18n::text("ai.connect-agent-58"))
+                                .on_click(|_, _, _| command(json!({"action":"section","value":1}))),
+                        ),
+                );
+        }
         let mut form = form(_cx).child(
             field(crate::i18n::text("routing.saved-configurations")).child(
                 Button::new("routing-refresh")
                     .ghost()
                     .small()
-                    .small()
+                    .max_w(px(260.))
+                    .justify_start()
                     .label(crate::i18n::text("routing.refresh-discard-changes"))
                     .disabled(busy)
                     .on_click(|_, _, _| command(json!({"action":"routing-refresh"}))),
@@ -44,6 +65,8 @@ impl Settings {
                 .child(
                     Button::new("worker-follow-chat")
                         .small()
+                        .max_w(px(260.))
+                        .self_start()
                         .label(if independent {
                             crate::i18n::text("routing.switch-to-following-chat")
                         } else {
@@ -57,7 +80,7 @@ impl Settings {
                 ),
         );
         if state["routing_owner"] == "main" {
-            form = form.child(field(crate::i18n::text("routing.independent-task-configuration")).child(Button::new("worker-pick").small().label(worker_label).dropdown_caret(true).disabled(busy)
+            form = form.child(field(crate::i18n::text("routing.independent-task-configuration")).child(Button::new("worker-pick").small().self_start().max_w(px(320.)).label(worker_label).dropdown_caret(true).disabled(busy)
                 .dropdown_menu(move|menu,_,_| worker_choices.iter().fold(menu,|menu,p| {let id=p["id"].as_str().unwrap_or("").to_owned();
                     menu.item(PopupMenuItem::new(p["name"].as_str().unwrap_or("Agent").to_owned()).on_click(move|_,_,_|command(json!({"action":"routing-choice","kind":"worker","id":id}))))}))));
         }
@@ -65,6 +88,8 @@ impl Settings {
             field(crate::i18n::text("routing.configuration-details")).child(
                 Button::new("routing-details")
                     .small()
+                    .self_start()
+                    .max_w(px(320.))
                     .label(details_label)
                     .dropdown_caret(true)
                     .disabled(busy)

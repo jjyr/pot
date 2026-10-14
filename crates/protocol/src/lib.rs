@@ -524,3 +524,5 @@ mod file_link_tests {
         assert!(super::parse_file_link("pot-file://evil.example/report.pdf").is_none());
     }
 }
+
+pub mod sse;

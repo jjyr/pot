@@ -29,7 +29,7 @@ use std::{
     ffi::{CStr, CString},
 };
 
-gpui_kit::assets::icon_assets!(SpaceIcons, [Cloud, Monitor]);
+gpui_kit::assets::icon_assets!(SpaceIcons, [Cloud, Monitor, MessageCircle]);
 struct AppAssets;
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
@@ -92,6 +92,8 @@ struct Shell {
     pending_offsets: Option<[Point<Pixels>; 5]>,
     pending_task_anchor: Option<(String, f32)>,
     last_content: String,
+    bridge_projection: serde_json::Value,
+    machine_watches: std::collections::BTreeMap<String, backend::Subscription>,
     summary_count: usize,
     summary_removal: Option<(std::time::Instant, usize)>,
     expanded: HashSet<String>,
@@ -115,7 +117,7 @@ struct Shell {
 impl Shell {
     fn switch_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if backend::toggle_mode().is_err() {
-            self.machine_connections.open = true;
+            self.machine_connections.connect();
             ui::command(serde_json::json!({"action":"page","value":1}));
             return;
         }
@@ -252,6 +254,11 @@ impl Shell {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) -> bool {
+        for (mode, domains) in spaces::take_native_changes() {
+            ui::command(
+                serde_json::json!({"action":"backend-changed","mode":mode,"domains":domains}),
+            );
+        }
         let directory = spaces::directory().lock().unwrap().clone();
         let directory_changed = directory != self.space_directory;
         for space in directory.spaces.values() {
@@ -305,7 +312,13 @@ impl Shell {
         let old_tasks = self.show_tasks;
         {
             let mut v = self.client.view.lock().unwrap();
-            v.schedules_visible = self.show_tasks && self.schedule_tab;
+            let visible = self.show_tasks && self.schedule_tab;
+            let changed = v.schedules_visible != visible;
+            v.schedules_visible = visible;
+            drop(v);
+            if changed {
+                self.client.refresh();
+            }
         }
         let success = self.client.view.lock().unwrap().schedule_success;
         if success != self.schedules_ui.success {
@@ -359,6 +372,23 @@ impl Shell {
             .as_str()
             .is_some_and(crate::i18n::set_locale);
         self.native = native;
+        let machines_visible = self.native["page"] == 1 && self.native["visible"] == true;
+        let modes: Vec<&str> = if machines_visible {
+            if backend::control_projection()["configured"] == true {
+                vec!["local", "remote"]
+            } else {
+                vec!["local"]
+            }
+        } else {
+            vec![]
+        };
+        self.machine_watches
+            .retain(|mode, _| modes.contains(&mode.as_str()));
+        for mode in modes {
+            self.machine_watches.entry(mode.into()).or_insert_with(|| {
+                backend::subscribe(mode.into(), "/api/v1/machines/watch".into(), |_| Ok(()))
+            });
+        }
         if language_changed {
             cx.notify();
         }
@@ -395,11 +425,16 @@ impl Shell {
             } else {
                 None
             };
-            if v.usage_query != query {
+            let changed = v.usage_query != query;
+            if changed {
                 v.usage = serde_json::Value::Null;
                 v.usage_error.clear();
             }
             v.usage_query = query;
+            drop(v);
+            if changed {
+                self.client.refresh();
+            }
         }
         let (accepted, accepted_conversation) = {
             let mut view = self.client.view.lock().unwrap();
@@ -475,8 +510,11 @@ impl Shell {
             "accepted":accepted,"accepted_conversation":accepted_conversation.map(|id|format!("{}/{id}",view.client_mode)),"at_bottom":at_bottom,
             "messages":view.main_snapshot.as_ref().map(|s|s.messages.as_slice()).unwrap_or(&[]).iter().map(|m|serde_json::json!({"id":m.id,"role":m.role,"status":m.status})).collect::<Vec<_>>()
         });
-        if let Ok(json) = CString::new(state.to_string()) {
-            unsafe { pot_bridge_update(json.as_ptr()) };
+        if state != self.bridge_projection || native_changed {
+            if let Ok(json) = CString::new(state.to_string()) {
+                unsafe { pot_bridge_update(json.as_ptr()) };
+            }
+            self.bridge_projection = state;
         }
         changed
     }
@@ -492,7 +530,13 @@ impl Shell {
                     .unwrap_or("Asia/Shanghai")
                     .to_owned(),
             );
-            spaces::directory().lock().unwrap().usage_query = Some(query.clone());
+            let directory = spaces::directory();
+            let mut directory = directory.lock().unwrap();
+            if directory.usage_query.as_ref() != Some(&query) {
+                directory.usage_query = Some(query.clone());
+                spaces::refresh_directory();
+            }
+            drop(directory);
             view.usage = self.space_directory.usage(
                 &self.usage_location,
                 &query,
@@ -506,12 +550,6 @@ impl Shell {
                 .filter_map(|s| {
                     if !s.error.is_empty() {
                         Some(format!("{}: {}", s.label(), s.error))
-                    } else if s.usage_query.as_ref() != Some(&query) {
-                        Some(format!(
-                            "{} · {}",
-                            s.label(),
-                            crate::i18n::text("client.loading")
-                        ))
                     } else {
                         None
                     }
@@ -562,6 +600,26 @@ impl Shell {
                         usage_error: &view.usage_error,
                         usage_notice: &view.usage_notice,
                         usage_pending: view.usage_pending,
+                        loading: view.usage.is_null()
+                            || (self.native["page"] == 4
+                                && self
+                                    .space_directory
+                                    .spaces
+                                    .values()
+                                    .filter(|s| {
+                                        self.usage_location.is_empty()
+                                            || self.usage_location == s.mode
+                                    })
+                                    .any(|s| {
+                                        s.usage_query.as_ref()
+                                            != Some(&(
+                                                self.usage_ui.days,
+                                                self.native["timezone"]
+                                                    .as_str()
+                                                    .unwrap_or("Asia/Shanghai")
+                                                    .to_owned(),
+                                            ))
+                                    })),
                         controls: self.native["page"] != 4
                             || (!self.usage_location.is_empty()
                                 && self
@@ -583,29 +641,15 @@ impl Shell {
                         .flex()
                         .flex_col()
                         .child(self.location_bar("usage", cx))
-                        .child(self.usage_breakdown(cx))
-                        .child(content)
+                        .child(content.flex_1().min_h_0())
                 } else {
                     content
                 };
             }
             Some(2) => {
-                let content = self.settings.render(&self.native["settings"], cx).child(
-                    Button::new("settings-resource-cache")
-                        .ghost()
-                        .label(crate::i18n::text("resources.cache"))
-                        .on_click(|_, _, _| {
-                            ui::command(serde_json::json!({"action":"resource-cache"}))
-                        }),
-                );
-                return div()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .when(self.native["settings"]["section"] != 0, |el| {
-                        el.child(self.location_bar("settings", cx))
-                    })
-                    .child(content);
+                let location = (self.native["settings"]["section"] != 0)
+                    .then(|| self.location_bar("settings", cx));
+                return self.settings.render(&self.native["settings"], location, cx);
             }
             Some(1) => return self.render_spaces_machines(window, cx),
             _ => {}
@@ -650,6 +694,9 @@ impl Shell {
             return ui::page(cx).child(
                 ui::content().child(
                     ui::card(cx)
+                        .max_w(px(520.))
+                        .mx_auto()
+                        .mt_8()
                         .child(ui::title(crate::i18n::text("onboarding.start")))
                         .child(ui::hint(
                             crate::i18n::text("onboarding.choose-connection"),
@@ -658,6 +705,7 @@ impl Shell {
                         .child(
                             Button::new("chat-ai-setup")
                                 .primary()
+                                .self_start()
                                 .label(crate::i18n::text("main.open-ai-configuration"))
                                 .on_click(|_, _, _| {
                                     ui::command(serde_json::json!({"action":"ai-open"}))
@@ -666,9 +714,10 @@ impl Shell {
                         .child(
                             Button::new("chat-control-setup")
                                 .ghost()
+                                .self_start()
                                 .label(crate::i18n::text("onboarding.connect-server"))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.machine_connections.open = true;
+                                    this.machine_connections.connect();
                                     ui::command(serde_json::json!({"action":"page","value":1}));
                                     cx.notify();
                                 })),
@@ -924,7 +973,7 @@ impl Shell {
                                         .child(Button::new(SharedString::from(format!("desktop-connect-{}", m.id)))
                                             .ghost().small().label(crate::i18n::text("onboarding.connect-desktop"))
                                             .on_click(cx.listener(|this, _, _, cx| {
-                                                this.machine_connections.open = true;
+                                                this.machine_connections.connect();
                                                 ui::command(serde_json::json!({"action":"page","value":1}));
                                                 cx.notify();
                                             }))))
@@ -1015,6 +1064,7 @@ impl Shell {
 }
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.tick(cx);
         if self.native["page"] != 2
             && self.native["page"] != 6
             && let Some((owner, selected)) = self.settings_return.take()
@@ -1174,18 +1224,7 @@ fn main() {
                         unsafe {
                             pot_bridge_set_wake(wake_ui);
                         }
-                        // Runtime snapshots and native geometry still use a bounded poll;
-                        // native commands bypass it and wake this task immediately.
-                        cx.background_spawn(async move {
-                            loop {
-                                smol::Timer::after(std::time::Duration::from_millis(200)).await;
-                                if sender.is_closed() {
-                                    break;
-                                }
-                                let _ = sender.try_send(());
-                            }
-                        })
-                        .detach();
+                        let _ = sender.try_send(());
                         cx.spawn(async move |this, cx| {
                             while receiver.recv().await.is_ok() {
                                 if this
@@ -1219,6 +1258,8 @@ fn main() {
                             pending_offsets: None,
                             pending_task_anchor: None,
                             last_content: String::new(),
+                            bridge_projection: serde_json::Value::Null,
+                            machine_watches: Default::default(),
                             summary_count: 0,
                             summary_removal: None,
                             expanded: HashSet::new(),
@@ -1238,11 +1279,15 @@ fn main() {
                             settings: ui::Settings::new(window, cx),
                             schedule_tab: false,
                             schedules_ui: schedules_ui::SchedulesUI::new(window, cx),
-                            task_search: cx.new(|cx| {
-                                InputState::new(window, cx).placeholder(crate::i18n::text(
-                                    "main.search-task-title-or-id-47",
-                                ))
-                            }),
+                            task_search: {
+                                let input = cx.new(|cx| {
+                                    InputState::new(window, cx).placeholder(crate::i18n::text(
+                                        "main.search-task-title-or-id-47",
+                                    ))
+                                });
+                                cx.observe(&input, |_, _, _| wake_ui()).detach();
+                                input
+                            },
                         }
                     })
                 },

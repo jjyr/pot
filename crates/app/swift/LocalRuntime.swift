@@ -7,8 +7,8 @@ import WebKit
     let root: URL
     weak var web: WKWebView?
     let label = NSTextField(wrappingLabelWithString: L.text("native.runtime-starting"))
-    var timer: Timer?
-    var polling = false
+    var refreshing = false
+    var refreshAgain = false
     var probing = false
     var loaded = ""
     var displayReady = false
@@ -35,7 +35,7 @@ import WebKit
         closeDesktop()
         desktopSupported = desktop
         viewGeneration += 1; sandboxID = id; loaded = ""; displayReady = false; web?.stopLoading(); web?.isHidden = true
-        poll()
+        refreshState()
     }
 
     var onState: (([String: Any]) -> Void)?
@@ -48,10 +48,7 @@ import WebKit
             label.frame = NSRect(x: 16, y: 120, width: 300, height: 110); label
                 .textColor = .white // Native chat presents status
             // The Sandbox Provider owns its Helper and starts it only for explicit lifecycle work.
-            timer = Timer
-                .scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.poll() }
-                }
+            refreshState()
         } catch { label.stringValue = "Helper failed: \(error)" }
     }
 
@@ -80,14 +77,21 @@ import WebKit
         completion?(["error": "Unsupported desktop lifecycle action"])
     }
 
-    func poll() {
-        if polling {
+    func refreshState() {
+        if refreshing {
+            refreshAgain = true
             return
-        }; polling = true
+        }; refreshing = true
         let target = sandboxID
         let generation = viewGeneration
         Task {
-            defer { polling = false }
+            defer {
+                refreshing = false
+                if refreshAgain {
+                    refreshAgain = false; refreshState()
+                }
+                wakeNativeUI()
+            }
             let client = RuntimeClient(); client.root = root
             if let inventory = try? await client.request("api/v1/sandboxes"),
                let items = inventory["items"] as? [[String: Any]],
@@ -155,11 +159,10 @@ import WebKit
     func reconnectDesktop() {
         requestedDesktops.insert(sandboxID)
         closeDesktop(); loaded = ""; displayReady = false; viewGeneration += 1; web?.stopLoading(); web?
-            .isHidden = true; poll()
+            .isHidden = true; refreshState()
     }
 
     func cleanup() {
         closeDesktop()
-        timer?.invalidate(); timer = nil
     }
 }

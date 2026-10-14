@@ -25,6 +25,7 @@ pub struct UsageView<'a> {
     pub usage_error: &'a str,
     pub usage_notice: &'a str,
     pub usage_pending: bool,
+    pub loading: bool,
     pub selected_title: Option<&'a str>,
     pub controls: bool,
 }
@@ -146,7 +147,9 @@ impl UsageUI {
                                     .when(!layout.native, |b| b.min_h(px(44.)))
                                     .small()
                                     .label(label)
-                                    .when(self.period == value, |b| b.bg(cx.theme().secondary))
+                                    .when(self.period == value, |b| {
+                                        b.bg(crate::design::surface(cx)).shadow_sm()
+                                    })
                                     .on_click(pages::on(&handler, "usage-period", json!(value)))
                             }),
                         ),
@@ -286,10 +289,6 @@ impl UsageUI {
                     cx,
                 ));
         }
-        if d.is_null() {
-            return pages::page(layout, cx)
-                .child(body.child(pages::loading(catalog.text("usage-ui.loading-usage"), cx)));
-        }
         let total = if detail { &d["lifetime"] } else { &d["total"] };
         if !detail {
             body = body.child(
@@ -306,7 +305,9 @@ impl UsageUI {
                             .when(!layout.native, |b| b.min_h(px(44.)))
                             .small()
                             .label(label)
-                            .when(self.days == days, |b| b.bg(cx.theme().secondary))
+                            .when(self.days == days, |b| {
+                                b.bg(crate::design::surface(cx)).shadow_sm()
+                            })
                             .on_click(pages::on(&handler, "usage-days", json!(days)))
                     }),
                 ),
@@ -323,6 +324,16 @@ impl UsageUI {
             .gap_5();
         scroll = scroll.child(
             pages::card(cx)
+                .relative()
+                .when(v.loading, |el| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .top_4()
+                            .right_4()
+                            .child(gpui_kit::component::spinner::Spinner::new().small()),
+                    )
+                })
                 .child(
                     div()
                         .flex()
@@ -715,11 +726,13 @@ impl UsageUI {
                     ))
                     .child(
                         div()
-                            .h(px(240.))
+                            .h(px(if tokens(total) == 0 { 152. } else { 240. }))
                             .w_full()
                             .when(tokens(total) == 0, |el| {
                                 el.flex().items_center().justify_center().child(pages::hint(
-                                    if n(total, "requests") == 0 {
+                                    if v.loading {
+                                        catalog.text("usage-ui.loading-usage")
+                                    } else if n(total, "requests") == 0 {
                                         catalog.text("usage-ui.no-usage-records-in-the-selected-range")
                                     } else {
                                         catalog.text("usage-ui.no-confirmed-token-usage-yet")

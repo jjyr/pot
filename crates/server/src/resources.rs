@@ -1,4 +1,5 @@
 //! Caller-created resources. Creation restores definitions, never model calls or VM starts.
+mod machine_monitor;
 use anyhow::{Result, ensure};
 use axum::{
     Json, Router,
@@ -89,6 +90,8 @@ struct Inner {
     book: Book,
 }
 pub(crate) struct Resources {
+    changes: pot_core::changes::Changes,
+    monitor: std::sync::Mutex<machine_monitor::Monitor>,
     inner: tokio::sync::Mutex<Inner>,
     routes: RwLock<Router>,
     config: RuntimeConfig,
@@ -152,7 +155,11 @@ impl Resources {
         if let Some(state) = backend.optional_state() {
             state.set_remote_execution(control.clone());
         }
+        let changes = backend.host().changes.clone();
+        control.ui_changed.bind(changes.clone(), "machines");
         let this = Arc::new(Self {
+            monitor: Default::default(),
+            changes,
             inner: tokio::sync::Mutex::new(Inner { backend, book }),
             routes: RwLock::new(routes),
             config,
@@ -246,6 +253,7 @@ impl Resources {
         Router::new()
             .route("/api/v1/runtime/resources", get(list).post(create))
             .route("/api/v1/machines", get(machines))
+            .route("/api/v1/machines/watch", get(machine_monitor::watch))
             .route(
                 "/api/v1/machine-connections",
                 get(crate::control::metadata).post(crate::control::connection_operator),
@@ -262,6 +270,47 @@ impl Resources {
                 }
             })
             .with_state(self.clone())
+            .layer(axum::middleware::from_fn({
+                let changes = self.changes.clone();
+                move |request: axum::extract::Request, next: axum::middleware::Next| {
+                    let changes = changes.clone();
+                    async move {
+                        let path = request.uri().path().to_owned();
+                        let write = request.method() == axum::http::Method::POST
+                            && path.starts_with("/api/v1/")
+                            && !path.ends_with("/providers/check");
+                        let response = next.run(request).await;
+                        if write && response.status().is_success() {
+                            // Read-only POSTs (notification cursors, queries, membership
+                            // heartbeats) must never trigger a refresh feedback loop.
+                            let domain = if path.contains("/agent")
+                                || path.contains("/providers")
+                                || path.ends_with("/instructions")
+                            {
+                                Some("settings")
+                            } else if path.contains("/usage/") {
+                                Some("usage")
+                            } else if path.contains("/permissions") {
+                                Some("permissions")
+                            } else if path.contains("/schedules") {
+                                Some("schedules")
+                            } else if path.contains("/sandbox")
+                                || path.contains("/machine-connections")
+                                || path == "/api/v1/runtime/resources"
+                                || path == "/api/v1/runtime/control"
+                            {
+                                Some("machines")
+                            } else {
+                                None
+                            };
+                            if let Some(domain) = domain {
+                                changes.notify(domain);
+                            }
+                        }
+                        response
+                    }
+                }
+            }))
     }
     pub async fn ensure_app_assistant(self: &Arc<Self>) -> Result<()> {
         if self.optional_state().await.is_some() {
@@ -300,6 +349,9 @@ impl Resources {
         self.inner.lock().await.backend.host().clone()
     }
     pub async fn shutdown(&self) {
+        if let Some(task) = self.monitor.lock().unwrap().task.take() {
+            task.abort();
+        }
         if let Err(error) = self.control.stop_listener(false).await {
             eprintln!("Control listener shutdown failed: {error}");
         }
@@ -450,6 +502,157 @@ async fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn local_and_http_clients_receive_mutations_without_read_feedback() {
+        use futures_util::StreamExt;
+        let root = std::env::temp_dir().join(format!("pot-ui-transports-{}", uuid::Uuid::new_v4()));
+        let config = RuntimeConfig {
+            data: root.join("product"),
+            workspace: root.join("workspace"),
+        };
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
+        let resources = Resources::open(backend, config).await.unwrap();
+        assert!(resources.monitor.lock().unwrap().task.is_none());
+        let host = resources.host().await;
+        let local = crate::ClientTransport::Local(crate::LocalClient::new(
+            resources.router(),
+            resources.token.clone(),
+            host.instance_lock(),
+        ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let remote = crate::ClientTransport::Remote(
+            crate::RemoteClient::new(
+                &format!("http://{}", listener.local_addr().unwrap()),
+                resources.token.clone(),
+            )
+            .unwrap(),
+        );
+        let router = resources.router();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let mut a = local.events("/api/v1/changes").await.unwrap();
+        let mut b = remote.events("/api/v1/changes").await.unwrap();
+        assert_eq!(
+            a.next().await.unwrap().unwrap(),
+            b.next().await.unwrap().unwrap()
+        );
+        assert!(local.events("/api/v1/runtime").await.is_err());
+        assert!(remote.events("/api/v1/runtime").await.is_err());
+        local.request("/api/v1/runtime", None).await.unwrap();
+        remote.request("/api/v1/machines", None).await.unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), a.next())
+                .await
+                .is_err()
+        );
+        let reply = local
+            .request(
+                "/api/v1/runtime/resources",
+                Some(json!({"request_id":"host","resource":{"kind":"host"}})),
+            )
+            .await
+            .unwrap();
+        assert!(reply.status.is_success());
+        let a = tokio::time::timeout(std::time::Duration::from_secs(1), a.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let b = tokio::time::timeout(std::time::Duration::from_secs(1), b.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(a, b);
+        assert!(
+            serde_json::from_str::<Value>(&a.data).unwrap()["versions"]["machines"].is_number()
+        );
+        resources.shutdown().await;
+        server.abort();
+        let _ = server.await;
+        drop(local);
+        drop(remote);
+        drop(host);
+        drop(resources);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn change_stream_authorizes_coalesces_and_closes_on_shutdown() {
+        use futures_util::StreamExt;
+        let root = std::env::temp_dir().join(format!("pot-ui-events-{}", uuid::Uuid::new_v4()));
+        let config = RuntimeConfig {
+            data: root.join("product"),
+            workspace: root.join("workspace"),
+        };
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
+        let resources = Resources::open(backend, config).await.unwrap();
+        // Ordinary change subscriptions do not activate machine checks.
+        assert!(resources.monitor.lock().unwrap().task.is_none());
+        let router = resources.router();
+        let request = |token: &str| {
+            axum::http::Request::builder()
+                .uri("/api/v1/changes")
+                .header("authorization", format!("Bearer {token}"))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request("wrong"))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let response = router
+            .clone()
+            .oneshot(request(&resources.token))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut stream = response.into_body().into_data_stream();
+        let mut decoder = pot_protocol::sse::Decoder::default();
+        let initial = decoder
+            .push(&stream.next().await.unwrap().unwrap())
+            .unwrap();
+        assert_eq!(initial[0].event, "changes");
+        assert!(
+            !serde_json::from_str::<Value>(&initial[0].data).unwrap()["boot_id"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
+        for _ in 0..1000 {
+            resources.changes.notify("tasks/main");
+        }
+        resources.changes.notify("settings/main");
+        let frames = decoder
+            .push(&stream.next().await.unwrap().unwrap())
+            .unwrap();
+        let next: Value = serde_json::from_str(&frames[0].data).unwrap();
+        assert!(
+            next["versions"]["settings/main"].as_u64().unwrap()
+                > next["versions"]["tasks/main"].as_u64().unwrap()
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())
+                .await
+                .is_err()
+        );
+        resources.shutdown().await;
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        drop(stream);
+        drop(router);
+        drop(resources);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[tokio::test]
     async fn machine_discovery_is_authenticated_and_independent_from_assistants() {
         let root =

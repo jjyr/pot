@@ -552,7 +552,7 @@ pub(crate) fn tick(root: &Service, at: i64) -> Result<()> {
             .save_with_metadata(message.clone(), Some(("tasks.v2", &serialized)));
         match saved {
             Ok(e) => {
-                let _ = root.conversation.events.send(e);
+                root.publish(e);
             }
             Err(e) => {
                 hub.schedules.outbox.insert(0, message);

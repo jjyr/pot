@@ -231,10 +231,13 @@ impl Hub {
         if self.service(&definition.id).is_err() {
             self.start(&definition.id)?;
         }
+        self.root.changes().notify("assistants");
         Ok(definition)
     }
     pub fn rename(&self, owner: &str, name: &str, revision: u64) -> Result<Definition> {
-        self.registry.rename(owner, name, revision)
+        let result = self.registry.rename(owner, name, revision)?;
+        self.root.changes().notify("assistants");
+        Ok(result)
     }
     pub async fn shutdown(&self) {
         let owners = std::mem::take(&mut *self.owners.lock().unwrap());
@@ -267,7 +270,9 @@ impl Hub {
         crate::assistant_instructions::read(&self.service(owner)?)
     }
     pub fn save_rules(&self, owner: &str, text: &str, revision: &str) -> Result<Value> {
-        crate::assistant_instructions::save(&self.service(owner)?, text, revision)
+        let result = crate::assistant_instructions::save(&self.service(owner)?, text, revision)?;
+        self.root.changes().notify(format!("settings/{owner}"));
+        Ok(result)
     }
 }
 

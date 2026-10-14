@@ -38,6 +38,25 @@ pub struct Service {
     pub(crate) tasks: TaskService,
 }
 impl Service {
+    pub fn changes(&self) -> pot_core::changes::Changes {
+        self.agent_service.resources.changes.clone()
+    }
+    pub fn invalidate(&self, domain: &str) {
+        self.changes()
+            .notify(format!("{domain}/{}", self.assistant_id));
+    }
+    pub(crate) fn publish(&self, event: Event) {
+        // Conversation deltas travel on their own stream. Summary invalidation
+        // is limited to lifecycle/settled messages, never each streamed token.
+        let summary = !matches!(&event.kind, EventKind::Message { message } if message.status == MessageStatus::Streaming);
+        if summary {
+            self.invalidate("tasks");
+            self.invalidate("usage");
+            self.invalidate("conversation");
+        }
+        let _ = self.conversation.events.send(event);
+    }
+
     /// Supply an embedder-owned master key before configuring providers.
     pub fn set_secret_key_source(&self, keys: Arc<dyn pot_secrets::KeySource>) {
         self.control_config.set_keys(keys);
@@ -129,7 +148,7 @@ impl Service {
     pub(crate) fn publish_budget(&self) -> Result<()> {
         let _inner = self.conversation.inner.lock().unwrap();
         if let Some(budget) = self.budget_for(&_inner.store)? {
-            let _ = self.conversation.events.send(Event {
+            self.publish(Event {
                 event_id: id(),
                 cursor: None,
                 kind: EventKind::Budget { budget },
@@ -145,20 +164,20 @@ impl Service {
             .unwrap()
             .store
             .save_non_notifying(message)?;
-        let _ = self.conversation.events.send(event);
+        self.publish(event);
         Ok(())
     }
     pub(crate) fn save(&self, message: Message) -> Result<()> {
         let mut inner = self.conversation.inner.lock().unwrap();
         let event = inner.store.save(message)?;
-        let _ = self.conversation.events.send(event);
+        self.publish(event);
         Ok(())
     }
     pub(crate) fn phase(&self, phase: AgentPhase, detail: Option<String>) {
         let mut s = self.conversation.inner.lock().unwrap();
         s.agent.phase = phase;
         s.agent.detail = detail;
-        let _ = self.conversation.events.send(Event {
+        self.publish(Event {
             event_id: id(),
             cursor: None,
             kind: EventKind::Agent {
@@ -169,7 +188,7 @@ impl Service {
     pub(crate) fn turn(&self, turn: Option<TurnState>) {
         let mut inner = self.conversation.inner.lock().unwrap();
         inner.turn = turn.clone();
-        let _ = self.conversation.events.send(Event {
+        self.publish(Event {
             event_id: id(),
             cursor: None,
             kind: EventKind::Turn { turn },
@@ -318,8 +337,8 @@ pub async fn send(
         user_message_id: mid.clone(),
         cancelling: false,
     });
-    let _ = s.conversation.events.send(event);
-    let _ = s.conversation.events.send(Event {
+    s.publish(event);
+    s.publish(Event {
         event_id: id(),
         cursor: None,
         kind: EventKind::Turn {
@@ -342,6 +361,8 @@ pub async fn send(
 pub struct Cursor {
     #[serde(default)]
     pub(crate) after: i64,
+    #[serde(default)]
+    pub(crate) snapshot: bool,
 }
 pub async fn events(
     State(s): State<Service>,
@@ -362,11 +383,15 @@ pub async fn events(
                 "Fetch a fresh snapshot before reconnecting",
             ));
         }
-        let history = inner.store.events(q.after).map_err(internal)?;
+        let history = if q.snapshot {
+            Vec::new()
+        } else {
+            inner.store.events(q.after).map_err(internal)?
+        };
         (rx, history, initial)
     };
     let stream = async_stream::stream! {
-     let mut cursor=q.after;
+     let mut cursor=if q.snapshot { initial.cursor } else { q.after };
      for event in history {cursor=event.cursor.unwrap_or(cursor);yield Ok::<_,Infallible>(SseEvent::default().id(cursor.to_string()).json_data(&event).unwrap());}
      yield Ok(SseEvent::default().event("snapshot").json_data(&initial).unwrap());
      loop {tokio::select! { event = rx.recv() => match event {
@@ -402,7 +427,7 @@ pub async fn cancel(
         }
         turn.cancelling = true;
     }
-    let _ = s.conversation.events.send(Event {
+    s.publish(Event {
         event_id: id(),
         cursor: None,
         kind: EventKind::Turn {
@@ -686,6 +711,50 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(data).unwrap();
     }
     #[tokio::test]
+    async fn snapshot_stream_skips_replay_and_keeps_following_updates() {
+        use futures::StreamExt;
+        let s = service();
+        s.save(Message {
+            id: "m".into(),
+            conversation_id: "main".into(),
+            role: Role::Assistant,
+            text: "initial".into(),
+            status: MessageStatus::Streaming,
+            created_at_ms: 0,
+            request_id: None,
+        })
+        .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer test-token".parse().unwrap());
+        let response = events(
+            State(s.clone()),
+            headers,
+            Query(Cursor {
+                after: 0,
+                snapshot: true,
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let mut stream = response.into_body().into_data_stream();
+        let initial = stream.next().await.unwrap().unwrap();
+        assert!(
+            std::str::from_utf8(&initial)
+                .unwrap()
+                .starts_with("event: snapshot")
+        );
+        s.turn(Some(TurnState {
+            user_message_id: "next".into(),
+            cancelling: false,
+        }));
+        assert!(
+            std::str::from_utf8(&stream.next().await.unwrap().unwrap())
+                .unwrap()
+                .contains("next")
+        );
+    }
+    #[tokio::test]
     pub(crate) async fn sse_replays_then_snapshots_then_delivers_live_updates() {
         use futures::StreamExt;
         let s = service();
@@ -705,10 +774,17 @@ pub(crate) mod tests {
         }));
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let response = events(State(s.clone()), h, Query(Cursor { after: 0 }))
-            .await
-            .unwrap()
-            .into_response();
+        let response = events(
+            State(s.clone()),
+            h,
+            Query(Cursor {
+                after: 0,
+                snapshot: false,
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
         // Update after subscription, before the response is polled.
         s.turn(None);
         let mut body = response.into_body().into_data_stream();

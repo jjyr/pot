@@ -33,6 +33,49 @@ pub fn content() -> Div {
     pot_ui::pages::content(pot_ui::pages::Layout::NATIVE)
 }
 
+/// Keep navigation identical across all settings screens.
+fn settings_header(selected: u64, busy: bool, location: Option<Div>, cx: &App) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .flex_wrap()
+        .gap_3()
+        .flex_shrink_0()
+        .child(
+            segments(cx).children(
+                [
+                    (0, crate::i18n::text("ui.general")),
+                    (1, crate::i18n::text("ui.ai-configuration")),
+                    (4, crate::i18n::text("ui.task-configuration")),
+                ]
+                .into_iter()
+                .map(|(i, name)| {
+                    Button::new(("settings-tab", i as usize))
+                        .ghost()
+                        .small()
+                        .h(px(28.))
+                        .label(name)
+                        .toggled(selected == i)
+                        .when(selected == i, |b| {
+                            b.bg(pot_ui::design::surface(cx)).shadow_sm()
+                        })
+                        .on_click(move |_, _, _| command(json!({"action":"section","value":i})))
+                }),
+            ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .when_some(location, |el, location| el.child(location))
+                .child(div().size(px(16.)).when(busy, |el| {
+                    el.child(gpui_kit::component::spinner::Spinner::new().small())
+                })),
+        )
+}
+
 pub struct Settings {
     pub scroll: ScrollHandle,
     locale: String,
@@ -149,65 +192,56 @@ impl Settings {
             self.fields[15].read(cx).focus_handle(cx).focus(window, cx);
         }
     }
-    pub fn render(&self, state: &Value, cx: &mut Context<Shell>) -> Div {
+    pub fn render(&self, state: &Value, location: Option<Div>, cx: &mut Context<Shell>) -> Div {
         let section = state["section"].as_u64().unwrap_or(0);
         if section == 1 {
-            return self.render_ai(state, cx);
+            return self.render_ai(state, location, cx);
         }
         let mut form = form(cx);
-        let label =
-            |name: &'static str, value: &'static str| field(name).child(div().py_2().child(value));
+        let mut preferences = div().flex().flex_col().gap_4();
         let input = |i: usize, name: &'static str, description: &'static str| {
-            field(name)
-                .description(description)
-                .child(Input::new(&self.fields[i]).aria_label(name))
+            field(name).description(description).child(
+                div()
+                    .w(px(128.))
+                    .child(Input::new(&self.fields[i]).aria_label(name)),
+            )
         };
         match section {
             0 => {
-                form = form
-                    .child(field(crate::i18n::text("settings.language"))
-                        .description(crate::i18n::text("settings.language.hint"))
-                        .child(Button::new("language-picker").ghost().small()
+                preferences = preferences.child(
+                    div().flex().items_center().justify_between().gap_4().flex_wrap()
+                        .child(div().flex().flex_col().gap_1()
+                            .child(crate::i18n::text("settings.language"))
+                            .child(hint(crate::i18n::text("settings.language.hint"), cx)))
+                        .child(Button::new("language-picker").small().w(px(180.)).dropdown_caret(true)
                             .label(pot_ui::localization::LANGUAGES.iter().find(|(locale, _)| state["locale"] == *locale).map(|(_, name)| *name).unwrap_or("English"))
                             .dropdown_menu({
                                 let locale = state["locale"].as_str().unwrap_or("en").to_owned();
-                                move |menu, _, _| {
-                                    pot_ui::localization::LANGUAGES.iter().copied().fold(menu, |menu, (value, name)| {
-                                        menu.item(gpui_kit::component::menu::PopupMenuItem::new(name)
-                                            .checked(locale == value)
-                                            .on_click(move |_, _, _| command(json!({"action":"language","value":value}))))
-                                    })
-                                }
-                            })))
-                    .child(field(crate::i18n::text("ui.appearance")).child(
-                        segments(cx).children([crate::i18n::text("ui.system"), crate::i18n::text("ui.light"), crate::i18n::text("ui.dark")].iter().enumerate().map(
-                            |(i, name)| {
-                                Button::new(("appearance", i))
-                                    .ghost()
-                                    .small()
-                                    .label(*name)
-                                    .toggled(state["appearance"].as_u64() == Some(i as u64))
-                                    .when(state["appearance"].as_u64() == Some(i as u64), |b| {
-                                        b.bg(cx.theme().secondary)
-                                    })
-                                    .on_click(move |_, _, _| {
-                                        command(json!({"action":"appearance","value":i}))
-                                    })
-                            },
-                        )),
-                    ))
-                    .child(label(
-                        crate::i18n::text("ui.keyboard-shortcuts"),
-                        crate::i18n::text("ui.back-forward-d-sandbox-settings-shift-enter"),
-                    ));
+                                move |menu, _, _| pot_ui::localization::LANGUAGES.iter().copied().fold(menu, |menu, (value, name)| {
+                                    menu.item(gpui_kit::component::menu::PopupMenuItem::new(name).checked(locale == value)
+                                        .on_click(move |_, _, _| command(json!({"action":"language","value":value}))))
+                                })
+                            }))
+                ).child(
+                    div().flex().items_center().justify_between().gap_4().flex_wrap()
+                        .pt_4().border_t_1().border_color(cx.theme().border)
+                        .child(crate::i18n::text("ui.appearance"))
+                        .child(segments(cx).children([
+                            crate::i18n::text("ui.system"), crate::i18n::text("ui.light"), crate::i18n::text("ui.dark")
+                        ].into_iter().enumerate().map(|(i, name)| {
+                            Button::new(("appearance", i)).ghost().small().min_w(px(64.)).h(px(28.))
+                                .label(name).toggled(state["appearance"].as_u64() == Some(i as u64))
+                                .when(state["appearance"].as_u64() == Some(i as u64), |b| b.bg(pot_ui::design::surface(cx)).shadow_sm())
+                                .on_click(move |_, _, _| command(json!({"action":"appearance","value":i})))
+                        })))
+                );
             }
             4 => {
-                form = self
-                    .routing_form(state, cx)
+                form = form
                     .child(input(
                         7,
                         crate::i18n::text("ui.concurrent-tasks"),
-                        crate::i18n::text("ui.default-5-range-1-1000-apply-global"),
+                        crate::i18n::text("ui.concurrent-tasks-hint"),
                     ))
                     .child(
                         field(crate::i18n::text("ui.periodic-token-allowance")).child(
@@ -254,27 +288,12 @@ impl Settings {
 
         page(cx).child(
             content()
-                .child(
-                    segments(cx).flex_wrap().children(
-                        [
-                            (0, crate::i18n::text("ui.general")),
-                            (1, crate::i18n::text("ui.ai-configuration")),
-                            (4, crate::i18n::text("ui.task-configuration")),
-                        ]
-                        .into_iter()
-                        .map(|(i, name)| {
-                            Button::new(("settings-tab", i as usize))
-                                .ghost()
-                                .small()
-                                .label(name)
-                                .toggled(section == i as u64)
-                                .when(section == i as u64, |b| b.bg(cx.theme().secondary))
-                                .on_click(move |_, _, _| {
-                                    command(json!({"action":"section","value":i}))
-                                })
-                        }),
-                    ),
-                )
+                .child(settings_header(
+                    section,
+                    state["routing_busy"] == true,
+                    location,
+                    cx,
+                ))
                 .child(hint(
                     match section {
                         0 => crate::i18n::text("ui.make-pot-work-the-way-you-prefer"),
@@ -298,7 +317,87 @@ impl Settings {
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
-                        .child(card(cx).child(form))
+                        .when(section == 4, |el| {
+                            el.child(
+                                card(cx)
+                                    .mb_4()
+                                    .child(pot_ui::pages::section(crate::i18n::text(
+                                        "ui.task-configuration",
+                                    )))
+                                    .child(self.routing_form(state, cx)),
+                            )
+                        })
+                        .child(
+                            card(cx)
+                                .child(pot_ui::pages::section(crate::i18n::text(if section == 0 {
+                                    "ui.general"
+                                } else {
+                                    "ui.execution-limits"
+                                })))
+                                .when(section == 0, |el| el.child(preferences))
+                                .when(section != 0, |el| el.child(form)),
+                        )
+                        .when(section == 0, |el| {
+                            el.child(
+                                card(cx)
+                                    .mt_4()
+                                    .child(pot_ui::pages::section(crate::i18n::text(
+                                        "ui.keyboard-shortcuts",
+                                    )))
+                                    .children(
+                                        [
+                                            ("settings.shortcuts.parent", "⌘ ["),
+                                            ("machines.title", "⌘ D"),
+                                            ("ui.settings", "⌘ ,"),
+                                            ("settings.shortcuts.new-line", "⇧ ↵"),
+                                        ]
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(
+                                            |(index, (label, keys))| {
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .gap_4()
+                                                    .when(index > 0, |row| {
+                                                        row.pt_3()
+                                                            .border_t_1()
+                                                            .border_color(cx.theme().border)
+                                                    })
+                                                    .child(hint(crate::i18n::text(label), cx))
+                                                    .child(
+                                                        div()
+                                                            .min_w(px(64.))
+                                                            .px_2()
+                                                            .py_1()
+                                                            .rounded(px(5.))
+                                                            .border_1()
+                                                            .border_color(cx.theme().border)
+                                                            .bg(cx.theme().muted)
+                                                            .text_center()
+                                                            .text_size(px(12.))
+                                                            .child(keys),
+                                                    )
+                                            },
+                                        ),
+                                    ),
+                            )
+                        })
+                        .when(section == 0, |el| {
+                            el.child(
+                                card(cx).mt_4().child(
+                                    Button::new("settings-resource-cache")
+                                        .ghost()
+                                        .small()
+                                        .self_start()
+                                        .label(crate::i18n::text("resources.cache"))
+                                        .on_click(|_, _, _| {
+                                            command(json!({"action":"resource-cache"}))
+                                        }),
+                                ),
+                            )
+                        })
                         .child(div().mt_3().when(
                             !state["result"].as_str().unwrap_or("").is_empty(),
                             |el| {
@@ -310,15 +409,17 @@ impl Settings {
                             },
                         )),
                 )
-                .child(
-                    actions
-                        .flex_wrap()
-                        .w_full()
-                        .pt_3()
-                        .border_t_1()
-                        .border_color(cx.theme().border)
-                        .flex_shrink_0(),
-                ),
+                .when(section == 4, |el| {
+                    el.child(
+                        actions
+                            .flex_wrap()
+                            .w_full()
+                            .pt_3()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .flex_shrink_0(),
+                    )
+                }),
         )
     }
 }

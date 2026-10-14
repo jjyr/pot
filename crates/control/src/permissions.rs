@@ -33,6 +33,7 @@ struct Book {
     disk: Option<Vec<u8>>,
 }
 pub(crate) struct Hub {
+    pub(crate) ui_changed: pot_core::changes::Signal,
     book: Mutex<Book>,
     path: Option<PathBuf>,
     changed: tokio::sync::Notify,
@@ -52,6 +53,7 @@ impl Hub {
             book: Mutex::new(Book::default()),
             path: None,
             changed: Default::default(),
+            ui_changed: Default::default(),
             sandbox_mutations: Default::default(),
         }
     }
@@ -73,6 +75,7 @@ impl Hub {
             }),
             path: Some(path.into()),
             changed: Default::default(),
+            ui_changed: Default::default(),
             sandbox_mutations: Default::default(),
         })
     }
@@ -185,6 +188,7 @@ impl Hub {
             });
         }
         self.changed.notify_waiters();
+        self.ui_changed.notify();
         Ok(())
     }
     fn save_policy(&self, book: &mut Book, policy: Policy) -> Result<()> {
@@ -208,6 +212,7 @@ impl Hub {
         book.policy = policy;
         book.grants = grants;
         self.changed.notify_waiters();
+        self.ui_changed.notify();
         Ok(())
     }
     pub(crate) fn sandbox_access(
@@ -384,6 +389,7 @@ impl Hub {
             decision: None,
         });
         self.changed.notify_waiters();
+        self.ui_changed.notify();
         Ok(id)
     }
     #[cfg(test)]
@@ -510,6 +516,7 @@ impl Hub {
                 .decision = Some(action != "deny");
         }
         self.changed.notify_waiters();
+        self.ui_changed.notify();
         Ok(())
     }
 }

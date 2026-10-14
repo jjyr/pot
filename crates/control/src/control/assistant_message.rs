@@ -64,6 +64,7 @@ impl assistants::Hub {
             RelayRequest::Directory => Ok(serde_json::to_value(self.message_directory()?)?),
             RelayRequest::Register { directory } => {
                 self.mailbox.register(directory)?;
+                self.root.changes().notify("mail");
                 Ok(json!({}))
             }
             RelayRequest::Pending { target_control_id } => Ok(serde_json::to_value(
@@ -78,10 +79,13 @@ impl assistants::Hub {
                         .any(|a| a.address == message.from),
                     "Unknown sending assistant"
                 );
-                Ok(serde_json::to_value(self.mailbox.deliver(&message)?)?)
+                let receipt = self.mailbox.deliver(&message)?;
+                self.root.changes().notify("mail");
+                Ok(serde_json::to_value(receipt)?)
             }
             RelayRequest::Acknowledge { receipt } => {
                 self.mailbox.acknowledge(&receipt)?;
+                self.root.changes().notify("mail");
                 Ok(json!({}))
             }
         }
@@ -113,6 +117,7 @@ pub(crate) fn send(s: &Service, id: &str, mut request: Send) -> Result<Value> {
         request,
         parent.as_ref(),
     )?;
+    s.changes().notify("mail");
     Ok(
         json!({"message":message,"delivery":if message.to.control_id == s.runtime_id { "accepted" } else { "queued" }}),
     )
@@ -198,6 +203,7 @@ async fn process_message(hub: &assistants::Hub, owner: Service, message: Envelop
         }
     };
     hub.mailbox.claim(&message.id)?;
+    hub.root.changes().notify("mail");
     hub.mail_sessions
         .lock()
         .unwrap()
@@ -227,6 +233,7 @@ async fn process_message(hub: &assistants::Hub, owner: Service, message: Envelop
         }
     });
     hub.mailbox.finish(&message.id, success, &detail)?;
+    hub.root.changes().notify("mail");
     Ok(())
 }
 fn session(owner: &Service, message: &Envelope) -> Result<Service> {

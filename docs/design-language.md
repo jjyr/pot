@@ -103,7 +103,7 @@ Use compact neutral segmented controls for local choices. Their selected item ha
 
 ### Forms
 
-Group fields by intent using section headings and quiet row dividers. At desktop widths, align labels to the right of a consistent label column; stack labels above fields when space is limited. Keep descriptions and errors beside the field they explain. Show units for numeric resources.
+Group fields by intent using section headings and quiet row dividers. At desktop widths, left-align labels in a consistent label column; stack labels above fields when space is limited. General preferences use grouped rows with trailing controls. Bound numeric fields and pop-up controls to their content rather than stretching them across the form. Keep descriptions and errors beside the field they explain. Show units for numeric resources.
 
 Focus the first invalid field on submission. Preserve unsaved values during navigation and background refresh. Optional advanced fields use a disclosure; ordinary setup must not require an extra Advanced page just to finish.
 
@@ -225,3 +225,26 @@ Implement shared tokens and shell/navigation first, then conversation/task patte
 Design previews contain illustrative counts, charts and files, a placeholder desktop and simulated login/save/control feedback. Their approval establishes visual and interaction direction, not real-provider or native-rendering acceptance. Full authorization failures, complete usage details and mobile access still require their own designs and implementation verification.
 
 Validate light/dark, 800 × 700, long Chinese titles, keyboard focus, IME input, per-conversation drafts, unsaved settings, scroll/filter restoration, history branching, missing routes, live updates during navigation, loading/errors, reduced motion and embedded desktop focus. Verify pot activity across main-only/background-only/concurrent execution and queue/wait/finish transitions; unread badges remain independent. Verify summary placement below only the latest assistant message, running-only membership, overflow, title-only rows, row removal and navigation without forced scroll/focus changes. Check rendered text/control contrast. UI-only verification requires no paid model calls. Compilation and a real App smoke test are necessary before claiming the design is delivered.
+
+
+## Page presentation and asynchronous data
+
+Navigation and filter controls render immediately and remain usable while page data
+loads. Usage keeps its range selector, zero-valued summary and chart container
+mounted, with loading feedback confined to the data area. Loading is not an error;
+actual failures retain inline recovery. A query change must not briefly present an
+old range as the new range's data. Informational notices use neutral color, with
+amber reserved for attention states.
+
+Settings shares one stable tab row; its location control sits beside the tabs.
+Task configuration separates Agent routing from execution limits. An unconfigured
+Agent shows a concise next action instead of unusable selectors. Machines presents
+compact inventory summaries, with permissions and resource limits behind a
+per-machine disclosure. Connection fields and labels live in a bounded, scrollable
+sheet that closes with Escape and restores focus. Task filters and search share a
+wrapping toolbar; empty lists suppress pagination and include guidance.
+
+The native sidebar uses restrained system material with the system's reduced
+transparency preference respected. Hover and selection preserve geometry. Tooltips
+on transient machine actions and location badges belong to the trigger's lifetime
+so they disappear when navigation removes that trigger.

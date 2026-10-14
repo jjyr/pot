@@ -58,6 +58,7 @@ pub(crate) struct AgentService {
 
 /// Agent resource paths are independent of Execution target inventory/lifecycle.
 pub(crate) struct AgentResources {
+    pub(crate) changes: pot_core::changes::Changes,
     pub(crate) assistants: Mutex<std::sync::Weak<assistants::Hub>>,
     pub(crate) mail_work: Mutex<std::collections::BTreeSet<String>>,
     pub(crate) home: PathBuf,
@@ -87,6 +88,7 @@ impl AgentResources {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../skills"));
         Self {
+            changes: Default::default(),
             home,
             skill_user,
             skill_builtin,

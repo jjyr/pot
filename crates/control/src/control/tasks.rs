@@ -64,12 +64,14 @@ pub(crate) fn serialized(hub: &Hub) -> Result<String> {
 }
 pub(crate) fn persist(root: &Service, hub: &Hub) -> Result<()> {
     let root = assistant_message::owner(root)?;
-    root.conversation
-        .inner
-        .lock()
-        .unwrap()
-        .store
-        .set("tasks.v2", &serialized(hub)?)
+    let encoded = serialized(hub)?;
+    let inner = root.conversation.inner.lock().unwrap();
+    if inner.store.get("tasks.v2")?.as_deref() != Some(&encoded) {
+        inner.store.set("tasks.v2", &encoded)?;
+        root.invalidate("tasks");
+        root.invalidate("schedules");
+    }
+    Ok(())
 }
 pub(crate) fn task_phase(hub: &Hub, task_id: &str) -> Option<TaskPhase> {
     hub.lanes.get(task_id).map(|l| l.record.info.phase.clone())
@@ -1511,7 +1513,7 @@ fn finish_with_result(
         .unwrap()
         .store
         .save_with_metadata(report, Some(("tasks.v2", &serialized)))?;
-    let _ = root.conversation.events.send(event);
+    root.publish(event);
     root.tasks.capacity.lock().unwrap().active.remove(task_id);
     Ok(())
 }
@@ -3358,6 +3360,44 @@ pub(crate) mod tests {
         .unwrap()
         .0
     }
+    #[tokio::test]
+    async fn task_stream_pushes_queued_guidance_with_public_task_identity() {
+        use futures::StreamExt;
+        let root = fixture();
+        let task = add(&root, "event task", "").await;
+        let response = events(State(root.clone()), headers(), Path(task.id.clone()))
+            .await
+            .unwrap()
+            .into_response();
+        let mut stream = response.into_body().into_data_stream();
+        let mut decoder = pot_protocol::sse::Decoder::default();
+        let initial = decoder
+            .push(&stream.next().await.unwrap().unwrap())
+            .unwrap();
+        let snapshot: Snapshot = serde_json::from_str(&initial[0].data).unwrap();
+        assert_eq!(snapshot.conversation_id, task.id);
+        assert!(
+            snapshot
+                .messages
+                .iter()
+                .all(|m| m.conversation_id == task.id)
+        );
+        guide(&root, &task.id, "guidance", "new guidance").await;
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let frames = decoder.push(&frame).unwrap();
+        assert_eq!(frames[0].event, "snapshot");
+        let snapshot: Snapshot = serde_json::from_str(&frames[0].data).unwrap();
+        assert!(
+            snapshot
+                .messages
+                .iter()
+                .any(|m| m.text == "new guidance" && m.conversation_id == task.id)
+        );
+    }
     async fn guide(s: &Service, task: &str, key: &str, text: &str) -> SendMessageAccepted {
         input(
             State(s.clone()),
@@ -4150,4 +4190,64 @@ pub(crate) mod tests {
         let (reply, ()) = tokio::join!(wait, stop);
         assert_eq!(reply.unwrap_err().0, StatusCode::CONFLICT);
     }
+}
+
+/// Task subscriptions use the same public conversation identity as task snapshots.
+pub async fn events(
+    State(root): State<Service>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    root.authorized(&headers)?;
+    use futures::StreamExt;
+    let mut changes = root.changes().subscribe();
+    let mut versions = changes.next().await.unwrap_or_default();
+    let (mut rx, initial, service) = event_snapshot(&root, &task_id)?;
+    let stream = async_stream::stream! {
+        yield Ok::<_,Infallible>(SseEvent::default().event("snapshot").json_data(initial).unwrap());
+        loop { tokio::select! {
+            event = rx.recv() => match event {
+                Ok(mut event) => {
+                    if let EventKind::Message { message } = &mut event.kind { message.conversation_id = task_id.clone(); }
+                    yield Ok(SseEvent::default().json_data(event).unwrap());
+                },
+                Err(_) => break,
+            },
+            next = changes.next() => {
+                let Some(next) = next else { break };
+                let topic = format!("tasks/{}", root.assistant_id);
+                if next.get(&topic) != versions.get(&topic) {
+                    match event_snapshot(&root, &task_id) {
+                        Ok((receiver, current, _)) => { rx = receiver; yield Ok(SseEvent::default().event("snapshot").json_data(current).unwrap()); },
+                        Err(_) => break,
+                    }
+                }
+                versions = next;
+            },
+            _ = service.stop_requested() => break,
+        }}
+    };
+    Ok(Sse::new(stream)
+        .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(5))))
+}
+
+fn event_snapshot(
+    root: &Service,
+    task_id: &str,
+) -> ApiResult<(broadcast::Receiver<Event>, Snapshot, Service)> {
+    let hub = root.tasks.hub.lock().unwrap();
+    let lane = hub.lanes.get(task_id).ok_or_else(missing)?;
+    let inner = lane.service.conversation.inner.lock().unwrap();
+    let receiver = lane.service.conversation.events.subscribe();
+    let mut snapshot = lane.service.snapshot_locked(&inner).map_err(internal)?;
+    for job in &lane.record.queue {
+        if !snapshot.messages.iter().any(|m| m.id == job.message_id) {
+            snapshot.messages.push(user(job));
+        }
+    }
+    snapshot.conversation_id = task_id.to_owned();
+    for message in &mut snapshot.messages {
+        message.conversation_id = task_id.to_owned();
+    }
+    Ok((receiver, snapshot, lane.service.clone()))
 }

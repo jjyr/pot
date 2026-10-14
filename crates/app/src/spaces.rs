@@ -3,7 +3,7 @@ use crate::backend::Requests;
 use pot_protocol::{ScheduleInfo, SchedulePage, TaskInfo, TaskPage, TaskQuery};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
@@ -73,47 +73,134 @@ pub struct Directory {
     pub usage_query: Option<(u32, String)>,
 }
 static DIRECTORY: OnceLock<Arc<Mutex<Directory>>> = OnceLock::new();
+static REFRESH: OnceLock<Vec<crate::client::Refresh>> = OnceLock::new();
+static NATIVE: OnceLock<Mutex<BTreeMap<String, BTreeSet<String>>>> = OnceLock::new();
+pub fn take_native_changes() -> BTreeMap<String, BTreeSet<String>> {
+    std::mem::take(&mut *NATIVE.get_or_init(Default::default).lock().unwrap())
+}
+pub fn refresh_directory() {
+    if let Some(senders) = REFRESH.get() {
+        for sender in senders {
+            let _ = sender.try_send(());
+        }
+    }
+}
 pub fn directory() -> Arc<Mutex<Directory>> {
     DIRECTORY
         .get_or_init(|| {
             let shared = Arc::new(Mutex::new(Directory::default()));
+            let mut senders = vec![];
             for mode in ["local", "remote"] {
+                let (sender, rx) = std::sync::mpsc::sync_channel(1);
+                let trigger = crate::client::Refresh {
+                    sender,
+                    dirty: Arc::new(Mutex::new(None)),
+                };
+                senders.push(trigger.clone());
+                let _ = trigger.try_send(());
                 let state = shared.clone();
                 std::thread::spawn(move || {
-                    loop {
-                        if mode == "local"
-                            || crate::backend::control_projection()["configured"] == true
+                    let mut subscription = None;
+                    while rx.recv().is_ok() {
+                        if mode == "remote"
+                            && crate::backend::control_projection()["configured"] != true
                         {
-                            let (previous, query) = {
-                                let d = state.lock().unwrap();
-                                (
-                                    d.spaces.get(mode).cloned().unwrap_or_else(|| Space {
-                                        mode: mode.into(),
-                                        ..Default::default()
-                                    }),
-                                    d.usage_query.clone(),
-                                )
-                            };
-                            let mut next = previous;
-                            match refresh(&mut next, query) {
-                                Ok(()) => next.error.clear(),
-                                Err(error) => {
-                                    next.error = error;
-                                    if let Some(machines) = next.machines["machines"].as_array_mut()
-                                    {
-                                        for machine in machines {
-                                            machine["connection"] = json!("offline");
+                            continue;
+                        }
+                        if subscription.is_none() {
+                            let notifications = trigger.clone();
+                            let status = state.clone();
+                            let mut versions = Value::Null;
+                            subscription = Some(crate::backend::subscribe(
+                                mode.into(),
+                                "/api/v1/changes".into(),
+                                move |frame| {
+                                    match frame {
+                                        Ok(frame) => {
+                                            let next: Value = serde_json::from_str(&frame.data)
+                                                .map_err(|e| e.to_string())?;
+                                            let all = versions["boot_id"] != next["boot_id"];
+                                            let topics: BTreeSet<String> = if all {
+                                                ["machines", "settings", "resources"]
+                                                    .into_iter()
+                                                    .map(str::to_owned)
+                                                    .collect()
+                                            } else {
+                                                next["versions"]
+                                                    .as_object()
+                                                    .into_iter()
+                                                    .flatten()
+                                                    .filter(|(k, v)| {
+                                                        versions["versions"][*k] != **v
+                                                    })
+                                                    .map(|(k, _)| k.clone())
+                                                    .collect()
+                                            };
+                                            NATIVE
+                                                .get_or_init(Default::default)
+                                                .lock()
+                                                .unwrap()
+                                                .entry(mode.into())
+                                                .or_default()
+                                                .extend(topics.clone());
+                                            if all {
+                                                let _ = notifications.try_send(());
+                                            } else {
+                                                notifications.changed(topics);
+                                            }
+                                            versions = next;
+                                            crate::wake_ui();
+                                        }
+                                        Err(error) => {
+                                            versions = Value::Null;
+                                            if let Some(space) =
+                                                status.lock().unwrap().spaces.get_mut(mode)
+                                            {
+                                                space.connected = false;
+                                                space.error = error;
+                                            }
+                                            crate::wake_ui();
                                         }
                                     }
-                                }
-                            }
-                            state.lock().unwrap().spaces.insert(mode.into(), next);
-                            crate::wake_ui();
+                                    Ok(())
+                                },
+                            ));
                         }
-                        std::thread::sleep(Duration::from_secs(3));
+                        let dirty = trigger.dirty.lock().unwrap().replace(BTreeSet::new());
+                        let (mut next, query) = {
+                            let state = state.lock().unwrap();
+                            (
+                                state.spaces.get(mode).cloned().unwrap_or_else(|| Space {
+                                    mode: mode.into(),
+                                    ..Default::default()
+                                }),
+                                state.usage_query.clone(),
+                            )
+                        };
+                        let generation = crate::backend::configuration_generation();
+                        let result = refresh(&mut next, query, dirty.as_ref());
+                        if generation != crate::backend::configuration_generation() {
+                            let _ = trigger.try_send(());
+                            continue;
+                        }
+                        match result {
+                            Ok(()) => next.error.clear(),
+                            Err(error) => {
+                                next.error = error;
+                                next.connected = false;
+                            }
+                        }
+                        let retry = !next.connected;
+                        state.lock().unwrap().spaces.insert(mode.into(), next);
+                        crate::wake_ui();
+                        if retry {
+                            std::thread::sleep(Duration::from_secs(1));
+                            let _ = trigger.try_send(());
+                        }
                     }
                 });
             }
+            let _ = REFRESH.set(senders);
             shared
         })
         .clone()
@@ -126,7 +213,18 @@ fn read<T: serde::de::DeserializeOwned>(agent: &Requests, path: &str) -> Result<
         .read_json()
         .map_err(|e| e.to_string())
 }
-fn refresh(space: &mut Space, usage_query: Option<(u32, String)>) -> Result<(), String> {
+fn refresh(
+    space: &mut Space,
+    usage_query: Option<(u32, String)>,
+    dirty: Option<&BTreeSet<String>>,
+) -> Result<(), String> {
+    let changed = |domain: &str| {
+        dirty.is_none_or(|topics| {
+            topics
+                .iter()
+                .any(|t| t == domain || t.starts_with(&format!("{domain}/")))
+        })
+    };
     let agent = Requests::for_mode(&space.mode)
         .scope("main")
         .timeout_global(Some(Duration::from_secs(3)));
@@ -153,33 +251,39 @@ fn refresh(space: &mut Space, usage_query: Option<(u32, String)>) -> Result<(), 
             .and_then(|url| url.host_str().map(str::to_owned))
             .unwrap_or_else(|| id.clone())
     };
-    space.assistants = read(&agent, "/api/v1/assistants")?;
-    space.machines = read(&agent, "/api/v1/machines")?;
-    let mut tasks = vec![];
-    for scope in ["active", "attention", "archived"] {
-        let mut offset = 0;
-        loop {
-            let page: TaskPage = agent
-                .get("/api/v1/assistant-tasks")
-                .query("scope", scope)
-                .query("offset", offset.to_string())
-                .query("limit", "50")
-                .call()?
-                .body_mut()
-                .read_json()
-                .map_err(|e| e.to_string())?;
-            tasks.extend(page.items);
-            match page.next_offset {
-                Some(next) if next > offset => offset = next,
-                _ => break,
+    if changed("assistants") {
+        space.assistants = read(&agent, "/api/v1/assistants")?;
+    }
+    if changed("machines") {
+        space.machines = read(&agent, "/api/v1/machines")?;
+    }
+    if changed("tasks") {
+        let mut tasks = vec![];
+        for scope in ["active", "attention", "archived"] {
+            let mut offset = 0;
+            loop {
+                let page: TaskPage = agent
+                    .get("/api/v1/assistant-tasks")
+                    .query("scope", scope)
+                    .query("offset", offset.to_string())
+                    .query("limit", "50")
+                    .call()?
+                    .body_mut()
+                    .read_json()
+                    .map_err(|e| e.to_string())?;
+                tasks.extend(page.items);
+                match page.next_offset {
+                    Some(next) if next > offset => offset = next,
+                    _ => break,
+                }
             }
         }
+        // A task can move between scopes while the pages are fetched.
+        tasks.sort_by_key(|a| std::cmp::Reverse(a.updated_at_ms));
+        let mut seen = std::collections::BTreeSet::new();
+        tasks.retain(|t| seen.insert((t.assistant_id.clone(), t.id.clone())));
+        space.tasks = tasks;
     }
-    // A task can move between scopes while the pages are fetched.
-    tasks.sort_by_key(|a| std::cmp::Reverse(a.updated_at_ms));
-    let mut seen = std::collections::BTreeSet::new();
-    tasks.retain(|t| seen.insert((t.assistant_id.clone(), t.id.clone())));
-    space.tasks = tasks;
     let mut schedules = vec![];
     for assistant in space.assistants["assistants"]
         .as_array()
@@ -192,44 +296,54 @@ fn refresh(space: &mut Space, usage_query: Option<(u32, String)>) -> Result<(), 
         let scoped = Requests::for_mode(&space.mode)
             .scope(owner)
             .timeout_global(Some(Duration::from_secs(3)));
-        space
-            .permissions
-            .insert(owner.into(), read(&scoped, "/api/v1/permissions")?);
-        let mut records = Vec::new();
-        let mut after = 0;
-        loop {
-            let page: Vec<pot_protocol::message::Record> = scoped
-                .post(pot_protocol::message::API)
-                .send_json(json!({"operation":"history","assistant_id":owner,"after":after}))?
-                .body_mut()
-                .read_json()
-                .map_err(|e| e.to_string())?;
-            let next = page.last().map(|r| r.sequence);
-            records.extend(page);
-            match next {
-                Some(next) if next > after => after = next,
-                _ => break,
-            }
+        if changed("permissions") || changed("assistants") {
+            space
+                .permissions
+                .insert(owner.into(), read(&scoped, "/api/v1/permissions")?);
         }
-        space.mail.insert(owner.into(), records);
-        let mut offset = 0;
-        loop {
-            let page: SchedulePage = scoped
-                .get("/api/v1/schedules")
-                .query("offset", offset.to_string())
-                .call()?
-                .body_mut()
-                .read_json()
-                .map_err(|e| e.to_string())?;
-            schedules.extend(page.items.into_iter().map(|p| (owner.to_owned(), p)));
-            match page.next_offset {
-                Some(next) if next > offset => offset = next,
-                _ => break,
+        if changed("mail") || changed("assistants") {
+            let mut records = Vec::new();
+            let mut after = 0;
+            loop {
+                let page: Vec<pot_protocol::message::Record> = scoped
+                    .post(pot_protocol::message::API)
+                    .send_json(json!({"operation":"history","assistant_id":owner,"after":after}))?
+                    .body_mut()
+                    .read_json()
+                    .map_err(|e| e.to_string())?;
+                let next = page.last().map(|r| r.sequence);
+                records.extend(page);
+                match next {
+                    Some(next) if next > after => after = next,
+                    _ => break,
+                }
+            }
+            space.mail.insert(owner.into(), records);
+        }
+        if changed("schedules") || changed("assistants") {
+            let mut offset = 0;
+            loop {
+                let page: SchedulePage = scoped
+                    .get("/api/v1/schedules")
+                    .query("offset", offset.to_string())
+                    .call()?
+                    .body_mut()
+                    .read_json()
+                    .map_err(|e| e.to_string())?;
+                schedules.extend(page.items.into_iter().map(|p| (owner.to_owned(), p)));
+                match page.next_offset {
+                    Some(next) if next > offset => offset = next,
+                    _ => break,
+                }
             }
         }
     }
-    space.schedules = schedules;
-    if let Some((days, timezone)) = &usage_query {
+    if changed("schedules") || changed("assistants") {
+        space.schedules = schedules;
+    }
+    if let Some((days, timezone)) = &usage_query
+        && (changed("usage") || space.usage_query != usage_query)
+    {
         let mut offset = 0;
         let mut models = vec![];
         let mut summary = Value::Null;
@@ -541,7 +655,7 @@ mod tests {
                 mode: "local".into(),
                 ..Default::default()
             };
-            refresh(&mut local, Some((7, "UTC".into()))).unwrap();
+            refresh(&mut local, Some((7, "UTC".into())), None).unwrap();
             assert!(!local.id.is_empty());
             assert_eq!(local.assistants["assistants"].as_array().unwrap().len(), 1);
             assert!(local.error.is_empty());
@@ -549,7 +663,7 @@ mod tests {
                 mode: "remote".into(),
                 ..Default::default()
             };
-            refresh(&mut remote, Some((7, "UTC".into()))).unwrap();
+            refresh(&mut remote, Some((7, "UTC".into())), None).unwrap();
             assert_ne!(local.id, remote.id);
             assert_eq!(remote.assistants["assistants"].as_array().unwrap().len(), 2);
             assert_eq!(remote.tasks.len(), 1);

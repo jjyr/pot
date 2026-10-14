@@ -55,6 +55,7 @@ pub fn apply_pending(s: &Service, at_turn_boundary: bool) -> Result<()> {
     storage::set(&tx, storage::THREAD, &serde_json::to_string(&thread)?)?;
     storage::set(&tx, PENDING, "")?;
     tx.commit()?;
+    s.invalidate("settings");
     Ok(())
 }
 #[derive(Deserialize)]
@@ -141,6 +142,7 @@ pub async fn select(
         }
     }
     apply_pending(&owner, false).map_err(internal)?;
+    owner.invalidate("settings");
     Ok(Json(
         json!({"saved":true,"pending":pending(&owner.conversation.inner.lock().unwrap().store).map_err(internal)?.is_some()}),
     ))
@@ -305,6 +307,7 @@ pub async fn settings(
     {
         s.phase(AgentPhase::Ready, None);
     }
+    s.invalidate("settings");
     Ok(Json(json!({"saved":true,"existing_tasks":"pinned"})))
 }
 

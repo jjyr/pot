@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme, Disableable,
+    ActiveTheme, Disableable, Sizable,
     button::{Button, ButtonVariants},
     input::{InputState, Textarea, TextareaState},
 };
@@ -19,7 +19,12 @@ gpui_kit::assets::icon_assets!(
         Ellipsis,
         RefreshCw,
         Info,
-        ChartPie
+        ChartPie,
+        Monitor,
+        Plus,
+        Close,
+        ChevronDown,
+        ChevronRight
     ]
 );
 thread_local! {
@@ -89,8 +94,15 @@ impl Mobile {
                         action("assistant-select", event.value.as_str().unwrap_or("main"));
                     }
                     "machine-connections-toggle" => {
-                        this.machine_connections.open = !this.machine_connections.open
+                        if this.machine_connections.open {
+                            this.machine_connections.open = false;
+                        } else {
+                            this.machine_connections.manage_members();
+                        }
                     }
+                    "machine-labels" => this
+                        .machine_connections
+                        .edit_labels(event.value.as_str().unwrap_or_default().to_owned()),
                     "machine-command" => action("machine-command", &event.value.to_string()),
                     "assistant-save" => action("assistant-save", &event.value.to_string()),
                     "assistant-model" => this.assistant_model_open = !this.assistant_model_open,
@@ -509,7 +521,25 @@ impl Render for Mobile {
             content = content
                 .p_0()
                 .gap_0()
-                .child(connections)
+                .relative()
+                .when(
+                    !self.machine_connections.open
+                        && self.data["machines"]["control_authority"]["role"] == "control",
+                    |el| {
+                        el.child(
+                            div().p_4().child(
+                                Button::new("web-machine-connections")
+                                    .small()
+                                    .label(catalog.text("machines.add-executor"))
+                                    .on_click(pot_ui::pages::on(
+                                        &handler,
+                                        "machine-connections-toggle",
+                                        Value::Null,
+                                    )),
+                            ),
+                        )
+                    },
+                )
                 .child(pot_ui::machines::render(
                     pot_ui::machines::MachinesView {
                         permissions: &self.data["permissions"],
@@ -524,7 +554,8 @@ impl Render for Mobile {
                     self.catalog(),
                     self.page_handler(cx),
                     cx,
-                ));
+                ))
+                .when(self.machine_connections.open, |el| el.child(connections));
         } else if self.page == "usage" {
             let handler = self.page_handler(cx);
             content = content.p_0().gap_0().child(self.usage_ui.render(
@@ -534,6 +565,7 @@ impl Render for Mobile {
                     usage_error: self.data["page_error"].as_str().unwrap_or(""),
                     usage_notice: "",
                     usage_pending: false,
+                    loading: self.data["usage"].is_null(),
                     selected_title: None,
                     controls: false,
                 },
@@ -948,4 +980,13 @@ pub fn reconcile_send(snapshot: &str) -> String {
         return "null".into();
     };
     SEND.with(|state| serde_json::to_string(&state.borrow_mut().reconcile(&snapshot)).unwrap())
+}
+
+#[wasm_bindgen]
+pub fn apply_conversation_event(snapshot: &str, event: &str) -> Result<String, JsValue> {
+    let mut snapshot: pot_protocol::Snapshot =
+        serde_json::from_str(snapshot).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let event = serde_json::from_str(event).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    pot_ui::state::apply_event(&mut snapshot, event).map_err(|e| JsValue::from_str(&e))?;
+    serde_json::to_string(&snapshot).map_err(|e| JsValue::from_str(&e.to_string()))
 }
