@@ -151,7 +151,8 @@ global directories; plugin implementations come from the owning assistant's curr
 source Profile, limited to the task's selected plugin names. Missing/disabled
 resources, unavailable profiles and failed synchronization stop execution.
 
-Each explicit continuation synchronizes again. Resource contents remain stable
+Each new task execution synchronizes current contents. Ended tasks cannot resume;
+reruns create new Tasks and synchronize again. Resource contents remain stable
 within one run; an in-flight run does not refresh. Control does not persist a
 per-task resource archive. Destination caches use content digests for verification,
 retain executable bits, expose files read-only, and keep only the workspace's
@@ -174,7 +175,7 @@ Control specifies the exact model, execution target and tool configuration.
 The execution Runtime runs that configuration or returns an explicit unsupported
 configuration/dependency error. It must not replace models, plugins or targets,
 or silently hide tools according to node-local settings.
-Control updates affect later launches, not already bound tasks. Missing bundles
+Resource updates affect later executions, while already running tasks keep their prepared contents. Missing bundles
 fail explicitly rather than falling back to a node-local catalog. Standalone App
 local mode retains its independent local resources and state.
 

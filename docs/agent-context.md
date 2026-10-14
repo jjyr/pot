@@ -12,10 +12,9 @@ remote launch uses Control-selected global skills/plugins while preserving proje
 AGENTS.md and project skills at the execution workspace; see
 [Architecture](architecture.md) for the execution contract.
 Permission storage is separate from instruction discovery; see
-[Agent permissions](permissions.md). Project discovery uses the actual tool execution cwd. Main uses Host execution:
-its configured workspace without a selected Sandbox, or `product/agent-workspace`
-when a Sandbox default exists. Selecting a Sandbox changes future task defaults,
-not Main's Host project context. Workers use their fixed Host/Sandbox task workspace.
+[Agent permissions](permissions.md). Project discovery uses the actual tool execution cwd. Main resolves the machine's
+current Host/shared-Sandbox policy at the start of each run. Workers use their
+recorded Host/Sandbox task workspace throughout an active execution.
 
 Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Sandbox discovery stops at its workspace mount boundary. Host discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 
@@ -174,7 +173,7 @@ Main Host execution advertises the real user/builtin source paths. Tasks materia
 
 Helper shares the Host user directory and packaged builtin root into root-only guest source directories. The root broker creates a private mount namespace, binds the global user root at the home-relative skill path, and binds each builtin bundle read-only over its corresponding entry. Task scopes also remount the user root read-only. Empty reserved mountpoint directories can exist in the user backing directory; builtin files are never copied there. Symlink sources/mountpoints and failed mount preparation fail the operation without an unrestricted fallback.
 
-Main/task runners remain separate unprivileged Unix users; task scopes cannot access raw writable shares or another main scope's writable view through `/proc`. Tool children drop effective capabilities and set no_new_privs. Shared workspace group permissions retain desktop access to task files, but do not provide mutual isolation between tasks in one Sandbox. Skills grant no extra tools or Sandbox lifecycle authority.
+Main and task runners use the same unprivileged guest account so installed toolchains remain reusable. Execution scopes have independent processes and sessions, but are not mutual security boundaries. Tool children drop effective capabilities and set no_new_privs. Shared workspace group permissions retain desktop access to task files, but do not provide mutual isolation between tasks in one Sandbox. Skills grant no extra tools or Sandbox lifecycle authority.
 
 Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and POT_BUILTIN_SKILLS_DIR for packaged builtin files. Helper supplies the latter to Server. Standalone development defaults to this repo's flat skills directory. Changing the configured source root requires restarting the Sandbox; directory contents remain live through the share.
 
@@ -182,9 +181,9 @@ Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and
 
 ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved names and optional selections. pot-agent discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. AgentExtensions::skills(context) is the shared override for main/task callers.
 
-Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution (including explicit continuation) synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
+Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
-Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual Host working directory; task execution target bindings remain fixed.
+Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
 
 ## Creation, installation and validation
 
