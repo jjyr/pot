@@ -490,6 +490,60 @@ pub(crate) fn relay_remote() -> Option<crate::relay::Connection> {
     })
 }
 
+/// Dropping a subscription cancels its socket, retry delay and callback together.
+fn subscription_epoch() -> &'static tokio::sync::watch::Sender<u64> {
+    static EPOCH: OnceLock<tokio::sync::watch::Sender<u64>> = OnceLock::new();
+    EPOCH.get_or_init(|| tokio::sync::watch::channel(0).0)
+}
+pub fn configuration_generation() -> u64 {
+    *subscription_epoch().borrow()
+}
+pub struct Subscription(tokio::task::JoinHandle<()>);
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+pub fn subscribe(
+    mode: String,
+    path: String,
+    mut receive: impl FnMut(Result<pot_protocol::sse::Frame, String>) -> Result<(), String>
+    + Send
+    + 'static,
+) -> Subscription {
+    use futures::StreamExt;
+    Subscription(runtime().spawn(async move {
+        let mut epoch = subscription_epoch().subscribe();
+        let mut delay = 250u64;
+        loop {
+            let selected_mode = mode.clone();
+            let transport = tokio::task::spawn_blocking(move || {
+                if selected_mode == "remote" {
+                    remote_client(&control_config()?)
+                } else {
+                    client()
+                }
+            })
+            .await;
+            let result = async {
+                let transport = transport.map_err(|e| e.to_string())??;
+                let mut stream = transport.events(&path).await.map_err(|e| e.to_string())?;
+                while let Some(frame) = tokio::select! { next = stream.next() => next, _ = epoch.changed() => { return Err("Control configuration changed".into()); } } {
+                    receive(Ok(frame.map_err(|e| e.to_string())?))?;
+                    delay = 250;
+                }
+                Err::<(), String>("Event connection closed".into())
+            }
+            .await;
+            if let Err(error) = result {
+                let _ = receive(Err(error));
+            }
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            delay = (delay * 2).min(15_000);
+        }
+    }))
+}
+
 #[cfg(test)]
 mod control_tests {
     use super::*;
@@ -564,58 +618,4 @@ mod control_tests {
             "/api/v1/runtime/control"
         );
     }
-}
-
-/// Dropping a subscription cancels its socket, retry delay and callback together.
-fn subscription_epoch() -> &'static tokio::sync::watch::Sender<u64> {
-    static EPOCH: OnceLock<tokio::sync::watch::Sender<u64>> = OnceLock::new();
-    EPOCH.get_or_init(|| tokio::sync::watch::channel(0).0)
-}
-pub fn configuration_generation() -> u64 {
-    *subscription_epoch().borrow()
-}
-pub struct Subscription(tokio::task::JoinHandle<()>);
-impl Drop for Subscription {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-pub fn subscribe(
-    mode: String,
-    path: String,
-    mut receive: impl FnMut(Result<pot_protocol::sse::Frame, String>) -> Result<(), String>
-    + Send
-    + 'static,
-) -> Subscription {
-    use futures::StreamExt;
-    Subscription(runtime().spawn(async move {
-        let mut epoch = subscription_epoch().subscribe();
-        let mut delay = 250u64;
-        loop {
-            let selected_mode = mode.clone();
-            let transport = tokio::task::spawn_blocking(move || {
-                if selected_mode == "remote" {
-                    remote_client(&control_config()?)
-                } else {
-                    client()
-                }
-            })
-            .await;
-            let result = async {
-                let transport = transport.map_err(|e| e.to_string())??;
-                let mut stream = transport.events(&path).await.map_err(|e| e.to_string())?;
-                while let Some(frame) = tokio::select! { next = stream.next() => next, _ = epoch.changed() => { return Err("Control configuration changed".into()); } } {
-                    receive(Ok(frame.map_err(|e| e.to_string())?))?;
-                    delay = 250;
-                }
-                Err::<(), String>("Event connection closed".into())
-            }
-            .await;
-            if let Err(error) = result {
-                let _ = receive(Err(error));
-            }
-            tokio::time::sleep(Duration::from_millis(delay)).await;
-            delay = (delay * 2).min(15_000);
-        }
-    }))
 }
