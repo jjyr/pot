@@ -417,10 +417,10 @@ impl Shell {
         let connection_handler: pot_ui::pages::Handler =
             std::rc::Rc::new(move |event, window, cx| {
                 let mut event = event.clone();
-                if event.kind == "machine-command" {
-                    if let Some(mode) = &connection_mode {
-                        event.value["mode"] = json!(mode);
-                    }
+                if event.kind == "machine-command"
+                    && let Some(mode) = &connection_mode
+                {
+                    event.value["mode"] = json!(mode);
                 }
                 connection_base(&event, window, cx);
             });

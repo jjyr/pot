@@ -641,23 +641,20 @@ impl Client {
                     conversation.take();
                 }
                 let owner = v.lock().unwrap().assistant_id().to_owned();
-                match receive(&v, dirty.as_ref()) {
-                    Err(error) => {
-                        let mut state = v.lock().unwrap();
-                        if state.assistant_id() == owner {
-                            state.error = error;
-                        }
-                        drop(state);
-                        crate::wake_ui();
-                        // A failed fetch is retried only while disconnected, not as
-                        // a healthy-state polling loop.
-                        if active.load(Ordering::Relaxed) {
-                            std::thread::sleep(Duration::from_secs(1));
-                            let _ = trigger.try_send(());
-                        }
-                        continue;
+                if let Err(error) = receive(&v, dirty.as_ref()) {
+                    let mut state = v.lock().unwrap();
+                    if state.assistant_id() == owner {
+                        state.error = error;
                     }
-                    Ok(()) => {}
+                    drop(state);
+                    crate::wake_ui();
+                    // A failed fetch is retried only while disconnected, not as
+                    // a healthy-state polling loop.
+                    if active.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_secs(1));
+                        let _ = trigger.try_send(());
+                    }
+                    continue;
                 }
                 if dirty.is_none() {
                     let state = v.lock().unwrap().clone();
