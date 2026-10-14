@@ -69,7 +69,7 @@ schedule = dict(
         misfire="coalesce",
         notify="changes",
         enabled=True,
-        sandbox_id="",
+        machine_id=control,
     ),
     next_at_ms=9999999999999,
     next_label="Tomorrow 09:00",
