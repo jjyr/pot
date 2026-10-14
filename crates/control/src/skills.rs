@@ -45,7 +45,7 @@ pub(crate) fn resources(s: &Service) -> Result<SkillResources> {
         return Ok(SkillResources::default());
     }
     let (base, _, cwd, visible) = crate::execution_target::workspace_view(s)?;
-    let host = !s.is_worker || s.sandbox_id.is_none();
+    let host = s.sandbox_id.is_none();
     let mut roots = vec![];
     let mut project = cwd.as_path();
     let mut location = visible.as_path();
@@ -209,6 +209,26 @@ mod tests {
             assert!(!skill.description.contains("forged"));
         }
         assert_eq!(catalog.diagnostics.len(), 4);
+        let mut sandbox_main = root.clone();
+        sandbox_main.sandbox_id = Some(root.execution_service.sandboxes.ensure_shared().unwrap());
+        let (_, _, _, visible) = crate::execution_target::workspace_view(&sandbox_main).unwrap();
+        let sandbox_catalog =
+            pot_agent::discover_skills(&resources(&sandbox_main).unwrap()).unwrap();
+        for name in ["skill-creator", "skill-installer"] {
+            let skill = sandbox_catalog
+                .skills
+                .iter()
+                .find(|skill| skill.name == name)
+                .unwrap();
+            assert_eq!(
+                skill.location,
+                visible
+                    .join(".pot/agent/skills")
+                    .join(name)
+                    .join("SKILL.md")
+                    .to_string_lossy()
+            );
+        }
         std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
     }
     #[tokio::test]
