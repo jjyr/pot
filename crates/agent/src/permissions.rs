@@ -31,8 +31,6 @@ pub struct Policy {
     pub machines: std::collections::BTreeMap<String, MachinePolicy>,
     #[serde(default)]
     pub machine_epochs: std::collections::BTreeMap<String, String>,
-    #[serde(default)]
-    pub sandbox_limits: std::collections::BTreeMap<String, SandboxLimits>,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -58,7 +56,6 @@ impl Default for MachinePolicy {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxLimits {
-    pub max_sandboxes: u64,
     pub cpus: u64,
     pub memory_gib: u64,
     pub disk_gib: u64,
@@ -66,7 +63,6 @@ pub struct SandboxLimits {
 impl Default for SandboxLimits {
     fn default() -> Self {
         Self {
-            max_sandboxes: 16,
             cpus: 4,
             memory_gib: 8,
             disk_gib: 32,
@@ -82,7 +78,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: 3,
+            version: 4,
             policy: Policy::default(),
         }
     }
@@ -90,7 +86,7 @@ impl Default for Config {
 impl Config {
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.version == 3,
+            self.version == 4,
             "Unsupported permission format; configure machine execution policies afresh"
         );
         for (machine, policy) in &self.policy.machines {
@@ -99,15 +95,6 @@ impl Config {
                 policy.execution_mode != ExecutionMode::Host
                     || policy.host_access != DefaultDecision::Deny,
                 "Host cannot be the default execution mode while Host operations are forbidden"
-            );
-        }
-        for limit in self.policy.sandbox_limits.values() {
-            ensure!(
-                limit.max_sandboxes > 0
-                    && limit.cpus > 0
-                    && limit.memory_gib > 0
-                    && limit.disk_gib > 0,
-                "Sandbox limits must be positive"
             );
         }
         Ok(())

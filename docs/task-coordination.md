@@ -70,9 +70,10 @@ The actual Host/Sandbox context is retained as execution information for the act
 run, receipts and file retrieval. It is not reused as a default for future tasks.
 Guidance is accepted only while a task remains active. Complete, failed, cancelled
 and interrupted tasks require a new task to run again; retained files are not
-implicitly imported into that new task. Managed Sandbox instances are private and
-destroyed after confirmed execution cleanup; task records and files remain.
+implicitly imported into that new task. Sandbox executions reuse the machine-owned shared development environment.
+Execution cleanup closes only that Task's processes and sessions; the environment,
+installed tools and files remain. A new Task receives a new workspace directory
+but observes existing shared software and cache state.
 
-Task persistence uses schema version 3. Earlier task/schedule records with fixed
-container selection are rejected without implicit migration; use an independent
+Task persistence uses schema version 4. Earlier per-task-container records are rejected without implicit migration; use an independent
 data directory for development builds of this schema. Existing files are not deleted.

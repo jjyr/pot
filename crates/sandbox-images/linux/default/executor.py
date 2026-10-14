@@ -39,7 +39,6 @@ DB.execute(
 )
 DB.commit()
 USER = pwd.getpwnam("potdesktop") if os.getuid() == 0 else None
-TASK_USER = pwd.getpwnam("pottask") if os.getuid() == 0 else None
 if USER:
     # Hide raw sources even when main and task scopes share a VM.
     os.chmod(SKILL_SOURCES, 0o700)
@@ -58,7 +57,7 @@ def workspace(cwd, role):
     path.mkdir(parents=True, exist_ok=True)
     if USER:
         # Ancestors created by Runtime mounts may have host ownership.
-        user = TASK_USER if role == "task" else USER
+        user = USER
         for parent in [WORK, *path.parents, path]:
             if parent.is_relative_to(WORK):
                 os.chown(parent, USER.pw_uid, USER.pw_gid)
@@ -66,6 +65,30 @@ def workspace(cwd, role):
         os.chown(path, user.pw_uid, USER.pw_gid)
         os.chmod(path, 0o775 if role == "task" else 0o755)
     return path
+
+
+def development_environment():
+    home = ROOT / "development"
+    for path in [home, home / ".cargo", home / ".rustup"]:
+        if path.is_symlink():
+            raise ValueError("Development environment must not be a symlink")
+        path.mkdir(parents=True, exist_ok=True)
+        if USER:
+            os.chown(path, USER.pw_uid, USER.pw_gid)
+            os.chmod(path, 0o2775)
+    return home
+
+
+def runner_environment(cwd):
+    development = development_environment()
+    return {
+        "PATH": f"{development}/.cargo/bin:/usr/local/bin:/usr/bin:/bin",
+        "CARGO_HOME": str(development / ".cargo"),
+        "RUSTUP_HOME": str(development / ".rustup"),
+        "LANG": "C.UTF-8",
+        "HOME": str(cwd),
+        "TMPDIR": "/tmp",
+    }
 
 
 def terminate(process):
@@ -100,10 +123,10 @@ def terminate(process):
 def demote(role):
     if USER:
         os.setgroups([])
-        user = TASK_USER if role == "task" else USER
+        user = USER
         os.setgid(USER.pw_gid)
         os.setuid(user.pw_uid)
-        os.umask(0o002 if role == "task" else 0o022)
+        os.umask(0o002)
         if ctypes.CDLL(None, use_errno=True).prctl(38, 1, 0, 0, 0) != 0:
             raise OSError(ctypes.get_errno(), "Unable to set no_new_privs")
 
@@ -132,12 +155,7 @@ class Runner:
         self.process = subprocess.Popen(
             ["/opt/pot/pot-tool-executor"],
             cwd=cwd,
-            env={
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
-                "LANG": "C.UTF-8",
-                "HOME": str(cwd),
-                "TMPDIR": "/tmp",
-            },
+            env=runner_environment(cwd),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

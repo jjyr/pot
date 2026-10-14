@@ -118,14 +118,14 @@ impl SandboxFixture {
                 let target = call["sandbox_id"].as_str().unwrap();
                 assert!(
                     matches!(target, "default" | "linux-b")
-                        || pot_sandbox::Manager::is_managed(target)
+                        || pot_sandbox::Manager::is_shared(target)
                 );
                 let port_target = if ports.contains_key(target) {
                     target
                 } else {
                     "default"
                 };
-                if pot_sandbox::Manager::is_managed(target) {
+                if pot_sandbox::Manager::is_shared(target) {
                     let directory = root.join("sandboxes").join(target);
                     std::fs::create_dir_all(&directory).unwrap();
                     std::fs::write(directory.join("executor-token"), "fixture-default\n").unwrap();

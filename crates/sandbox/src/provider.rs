@@ -104,6 +104,10 @@ pub trait Provider: Send + Sync {
         context: &'a ProviderContext,
         method: &'a str,
     ) -> BoxFuture<'a, Result<Value>>;
+    /// Explicit owner rebuild/delete. Ordinary stop retains the environment.
+    fn destroy<'a>(&'a self, context: &'a ProviderContext) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move { self.lifecycle(context, "stop").await })
+    }
     fn health<'a>(&'a self, context: &'a ProviderContext) -> BoxFuture<'a, Result<bool>>;
     fn request<'a>(
         &'a self,

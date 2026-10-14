@@ -43,6 +43,7 @@ pub fn router(s: Service) -> Router {
             "/api/v1/sandboxes",
             get(sandbox::list).post(sandbox::manage),
         )
+        .route("/api/v1/sandboxes/shared", post(sandbox::shared_lifecycle))
         .route(
             "/api/v1/sandbox-resources",
             get(pot_control::sandbox_resources::status)

@@ -850,6 +850,14 @@ impl Client {
         });
     }
     pub fn permission_decision(&self, body: Value) {
+        self.machine_operation("/api/v1/permissions", body);
+    }
+    pub fn sandbox_lifecycle(&self, mut body: Value) {
+        body["request_id"] = json!(uuid::Uuid::new_v4().to_string());
+        body.as_object_mut().unwrap().remove("sandbox_id");
+        self.machine_operation("/api/v1/sandboxes/shared", body);
+    }
+    fn machine_operation(&self, path: &'static str, body: Value) {
         let owner = self.view.lock().unwrap().assistant_id().to_owned();
         let view = self.view.clone();
         let refresh = self.refresh.clone();
@@ -857,10 +865,10 @@ impl Client {
             let result = (|| -> Result<(), String> {
                 let mut response = requests(&view)
                     .scope(&owner)
-                    .timeout_global(Some(Duration::from_secs(10)))
+                    .timeout_global(Some(Duration::from_secs(60)))
                     .build()
                     .new_agent()
-                    .post("/api/v1/permissions")
+                    .post(path)
                     .config()
                     .http_status_as_error(false)
                     .build()

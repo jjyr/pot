@@ -71,9 +71,9 @@ single message contract, processing isolation and recovery rules.
 Data, drafts, event cursors and cached results are scoped
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
 UI is deferred. Machines shows lightweight status cards, expandable Host/Sandbox rows and
-Tasks filtered by the exact execution target. Technical management and file transfers
-belong in ordinary Chat; there is no assistant-management shortcut or Machines/Task
-artifact-download UI. File delivery uses clickable Chat links:
+Tasks filtered by the exact execution target. Machine settings provide shared-environment start/stop and resource limits.
+Advanced native owner APIs provide rebuild and mappings. File delivery uses Chat;
+Machines and Task pages do not expose artifact-download lists. File delivery uses clickable Chat links:
 Control relays a task file from its execution machine to the current client; App
 asks for a save location and Web uses browser downloads. Links use
 `pot-file://TASK_UUID/encoded/relative/path`; owner-scoped reads use the task's
@@ -297,13 +297,20 @@ reconciliation before new conflicting operations. Restart restores current-schem
 ## Machine policy and execution records
 
 The machine policy is the execution default. Tasks record actual execution
-information for receipts, results and file retrieval; this record is not a future
-container binding. Dispatch reads the current machine policy. Finished work is
-rerun as a new task, never by reviving its previous container. A running operation
-retains its context while subsequent Host authorization checks use current policy.
+information at dispatch, and reruns create new Tasks using current policy. Active
+executions retain their location; Host operations use current authorization.
 
-Control owns policy, routing and approval. The target Runtime owns resource
-reservations, execution leases, process cleanup and disposable container destruction.
-The UI uses existing backend state events and does not own lifecycle timers.
-Managed workspace definitions preserve files independently of disposable runtime
-instances. Prepared macOS VMs remain an explicit operator facility.
+Control owns routing, machine policy and exact Host approval. Runtime owns one
+shared Linux development Sandbox per machine, execution scopes, run leases and
+cleanup. Providers preserve the writable environment on stop and destroy it only
+on explicit owner rebuild/delete. Tasks share software/caches and the filesystem;
+per-Task directories are organization rather than mutual security isolation.
+Task termination closes its own sessions and processes, leaving the environment
+and other executions alive. Installed Rust tools use shared Cargo/Rustup paths.
+
+Sandbox GUI remains an owner-viewed desktop with the existing viewer takeover
+rules. Native Host/Sandbox desktop automation is not implemented. The built-in
+Computer Use plugin controls independent headless Chromium sessions; sharing a
+container does not require a machine-wide browser lock. See
+[execution lifecycle](executor.md#shared-machine-execution-environment) and
+[Computer Use](computer-use.md).

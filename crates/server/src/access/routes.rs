@@ -249,7 +249,8 @@ fn allowed(method: &Method, path: &str) -> bool {
         return allowed(method, &format!("/api/v1/{operation}"));
     }
 
-    if *method == Method::POST && path == "/api/v1/permissions" {
+    if *method == Method::POST && matches!(path, "/api/v1/permissions" | "/api/v1/sandboxes/shared")
+    {
         return true;
     }
     if *method == Method::GET
@@ -585,6 +586,7 @@ mod tests {
             "/api/v1/assistants/main/tasks/id/files"
         ));
         assert!(!allowed(&Method::POST, "/api/v1/tasks/id/files"));
+        assert!(allowed(&Method::POST, "/api/v1/sandboxes/shared"));
         for p in [
             "/api/v1/execution",
             "/api/v1/terminals",

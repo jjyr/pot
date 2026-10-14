@@ -12,7 +12,7 @@ pub struct RemoteBinding {
     pub execution_target: pot_core::ExecutionTarget,
 }
 pub trait RemoteExecution: Send + Sync {
-    fn configure_sandbox_budget(
+    fn configure_sandbox_resources(
         &self,
         _machine: String,
         _budget: Value,

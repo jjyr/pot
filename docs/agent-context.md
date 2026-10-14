@@ -111,7 +111,7 @@ Explicit task choices take precedence over saved rules. Without an explicit targ
 Control selects a machine labelled `task-runner`, preferring its own Runtime and
 then stable Runtime ID order. Task and schedule requests select `machine_id`.
 At dispatch, the selected machine's current policy determines direct Host or
-private Sandbox execution. The actual context is recorded for this execution;
+shared Sandbox execution. The actual context is recorded for this execution;
 reruns create new Tasks. Same-machine Host exceptions require machine policy
 approval and do not change the Task's normal context. Labels describe routing intent, not a capability guarantee;
 execution fails normally if the selected target cannot do the work. Rules cannot enable a

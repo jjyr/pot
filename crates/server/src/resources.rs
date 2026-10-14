@@ -127,7 +127,7 @@ impl Resources {
         Self::open_policy(backend, config, true).await
     }
     pub async fn open_policy(
-        backend: Backend,
+        mut backend: Backend,
         config: RuntimeConfig,
         control_allowed: bool,
     ) -> Result<Arc<Self>> {
@@ -145,6 +145,11 @@ impl Resources {
                 entries: vec![],
             }
         };
+        // Shared environments are created by execution rather than resource-book
+        // entries. Restore their Provider registration before lease reconciliation.
+        if config.data.join("sandboxes.json").exists() {
+            backend.register_sandbox_providers(crate::hosting::installed_providers()?)?;
+        }
         let token = backend.endpoint(0).token;
         let routes = crate::hosting::backend_router(&backend);
         let control = crate::control::Authority::open_policy(
@@ -198,6 +203,7 @@ impl Resources {
                 );
                 let first = backend.assistants().is_none();
                 let existing = self.config.data.join("pot-v2.sqlite").exists();
+                backend.register_sandbox_providers(crate::hosting::installed_providers()?)?;
                 backend
                     .enable_assistant_resources(self.config.clone())
                     .await?;
@@ -344,6 +350,18 @@ impl Resources {
     }
     pub(super) async fn assistant_hub(&self) -> Option<Arc<pot_control::control::assistants::Hub>> {
         self.inner.lock().await.backend.assistants()
+    }
+    /// Only an authenticated shared-environment command may provision Providers.
+    /// Registration creates no container and downloads no image.
+    pub(super) async fn execution_host(&self, shared: bool) -> Result<pot_control::host::Host> {
+        let mut inner = self.inner.lock().await;
+        if shared {
+            inner
+                .backend
+                .register_sandbox_providers(crate::hosting::installed_providers()?)?;
+            *self.routes.write().unwrap() = crate::hosting::backend_router(&inner.backend);
+        }
+        Ok(inner.backend.host().clone())
     }
     pub(super) async fn host(&self) -> pot_control::host::Host {
         self.inner.lock().await.backend.host().clone()
@@ -501,6 +519,40 @@ async fn create(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn shared_environment_registers_lazily_and_restores_without_resource_creation() {
+        let root =
+            std::env::temp_dir().join(format!("pot-shared-registration-{}", uuid::Uuid::new_v4()));
+        let config = RuntimeConfig {
+            data: root.join("data"),
+            workspace: root.join("workspace"),
+        };
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
+        let resources = Resources::open(backend, config.clone()).await.unwrap();
+        assert!(resources.host().await.sandbox_manager().is_none());
+        let host = resources.execution_host(true).await.unwrap();
+        let manager = host.sandbox_manager().unwrap();
+        let target = manager.ensure_shared().unwrap();
+        assert!(manager.describe(&target).is_ok());
+        assert!(resources.inner.lock().await.book.entries.is_empty());
+        resources.shutdown().await;
+        drop(manager);
+        drop(host);
+        drop(resources);
+        let backend = pot_runtime::initialize(config.clone()).await.unwrap();
+        let restored = Resources::open(backend, config).await.unwrap();
+        let host = restored.host().await;
+        let manager = host.sandbox_manager().unwrap();
+        assert_eq!(manager.ensure_shared().unwrap(), target);
+        assert!(manager.describe(&target).is_ok());
+        assert!(restored.inner.lock().await.book.entries.is_empty());
+        assert!(!root.join("helper.sock").exists());
+        restored.shutdown().await;
+        drop(manager);
+        drop(host);
+        drop(restored);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     use super::*;
     #[tokio::test]
     async fn local_and_http_clients_receive_mutations_without_read_feedback() {

@@ -788,9 +788,8 @@
   "permissions.policy-ask": "Ask",
   "permissions.policy-allow": "Allow",
   "permissions.policy-deny": "Disabled",
-  "permissions.limit-max_sandboxes": "Sandbox limit",
-  "permissions.limit-cpus": "Total sandbox CPU budget",
-  "permissions.limit-memory_gib": "Total sandbox memory (GiB)",
+  "permissions.limit-cpus": "Shared Sandbox CPUs",
+  "permissions.limit-memory_gib": "Shared Sandbox memory (GiB)",
   "permissions.limit-disk_gib": "Environment disk sizing ceiling (GiB; provider-dependent)",
   "permissions.assign-sandbox": "Assign management to this assistant",
   "onboarding.start": "Start using Pot",
@@ -821,9 +820,12 @@
   "machines.execution-host": "Run directly on this machine (Host)",
   "machines.execution-sandbox": "Run inside a sandbox",
   "machines.execution-host-detail": "Uses the Runtime account permissions and can modify this machine’s files and configuration.",
-  "machines.execution-sandbox-detail": "Uses a private temporary environment. The environment is destroyed after execution; task files are retained.",
+  "machines.execution-sandbox-detail": "Uses this machine’s shared development environment. Installed tools and dependencies are reused; each task cleans up its own processes and sessions.",
   "machines.host-access": "Host operations",
   "machines.host-ask": "Ask before each operation",
   "machines.host-allow": "Allow directly",
-  "machines.host-deny": "Never allow"
+  "machines.host-deny": "Never allow",
+  "machines.start-shared": "Start shared Sandbox",
+  "machines.stop-shared": "Stop shared Sandbox",
+  "machines.shared-resources-detail": "Stop the environment to change resources. Stopping retains installed software and files. Rebuilding resets installed tools."
 }

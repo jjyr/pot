@@ -3,6 +3,15 @@ set -eu
 umask 077
 mkdir -p /data/workspace /data/logs /run/pot-skill-sources
 chown potdesktop /data/workspace
+# One persistent development home for both task tools and the owner GUI.
+for directory in /data/development /data/development/.cargo /data/development/.rustup; do
+  test ! -L "$directory"
+  mkdir -p "$directory"
+  chown potdesktop "$directory"
+  chmod 2775 "$directory"
+done
+export CARGO_HOME=/data/development/.cargo RUSTUP_HOME=/data/development/.rustup
+export PATH="$CARGO_HOME/bin:$PATH"
 if [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
   mkdir -p /sys/fs/cgroup
   mount -t cgroup2 none /sys/fs/cgroup

@@ -110,27 +110,40 @@ orphan drainage using isolated SQLite/cgroup doubles. See the [dated acceptance
 report](validation/executor-sessions-20261007.md) for what was actually run; these are not substitutes for real Linux VM
 cgroup/desktop acceptance.
 
-## Disposable managed execution
+## Shared machine execution environment
 
-Machine policy selects Host or a managed Linux Sandbox at execution dispatch.
-A managed workspace address is durable metadata, not a retained container. Each
-Task has its own workspace address; instances are created on demand and stopped
-and destroyed when execution finishes, fails or is cancelled. The Linux providers
-remove the actual container on stop. Workspace files remain on the machine and
-can still be read through the Task file API. Installed software outside the
-workspace, memory and live sessions do not survive destruction.
+Machine policy selects Host or the machine-owned `shared` Linux Sandbox at
+execution dispatch. All assistants and Tasks on that machine reuse the same
+container and installed development environment. Each Task has its own workspace
+subdirectory and execution scope. Workspace directories organize artifacts; they
+do not isolate Tasks from each other's files, processes or environment changes.
 
-Managed definitions are not user-selectable shared environments. The `work-`
-address in execution records identifies the durable workspace; provider boot
-identity/generation identifies the individual runtime. A subsequent new task gets
-a new workspace address. Finished tasks cannot be reopened with guidance; rerun
-by creating a new task with the desired input and explicitly selected materials.
+Task success, failure, cancellation and interruption close only that execution's
+command/plugin sessions and drain its process scope. Run leases cover model/tool
+waits. The shared container remains running, including its installed software and
+user-viewed GUI. Task cleanup never stops another Task or the shared desktop.
+Unknown cleanup outcomes retain quarantine and prevent new uncertain effects.
 
-A run lease covers active work, including model/tool waits. Cleanup first drains
-process scopes, then checks leases and unsettled operations, then destroys the
-container. A durable resource reservation remains if cleanup fails. Reaping only
-attempts managed environments without active leases or unsettled operations;
-uncertain execution still requires reconciliation and is never replayed.
+Explicit owner stop requires no active leases or unsettled operations. It stops
+the environment while preserving the writable filesystem and workspace. Podman
+restarts the retained container; Apple Containerization reuses the retained ext4
+rootfs with a new VM/network identity. Runtime shutdown stops environments but
+retains their disks. Rebuild explicitly destroys the writable environment and
+shared development toolchain directories; Task files/transcripts remain. There
+is no idle container destruction or automatic rebuild.
 
-Owner-enrolled macOS VMs are not automatically cloned or destroyed. Automatic
-execution uses the installed disposable Linux provider and fails if unavailable.
+The guest broker supplies shared `CARGO_HOME=/data/development/.cargo` and
+`RUSTUP_HOME=/data/development/.rustup`; scope HOME and cwd remain Task-specific.
+Rust entrypoints in `/usr/local/bin` survive login-shell PATH initialization.
+Installations and version/cache changes affect subsequent Tasks. Rebuild the
+Linux image after changing broker/install sources; old published images do not
+acquire these paths from a client-only update. Assistant and Task tools use the
+same unprivileged guest account so user-installed
+Rustup files remain accessible. Role-specific read-only Skill mounts and separate
+process scopes remain in force. The guest receives no Control credentials.
+
+Owner-enrolled macOS VMs remain separate operator resources. The default shared
+Sandbox uses the installed Linux Provider; missing support fails without Host
+fallback. Native desktop Task automation remains unsupported. `cua_repl` uses
+independent headless Chromium sessions in Host or Sandbox, so browser automation
+does not require desktop ownership.

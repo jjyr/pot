@@ -85,9 +85,10 @@ fn machine_configuration_persists_but_operation_decisions_do_not() {
     let restored = Hub::open(&path).unwrap();
     assert!(restored.continuous_host("any-assistant", "devpc"));
     let value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(value["version"], 3);
+    assert_eq!(value["version"], 4);
     assert!(value.get("grants").is_none());
     assert!(value["policy"].get("rules").is_none());
+    assert!(value["policy"].get("sandbox_limits").is_none());
     std::fs::remove_dir_all(dir).unwrap();
 }
 #[test]

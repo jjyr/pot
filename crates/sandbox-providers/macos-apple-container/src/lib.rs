@@ -249,7 +249,7 @@ impl Provider for MacOSAppleContainerProvider {
     ) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             ensure!(
-                ["prepare", "start", "status", "stop"].contains(&method),
+                ["prepare", "start", "status", "stop", "delete"].contains(&method),
                 "Unsupported lifecycle operation"
             );
             let socket_path = context.root.join("helper.sock");
@@ -264,6 +264,16 @@ impl Provider for MacOSAppleContainerProvider {
                     !socket_path.exists(),
                     "Unowned Sandbox Helper socket; reconciliation required"
                 );
+                if method == "delete"
+                    && !context
+                        .root
+                        .join("sandboxes")
+                        .join(&context.sandbox_id)
+                        .join("store/containers")
+                        .exists()
+                {
+                    return Ok(json!({"phase":"stopped","generation":0}));
+                }
                 if method == "status" || method == "stop" {
                     return Ok(
                         json!({"phase":if helper.is_file() {"stopped"} else {"unavailable"},"generation":0}),
@@ -363,6 +373,9 @@ impl Provider for MacOSAppleContainerProvider {
             Ok(())
         })
     }
+    fn destroy<'a>(&'a self, context: &'a ProviderContext) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move { self.lifecycle(context, "delete").await })
+    }
     fn health<'a>(&'a self, context: &'a ProviderContext) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
             let (url, token) = self.endpoint(context).await?;
@@ -410,6 +423,23 @@ impl Provider for MacOSAppleContainerProvider {
                 .json()
                 .await?)
         })
+    }
+    fn validate_instance_config(&self, context: &ProviderContext, config: &Value) -> Result<()> {
+        self.validate_config(config)?;
+        let dir = context.root.join("sandboxes").join(&context.sandbox_id);
+        let disk = dir
+            .join("store/containers")
+            .join(format!("pot-{}", context.sandbox_id))
+            .join("rootfs.ext4");
+        if disk.exists() {
+            let previous: Value =
+                serde_json::from_slice(&std::fs::read(dir.join("workspace/sandbox.json"))?)?;
+            ensure!(
+                previous["disk_gib"] == config["disk_gib"],
+                "Rebuild the Sandbox before changing disk size; installed software would be reset"
+            );
+        }
+        Ok(())
     }
     fn validate_config(&self, config: &Value) -> Result<()> {
         ensure!(

@@ -27,8 +27,9 @@ assigned execution context and cannot manage lifecycle. Same-machine Host except
 Start completes only after authenticated execution readiness. Runtime may prepare
 the already bound Sandbox; it cannot allocate a different one as fallback.
 Stop/delete respect active scopes and uncertain outcomes. Deleted IDs are retired;
-workspace artifacts remain. Automatic Tasks use private disposable containers;
-operator-managed definitions are not selected or shared by Task creation.
+workspace artifacts remain. Automatic Tasks reuse the machine-owned shared Linux development environment.
+Stop preserves its writable layer; explicit rebuild/delete removes it. Prepared
+macOS VM bundles retain their existing operator-managed lifecycle.
 
 ## Desktop boundary
 
@@ -47,3 +48,15 @@ MacOS VM preparation requires an enrolled compatible instance and qualified tool
 IPSW installation media is not a ready development VM. Android, iOS and Windows
 Providers, allocation catalogs and automatic template cloning are outside current
 implementation. They add no unused public interfaces or tool schemas.
+
+Owner rebuild uses the existing native Sandbox API with `action: "rebuild"`.
+It rejects occupied/quarantined environments, resets the writable layer and
+shared development tools, and retains Task files and records. Container Providers
+implement explicit destruction separately from stop. Stopped retained environments
+remain discoverable and can be restarted with their installed software.
+
+Control initialization registers installed Providers without creating instances.
+On execution nodes, an authenticated command for the shared environment lazily
+registers Providers; no separate Sandbox creation call is needed. Persisted shared
+definitions restore registration before lease reconciliation on Runtime restart.
+Registration itself neither starts a VM nor downloads assets.

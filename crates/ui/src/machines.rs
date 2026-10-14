@@ -1,4 +1,4 @@
-//! Machine status and owner-controlled access, limits and sandbox assignments.
+//! Machine-wide execution policy and shared development environment.
 use crate::{
     localization::Catalog,
     pages::{self, Handler, Layout},
@@ -180,16 +180,51 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             }
             card = card.child(controls);
         }
-        let limits = view.permissions["policy"]["sandbox_limits"]
-            .get(runtime)
-            .cloned()
-            .unwrap_or(json!({"max_sandboxes":16,"cpus":4,"memory_gib":8,"disk_gib":32}));
-        for key in ["max_sandboxes", "cpus", "memory_gib", "disk_gib"]
+        let shared = machine["execution_targets"]
+            .as_array()
             .into_iter()
-            .filter(|_| {
+            .flatten()
+            .find(|e| e["shared"] == true);
+        let shared_running = shared.is_some_and(|e| e["state"]["phase"] == "running");
+        let shared_busy = shared.is_some_and(|e| {
+            e["active_leases"].as_u64().unwrap_or(0) > 0
+                || e["unsettled_operations"].as_u64().unwrap_or(0) > 0
+        });
+        if settings_open && policy["execution_mode"] == "sandbox" {
+            let action = if shared_running { "stop" } else { "start" };
+            card = card
+                .child(
+                    Button::new(SharedString::from(format!("shared-lifecycle-{runtime}")))
+                        .ghost()
+                        .small()
+                        .label(catalog.text(if shared_running {
+                            "machines.stop-shared"
+                        } else {
+                            "machines.start-shared"
+                        }))
+                        .disabled(!online || shared_busy)
+                        .on_click(pages::on(
+                            &handler,
+                            "sandbox-lifecycle",
+                            json!({"runtime_id":runtime,"sandbox_id":"shared","action":action}),
+                        )),
+                )
+                .child(pages::hint(
+                    catalog.text("machines.shared-resources-detail"),
+                    cx,
+                ));
+        }
+        let limits = shared
+            .map(|e| e["config"].clone())
+            .unwrap_or(json!({"cpus":4,"memory_gib":8,"disk_gib":32}));
+        for key in ["cpus", "memory_gib", "disk_gib"]
+            .into_iter()
+            .filter(|key| {
                 settings_open
                     && !view.permissions.is_null()
                     && policy["execution_mode"] == "sandbox"
+                    && (*key != "disk_gib"
+                        || shared.is_none_or(|e| e["config"]["disk_gib"].as_u64().unwrap_or(0) > 0))
             })
         {
             let n = limits[key].as_u64().unwrap_or(1);
@@ -214,7 +249,11 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                     )))
                     .small()
                     .w(px(28.))
-                    .disabled(!increase && n <= 1)
+                    .disabled(
+                        shared_running
+                            || shared_busy
+                            || (!increase && n <= if key == "disk_gib" { 4 } else { 1 }),
+                    )
                     .label(if increase { "+" } else { "−" })
                     .on_click(pages::on(
                         &handler,
@@ -233,11 +272,6 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             card = card.child(pages::hint(catalog.text("machines.empty"), cx));
         }
         for execution_target in execution_targets {
-            if execution_target["managed"] == true
-                && execution_target["state"]["phase"] == "stopped"
-            {
-                continue;
-            }
             let reference = &execution_target["execution_target"];
             let host = reference["target"]["kind"] == "host";
             let title = if host {

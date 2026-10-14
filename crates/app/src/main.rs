@@ -179,6 +179,7 @@ impl Shell {
                     "assistant-save" => this.client.assistant_save(event.value),
                     "assistant-model" => ui::command(serde_json::json!({"action":"ai-open","owner":event.value,"return_to_chat":true})),
                     "permission-decision" => this.client.permission_decision(event.value),
+                    "sandbox-lifecycle" => this.client.sandbox_lifecycle(event.value),
                     "native" => ui::command(event.value),
                     "machine-select" => {
                         this.machine_selection = event.value.clone();
