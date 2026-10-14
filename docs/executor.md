@@ -3,8 +3,8 @@
 The Host Agent (pot-agent) calls the same role-scoped tools. Runtime validates
 arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. pot-agent also routes these same tool names to
 Host after its [permission gate](permissions.md).
-`execution_target` selects Host or a Sandbox for pot-agent. Main defaults to Host and
-tasks remain bound to their fixed Host/Sandbox target. File tools share the same runner implementation.
+`execution_target` selects Host or a Sandbox for pot-agent. Main uses the machine execution policy and
+tasks resolve policy at dispatch and retain that context only for their current execution. File tools share the same runner implementation.
 
 ## Commands and shells
 
@@ -47,7 +47,7 @@ sets a total command timeout; otherwise they live until exit, cancellation,
 termination or inactivity. `session_idle_timeout_ms` defaults to 30 minutes and
 must be positive. A stdin call/poll refreshes activity; output alone does not. `write_stdin` input,
 polling, resizing and stopping check current machine capability authorization as
-well as Agent/epoch/target ownership. Work and permanent grants avoid repeated prompts.
+well as Agent/epoch/target ownership. Host policy is checked per operation; allow-once approvals identify the exact call and arguments.
 
 Normal turn completion closes sessions. Runtime binds them to owner, Agent
 binding epoch, Sandbox and VM generation. A main default selection change does
@@ -109,3 +109,28 @@ generation invalidation, parking/reactivation, restart quarantine and cleanup.
 orphan drainage using isolated SQLite/cgroup doubles. See the [dated acceptance
 report](validation/executor-sessions-20261007.md) for what was actually run; these are not substitutes for real Linux VM
 cgroup/desktop acceptance.
+
+## Disposable managed execution
+
+Machine policy selects Host or a managed Linux Sandbox at execution dispatch.
+A managed workspace address is durable metadata, not a retained container. Each
+Task has its own workspace address; instances are created on demand and stopped
+and destroyed when execution finishes, fails or is cancelled. The Linux providers
+remove the actual container on stop. Workspace files remain on the machine and
+can still be read through the Task file API. Installed software outside the
+workspace, memory and live sessions do not survive destruction.
+
+Managed definitions are not user-selectable shared environments. The `work-`
+address in execution records identifies the durable workspace; provider boot
+identity/generation identifies the individual runtime. A subsequent new task gets
+a new workspace address. Finished tasks cannot be reopened with guidance; rerun
+by creating a new task with the desired input and explicitly selected materials.
+
+A run lease covers active work, including model/tool waits. Cleanup first drains
+process scopes, then checks leases and unsettled operations, then destroys the
+container. A durable resource reservation remains if cleanup fails. Reaping only
+attempts managed environments without active leases or unsettled operations;
+uncertain execution still requires reconciliation and is never replayed.
+
+Owner-enrolled macOS VMs are not automatically cloned or destroyed. Automatic
+execution uses the installed disposable Linux provider and fails if unavailable.

@@ -116,10 +116,9 @@ fn host_workspace_view(workspace: &std::path::Path) -> (PathBuf, PathBuf, PathBu
 
 /// Source and execution-visible roots for local instruction/skill discovery.
 pub(crate) fn workspace_view(s: &Service) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf)> {
-    if s.is_worker
-        && s.execution_target
-            .as_ref()
-            .is_some_and(|r| matches!(r.target, pot_core::ExecutionTargetKind::Host {}))
+    if s.execution_target
+        .as_ref()
+        .is_some_and(|r| matches!(r.target, pot_core::ExecutionTargetKind::Host {}))
     {
         let reference = s.execution_target.as_ref().unwrap();
         anyhow::ensure!(
@@ -128,7 +127,7 @@ pub(crate) fn workspace_view(s: &Service) -> Result<(PathBuf, PathBuf, PathBuf, 
         );
         return Ok(host_workspace_view(&s.workspace));
     }
-    if !s.is_worker {
+    if !s.is_worker && s.sandbox_id.is_none() {
         let workspace = if s.execution_service.sandboxes.assignment("").is_err() {
             s.workspace.clone()
         } else {
@@ -142,6 +141,9 @@ pub(crate) fn workspace_view(s: &Service) -> Result<(PathBuf, PathBuf, PathBuf, 
         .ok_or_else(|| anyhow!("Worker Sandbox binding missing"))?;
     let base = s.execution_service.sandboxes.workspace(&target);
     let visible_base = PathBuf::from(s.execution_service.sandboxes.guest_workspace(&target)?);
+    if !s.is_worker {
+        return Ok((base.clone(), visible_base.clone(), base, visible_base));
+    }
     let cwd = base.join("tasks").join(&s.usage_scope);
     let visible = visible_base.join("tasks").join(&s.usage_scope);
     Ok((base, visible_base, cwd, visible))
@@ -233,7 +235,12 @@ pub(crate) fn local_key(s: &Service, reference: &pot_core::ExecutionTarget) -> R
 }
 pub(crate) fn check_binding(s: &Service, reference: &pot_core::ExecutionTarget) -> Result<()> {
     anyhow::ensure!(
-        !s.is_worker || s.execution_target.as_ref() == Some(reference),
+        !s.is_worker
+            || s.execution_target.as_ref() == Some(reference)
+            || (matches!(reference.target, pot_core::ExecutionTargetKind::Host {})
+                && s.execution_target
+                    .as_ref()
+                    .is_some_and(|bound| bound.runtime_id == reference.runtime_id)),
         "Workers cannot switch Execution target targets"
     );
     Ok(())
@@ -373,7 +380,8 @@ pub async fn refresh(s: &Service) -> Result<()> {
 }
 pub async fn reap_idle(s: &Service) -> Result<()> {
     s.execution_service.host.reap_host_plugins().await?;
-    s.execution_service.sandboxes.reap_idle().await
+    s.execution_service.sandboxes.reap_idle().await?;
+    s.execution_service.sandboxes.reap_managed().await
 }
 pub async fn finish_stale(s: &Service, generation: u64) -> Result<()> {
     s.execution_service
@@ -418,8 +426,9 @@ mod tests {
         let binding = pot_core::ExecutionTarget::sandbox(&worker.runtime_id, "default");
         worker.execution_target = Some(binding.clone());
         assert!(check_binding(&worker, &binding).is_ok());
+        assert!(check_binding(&worker, &resolve(&worker, &json!("host")).unwrap()).is_ok());
         for value in [
-            json!("host"),
+            json!({"runtime_id":"other","target":{"kind":"host"}}),
             json!({"runtime_id":"other","target":{"kind":"sandbox","sandbox_id":"default"}}),
         ] {
             let target = resolve(&worker, &value).unwrap();

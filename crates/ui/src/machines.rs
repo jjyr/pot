@@ -1,6 +1,5 @@
 //! Machine status and owner-controlled access, limits and sandbox assignments.
 use crate::{
-    design,
     localization::Catalog,
     pages::{self, Handler, Layout},
 };
@@ -125,60 +124,61 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                     .on_click(pages::on(&handler, "machine-labels", json!(runtime))),
             );
         }
-        for capability in ["sandbox", "host"]
-            .into_iter()
-            .filter(|_| settings_open && !view.permissions.is_null())
-        {
-            let current = view.permissions["policy"]["rules"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|r| {
-                    r["assistant_id"] == view.permissions["assistant_id"]
-                        && r["scope"]["machine_id"] == runtime
-                        && r["scope"]["capability"] == capability
-                })
-                .and_then(|r| r["decision"].as_str())
-                .unwrap_or("ask");
-            let mut controls =
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(div().flex_1().child(format!(
-                        "{} · {}",
-                        view.permissions["assistant_id"].as_str().unwrap_or(""),
-                        capability
-                    )));
-            for decision in ["ask", "allow", "deny"] {
-                controls=controls.child(Button::new(SharedString::from(format!("policy-{runtime}-{capability}-{decision}")))
-                    .ghost().small().label(catalog.text(&format!("permissions.policy-{decision}"))).toggled(current==decision)
-                    .when(current==decision, |b| b.bg(design::navigation(cx)).font_weight(FontWeight::MEDIUM))
-                    .on_click(pages::on(&handler,"permission-decision",json!({"action":"configure","machine_id":runtime,"capability":capability,"decision":decision}))));
-            }
-            card = card.child(controls);
-        }
-        for grant in view.permissions["grants"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|g| settings_open && g["scope"]["machine_id"] == runtime)
-        {
-            card = card.child(
-                Button::new(SharedString::from(format!("revoke-{}", grant["id"])))
+        let policy = view.permissions["policy"]["machines"]
+            .get(runtime)
+            .cloned()
+            .unwrap_or(json!({"execution_mode":"sandbox","host_access":"ask"}));
+        if settings_open && !view.permissions.is_null() {
+            card = card.child(pages::title(catalog.text("machines.execution-mode")));
+            for mode in ["sandbox", "host"] {
+                let mut next = policy.clone();
+                next["execution_mode"] = json!(mode);
+                card = card.child(
+                    Button::new(SharedString::from(format!(
+                        "execution-mode-{runtime}-{mode}"
+                    )))
                     .ghost()
-                    .label(format!(
-                        "{} · {}",
-                        catalog.text("permissions.revoke"),
-                        grant["scope"]["capability"].as_str().unwrap_or("")
-                    ))
+                    .small()
+                    .label(catalog.text(&format!("machines.execution-{mode}")))
+                    .toggled(policy["execution_mode"] == mode)
+                    .disabled(mode == "host" && policy["host_access"] == "deny")
                     .on_click(pages::on(
                         &handler,
                         "permission-decision",
-                        json!({"id":grant["id"],"action":"revoke"}),
+                        json!({"action":"configure","machine_id":runtime,"machine_policy":next}),
                     )),
-            );
+                );
+            }
+            card = card.child(pages::hint(
+                catalog.text(if policy["execution_mode"] == "host" {
+                    "machines.execution-host-detail"
+                } else {
+                    "machines.execution-sandbox-detail"
+                }),
+                cx,
+            ));
+            card = card.child(pages::title(catalog.text("machines.host-access")));
+            let mut controls = div().flex().flex_wrap().gap_2();
+            for decision in ["ask", "allow", "deny"] {
+                let mut next = policy.clone();
+                next["host_access"] = json!(decision);
+                controls = controls.child(
+                    Button::new(SharedString::from(format!(
+                        "host-access-{runtime}-{decision}"
+                    )))
+                    .ghost()
+                    .small()
+                    .label(catalog.text(&format!("machines.host-{decision}")))
+                    .toggled(policy["host_access"] == decision)
+                    .disabled(decision == "deny" && policy["execution_mode"] == "host")
+                    .on_click(pages::on(
+                        &handler,
+                        "permission-decision",
+                        json!({"action":"configure","machine_id":runtime,"machine_policy":next}),
+                    )),
+                );
+            }
+            card = card.child(controls);
         }
         let limits = view.permissions["policy"]["sandbox_limits"]
             .get(runtime)
@@ -186,7 +186,11 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             .unwrap_or(json!({"max_sandboxes":16,"cpus":4,"memory_gib":8,"disk_gib":32}));
         for key in ["max_sandboxes", "cpus", "memory_gib", "disk_gib"]
             .into_iter()
-            .filter(|_| settings_open && !view.permissions.is_null())
+            .filter(|_| {
+                settings_open
+                    && !view.permissions.is_null()
+                    && policy["execution_mode"] == "sandbox"
+            })
         {
             let n = limits[key].as_u64().unwrap_or(1);
             let mut row = div()
@@ -229,6 +233,11 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             card = card.child(pages::hint(catalog.text("machines.empty"), cx));
         }
         for execution_target in execution_targets {
+            if execution_target["managed"] == true
+                && execution_target["state"]["phase"] == "stopped"
+            {
+                continue;
+            }
             let reference = &execution_target["execution_target"];
             let host = reference["target"]["kind"] == "host";
             let title = if host {
@@ -272,19 +281,6 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                     },
                 )),
             );
-            if expanded && !host && !view.permissions.is_null() {
-                let sandbox = reference["target"]["sandbox_id"].as_str().unwrap_or("");
-                let access = view.permissions["policy"]["sandboxes"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|r| r["machine_id"] == runtime && r["sandbox_id"] == sandbox);
-                let assistant = view.permissions["assistant_id"].as_str().unwrap_or("");
-                row=row.child(Button::new(SharedString::from(format!("sandbox-owner-{runtime}-{sandbox}"))).ghost()
-                    .label(catalog.text("permissions.assign-sandbox"))
-                    .disabled(access.is_some_and(|r|r["owner"]==assistant))
-                    .on_click(pages::on(&handler,"permission-decision",json!({"action":"configure","machine_id":runtime,"sandbox_access":{"machine_id":runtime,"sandbox_id":sandbox,"owner":assistant,"shared_with":[]}}))));
-            }
             if expanded {
                 let desktop = crate::machine_state::desktop_available(
                     &machine,

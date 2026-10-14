@@ -16,13 +16,6 @@ pub struct Scope {
     pub machine_id: String,
     pub capability: Capability,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct Grant {
-    pub id: String,
-    pub owner: String,
-    pub scope: Scope,
-}
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultDecision {
@@ -31,24 +24,36 @@ pub enum DefaultDecision {
     Allow,
     Deny,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct Rule {
-    pub assistant_id: String,
-    pub scope: Scope,
-    pub decision: DefaultDecision,
-}
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     #[serde(default)]
+    pub machines: std::collections::BTreeMap<String, MachinePolicy>,
+    #[serde(default)]
     pub machine_epochs: std::collections::BTreeMap<String, String>,
     #[serde(default)]
-    pub rules: Vec<Rule>,
-    #[serde(default)]
     pub sandbox_limits: std::collections::BTreeMap<String, SandboxLimits>,
-    #[serde(default)]
-    pub sandboxes: Vec<SandboxAccess>,
+}
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    #[default]
+    Sandbox,
+    Host,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MachinePolicy {
+    pub execution_mode: ExecutionMode,
+    pub host_access: DefaultDecision,
+}
+impl Default for MachinePolicy {
+    fn default() -> Self {
+        Self {
+            execution_mode: ExecutionMode::Sandbox,
+            host_access: DefaultDecision::Ask,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -68,72 +73,32 @@ impl Default for SandboxLimits {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct SandboxAccess {
-    pub machine_id: String,
-    pub sandbox_id: String,
-    pub owner: String,
-    #[serde(default)]
-    pub shared_with: Vec<String>,
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
     pub policy: Policy,
-    pub grants: Vec<Grant>,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             policy: Policy::default(),
-            grants: vec![],
         }
     }
 }
 impl Config {
-    pub fn from_grants(grants: &[Grant]) -> Self {
-        Self {
-            grants: grants.to_vec(),
-            ..Self::default()
-        }
-    }
-    pub fn into_grants(self) -> Result<Vec<Grant>> {
+    pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.version == 2,
-            "Unsupported permission format; configure machine capabilities afresh"
+            self.version == 3,
+            "Unsupported permission format; configure machine execution policies afresh"
         );
-        ensure!(
-            self.grants.len() <= 1000 && self.policy.rules.len() <= 1000,
-            "Permission limit reached"
-        );
-        let mut ids = std::collections::BTreeSet::new();
-        let mut scopes = std::collections::BTreeSet::new();
-        for g in &self.grants {
-            validate_identity(&g.owner, &g.scope)?;
+        for (machine, policy) in &self.policy.machines {
+            ensure!(!machine.trim().is_empty(), "Machine identity required");
             ensure!(
-                !g.id.is_empty() && ids.insert(&g.id) && scopes.insert((&g.owner, &g.scope)),
-                "Duplicate or invalid grant"
-            );
-        }
-        let mut rules = std::collections::BTreeSet::new();
-        for r in &self.policy.rules {
-            validate_identity(&r.assistant_id, &r.scope)?;
-            ensure!(
-                rules.insert((&r.assistant_id, &r.scope)),
-                "Duplicate machine policy"
-            );
-        }
-        let mut resources = std::collections::BTreeSet::new();
-        for r in &self.policy.sandboxes {
-            ensure!(
-                !r.machine_id.is_empty()
-                    && !r.sandbox_id.is_empty()
-                    && !r.owner.is_empty()
-                    && resources.insert((&r.machine_id, &r.sandbox_id)),
-                "Invalid or duplicate sandbox ownership"
+                policy.execution_mode != ExecutionMode::Host
+                    || policy.host_access != DefaultDecision::Deny,
+                "Host cannot be the default execution mode while Host operations are forbidden"
             );
         }
         for limit in self.policy.sandbox_limits.values() {
@@ -145,15 +110,8 @@ impl Config {
                 "Sandbox limits must be positive"
             );
         }
-        Ok(self.grants)
+        Ok(())
     }
-}
-fn validate_identity(owner: &str, scope: &Scope) -> Result<()> {
-    ensure!(
-        !owner.trim().is_empty() && !owner.contains('*') && !scope.machine_id.trim().is_empty(),
-        "Explicit assistant and machine identities required"
-    );
-    Ok(())
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -180,18 +138,17 @@ pub async fn authorize(
     let instructions = super::instruction_tools::instructions_tool(tool);
     let execution =
         is_execution_tool(tool) || thread.config.params.agent.plugin_for_tool(tool)?.is_some();
-    let management = tool == "manage_sandbox";
-    if instructions || management {
+    if instructions {
         ensure!(
             context.role == ExecutionRole::Main,
-            "Only the owning assistant can manage resources and instructions"
+            "Only the owning assistant can edit instructions"
         );
     }
     ensure!(
-        context.role != ExecutionRole::Summary || (!execution && !management && !instructions),
+        context.role != ExecutionRole::Summary || (!execution && !instructions),
         "Summary is read-only"
     );
-    if tool == "read_agent_instructions" || (!execution && !management && !instructions) {
+    if tool == "read_agent_instructions" || (!execution && !instructions) {
         return Ok(());
     }
     // Embedders without machine execution use their own contained executor.
@@ -230,23 +187,22 @@ pub async fn authorize(
 mod tests {
     use super::*;
     #[test]
-    fn old_operation_grants_are_rejected() {
+    fn policies_are_machine_scoped_and_legacy_grants_are_rejected() {
+        assert!(Config::default().validate().is_ok());
         assert!(
-            serde_json::from_value::<Config>(serde_json::json!({"version":1,"grants":[]})).is_err()
+            serde_json::from_value::<Config>(
+                serde_json::json!({"version":2,"policy":{},"grants":[]})
+            )
+            .is_err()
         );
-        let g = Grant {
-            id: "g".into(),
-            owner: "assistant".into(),
-            scope: Scope {
-                machine_id: "machine".into(),
-                capability: Capability::Sandbox,
+        let mut config = Config::default();
+        config.policy.machines.insert(
+            "devpc".into(),
+            MachinePolicy {
+                execution_mode: ExecutionMode::Host,
+                host_access: DefaultDecision::Deny,
             },
-        };
-        assert_eq!(
-            Config::from_grants(std::slice::from_ref(&g))
-                .into_grants()
-                .unwrap(),
-            vec![g]
         );
+        assert!(config.validate().is_err());
     }
 }

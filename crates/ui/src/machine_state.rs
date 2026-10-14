@@ -63,18 +63,7 @@ pub fn desktop_available(machine: &Value, execution_target: &Value, runtime: Opt
 }
 
 pub fn schedule_location(spec: &pot_protocol::ScheduleSpec) -> String {
-    spec.execution_target
-        .as_ref()
-        .map(|reference| {
-            let target = match &reference.target {
-                pot_core::ExecutionTargetKind::Host {} => "Host".to_owned(),
-                pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
-                    format!("Sandbox: {sandbox_id}")
-                }
-            };
-            format!("{} / {target}", reference.runtime_id)
-        })
-        .unwrap_or_default()
+    spec.machine_id.clone()
 }
 
 #[cfg(test)]

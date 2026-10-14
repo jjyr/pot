@@ -512,7 +512,7 @@ mod tests {
                 && !main.contains("WRONG_OVERRIDE")
         );
         let child = load(&worker).unwrap().text;
-        assert!(child.contains("FIRST") && child.contains("TASK"));
+        assert!(!child.contains("FIRST") && child.contains("TASK"));
         assert!(!child.contains("GLOBAL"));
         assert!(!child.contains("SECOND"));
         assert!(child.contains(&format!("/data/workspace/tasks/{}", task.id)));
@@ -557,7 +557,16 @@ mod tests {
         .await
         .unwrap()
         .0;
-        let worker = tasks::owner(&root, &task.id).unwrap();
+        // Provider path contract for an operator-prepared VM; automatic Tasks
+        // deliberately do not select or destroy this environment.
+        let mut worker = tasks::owner(&root, &task.id).unwrap();
+        worker.sandbox_id = Some("mac-dev".into());
+        worker.execution_target = Some(pot_core::ExecutionTarget::sandbox(
+            &root.runtime_id,
+            "mac-dev",
+        ));
+        worker.workspace = base.join("tasks").join(&task.id);
+        fs::create_dir_all(&worker.workspace).unwrap();
         assert_eq!(worker.workspace, base.join("tasks").join(&task.id));
         fs::write(worker.workspace.join("AGENTS.md"), "MAC_TASK").unwrap();
         let text = load(&worker).unwrap().text;

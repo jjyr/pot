@@ -101,6 +101,217 @@ impl Drop for Lease {
     }
 }
 impl Manager {
+    pub fn configure_budget(&self, value: &Value) -> Result<()> {
+        for key in ["max_sandboxes", "cpus", "memory_gib", "disk_gib"] {
+            anyhow::ensure!(
+                value[key].as_u64().is_some_and(|n| n > 0),
+                "Invalid machine resource budget"
+            );
+        }
+        private_json(&self.data.join("sandbox-budget.json"), value)?;
+        self.changed.notify();
+        Ok(())
+    }
+    async fn reserve_managed(
+        &self,
+        target: &str,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<()> {
+        if !Self::is_managed(target) {
+            return Ok(());
+        }
+        loop {
+            anyhow::ensure!(
+                !cancelled(),
+                "Cancelled while waiting for machine resources"
+            );
+            {
+                let _lock = self.lifecycle.lock().await;
+                let directory = self.root.join("sandboxes").join(target);
+                let marker = directory.join("managed-runtime.json");
+                if marker.exists() {
+                    return Ok(());
+                }
+                let budget_path = self.data.join("sandbox-budget.json");
+                let budget: Value = if budget_path.exists() {
+                    serde_json::from_slice(&std::fs::read(budget_path)?)?
+                } else {
+                    json!({"max_sandboxes":16,"cpus":4,"memory_gib":8,"disk_gib":32})
+                };
+                let config = self.provider(target)?.default_config();
+                let cpu = config["cpus"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow!("Provider CPU size missing"))?;
+                let memory = config["memory_gib"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow!("Provider memory size missing"))?;
+                anyhow::ensure!(
+                    cpu <= budget["cpus"].as_u64().unwrap_or(0)
+                        && memory <= budget["memory_gib"].as_u64().unwrap_or(0),
+                    "Default environment exceeds machine resource budget"
+                );
+                if let Some(disk) = config["disk_gib"].as_u64() {
+                    anyhow::ensure!(
+                        disk <= budget["disk_gib"].as_u64().unwrap_or(0),
+                        "Default environment disk size exceeds machine sizing limit"
+                    );
+                }
+                let ids: Vec<_> = self
+                    .book
+                    .lock()
+                    .unwrap()
+                    .items
+                    .keys()
+                    .filter(|id| Self::is_managed(id))
+                    .cloned()
+                    .collect();
+                let (mut count, mut used_cpu, mut used_memory) = (0, 0, 0);
+                for id in ids {
+                    let path = self
+                        .root
+                        .join("sandboxes")
+                        .join(id)
+                        .join("managed-runtime.json");
+                    if path.exists() {
+                        let reserved: Value = serde_json::from_slice(&std::fs::read(path)?)?;
+                        count += 1;
+                        used_cpu += reserved["cpus"]
+                            .as_u64()
+                            .ok_or_else(|| anyhow!("Invalid resource reservation"))?;
+                        used_memory += reserved["memory_gib"]
+                            .as_u64()
+                            .ok_or_else(|| anyhow!("Invalid resource reservation"))?;
+                    }
+                }
+                if count < budget["max_sandboxes"].as_u64().unwrap_or(0)
+                    && used_cpu + cpu <= budget["cpus"].as_u64().unwrap_or(0)
+                    && used_memory + memory <= budget["memory_gib"].as_u64().unwrap_or(0)
+                {
+                    std::fs::create_dir_all(&directory)?;
+                    private_json(&marker, &json!({"cpus":cpu,"memory_gib":memory}))?;
+                    self.changed.notify();
+                    return Ok(());
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+    /// A durable workspace binding, not a reusable container. Only trusted
+    /// product code constructs these IDs; model tools never select them.
+    pub fn managed_id(owner: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(owner.as_bytes());
+        format!(
+            "work-{}",
+            digest[..20]
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        )
+    }
+    pub fn is_managed(id: &str) -> bool {
+        id.strip_prefix("work-")
+            .is_some_and(|v| v.len() == 40 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+    }
+    pub fn ensure_managed(&self, target: &str) -> Result<()> {
+        anyhow::ensure!(
+            Self::is_managed(target),
+            "Invalid managed workspace identity"
+        );
+        let provider = if [
+            crate::MACOS_APPLE_CONTAINER_PROVIDER,
+            crate::LINUX_PODMAN_PROVIDER,
+        ]
+        .contains(&self.default_provider.as_str())
+        {
+            self.default_provider.clone()
+        } else {
+            crate::provider::default_provider()
+        };
+        {
+            let mut book = self.book.lock().unwrap();
+            if let Some(existing) = book.items.get(target) {
+                anyhow::ensure!(
+                    existing.provider == provider,
+                    "Managed workspace provider changed"
+                );
+                return Ok(());
+            }
+            book.items.insert(
+                target.into(),
+                Sandbox {
+                    id: target.into(),
+                    name: "Task workspace".into(),
+                    provider,
+                },
+            );
+        }
+        self.persist(&self.data)?;
+        std::fs::create_dir_all(self.workspace(target))?;
+        Ok(())
+    }
+    /// Destroy the disposable runtime while retaining its workspace binding.
+    /// Failure keeps the binding visible and prevents claiming successful cleanup.
+    pub async fn dispose_managed(&self, target: &str) -> Result<()> {
+        if !Self::is_managed(target) {
+            return Ok(());
+        }
+        let _lock = self.lifecycle.lock().await;
+        let marker = self
+            .root
+            .join("sandboxes")
+            .join(target)
+            .join("managed-runtime.json");
+        if !marker.exists() {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            *self.leases.lock().unwrap().get(target).unwrap_or(&0) == 0,
+            "Managed environment still in use"
+        );
+        anyhow::ensure!(
+            !self
+                .pending
+                .lock()
+                .unwrap()
+                .values()
+                .any(|p| p.target == target),
+            "Managed environment has unsettled operations"
+        );
+        self.revoke_desktops(target);
+        let state = self.helper(target, "stop").await?;
+        anyhow::ensure!(
+            state["phase"] == "stopped",
+            "Managed environment destruction unconfirmed"
+        );
+        std::fs::remove_file(marker)?;
+        self.changed.notify();
+        Ok(())
+    }
+    pub async fn reap_managed(&self) -> Result<()> {
+        let targets: Vec<_> = self
+            .book
+            .lock()
+            .unwrap()
+            .items
+            .keys()
+            .filter(|id| Self::is_managed(id))
+            .cloned()
+            .collect();
+        for target in targets {
+            if *self.leases.lock().unwrap().get(&target).unwrap_or(&0) == 0
+                && !self
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|p| p.target == target)
+            {
+                self.dispose_managed(&target).await?;
+            }
+        }
+        Ok(())
+    }
     pub fn data_dir(&self) -> &std::path::Path {
         &self.data
     }
@@ -242,7 +453,13 @@ impl Manager {
             .ok_or_else(|| anyhow!("Sandbox Provider unavailable"))
     }
     pub fn sandbox_count(&self) -> usize {
-        self.book.lock().unwrap().items.len()
+        self.book
+            .lock()
+            .unwrap()
+            .items
+            .keys()
+            .filter(|id| !Self::is_managed(id))
+            .count()
     }
     pub fn describe(&self, target: &str) -> Result<crate::ProviderDescriptor> {
         Ok(self.provider(target)?.descriptor())
@@ -453,6 +670,7 @@ impl Manager {
             .clone();
         let _lock = lock.lock().await;
         anyhow::ensure!(!cancelled(), "Sandbox preparation cancelled");
+        self.reserve_managed(target, cancelled).await?;
         let mut state = self.helper(target, "start").await?;
         for _ in 0..1200 {
             anyhow::ensure!(!cancelled(), "Sandbox preparation cancelled");
@@ -501,10 +719,20 @@ impl Manager {
         };
         let mut rows = vec![];
         for item in items {
-            let state = self
-                .helper(&item.id, "status")
-                .await
-                .unwrap_or_else(|_| json!({"phase":"unavailable"}));
+            let inactive_managed = Self::is_managed(&item.id)
+                && !self
+                    .root
+                    .join("sandboxes")
+                    .join(&item.id)
+                    .join("managed-runtime.json")
+                    .exists();
+            let state = if inactive_managed {
+                json!({"phase":"stopped"})
+            } else {
+                self.helper(&item.id, "status")
+                    .await
+                    .unwrap_or_else(|_| json!({"phase":"unavailable"}))
+            };
             let active = *self.leases.lock().unwrap().get(&item.id).unwrap_or(&0);
             let config = std::fs::read(
                 self.root
@@ -520,7 +748,7 @@ impl Manager {
                     .unwrap_or(Value::Null)
             });
             let descriptor = self.describe(&item.id).ok();
-            rows.push(json!({"config":config,"id":item.id,"name":item.name,"provider":item.provider,"os":descriptor.as_ref().map(|d|d.os.as_str()),"host_os":descriptor.as_ref().map(|d|d.host_os.as_str()),"engine":descriptor.as_ref().map(|d|d.engine.as_str()),"capabilities":descriptor.map(|d|d.capabilities),"desktop_capabilities":self.provider(&item.id).map(|p|p.desktop_capabilities()).ok(),"scope_cleanup_policy":self.provider(&item.id).map(|p|p.scope_cleanup_policy()).ok(),"active_leases":active,"unsettled_operations":self.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":display_state(&state)}));
+            rows.push(json!({"managed":Self::is_managed(&item.id),"config":config,"id":item.id,"name":item.name,"provider":item.provider,"os":descriptor.as_ref().map(|d|d.os.as_str()),"host_os":descriptor.as_ref().map(|d|d.host_os.as_str()),"engine":descriptor.as_ref().map(|d|d.engine.as_str()),"capabilities":descriptor.map(|d|d.capabilities),"desktop_capabilities":self.provider(&item.id).map(|p|p.desktop_capabilities()).ok(),"scope_cleanup_policy":self.provider(&item.id).map(|p|p.scope_cleanup_policy()).ok(),"active_leases":active,"unsettled_operations":self.pending.lock().unwrap().values().filter(|v| v.target == item.id).count(),"state":display_state(&state)}));
         }
         json!({"selected":selected,"items":rows})
     }
@@ -591,7 +819,10 @@ impl Manager {
                     !book.retired.contains(id),
                     "Deleted Sandbox IDs cannot be reused"
                 );
-                anyhow::ensure!(book.items.len() < 16, "Sandbox limit reached");
+                anyhow::ensure!(
+                    book.items.keys().filter(|id| !Self::is_managed(id)).count() < 16,
+                    "Sandbox limit reached"
+                );
                 if let Some(existing) = book.items.get(id) {
                     anyhow::ensure!(
                         existing.name == name && existing.provider == provider_id,

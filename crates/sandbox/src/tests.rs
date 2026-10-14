@@ -95,6 +95,7 @@ impl Provider for Fake {
                     self.running.store(true, Ordering::SeqCst);
                 }
                 "stop" => {
+                    anyhow::ensure!(!self.fail_cleanup.load(Ordering::SeqCst), "Cleanup failed");
                     self.running.store(false, Ordering::SeqCst);
                 }
                 "status" => {}
@@ -692,4 +693,68 @@ async fn cancelled_execution_preparation_never_starts_a_guest() {
         .unwrap();
     assert!(provider.running.load(Ordering::SeqCst));
     assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn managed_cleanup_retains_files_and_reservation_until_confirmed() {
+    let (dir, manager, provider) = fixture();
+    let target = Manager::managed_id("first-task");
+    manager.ensure_managed(&target).unwrap();
+    let file = manager.workspace(&target).join("result.txt");
+    std::fs::write(&file, "retained").unwrap();
+    let lease = manager.acquire(&target).await.unwrap();
+    manager
+        .ready_for_execution(&target, &|| false)
+        .await
+        .unwrap();
+    let reservation = dir
+        .path()
+        .join("sandboxes")
+        .join(&target)
+        .join("managed-runtime.json");
+    assert!(reservation.exists());
+    assert!(manager.dispose_managed(&target).await.is_err());
+    drop(lease);
+    provider.fail_cleanup.store(true, Ordering::SeqCst);
+    assert!(manager.dispose_managed(&target).await.is_err());
+    assert!(reservation.exists());
+    provider.fail_cleanup.store(false, Ordering::SeqCst);
+    manager.dispose_managed(&target).await.unwrap();
+    assert!(!reservation.exists());
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "retained");
+    assert!(!provider.running.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn managed_budget_wait_is_cancellable_and_workspaces_are_private() {
+    let (_dir, manager, _) = fixture();
+    let first = Manager::managed_id("a");
+    let second = Manager::managed_id("b");
+    manager.ensure_managed(&first).unwrap();
+    manager.ensure_managed(&second).unwrap();
+    assert_ne!(manager.workspace(&first), manager.workspace(&second));
+    manager
+        .configure_budget(&json!({"max_sandboxes":1,"cpus":4,"memory_gib":8,"disk_gib":32}))
+        .unwrap();
+    let lease = manager.acquire(&first).await.unwrap();
+    manager
+        .ready_for_execution(&first, &|| false)
+        .await
+        .unwrap();
+    let cancelled = AtomicBool::new(false);
+    let is_cancelled = || cancelled.load(Ordering::SeqCst);
+    let wait = manager.ready_for_execution(&second, &is_cancelled);
+    let stop = async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        cancelled.store(true, Ordering::SeqCst);
+    };
+    let (result, ()) = tokio::join!(wait, stop);
+    assert!(result.unwrap_err().to_string().contains("Cancelled"));
+    drop(lease);
+    manager.dispose_managed(&first).await.unwrap();
+    manager
+        .ready_for_execution(&second, &|| false)
+        .await
+        .unwrap();
+    manager.dispose_managed(&second).await.unwrap();
 }

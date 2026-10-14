@@ -47,7 +47,7 @@ pub async fn invoke(
             return Err(error(
                 StatusCode::BAD_REQUEST,
                 "invalid_tool_argument",
-                "Unknown task argument; specify execution_target for the destination",
+                "Unknown task argument; specify machine_id for the destination",
             ));
         }
     }
@@ -181,15 +181,11 @@ pub async fn invoke(
                 s,
                 h,
                 CreateTask {
-                    execution_target: serde_json::from_value(call.args["execution_target"].clone())
-                        .map_err(|e| {
-                            error(StatusCode::BAD_REQUEST, "execution_target", &e.to_string())
-                        })?,
+                    machine_id: call.args["machine_id"].as_str().unwrap_or("").into(),
                     skills: serde_json::from_value(
                         call.args.get("skills").cloned().unwrap_or(Value::Null),
                     )
                     .map_err(|e| error(StatusCode::BAD_REQUEST, "task_skills", &e.to_string()))?,
-                    sandbox_id: call.args["sandbox_id"].as_str().unwrap_or("").into(),
                     request_id,
                     text: field(&call.args, "text")?,
                     resource: call.args["resource"].as_str().unwrap_or("").into(),

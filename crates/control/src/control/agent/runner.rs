@@ -8,10 +8,45 @@ pub async fn execute(
     transcript: &mut super::transcript::Transcript,
     resuming: bool,
 ) -> Result<()> {
+    let mut run_service = s.clone();
+    if !s.is_worker
+        && s.execution_service
+            .permissions
+            .machine_policy(&s.runtime_id)
+            .execution_mode
+            == pot_agent::permissions::ExecutionMode::Sandbox
+    {
+        let target = s.execution_service.sandboxes.ensure_shared()?;
+        run_service.sandbox_id = Some(target.clone());
+        run_service.execution_target =
+            Some(pot_core::ExecutionTarget::sandbox(&s.runtime_id, &target));
+    } else if !s.is_worker {
+        run_service.sandbox_id = None;
+        run_service.execution_target = Some(pot_core::ExecutionTarget::host(&s.runtime_id));
+    }
+    let s = &run_service;
+    let run_lease = acquire_local_execution_target(s).await?;
+    let result = execute_run(s, request, transcript, resuming).await;
+    drop(run_lease);
+    // Clean this run's scopes and sessions; shared environment remains alive.
+    let cleanup = async {
+        execution_target::finish(s).await?;
+        execution_target::drain(s).await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    cleanup?;
+    result
+}
+async fn execute_run(
+    s: &Service,
+    request: &SendMessage,
+    transcript: &mut super::transcript::Transcript,
+    resuming: bool,
+) -> Result<()> {
     if s.is_worker {
         crate::permissions::authorize_task(s).await?;
     }
-    let _lease = acquire_local_execution_target(s).await?;
     if s.is_worker && !crate::remote_execution::is_remote(s) {
         crate::control_resources::refresh_plugins(s)?;
         let (_, _, cwd, _) = crate::execution_target::workspace_view(s)?;
@@ -138,9 +173,6 @@ pub async fn execute(
 }
 
 async fn acquire_local_execution_target(s: &Service) -> Result<Option<pot_sandbox::Lease>> {
-    if !s.is_worker {
-        return Ok(None);
-    }
     let reference = s
         .execution_target
         .as_ref()

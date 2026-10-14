@@ -2,13 +2,13 @@
 
 Execution target references distinguish Host execution from managed Sandbox instances;
 remote is a relationship to a Runtime. [Architecture](architecture.md) defines
-ownership, exact configuration and fixed Task targets.
+ownership, machine policy and execution records.
 
 ## Implemented contracts
 
 Sandbox Manager owns definitions, default selection, explicit Provider registration,
 lifecycle serialization, scoped execution, leases, receipts, cancellation and
-recovery. Runtime supplies owner approval and task bindings; Providers supply
+recovery. Control supplies policy and approval; Runtime supplies execution scopes. Providers supply
 platform configuration, workspace paths, lifecycle and authenticated guest transport.
 Resource creation registers installed Providers without starting an instance.
 
@@ -22,13 +22,13 @@ Provider descriptors report shell/files/desktop/shared-execution support. These
 are execution validation, not model tool-catalog selection. Control's configured
 tools stay visible; unsupported calls return explicit errors. No configuration,
 model, target or plugin replacement occurs. Worker calls are fixed to their
-assigned typed Execution target and cannot manage lifecycle or switch targets.
+assigned execution context and cannot manage lifecycle. Same-machine Host exceptions return through Control for authorization.
 
 Start completes only after authenticated execution readiness. Runtime may prepare
 the already bound Sandbox; it cannot allocate a different one as fallback.
 Stop/delete respect active scopes and uncertain outcomes. Deleted IDs are retired;
-workspace artifacts remain. Cooperative tasks can share a Sandbox but separate
-directories do not provide mutual isolation.
+workspace artifacts remain. Automatic Tasks use private disposable containers;
+operator-managed definitions are not selected or shared by Task creation.
 
 ## Desktop boundary
 

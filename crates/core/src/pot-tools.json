@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using eligible configured Profiles. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using eligible configured Profiles. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Temporary sandboxes are automatically destroyed after execution; files remain available.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -44,10 +44,6 @@
           "maxLength": 512,
           "description": "Concise creation-time reason for the chosen executor; do not claim certainty for ambiguous work."
         },
-        "sandbox_id": {
-          "type": "string",
-          "description": "Local Sandbox selection; use execution_target for a full Host or Sandbox destination. Cannot combine both. Omitted snapshots the Agent Runtime execution default."
-        },
         "skills": {
           "type": "array",
           "items": {
@@ -55,50 +51,9 @@
           },
           "description": "Global skill names to include in this task. Omitted or empty loads no global skills. Project skills are always discovered independently."
         },
-        "execution_target": {
-          "type": "object",
-          "properties": {
-            "runtime_id": {
-              "type": "string"
-            },
-            "target": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "host"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "sandbox"
-                    },
-                    "sandbox_id": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "sandbox_id"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            }
-          },
-          "required": [
-            "runtime_id",
-            "target"
-          ],
-          "additionalProperties": false
+        "machine_id": {
+          "type": "string",
+          "description": "Target machine ID. Omitted follows the current machine routing. Execution uses the machine policy at dispatch; no Sandbox selection is needed."
         }
       },
       "required": [
@@ -173,7 +128,7 @@
   },
   {
     "name": "guide_task",
-    "description": "Queue a follow-up instruction in an existing task. Applied after the current turn; does not interrupt it.",
+    "description": "Queue a follow-up instruction in an existing task. Applied after the current turn; does not interrupt it. Only active tasks accept guidance. For finished or failed tasks, create a new task.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -195,7 +150,7 @@
   },
   {
     "name": "send_message",
-    "description": "Send reference information from Main to a pot-agent task. Delivered at a safe model boundary if running, or retained for its next explicit guide_task continuation. Does not create a work turn, interrupt current work, resume stopped tasks or authorize new permissions. Sender identity is trusted Runtime metadata, not caller supplied.",
+    "description": "Send reference information from Main to a pot-agent task. Delivered at a safe model boundary if running, or retained as reference history if the task has ended. Does not create a work turn, interrupt current work, resume stopped tasks or authorize new permissions. Sender identity is trusted Runtime metadata, not caller supplied.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -252,7 +207,7 @@
   },
   {
     "name": "interrupt",
-    "description": "Interrupt current work while retaining task/session/files and pending guidance. Does not replay interrupted input or automatically resume. Running work retains capacity until cleanup is confirmed; guide_task explicitly resumes. Completed task results remain complete.",
+    "description": "Interrupt current work while retaining task/session/files and pending guidance. Does not replay interrupted input or automatically resume. Running work retains capacity until cleanup is confirmed; run again by creating a new task. Completed task results remain complete.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -446,54 +401,9 @@
               },
               "additionalProperties": false
             },
-            "sandbox_id": {
+            "machine_id": {
               "type": "string",
-              "description": "Creation snapshots the current execution default when omitted. Update retains the saved execution target when omitted."
-            },
-            "execution_target": {
-              "type": "object",
-              "properties": {
-                "runtime_id": {
-                  "type": "string"
-                },
-                "target": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "kind": {
-                          "const": "host"
-                        }
-                      },
-                      "required": [
-                        "kind"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "kind": {
-                          "const": "sandbox"
-                        },
-                        "sandbox_id": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "sandbox_id"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "runtime_id",
-                "target"
-              ],
-              "additionalProperties": false
+              "description": "Machine to run on. Each occurrence reads its current execution policy and creates a fresh Task. Omit on update to retain the machine."
             }
           },
           "required": [
@@ -518,77 +428,6 @@
       "type": "object",
       "properties": {},
       "required": [],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "manage_sandbox",
-    "description": "Main-only Sandbox lifecycle and selection. Workers cannot manage or switch execution targets. Busy execution targets cannot be stopped. Creating a definition does not boot a VM. Update requires name and config, and a stopped or failed Sandbox with no active operations. Resources apply at next start.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "type": "string",
-          "enum": [
-            "create",
-            "start",
-            "desktop",
-            "stop",
-            "delete",
-            "recover",
-            "select",
-            "update"
-          ]
-        },
-        "sandbox_id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "config": {
-          "type": "object",
-          "properties": {
-            "cpus": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 32
-            },
-            "memory_gib": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 128
-            },
-            "disk_gib": {
-              "type": "integer",
-              "minimum": 4,
-              "maximum": 512
-            }
-          },
-          "required": [
-            "cpus",
-            "memory_gib",
-            "disk_gib"
-          ],
-          "additionalProperties": false
-        },
-        "provider": {
-          "type": "string",
-          "enum": [
-            "macos.apple-containerization",
-            "linux.podman",
-            "macos.apple-virtualization"
-          ],
-          "description": "Engine for create only; defaults to Linux. macOS requires an owner-enrolled prepared VM."
-        },
-        "runtime_id": {
-          "type": "string",
-          "description": "Destination Runtime; omitted uses this Agent Runtime. Host is not a Sandbox management target."
-        }
-      },
-      "required": [
-        "action"
-      ],
       "additionalProperties": false
     }
   },

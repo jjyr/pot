@@ -15,13 +15,14 @@ user agreement; see the repository `AGENTS.md`.
 | Assistant messages | `list_assistants`, `send_assistant_message` | Main |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
-| Execution targets | `list_execution_targets`; Sandbox-only `manage_sandbox` | Main |
+| Execution targets | `list_execution_targets` | Main |
 
 `list_execution_targets` discovers authorized Host/Sandbox destinations without
 starting them. Execution tools use `execution_target` with `"host"`, `"sandbox:ID"`
 or a typed Runtime + Host/Sandbox reference. `create_task` and
-`manage_schedule.spec` use the typed `execution_target` value. These are addresses,
-not independently managed resources; Sandbox lifecycle remains in `manage_sandbox`.
+`manage_schedule.spec` use `machine_id`; machine policy resolves the execution mode at dispatch. These are addresses,
+not independently managed resources. Runtime owns automatic Sandbox lifecycle;
+`manage_sandbox` is absent from the model tool catalog.
 
 Profile filters can narrow visibility. Target defaults and approval rules are in
 [Agent permissions](permissions.md).
@@ -68,8 +69,6 @@ Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable compos
 Expanded schemas count toward context limits. Validation and qualification limits:
 [permission contract](permissions.md).
 
-Remote `manage_sandbox` requires an explicit Runtime and existing Sandbox ID with
-the assistant’s machine Sandbox capability. Main may start, stop, recover, update, or delete
-that target; create/select remain local, and desktop access uses separate authority.
-Management cannot acquire execution privileges. Lost operations are inspected by
+Operator management endpoints remain separate from model tools. They require
+Control membership and an existing resource. Lost operations are inspected by
 original identity and never resent; unresolved receipts block new effects.

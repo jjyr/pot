@@ -17,6 +17,15 @@ pub enum Operation {
     Permission {
         request: Value,
     },
+    PrepareHost {
+        name: String,
+        args: Value,
+    },
+    ExecuteHost {
+        call_id: String,
+        name: String,
+        args: Value,
+    },
     Compaction {
         event: Value,
     },

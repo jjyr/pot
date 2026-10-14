@@ -24,13 +24,6 @@ fn configured_schemas(
         tool["inputSchema"]["properties"]["execution_target"] =
             pot_core::execution_tools::selector_schema();
     }
-    if !worker {
-        for tool in &mut execution {
-            if tool["name"] != "write_stdin" {
-                tool["inputSchema"]["properties"]["sandbox_id"] = json!({"type":"string"});
-            }
-        }
-    }
     all.extend(execution);
     Ok(all
         .into_iter()
@@ -151,7 +144,7 @@ pub(crate) async fn dispatch(
             let name = call["params"]["name"].as_str().unwrap_or("");
             let settings = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?.map(|b| b.config.params.agent).unwrap_or_default();
             if !configured_schemas(turn.starts_with(pot_assistant::orchestration::RESULT_PREFIX),s.is_worker,&settings).map_err(internal)?.iter().any(|v|v["name"]==name) { return Err(error(StatusCode::FORBIDDEN,"tool_unavailable","Tool is unavailable for this role")); }
-            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || matches!(name,"list_execution_targets" | "manage_sandbox") {
+            if matches!(name,"exec_command"|"write_stdin"|"apply_patch") || settings.plugin_for_tool(name).map_err(internal)?.is_some() || name == "list_execution_targets" {
                 let name = name.to_owned(); let id = format!("mcp:{rpc_id}"); let args = call["params"].get("arguments").cloned().unwrap_or_else(||json!({}));
                 let operation = tokio::spawn(async move { sandbox::tool(&s,&name,&id,&args).await });
                 let result = operation.await.map_err(|e|internal(e.into()))?;
@@ -252,7 +245,7 @@ mod tests {
                     ["exec_command", "write_stdin", "apply_patch", "cua_repl"].into()
                 );
             } else {
-                assert!(names.contains("manage_sandbox"));
+                assert!(!names.contains("manage_sandbox"));
                 assert!(names.contains("list_execution_targets"));
                 assert!(!names.contains("list_environments"));
                 assert!(names.contains("create_task"));
@@ -270,11 +263,10 @@ mod tests {
                             .get("environment")
                             .is_none()
                     );
-                    assert_eq!(
+                    assert!(
                         schema["inputSchema"]["properties"]
                             .get("sandbox_id")
-                            .is_some(),
-                        !worker && name != "write_stdin"
+                            .is_none()
                     );
                 }
             }

@@ -22,6 +22,81 @@ impl Service {
     ) -> Result<Value> {
         self.validate_task_agent_binding(binding)?;
         match operation {
+            Operation::PrepareHost { name, mut args } => {
+                anyhow::ensure!(
+                    pot_agent::permissions::is_execution_tool(&name)
+                        || agent::thread(self)?
+                            .config
+                            .params
+                            .agent
+                            .plugin_for_tool(&name)?
+                            .is_some(),
+                    "Unsupported Host operation"
+                );
+                args["execution_target"] = json!(crate::remote_execution::key(
+                    &pot_core::ExecutionTarget::host(&binding.execution_target.runtime_id)
+                )?);
+                crate::permissions::prepare(self, &name, args).await
+            }
+            Operation::ExecuteHost {
+                call_id,
+                name,
+                mut args,
+            } => {
+                anyhow::ensure!(
+                    pot_agent::permissions::is_execution_tool(&name)
+                        || agent::thread(self)?
+                            .config
+                            .params
+                            .agent
+                            .plugin_for_tool(&name)?
+                            .is_some(),
+                    "Unsupported Host operation"
+                );
+                let host = crate::remote_execution::binding(
+                    self,
+                    pot_core::ExecutionTarget::host(&binding.execution_target.runtime_id),
+                )?;
+                let turn = self
+                    .conversation
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .turn
+                    .clone()
+                    .ok_or_else(|| anyhow!("No active turn"))?;
+                let request_id = self
+                    .conversation
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .store
+                    .message(&turn.user_message_id)?
+                    .and_then(|m| m.request_id)
+                    .ok_or_else(|| anyhow!("Missing turn identity"))?;
+                let decision = crate::permissions::request(
+                    self,
+                    binding.generation,
+                    &request_id,
+                    json!(pot_agent::permissions::Request {
+                        owner: binding.owner.clone(),
+                        execution_target: crate::remote_execution::key(&host.execution_target)?,
+                        generation: binding.generation,
+                        turn: request_id.clone(),
+                        call_id: call_id.clone(),
+                        tool: name.clone(),
+                        args: args.clone(),
+                    }),
+                )
+                .await?;
+                anyhow::ensure!(decision["approved"] == true, "Host operation denied");
+                args.as_object_mut()
+                    .ok_or_else(|| anyhow!("Invalid arguments"))?
+                    .remove("execution_target");
+                crate::remote_execution::port(self)?
+                    .execute(host, call_id, name, args)
+                    .await
+            }
             Operation::Resources { skills, plugins } => {
                 anyhow::ensure!(
                     skills == self.skill_selection.clone().unwrap_or_default(),
@@ -82,8 +157,14 @@ impl Service {
                     request["owner"] == binding.owner
                         && request["turn"] == binding.run_id
                         && request["generation"] == binding.generation
-                        && request["execution_target"]
-                            == crate::remote_execution::key(&binding.execution_target)?,
+                        && (request["execution_target"]
+                            == crate::remote_execution::key(&binding.execution_target)?
+                            || request["execution_target"]
+                                == crate::remote_execution::key(
+                                    &pot_core::ExecutionTarget::host(
+                                        &binding.execution_target.runtime_id
+                                    )
+                                )?),
                     "Remote approval identity mismatch"
                 );
                 let original = request.clone();

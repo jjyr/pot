@@ -12,6 +12,13 @@ pub struct RemoteBinding {
     pub execution_target: pot_core::ExecutionTarget,
 }
 pub trait RemoteExecution: Send + Sync {
+    fn configure_sandbox_budget(
+        &self,
+        _machine: String,
+        _budget: Value,
+    ) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { bail!("Remote budget configuration unavailable") })
+    }
     /// Non-secret enrollment fingerprint. Re-enrollment must invalidate model grants.
     fn machine_epoch(&self, _machine: &str) -> Result<String> {
         bail!("Machine enrollment identity unavailable")

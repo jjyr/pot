@@ -343,8 +343,8 @@ pub(crate) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             "update" => {
                 let mut spec: ScheduleSpec =
                     serde_json::from_value(req["spec"].clone()).map_err(invalid)?;
-                if spec.execution_target.is_none() && spec.sandbox_id.is_empty() {
-                    spec.execution_target = plan.info.spec.execution_target.clone();
+                if spec.machine_id.is_empty() {
+                    spec.machine_id = plan.info.spec.machine_id.clone();
                 } else {
                     bind(root, &mut spec)?;
                 }
@@ -364,8 +364,7 @@ pub(crate) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                 if spec.enabled && due.is_none() {
                     return Err(invalid("一次性计划时间已过"));
                 }
-                if spec.goal != plan.info.spec.goal
-                    || spec.execution_target != plan.info.spec.execution_target
+                if spec.goal != plan.info.spec.goal || spec.machine_id != plan.info.spec.machine_id
                 {
                     plan.generation += 1;
                     plan.info.baseline = None;
@@ -442,7 +441,7 @@ fn launch(
         root,
         hub,
         CreateTask {
-            execution_target: plan.info.spec.execution_target.clone(),
+            machine_id: plan.info.spec.machine_id.clone(),
             request_id: format!("schedule:{}", id()),
             text: brief,
             resource: String::new(),
@@ -752,32 +751,22 @@ pub(crate) fn contains_task(book: &Book, task: &str) -> bool {
     })
 }
 fn bind(root: &Service, spec: &mut ScheduleSpec) -> ApiResult<()> {
-    let target =
-        tasks::resolve_execution_target(root, spec.execution_target.clone(), &spec.sandbox_id)?;
-    spec.sandbox_id.clear();
-    spec.execution_target = Some(target);
+    if spec.machine_id.is_empty() {
+        spec.machine_id = root.runtime_id.clone();
+    }
+    pot_core::ExecutionTarget::host(&spec.machine_id)
+        .validate()
+        .map_err(invalid)?;
     Ok(())
 }
-pub(crate) fn validate_bindings(root: &Service, book: &Book) -> Result<()> {
+pub(crate) fn validate_bindings(_root: &Service, book: &Book) -> Result<()> {
     for plan in book.plans.values() {
-        let target = plan
-            .info
-            .spec
-            .execution_target
-            .as_ref()
-            .ok_or_else(|| anyhow!("Persisted schedule execution target missing"))?;
-        target.validate()?;
-        // Offline remote targets remain pinned and can be restored without discovery.
-        if target.is_local_to(&root.runtime_id)
-            && let pot_core::ExecutionTargetKind::Sandbox { sandbox_id } = &target.target
-        {
-            root.execution_service.sandboxes.assignment(sandbox_id)?;
-        }
+        pot_core::ExecutionTarget::host(&plan.info.spec.machine_id).validate()?;
     }
     Ok(())
 }
-pub(crate) fn uses_sandbox(book: &Book, runtime_id: &str, sandbox_id: &str) -> bool {
-    book.plans.values().any(|plan| plan.info.spec.execution_target.as_ref().is_some_and(|e| e.is_local_to(runtime_id) && matches!(&e.target, pot_core::ExecutionTargetKind::Sandbox { sandbox_id: id } if id == sandbox_id)))
+pub(crate) fn uses_sandbox(_book: &Book, _runtime_id: &str, _sandbox_id: &str) -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -869,7 +858,7 @@ mod tests {
         s.set_remote_execution(Arc::new(Remote));
         let target = pot_core::ExecutionTarget::sandbox("remote-machine", "default");
         let mut input = spec();
-        input.execution_target = Some(target.clone());
+        input.machine_id = target.runtime_id.clone();
         let sid = create(&s, input, 0);
         assert!(!uses_sandbox(
             &s.tasks.hub.lock().unwrap().schedules,
@@ -890,8 +879,8 @@ mod tests {
             reopened.tasks.hub.lock().unwrap().schedules.plans[&sid]
                 .info
                 .spec
-                .execution_target,
-            Some(target.clone())
+                .machine_id,
+            target.runtime_id
         );
         reopened.set_remote_execution(Arc::new(Remote));
         let req = json!({"request_id":"run-remote","action":"run","schedule_id":sid});
@@ -899,10 +888,13 @@ mod tests {
         assert_eq!(first, apply(&reopened, req, 3).unwrap());
         let page = tasks::page(&reopened, &TaskQuery::default()).unwrap();
         assert_eq!(page.items.len(), 1);
-        assert_eq!(page.items[0].execution_target, Some(target));
+        assert_eq!(
+            page.items[0].execution_target.as_ref().unwrap().runtime_id,
+            target.runtime_id
+        );
+        assert!(pot_sandbox::Manager::is_managed(&page.items[0].sandbox_id));
         let mut conflict = spec();
-        conflict.sandbox_id = "default".into();
-        conflict.execution_target = Some(pot_core::ExecutionTarget::host("remote-machine"));
+        conflict.machine_id = "invalid/machine".into();
         assert!(
             apply(
                 &reopened,
@@ -1189,8 +1181,8 @@ mod tests {
             s.tasks.hub.lock().unwrap().schedules.plans[&sid]
                 .info
                 .spec
-                .execution_target,
-            Some(pot_core::ExecutionTarget::sandbox(&s.runtime_id, "default"))
+                .machine_id,
+            s.runtime_id
         );
         let mut reopened = s.clone();
         reopened.tasks.hub = Arc::new(Mutex::new(tasks::Hub::default()));
@@ -1201,10 +1193,12 @@ mod tests {
             2,
         )
         .unwrap();
-        assert_eq!(
-            tasks::page(&reopened, &TaskQuery::default()).unwrap().items[0].execution_target,
-            Some(pot_core::ExecutionTarget::sandbox(&s.runtime_id, "default"))
-        );
+        let task = tasks::page(&reopened, &TaskQuery::default())
+            .unwrap()
+            .items
+            .remove(0);
+        assert_eq!(task.execution_target.unwrap().runtime_id, s.runtime_id);
+        assert!(pot_sandbox::Manager::is_managed(&task.sandbox_id));
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
     }
 }

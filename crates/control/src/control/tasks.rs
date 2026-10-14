@@ -59,7 +59,7 @@ fn next_order(hub: &Hub) -> u64 {
 pub(crate) fn serialized(hub: &Hub) -> Result<String> {
     let records: Vec<_> = hub.lanes.values().map(|l| &l.record).collect();
     Ok(serde_json::to_string(
-        &json!({"tasks":records,"schedules":hub.schedules}),
+        &json!({"version":3,"tasks":records,"schedules":hub.schedules}),
     )?)
 }
 pub(crate) fn persist(root: &Service, hub: &Hub) -> Result<()> {
@@ -103,6 +103,11 @@ fn child(
     } else {
         match &execution_target.target {
             pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
+                if pot_sandbox::Manager::is_managed(sandbox_id) {
+                    root.execution_service
+                        .sandboxes
+                        .ensure_managed(sandbox_id)?;
+                }
                 root.execution_service.sandboxes.assignment(sandbox_id)?;
                 (
                     Some(sandbox_id.clone()),
@@ -185,6 +190,10 @@ pub(crate) fn restore(root: &Service) -> Result<()> {
     let (records, book): (Vec<Record>, schedules::Book) = match current {
         Some(value) => {
             let value: Value = serde_json::from_str(&value)?;
+            anyhow::ensure!(
+                value["version"] == 3,
+                "Unsupported task persistence schema; machine-policy Tasks require version 3"
+            );
             (
                 serde_json::from_value(value["tasks"].clone())?,
                 serde_json::from_value(value["schedules"].clone())?,
@@ -216,9 +225,9 @@ pub(crate) fn restore(root: &Service) -> Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow!("Task assignment missing"))?;
         assignment.validate_binding(&root.runtime_id, &record.info.id, &execution_target)?;
-        if let Some(requested) = &record.create_request.execution_target {
+        if !record.create_request.machine_id.is_empty() {
             anyhow::ensure!(
-                requested == &execution_target && record.create_request.sandbox_id.is_empty(),
+                record.create_request.machine_id == execution_target.runtime_id,
                 "Task request Execution target mismatch"
             );
         }
@@ -576,18 +585,9 @@ fn enqueue_from(
             .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
-    if req.execution_target.is_some() && !req.sandbox_id.is_empty() {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            "execution_target_conflict",
-            "Use execution_target or sandbox_id",
-        ));
-    }
     let refs = task_references(root, &req, source)?;
-    let explicit = req.execution_target.clone().or_else(|| {
-        (!req.sandbox_id.is_empty())
-            .then(|| pot_core::ExecutionTarget::sandbox(&root.runtime_id, &req.sandbox_id))
-    });
+    let explicit =
+        (!req.machine_id.is_empty()).then(|| pot_core::ExecutionTarget::host(&req.machine_id));
     let constrained = refs.machine.is_some() || !refs.tags.is_empty();
     let target = if explicit.is_none() || constrained {
         let machines = crate::remote_execution::port(root)
@@ -621,22 +621,24 @@ fn enqueue_from(
                 ));
             }
             explicit.clone()
-        } else if runtime == root.runtime_id {
-            None
         } else {
-            Some(pot_core::ExecutionTarget::host(runtime))
+            Some(pot_core::ExecutionTarget::sandbox(runtime, "auto"))
         }
     } else {
         explicit
     };
-    let execution_target = resolve_execution_target(root, target, "")?;
+    let task_id = id();
+    let machine = target
+        .as_ref()
+        .map(|t| t.runtime_id.as_str())
+        .unwrap_or(&root.runtime_id);
+    let execution_target = machine_execution_target(root, machine, &task_id)?;
     let message_skills = (!refs.skills.is_empty()).then_some(refs.skills);
     let selected_skills = message_skills.clone().or_else(|| req.skills.clone());
     let sandbox_id = match &execution_target.target {
         pot_core::ExecutionTargetKind::Host {} => String::new(),
         pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => sandbox_id.clone(),
     };
-    let task_id = id();
     let mut first = job(req.request_id.clone(), req.text.clone(), next_order(hub));
     if matches!(source, agent::routing::Source::Tool)
         && let Ok(work) = crate::permissions::work_scope(root)
@@ -733,6 +735,16 @@ pub async fn input(
             message_id: old.message_id.clone(),
             duplicate: true,
         }));
+    }
+    if matches!(
+        lane.record.info.phase,
+        TaskPhase::Complete | TaskPhase::Failed | TaskPhase::Cancelled | TaskPhase::Interrupted
+    ) {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "task_finished",
+            "This task has ended. Create a new task to run again with the machine's current execution policy.",
+        ));
     }
     if lane.service.conversation.inner.lock().unwrap().agent.phase == AgentPhase::Failed {
         return Err(error(
@@ -1164,7 +1176,7 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
                 // Let the normal execution path report a corrupt thread visibly.
                 && agent::thread(&l.service)
                     .map(|b| policy.admits(&b.config, &active_specs)).unwrap_or(true)
-                && !(l.record.info.resource == "shared" && capacity.active.values().any(|(_, target)| target.as_ref() == l.record.info.execution_target.as_ref()))
+                && !(l.record.info.resource == "shared" && capacity.active.values().any(|(_, target)| target.as_ref().map(|t| &t.runtime_id) == l.record.info.execution_target.as_ref().map(|t| &t.runtime_id)))
         })
         .min_by_key(|(_, l)| l.record.queue.front().unwrap().order)
         .map(|(id, _)| id.clone());
@@ -1173,12 +1185,48 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
     };
     let lane = hub.lanes.get_mut(&task_id).unwrap();
     let before = lane.record.clone();
+    let before_service = lane.service.clone();
+    let machine = lane
+        .record
+        .info
+        .execution_target
+        .as_ref()
+        .ok_or_else(|| anyhow!("Task machine missing"))?
+        .runtime_id
+        .clone();
+    let target = machine_execution_target(root, &machine, &task_id)
+        .map_err(|e| anyhow!("Cannot prepare task execution: {e:?}"))?;
+    lane.record.info.execution_target = Some(target.clone());
+    lane.record.info.sandbox_id = match &target.target {
+        pot_core::ExecutionTargetKind::Host {} => String::new(),
+        pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => sandbox_id.clone(),
+    };
+    lane.record.assignment = Some(pot_core::Assignment::on_execution_target(
+        &root.runtime_id,
+        &task_id,
+        target.clone(),
+    ));
+    lane.service.execution_target = Some(target);
+    lane.service.sandbox_id =
+        (!lane.record.info.sandbox_id.is_empty()).then(|| lane.record.info.sandbox_id.clone());
+    lane.service.workspace = match &lane.service.sandbox_id {
+        Some(id) if machine == root.runtime_id => root
+            .execution_service
+            .sandboxes
+            .workspace(id)
+            .join("tasks")
+            .join(&task_id),
+        _ => lane.service.data.join("agent-workspace"),
+    };
+    std::fs::create_dir_all(&lane.service.workspace)?;
     let job = lane.record.queue.pop_front().unwrap();
     lane.record.active = Some(job.clone());
     lane.record.info.updated_at_ms = now();
     lane.record.info.phase = TaskPhase::Running;
     if let Err(e) = persist(root, &hub) {
-        hub.lanes.get_mut(&task_id).unwrap().record = before;
+        let lane = hub.lanes.get_mut(&task_id).unwrap();
+        lane.record = before;
+        lane.service = before_service;
         return Err(e);
     }
     let lane = hub.lanes.get_mut(&task_id).unwrap();
@@ -1210,6 +1258,27 @@ pub(crate) fn claim(root: &Service) -> Result<Option<(String, Service, SendMessa
             text: job.text,
         },
     )))
+}
+fn machine_execution_target(
+    root: &Service,
+    machine: &str,
+    task: &str,
+) -> ApiResult<pot_core::ExecutionTarget> {
+    let policy = root.execution_service.permissions.machine_policy(machine);
+    let target = match policy.execution_mode {
+        pot_agent::permissions::ExecutionMode::Host => pot_core::ExecutionTarget::host(machine),
+        pot_agent::permissions::ExecutionMode::Sandbox => {
+            let id = pot_sandbox::Manager::managed_id(task);
+            if machine == root.runtime_id {
+                root.execution_service
+                    .sandboxes
+                    .ensure_managed(&id)
+                    .map_err(internal)?;
+            }
+            pot_core::ExecutionTarget::sandbox(machine, &id)
+        }
+    };
+    resolve_execution_target(root, Some(target), "")
 }
 pub(crate) fn resolve_execution_target(
     root: &Service,
@@ -1765,11 +1834,71 @@ fn task_references(
         .map_err(|e| error(StatusCode::BAD_REQUEST, "message_references", e))
 }
 
+/// Task subscriptions use the same public conversation identity as task snapshots.
+pub async fn events(
+    State(root): State<Service>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    root.authorized(&headers)?;
+    use futures::StreamExt;
+    let mut changes = root.changes().subscribe();
+    let mut versions = changes.next().await.unwrap_or_default();
+    let (mut rx, initial, service) = event_snapshot(&root, &task_id)?;
+    let stream = async_stream::stream! {
+        yield Ok::<_,Infallible>(SseEvent::default().event("snapshot").json_data(initial).unwrap());
+        loop { tokio::select! {
+            event = rx.recv() => match event {
+                Ok(mut event) => {
+                    if let EventKind::Message { message } = &mut event.kind { message.conversation_id = task_id.clone(); }
+                    yield Ok(SseEvent::default().json_data(event).unwrap());
+                },
+                Err(_) => break,
+            },
+            next = changes.next() => {
+                let Some(next) = next else { break };
+                let topic = format!("tasks/{}", root.assistant_id);
+                if next.get(&topic) != versions.get(&topic) {
+                    match event_snapshot(&root, &task_id) {
+                        Ok((receiver, current, _)) => { rx = receiver; yield Ok(SseEvent::default().event("snapshot").json_data(current).unwrap()); },
+                        Err(_) => break,
+                    }
+                }
+                versions = next;
+            },
+            _ = service.stop_requested() => break,
+        }}
+    };
+    Ok(Sse::new(stream)
+        .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(5))))
+}
+
+fn event_snapshot(
+    root: &Service,
+    task_id: &str,
+) -> ApiResult<(broadcast::Receiver<Event>, Snapshot, Service)> {
+    let hub = root.tasks.hub.lock().unwrap();
+    let lane = hub.lanes.get(task_id).ok_or_else(missing)?;
+    let inner = lane.service.conversation.inner.lock().unwrap();
+    let receiver = lane.service.conversation.events.subscribe();
+    let mut snapshot = lane.service.snapshot_locked(&inner).map_err(internal)?;
+    for job in &lane.record.queue {
+        if !snapshot.messages.iter().any(|m| m.id == job.message_id) {
+            snapshot.messages.push(user(job));
+        }
+    }
+    snapshot.conversation_id = task_id.to_owned();
+    for message in &mut snapshot.messages {
+        message.conversation_id = task_id.to_owned();
+    }
+    Ok((receiver, snapshot, lane.service.clone()))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     #[tokio::test]
-    async fn derived_tasks_share_work_scope_and_finished_tasks_resume_in_new_work() {
+    async fn rerun_creates_new_task_and_reads_current_machine_policy() {
         let s = fixture();
         let mid = id();
         s.save(Message {
@@ -1805,21 +1934,57 @@ pub(crate) mod tests {
         s.turn(None);
         assert_eq!(crate::permissions::work_scope(&worker).unwrap(), parent);
         finish(&s, &created.id, Err(anyhow!("finished"))).unwrap();
-        let _ = input(
-            State(s.clone()),
-            headers(),
-            Path(created.id.clone()),
-            Json(TaskInput {
-                request_id: id(),
-                text: "new work".into(),
-            }),
-        )
-        .await
-        .unwrap();
+        assert_finished(&s, &created.id).await;
+        s.execution_service.permissions.set_machine_policy(
+            &s.runtime_id,
+            pot_agent::permissions::ExecutionMode::Host,
+            pot_agent::permissions::DefaultDecision::Allow,
+        );
+        let rerun = add(&s, "new work", "").await;
+        assert_ne!(rerun.id, created.id);
         let (_, worker, _) = claim(&s).unwrap().unwrap();
         assert_ne!(crate::permissions::work_scope(&worker).unwrap(), parent);
-        finish(&s, &created.id, Err(anyhow!("done"))).unwrap();
+        assert!(matches!(
+            worker.execution_target.as_ref().unwrap().target,
+            pot_core::ExecutionTargetKind::Host {}
+        ));
+        assert!(pot_sandbox::Manager::is_managed(&created.sandbox_id));
+        finish(&s, &rerun.id, Err(anyhow!("done"))).unwrap();
         std::fs::remove_dir_all(s.data.parent().unwrap()).unwrap();
+    }
+    #[tokio::test]
+    async fn queued_task_reads_policy_at_dispatch_and_active_context_stays_fixed() {
+        let root = fixture();
+        let first = add(&root, "queued before policy change", "").await;
+        assert!(pot_sandbox::Manager::is_managed(&first.sandbox_id));
+        root.execution_service.permissions.set_machine_policy(
+            &root.runtime_id,
+            pot_agent::permissions::ExecutionMode::Host,
+            pot_agent::permissions::DefaultDecision::Allow,
+        );
+        let (_, worker, _) = claim(&root).unwrap().unwrap();
+        let host = pot_core::ExecutionTarget::host(&root.runtime_id);
+        assert_eq!(worker.execution_target, Some(host.clone()));
+        root.execution_service.permissions.set_machine_policy(
+            &root.runtime_id,
+            pot_agent::permissions::ExecutionMode::Sandbox,
+            pot_agent::permissions::DefaultDecision::Ask,
+        );
+        assert_eq!(
+            owner(&root, &first.id).unwrap().execution_target,
+            Some(host)
+        );
+        let second = add(&root, "independent execution", "").await;
+        assert_ne!(first.sandbox_id, second.sandbox_id);
+        let (_, second_worker, _) = claim(&root).unwrap().unwrap();
+        assert!(
+            second_worker
+                .sandbox_id
+                .as_ref()
+                .is_some_and(|id| pot_sandbox::Manager::is_managed(id))
+        );
+        finish(&root, &first.id, Err(anyhow!("done"))).unwrap();
+        finish(&root, &second.id, Err(anyhow!("done"))).unwrap();
     }
     #[tokio::test]
     async fn compaction_events_are_authorized_and_confined_to_the_active_lane() {
@@ -1915,7 +2080,6 @@ pub(crate) mod tests {
             State(s.clone()),
             headers(),
             Json(CreateTask {
-                sandbox_id: String::new(),
                 request_id: "full-title".into(),
                 text: format!("{title}\nAdditional instructions"),
                 resource: "".into(),
@@ -2481,7 +2645,7 @@ pub(crate) mod tests {
         assert!(!prompt.contains("History"));
     }
     #[tokio::test]
-    async fn archive_reopens_on_guidance_and_context_omits_history() {
+    async fn archive_rejects_guidance_and_context_omits_history() {
         let s = fixture();
         let completed = add(&s, "ARCHIVED_TITLE", "").await;
         let a = claim(&s).unwrap().unwrap();
@@ -2521,10 +2685,8 @@ pub(crate) mod tests {
                 .id,
             failed.id
         );
-        guide(&s, &completed.id, "reopen", "Add a comparison").await;
-        let open = page(&s, &TaskQuery::default()).unwrap();
-        assert_eq!(open.items[0].id, completed.id);
-        assert_eq!(open.items[0].phase, TaskPhase::Queued);
+        assert_finished(&s, &completed.id).await;
+        assert!(page(&s, &TaskQuery::default()).unwrap().items.is_empty());
         assert_eq!(
             page(
                 &s,
@@ -2535,7 +2697,7 @@ pub(crate) mod tests {
             )
             .unwrap()
             .total,
-            1
+            2
         );
         main_turn(&s, "filtered-tools");
         let output = tool(
@@ -2569,9 +2731,9 @@ pub(crate) mod tests {
             )
             .unwrap()
             .total,
-            1
+            2
         );
-        assert_eq!(page(&reopened, &TaskQuery::default()).unwrap().total, 1);
+        assert_eq!(page(&reopened, &TaskQuery::default()).unwrap().total, 0);
     }
 
     #[tokio::test]
@@ -2727,7 +2889,6 @@ pub(crate) mod tests {
         let s = fixture();
         routing_profiles(&s);
         let request = CreateTask {
-            sandbox_id: String::new(),
             request_id: "routed".into(),
             text: "test".into(),
             profile: Some("alternate".into()),
@@ -2836,7 +2997,6 @@ pub(crate) mod tests {
                     State(s.clone()),
                     headers(),
                     Json(CreateTask {
-                        sandbox_id: String::new(),
                         request_id: id(),
                         requirements,
                         ..request.clone()
@@ -2851,7 +3011,6 @@ pub(crate) mod tests {
                 State(s.clone()),
                 headers(),
                 Json(CreateTask {
-                    sandbox_id: String::new(),
                     request_id: id(),
                     profile: Some("other".into()),
                     requirements: TaskRequirements {
@@ -2891,7 +3050,6 @@ pub(crate) mod tests {
                     State(s.clone()),
                     headers(),
                     Json(CreateTask {
-                        sandbox_id: String::new(),
                         request_id: id(),
                         text: "job".into(),
                         profile: Some(profile.into()),
@@ -3230,7 +3388,7 @@ pub(crate) mod tests {
             Json(CreateTask {
                 text: "original input".into(),
                 request_id: "original-request".into(),
-                execution_target: Some(pot_core::ExecutionTarget::host(&root.runtime_id)),
+                machine_id: root.runtime_id.clone(),
                 ..Default::default()
             }),
         )
@@ -3243,7 +3401,8 @@ pub(crate) mod tests {
             let mut hub = root.tasks.hub.lock().unwrap();
             let lane = hub.lanes.get_mut(&task.id).unwrap();
             lane.record.info.execution_target = Some(destination.clone());
-            lane.record.create_request.execution_target = Some(destination.clone());
+            lane.record.create_request.machine_id = destination.runtime_id.clone();
+            lane.record.info.sandbox_id.clear();
             lane.record.assignment = Some(pot_core::Assignment::on_execution_target(
                 &root.runtime_id,
                 &task.id,
@@ -3270,9 +3429,14 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn host_task_binding_restores_and_conflicts_fail_before_creation() {
         let root = fixture();
+        root.execution_service.permissions.set_machine_policy(
+            &root.runtime_id,
+            pot_agent::permissions::ExecutionMode::Host,
+            pot_agent::permissions::DefaultDecision::Allow,
+        );
         let execution_target = pot_core::ExecutionTarget::host(&root.runtime_id);
         let request = CreateTask {
-            execution_target: Some(execution_target.clone()),
+            machine_id: execution_target.runtime_id.clone(),
             request_id: id(),
             text: "Host task".into(),
             ..Default::default()
@@ -3306,7 +3470,7 @@ pub(crate) mod tests {
         );
         let mut conflict = request.clone();
         conflict.request_id = id();
-        conflict.sandbox_id = "default".into();
+        conflict.machine_id = "invalid/machine".into();
         assert!(
             create(State(root.clone()), headers(), Json(conflict))
                 .await
@@ -3314,7 +3478,7 @@ pub(crate) mod tests {
         );
         let mut remote = request;
         remote.request_id = id();
-        remote.execution_target = Some(pot_core::ExecutionTarget::host("remote"));
+        remote.machine_id = "remote".into();
         assert!(
             create(State(root.clone()), headers(), Json(remote))
                 .await
@@ -3330,7 +3494,7 @@ pub(crate) mod tests {
             State(root.clone()),
             headers(),
             Json(CreateTask {
-                execution_target: Some(pot_core::ExecutionTarget::host(&root.runtime_id)),
+                machine_id: root.runtime_id.clone(),
                 request_id: id(),
                 text: "Host shared work".into(),
                 resource: "shared".into(),
@@ -3341,6 +3505,8 @@ pub(crate) mod tests {
         .unwrap()
         .0;
         assert_eq!(claim(&root).unwrap().unwrap().0, sandbox.id);
+        assert!(claim(&root).unwrap().is_none());
+        finish(&root, &sandbox.id, Err(anyhow!("done"))).unwrap();
         assert_eq!(claim(&root).unwrap().unwrap().0, host.id);
         assert!(claim(&root).unwrap().is_none());
     }
@@ -3349,7 +3515,6 @@ pub(crate) mod tests {
             State(s.clone()),
             headers(),
             Json(CreateTask {
-                sandbox_id: String::new(),
                 request_id: text.into(),
                 text: text.into(),
                 resource: resource.into(),
@@ -3397,6 +3562,21 @@ pub(crate) mod tests {
                 .iter()
                 .any(|m| m.text == "new guidance" && m.conversation_id == task.id)
         );
+    }
+    async fn assert_finished(s: &Service, task: &str) {
+        let error = input(
+            State(s.clone()),
+            headers(),
+            Path(task.into()),
+            Json(TaskInput {
+                request_id: id(),
+                text: "resume".into(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.0, StatusCode::CONFLICT);
+        assert_eq!(error.1.0.code, "task_finished");
     }
     async fn guide(s: &Service, task: &str, key: &str, text: &str) -> SendMessageAccepted {
         input(
@@ -3636,10 +3816,8 @@ pub(crate) mod tests {
         assert_eq!(id, b.id);
         assert_eq!(req.text, "not started");
         assert!(claim(&next).unwrap().is_none());
-        guide(&next, &a.id, "resume", "continue after checking files").await;
-        let (id, _, req) = claim(&next).unwrap().unwrap();
-        assert_eq!(id, a.id);
-        assert_eq!(req.text, "later");
+        assert_finished(&next, &a.id).await;
+        assert!(claim(&next).unwrap().is_none());
     }
     #[tokio::test]
     async fn cooperative_shared_resource_is_serialized() {
@@ -3738,7 +3916,6 @@ pub(crate) mod tests {
                 State(s),
                 HeaderMap::new(),
                 Json(CreateTask {
-                    sandbox_id: String::new(),
                     request_id: "x".into(),
                     text: "x".into(),
                     resource: "".into(),
@@ -3840,11 +4017,7 @@ pub(crate) mod tests {
         assert!(claim(&s).unwrap().is_none());
         restore(&s).unwrap();
         assert!(claim(&s).unwrap().is_none());
-        guide(&s, &task.id, "resume", "continue safely").await;
-        let (id, _, request) = claim(&s).unwrap().unwrap();
-        assert_eq!(id, task.id);
-        assert_eq!(request.text, "pending guidance");
-        assert_ne!(request.text, "original work");
+        assert_finished(&s, &task.id).await;
     }
 
     #[tokio::test]
@@ -3906,8 +4079,7 @@ pub(crate) mod tests {
                 task_phase(&s.tasks.hub.lock().unwrap(), &task.id),
                 Some(TaskPhase::Cancelled)
             );
-            guide(&s, &task.id, "restart", "new work").await;
-            assert_eq!(claim(&s).unwrap().unwrap().2.text, "new work");
+            assert_finished(&s, &task.id).await;
         }
     }
 
@@ -4003,8 +4175,7 @@ pub(crate) mod tests {
             .unwrap();
         restore(&s).unwrap();
         assert!(claim(&s).unwrap().is_none());
-        guide(&s, &task.id, "resume", "continue").await;
-        assert_eq!(claim(&s).unwrap().unwrap().2.text, "fresh guidance");
+        assert_finished(&s, &task.id).await;
     }
 
     #[tokio::test]
@@ -4055,8 +4226,7 @@ pub(crate) mod tests {
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.counts.archived, 0);
         assert!(claim(&s).unwrap().is_none());
-        guide(&s, &task.id, "resume", "continue").await;
-        assert_eq!(claim(&s).unwrap().unwrap().2.text, "not started");
+        assert_finished(&s, &task.id).await;
     }
 
     #[tokio::test]
@@ -4113,15 +4283,11 @@ pub(crate) mod tests {
         assert_eq!(task_phase(&s.tasks.hub.lock().unwrap(), &task.id), saved);
         assert!(claim(&s).unwrap().is_none());
         restore(&s).unwrap();
-        guide(&s, &task.id, "resume", "review new reference").await;
-        let (_, worker, _) = claim(&s).unwrap().unwrap();
-        let thread = agent::thread(&worker).unwrap();
-        assert_eq!(
-            crate::turn_control::pending(&worker, thread.generation, false)
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_finished(&s, &task.id).await;
+        let worker = owner(&s, &task.id).unwrap();
+        assert!(worker.snapshot().unwrap().turn.is_none());
+        assert!(claim(&s).unwrap().is_none());
+        assert_eq!(task_phase(&s.tasks.hub.lock().unwrap(), &task.id), saved);
     }
 
     #[tokio::test]
@@ -4190,64 +4356,4 @@ pub(crate) mod tests {
         let (reply, ()) = tokio::join!(wait, stop);
         assert_eq!(reply.unwrap_err().0, StatusCode::CONFLICT);
     }
-}
-
-/// Task subscriptions use the same public conversation identity as task snapshots.
-pub async fn events(
-    State(root): State<Service>,
-    headers: HeaderMap,
-    Path(task_id): Path<String>,
-) -> ApiResult<impl IntoResponse> {
-    root.authorized(&headers)?;
-    use futures::StreamExt;
-    let mut changes = root.changes().subscribe();
-    let mut versions = changes.next().await.unwrap_or_default();
-    let (mut rx, initial, service) = event_snapshot(&root, &task_id)?;
-    let stream = async_stream::stream! {
-        yield Ok::<_,Infallible>(SseEvent::default().event("snapshot").json_data(initial).unwrap());
-        loop { tokio::select! {
-            event = rx.recv() => match event {
-                Ok(mut event) => {
-                    if let EventKind::Message { message } = &mut event.kind { message.conversation_id = task_id.clone(); }
-                    yield Ok(SseEvent::default().json_data(event).unwrap());
-                },
-                Err(_) => break,
-            },
-            next = changes.next() => {
-                let Some(next) = next else { break };
-                let topic = format!("tasks/{}", root.assistant_id);
-                if next.get(&topic) != versions.get(&topic) {
-                    match event_snapshot(&root, &task_id) {
-                        Ok((receiver, current, _)) => { rx = receiver; yield Ok(SseEvent::default().event("snapshot").json_data(current).unwrap()); },
-                        Err(_) => break,
-                    }
-                }
-                versions = next;
-            },
-            _ = service.stop_requested() => break,
-        }}
-    };
-    Ok(Sse::new(stream)
-        .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(5))))
-}
-
-fn event_snapshot(
-    root: &Service,
-    task_id: &str,
-) -> ApiResult<(broadcast::Receiver<Event>, Snapshot, Service)> {
-    let hub = root.tasks.hub.lock().unwrap();
-    let lane = hub.lanes.get(task_id).ok_or_else(missing)?;
-    let inner = lane.service.conversation.inner.lock().unwrap();
-    let receiver = lane.service.conversation.events.subscribe();
-    let mut snapshot = lane.service.snapshot_locked(&inner).map_err(internal)?;
-    for job in &lane.record.queue {
-        if !snapshot.messages.iter().any(|m| m.id == job.message_id) {
-            snapshot.messages.push(user(job));
-        }
-    }
-    snapshot.conversation_id = task_id.to_owned();
-    for message in &mut snapshot.messages {
-        message.conversation_id = task_id.to_owned();
-    }
-    Ok((receiver, snapshot, lane.service.clone()))
 }

@@ -308,6 +308,9 @@ pub(super) enum Rpc {
         operation_id: String,
     },
     Inventory,
+    ConfigureSandboxBudget {
+        budget: Value,
+    },
     Resources {
         lease_id: String,
         resources: pot_runner::resources::GlobalResources,
@@ -1325,6 +1328,7 @@ async fn poll(
     }
 }
 async fn require_target(host: &pot_control::host::Host, target: &Target) -> Result<()> {
+    host.ensure_managed_target(target)?;
     let inventory = host.execution_target_inventory().await;
     ensure!(
         inventory["items"].as_array().is_some_and(|items| items
@@ -1478,6 +1482,10 @@ impl Authority {
                 )?)
             }
             Rpc::Inventory => Ok(host.execution_target_inventory().await),
+            Rpc::ConfigureSandboxBudget { budget } => {
+                host.configure_sandbox_budget(&budget)?;
+                Ok(json!({"ok":true}))
+            }
             Rpc::Acquire {
                 owner,
                 run_id,

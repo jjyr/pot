@@ -43,15 +43,21 @@ pub fn cards(
                     .child(crate::permission_display::description(&display, catalog)),
             );
         let mut actions = div().flex().flex_wrap().gap_2();
-        for action in ["allow_persistent", "allow_once", "deny"] {
-            if action == "allow_persistent" && record["scope"].is_null() {
-                continue;
-            }
+        for action in ["allow_once", "deny"] {
             actions = actions.child(
                 Button::new(SharedString::from(format!("permission-{id}-{action}")))
                     .ghost()
                     .small()
-                    .label(catalog.text(&format!("permissions.{action}")))
+                    .label(catalog.text(
+                        if action == "allow_once" && record["scope"]["capability"] == "host" {
+                            "permissions.allow-operation"
+                        } else {
+                            match action {
+                                "allow_once" => "permissions.allow_once",
+                                _ => "permissions.deny",
+                            }
+                        },
+                    ))
                     .on_click(pages::on(
                         &handler,
                         "permission-decision",
@@ -60,45 +66,6 @@ pub fn cards(
             );
         }
         result = result.child(card.child(actions));
-    }
-    for grant in book["grants"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|g| book["assistant_id"] == owner || g["owner"] == owner)
-    {
-        let id = grant["id"].as_str().unwrap_or("");
-        result = result.child(
-            pages::card(cx)
-                .child(pages::title(catalog.text("permissions.grant")))
-                .child(pages::hint(
-                    format!(
-                        "{} · {}",
-                        grant["owner"].as_str().unwrap_or(""),
-                        grant["scope"]["machine_id"].as_str().unwrap_or("")
-                    ),
-                    cx,
-                ))
-                .child(
-                    div().text_sm().whitespace_normal().child(
-                        grant["scope"]["capability"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_owned(),
-                    ),
-                )
-                .child(
-                    Button::new(SharedString::from(format!("permission-revoke-{id}")))
-                        .ghost()
-                        .small()
-                        .label(catalog.text("permissions.revoke"))
-                        .on_click(pages::on(
-                            &handler,
-                            "permission-decision",
-                            json!({"id":id,"action":"revoke"}),
-                        )),
-                ),
-        );
     }
     result
 }

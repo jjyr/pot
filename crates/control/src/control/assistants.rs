@@ -438,8 +438,8 @@ mod tests {
             removed.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         };
-        assert!(hub.guard_sandbox_delete("default", &delete).is_err());
-        assert!(!removed.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(hub.guard_sandbox_delete("default", &delete).is_ok());
+        assert!(removed.load(std::sync::atomic::Ordering::SeqCst));
         hub.guard_sandbox_delete("unassigned", &delete).unwrap();
         assert!(removed.load(std::sync::atomic::Ordering::SeqCst));
         assert_eq!(ta.assistant_id, a.id);

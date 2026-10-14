@@ -73,7 +73,7 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    Enrollment copies the complete fixed-file bundle, rejects symlinks/non-private files and existing instances, and creates a macOS definition through the local management API. It requires the source to be stopped; it cannot prove the state of a third-party VM engine. A failed final API registration retains the private copy for owner inspection. Do not simply retry over an existing copy. Raw whole-GiB disk size is recorded in the instance resource config; disk resizing is rejected. CPU/RAM changes apply after stopping, subject to VZ validation.
 
-4. Main can select `mac-dev` or bind a task explicitly to it. `manage_sandbox` accepts `provider` only at creation; it never accepts a Host bundle path. Worker binding, ownership/session IDs and receipts use the same Manager contracts as Linux.
+4. The owner manages the prepared macOS VM through the machine management API. Models do not manage its lifecycle. Automatic task sandboxes use disposable Linux containers; enrolled macOS VMs are not selected or deleted by that automatic lifecycle. Session IDs and receipts use the common Manager contracts.
 
 Control owns all machine grants. The guest broker exposes `/prepare` only for argument normalization and keeps no authorization file. Reprovision the broker after this incompatible protocol change.
 

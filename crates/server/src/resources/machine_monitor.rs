@@ -13,10 +13,10 @@ impl Drop for Interest {
         if let Some(resources) = self.0.upgrade() {
             let mut monitor = resources.monitor.lock().unwrap();
             monitor.users -= 1;
-            if monitor.users == 0 {
-                if let Some(task) = monitor.task.take() {
-                    task.abort();
-                }
+            if monitor.users == 0
+                && let Some(task) = monitor.task.take()
+            {
+                task.abort();
             }
         }
     }
@@ -44,11 +44,11 @@ impl Resources {
                         state
                     })
                     .await;
-                    if let Ok(state) = state {
-                        if state != previous {
-                            previous = state;
-                            resources.changes.notify("machines");
-                        }
+                    if let Ok(state) = state
+                        && state != previous
+                    {
+                        previous = state;
+                        resources.changes.notify("machines");
                     }
                     drop(resources);
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;

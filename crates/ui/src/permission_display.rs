@@ -10,7 +10,7 @@ pub fn description(record: &Value, catalog: Catalog) -> String {
             record["request"]["args"]["text"].as_str().unwrap_or("")
         );
     }
-    format!(
+    let mut description = format!(
         "{} · {}\n{}\n\n{}",
         record["assistant_id"].as_str().unwrap_or(""),
         record["machine_name"]
@@ -27,7 +27,15 @@ pub fn description(record: &Value, catalog: Catalog) -> String {
         } else {
             "permissions.sandbox-detail"
         })
-    )
+    );
+    if scope["capability"] == "host" {
+        description.push_str(&format!(
+            "\n\n{}\n{}",
+            record["request"]["tool"].as_str().unwrap_or(""),
+            serde_json::to_string_pretty(&record["request"]["args"]).unwrap_or_default()
+        ));
+    }
+    description
 }
 #[cfg(test)]
 mod tests {

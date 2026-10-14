@@ -37,6 +37,23 @@ impl ExecutionFeedback for Feedback {
     }
 }
 impl Host {
+    pub fn configure_sandbox_budget(&self, budget: &Value) -> Result<()> {
+        self.sandboxes
+            .as_ref()
+            .ok_or_else(|| anyhow!("Sandbox service unavailable"))?
+            .configure_budget(budget)
+    }
+    pub fn ensure_managed_target(&self, target: &pot_core::ExecutionTargetKind) -> Result<()> {
+        if let pot_core::ExecutionTargetKind::Sandbox { sandbox_id } = target
+            && pot_sandbox::Manager::is_managed(sandbox_id)
+        {
+            self.sandboxes
+                .as_ref()
+                .ok_or_else(|| anyhow!("Sandbox service unavailable"))?
+                .ensure_managed(sandbox_id)?;
+        }
+        Ok(())
+    }
     pub async fn manage_controlled_sandbox(
         &self,
         args: Value,
@@ -201,6 +218,23 @@ impl Host {
             }
         }
     }
+    /// Hold the environment through a complete destination-local Agent run,
+    /// including model waits between individual tool calls.
+    pub async fn acquire_controlled_run(
+        &self,
+        target: &pot_core::ExecutionTargetKind,
+    ) -> Result<Option<pot_sandbox::Lease>> {
+        match target {
+            pot_core::ExecutionTargetKind::Host {} => Ok(None),
+            pot_core::ExecutionTargetKind::Sandbox { sandbox_id } => {
+                let manager = self
+                    .sandboxes
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Sandbox service unavailable"))?;
+                Ok(Some(manager.acquire(sandbox_id).await?))
+            }
+        }
+    }
     pub async fn cancel_controlled(
         &self,
         scope: &str,
@@ -216,6 +250,7 @@ impl Host {
                 if let Some(manager) = &self.sandboxes {
                     manager.finish(scope).await?;
                     manager.drain(scope).await?;
+                    manager.reap_managed().await?;
                 }
             }
         }

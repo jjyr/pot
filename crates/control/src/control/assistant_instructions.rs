@@ -166,6 +166,9 @@ mod tests {
         .unwrap()
         .0;
         let worker = tasks::owner(&root, &task.id).unwrap();
+        let project = root.execution_service.sandboxes.workspace(&task.sandbox_id);
+        std::fs::write(project.join(".git"), "gitdir").unwrap();
+        std::fs::write(project.join("AGENTS.md"), "PROJECT_FIRST").unwrap();
         let main = crate::instructions::load(&root).unwrap().text;
         let child = crate::instructions::load(&worker).unwrap().text;
         assert!(main.contains("ASSISTANT_DB_ONLY") && main.contains("HOST_FIRST"));
@@ -202,6 +205,11 @@ mod tests {
     #[tokio::test]
     async fn host_project_instructions_remain_filesystem_based_without_sandboxes() {
         let mut root = tasks::tests::fixture();
+        root.execution_service.permissions.set_machine_policy(
+            &root.runtime_id,
+            pot_agent::permissions::ExecutionMode::Host,
+            pot_agent::permissions::DefaultDecision::Allow,
+        );
         let empty = root.data.join("empty-inventory");
         root.execution_service.sandboxes =
             Arc::new(crate::sandbox::Manager::empty(&empty, vec![]).unwrap());
@@ -251,6 +259,11 @@ mod tests {
     #[tokio::test]
     async fn worker_does_not_inherit_assistant_or_global_instructions() {
         let root = tasks::tests::fixture();
+        root.execution_service.permissions.set_machine_policy(
+            &root.runtime_id,
+            pot_agent::permissions::ExecutionMode::Host,
+            pot_agent::permissions::DefaultDecision::Allow,
+        );
         let rules = read(&root).unwrap();
         save(
             &root,

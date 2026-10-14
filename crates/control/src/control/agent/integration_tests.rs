@@ -146,6 +146,11 @@ async fn fixture(
     Arc<Mutex<Vec<Value>>>,
 ) {
     let mut s = tasks::tests::fixture();
+    s.execution_service.permissions.set_machine_policy(
+        &s.runtime_id,
+        pot_agent::permissions::ExecutionMode::Host,
+        pot_agent::permissions::DefaultDecision::Ask,
+    );
     // Model/receipt tests explicitly inject local tools in an isolated test root.
     // Product execution uses Runtime Sandbox routing, verified separately.
     s.test_tool_executor = Some(Arc::new(pot_tool_executor::LocalTools::default()));
@@ -1114,7 +1119,7 @@ async fn native_agent_display_duplicates_do_not_trigger_compaction_or_extra_usag
 
 #[tokio::test]
 async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explicit_grants() {
-    for action in ["deny", "allow_once", "allow_persistent"] {
+    for action in ["deny", "allow_once"] {
         let directory = std::env::temp_dir().join(format!("pot-owner-{}", id()));
         std::fs::create_dir(&directory).unwrap();
         let path = directory.canonicalize().unwrap().join("file.txt");
@@ -1122,6 +1127,11 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
         let permissions_file = s.data.join("permissions.json");
         s.execution_service.permissions =
             Arc::new(crate::permissions::Hub::open(&permissions_file).unwrap());
+        s.execution_service.permissions.set_machine_policy(
+            &s.runtime_id,
+            pot_agent::permissions::ExecutionMode::Host,
+            pot_agent::permissions::DefaultDecision::Ask,
+        );
         let owner = async {
             let record = tokio::time::timeout(std::time::Duration::from_secs(3), async {
                 loop {
@@ -1166,8 +1176,8 @@ async fn native_pot_host_tools_wait_for_owner_decisions_and_persist_only_explici
         }
         let reopened = crate::permissions::Hub::open(&permissions_file).unwrap();
         assert_eq!(
-            reopened.grants("main").as_array().unwrap().len(),
-            usize::from(action == "allow_persistent")
+            reopened.machine_policy(&s.runtime_id).host_access,
+            pot_agent::permissions::DefaultDecision::Ask
         );
         server.abort();
         std::fs::remove_dir_all(directory).unwrap();
@@ -1232,7 +1242,7 @@ async fn main_host_computer_use_waits_for_owner_and_keeps_session_scope() {
         .await
         .unwrap();
         job.await.unwrap();
-        assert_eq!(approvals, 1);
+        assert_eq!(approvals, if approved { 3 } else { 1 });
         {
             let requests = captured.lock().unwrap();
             let continuation = requests[1].to_string();
