@@ -176,6 +176,40 @@ mod integration_tests {
         }
     }
     #[test]
+    fn stream_reducer_rejects_gaps_and_wrong_identity_without_advancing() {
+        use pot_protocol::{Event, EventKind};
+        let mut state = snapshot();
+        let message = Message {
+            id: "message".into(),
+            conversation_id: "main".into(),
+            role: Role::Assistant,
+            text: "one".into(),
+            status: MessageStatus::Streaming,
+            created_at_ms: 0,
+            request_id: None,
+        };
+        let event = |cursor, message| Event {
+            event_id: "test".into(),
+            cursor,
+            kind: EventKind::Message { message },
+        };
+        apply_event(&mut state, event(Some(1), message.clone())).unwrap();
+        let before = state.clone();
+        assert!(apply_event(&mut state, event(Some(3), message.clone())).is_err());
+        assert_eq!(state, before);
+        let mut wrong = message.clone();
+        wrong.conversation_id = "other".into();
+        assert!(apply_event(&mut state, event(Some(2), wrong)).is_err());
+        assert_eq!(state, before);
+        let mut next = message;
+        next.text = "two".into();
+        apply_event(&mut state, event(Some(1), next.clone())).unwrap();
+        assert_eq!(state, before);
+        apply_event(&mut state, event(None, next)).unwrap();
+        assert_eq!(state.cursor, 1);
+        assert_eq!(state.messages[0].text, "two");
+    }
+    #[test]
     fn authoritative_receipts_are_conversation_scoped_and_send_guards_match_both_clients() {
         let mut snapshot = snapshot();
         let mut state = SendState::default();
@@ -220,4 +254,36 @@ mod integration_tests {
         });
         assert!(!can_send(Some(&snapshot), true, false, true));
     }
+}
+
+/// Apply an ordered conversation event without advancing the cursor on invalid data.
+pub fn apply_event(snapshot: &mut Snapshot, event: pot_protocol::Event) -> Result<(), String> {
+    use pot_protocol::EventKind;
+    if let EventKind::Message { message } = &event.kind
+        && message.conversation_id != snapshot.conversation_id
+    {
+        return Err("Conversation mismatch".into());
+    }
+    if let Some(cursor) = event.cursor {
+        if cursor <= snapshot.cursor {
+            return Ok(());
+        }
+        if cursor != snapshot.cursor + 1 {
+            return Err("Event gap; fetch a fresh snapshot".into());
+        }
+        snapshot.cursor = cursor;
+    }
+    match event.kind {
+        EventKind::Message { message } => {
+            if let Some(old) = snapshot.messages.iter_mut().find(|m| m.id == message.id) {
+                *old = message;
+            } else {
+                snapshot.messages.push(message);
+            }
+        }
+        EventKind::Agent { status } => snapshot.agent = status,
+        EventKind::Turn { turn } => snapshot.turn = turn,
+        EventKind::Budget { budget } => snapshot.budget = Some(budget),
+    }
+    Ok(())
 }

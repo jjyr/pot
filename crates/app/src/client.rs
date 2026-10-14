@@ -1,7 +1,7 @@
 use pot_protocol::*;
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -99,6 +99,7 @@ pub struct View {
     pub schedule_success: u64,
     pub schedule_error: String,
     pub main_snapshot: Option<Snapshot>,
+    generation: u64,
     cached_tasks: HashMap<String, Arc<Snapshot>>,
 }
 impl View {
@@ -147,6 +148,7 @@ impl View {
             self.cached_tasks
                 .insert(self.selected.clone(), Arc::new(snapshot.clone()));
         }
+        self.generation += 1;
         self.snapshot = if id.is_empty() || id == "new" {
             self.main_snapshot.clone()
         } else {
@@ -180,36 +182,12 @@ impl View {
         self.error.clear();
         Ok(())
     }
-    #[cfg(test)]
     fn apply(&mut self, event: Event) -> Result<(), String> {
         let s = self
             .snapshot
             .as_mut()
             .ok_or(crate::i18n::text("client.chat-snapshot-missing"))?;
-        if let Some(cursor) = event.cursor {
-            if cursor <= s.cursor {
-                return Ok(());
-            }
-            if cursor != s.cursor + 1 {
-                return Err(crate::i18n::text("client.missing-events-resynchronizing").into());
-            }
-            s.cursor = cursor;
-        }
-        match event.kind {
-            EventKind::Message { message } => {
-                if message.conversation_id != s.conversation_id {
-                    return Err(crate::i18n::text("client.session-mismatch").into());
-                }
-                if let Some(old) = s.messages.iter_mut().find(|m| m.id == message.id) {
-                    *old = message;
-                } else {
-                    s.messages.push(message);
-                }
-            }
-            EventKind::Agent { status } => s.agent = status,
-            EventKind::Turn { turn } => s.turn = turn,
-            EventKind::Budget { budget } => s.budget = Some(budget),
-        }
+        pot_ui::state::apply_event(s, event)?;
         self.error.clear();
         Ok(())
     }
@@ -237,15 +215,36 @@ impl View {
         }
     }
 }
+#[derive(Clone)]
+pub(crate) struct Refresh {
+    pub(crate) sender: mpsc::SyncSender<()>,
+    pub(crate) dirty: Arc<Mutex<Option<BTreeSet<String>>>>,
+}
+impl Refresh {
+    pub(crate) fn try_send(&self, _: ()) -> Result<(), mpsc::TrySendError<()>> {
+        *self.dirty.lock().unwrap() = None;
+        self.sender.try_send(())
+    }
+    pub(crate) fn changed(&self, topics: BTreeSet<String>) {
+        if topics.is_empty() {
+            return;
+        }
+        if let Some(dirty) = self.dirty.lock().unwrap().as_mut() {
+            dirty.extend(topics);
+        }
+        let _ = self.sender.try_send(());
+    }
+}
 pub struct Client {
     pub view: Arc<Mutex<View>>,
     tx: mpsc::Sender<(String, SendMessage)>,
     running: Arc<AtomicBool>,
-    refresh: mpsc::SyncSender<()>,
+    refresh: Refresh,
 }
 impl Drop for Client {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
+        let _ = self.refresh.try_send(());
     }
 }
 pub fn root() -> PathBuf {
@@ -259,7 +258,16 @@ fn requests(view: &Arc<Mutex<View>>) -> crate::backend::Requests {
     let state = view.lock().unwrap();
     crate::backend::Requests::for_mode(&state.client_mode).scope(state.assistant_id())
 }
-fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String> {
+fn receive(view: &Arc<Mutex<View>>, dirty: Option<&BTreeSet<String>>) -> Result<(), String> {
+    let configuration_generation = crate::backend::configuration_generation();
+    let before = view.lock().unwrap().clone();
+    let changed = |domain: &str| {
+        dirty.is_none_or(|topics| {
+            topics
+                .iter()
+                .any(|t| t == domain || t.starts_with(&format!("{domain}/")))
+        })
+    };
     crate::backend::ready()?;
     let (selected, query, assistant_id) = {
         let v = view.lock().unwrap();
@@ -282,18 +290,26 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         .timeout_global(Some(Duration::from_secs(3)))
         .build()
         .new_agent();
-    let directory: Value = agent
-        .get("/api/v1/runtime")
-        .call()?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
-    let mut machines: Value = agent
-        .get("/api/v1/machines")
-        .call()?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
+    let directory: Value = if changed("machines") {
+        agent
+            .get("/api/v1/runtime")
+            .call()?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        before.runtime.clone()
+    };
+    let mut machines: Value = if changed("machines") {
+        agent
+            .get("/api/v1/machines")
+            .call()?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        before.machines.clone()
+    };
     if view.lock().unwrap().client_mode == "remote"
         && let Some(items) = machines["machines"].as_array_mut()
     {
@@ -303,7 +319,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             }
         }
     }
-    view.lock().unwrap().machines = machines;
+
     if !directory["capabilities"]
         .as_array()
         .is_some_and(|caps| caps.iter().any(|c| c == "conversation"))
@@ -316,50 +332,73 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
         }
         return Err("Runtime conversation capability unavailable".into());
     }
-    let assistants: Value = agent
-        .get("/api/v1/assistants")
-        .call()?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
-    let assistant_rules: Value = agent
-        .get(&format!("/api/v1/assistants/{assistant_id}/instructions"))
-        .call()?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
-    let task_page: TaskPage = agent
-        .get("/api/v1/assistant-tasks")
-        .query("scope", &query.scope)
-        .query("q", &query.q)
-        .query("offset", query.offset.to_string())
-        .query("limit", query.limit.to_string())
-        .query("selected", &selected)
-        .query(
-            "execution_target",
-            serde_json::from_str::<Value>(&query.execution_target)
-                .ok()
-                .and_then(|v| v.get("execution_target").map(Value::to_string))
-                .unwrap_or_else(|| query.execution_target.clone()),
-        )
-        .call()
-        .map_err(|e| e.to_string())?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
+    let assistants: Value = if changed("assistants") {
+        agent
+            .get("/api/v1/assistants")
+            .call()?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        before.assistants.clone()
+    };
+    let assistant_rules: Value = if changed("settings") {
+        agent
+            .get(&format!("/api/v1/assistants/{assistant_id}/instructions"))
+            .call()?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        before.assistant_rules.clone()
+    };
+    let task_page: TaskPage = if changed("tasks") {
+        agent
+            .get("/api/v1/assistant-tasks")
+            .query("scope", &query.scope)
+            .query("q", &query.q)
+            .query("offset", query.offset.to_string())
+            .query("limit", query.limit.to_string())
+            .query("selected", &selected)
+            .query(
+                "execution_target",
+                serde_json::from_str::<Value>(&query.execution_target)
+                    .ok()
+                    .and_then(|v| v.get("execution_target").map(Value::to_string))
+                    .unwrap_or_else(|| query.execution_target.clone()),
+            )
+            .call()
+            .map_err(|e| e.to_string())?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        TaskPage::default()
+    };
     let agent = agent.scope(&assistant_id);
     // Independent of the visible task filter and page. Only executing lanes
     // count as activity; queued and budget/user waits do not.
-    let executing: TaskPage = agent
-        .get(&format!("{PATH_TASKS}/query"))
-        .query("phase", "running")
-        .query("limit", "3")
-        .call()
-        .map_err(|e| e.to_string())?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
-    let mut running_tasks = Vec::new();
+    let executing: TaskPage = if changed("tasks") {
+        agent
+            .get(&format!("{PATH_TASKS}/query"))
+            .query("phase", "running")
+            .query("limit", "3")
+            .call()
+            .map_err(|e| e.to_string())?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        TaskPage {
+            total: before.running_total,
+            ..Default::default()
+        }
+    };
+    let mut running_tasks = if changed("tasks") {
+        Vec::new()
+    } else {
+        before.running_tasks.clone()
+    };
     let mut finished = 0;
     for task in &executing.items {
         let progress = agent
@@ -383,7 +422,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
                 .unwrap_or_else(|| crate::i18n::text("client.working").into()),
         });
     }
-    let schedules: Option<SchedulePage> = if sq.0 {
+    let schedules: Option<SchedulePage> = if sq.0 && changed("schedules") {
         Some(
             agent
                 .get("/api/v1/schedules")
@@ -402,9 +441,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     let uq = {
         let v = view.lock().unwrap();
         v.usage_query.clone().filter(|q| {
-            v.usage_loaded.as_ref() != Some(q)
-                || v.usage_fetched
-                    .is_none_or(|t| t.elapsed() > Duration::from_secs(3))
+            changed("usage") || v.usage_loaded.as_ref() != Some(q) || v.usage_fetched.is_none()
         })
     };
     if let Some(q) = uq {
@@ -422,7 +459,11 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
                 .map_err(|e| e.to_string())
         })();
         let mut v = view.lock().unwrap();
-        if v.assistant_id() == assistant_id && v.usage_query.as_ref() == Some(&q) {
+        if v.assistant_id() == assistant_id
+            && v.generation == before.generation
+            && configuration_generation == crate::backend::configuration_generation()
+            && v.usage_query.as_ref() == Some(&q)
+        {
             v.usage_fetched = Some(std::time::Instant::now());
             v.usage_loaded = Some(q);
             match result {
@@ -434,27 +475,40 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             }
         }
     }
-    let completions: Value = agent
-        .get("/api/v1/completions")
-        .call()?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
-    let permissions: Value = agent
-        .get("/api/v1/permissions")
-        .call()
-        .map_err(|e| e.to_string())?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
+    let completions: Value = if changed("settings") {
+        agent
+            .get("/api/v1/completions")
+            .call()?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        before.completions.clone()
+    };
+    let permissions: Value = if changed("permissions") {
+        agent
+            .get("/api/v1/permissions")
+            .call()
+            .map_err(|e| e.to_string())?
+            .body_mut()
+            .read_json()
+            .map_err(|e| e.to_string())?
+    } else {
+        before.permissions.clone()
+    };
 
-    let main: Snapshot = agent
-        .get(PATH_SNAPSHOT)
-        .call()
-        .map_err(|e| e.to_string())?
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
+    let main: Snapshot =
+        if dirty.is_none() || changed("conversation") || before.main_snapshot.is_none() {
+            agent
+                .get(PATH_SNAPSHOT)
+                .call()
+                .map_err(|e| e.to_string())?
+                .body_mut()
+                .read_json()
+                .map_err(|e| e.to_string())?
+        } else {
+            before.main_snapshot.clone().unwrap()
+        };
     let path = if selected.is_empty() || selected == "new" {
         PATH_SNAPSHOT.to_string()
     } else {
@@ -462,7 +516,7 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     };
     let snapshot: Snapshot = if selected.is_empty() || selected == "new" {
         main.clone()
-    } else {
+    } else if dirty.is_none() || before.snapshot.is_none() {
         agent
             .get(&path)
             .call()
@@ -470,14 +524,20 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
             .body_mut()
             .read_json()
             .map_err(|e| e.to_string())?
+    } else {
+        before.snapshot.clone().unwrap()
     };
     let mut v = view.lock().unwrap();
-    if v.assistant_id() != assistant_id {
+    if v.assistant_id() != assistant_id
+        || v.generation != before.generation
+        || configuration_generation != crate::backend::configuration_generation()
+    {
         return Ok(());
     }
     if v.runtime["runtime_id"] != directory["runtime_id"] {
         v.cached_tasks.clear();
     }
+    v.machines = machines;
     v.runtime = directory;
     v.permissions = permissions;
     v.completions = completions;
@@ -505,9 +565,13 @@ fn receive(view: &Arc<Mutex<View>>, _running: &AtomicBool) -> Result<(), String>
     }
     v.running_total = executing.total.saturating_sub(finished);
     v.running_tasks = running_tasks;
-    v.main_snapshot = Some(main);
-    v.apply_task_page(&query, &selected, task_page);
-    if v.selected == selected {
+    if changed("tasks") {
+        v.apply_task_page(&query, &selected, task_page);
+    }
+    if dirty.is_none() || (changed("conversation") && v.main_snapshot == before.main_snapshot) {
+        v.main_snapshot = Some(main);
+    }
+    if dirty.is_none() && v.selected == selected {
         v.replace(snapshot)?;
     }
     Ok(())
@@ -529,30 +593,120 @@ impl Client {
         }));
         let running = Arc::new(AtomicBool::new(true));
         let (tx, rx) = mpsc::channel::<(String, SendMessage)>();
-        let (refresh, refresh_rx) = mpsc::sync_channel(1);
+        let (sender, refresh_rx) = mpsc::sync_channel(1);
+        let refresh = Refresh {
+            sender,
+            dirty: Arc::new(Mutex::new(None)),
+        };
         let v = view.clone();
         let active = running.clone();
+        let trigger = refresh.clone();
+        let mode = mode.to_owned();
         std::thread::spawn(move || {
-            while active.load(Ordering::Relaxed) {
-                let owner = v.lock().unwrap().assistant_id().to_owned();
-                if let Err(e) = receive(&v, &active) {
-                    let mut state = v.lock().unwrap();
-                    if state.assistant_id() == owner {
-                        state.error = e;
-                        if state.client_mode == "remote"
-                            && let Some(items) = state.machines["machines"].as_array_mut()
-                        {
-                            for machine in items {
-                                machine["connection"] = serde_json::json!("offline");
+            let mut versions = serde_json::Value::Null;
+            let notifications = trigger.clone();
+            let status = v.clone();
+            let _changes =
+                crate::backend::subscribe(mode.clone(), "/api/v1/changes".into(), move |frame| {
+                    match frame {
+                        Ok(frame) => {
+                            let next: Value =
+                                serde_json::from_str(&frame.data).map_err(|e| e.to_string())?;
+                            if next["boot_id"] != versions["boot_id"] {
+                                let _ = notifications.try_send(());
+                            } else {
+                                let dirty = next["versions"]
+                                    .as_object()
+                                    .into_iter()
+                                    .flatten()
+                                    .filter(|(key, value)| versions["versions"][*key] != **value)
+                                    .map(|(key, _)| key.clone())
+                                    .collect();
+                                notifications.changed(dirty);
                             }
+                            versions = next;
+                        }
+                        Err(error) => {
+                            status.lock().unwrap().error = error;
+                            versions = Value::Null;
+                            crate::wake_ui();
                         }
                     }
+                    Ok(())
+                });
+            let mut conversation: Option<crate::backend::Subscription> = None;
+            while refresh_rx.recv().is_ok() && active.load(Ordering::Relaxed) {
+                let dirty = trigger.dirty.lock().unwrap().replace(BTreeSet::new());
+                if dirty.is_none() {
+                    conversation.take();
+                }
+                let owner = v.lock().unwrap().assistant_id().to_owned();
+                match receive(&v, dirty.as_ref()) {
+                    Err(error) => {
+                        let mut state = v.lock().unwrap();
+                        if state.assistant_id() == owner {
+                            state.error = error;
+                        }
+                        drop(state);
+                        crate::wake_ui();
+                        // A failed fetch is retried only while disconnected, not as
+                        // a healthy-state polling loop.
+                        if active.load(Ordering::Relaxed) {
+                            std::thread::sleep(Duration::from_secs(1));
+                            let _ = trigger.try_send(());
+                        }
+                        continue;
+                    }
+                    Ok(()) => {}
+                }
+                if dirty.is_none() {
+                    let state = v.lock().unwrap().clone();
+                    let owner = state.assistant_id().to_owned();
+                    let selected = state.selected.clone();
+                    let generation = state.generation;
+                    let path = if selected.is_empty() || selected == "new" {
+                        format!("/api/v1/assistants/{owner}/events?snapshot=true")
+                    } else {
+                        format!("/api/v1/assistants/{owner}/tasks/{selected}/events")
+                    };
+                    let state = v.clone();
+                    conversation = Some(crate::backend::subscribe(
+                        mode.clone(),
+                        path,
+                        move |frame| {
+                            let mut state = state.lock().unwrap();
+                            if state.assistant_id() != owner
+                                || state.selected != selected
+                                || state.generation != generation
+                            {
+                                return Ok(());
+                            }
+                            match frame {
+                                Ok(frame) if frame.event == "snapshot" => {
+                                    state.replace(
+                                        serde_json::from_str(&frame.data)
+                                            .map_err(|e| e.to_string())?,
+                                    )?;
+                                }
+                                Ok(frame) => state.apply(
+                                    serde_json::from_str(&frame.data).map_err(|e| e.to_string())?,
+                                )?,
+                                Err(error) => state.error = error,
+                            }
+                            if selected.is_empty() {
+                                state.main_snapshot = state.snapshot.clone();
+                            }
+                            drop(state);
+                            crate::wake_ui();
+                            Ok(())
+                        },
+                    ));
                 }
                 crate::wake_ui();
-                let _ = refresh_rx.recv_timeout(Duration::from_millis(500));
             }
         });
         // Writes never block behind the long-lived SSE response.
+        let write_refresh = refresh.clone();
         let v = view.clone();
         let active = running.clone();
         std::thread::spawn(move || {
@@ -560,6 +714,7 @@ impl Client {
                 while active.load(Ordering::Relaxed) {
                     if let Err(error) = crate::backend::ready() {
                         v.lock().unwrap().command_error = error;
+                        crate::wake_ui();
                         std::thread::sleep(Duration::from_millis(500));
                         continue;
                     }
@@ -596,7 +751,9 @@ impl Client {
                                 state.command_error.clear();
                                 if req.conversation_id == "new" {
                                     if let Some(id) = result["id"].as_str() {
+                                        state.generation += 1;
                                         state.selected = id.into();
+                                        let _ = write_refresh.try_send(());
                                         state.snapshot = None;
                                     }
                                     state.pending = false;
@@ -634,8 +791,10 @@ impl Client {
                             .into();
                         }
                     }
+                    crate::wake_ui();
                     std::thread::sleep(Duration::from_millis(500));
                 }
+                crate::wake_ui();
             }
         });
         Self {
@@ -662,6 +821,7 @@ impl Client {
                 return;
             }
         };
+        crate::wake_ui();
         let view = self.view.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(), String> {
@@ -686,6 +846,7 @@ impl Client {
                     turn.cancelling = false;
                 }
             }
+            crate::wake_ui();
         });
     }
     pub fn permission_decision(&self, body: Value) {
@@ -720,6 +881,7 @@ impl Client {
                 }
             }
             let _ = refresh.try_send(());
+            crate::wake_ui();
         });
     }
     pub fn usage_action(&self, path: &'static str, body: Value) {
@@ -733,6 +895,7 @@ impl Client {
             v.usage_notice.clear();
             v.usage_error.clear();
         }
+        crate::wake_ui();
         let view = self.view.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
@@ -770,6 +933,7 @@ impl Client {
             }
             drop(v);
             let _ = refresh.try_send(());
+            crate::wake_ui();
         });
     }
     pub fn schedule_select(&self, id: String) {
@@ -779,7 +943,9 @@ impl Client {
         v.schedules.selected = None;
         v.schedules.runs.clear();
         v.schedule_error.clear();
+        drop(v);
         let _ = self.refresh.try_send(());
+        crate::wake_ui();
     }
     pub fn schedule_action(&self, mut req: Value) {
         let owner = self.view.lock().unwrap().assistant_id().to_owned();
@@ -791,6 +957,7 @@ impl Client {
             v.schedule_pending = true;
             v.schedule_error.clear();
         }
+        crate::wake_ui();
         req["request_id"] = json!(uuid::Uuid::new_v4().to_string());
         let view = self.view.clone();
         let active = self.running.clone();
@@ -854,6 +1021,10 @@ impl Client {
                             "client.connection-interrupted-retrying-with-the-same-request",
                         )
                         .into();
+                        // Never hold the presentation lock during retry backoff:
+                        // render and input handlers need it even while offline.
+                        drop(state);
+                        crate::wake_ui();
                         std::thread::sleep(Duration::from_millis(1000));
                     }
                 }
@@ -875,7 +1046,9 @@ impl Client {
         v.task_query.offset = 0;
         v.tasks.clear();
         v.tasks_loading = true;
+        drop(v);
         let _ = self.refresh.try_send(());
+        crate::wake_ui();
     }
     pub fn filter_tasks(&self, scope: String, q: String, offset: usize) {
         let mut v = self.view.lock().unwrap();
@@ -887,7 +1060,9 @@ impl Client {
         v.task_query.offset = offset;
         v.tasks.clear();
         v.tasks_loading = true;
+        drop(v);
         let _ = self.refresh.try_send(());
+        crate::wake_ui();
     }
     pub fn machine_command(&self, value: Value) {
         {
@@ -897,6 +1072,7 @@ impl Client {
             }
             state.machine_pending = true;
         }
+        crate::wake_ui();
         let view = self.view.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
@@ -904,7 +1080,11 @@ impl Client {
                 if value["command"]["action"] == "configure_control" {
                     return crate::backend::configure_control(value["command"].clone());
                 }
-                requests(&view)
+                let target = value["mode"]
+                    .as_str()
+                    .map(crate::backend::Requests::for_mode)
+                    .unwrap_or_else(|| requests(&view));
+                target
                     .post("/api/v1/machine-connections")
                     .send_json(value["command"].clone())?
                     .body_mut()
@@ -935,6 +1115,7 @@ impl Client {
             }
             state.assistant_pending = true;
         }
+        crate::wake_ui();
         let view = self.view.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
@@ -989,6 +1170,7 @@ impl Client {
         if v.assistant_id() == id || v.pending {
             return;
         }
+        v.generation += 1;
         v.selected_assistant = id.clone();
         v.selected.clear();
         v.snapshot = None;
@@ -1054,6 +1236,8 @@ impl Client {
                 crate::i18n::text("client.send-service-exited-reopen-the-app").into();
             return false;
         }
+        drop(state);
+        crate::wake_ui();
         true
     }
 }

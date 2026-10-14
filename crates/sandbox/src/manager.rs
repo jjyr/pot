@@ -68,6 +68,7 @@ impl Drop for Execution {
     }
 }
 pub struct Manager {
+    pub changed: pot_core::changes::Signal,
     desktop_io: tokio::sync::Mutex<()>,
     pub(crate) viewers: Mutex<BTreeMap<String, crate::desktop::Viewer>>,
     root: PathBuf,
@@ -164,6 +165,7 @@ impl Manager {
         }
         private_json(&generation_path, &serde_json::to_value(&generations)?)?;
         Ok(Self {
+            changed: Default::default(),
             desktop_io: tokio::sync::Mutex::new(()),
             viewers: Mutex::new(BTreeMap::new()),
             root,
@@ -253,6 +255,7 @@ impl Manager {
             return Err(error);
         }
         *self.committed.lock().unwrap() = book.clone();
+        self.changed.notify();
         Ok(())
     }
     fn persist_operations(&self) -> Result<()> {
@@ -411,6 +414,9 @@ impl Manager {
                 return Err(error);
             }
             state["generation"] = json!(epoch);
+        }
+        if method != "status" {
+            self.changed.notify();
         }
         Ok(state)
     }

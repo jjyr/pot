@@ -16,3 +16,5 @@ pub use placement::*;
 
 /// Shared Pot/MCP tool schema; adapters cannot maintain divergent definitions.
 pub const TOOL_SCHEMA: &str = include_str!("pot-tools.json");
+
+pub mod changes;

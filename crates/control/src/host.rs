@@ -26,6 +26,7 @@ struct Identity {
 /// Process authority and identity exist independently of optional product stores.
 #[derive(Clone)]
 pub struct Host {
+    pub changes: pot_core::changes::Changes,
     pub(crate) data: PathBuf,
     pub(crate) token: String,
     pub(crate) boot: String,
@@ -104,6 +105,7 @@ impl Host {
             pot_runtime_execution::Limits::load(data)?,
         )?;
         Ok(Self {
+            changes: Default::default(),
             executions,
             data: data.into(),
             token: id(),
@@ -122,6 +124,10 @@ impl Host {
         self.host_execution = Some(Arc::new(execution_target::HostExecution::default()));
     }
     pub(crate) fn attach_sandboxes(&mut self, manager: Arc<sandbox::Manager>) {
+        manager.changed.bind(self.changes.clone(), "machines");
+        if let Some(resources) = &manager.resources {
+            resources.ui_changed.bind(self.changes.clone(), "resources");
+        }
         self.sandboxes = Some(manager);
     }
     pub fn sandbox_manager(&self) -> Option<Arc<sandbox::Manager>> {
@@ -172,7 +178,7 @@ impl Host {
             boot_id: self.boot.clone(),
         }
     }
-    fn authorize(&self, h: &HeaderMap) -> ApiResult<()> {
+    pub(crate) fn authorize(&self, h: &HeaderMap) -> ApiResult<()> {
         if h.contains_key("origin")
             || h.get("authorization").and_then(|h| h.to_str().ok())
                 != Some(&format!("Bearer {}", self.token))
@@ -195,7 +201,9 @@ impl Host {
         })
     }
     pub fn router(&self) -> Router {
-        let mut routes = Router::new().route("/api/v1/runtime", get(describe));
+        let mut routes = Router::new()
+            .route("/api/v1/changes", get(crate::changes::events))
+            .route("/api/v1/runtime", get(describe));
         if !self.assistant_enabled && (self.host_enabled || self.sandboxes.is_some()) {
             routes = routes
                 .route("/api/v1/execution_targets", get(execution_target_inventory))
@@ -233,6 +241,9 @@ impl Host {
     }
     pub fn executions(&self) -> &pot_runtime_execution::Manager {
         &self.executions
+    }
+    pub(crate) fn stop_receiver(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.stop.subscribe()
     }
     pub fn request_stop(&self) {
         self.executions.stop();

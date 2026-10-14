@@ -25,6 +25,7 @@ struct Book {
     requests: BTreeMap<String, Request>,
 }
 pub struct Hub {
+    pub(crate) ui_changed: pot_core::changes::Signal,
     images: Arc<Images>,
     path: PathBuf,
     book: Mutex<Book>,
@@ -48,6 +49,7 @@ impl Hub {
             }
         }
         let hub = Arc::new(Self {
+            ui_changed: Default::default(),
             images: Arc::new(Images::open(
                 data.parent().unwrap_or(data).join("resource-cache"),
             )?),
@@ -60,7 +62,9 @@ impl Hub {
         Ok(hub)
     }
     fn save(&self, book: &Book) -> Result<()> {
-        pot_sandbox::private_json(&self.path, &serde_json::to_value(book)?)
+        pot_sandbox::private_json(&self.path, &serde_json::to_value(book)?)?;
+        self.ui_changed.notify();
+        Ok(())
     }
     fn pin(&self, id: &str) -> Result<String> {
         let mut book = self.book.lock().unwrap();

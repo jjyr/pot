@@ -85,6 +85,7 @@ pub fn router(s: Service) -> Router {
             get(schedules::list).post(schedules::command),
         )
         .route("/api/v1/tasks/{id}", get(tasks::snapshot))
+        .route("/api/v1/tasks/{id}/events", get(tasks::events))
         .route("/api/v1/tasks/{id}/messages", post(tasks::input))
         .route("/api/v1/tasks/{id}/interrupt", post(tasks::interrupt))
         .route("/api/v1/tasks/{id}/cancel", post(tasks::cancel))

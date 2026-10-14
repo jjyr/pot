@@ -209,7 +209,10 @@ async fn logout(State(a): State<Access>, h: HeaderMap) -> Response {
     )
 }
 fn allowed(method: &Method, path: &str) -> bool {
-    if matches!(path, "/api/v1/runtime" | "/api/v1/machines") {
+    if matches!(
+        path,
+        "/api/v1/runtime" | "/api/v1/machines" | "/api/v1/changes" | "/api/v1/machines/watch"
+    ) {
         return *method == Method::GET;
     }
     if path == "/api/v1/machine-connections" {
@@ -273,7 +276,8 @@ fn allowed(method: &Method, path: &str) -> bool {
     if parts.len() >= 5 && parts[..4] == ["", "api", "v1", "tasks"] && !parts[4].is_empty() {
         return (*method == Method::GET
             && (parts.len() == 5
-                || (parts.len() == 6 && matches!(parts[5], "files" | "file-download"))))
+                || (parts.len() == 6
+                    && matches!(parts[5], "files" | "file-download" | "events"))))
             || (*method == Method::POST
                 && parts.len() == 6
                 && matches!(parts[5], "messages" | "cancel" | "interrupt"));
@@ -357,6 +361,7 @@ async fn assets(State(a): State<Access>, req: Request) -> Response {
         "/icon-512.png" => ("icon-512.png", "image/png"),
         "/install.js" => ("install.js", "text/javascript"),
         "/auth.js" => ("auth.js", "text/javascript"),
+        "/events.js" => ("events.js", "text/javascript"),
         "/style.css" => ("style.css", "text/css"),
         "/pkg/pot_web_ui.js" => ("pkg/pot_web_ui.js", "text/javascript"),
         "/pkg/pot_web_ui_bg.wasm" => ("pkg/pot_web_ui_bg.wasm", "application/wasm"),
@@ -550,6 +555,14 @@ mod tests {
     }
     #[test]
     fn allowlist_excludes_management_and_terminal() {
+        assert!(allowed(&Method::GET, "/api/v1/changes"));
+        assert!(allowed(&Method::GET, "/api/v1/machines/watch"));
+        assert!(!allowed(&Method::POST, "/api/v1/machines/watch"));
+        assert!(!allowed(&Method::POST, "/api/v1/changes"));
+        assert!(allowed(
+            &Method::GET,
+            "/api/v1/assistants/main/tasks/id/events"
+        ));
         assert!(allowed(&Method::POST, "/api/v1/messages"));
         assert!(allowed(&Method::POST, "/api/v1/machine-connections"));
         assert!(allowed(&Method::GET, "/api/v1/assistants/main/completions"));

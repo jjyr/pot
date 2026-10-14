@@ -59,44 +59,53 @@ pub fn render(
                 ))
             })
             .child(
-                pages::segments(cx).children(
-                    [
-                        (
-                            "active",
-                            catalog.text("main.ongoing"),
-                            view.task_page.counts.active,
+                div()
+                    .flex()
+                    .items_center()
+                    .flex_wrap()
+                    .gap_3()
+                    .child(
+                        pages::segments(cx).children(
+                            [
+                                (
+                                    "active",
+                                    catalog.text("main.ongoing"),
+                                    view.task_page.counts.active,
+                                ),
+                                (
+                                    "attention",
+                                    catalog.text("main.needs-attention"),
+                                    view.task_page.counts.attention,
+                                ),
+                                (
+                                    "archived",
+                                    catalog.text("main.archived"),
+                                    view.task_page.counts.archived,
+                                ),
+                            ]
+                            .into_iter()
+                            .map(|(scope, label, count)| {
+                                Button::new(SharedString::from(format!("task-scope-{scope}")))
+                                    .ghost()
+                                    .when(!layout.native, |b| b.min_h(px(44.)))
+                                    .small()
+                                    .toggled(view.task_query.scope == scope)
+                                    .label(format!("{label} {count}"))
+                                    .when(view.task_query.scope == scope, |b| {
+                                        b.bg(design::surface(cx)).shadow_sm()
+                                    })
+                                    .on_click(pages::on(&handler, "task-filter", json!(scope)))
+                            }),
                         ),
-                        (
-                            "attention",
-                            catalog.text("main.needs-attention"),
-                            view.task_page.counts.attention,
+                    )
+                    .child(
+                        div().flex_1().min_w(px(180.)).child(
+                            Input::new(search)
+                                .small()
+                                .when(!layout.native, |input| input.h(px(44.)))
+                                .aria_label(catalog.text("main.search-task-title-or-id")),
                         ),
-                        (
-                            "archived",
-                            catalog.text("main.archived"),
-                            view.task_page.counts.archived,
-                        ),
-                    ]
-                    .into_iter()
-                    .map(|(scope, label, count)| {
-                        Button::new(SharedString::from(format!("task-scope-{scope}")))
-                            .ghost()
-                            .when(!layout.native, |b| b.min_h(px(44.)))
-                            .small()
-                            .toggled(view.task_query.scope == scope)
-                            .label(format!("{label} {count}"))
-                            .when(view.task_query.scope == scope, |b| {
-                                b.bg(cx.theme().secondary)
-                            })
-                            .on_click(pages::on(&handler, "task-filter", json!(scope)))
-                    }),
-                ),
-            )
-            .child(
-                Input::new(search)
-                    .small()
-                    .when(!layout.native, |input| input.h(px(44.)))
-                    .aria_label(catalog.text("main.search-task-title-or-id")),
+                    ),
             )
             .when(!view.error.is_empty() && view.connected, |el| {
                 el.child(
@@ -335,6 +344,7 @@ pub fn render(
             )
             .child(
                 div()
+                    .when(view.task_page.total == 0, |el| el.invisible())
                     .flex()
                     .items_center()
                     .justify_between()

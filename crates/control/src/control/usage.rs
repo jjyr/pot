@@ -23,6 +23,7 @@ pub async fn policy(
         .unwrap()
         .set_policy(&p)
         .map_err(|e| error(StatusCode::BAD_REQUEST, "usage_policy", &e.to_string()))?;
+    s.invalidate("usage");
     Ok(Json(json!({"saved":true})))
 }
 
@@ -43,6 +44,7 @@ pub async fn resume(
         .execute("UPDATE waits SET released=1 WHERE scope=?", [&r.scope])
         .map(|_| ())
         .map_err(|e| internal(e.into()))?;
+    s.invalidate("usage");
     Ok(Json(json!({"resumed":true})))
 }
 

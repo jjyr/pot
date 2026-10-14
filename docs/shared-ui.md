@@ -33,7 +33,7 @@ Linux backend CI. Native and WASM clients enable presentation for their targets.
 The shared layer receives protocol data and dispatches actions; it never fetches
 an endpoint, reads a native token, retrieves a browser Token or changes OS settings.
 
-App supplies ureq transport, native navigation/history, native file-save actions,
+App supplies in-process/HTTP request and SSE transports, native navigation/history, native file-save actions,
 its running-task summary extension, AppKit/Swift input and editor storage. Mobile
 supplies same-origin fetch/cookies, browser history, GPUI Textarea editor entities,
 Token/PWA and the mobile navigation shell. Browser JS delegates pending
@@ -119,5 +119,31 @@ Enter accepting a result does not send the message. Input-method composition is
 left to the platform. Drafts and exact send retries include reference text.
 See [Agent context](agent-context.md#message-references-and-machine-labels) for scope.
 
-Machines shows each machine's labels; Connections provides a space-separated
-label field and explicit Save for each machine. Resource creation stays API-only.
+The native Machines page connects only to Control through the Cloud section's
+Connect server entry. It has no duplicate global Connect machine button. Each
+remote Control group offers Add execution machine for Control-owned invitations
+and membership management. Runner enrollment remains an outbound join to Control;
+the App never connects directly to a Runner. The server address form contains only
+Control connection fields, and backend validation rejects non-Control endpoints.
+
+Machines shows each machine's labels. Edit labels lives inside each machine's
+settings disclosure and opens a dedicated sheet for that machine. Label and
+membership commands target the selected group's backend, independently of the
+active chat location. The label sheet renders labels as removable
+chips; spaces, commas and Enter commit a draft, duplicates and empty labels are ignored,
+and Backspace on an empty draft removes the last chip. Pasted lists use the same
+delimiters. Blur and Save commit any remaining draft, and explicit Save persists the
+machine's labels. Nonempty drafts offer matching labels from the machine directory
+and standard `task-runner`, `desktop`, `macos`, `linux` and `windows` labels, excluding
+already selected labels. Prefix matches rank first; Up/Down and Enter select a
+suggestion, Escape dismisses suggestions, and custom labels remain supported.
+IME composition is not tokenized until committed. Private CA input is
+under a collapsed Advanced connection options disclosure; folding it preserves the PEM.
+Permissions and resource limits are
+collapsed behind the machine settings disclosure. Resource creation stays API-only.
+
+## Event-driven updates
+
+Native and Web use coalesced Control invalidations and conversation SSE instead of
+healthy-state UI polling. See [UI events](ui-events.md) for scope, cursor/snapshot
+ordering, cancellation, recovery and the remaining backend lifecycle monitor.

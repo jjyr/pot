@@ -352,6 +352,7 @@ struct Receipt {
 }
 
 pub(crate) struct Authority {
+    pub(super) ui_changed: pot_core::changes::Signal,
     identity: Identity,
     key: signature::Ed25519KeyPair,
     data: PathBuf,
@@ -449,6 +450,7 @@ impl Authority {
             }
         };
         Ok(Arc::new(Self {
+            ui_changed: Default::default(),
             identity,
             key,
             data: data.into(),
@@ -479,7 +481,23 @@ impl Authority {
         let mut next = committed.clone();
         let result = change(&mut next)?;
         self.save(&next)?;
+        let projection = |book: &Book| {
+            let mut value =
+                json!({"members":book.members,"control":book.control,"local_tags":book.local_tags});
+            if let Some(members) = value["members"].as_object_mut() {
+                for member in members.values_mut() {
+                    if let Some(object) = member.as_object_mut() {
+                        object.remove("last_seen_ms");
+                    }
+                }
+            }
+            value
+        };
+        let changed = projection(&committed) != projection(&next);
         *committed = next;
+        if changed {
+            self.ui_changed.notify();
+        }
         Ok(result)
     }
     fn sign<T: Serialize>(&self, payload: T) -> Result<Signed<T>> {

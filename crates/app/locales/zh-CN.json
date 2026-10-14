@@ -1,4 +1,7 @@
 {
+  "ui.execution-limits": "执行限制",
+  "settings.shortcuts.parent": "返回上一级",
+  "settings.shortcuts.new-line": "换行",
   "ui.retry": "重试",
   "ui.leave-blank-to-keep-the-saved-key": "留空保留已保存的密钥",
   "ui.enter-a-value": "请输入",
@@ -9,7 +12,7 @@
   "ui.keyboard-shortcuts": "快捷键",
   "ui.back-forward-d-sandbox-settings-shift-enter": "⌘[ 返回上一级 · ⌘D 机器 · ⌘, 设置 · Shift+Enter 换行",
   "ui.concurrent-tasks": "同时处理的任务数",
-  "ui.default-5-range-1-1000-apply-global": "默认：5；范围：1–1000。重启 Pot 后应用全局限制。",
+  "ui.concurrent-tasks-hint": "默认：8；范围：1–1000。重启 Pot 后应用全局限制。",
   "ui.periodic-token-allowance": "周期 Token 额度",
   "ui.set-allowance-and-automatic-resume": "设置额度与自动继续 →",
   "ui.lifetime-request-limit": "累计请求上限",
@@ -770,7 +773,7 @@
   "files.save-title": "保存文件",
   "files.download-failed": "文件下载失败",
   "files.assistant-changed": "助手已切换，请重新点击文件链接。",
-  "machines.tags": "标签（空格分隔）",
+  "machines.tags": "标签（空格或逗号分隔）",
   "machines.save-tags": "保存标签",
   "navigation.back-tasks": "返回任务列表（⌘[）",
   "navigation.back-schedules": "返回定时任务列表（⌘[）",
@@ -807,5 +810,10 @@
   "spaces.stale": "状态未更新",
   "spaces.identity-changed": "Space 身份已改变，请从所属 Space 重新打开。",
   "spaces.reply": "助手回复",
-  "spaces.wait-send": "请等待当前消息发送完成。"
+  "spaces.wait-send": "请等待当前消息发送完成。",
+  "machines.advanced-connection": "高级连接选项",
+  "machines.remove-tag": "删除标签 {}",
+  "machines.edit-tags": "编辑标签",
+  "machines.add-executor": "添加执行机器",
+  "machines.join-instructions": "在此 Control 创建加入邀请，再到执行机器上使用邀请加入。执行机器连接到 Control，加入后会显示在此分组中。"
 }

@@ -351,8 +351,8 @@ pub(crate) fn deliver(s: &Service) -> Result<()> {
         user_message_id: mid,
         cancelling: false,
     });
-    let _ = s.conversation.events.send(event);
-    let _ = s.conversation.events.send(Event {
+    s.publish(event);
+    s.publish(Event {
         event_id: id(),
         cursor: None,
         kind: EventKind::Turn {

@@ -388,7 +388,7 @@ pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Resul
                 created_at_ms: now(),
                 request_id: None,
             })?;
-            let _ = s.conversation.events.send(event);
+            s.publish(event);
             entry.consumed = true;
         }
     }
@@ -407,7 +407,7 @@ pub(crate) fn acknowledge(s: &Service, generation: u64, ids: &[String]) -> Resul
                 created_at_ms: mail.created,
                 request_id: None,
             })?;
-            let _ = s.conversation.events.send(event);
+            s.publish(event);
             mail.consumed = true;
         }
     }

@@ -41,7 +41,12 @@ fn profile_brand<'a>(state: &'a Value, profile: &'a Value) -> &'a str {
 }
 
 impl Settings {
-    pub(super) fn render_ai(&self, state: &Value, cx: &mut Context<Shell>) -> Div {
+    pub(super) fn render_ai(
+        &self,
+        state: &Value,
+        location: Option<Div>,
+        cx: &mut Context<Shell>,
+    ) -> Div {
         let busy = state["ai_busy"] == true;
         let screen = state["ai_screen"].as_str().unwrap_or("main");
         let mut body = div()
@@ -215,7 +220,7 @@ impl Settings {
             let check_fields = self.fields.clone();
             let mut actions = div().flex().flex_wrap().justify_end().gap_2();
             {
-                actions = actions.child(Button::new("ai-api-check").small().label(if busy {crate::i18n::text("ui.working")} else {crate::i18n::text("ai.check-connection")})
+                actions = actions.child(Button::new("ai-api-check").small().label(crate::i18n::text("ai.check-connection"))
                     .disabled(busy).on_click(move |_, _, cx| command(json!({"action":"ai-api-check","endpoint":check_fields[14].read(cx).value(),"key":check_fields[15].read(cx).value()}))));
             }
             actions = actions.child(Button::new("ai-save-connection").primary().small().label(if state["active_spec"]["model"].as_str().is_none() && state["routing_owner"] == "main" {
@@ -309,6 +314,7 @@ impl Settings {
                                 .disabled(busy),
                         ),
                 );
+            let no_profiles = profiles.is_empty();
             let active = &state["active_spec"];
             if screen == "main" {
                 let active_profile = profiles
@@ -355,12 +361,13 @@ impl Settings {
                                         .label(if active["model"].as_str().is_some() {
                                             crate::i18n::text("ai.change")
                                         } else {
-                                            crate::i18n::text("ui.settings")
+                                            crate::i18n::text("ai.connect-agent")
                                         })
-                                        .disabled(busy || profiles.is_empty())
-                                        .on_click(|_, _, _| {
+                                        .when(no_profiles, |b| b.primary())
+                                        .disabled(busy)
+                                        .on_click(move |_, _, _| {
                                             command(
-                                                json!({"action":"ai-screen","screen":"main-edit"}),
+                                                json!({"action":"ai-screen","screen":if no_profiles { "add" } else { "main-edit" }}),
                                             )
                                         }),
                                 ),
@@ -478,7 +485,7 @@ impl Settings {
             background["ai_screen"] = json!("main");
             background["ai_busy"] = json!(true);
             background["design_underlay"] = json!(true);
-            let main = self.render_ai(&background, cx);
+            let main = self.render_ai(&background, location, cx);
             return div().relative().size_full().child(main).child(
                 div().id("ai-config-overlay").absolute().inset_0().bg(cx.theme().background.opacity(0.84))
                     .on_key_down(move |event, _, cx| {
@@ -506,30 +513,11 @@ impl Settings {
         }
         page(cx).child(
             content()
-                .child(title(crate::i18n::text("ui.ai-configuration")))
-                .child(
-                    segments(cx).flex_wrap().children(
-                        [
-                            (0, crate::i18n::text("ui.general")),
-                            (1, crate::i18n::text("ui.ai-configuration")),
-                            (4, crate::i18n::text("ui.task-configuration")),
-                            (5, crate::i18n::text("web.title")),
-                            (6, crate::i18n::text("tailscale.title")),
-                        ]
-                        .into_iter()
-                        .map(|(i, label)| {
-                            Button::new(("ai-tab", i as usize))
-                                .ghost()
-                                .small()
-                                .label(label)
-                                .toggled(i == 1)
-                                .disabled(busy)
-                                .on_click(move |_, _, _| {
-                                    command(json!({"action":"section","value":i}))
-                                })
-                        }),
-                    ),
-                )
+                .child(super::settings_header(1, busy, location, cx))
+                .child(hint(
+                    crate::i18n::text("ui.connect-an-agent-and-choose-the-model"),
+                    cx,
+                ))
                 .when(screen != "main", |el| {
                     el.child(
                         Button::new("ai-back")

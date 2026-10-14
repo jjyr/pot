@@ -124,9 +124,26 @@ pub fn title_tooltip(title: String, window: &mut Window, cx: &mut App) -> AnyVie
     .build(window, cx)
 }
 
+/// Keep tooltip lifetime tied to its trigger, including native rail navigation.
+pub fn action_tooltip(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    button: Button,
+) -> Stateful<Div> {
+    let label = label.into();
+    div()
+        .id(id)
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+        })
+        .child(button)
+}
+
 pub fn page(layout: Layout, cx: &App) -> Div {
     div()
         .size_full()
+        .min_h_0()
+        .min_w_0()
         .pl(px(if layout.native { SIDEBAR } else { 0. }))
         .bg(cx.theme().background)
         .text_color(cx.theme().foreground)
@@ -140,6 +157,8 @@ pub fn page(layout: Layout, cx: &App) -> Div {
 pub fn content(layout: Layout) -> Div {
     div()
         .size_full()
+        .min_h_0()
+        .min_w_0()
         .max_w(px(PAGE_WIDTH))
         .mx_auto()
         .px_8()
@@ -193,19 +212,18 @@ pub fn form(cx: &App) -> Form {
     (if design::compact(cx) {
         Form::vertical()
     } else {
-        Form::horizontal().label_width(px(144.))
+        Form::horizontal().label_width(px(184.))
     })
     .small()
     .gap_4()
 }
 pub fn field(label: impl Into<SharedString>) -> Field {
     let label = label.into();
-    Field::new().label_fn(move |_, cx| {
+    Field::new().label_fn(move |_, _cx| {
         div()
             .w_full()
             .text_size(px(14.))
             .font_weight(FontWeight::MEDIUM)
-            .when(!design::compact(cx), |el| el.text_right())
             .child(label.clone())
     })
 }
@@ -260,7 +278,7 @@ pub fn notice(text: impl Into<SharedString>, error: bool, cx: &App) -> Div {
     let color = if error {
         cx.theme().danger
     } else {
-        design::attention(cx)
+        cx.theme().muted_foreground
     };
     div()
         .w_full()

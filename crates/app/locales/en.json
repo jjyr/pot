@@ -1,4 +1,7 @@
 {
+  "ui.execution-limits": "Execution limits",
+  "settings.shortcuts.parent": "Parent page",
+  "settings.shortcuts.new-line": "New line",
   "ui.retry": "Retry",
   "ui.leave-blank-to-keep-the-saved-key": "Leave blank to keep the saved key",
   "ui.enter-a-value": "Enter a value",
@@ -9,7 +12,7 @@
   "ui.keyboard-shortcuts": "Keyboard shortcuts",
   "ui.back-forward-d-sandbox-settings-shift-enter": "⌘[ Parent page · ⌘D Machines · ⌘, Settings · Shift+Enter New line",
   "ui.concurrent-tasks": "Concurrent tasks",
-  "ui.default-5-range-1-1000-apply-global": "Default: 5; range: 1–1000. Apply global limits by restarting Pot.",
+  "ui.concurrent-tasks-hint": "Default: 8; range: 1–1000. Apply global limits by restarting Pot.",
   "ui.periodic-token-allowance": "Periodic token allowance",
   "ui.set-allowance-and-automatic-resume": "Set allowance and automatic resume →",
   "ui.lifetime-request-limit": "Lifetime request limit",
@@ -770,7 +773,7 @@
   "files.save-title": "Save file",
   "files.download-failed": "File download failed",
   "files.assistant-changed": "Assistant changed; click the file link again.",
-  "machines.tags": "Labels (space-separated)",
+  "machines.tags": "Labels (separated by spaces or commas)",
   "machines.save-tags": "Save labels",
   "navigation.back-tasks": "Back to Tasks (⌘[)",
   "navigation.back-schedules": "Back to Schedules (⌘[)",
@@ -807,5 +810,10 @@
   "spaces.stale": "Status not updated",
   "spaces.identity-changed": "Space identity changed. Reopen the object from its Space.",
   "spaces.reply": "Reply from assistant",
-  "spaces.wait-send": "Wait for the current message to finish sending."
+  "spaces.wait-send": "Wait for the current message to finish sending.",
+  "machines.advanced-connection": "Advanced connection options",
+  "machines.remove-tag": "Remove label {}",
+  "machines.edit-tags": "Edit labels",
+  "machines.add-executor": "Add execution machine",
+  "machines.join-instructions": "Create an invitation on this Control, then use it on the execution machine to join. The machine connects to Control and appears here after joining."
 }

@@ -10,20 +10,23 @@ use gpui_kit::component::{
 };
 use serde_json::{Value, json};
 
-pub fn badge(space: &Space, context: &str) -> Button {
-    Button::new(SharedString::from(format!(
-        "space-badge-{}-{context}",
-        space.id
-    )))
-    .ghost()
-    .small()
-    .icon(if space.mode == "local" {
-        gpui_kit::assets::IconName::Monitor
-    } else {
-        gpui_kit::assets::IconName::Cloud
-    })
-    .tooltip(space.label())
-    .accessibility_label(space.label())
+pub fn badge(space: &Space, context: &str) -> Stateful<Div> {
+    pot_ui::pages::action_tooltip(
+        SharedString::from(format!("space-tip-{}-{context}", space.id)),
+        space.label(),
+        Button::new(SharedString::from(format!(
+            "space-badge-{}-{context}",
+            space.id
+        )))
+        .ghost()
+        .small()
+        .icon(if space.mode == "local" {
+            gpui_kit::assets::IconName::Monitor
+        } else {
+            gpui_kit::assets::IconName::Cloud
+        })
+        .accessibility_label(space.label()),
+    )
 }
 impl Shell {
     pub fn capture_chat(&self) -> Option<(Owner, String)> {
@@ -193,10 +196,12 @@ impl Shell {
             div()
                 .flex()
                 .justify_between()
-                .child(ui::title(crate::i18n::text("spaces.assistants")))
+                .items_center()
+                .child(ui::hint(crate::i18n::text("spaces.assistants"), cx))
                 .child(
                     Button::new("assistant-new-top")
                         .primary()
+                        .small()
                         .icon(IconName::Plus)
                         .label(crate::i18n::text("assistant.new"))
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -272,7 +277,19 @@ impl Shell {
                                 owner.key()
                             )))
                             .ghost()
-                            .label(label)
+                            .accessibility_label(label.clone())
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(gpui_kit::component::Icon::new(
+                                        gpui_kit::assets::IconName::MessageCircle,
+                                    ))
+                                    .child(label),
+                            )
+                            .h(px(52.))
                             .flex_1()
                             .on_click(cx.listener(
                                 move |this, _, window, cx| {
@@ -310,50 +327,11 @@ impl Shell {
         }
         ui::page(cx).child(body)
     }
-    pub fn usage_breakdown(&self, cx: &mut Context<Self>) -> Div {
-        let query = (
-            self.usage_ui.days,
-            self.native["timezone"]
-                .as_str()
-                .unwrap_or("Asia/Shanghai")
-                .to_owned(),
-        );
-        div()
-            .ml(px(56.))
-            .px_8()
-            .flex()
-            .flex_wrap()
-            .gap_4()
-            .children(
-                self.space_directory
-                    .spaces
-                    .values()
-                    .filter(|s| self.usage_location.is_empty() || self.usage_location == s.mode)
-                    .map(|s| {
-                        let value = if s.usage_query.as_ref() == Some(&query) {
-                            format!(
-                                "{} tokens",
-                                crate::usage_ui::count(
-                                    s.usage["total"]["input"].as_u64().unwrap_or(0)
-                                        + s.usage["total"]["output"].as_u64().unwrap_or(0)
-                                )
-                            )
-                        } else {
-                            crate::i18n::text("client.loading").into()
-                        };
-                        ui::hint(
-                            format!(
-                                "{} · {value}{}",
-                                s.label(),
-                                if s.error.is_empty() { "" } else { " · ⚠" }
-                            ),
-                            cx,
-                        )
-                    }),
-            )
-    }
     pub fn location_bar(&self, purpose: &'static str, cx: &mut Context<Self>) -> Div {
         let mut row = div()
+            .w_full()
+            .max_w(px(pot_ui::pages::PAGE_WIDTH))
+            .mx_auto()
             .px_8()
             .py_2()
             .flex()
@@ -367,6 +345,9 @@ impl Shell {
                     .small()
                     .label(crate::i18n::text("spaces.all"))
                     .toggled(self.usage_location.is_empty())
+                    .when(self.usage_location.is_empty(), |b| {
+                        b.bg(pot_ui::design::navigation(cx))
+                    })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.usage_location.clear();
                         this.usage_ui.group_offset = 0;
@@ -390,6 +371,7 @@ impl Shell {
                 .small()
                 .label(space.label())
                 .toggled(selected)
+                .when(selected, |b| b.bg(pot_ui::design::navigation(cx)))
                 .disabled(purpose != "usage" && !space.error.is_empty())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if purpose == "usage" {
@@ -416,34 +398,60 @@ impl Shell {
                 })),
             );
         }
-        row
+        if purpose == "settings" || purpose == "create" {
+            row.w_auto().mx_0().p_0()
+        } else {
+            div().pl(px(56.)).flex_shrink_0().child(row)
+        }
     }
     pub fn render_spaces_machines(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let view = self.client.view.lock().unwrap().clone();
         let base = self.page_handler(cx);
+        let connection_mode = self.machine_connections.mode.clone();
+        let connection_directory = connection_mode
+            .as_ref()
+            .and_then(|mode| self.space_directory.spaces.get(mode))
+            .map(|space| space.machines.clone())
+            .unwrap_or_else(|| view.machines.clone());
+        let connection_base = base.clone();
+        let connection_handler: pot_ui::pages::Handler =
+            std::rc::Rc::new(move |event, window, cx| {
+                let mut event = event.clone();
+                if event.kind == "machine-command" {
+                    if let Some(mode) = &connection_mode {
+                        event.value["mode"] = json!(mode);
+                    }
+                }
+                connection_base(&event, window, cx);
+            });
         let connections = self.machine_connections.render(
             pot_ui::machine_connections::View {
                 client: Some(&backend::control_projection()),
-                directory: &view.machines,
+                directory: &connection_directory,
                 selected: &self.machine_selection,
                 reply: &view.machine_reply,
                 pending: view.machine_pending,
             },
             self.catalog(),
-            base.clone(),
+            connection_handler,
             window,
             cx,
         );
         let mut body = div()
-            .px_8()
-            .py_4()
             .id("spaces-machines")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .flex()
             .flex_col()
-            .child(connections);
+            .gap_5();
+        if self.space_directory.spaces.is_empty() {
+            body = body.child(ui::card(cx).child(ui::empty(
+                IconName::Inbox,
+                crate::i18n::text("machines.loading"),
+                cx,
+            )));
+        }
         for space in self.space_directory.spaces.values() {
             let base = base.clone();
             let source = space.clone();
@@ -464,6 +472,14 @@ impl Shell {
             };
             let handler: pot_ui::pages::Handler = std::rc::Rc::new(cx.listener(
                 move |this, event: &pot_ui::pages::PageAction, window, cx| {
+                    if event.kind == "machine-labels" {
+                        this.machine_connections.mode = Some(source.mode.clone());
+                        this.machine_connections
+                            .edit_labels(event.value.as_str().unwrap_or_default().to_owned());
+                        this.client.view.lock().unwrap().machine_reply = Value::Null;
+                        cx.notify();
+                        return;
+                    }
                     if event.kind == "machine-select" {
                         this.machine_selection =
                             json!({"space_id":source.id,"execution_target":event.value});
@@ -512,10 +528,37 @@ impl Shell {
             ));
             body = body.child(
                 div()
-                    .pt_4()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .child(ui::section(space.label()))
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(ui::hint(space.label(), cx))
+                            .when(
+                                space.mode == "remote"
+                                    && space.machines["control_authority"]["role"] == "control",
+                                |el| {
+                                    let mode = space.mode.clone();
+                                    el.child(
+                                        Button::new("add-execution-machine")
+                                            .small()
+                                            .icon(IconName::Plus)
+                                            .disabled(!space.error.is_empty())
+                                            .label(crate::i18n::text("machines.add-executor"))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.machine_connections.mode = Some(mode.clone());
+                                                this.machine_connections.manage_members();
+                                                this.client.view.lock().unwrap().machine_reply =
+                                                    Value::Null;
+                                                cx.notify();
+                                            })),
+                                    )
+                                },
+                            ),
+                    )
                     .when(!space.error.is_empty(), |el| {
                         el.child(ui::notice(
                             format!("{} · {}", crate::i18n::text("spaces.stale"), space.error),
@@ -550,19 +593,36 @@ impl Shell {
                     .pt_4()
                     .border_t_1()
                     .border_color(cx.theme().border)
-                    .child(ui::section(crate::i18n::text("spaces.cloud")))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(ui::hint(crate::i18n::text("spaces.cloud"), cx))
                     .child(
                         Button::new("cloud-connect")
-                            .ghost()
+                            .small()
                             .label(crate::i18n::text("onboarding.connect-server"))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.machine_connections.open = true;
+                                this.machine_connections.connect();
                                 cx.notify();
                             })),
                     ),
             );
         }
-        ui::page(cx).flex().flex_col().child(body)
+        ui::page(cx)
+            .relative()
+            .child(
+                ui::content()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .flex_shrink_0()
+                            .child(ui::hint(crate::i18n::text("machines.title"), cx)),
+                    )
+                    .child(body),
+            )
+            .when(self.machine_connections.open, |el| el.child(connections))
     }
     pub fn render_space_schedules(&self, cx: &mut Context<Self>) -> Div {
         let mut entries = vec![];
@@ -588,7 +648,14 @@ impl Shell {
             .id("spaces-schedules")
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .when(total == 0, |el| {
+                el.child(ui::empty(
+                    IconName::Inbox,
+                    crate::i18n::text("schedules-ui.no-schedules-yet-tell-pot-what-to"),
+                    cx,
+                ))
+            });
         for (space, owner, plan) in entries.into_iter().skip(offset).take(20) {
             let name = space.assistants["assistants"]
                 .as_array()
@@ -637,13 +704,16 @@ impl Shell {
             ui::content()
                 .child(crate::schedules_ui::navigation(true, cx))
                 .child(list)
-                .child(ui::hint(format!("{total} · {}", offset / 20 + 1), cx))
+                .when(total > 0, |el| {
+                    el.child(ui::hint(format!("{total} · {}", offset / 20 + 1), cx))
+                })
                 .child(
                     div()
                         .flex()
                         .gap_2()
                         .child(
                             Button::new("all-schedules-prev")
+                                .when(total == 0, |el| el.invisible())
                                 .ghost()
                                 .label(crate::i18n::text("schedules-ui.previous"))
                                 .disabled(offset == 0)
@@ -655,6 +725,7 @@ impl Shell {
                         )
                         .child(
                             Button::new("all-schedules-next")
+                                .when(total == 0, |el| el.invisible())
                                 .ghost()
                                 .label(crate::i18n::text("schedules-ui.next-52"))
                                 .disabled(offset + 20 >= total)

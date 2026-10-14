@@ -107,6 +107,9 @@ pub async fn open(
     }
     host.attach_sandboxes(sandboxes.clone());
     let permissions = Arc::new(permissions::Hub::open(&data.join("permissions.json"))?);
+    permissions
+        .ui_changed
+        .bind(host.changes.clone(), "permissions");
     let s = Service {
         scope: OwnerScope {
             runtime_id: host.runtime_id().into(),
@@ -152,7 +155,11 @@ pub async fn open(
             executions: host.executions().clone(),
             #[cfg(test)]
             extensions: None,
-            resources: Arc::new(AgentResources::paths(&data)),
+            resources: Arc::new({
+                let mut resources = AgentResources::paths(&data);
+                resources.changes = host.changes.clone();
+                resources
+            }),
         },
         execution_service: ExecutionService {
             remote: Default::default(),

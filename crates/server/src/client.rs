@@ -1,7 +1,9 @@
 //! Client adapters share bounded replies; client and machine credentials are separate.
 use crate::{LocalClient, LocalReply};
 use anyhow::{Result, ensure};
+use futures_util::StreamExt;
 use serde_json::Value;
+pub type ByteStream = futures_util::stream::BoxStream<'static, Result<axum::body::Bytes>>;
 
 #[derive(Clone)]
 pub enum ClientTransport {
@@ -9,6 +11,27 @@ pub enum ClientTransport {
     Remote(RemoteClient),
 }
 impl ClientTransport {
+    pub async fn events(
+        &self,
+        path: &str,
+    ) -> Result<futures_util::stream::BoxStream<'static, Result<pot_protocol::sse::Frame>>> {
+        let mut bytes = self.stream(path).await?;
+        Ok(Box::pin(async_stream::try_stream! {
+            let mut decoder = pot_protocol::sse::Decoder::default();
+            while let Some(chunk) = bytes.next().await {
+                for frame in decoder.push(&chunk?).map_err(anyhow::Error::msg)? { yield frame; }
+            }
+            decoder.finish().map_err(anyhow::Error::msg)?;
+        }))
+    }
+
+    pub async fn stream(&self, path: &str) -> Result<ByteStream> {
+        match self {
+            Self::Local(client) => client.stream(path).await,
+            Self::Remote(client) => client.stream(path).await,
+        }
+    }
+
     pub async fn request(&self, path: &str, body: Option<Value>) -> Result<LocalReply> {
         match self {
             Self::Local(client) => client.request(path, body).await,
@@ -49,7 +72,8 @@ impl RemoteClient {
         ensure!(!token.is_empty(), "Client credential required");
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(std::time::Duration::from_secs(120));
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .read_timeout(std::time::Duration::from_secs(20));
         if let Some(ca) = ca_pem {
             builder = builder.add_root_certificate(reqwest::Certificate::from_pem(ca.as_bytes())?);
         }
@@ -58,6 +82,41 @@ impl RemoteClient {
             token,
             http: builder.build()?,
         })
+    }
+    pub async fn stream(&self, path: &str) -> Result<ByteStream> {
+        ensure!(
+            path.starts_with("/api/") && !path.contains(['#', '\\']),
+            "Invalid API path"
+        );
+        let endpoint = self.endpoint.join(path)?;
+        ensure!(
+            endpoint.origin() == self.endpoint.origin(),
+            "Client request cannot change origin"
+        );
+        let response = self
+            .http
+            .get(endpoint)
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+        ensure!(
+            response.status().is_success(),
+            "Subscription rejected: {}",
+            response.status()
+        );
+        anyhow::ensure!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.starts_with("text/event-stream")),
+            "Expected event stream"
+        );
+        Ok(Box::pin(
+            response
+                .bytes_stream()
+                .map(|chunk| chunk.map_err(Into::into)),
+        ))
     }
     pub async fn request(&self, path: &str, body: Option<Value>) -> Result<LocalReply> {
         ensure!(
@@ -74,7 +133,11 @@ impl RemoteClient {
         } else {
             reqwest::Method::GET
         };
-        let mut request = self.http.request(method, endpoint).bearer_auth(&self.token);
+        let mut request = self
+            .http
+            .request(method, endpoint)
+            .bearer_auth(&self.token)
+            .timeout(std::time::Duration::from_secs(120));
         if let Some(body) = body {
             request = request.json(&body);
         }

@@ -7,8 +7,16 @@ var bridge: PotBridge?
 /// GPUI renders chat. Native siblings own navigation, IME composer and desktop.
 @MainActor final class HostView: NSView {
     var resized: (() -> Void)?
+    private var previousBounds: NSRect?
     override func layout() {
-        super.layout(); resized?()
+        super.layout()
+        if previousBounds != bounds {
+            previousBounds = bounds; resized?(); wakeNativeUI()
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance(); wakeNativeUI()
     }
 }
 
@@ -46,9 +54,13 @@ var bridge: PotBridge?
         hovered = false; refresh()
     }
 
+    override var isHighlighted: Bool {
+        didSet { refresh() }
+    }
+
     func refresh() {
-        let color = selected ? NSColor.controlAccentColor
-            .withAlphaComponent(hovered ? 0.08 : 0) :
+        let color = isHighlighted ? NSColor.controlAccentColor.withAlphaComponent(0.20) :
+            selected ? NSColor.controlAccentColor.withAlphaComponent(hovered ? 0.05 : 0) :
             (hovered ? NSColor.labelColor.withAlphaComponent(0.07) : .clear)
         if lastBackground != color.cgColor {
             let previous = layer?.presentation()?.backgroundColor ?? layer?.backgroundColor
@@ -57,7 +69,7 @@ var bridge: PotBridge?
             if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let previous {
                 let animation = CABasicAnimation(keyPath: "backgroundColor")
                 animation.fromValue = previous; animation.toValue = color.cgColor
-                animation.duration = 0.14; layer?.add(animation, forKey: "selection")
+                animation.duration = isHighlighted ? 0 : 0.09; layer?.add(animation, forKey: "selection")
             }
         }
         contentTintColor = selected || hovered ? .controlAccentColor : .secondaryLabelColor
@@ -110,7 +122,7 @@ var bridge: PotBridge?
     let rootView: HostView
     let status: NSStatusItem
     let web: WKWebView
-    let rail = NSView()
+    let rail = NSVisualEffectView()
     let composer = Composer()
     let completionBox = NSStackView()
     var completionItems: [[String: String]] = []
@@ -167,6 +179,7 @@ var bridge: PotBridge?
     var sandboxDefault = "default"
     var sandboxBusy = false
     @LocalizedMessage var sandboxError = ""
+    var sandboxRefreshAgain = false
     var sandboxRefreshing = false
     var sandboxRefreshAt = Date.distantPast
     var desktopAttempt: String?
@@ -190,6 +203,7 @@ var bridge: PotBridge?
         host.contentView = rootView
         rootView.addSubview(gpuiView)
         rootView.addSubview(rail)
+        rail.material = .sidebar; rail.blendingMode = .behindWindow; rail.state = .followsWindowActiveState
         rail.wantsLayer = true
         railHighlight.wantsLayer = true; railHighlight.layer?.cornerRadius = 10
         rail.addSubview(railHighlight)
@@ -237,6 +251,8 @@ var bridge: PotBridge?
         placeholder.textColor = .placeholderTextColor; placeholder.font = .systemFont(ofSize: 15); composerBox
             .addSubview(placeholder)
         sendButton.target = self; sendButton.action = #selector(sendMessage); sendButton.isBordered = false
+        sendButton.title = ""
+        sendButton.image = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: nil)
         sendButton.wantsLayer = true; sendButton.layer?.cornerRadius = 16
         composerBox.addSubview(sendButton)
         rootView.resized = { [weak self] in self?.layout() }
@@ -300,10 +316,20 @@ var bridge: PotBridge?
         localRuntime = LocalRuntime(view: rootView, web: web)
         localRuntime?.onState = { [weak self] state in self?.runtimeChanged(state) }
         settings.load()
-        animation = Timer
-            .scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.updateIcon() }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+                     NSWindow.didChangeOcclusionStateNotification, NSWindow.didDeminiaturizeNotification]
+        {
+            NotificationCenter.default.addObserver(forName: name, object: host, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateIcon(); wakeNativeUI() }
             }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateIcon(); wakeNativeUI() }
+        }
         layout(); selectPage(page)
     }
 
@@ -443,7 +469,7 @@ var bridge: PotBridge?
         let height = min(150, max(48, used + 20))
         let boxFrame = NSRect(x: 56 + (area.width - width) / 2, y: 24, width: width, height: height)
         if composerBox.frame != boxFrame {
-            composerBox.frame = boxFrame
+            composerBox.frame = boxFrame; wakeNativeUI()
         }
         let scrollFrame = NSRect(x: 8, y: 2, width: width - 58, height: height - 4)
         if composerScroll.frame != scrollFrame {
@@ -468,7 +494,8 @@ var bridge: PotBridge?
         let sidebar = NSColor(white: dark ? 40.0 / 255 : 244.0 / 255, alpha: 1)
         host.backgroundColor = background
         rootView.layer?.backgroundColor = background.cgColor
-        rail.layer?.backgroundColor = sidebar.cgColor
+        rail.layer?.backgroundColor = sidebar
+            .withAlphaComponent(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.9).cgColor
         composerBox.layer?.backgroundColor = NSColor(white: dark ? 0.169 : 1, alpha: 1).cgColor
         composerBox.layer?.shadowColor = NSColor.black.cgColor
         composerBox.layer?.shadowOpacity = dark ? 0.12 : 0.04
@@ -608,7 +635,10 @@ var bridge: PotBridge?
 
     func selectPage(_ value: Int) {
         page = value; bridgeWake?(); web.isHidden = value != 1 || machinesDetail || localRuntime?.displayReady != true
-        gpuiView.isHidden = false; composerBox.isHidden = value != 0 && value != 3
+        gpuiView.isHidden = false
+        composerBox.isHidden = (value != 0 && value != 3) || lastUIState["task_list"] as? Bool == true ||
+            lastUIState["assistant_list"] as? Bool == true ||
+            (value == 0 && lastUIState["needs_configuration"] as? Bool == true)
         if value == 0 {
             host.makeFirstResponder(composer)
         }
@@ -777,7 +807,7 @@ var bridge: PotBridge?
                     chooseSandbox("default")
                 }
             } catch { sandboxError = error.localizedDescription }
-            sandboxBusy = false; refreshSandboxes(); localRuntime?.poll(); bridgeWake?()
+            sandboxBusy = false; refreshSandboxes(); localRuntime?.refreshState(); bridgeWake?()
         }
     }
 
@@ -925,10 +955,15 @@ var bridge: PotBridge?
     }
 
     func refreshSandboxes() {
-        guard !sandboxRefreshing else { return }
+        guard !sandboxRefreshing else { sandboxRefreshAgain = true; return }
         sandboxRefreshing = true; sandboxRefreshAt = Date()
         Task {
-            defer { sandboxRefreshing = false }
+            defer {
+                sandboxRefreshing = false
+                if sandboxRefreshAgain {
+                    sandboxRefreshAgain = false; refreshSandboxes()
+                }
+            }
             do {
                 let value = try await runtime.request("api/v1/sandboxes")
                 sandboxItems = value["items"] as? [[String: Any]] ?? []
@@ -1222,10 +1257,18 @@ var bridge: PotBridge?
             }
         }
         settings.refreshStatus()
-        layout()
+        updateIcon(); layout()
     }
 
     func updateIcon() {
+        let animate = running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if animate && animation == nil {
+            animation = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateIcon() }
+            }
+        } else if !animate {
+            animation?.invalidate(); animation = nil
+        }
         (navigation.first as? CompanionButton)?.update(cooking: running)
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let waiting = (snapshot["needs_configuration"] as? Bool ?? false)
@@ -1309,6 +1352,12 @@ var bridge: PotBridge?
         .assumeIsolated { Double(bridge?.composerBox.frame.height ?? 48) + 48 }
 }
 
+/// Coalesced by the Rust channel; asynchronous configuration updates must not
+/// wait for the geometry/snapshot fallback timer to become visible.
+@MainActor func wakeNativeUI() {
+    bridgeWake?()
+}
+
 private var bridgeWake: (@convention(c) () -> Void)?
 @_cdecl("pot_bridge_set_wake") public func setWake(_ callback: @escaping @convention(c) () -> Void) {
     bridgeWake = callback
@@ -1319,6 +1368,7 @@ private var bridgeWake: (@convention(c) () -> Void)?
         guard let bridge else { return 0 }
         let state: [String: Any] = [
             "page": bridge.page,
+            "visible": bridge.host.isVisible && bridge.host.occlusionState.contains(.visible),
             "timezone": TimeZone.current.identifier,
             "settings": bridge.settings.publicState,
             "viewer": bridge.viewer,
@@ -1345,6 +1395,30 @@ private var bridgeWake: (@convention(c) () -> Void)?
               let action = v["action"] as? String else { return }
         let settings = bridge.settings
         switch action {
+        case "backend-changed":
+            let domains = v["domains"] as? [String] ?? []
+            let mode = v["mode"] as? String ?? "local"
+            let matchesMode = (mode == "remote") == bridge.runtime.remoteMode
+            if mode == "local",
+               domains.contains(where: { $0 == "machines" || $0 == "resources" })
+            {
+                bridge.localRuntime?.refreshState()
+            }
+            if matchesMode {
+                if domains.contains(where: { $0 == "machines" || $0 == "resources" }) {
+                    bridge.refreshSandboxes()
+                }
+                if domains.contains(where: { $0 == "settings" || $0 == "settings/" + bridge.runtime.assistantID }),
+                   bridge.page == 2
+                {
+                    settings.configurationChanged()
+                    if settings.section == 1 {
+                        settings.refreshAI()
+                    } else if settings.section == 4 {
+                        settings.refreshRouting(preserveDraft: true)
+                    }
+                }
+            }
         case "resource-command": bridge.resourceCommand(
                 v["request_id"] as? String ?? "",
                 v["operation"] as? String ?? ""

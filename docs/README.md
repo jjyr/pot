@@ -18,6 +18,7 @@ is the single phase progress table.
 | Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
 | Sandbox execution and resources | [Providers](sandbox-providers.md), [executor](executor.md), [resources](sandbox-resources.md), [images](sandbox-image.md), [macOS](macos-sandbox.md) |
+| Event-driven updates and stream lifecycle | [UI events](ui-events.md) |
 | Shared UI, language and licenses | [Shared UI](shared-ui.md), [internationalization](internationalization.md), [licenses](licenses-and-about.md) |
 | Product goals | [Product](product-design.md) |
 
@@ -45,8 +46,9 @@ is the single phase progress table.
 
 Current [component boundaries and regression checks](validation/component-boundaries-20261011.md).
 
-Validation reports record date, method, results and limitations. They establish only
-the tested scope. Current distributed evidence: [membership](validation/control-membership-20261011.md),
+These historical reports establish only their recorded test scope. Do not add new
+validation reports to the repository; report checks and limitations in the task
+response instead. Historical distributed evidence: [membership](validation/control-membership-20261011.md),
 [App](validation/control-client-20261011.md), [Web](validation/control-web-20261011.md),
 [Machines](validation/machines-simple-20261011.md), [Chat downloads](validation/chat-file-downloads-20261011.md),
 [global resources](validation/control-global-resources-20261011.md),
@@ -56,8 +58,9 @@ the tested scope. Current distributed evidence: [membership](validation/control-
 [cross-machine clients](validation/control-cross-machine-ui-20261011.md),
 [notifications](validation/control-notifications-20261011.md),
 [final qualification](validation/control-final-qualification-20261011.md).
-Platform/executor reports remain under `validation/`; applicable platform research
-remains under `research/`. Superseded designs and reports are retained in Git history.
+Existing platform/executor reports are archived under `validation/`; applicable
+platform research remains under `research/`. Superseded designs and reports are
+retained in Git history.
 
 ## Maintenance
 
