@@ -18,7 +18,7 @@ Resources and build caches are under `.local/d1/`; rebuild/export the image and 
 
 Minimal Xfce uses `xfwm4`, `xfsettingsd`, `xfdesktop`, Thunar, Xfce Terminal, and a persistent bottom panel without login manager/screensaver/compositor. Warm-white Pot background, adw-gtk3 widgets, Adwaita icons; direct Browser/Files/Terminal launchers, window switching, and clock on the bottom panel, with the same apps in the context menu. Click Take over in Pot before interacting. Theme defaults migrate by version rather than overwriting user fonts/preferences at every startup.
 
-The neutral desktop wallpaper uses a subdued terracotta Pot Companion watermark matching the application identity.
+The neutral desktop wallpaper uses a subdued ochre Pot Companion watermark matching the application identity.
 
 Desktop startup shows the desktop and panel directly, without launching Chromium or a welcome webpage. Browser launches on demand from the panel/context menu or the viewer's Open browser action, initially at `about:blank`, using the persistent profile and loopback-only debugging port. Desktop shutdown still waits for any manually opened browser to exit. Rebuild/export the Sandbox image to apply this startup change to newly booted sandboxes.
 

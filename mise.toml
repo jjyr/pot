@@ -200,3 +200,11 @@ run = "python scripts/build-tailscale"
 [tasks."test:architecture"]
 description = "Guard independently testable component dependency boundaries"
 run = "python scripts/tests/architecture.py"
+
+[tasks.icons]
+description = "Generate all brand assets from the canonical native vector master"
+run = """
+mkdir -p .local/icons
+xcrun swiftc -module-cache-path .local/icons/modules crates/app/swift/PotIcon.swift scripts/make-icons.swift -o .local/icons/generate
+.local/icons/generate
+"""
