@@ -35,6 +35,10 @@ def fixture(dist):
 
 
 class WebAssets(unittest.TestCase):
+    def test_browser_scripts_are_all_packaged(self):
+        scripts = {path.name for path in (ROOT / "crates/web-ui/web").glob("*.js")}
+        self.assertFalse(scripts - set(package.NAMES), "Browser scripts missing from package")
+
     def test_compression_reuses_valid_files_and_repairs_changed_or_corrupt_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
