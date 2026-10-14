@@ -21,6 +21,7 @@ NAMES = [
     "icon-512.png",
     "install.js",
     "auth.js",
+    "events.js",
     "style.css",
     "pkg/pot_web_ui.js",
     "pkg/pot_web_ui_bg.wasm",
