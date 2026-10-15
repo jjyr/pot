@@ -1849,6 +1849,9 @@ mod tests {
             .restore_listener(resources.clone())
             .await
             .unwrap();
+        // Verify the restored listener and persisted credential using a new
+        // connection pool; the old listener's keep-alive sockets were closed.
+        let client = crate::RemoteClient::new(&url, token.clone()).unwrap();
         assert!(
             client
                 .request("/api/v1/runtime", None)
