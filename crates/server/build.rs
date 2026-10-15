@@ -16,9 +16,9 @@ fn main() {
         .parent()
         .unwrap()
         .to_owned();
-    // OUT_DIR is <target>/<profile>/build/<package>/out. A separate target
+    // Cargo 1.100+: OUT_DIR is <target>/<profile>/build/<package>/<hash>/out. A separate target
     // below this shared cache prevents nested Cargo from waiting on our lock.
-    let cache = out.ancestors().nth(4).unwrap().join("pot-web");
+    let cache = out.ancestors().nth(5).unwrap().join("pot-web");
     println!("cargo:rerun-if-env-changed=PATH");
     let status = Command::new("python3")
         .arg(root.join("scripts/build-web-ui"))

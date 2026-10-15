@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
         with:
-          version: 2026.6.0
+          version: 2026.10.10
       - name: Build and verify separate resource assets
         run: |
           mise run prepare

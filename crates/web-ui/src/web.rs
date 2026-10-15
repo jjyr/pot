@@ -447,7 +447,7 @@ pub fn update_view(data: &str) {
 }
 #[wasm_bindgen]
 pub fn run() {
-    console_error_panic_hook::set_once();
+    super::crash::install();
     gpui_kit::platform::web_init();
     let web = Rc::new(
         gpui_kit::web::WebPlatform::new_with_backend_and_font_fallback(

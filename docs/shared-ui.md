@@ -54,11 +54,23 @@ receipts clear only the submitted draft. Reference completion uses the same
 catalog, query rules, menu and keyboard behavior on both hosts; marked text is
 left to the input method.
 
-Native and browser builds pin `gpui-kit` 0.7.3 with `gpui-fast`. Both hosts load
+Native and browser builds pin `gpui-kit` 0.7.3 with the GPUI Fast Git fork below. Both hosts load
 the shared application asset source and design tokens. The sidebar Companion
 uses transparent idle/cooking exports from the existing native vector master;
 `mise run icons` regenerates those shared assets. Platform font resolution
 and operating-system window controls remain host responsibilities.
+
+The workspace patches GPUI Kit's `gpui-pre-*` dependencies to the compatibility
+crates in [`jjyr/gpui-fast` at `1beaef379aa91b0dbd4bacf87b66617f65f4c1c0`](https://github.com/jjyr/gpui-fast/commit/1beaef379aa91b0dbd4bacf87b66617f65f4c1c0).
+These re-export one GPUI Fast core for both hosts. The commit uses the WASM-safe
+`scheduler::Instant` for wheel hover suppression and profiling; the standard
+clock can panic during browser wheel dispatch and stop input handling.
+Follow the fork's `compat/README.md`; its Git development package names differ
+from the crates.io `gpui-fast` releases, so the published backend feature is not
+enabled. Crates using its macros alias `gpui-kit` as `gpui` at their root.
+`Cargo.lock` pins the Git source, and its hash participates in Web build cache
+invalidation. Keep the overrides until an upstream release includes the fix.
+
 AI connection marks and provider/model options come from Control's local
 [model directory](model-directory.md), with the shared embedded marks in
 `crates/ui/assets/agents` as fallbacks. Both targets render the same chooser,
@@ -109,3 +121,23 @@ adapter, not product views.
 
 See [multi-Space behavior](multi-space-ui.md), [UI specification](ui-ux-design.md),
 [event updates](ui-events.md) and [deployment](deployment.md).
+
+## Browser crash reporting
+
+The browser loads `errors.js` before the application module. Rust's panic hook
+reports directly to this DOM layer and retains the console panic hook; global
+`error` and `unhandledrejection` listeners capture uncaught JavaScript failures.
+These handlers show a red, non-modal toast independently of GPUI/WASM, so a
+trapped application can still explain the failure and offer a manual refresh.
+Handled request errors keep their existing presentation.
+
+The toast hides after eight seconds, pauses while hovered, focused or expanded,
+and merges repeated errors without restarting its timer. Details offer copying
+the diagnostic log. A small Error log button reopens details after dismissal
+or reload. Up to 20 bounded entries (time, kind, message, stack, page and repeat
+count) remain in memory and same-tab session storage; new entries are also sent
+to the browser console. Storage/clipboard failures do not interrupt reporting.
+Logs omit page query parameters and fragments and redact common credential
+patterns; no request bodies, form values or transcript data are collected.
+There is no automatic log upload or refresh. A blocked JavaScript main thread
+cannot run these hooks; this mechanism detects exceptions, not all hangs.

@@ -1,7 +1,8 @@
 [tools]
 "conda:brotli-bin" = "1.2.0"
 go = "1.25.5"
-rust = "1.98.1"
+rust = { version = "beta-2026-10-14", mr_boxington = true }
+mr-boxington = "1.24.0"
 python = "3.12.13"
 zig = "0.15.2"
 "cargo:cargo-zigbuild" = "0.23.4"
@@ -61,6 +62,10 @@ cargo test --locked -p pot-core -p pot-storage -p pot-usage -p pot-agent -p pot-
 [tasks."test:executor"]
 description = "Verify executor receipts, idle expiry and orphan cleanup without a VM"
 run = "python scripts/tests/executor-lifecycle.py"
+
+[tasks."test:hooks"]
+description = "Verify hook timing and failure propagation"
+run = "python scripts/tests/hook-timing.py"
 
 [tasks."test:operation-prepare"]
 description = "Verify guest argument preparation without authorization state"

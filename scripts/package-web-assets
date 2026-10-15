@@ -22,6 +22,7 @@ NAMES = [
     "install.js",
     "auth.js",
     "events.js",
+    "errors.js",
     "style.css",
     "pkg/pot_web_ui.js",
     "pkg/pot_web_ui_bg.wasm",

@@ -398,6 +398,7 @@ async fn assets(State(a): State<Access>, req: Request) -> Response {
         "/install.js" => ("install.js", "text/javascript"),
         "/auth.js" => ("auth.js", "text/javascript"),
         "/events.js" => ("events.js", "text/javascript"),
+        "/errors.js" => ("errors.js", "text/javascript"),
         "/style.css" => ("style.css", "text/css"),
         "/pkg/pot_web_ui.js" => ("pkg/pot_web_ui.js", "text/javascript"),
         "/pkg/pot_web_ui_bg.wasm" => ("pkg/pot_web_ui_bg.wasm", "application/wasm"),

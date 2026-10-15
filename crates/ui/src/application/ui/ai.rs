@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::IconName;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
 fn directory_provider<'a>(state: &'a Value, id: &str) -> Option<&'a Value> {
@@ -483,6 +484,9 @@ impl Settings {
                                         } else {
                                             crate::application::i18n::text("ai.connect-agent")
                                         })
+                                        .when(active["model"].as_str().is_none(), |b| {
+                                            b.icon(IconName::Plus)
+                                        })
                                         .when(no_profiles, |b| b.primary())
                                         .disabled(busy)
                                         .on_click(move |_, _, _| {
@@ -526,6 +530,7 @@ impl Settings {
                             div().flex().gap_2().child(
                                 Button::new("ai-add")
                                     .small()
+                                    .icon(IconName::Plus)
                                     .label(crate::application::i18n::text("ai.connect-agent"))
                                     .disabled(busy)
                                     .on_click(|_, _, _| {

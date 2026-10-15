@@ -307,7 +307,7 @@
   "ai.save-to-apply-existing-tasks-keep-their": "Save to apply. Existing tasks keep their configuration.",
   "ai.save-changes": "Save changes",
   "ai.integrated-agents": "Integrated Agents",
-  "ai.connect-agent": "＋ Connect Agent",
+  "ai.connect-agent": "Connect Agent",
   "ai.no-agents-connected-yet-choose-an-ai": "No Agents connected yet. Choose an AI to start configuration.",
   "ai.sign-in-56": "Sign in",
   "ai.configure": "Configure",
@@ -848,5 +848,14 @@
   "ai.fewer-providers": "Fewer providers",
   "ai.context-window": "Context window (tokens)",
   "ai.max-output-tokens": "Maximum output (tokens)",
-  "ai.invalid-token-limit": "Enter a positive whole number of tokens."
+  "ai.invalid-token-limit": "Enter a positive whole number of tokens.",
+  "web.error.title": "The interface encountered an error",
+  "web.error.message": "Some controls may stop responding. Refresh the page to recover.",
+  "web.error.reload": "Refresh page",
+  "web.error.details": "View details",
+  "web.error.close": "Close",
+  "web.error.log": "Error log",
+  "web.error.copy": "Copy log",
+  "web.error.copied": "Log copied",
+  "web.error.copy-failed": "Could not copy. Select and copy the log below."
 }

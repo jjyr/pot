@@ -382,14 +382,9 @@ impl Decoder {
                         for c in calls {
                             let i = c["index"].as_u64().unwrap_or(0) as usize;
                             let block=self.blocks.entry(i).or_insert_with(||json!({"id":"","type":"function","function":{"name":"","arguments":""}}));
-                            for (path, val) in [("id", &c["id"])] {
-                                if let Some(s) = val.as_str() {
-                                    block[path] = json!(format!(
-                                        "{}{}",
-                                        block[path].as_str().unwrap_or(""),
-                                        s
-                                    ));
-                                }
+                            if let Some(s) = c["id"].as_str() {
+                                block["id"] =
+                                    json!(format!("{}{}", block["id"].as_str().unwrap_or(""), s));
                             }
                             for key in ["name", "arguments"] {
                                 if let Some(s) = c["function"][key].as_str() {

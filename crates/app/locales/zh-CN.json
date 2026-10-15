@@ -307,7 +307,7 @@
   "ai.save-to-apply-existing-tasks-keep-their": "保存后生效，已有任务保持原配置。",
   "ai.save-changes": "保存更改",
   "ai.integrated-agents": "已集成 Agent",
-  "ai.connect-agent": "＋ 集成 Agent",
+  "ai.connect-agent": "集成 Agent",
   "ai.no-agents-connected-yet-choose-an-ai": "尚未集成 Agent。选择你想使用的 AI 开始配置。",
   "ai.sign-in-56": "去登录",
   "ai.configure": "配置",
@@ -848,5 +848,14 @@
   "ai.fewer-providers": "收起供应商",
   "ai.context-window": "上下文窗口（tokens）",
   "ai.max-output-tokens": "单次最大输出（tokens）",
-  "ai.invalid-token-limit": "请输入正整数 Token 数量。"
+  "ai.invalid-token-limit": "请输入正整数 Token 数量。",
+  "web.error.title": "界面发生异常",
+  "web.error.message": "部分操作可能无法响应，请刷新页面恢复。",
+  "web.error.reload": "刷新页面",
+  "web.error.details": "查看详情",
+  "web.error.close": "关闭",
+  "web.error.log": "错误日志",
+  "web.error.copy": "复制日志",
+  "web.error.copied": "日志已复制",
+  "web.error.copy-failed": "无法自动复制，请选择下方日志并复制。"
 }
