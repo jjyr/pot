@@ -144,7 +144,7 @@ impl UsageUI {
                             .map(|(value, label)| {
                                 Button::new(SharedString::from(format!("quota-{value}")))
                                     .ghost()
-                                    .when(!layout.native, |b| b.min_h(px(44.)))
+                                    .when(layout.compact, |b| b.min_h(px(44.)))
                                     .small()
                                     .label(label)
                                     .when(self.period == value, |b| {
@@ -173,7 +173,7 @@ impl UsageUI {
                             div().flex().child(
                                 Button::new("quota-auto")
                                     .ghost()
-                                    .when(!layout.native, |b| b.min_h(px(44.)))
+                                    .when(layout.compact, |b| b.min_h(px(44.)))
                                     .small()
                                     .label(if self.auto_resume {
                                         catalog.text("usage-ui.resume-automatically")
@@ -234,7 +234,7 @@ impl UsageUI {
                                     .disabled(v.usage_pending || d.is_null() || !v.controls)
                                     .on_click(pages::on(&handler, "usage-save", Value::Null)),
                             )
-                            .when(!layout.native, |el| {
+                            .when(layout.compact, |el| {
                                 el.child(
                                     Button::new("quota-back")
                                         .ghost()
@@ -260,7 +260,7 @@ impl UsageUI {
                     el.child(
                         Button::new("quota-settings")
                             .ghost()
-                            .when(!layout.native, |b| b.min_h(px(44.)))
+                            .when(layout.compact, |b| b.min_h(px(44.)))
                             .small()
                             .label(catalog.text("navigation.usage-limits"))
                             .disabled(!v.controls)
@@ -302,7 +302,7 @@ impl UsageUI {
                     .map(|(days, label)| {
                         Button::new(("usage-days", days as usize))
                             .ghost()
-                            .when(!layout.native, |b| b.min_h(px(44.)))
+                            .when(layout.compact, |b| b.min_h(px(44.)))
                             .small()
                             .label(label)
                             .when(self.days == days, |b| {
@@ -493,7 +493,7 @@ impl UsageUI {
                         .child(
                             Button::new("agent-model-prev")
                                 .ghost()
-                                .when(!layout.native, |b| b.min_h(px(44.)))
+                                .when(layout.compact, |b| b.min_h(px(44.)))
                                 .small()
                                 .label(catalog.text("schedules-ui.previous"))
                                 .disabled(self.group_offset == 0)
@@ -502,7 +502,7 @@ impl UsageUI {
                         .child(
                             Button::new("agent-model-next")
                                 .ghost()
-                                .when(!layout.native, |b| b.min_h(px(44.)))
+                                .when(layout.compact, |b| b.min_h(px(44.)))
                                 .small()
                                 .label(catalog.text("schedules-ui.next-52"))
                                 .disabled(next.is_none())
@@ -696,7 +696,7 @@ impl UsageUI {
                     card = card.child(
                         Button::new("usage-more-tools")
                             .ghost()
-                            .when(!layout.native, |b| b.min_h(px(44.)))
+                            .when(layout.compact, |b| b.min_h(px(44.)))
                             .small()
                             .label(if self.show_all_tools {
                                 catalog.text("usage-ui.show-less").into()
@@ -828,7 +828,7 @@ impl UsageUI {
                     .child(
                         Button::new("usage-resume")
                             .ghost()
-                            .when(!layout.native, |b| b.min_h(px(44.)))
+                            .when(layout.compact, |b| b.min_h(px(44.)))
                             .small()
                             .label(catalog.text("usage-ui.continue"))
                             .disabled(v.usage_pending || !v.controls)
@@ -844,7 +844,7 @@ impl UsageUI {
             scroll = scroll.child(
                 Button::new("cancel-usage-wait")
                     .ghost()
-                    .when(!layout.native, |b| b.min_h(px(44.)))
+                    .when(layout.compact, |b| b.min_h(px(44.)))
                     .small()
                     .label(catalog.text("usage-ui.cancel-wait"))
                     .disabled(v.usage_pending || !v.controls)

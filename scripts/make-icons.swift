@@ -39,8 +39,28 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
     return bitmap.representation(using: .png, properties: [:])!
 }
 
+@MainActor func renderCompanion(size: Int, cooking: Bool) -> Data {
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
+                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                  colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    companionIcon(steam: cooking ? 1 : 0).draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+    NSGraphicsContext.restoreGraphicsState()
+    return bitmap.representation(using: .png, properties: [:])!
+}
+
 @main struct IconGenerator {
     @MainActor static func main() throws {
+        let uiAssets = root.appendingPathComponent("crates/ui/assets")
+        try FileManager.default.createDirectory(at: uiAssets, withIntermediateDirectories: true)
+        for cooking in [false, true] {
+            try renderCompanion(size: 112, cooking: cooking)
+                .write(to: uiAssets.appendingPathComponent(cooking ? "PotCooking.png" : "PotCompanion.png"))
+        }
+        if CommandLine.arguments.contains("--ui-only") {
+            return
+        }
         try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
         // README displays at 128 CSS pixels; provide enough detail for 3x screens.
         try render(size: 384).write(to: assets.appendingPathComponent("Pot384.png"))

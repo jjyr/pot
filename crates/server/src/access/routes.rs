@@ -215,6 +215,31 @@ fn allowed(method: &Method, path: &str) -> bool {
     ) {
         return *method == Method::GET;
     }
+    // Configuration and schedules are shared product pages. These exact routes
+    // keep execution, terminals, resource provisioning and Control administration private.
+    if matches!(
+        path,
+        "/api/v1/agent"
+            | "/api/v1/agent/routing"
+            | "/api/v1/providers"
+            | "/api/v1/usage/providers"
+            | "/api/v1/schedules"
+    ) {
+        return *method == Method::GET || *method == Method::POST;
+    }
+    if matches!(
+        path,
+        "/api/v1/providers/check"
+            | "/api/v1/agent/config"
+            | "/api/v1/usage/policy"
+            | "/api/v1/usage/resume"
+            | "/api/v1/usage/cancel"
+    ) {
+        return *method == Method::POST;
+    }
+    if path == pot_protocol::message::API {
+        return *method == Method::POST;
+    }
     if path == "/api/v1/machine-connections" {
         return *method == Method::GET || *method == Method::POST;
     }
@@ -236,9 +261,6 @@ fn allowed(method: &Method, path: &str) -> bool {
         }
         if operation == "definition" || operation == "agent/config" {
             return *method == Method::POST;
-        }
-        if operation == "agent" {
-            return *method == Method::GET;
         }
         if operation.starts_with("assistants")
             || operation == "assistant-tasks"
@@ -285,6 +307,9 @@ fn allowed(method: &Method, path: &str) -> bool {
     }
     false
 }
+fn mail_history_only(bytes: &[u8]) -> bool {
+    matches!(serde_json::from_slice::<pot_protocol::message::RelayRequest>(bytes),Ok(pot_protocol::message::RelayRequest::History{assistant_id,after}) if after>=0 && (assistant_id=="main"||uuid::Uuid::parse_str(&assistant_id).is_ok()))
+}
 async fn proxy(State(mut a): State<Access>, mut req: Request) -> Result<Response, Failure> {
     a.capture_endpoint();
     let session = a
@@ -292,6 +317,16 @@ async fn proxy(State(mut a): State<Access>, mut req: Request) -> Result<Response
         .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "invalid_token"))?;
     if !allowed(req.method(), req.uri().path()) {
         return Err(fail(StatusCode::FORBIDDEN, "route_not_allowed"));
+    }
+    if req.uri().path().ends_with("/assistant-mail") {
+        let (parts, body) = req.into_parts();
+        let bytes = axum::body::to_bytes(body, 1024 * 1024)
+            .await
+            .map_err(|_| fail(StatusCode::BAD_REQUEST, "invalid_mail_history"))?;
+        if !mail_history_only(&bytes) {
+            return Err(fail(StatusCode::FORBIDDEN, "mail_history_only"));
+        }
+        req = Request::from_parts(parts, Body::from(bytes));
     }
     let inventory = req.uri().path() == "/api/v1/sandboxes";
     // Never forward client-provided authorization, cookies or native-only route access.
@@ -555,6 +590,55 @@ mod tests {
         }
     }
     #[test]
+    fn browser_mailbox_cannot_send_or_reconfigure_the_relay() {
+        assert!(mail_history_only(
+            br#"{"operation":"history","assistant_id":"main","after":0}"#
+        ));
+        assert!(!mail_history_only(br#"{"operation":"directory"}"#));
+        assert!(!mail_history_only(
+            br#"{"operation":"pending","target_control_id":"other"}"#
+        ));
+        assert!(!mail_history_only(
+            br#"{"operation":"history","assistant_id":"other","after":0}"#
+        ));
+        assert!(!mail_history_only(
+            br#"{"operation":"history","assistant_id":"main","after":-1}"#
+        ));
+    }
+    #[test]
+    fn shared_settings_and_schedules_keep_the_authenticated_owner_boundary() {
+        for path in [
+            "agent",
+            "agent/routing",
+            "providers",
+            "usage/providers",
+            "schedules",
+        ] {
+            assert!(allowed(&Method::GET, &format!("/api/v1/{path}")));
+            assert!(allowed(&Method::POST, &format!("/api/v1/{path}")));
+            assert!(allowed(
+                &Method::POST,
+                &format!("/api/v1/assistants/main/{path}")
+            ));
+        }
+        for path in [
+            "providers/check",
+            "agent/config",
+            "usage/policy",
+            "usage/resume",
+            "usage/cancel",
+        ] {
+            assert!(allowed(&Method::POST, &format!("/api/v1/{path}")));
+            assert!(!allowed(&Method::GET, &format!("/api/v1/{path}")));
+        }
+        assert!(!allowed(
+            &Method::POST,
+            "/api/v1/assistants/arbitrary/providers"
+        ));
+        assert!(!allowed(&Method::POST, "/api/v1/runtime/control"));
+        assert!(!allowed(&Method::POST, "/api/v1/assistants/main/terminals"));
+    }
+    #[test]
     fn allowlist_excludes_management_and_terminal() {
         assert!(allowed(&Method::GET, "/api/v1/changes"));
         assert!(allowed(&Method::GET, "/api/v1/machines/watch"));
@@ -590,7 +674,6 @@ mod tests {
         for p in [
             "/api/v1/execution",
             "/api/v1/terminals",
-            "/api/v1/providers",
             "/api/v1/access",
             "/api/v1/authorization/start",
             "/api/v1/sandboxes",
@@ -605,12 +688,7 @@ mod tests {
             &Method::GET,
             "/api/v1/assistants/00000000-0000-0000-0000-000000000001/agent"
         ));
-        for suffix in [
-            "providers",
-            "execution",
-            "terminals",
-            "assistants/b/messages",
-        ] {
+        for suffix in ["execution", "terminals", "assistants/b/messages"] {
             assert!(!allowed(
                 &Method::POST,
                 &format!("/api/v1/assistants/00000000-0000-0000-0000-000000000001/{suffix}")

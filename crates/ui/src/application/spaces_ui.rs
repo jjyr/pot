@@ -1,4 +1,4 @@
-use crate::{
+use crate::application::{
     Shell, backend, gpui,
     spaces::{Owner, Space},
     ui,
@@ -49,7 +49,7 @@ impl Shell {
             .is_some_and(|s| s.id == owner.control);
         if !valid {
             self.client.view.lock().unwrap().command_error =
-                crate::i18n::text("spaces.identity-changed").into();
+                crate::application::i18n::text("spaces.identity-changed").into();
             return false;
         }
         let query = self.client.view.lock().unwrap().task_query.clone();
@@ -59,7 +59,7 @@ impl Shell {
         self.client.select_assistant(owner.assistant.clone());
         if self.client.view.lock().unwrap().assistant_id() != owner.assistant {
             self.client.view.lock().unwrap().command_error =
-                crate::i18n::text("spaces.wait-send").into();
+                crate::application::i18n::text("spaces.wait-send").into();
             return false;
         }
         self.client.view.lock().unwrap().task_query.execution_target =
@@ -89,7 +89,7 @@ impl Shell {
                             .label(format!(
                                 "{} · {}",
                                 space.assistant_name(assistant),
-                                crate::i18n::text("permissions.request")
+                                crate::application::i18n::text("permissions.request")
                             ))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if this.activate_owner(&owner, window, cx) {
@@ -115,7 +115,7 @@ impl Shell {
             let label = format!(
                 "{name} · {} · {}",
                 task.title,
-                crate::task_phase(&task.phase)
+                crate::application::task_phase(&task.phase)
             );
             row = row.px_8().py_2().child(
                 Button::new("space-notification")
@@ -143,7 +143,7 @@ impl Shell {
                 Button::new("dismiss-space-notification")
                     .ghost()
                     .icon(IconName::Close)
-                    .tooltip(crate::i18n::text("assistant.close"))
+                    .tooltip(crate::application::i18n::text("assistant.close"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.notifications.remove(0);
                         cx.notify();
@@ -152,7 +152,11 @@ impl Shell {
         }
         row
     }
-    pub fn collaboration_updates(&self, view: &crate::client::View, cx: &mut Context<Self>) -> Div {
+    pub fn collaboration_updates(
+        &self,
+        view: &crate::application::client::View,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let mut body = div().flex().flex_col().gap_3();
         if !view.selected.is_empty() {
             return body;
@@ -163,7 +167,9 @@ impl Shell {
         let Some(records) = space.mail.get(view.assistant_id()) else {
             return body;
         };
-        for record in crate::spaces::chat_updates(records, &space.owner(view.assistant_id())) {
+        for record in
+            crate::application::spaces::chat_updates(records, &space.owner(view.assistant_id()))
+        {
             let peer = self
                 .space_directory
                 .spaces
@@ -183,7 +189,10 @@ impl Shell {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(format!("{} · {name}", crate::i18n::text("spaces.reply")))
+                            .child(format!(
+                                "{} · {name}",
+                                crate::application::i18n::text("spaces.reply")
+                            ))
                             .when_some(peer, |el, s| el.child(badge(s, &record.message.id))),
                     )
                     .child(div().whitespace_normal().child(record.message.text)),
@@ -192,18 +201,21 @@ impl Shell {
         body
     }
     pub fn render_assistant_list(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let mut body = ui::content().child(
+        let mut body = ui::content(cx).child(
             div()
                 .flex()
                 .justify_between()
                 .items_center()
-                .child(ui::hint(crate::i18n::text("spaces.assistants"), cx))
+                .child(ui::hint(
+                    crate::application::i18n::text("spaces.assistants"),
+                    cx,
+                ))
                 .child(
                     Button::new("assistant-new-top")
                         .primary()
                         .small()
                         .icon(IconName::Plus)
-                        .label(crate::i18n::text("assistant.new"))
+                        .label(crate::application::i18n::text("assistant.new"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.assistants_ui.form_only = true;
                             this.assistants_ui.select("new");
@@ -306,7 +318,7 @@ impl Shell {
                         .child(badge(&s, a["id"].as_str().unwrap_or("main")))
                         .when(!s.error.is_empty(), |el| {
                             el.child(ui::hint(
-                                crate::i18n::text(if s.connected {
+                                crate::application::i18n::text(if s.connected {
                                     "spaces.stale"
                                 } else {
                                     "machines.offline"
@@ -318,7 +330,10 @@ impl Shell {
             }
         }
         if self.space_directory.spaces.is_empty() {
-            list = list.child(ui::hint(crate::i18n::text("client.loading"), cx));
+            list = list.child(ui::hint(
+                crate::application::i18n::text("client.loading"),
+                cx,
+            ));
         }
         body = body.child(list);
         let error = self.space_directory.error();
@@ -337,13 +352,16 @@ impl Shell {
             .flex()
             .items_center()
             .gap_2()
-            .child(ui::hint(crate::i18n::text("spaces.location"), cx));
+            .child(ui::hint(
+                crate::application::i18n::text("spaces.location"),
+                cx,
+            ));
         if purpose == "usage" {
             row = row.child(
                 Button::new("usage-all-spaces")
                     .ghost()
                     .small()
-                    .label(crate::i18n::text("spaces.all"))
+                    .label(crate::application::i18n::text("spaces.all"))
                     .toggled(self.usage_location.is_empty())
                     .when(self.usage_location.is_empty(), |b| {
                         b.bg(pot_ui::design::navigation(cx))
@@ -378,7 +396,7 @@ impl Shell {
                         this.usage_location = owner.mode.clone();
                         this.usage_ui.group_offset = 0;
                     } else {
-                        let section = this.native["settings"]["section"].clone();
+                        let section = this.host["settings"]["section"].clone();
                         if purpose == "settings" && this.settings_return.is_none() {
                             this.settings_return = this.capture_chat();
                         }
@@ -424,9 +442,14 @@ impl Shell {
                 }
                 connection_base(&event, window, cx);
             });
+        let control_projection = backend::control_projection();
         let connections = self.machine_connections.render(
             pot_ui::machine_connections::View {
-                client: Some(&backend::control_projection()),
+                client: if super::platform::with(|p| p.capabilities().control_switching) {
+                    Some(&control_projection)
+                } else {
+                    None
+                },
                 directory: &connection_directory,
                 selected: &self.machine_selection,
                 reply: &view.machine_reply,
@@ -448,7 +471,7 @@ impl Shell {
         if self.space_directory.spaces.is_empty() {
             body = body.child(ui::card(cx).child(ui::empty(
                 IconName::Inbox,
-                crate::i18n::text("machines.loading"),
+                crate::application::i18n::text("machines.loading"),
                 cx,
             )));
         }
@@ -505,22 +528,7 @@ impl Shell {
                         }
                         let owner = source.owner(&permission_owner);
                         let value = event.value.clone();
-                        std::thread::spawn(move || {
-                            let result = backend::Requests::for_mode(&owner.mode)
-                                .scope(&owner.assistant)
-                                .post("/api/v1/permissions")
-                                .send_json(value);
-                            if let Err(error) = result
-                                && let Some(s) = crate::spaces::directory()
-                                    .lock()
-                                    .unwrap()
-                                    .spaces
-                                    .get_mut(&owner.mode)
-                            {
-                                s.error = error;
-                            }
-                            crate::wake_ui();
-                        });
+                        super::platform::with(|p| p.permission(&owner, value));
                         return;
                     }
                     base(event, window, cx);
@@ -547,7 +555,9 @@ impl Shell {
                                             .small()
                                             .icon(IconName::Plus)
                                             .disabled(!space.error.is_empty())
-                                            .label(crate::i18n::text("machines.add-executor"))
+                                            .label(crate::application::i18n::text(
+                                                "machines.add-executor",
+                                            ))
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.machine_connections.mode = Some(mode.clone());
                                                 this.machine_connections.manage_members();
@@ -561,7 +571,11 @@ impl Shell {
                     )
                     .when(!space.error.is_empty(), |el| {
                         el.child(ui::notice(
-                            format!("{} · {}", crate::i18n::text("spaces.stale"), space.error),
+                            format!(
+                                "{} · {}",
+                                crate::application::i18n::text("spaces.stale"),
+                                space.error
+                            ),
                             true,
                             cx,
                         ))
@@ -575,7 +589,9 @@ impl Shell {
                                 &Value::Null
                             },
                             preferred: &selected,
-                            desktop_runtime: if space.mode == "local" {
+                            desktop_runtime: if space.mode == "local"
+                                || super::platform::with(|p| p.capabilities().browser_access)
+                            {
                                 Some(&space.id)
                             } else {
                                 None
@@ -596,11 +612,11 @@ impl Shell {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(ui::hint(crate::i18n::text("spaces.cloud"), cx))
+                    .child(ui::hint(crate::application::i18n::text("spaces.cloud"), cx))
                     .child(
                         Button::new("cloud-connect")
                             .small()
-                            .label(crate::i18n::text("onboarding.connect-server"))
+                            .label(crate::application::i18n::text("onboarding.connect-server"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.machine_connections.connect();
                                 cx.notify();
@@ -611,14 +627,17 @@ impl Shell {
         ui::page(cx)
             .relative()
             .child(
-                ui::content()
+                ui::content(cx)
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
                             .flex_shrink_0()
-                            .child(ui::hint(crate::i18n::text("machines.title"), cx)),
+                            .child(ui::hint(
+                                crate::application::i18n::text("machines.title"),
+                                cx,
+                            )),
                     )
                     .child(body),
             )
@@ -652,7 +671,9 @@ impl Shell {
             .when(total == 0, |el| {
                 el.child(ui::empty(
                     IconName::Inbox,
-                    crate::i18n::text("schedules-ui.no-schedules-yet-tell-pot-what-to"),
+                    crate::application::i18n::text(
+                        "schedules-ui.no-schedules-yet-tell-pot-what-to",
+                    ),
                     cx,
                 ))
             });
@@ -694,15 +715,15 @@ impl Shell {
                         if space.error.is_empty() {
                             plan.next_label
                         } else {
-                            crate::i18n::text("spaces.stale").into()
+                            crate::application::i18n::text("spaces.stale").into()
                         },
                         cx,
                     )),
             );
         }
         ui::page(cx).child(
-            ui::content()
-                .child(crate::schedules_ui::navigation(true, cx))
+            ui::content(cx)
+                .child(crate::application::schedules_ui::navigation(true, cx))
                 .child(list)
                 .when(total > 0, |el| {
                     el.child(ui::hint(format!("{total} · {}", offset / 20 + 1), cx))
@@ -715,7 +736,7 @@ impl Shell {
                             Button::new("all-schedules-prev")
                                 .when(total == 0, |el| el.invisible())
                                 .ghost()
-                                .label(crate::i18n::text("schedules-ui.previous"))
+                                .label(crate::application::i18n::text("schedules-ui.previous"))
                                 .disabled(offset == 0)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.client.view.lock().unwrap().schedule_offset =
@@ -727,7 +748,7 @@ impl Shell {
                             Button::new("all-schedules-next")
                                 .when(total == 0, |el| el.invisible())
                                 .ghost()
-                                .label(crate::i18n::text("schedules-ui.next-52"))
+                                .label(crate::application::i18n::text("schedules-ui.next-52"))
                                 .disabled(offset + 20 >= total)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.client.view.lock().unwrap().schedule_offset = offset + 20;

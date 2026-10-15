@@ -1,7 +1,7 @@
 use pot_protocol::*;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::BTreeSet,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -18,203 +18,9 @@ fn rejection_detail(body: &mut crate::backend::Body, fallback_key: &str) -> Stri
         .unwrap_or_else(|_| crate::i18n::text(fallback_key).into())
 }
 
-#[derive(Clone, PartialEq)]
-pub struct RunningTask {
-    pub id: String,
-    pub title: String,
-    pub progress: String,
-    pub executor_icon: String,
-}
+use pot_ui::application::client::task_progress;
 
-fn task_progress(snapshot: &Snapshot) -> String {
-    if snapshot.turn.as_ref().is_some_and(|t| t.cancelling) {
-        return crate::i18n::text("client.stopping").into();
-    }
-    match snapshot.messages.last() {
-        Some(m) if m.role == Role::Tool && m.status == MessageStatus::Streaming => {
-            // Tool headers are runtime facts, not generated summaries.
-            crate::i18n::tr!(
-                "client.running",
-                m.text
-                    .lines()
-                    .next()
-                    .unwrap_or(crate::i18n::text("client.tool"))
-                    .chars()
-                    .take(36)
-                    .collect::<String>()
-            )
-        }
-        Some(m) if m.role == Role::Assistant && m.status == MessageStatus::Streaming => {
-            crate::i18n::text("client.generating-a-reply").into()
-        }
-        _ => crate::i18n::text("client.working").into(),
-    }
-}
-
-#[derive(Default, Clone, PartialEq)]
-pub struct View {
-    pub client_mode: String,
-    pub runtime: Value,
-    pub machines: Value,
-    pub completions: Value,
-    pub machine_reply: Value,
-    pub machine_pending: bool,
-    pub assistants: Value,
-    pub selected_assistant: String,
-    pub assistant_rules: Value,
-    pub assistant_saved_owner: Option<String>,
-    pub created_assistant: Option<String>,
-    pub assistant_pending: bool,
-    pub permissions: Value,
-    pub usage_query: Option<(String, u32, usize, String)>,
-    pub usage: Value,
-    pub usage_error: String,
-    pub usage_pending: bool,
-    pub usage_notice: String,
-    usage_fetched: Option<std::time::Instant>,
-    usage_loaded: Option<(String, u32, usize, String)>,
-    pub snapshot: Option<Snapshot>,
-    /// Connection error is cleared only after a successful snapshot/stream update.
-    pub error: String,
-    /// Command errors survive background updates until the next user attempt.
-    pub command_error: String,
-    pub pending: bool,
-    sending: pot_ui::state::SendState,
-    pub accepted_text: Option<String>,
-    pub accepted_conversation: Option<String>,
-    pub selected: String,
-    pub tasks: Vec<TaskInfo>,
-    pub running_tasks: Vec<RunningTask>,
-    pub running_total: usize,
-    pub task_query: TaskQuery,
-    pub task_page: TaskPage,
-    pub selected_task: Option<TaskInfo>,
-    pub tasks_loading: bool,
-    pub schedules_visible: bool,
-    pub schedules: SchedulePage,
-    pub schedule_selected: String,
-    pub schedule_offset: usize,
-    pub runs_offset: usize,
-    pub schedule_pending: bool,
-    pub schedule_success: u64,
-    pub schedule_error: String,
-    pub main_snapshot: Option<Snapshot>,
-    generation: u64,
-    cached_tasks: HashMap<String, Arc<Snapshot>>,
-}
-impl View {
-    pub fn assistant_id(&self) -> &str {
-        if self.selected_assistant.is_empty() {
-            "main"
-        } else {
-            &self.selected_assistant
-        }
-    }
-    pub fn is_cooking(&self) -> bool {
-        self.running_total > 0
-            || self.main_snapshot.as_ref().is_some_and(|s| {
-                s.turn.is_some()
-                    && s.agent.phase == AgentPhase::Ready
-                    && s.agent.detail.as_deref() != Some("等待 Pot 额度恢复")
-            })
-    }
-
-    fn apply_task_page(&mut self, query: &TaskQuery, selected: &str, page: TaskPage) {
-        // Counts describe all tasks, never just the visible page. Keep lifecycle
-        // guards correct when a running task is hidden by a search or archive tab.
-        self.task_page.counts = page.counts.clone();
-        if self.selected == selected {
-            self.selected_task = page.selected.clone();
-        }
-        if &self.task_query == query {
-            self.task_query.offset = page.offset;
-            self.tasks = page.items.clone();
-            self.task_page = page;
-            self.tasks_loading = false;
-        }
-    }
-
-    fn select(&mut self, id: String) -> bool {
-        if self.pending || self.selected == id {
-            return false;
-        }
-        if !self.selected.is_empty()
-            && self.selected != "new"
-            && let Some(snapshot) = &self.snapshot
-        {
-            if self.cached_tasks.len() >= 16 {
-                self.cached_tasks.clear();
-            }
-            self.cached_tasks
-                .insert(self.selected.clone(), Arc::new(snapshot.clone()));
-        }
-        self.generation += 1;
-        self.snapshot = if id.is_empty() || id == "new" {
-            self.main_snapshot.clone()
-        } else {
-            self.cached_tasks.get(&id).map(|s| s.as_ref().clone())
-        };
-        self.selected_task = self.tasks.iter().find(|t| t.id == id).cloned();
-        self.selected = id;
-        self.command_error.clear();
-        if self.snapshot.is_none() && self.error.is_empty() {
-            self.error = crate::i18n::text("client.loading").into();
-        } else if self.snapshot.is_some()
-            && crate::i18n::matches_message("client.loading", &self.error)
-        {
-            self.error.clear();
-        }
-        true
-    }
-    pub fn can_send(&self) -> bool {
-        pot_ui::state::can_send(
-            self.snapshot.as_ref(),
-            !self.selected.is_empty(),
-            self.pending,
-            self.error.is_empty(),
-        )
-    }
-    fn replace(&mut self, snapshot: Snapshot) -> Result<(), String> {
-        if snapshot.api_version != API_VERSION {
-            return Err(crate::i18n::text("client.incompatible-runtime-protocol-version").into());
-        }
-        self.snapshot = Some(snapshot);
-        self.error.clear();
-        Ok(())
-    }
-    fn apply(&mut self, event: Event) -> Result<(), String> {
-        let s = self
-            .snapshot
-            .as_mut()
-            .ok_or(crate::i18n::text("client.chat-snapshot-missing"))?;
-        pot_ui::state::apply_event(s, event)?;
-        self.error.clear();
-        Ok(())
-    }
-    fn accepted(&mut self, req: &SendMessage, result: SendMessageAccepted) {
-        self.pending = false;
-        self.sending.accept(&req.request_id);
-        self.accepted_text = Some(pot_ui::state::Receipt::from_request(req).text);
-        self.accepted_conversation = Some(req.conversation_id.clone());
-        let assistant_id = self.assistant_id().to_owned();
-        if let Some(s) = self
-            .snapshot
-            .as_mut()
-            .filter(|s| s.conversation_id == req.conversation_id)
-        {
-            let settled = s.messages.iter().any(|m| {
-                m.request_id.as_deref() == Some(&req.request_id)
-                    && !matches!(m.status, MessageStatus::Accepted | MessageStatus::Streaming)
-            });
-            if !settled && s.turn.is_none() && req.conversation_id == assistant_id {
-                s.turn = Some(TurnState {
-                    user_message_id: result.message_id,
-                    cancelling: false,
-                });
-            }
-        }
-    }
-}
+pub use pot_ui::application::client::{RunningTask, View};
 #[derive(Clone)]
 pub(crate) struct Refresh {
     pub(crate) sender: mpsc::SyncSender<()>,
@@ -577,9 +383,6 @@ fn receive(view: &Arc<Mutex<View>>, dirty: Option<&BTreeSet<String>>) -> Result<
     Ok(())
 }
 impl Client {
-    pub fn start() -> Self {
-        Self::start_mode(crate::backend::mode())
-    }
     pub fn start_mode(mode: &str) -> Self {
         let view = Arc::new(Mutex::new(View {
             client_mode: mode.into(),
@@ -952,7 +755,7 @@ impl Client {
         let _ = self.refresh.try_send(());
         crate::wake_ui();
     }
-    pub fn schedule_action(&self, mut req: Value) {
+    pub fn schedule_action(&self, req: Value) {
         let owner = self.view.lock().unwrap().assistant_id().to_owned();
         {
             let mut v = self.view.lock().unwrap();
@@ -963,7 +766,6 @@ impl Client {
             v.schedule_error.clear();
         }
         crate::wake_ui();
-        req["request_id"] = json!(uuid::Uuid::new_v4().to_string());
         let view = self.view.clone();
         let active = self.running.clone();
         let refresh = self.refresh.clone();
@@ -1172,24 +974,9 @@ impl Client {
     }
     pub fn select_assistant(&self, id: String) {
         let mut v = self.view.lock().unwrap();
-        if v.assistant_id() == id || v.pending {
+        if !v.select_assistant(id.clone()) {
             return;
         }
-        v.generation += 1;
-        v.selected_assistant = id.clone();
-        v.selected.clear();
-        v.snapshot = None;
-        v.main_snapshot = None;
-        v.cached_tasks.clear();
-        v.permissions = Value::Null;
-        v.usage_pending = false;
-        v.usage_loaded = None;
-        v.usage_fetched = None;
-        v.schedule_pending = false;
-        v.schedules = SchedulePage::default();
-        v.schedule_selected.clear();
-        v.usage = Value::Null;
-        v.assistant_rules = Value::Null;
         crate::backend::select_assistant(&id);
         drop(v);
         let _ = self.refresh.try_send(());

@@ -8,21 +8,34 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 import uuid
+import mimetypes
+import time
+import re
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--root", type=Path, required=True)
 parser.add_argument("--port", type=int, default=17947)
+parser.add_argument(
+    "--web-assets", type=Path, help="Serve the built shared UI for disposable browser qualification"
+)
+parser.add_argument(
+    "--reuse", action="store_true", help="Restart a previously created disposable fixture root"
+)
 args = parser.parse_args()
+protocol_source = (Path(__file__).resolve().parents[2] / "crates/protocol/src/lib.rs").read_text()
+api_version = int(re.search(r"pub const API_VERSION: u32 = (\d+)", protocol_source).group(1))
 # Reserve an ephemeral port when requested, before publishing the client config.
 import socket
 
 listener = socket.socket()
+listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 listener.bind(("127.0.0.1", args.port))
 args.port = listener.getsockname()[1]
 listener.close()
 args.root.mkdir(parents=True, exist_ok=True)
+(args.root / "server.pid").write_text(str(os.getpid()))
 config = args.root / "control-client.json"
-if config.exists():
+if config.exists() and not args.reuse:
     raise SystemExit("Use a new disposable App root")
 control = "00000000-0000-4000-8000-000000000047"
 config.write_text(
@@ -34,8 +47,9 @@ config.write_text(
 )
 config.chmod(0o600)
 key = args.root / "test-key"
-key.write_bytes(os.urandom(32))
-key.chmod(0o600)
+if not key.exists():
+    key.write_bytes(os.urandom(32))
+    key.chmod(0o600)
 assistants = [
     dict(id="main", name="Pot", revision=1),
     dict(id="research", name="研究助手", revision=1),
@@ -100,17 +114,122 @@ class Handler(http.server.BaseHTTPRequestHandler):
             path = "/api/v1/" + suffix
         return path, owner, parse_qs(parsed.query)
 
+    def web_shell(self):
+        if not args.web_assets:
+            return False
+        path = urlsplit(self.path).path
+        if path.startswith("/access/"):
+            self.data(dict(authenticated=True, push_available=False, subscription=None))
+            return True
+        if path.startswith("/api/"):
+            return False
+        asset = args.web_assets.resolve() / (path.lstrip("/") or "index.html")
+        if not asset.resolve().is_relative_to(args.web_assets.resolve()) or not asset.is_file():
+            self.data(dict(message="missing asset"), 404)
+            return True
+        data = asset.read_bytes()
+        viewport_file = args.root / "viewport.json"
+        if asset.name == "style.css" and viewport_file.is_file():
+            viewport = json.loads(viewport_file.read_text())
+            data += f"\ncanvas{{width:{int(viewport['width'])}px!important;height:{int(viewport['height'])}px!important}}".encode()
+
+        self.send_response(200)
+        self.send_header(
+            "Content-Type", mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
+        )
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+        return True
+
     def authorized(self):
+        if args.web_assets:
+            return True
         if self.headers.get("Authorization") != "Bearer ui-fixture":
             self.data(dict(message="Invalid fixture credential"), 401)
             return False
         return True
 
     def do_GET(self):
+        if self.web_shell():
+            return
         if not self.authorized():
             return
         path, owner, query = self.route()
-        if path == "/api/v1/runtime":
+        if path in ("/api/v1/changes", "/api/v1/machines/watch") or path.endswith("/events"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            try:
+                for _ in range(120):
+                    if path == "/api/v1/changes":
+                        self.wfile.write(
+                            (
+                                "event: changes\ndata: "
+                                + json.dumps(
+                                    dict(
+                                        boot_id="fixture",
+                                        runtime_id=control,
+                                        versions=dict(settings=1, machines=1, tasks=1, schedules=1),
+                                    )
+                                )
+                                + "\n\n"
+                            ).encode()
+                        )
+                    else:
+                        self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                    time.sleep(1)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        elif path == "/api/v1/agent":
+            self.data(
+                dict(
+                    profiles=[
+                        dict(
+                            id="fixture",
+                            name="Fixture Agent",
+                            provider="fixture",
+                            model="fixture",
+                            revision=1,
+                        )
+                    ],
+                    thread=dict(
+                        config=dict(
+                            source_profile_id="fixture", model="fixture", source_profile_revision=1
+                        )
+                    ),
+                    pending_config=None,
+                )
+            )
+        elif path == "/api/v1/providers":
+            self.data(
+                dict(
+                    connections=[
+                        dict(
+                            profile_id="fixture",
+                            endpoint="https://example.invalid/v1/chat/completions",
+                            protocol="openai_chat",
+                            has_key=True,
+                        )
+                    ]
+                )
+            )
+        elif path == "/api/v1/agent/routing":
+            self.data(
+                dict(
+                    revision=1,
+                    follow_chat=True,
+                    worker_profile=None,
+                    allowed_tool_profiles=[],
+                    profile_limits={},
+                    provider_limits={},
+                )
+            )
+        elif path == "/api/v1/usage/providers":
+            self.data(dict(providers=[]))
+        elif path == "/api/v1/runtime":
             self.data(
                 dict(
                     runtime_id=(args.root / "replacement-id").read_text()
@@ -156,7 +275,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 )
             )
         elif path == "/api/v1/completions":
-            self.data(dict(items=[]))
+            self.data(
+                dict(
+                    items=[
+                        dict(
+                            token="/machine:fixture", label="Fixture machine", detail="Control Host"
+                        ),
+                        dict(token="/tag:desktop", label="desktop", detail="Machine label"),
+                    ]
+                )
+            )
         elif path in ("/api/v1/assistant-tasks", "/api/v1/tasks/query"):
             if int(query.get("limit", ["20"])[0]) > 50:
                 self.data(dict(message="Invalid page size"), 400)
@@ -211,7 +339,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conversation = owner if path.endswith("snapshot") else path.rsplit("/", 1)[-1]
             self.data(
                 dict(
-                    api_version=2,
+                    api_version=api_version,
                     boot_id="fixture",
                     cursor=1,
                     conversation_id=conversation,

@@ -137,12 +137,38 @@ async fn token_headers_cookies_rotation_and_private_routes() {
             .0,
         200
     );
-    for path in ["/api/v1/providers", "/api/v1/access", "/api/v1/terminals"] {
+    for path in ["/api/v1/access", "/api/v1/terminals"] {
         assert_eq!(
             f.request(false, path, None, Some(&token), None).await.0,
             403
         );
     }
+    // Shared settings is authenticated and reaches the backend. This fixture
+    // has no provider route, so a forwarded request returns 404 rather than 403.
+    assert_eq!(
+        f.request(false, "/api/v1/providers", None, None, None)
+            .await
+            .0,
+        401
+    );
+    assert_eq!(
+        f.request(false, "/api/v1/providers", None, Some(&token), None)
+            .await
+            .0,
+        404
+    );
+    assert_eq!(
+        f.request(
+            false,
+            "/api/v1/assistant-mail",
+            Some(json!({"operation":"pending","target_control_id":"other"})),
+            Some(&token),
+            None
+        )
+        .await
+        .0,
+        403
+    );
     let fresh = f.command("regenerate_token").await;
     assert_ne!(fresh["token"], token);
     assert_eq!(

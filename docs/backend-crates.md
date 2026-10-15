@@ -25,7 +25,9 @@
 | pot-sandbox-macos-apple-container | Apple Containerization Helper and Linux guest transport |
 | pot-sandbox-macos-apple-vm | Prepared VZ instance and pinned guest TLS; qualification pending |
 | pot-resource / pot-sandbox-images | Verified delivery, image catalog and recipes |
-| pot-app / pot-ui | Native client and shared UI state/components |
+| pot-ui | Complete shared GPUI application, navigation, pages, configuration state and composer |
+| pot-app | Native bootstrap, client transport, text editing and system-service adapter |
+| pot-web-ui | WASM bootstrap and browser transport, history, authentication and PWA adapter |
 | pot-eval | Deterministic and explicitly selected live evaluation |
 
 Server creates neutral Runtime infrastructure. Resource APIs assemble optional

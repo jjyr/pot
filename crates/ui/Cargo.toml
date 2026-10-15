@@ -6,7 +6,7 @@ license.workspace = true
 
 [features]
 default = []
-presentation = ["dep:gpui-kit", "dep:uuid"]
+presentation = ["dep:gpui-kit", "dep:uuid", "dep:web-time"]
 
 [dependencies]
 gpui-kit = { workspace = true, optional = true }
@@ -16,6 +16,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 unicode-segmentation = "1.12"
 uuid = { version = "1", features = ["v4", "js"], optional = true }
+
+web-time = {version="1",optional=true}
 
 [build-dependencies]
 serde_json.workspace = true

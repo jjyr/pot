@@ -87,7 +87,7 @@ pub fn render(
                             .map(|(scope, label, count)| {
                                 Button::new(SharedString::from(format!("task-scope-{scope}")))
                                     .ghost()
-                                    .when(!layout.native, |b| b.min_h(px(44.)))
+                                    .when(layout.compact, |b| b.min_h(px(44.)))
                                     .small()
                                     .toggled(view.task_query.scope == scope)
                                     .label(format!("{label} {count}"))
@@ -102,7 +102,7 @@ pub fn render(
                         div().flex_1().min_w(px(180.)).child(
                             Input::new(search)
                                 .small()
-                                .when(!layout.native, |input| input.h(px(44.)))
+                                .when(layout.compact, |input| input.h(px(44.)))
                                 .aria_label(catalog.text("main.search-task-title-or-id")),
                         ),
                     ),
@@ -161,7 +161,7 @@ pub fn render(
                             el.child(
                                 Button::new("clear-task-search")
                                     .ghost()
-                                    .when(!layout.native, |b| b.min_h(px(44.)))
+                                    .when(layout.compact, |b| b.min_h(px(44.)))
                                     .small()
                                     .label(catalog.text("main.clear-search"))
                                     .on_click(pages::on(
@@ -187,7 +187,7 @@ pub fn render(
                             .gap_2()
                             .p_4()
                             .h(px(80.))
-                            .when(!layout.native, |el| el.h_auto().min_h(px(80.)))
+                            .when(layout.compact, |el| el.h_auto().min_h(px(80.)))
                             .rounded(px(0.))
                             .bg(design::surface(cx))
                             .border_b_1()
@@ -218,7 +218,7 @@ pub fn render(
                                             .child(pages::single_line_title(
                                                 &task.title,
                                                 15.,
-                                                (if layout.native {
+                                                (if !layout.compact {
                                                     window.viewport_size().width
                                                         - px(pages::SIDEBAR)
                                                 } else {
@@ -226,7 +226,6 @@ pub fn render(
                                                 })
                                                 .min(px(pages::PAGE_WIDTH))
                                                     - px(130.),
-                                                layout.native,
                                                 window,
                                                 cx,
                                             )),
@@ -368,7 +367,7 @@ pub fn render(
                             .child(
                                 Button::new("tasks-previous")
                                     .ghost()
-                                    .when(!layout.native, |b| b.min_h(px(44.)))
+                                    .when(layout.compact, |b| b.min_h(px(44.)))
                                     .label(catalog.text("schedules-ui.previous"))
                                     .disabled(view.tasks_loading || view.task_query.offset == 0)
                                     .on_click(pages::on(&handler, "task-previous", Value::Null)),
@@ -376,7 +375,7 @@ pub fn render(
                             .child(
                                 Button::new("tasks-next")
                                     .ghost()
-                                    .when(!layout.native, |b| b.min_h(px(44.)))
+                                    .when(layout.compact, |b| b.min_h(px(44.)))
                                     .label(catalog.text("schedules-ui.next-52"))
                                     .disabled(
                                         view.tasks_loading || view.task_page.next_offset.is_none(),

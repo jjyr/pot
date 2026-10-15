@@ -190,6 +190,31 @@ fn request_mode(
     body: Option<Value>,
     timeout: Duration,
 ) -> Result<Response, String> {
+    request_mode_owned(mode, path, body, timeout, None)
+}
+pub(crate) fn configuration_request(
+    mode: &str,
+    owner: &str,
+    control: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Response, String> {
+    let requests = Requests::for_mode(mode).scope(owner);
+    request_mode_owned(
+        mode,
+        &requests.scoped(path),
+        body,
+        requests.timeout,
+        Some(control),
+    )
+}
+fn request_mode_owned(
+    mode: &str,
+    path: &str,
+    body: Option<Value>,
+    timeout: Duration,
+    expected_control: Option<&str>,
+) -> Result<Response, String> {
     let control = if mode == "remote" {
         Some(control_config()?)
     } else {
@@ -217,7 +242,7 @@ fn request_mode(
         path.into()
     };
     runtime().block_on(async {
-        if let Some(config) = &control {
+        if control.is_some() || expected_control.is_some() {
             let identity = tokio::time::timeout(timeout, client.request("/api/v1/runtime", None))
                 .await
                 .map_err(|_| "Space identity check timed out".to_string())?
@@ -226,7 +251,11 @@ fn request_mode(
                 return Err("Space identity check rejected".into());
             }
             let value: Value = serde_json::from_slice(&identity.body).map_err(|e| e.to_string())?;
-            if value["runtime_id"] != config.runtime_id {
+            if control
+                .as_ref()
+                .is_some_and(|config| value["runtime_id"] != config.runtime_id)
+                || expected_control.is_some_and(|id| value["runtime_id"].as_str() != Some(id))
+            {
                 return Err("Configured Control identity changed".into());
             }
         }

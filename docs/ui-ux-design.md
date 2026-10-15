@@ -18,7 +18,7 @@ the application language.
 
 ## Shared layout
 
-Tasks, settings, and Machines use **gpui-kit 0.7.3** with the **gpui-fast** backend, configured in the workspace dependency shared by native and Web UI. Shared layout lives in `crates/app/src/ui.rs`; new pages reuse it rather than maintain separate colors/sizes.
+Tasks, settings, and Machines use **gpui-kit 0.7.3** with the **gpui-fast** backend, configured in the workspace dependency shared by native and Web UI. The complete application lives in `crates/ui/src/application`; both hosts mount the same root and pages. See [Shared UI](shared-ui.md).
 
 | Element | Specification |
 | --- | --- |
@@ -70,8 +70,8 @@ show an inline recovery action.
 
 ## Implementation boundaries
 
-- Rust / Kit: chat, tasks, settings, Sandbox title/toolbar, unready states.
-- Swift: window/sidebar/tray/native chat input/configuration/lifecycle. `SettingsPanel.swift` is configuration service only, not settings rendering. Restart confirmation uses native sheets; Desktop viewer menus remain confined to the viewer.
+- `pot-ui` / Kit: the complete shared application, pages, navigation, configuration state, composer frame, drafts and reference completion.
+- Swift: native window/tray, text editing and IME, local Runtime preferences/restarts and desktop viewer services. `SettingsPanel.swift` provides only native preferences and local execution-limit persistence. Restart confirmation uses native sheets; desktop viewer menus remain confined to the viewer.
 - WKWebView / noVNC: desktop canvas/Sandbox details/clipboard/scaling. Standalone viewer retains its web More menu; shared web implementations use neutral colors, 8 px radii, 13-14 px text, synchronized themes. Hide web title bar in App to avoid duplicate toolbars.
 
 Rust reads nonsensitive state through `pot_bridge_ui` and sends allowlisted operations via `pot_bridge_command`. Saved keys never return to UI; masked Input accepts new keys, blank preserves existing. Sync forms only on configuration revision changes; background refresh must preserve unsaved input. Validate ranges/active tasks/connection before save; after confirmation, stop normally, write atomically, restart.
@@ -143,7 +143,7 @@ Preset API forms show only key/model and a Get API Key link. Endpoint/protocol a
 
 Check and Save are separate adjacent buttons. Check performs supported model-list GETs without inference or saving. Save validates configuration through the existing Runtime API; it does not force a separate Check click or claim successful inference. Unsupported model discovery permits manual input. Provider errors preserve drafts; secrets are masked and excluded from public state. Switching connection forms clears secret fields.
 
-OpenCode uses a maintained per-plan, per-model route table in `crates/app/swift/APIIntegration.swift`, checked against official documentation on 2026-10-06. Go and Zen may serve the same model through different formats. Unknown formats/models are excluded from discovered options and require a catalog update or explicit Custom API configuration; names alone do not determine the adapter.
+OpenCode uses a maintained per-plan, per-model route table in `crates/ui/src/application/open-code-routes.json`. Go and Zen may serve the same model through different formats. Unknown formats/models are excluded from discovered options and require a catalog update or explicit Custom API configuration; names alone do not determine the adapter.
 
 For an empty main configuration, the final connection action also sets the Main Agent at a safe turn boundary. Entry from Chat uses Save and start chatting and restores its draft without sending. Settings explains Save and set as Main Agent. Existing main configurations are not replaced by ordinary additions. Save retains a stable draft connection identity and reconciles partially completed saves before retrying.
 

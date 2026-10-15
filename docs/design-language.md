@@ -218,7 +218,13 @@ Activity cycles are semantic execution indicators, not decorative loops: run the
 
 ## Implementation and validation
 
-2026-10-06 implementation: Chat light/dark colors, pale user bubbles, unboxed assistant messages, the native composer, running-task summary and Pot cooking/unread icons are implemented. The summary displays task titles only; runtime progress remains available in accessible row labels. Summary removal hides finished content immediately and briefly collapses the released space. Shared light/dark tokens, the contextual toolbar and Back/Forward history (superseded by the parent navigation above on 2026-10-12), grouped task rows, four Settings categories with compact AI connection choices, responsive forms and stable action footers, Usage styling, and native/embedded Sandbox toolbar styling are also implemented. Existing saved execution settings remain available under a collapsed advanced disclosure. After rebasing onto #10, the upstream browser authorization, provider integration and Terminal removal are preserved. Its provider grid, connection panels, model pickers and task configuration now use the shared design tokens, compact controls and responsive labels. The connection sheet enters with a restrained 200 ms fade, disabled under Reduce Motion.
+The shared `pot-ui::application::Shell` owns Chat, running-task summaries, navigation,
+Tasks, Schedules, Machines, Usage and the three Settings sections. Both hosts use
+its tokens, controls, layouts and interaction state. The composer frame, send
+button, reference completion and draft ownership are shared; AppKit supplies
+native text editing and IME. Browser text input uses the GPUI textarea. Native
+window controls, tray and desktop viewer services remain platform adapters. See
+[Shared UI](shared-ui.md) for the ownership boundary.
 
 Implement shared tokens and shell/navigation first, then conversation/task patterns, settings/usage and embedded toolbar consistency. Update the current UI specification as behavior ships. Do not change authentication, task bindings, accounting or desktop-control semantics through styling alone.
 

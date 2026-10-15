@@ -10,14 +10,10 @@ use serde_json::Value;
 use std::rc::Rc;
 #[derive(Clone, Copy)]
 pub struct Layout {
-    pub native: bool,
     pub compact: bool,
 }
 impl Layout {
-    pub const NATIVE: Self = Self {
-        native: true,
-        compact: false,
-    };
+    pub const DESKTOP: Self = Self { compact: false };
 }
 #[derive(Clone, Debug)]
 pub struct PageAction {
@@ -62,16 +58,11 @@ pub fn single_line_title(
     text: &str,
     size: f32,
     width: Pixels,
-    native: bool,
     window: &Window,
     cx: &App,
 ) -> SharedString {
     let style = TextStyle {
-        font_family: if native {
-            ".AppleSystemUIFont".into()
-        } else {
-            cx.theme().font_family.clone()
-        },
+        font_family: cx.theme().font_family.clone(),
         font_weight: FontWeight::MEDIUM,
         color: cx.theme().foreground,
         ..Default::default()
@@ -139,20 +130,16 @@ pub fn action_tooltip(
         .child(button)
 }
 
-pub fn page(layout: Layout, cx: &App) -> Div {
+pub fn page(_layout: Layout, cx: &App) -> Div {
     div()
         .size_full()
         .min_h_0()
         .min_w_0()
-        .pl(px(if layout.native { SIDEBAR } else { 0. }))
+        .pl(px(SIDEBAR))
         .bg(cx.theme().background)
         .text_color(cx.theme().foreground)
         .text_size(px(14.))
-        .font_family(if layout.native {
-            ".AppleSystemUIFont"
-        } else {
-            "IBM Plex Sans"
-        })
+        .font_family(cx.theme().font_family.clone())
 }
 pub fn content(layout: Layout) -> Div {
     div()
@@ -295,12 +282,12 @@ pub fn notice(text: impl Into<SharedString>, error: bool, cx: &App) -> Div {
 
 pub fn brand_icon(kind: &str) -> Icon {
     let icon = match kind {
-        "openai" => Icon::empty().data(include_bytes!("../../app/assets/agents/openai.svg")),
-        "anthropic" => Icon::empty().data(include_bytes!("../../app/assets/agents/claude.svg")),
-        "gemini" => Icon::empty().data(include_bytes!("../../app/assets/agents/gemini.svg")),
-        "deepseek" => Icon::empty().data(include_bytes!("../../app/assets/agents/deepseek.svg")),
+        "openai" => Icon::empty().data(include_bytes!("../assets/agents/openai.svg")),
+        "anthropic" => Icon::empty().data(include_bytes!("../assets/agents/claude.svg")),
+        "gemini" => Icon::empty().data(include_bytes!("../assets/agents/gemini.svg")),
+        "deepseek" => Icon::empty().data(include_bytes!("../assets/agents/deepseek.svg")),
         "opencode-go" | "opencode-zen" => {
-            Icon::empty().data(include_bytes!("../../app/assets/agents/opencode.svg"))
+            Icon::empty().data(include_bytes!("../assets/agents/opencode.svg"))
         }
         _ => Icon::new(IconName::Globe),
     };

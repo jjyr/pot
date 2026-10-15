@@ -2,7 +2,7 @@
 mod ai;
 pub(crate) use pot_ui::pages::brand_icon;
 mod routing;
-use crate::{Shell, gpui};
+use crate::application::{Shell, gpui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::{
@@ -12,7 +12,6 @@ use gpui_kit::component::{
     input::{Input, InputState},
 };
 use serde_json::{Value, json};
-use std::ffi::CString;
 
 pub const TITLEBAR: f32 = 44.;
 
@@ -21,16 +20,29 @@ pub const TITLEBAR: f32 = 44.;
 pub use pot_ui::pages::title_tooltip;
 
 pub fn command(value: Value) {
-    if let Ok(json) = CString::new(value.to_string()) {
-        unsafe { crate::pot_bridge_command(json.as_ptr()) };
-    }
+    let value = if value["action"] == "page" {
+        json!({"action":"navigation-command","value":value})
+    } else if super::settings_state::SettingsState::handles(value["action"].as_str().unwrap_or(""))
+    {
+        json!({"action":"configuration-command","value":value})
+    } else {
+        value
+    };
+    super::platform::with(|p| p.command(value));
 }
 pub use pot_ui::pages::{card, empty, field, form, hint, notice, section, segments, sheet, title};
 pub fn page(cx: &App) -> Div {
-    pot_ui::pages::page(pot_ui::pages::Layout::NATIVE, cx)
+    pot_ui::pages::page(
+        pot_ui::pages::Layout {
+            compact: pot_ui::design::compact(cx),
+        },
+        cx,
+    )
 }
-pub fn content() -> Div {
-    pot_ui::pages::content(pot_ui::pages::Layout::NATIVE)
+pub fn content(cx: &App) -> Div {
+    pot_ui::pages::content(pot_ui::pages::Layout {
+        compact: pot_ui::design::compact(cx),
+    })
 }
 
 /// Keep navigation identical across all settings screens.
@@ -45,9 +57,9 @@ fn settings_header(selected: u64, busy: bool, location: Option<Div>, cx: &App) -
         .child(
             segments(cx).children(
                 [
-                    (0, crate::i18n::text("ui.general")),
-                    (1, crate::i18n::text("ui.ai-configuration")),
-                    (4, crate::i18n::text("ui.task-configuration")),
+                    (0, crate::application::i18n::text("ui.general")),
+                    (1, crate::application::i18n::text("ui.ai-configuration")),
+                    (4, crate::application::i18n::text("ui.task-configuration")),
                 ]
                 .into_iter()
                 .map(|(i, name)| {
@@ -95,9 +107,9 @@ impl Settings {
                     InputState::new(window, cx)
                         .masked(i == 0 || i == 15)
                         .placeholder(if i == 0 {
-                            crate::i18n::text("ui.leave-blank-to-keep-the-saved-key")
+                            crate::application::i18n::text("ui.leave-blank-to-keep-the-saved-key")
                         } else {
-                            crate::i18n::text("ui.enter-a-value")
+                            crate::application::i18n::text("ui.enter-a-value")
                         })
                 })
             })
@@ -115,7 +127,7 @@ impl Settings {
         }
     }
     pub fn localize(&mut self, window: &mut Window, cx: &mut Context<Shell>) -> bool {
-        let locale = rust_i18n::locale().to_string();
+        let locale = super::i18n::locale().to_string();
         if self.locale == locale {
             return false;
         }
@@ -123,7 +135,7 @@ impl Settings {
         for (i, field) in self.fields.iter().enumerate() {
             field.update(cx, |input, cx| {
                 input.set_placeholder(
-                    crate::i18n::text(if i == 0 {
+                    crate::application::i18n::text(if i == 0 {
                         "ui.leave-blank-to-keep-the-saved-key"
                     } else {
                         "ui.enter-a-value"
@@ -211,8 +223,8 @@ impl Settings {
                 preferences = preferences.child(
                     div().flex().items_center().justify_between().gap_4().flex_wrap()
                         .child(div().flex().flex_col().gap_1()
-                            .child(crate::i18n::text("settings.language"))
-                            .child(hint(crate::i18n::text("settings.language.hint"), cx)))
+                            .child(crate::application::i18n::text("settings.language"))
+                            .child(hint(crate::application::i18n::text("settings.language.hint"), cx)))
                         .child(Button::new("language-picker").small().w(px(180.)).dropdown_caret(true)
                             .label(pot_ui::localization::LANGUAGES.iter().find(|(locale, _)| state["locale"] == *locale).map(|(_, name)| *name).unwrap_or("English"))
                             .dropdown_menu({
@@ -225,9 +237,9 @@ impl Settings {
                 ).child(
                     div().flex().items_center().justify_between().gap_4().flex_wrap()
                         .pt_4().border_t_1().border_color(cx.theme().border)
-                        .child(crate::i18n::text("ui.appearance"))
+                        .child(crate::application::i18n::text("ui.appearance"))
                         .child(segments(cx).children([
-                            crate::i18n::text("ui.system"), crate::i18n::text("ui.light"), crate::i18n::text("ui.dark")
+                            crate::application::i18n::text("ui.system"), crate::application::i18n::text("ui.light"), crate::application::i18n::text("ui.dark")
                         ].into_iter().enumerate().map(|(i, name)| {
                             Button::new(("appearance", i)).ghost().small().min_w(px(64.)).h(px(28.))
                                 .label(name).toggled(state["appearance"].as_u64() == Some(i as u64))
@@ -240,15 +252,20 @@ impl Settings {
                 form = form
                     .child(input(
                         7,
-                        crate::i18n::text("ui.concurrent-tasks"),
-                        crate::i18n::text("ui.concurrent-tasks-hint"),
+                        crate::application::i18n::text("ui.concurrent-tasks"),
+                        crate::application::i18n::text("ui.concurrent-tasks-hint"),
                     ))
                     .child(
-                        field(crate::i18n::text("ui.periodic-token-allowance")).child(
+                        field(crate::application::i18n::text(
+                            "ui.periodic-token-allowance",
+                        ))
+                        .child(
                             Button::new("task-usage-policy")
                                 .ghost()
                                 .small()
-                                .label(crate::i18n::text("ui.set-allowance-and-automatic-resume"))
+                                .label(crate::application::i18n::text(
+                                    "ui.set-allowance-and-automatic-resume",
+                                ))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.usage_ui.open_settings();
                                     command(json!({"action":"page","value":6}));
@@ -260,17 +277,17 @@ impl Settings {
                     form = form
                         .child(input(
                             1,
-                            crate::i18n::text("ui.lifetime-request-limit"),
-                            crate::i18n::text("ui.0-1000000-0-disables-requests"),
+                            crate::application::i18n::text("ui.lifetime-request-limit"),
+                            crate::application::i18n::text("ui.0-1000000-0-disables-requests"),
                         ))
                         .child(input(
                             2,
-                            crate::i18n::text("ui.output-token-limit"),
-                            crate::i18n::text("ui.supports-k-m-such-as-128k-or"),
+                            crate::application::i18n::text("ui.output-token-limit"),
+                            crate::application::i18n::text("ui.supports-k-m-such-as-128k-or"),
                         ))
                         .child(input(
                             3,
-                            crate::i18n::text("ui.requests-per-turn"),
+                            crate::application::i18n::text("ui.requests-per-turn"),
                             "1–1000。",
                         ));
                 }
@@ -280,14 +297,14 @@ impl Settings {
         let fields = self.fields.clone();
         let mut actions = div().flex().items_center().justify_end().gap_2();
         if section == 4 {
-            actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {crate::i18n::text("ui.hide-advanced-limits")} else {crate::i18n::text("ui.advanced-limits")})
+            actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {crate::application::i18n::text("ui.hide-advanced-limits")} else {crate::application::i18n::text("ui.advanced-limits")})
                 .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced = !this.settings.advanced;cx.notify();})))
-                .child(Button::new("save-task-limits").primary().small().label(crate::i18n::text("ui.apply-global-limits")).on_click(move|_,_,cx|
-                    command(json!({"action":"save-agent","key":"","limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}))));
+                .child(Button::new("save-task-limits").primary().small().label(crate::application::i18n::text("ui.apply-global-limits")).on_click(move|_,_,cx|
+                    command(json!({"action":"save-agent","limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}))));
         }
 
         page(cx).child(
-            content()
+            content(cx)
                 .child(settings_header(
                     section,
                     state["routing_busy"] == true,
@@ -296,12 +313,16 @@ impl Settings {
                 ))
                 .child(hint(
                     match section {
-                        0 => crate::i18n::text("ui.make-pot-work-the-way-you-prefer"),
-                        1 => crate::i18n::text("ui.connect-an-agent-and-choose-the-model"),
-                        4 => crate::i18n::text("ui.new-tasks-follow-the-chat-configuration-by"),
-                        _ => {
-                            crate::i18n::text("ui.resource-changes-apply-after-restarting-chat-and")
-                        }
+                        0 => crate::application::i18n::text("ui.make-pot-work-the-way-you-prefer"),
+                        1 => crate::application::i18n::text(
+                            "ui.connect-an-agent-and-choose-the-model",
+                        ),
+                        4 => crate::application::i18n::text(
+                            "ui.new-tasks-follow-the-chat-configuration-by",
+                        ),
+                        _ => crate::application::i18n::text(
+                            "ui.resource-changes-apply-after-restarting-chat-and",
+                        ),
                     },
                     cx,
                 ))
@@ -321,27 +342,43 @@ impl Settings {
                             el.child(
                                 card(cx)
                                     .mb_4()
-                                    .child(pot_ui::pages::section(crate::i18n::text(
+                                    .child(pot_ui::pages::section(crate::application::i18n::text(
                                         "ui.task-configuration",
                                     )))
                                     .child(self.routing_form(state, cx)),
                             )
                         })
-                        .child(
-                            card(cx)
-                                .child(pot_ui::pages::section(crate::i18n::text(if section == 0 {
-                                    "ui.general"
-                                } else {
-                                    "ui.execution-limits"
-                                })))
-                                .when(section == 0, |el| el.child(preferences))
-                                .when(section != 0, |el| el.child(form)),
+                        .when(
+                            section == 0
+                                || super::platform::with(|p| {
+                                    p.capabilities().local_execution_settings
+                                }),
+                            |el| {
+                                el.child(
+                                    card(cx)
+                                        .child(pot_ui::pages::section(
+                                            crate::application::i18n::text(if section == 0 {
+                                                "ui.general"
+                                            } else {
+                                                "ui.execution-limits"
+                                            }),
+                                        ))
+                                        .when(section == 0, |el| el.child(preferences))
+                                        .when(
+                                            section != 0
+                                                && super::platform::with(|p| {
+                                                    p.capabilities().local_execution_settings
+                                                }),
+                                            |el| el.child(form),
+                                        ),
+                                )
+                            },
                         )
                         .when(section == 0, |el| {
                             el.child(
                                 card(cx)
                                     .mt_4()
-                                    .child(pot_ui::pages::section(crate::i18n::text(
+                                    .child(pot_ui::pages::section(crate::application::i18n::text(
                                         "ui.keyboard-shortcuts",
                                     )))
                                     .children(
@@ -365,7 +402,10 @@ impl Settings {
                                                             .border_t_1()
                                                             .border_color(cx.theme().border)
                                                     })
-                                                    .child(hint(crate::i18n::text(label), cx))
+                                                    .child(hint(
+                                                        crate::application::i18n::text(label),
+                                                        cx,
+                                                    ))
                                                     .child(
                                                         div()
                                                             .min_w(px(64.))
@@ -377,27 +417,69 @@ impl Settings {
                                                             .bg(cx.theme().muted)
                                                             .text_center()
                                                             .text_size(px(12.))
-                                                            .child(keys),
+                                                            .child(shortcut_keys(keys)),
                                                     )
                                             },
                                         ),
                                     ),
                             )
                         })
-                        .when(section == 0, |el| {
-                            el.child(
-                                card(cx).mt_4().child(
-                                    Button::new("settings-resource-cache")
-                                        .ghost()
-                                        .small()
-                                        .self_start()
-                                        .label(crate::i18n::text("resources.cache"))
-                                        .on_click(|_, _, _| {
-                                            command(json!({"action":"resource-cache"}))
-                                        }),
-                                ),
-                            )
-                        })
+                        .when(
+                            section == 0
+                                && super::platform::with(|p| p.capabilities().resource_cache),
+                            |el| {
+                                el.child(
+                                    card(cx).mt_4().child(
+                                        Button::new("settings-resource-cache")
+                                            .ghost()
+                                            .small()
+                                            .self_start()
+                                            .label(crate::application::i18n::text(
+                                                "resources.cache",
+                                            ))
+                                            .on_click(|_, _, _| {
+                                                command(json!({"action":"resource-cache"}))
+                                            }),
+                                    ),
+                                )
+                            },
+                        )
+                        .when(
+                            section == 0
+                                && super::platform::with(|p| p.capabilities().browser_access),
+                            |el| {
+                                el.child(
+                                    card(cx).mt_4().children(
+                                        [
+                                            ("install", "mobile.install"),
+                                            (
+                                                "notifications",
+                                                "mobile.enable-message-notifications",
+                                            ),
+                                            (
+                                                "notifications-off",
+                                                "mobile.disable-message-notifications",
+                                            ),
+                                            ("configure-token", "web.change-token"),
+                                            ("logout", "mobile.sign-out"),
+                                        ]
+                                        .into_iter()
+                                        .map(
+                                            |(action, key)| {
+                                                Button::new(action)
+                                                    .ghost()
+                                                    .small()
+                                                    .self_start()
+                                                    .label(crate::application::i18n::text(key))
+                                                    .on_click(move |_, _, _| {
+                                                        command(json!({"action":action}))
+                                                    })
+                                            },
+                                        ),
+                                    ),
+                                )
+                            },
+                        )
                         .child(div().mt_3().when(
                             !state["result"].as_str().unwrap_or("").is_empty(),
                             |el| {
@@ -409,17 +491,37 @@ impl Settings {
                             },
                         )),
                 )
-                .when(section == 4, |el| {
-                    el.child(
-                        actions
-                            .flex_wrap()
-                            .w_full()
-                            .pt_3()
-                            .border_t_1()
-                            .border_color(cx.theme().border)
-                            .flex_shrink_0(),
-                    )
-                }),
+                .when(
+                    section == 4
+                        && super::platform::with(|p| p.capabilities().local_execution_settings),
+                    |el| {
+                        el.child(
+                            actions
+                                .flex_wrap()
+                                .w_full()
+                                .pt_3()
+                                .border_t_1()
+                                .border_color(cx.theme().border)
+                                .flex_shrink_0(),
+                        )
+                    },
+                ),
         )
+    }
+}
+
+fn shortcut_keys(keys: &str) -> Div {
+    use gpui_kit::assets::IconName;
+    let mut row = div().flex().items_center().justify_center().gap_1();
+    if keys.starts_with('⌘') {
+        row = if super::platform::with(|p| p.capabilities().command_key) {
+            row.child(gpui_kit::component::Icon::new(IconName::Command).size(px(12.)))
+        } else {
+            row.child("Ctrl")
+        };
+        row.child(keys.trim_start_matches('⌘').trim().to_owned())
+    } else {
+        row.child(gpui_kit::component::Icon::new(IconName::ArrowBigUp).size(px(12.)))
+            .child(gpui_kit::component::Icon::new(IconName::CornerDownLeft).size(px(12.)))
     }
 }
