@@ -55,6 +55,12 @@ the shared application asset source and design tokens. The sidebar Companion
 uses transparent idle/cooking exports from the existing native vector master;
 `mise run icons` regenerates those shared assets. Platform font resolution
 and operating-system window controls remain host responsibilities.
+
+`vendor/gpui-fast` contains the crates.io 0.1.7 sources with one clock fix:
+wheel hover suppression uses `scheduler::Instant`, which supports WASM. The
+upstream `std::time::Instant` panics on the first browser wheel event and stops
+input dispatch. Keep the Cargo patch until an upstream release includes this fix.
+
 Provider marks and their attribution live in `crates/ui/assets/agents`; both
 targets embed them through the shared page components.
 
@@ -103,3 +109,23 @@ adapter, not product views.
 
 See [multi-Space behavior](multi-space-ui.md), [UI specification](ui-ux-design.md),
 [event updates](ui-events.md) and [deployment](deployment.md).
+
+## Browser crash reporting
+
+The browser loads `errors.js` before the application module. Rust's panic hook
+reports directly to this DOM layer and retains the console panic hook; global
+`error` and `unhandledrejection` listeners capture uncaught JavaScript failures.
+These handlers show a red, non-modal toast independently of GPUI/WASM, so a
+trapped application can still explain the failure and offer a manual refresh.
+Handled request errors keep their existing presentation.
+
+The toast hides after eight seconds, pauses while hovered, focused or expanded,
+and merges repeated errors without restarting its timer. Details offer copying
+the diagnostic log. A small Error log button reopens details after dismissal
+or reload. Up to 20 bounded entries (time, kind, message, stack, page and repeat
+count) remain in memory and same-tab session storage; new entries are also sent
+to the browser console. Storage/clipboard failures do not interrupt reporting.
+Logs omit page query parameters and fragments and redact common credential
+patterns; no request bodies, form values or transcript data are collected.
+There is no automatic log upload or refresh. A blocked JavaScript main thread
+cannot run these hooks; this mechanism detects exceptions, not all hangs.

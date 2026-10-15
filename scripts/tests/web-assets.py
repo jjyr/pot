@@ -6,6 +6,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -35,6 +36,28 @@ def fixture(dist):
 
 
 class WebAssets(unittest.TestCase):
+    def test_browser_error_reporting(self):
+        subprocess.run(["node", ROOT / "scripts/tests/web-errors.js"], check=True)
+
+    def test_vendored_dependency_changes_invalidate_browser_assets(self):
+        names = package.sources()
+        patched_source = "vendor/gpui-fast/src/fast/layers/hover_freeze.rs"
+        self.assertIn(patched_source, names)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in names:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"original")
+            with patch.object(package, "ROOT", root):
+                before = package.sources()
+                (root / patched_source).write_bytes(b"patched clock")
+                after = package.sources()
+            self.assertEqual(before.keys(), after.keys())
+            self.assertEqual(
+                {name for name in before if before[name] != after[name]}, {patched_source}
+            )
+
     def test_browser_scripts_are_all_packaged(self):
         scripts = {path.name for path in (ROOT / "crates/web-ui/web").glob("*.js")}
         self.assertFalse(scripts - set(package.NAMES), "Browser scripts missing from package")

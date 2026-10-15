@@ -95,6 +95,13 @@ async fn http_listener_authenticates_with_http_and_external_https_origins() {
                     .unwrap()
                     .contains("body.request_id=requestUUID();")
             );
+            let response = client
+                .get(format!("{base}/errors.js"))
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success());
+            assert!(response.text().await.unwrap().contains("potReportPanic"));
         }
         let credentials: Value = serde_json::from_slice(
             &std::fs::read(process.root.join("product/access-token.json")).unwrap(),
