@@ -5,6 +5,8 @@ import argparse
 import copy
 import http.server
 import json
+import re
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -26,7 +28,7 @@ if endpoint.exists():
 endpoint.write_text(
     json.dumps(
         {
-            "api_version": 2,
+            "api_version": 3,
             "port": args.port,
             "token": "isolated-ui-fixture",
             "boot_id": "ui-fixture",
@@ -49,7 +51,7 @@ def message(identifier, role, text, request=None):
 
 
 snapshot = dict(
-    api_version=2,
+    api_version=3,
     boot_id="ui-fixture",
     cursor=0,
     agent=dict(model="fixture", phase="ready", detail=None),
@@ -157,7 +159,60 @@ page_usage = dict(
 
 
 fixture_writes = []
+fixture_schedule = dict(
+    id="fixture-schedule",
+    spec=dict(
+        title="Daily check",
+        goal="Check the fixture",
+        machine_id="fixture",
+        kind="daily",
+        timezone="Asia/Shanghai",
+        time="09:00",
+        notify="changes",
+        misfire="coalesce",
+        enabled=True,
+    ),
+    next_at_ms=1800000000000,
+    next_label="Tomorrow",
+    deleted=False,
+    last_error="",
+    baseline=None,
+    created_at_ms=1,
+)
 machine_labels = ["desktop", "task-runner", "macos"]
+profiles = [dict(id="fixture-openai", name="Fixture connection", model="fixture-model", revision=1)]
+connections = [
+    dict(
+        profile_id="fixture-openai",
+        endpoint="https://example.invalid/v1",
+        protocol="openai_chat",
+        has_key=True,
+        model_settings=dict(catalog_provider="openai"),
+    )
+]
+active_config = dict(source_profile_id="fixture-openai", model="fixture-model")
+providers = [
+    dict(
+        id="openai",
+        name="OpenAI",
+        common=True,
+        endpoint="https://example.invalid/v1",
+        protocol="openai_chat",
+        models=[dict(id="fixture-model", name="Fixture model", context=32768, output=8192)],
+    )
+]
+if args.pages:
+    providers.extend(
+        dict(
+            id=f"fixture-{index}",
+            name=f"Fixture provider {index:02}",
+            common=True,
+            endpoint="https://example.invalid/v1",
+            protocol="openai_chat",
+            models=[],
+        )
+        for index in range(1, 16)
+    )
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -178,9 +233,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path.startswith("/api/v1/assistants/main/"):
-            path = "/api/v1/" + path[len("/api/v1/assistants/main/") :]
-        if path == "/api/v1/runtime":
+        owner_match = re.match(r"/api/v1/assistants/([^/]+)/", path)
+        owner = owner_match[1] if owner_match else "main"
+        if owner_match:
+            path = "/api/v1/" + path[owner_match.end() :]
+        if path in ("/api/v1/events", "/api/v1/changes", "/api/v1/machines/watch") or path.endswith(
+            "/events"
+        ):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            try:
+                for _ in range(60):
+                    self.wfile.write(b": fixture heartbeat\n\n")
+                    self.wfile.flush()
+                    time.sleep(5)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        elif path == "/api/v1/runtime":
             self.data(
                 dict(
                     runtime_id="fixture",
@@ -188,7 +258,45 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 )
             )
         elif path == "/api/v1/assistants":
-            self.data(dict(assistants=[dict(id="main", name="Pot", revision=1)]))
+            names = (
+                [
+                    "Pot",
+                    "Research",
+                    "Code",
+                    "旅行计划",
+                    "Design",
+                    "Writing",
+                    "Reading",
+                    "Analytics",
+                    "Long assistant name for layout",
+                    "Assistant 10",
+                    "Assistant 11",
+                    "Assistant 12",
+                ]
+                if args.pages
+                else ["Pot"]
+            )
+            self.data(
+                dict(
+                    assistants=[
+                        dict(
+                            id="main" if i == 0 else f"assistant-{i + 1}",
+                            name=name,
+                            revision=1,
+                            preview="Continue our conversation · 继续对话",
+                        )
+                        for i, name in enumerate(names)
+                    ]
+                )
+            )
+        elif path == "/api/v1/agent":
+            self.data(dict(profiles=profiles, thread=dict(config=active_config)))
+        elif path == "/api/v1/providers":
+            self.data(dict(connections=connections, directory=providers))
+        elif path == "/api/v1/agent/routing":
+            self.data(dict(default_profile="fixture-openai"))
+        elif path == "/api/v1/usage/providers":
+            self.data(dict(providers=[]))
         elif path == "/api/v1/instructions":
             self.data(dict(text="Fixture assistant rules", revision="fixture"))
         elif path == "/api/v1/permissions":
@@ -232,19 +340,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 )
             )
         elif path == "/api/v1/schedules":
+            selected = parse_qs(urlsplit(self.path).query).get("selected", [""])[0]
             self.data(
                 dict(
-                    items=[
-                        dict(
-                            spec=dict(
-                                title="Daily check",
-                                execution_target=dict(
-                                    runtime_id="fixture", target=dict(kind="host")
-                                ),
-                            ),
-                            next_label="Tomorrow",
-                        )
-                    ]
+                    items=[fixture_schedule],
+                    total=1,
+                    offset=0,
+                    next_offset=None,
+                    selected=fixture_schedule if selected == fixture_schedule["id"] else None,
+                    runs=[],
+                    runs_next_offset=None,
                 )
             )
         elif path == "/__fixture/writes" and args.pages:
@@ -253,7 +358,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # UI-only simulation: does not qualify real Passkey/authentication.
             self.data(dict(authenticated=True, enrollment_open=False, push_available=False))
         elif path == "/api/v1/snapshot":
-            self.data(snapshot)
+            current = copy.deepcopy(snapshot)
+            current["conversation_id"] = owner
+            for item in current["messages"]:
+                item["conversation_id"] = owner
+            self.data(current)
         elif path in ("/api/v1/tasks/query", "/api/v1/assistant-tasks"):
             query = parse_qs(urlsplit(self.path).query)
             scope = query.get("scope", ["active"])[0]
@@ -312,11 +421,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(413)
             return
         path = urlsplit(self.path).path
-        if path.startswith("/api/v1/assistants/main/"):
-            path = "/api/v1/" + path[len("/api/v1/assistants/main/") :]
+        owner_match = re.match(r"/api/v1/assistants/([^/]+)/", path)
+        owner = owner_match[1] if owner_match else "main"
+        if owner_match:
+            path = "/api/v1/" + path[owner_match.end() :]
         value = json.loads(self.rfile.read(length))
         fixture_writes.append(dict(path=self.path, body=value))
         if self.path == "/access/token":
+            self.data(dict(accepted=True))
+        elif path == "/api/v1/assistant-mail":
+            self.data([])
+        elif path == "/api/v1/providers/check":
+            self.data(
+                dict(models=["fixture-model", "fixture-model-2"], message="Fixture check passed")
+            )
+        elif path == "/api/v1/providers":
+            profile = next(
+                (profile for profile in profiles if profile["id"] == value["profile_id"]), None
+            )
+            if profile is None:
+                profile = dict(id=value["profile_id"], revision=0)
+                profiles.append(profile)
+            profile.update(
+                name=value["name"], model=value["model"], revision=profile["revision"] + 1
+            )
+            self.data(dict(accepted=True))
+        elif path == "/api/v1/agent":
+            active_config.update(
+                source_profile_id=value["profile"]["id"], model=value["profile"]["model"]
+            )
+            self.data(dict(accepted=True))
+        elif path == "/api/v1/schedules" and value.get("action") == "update":
+            fixture_schedule["spec"].update(value["spec"])
             self.data(dict(accepted=True))
         elif self.path == "/api/v1/usage/policy" and args.pages:
             page_usage["quota"]["policy"] = value

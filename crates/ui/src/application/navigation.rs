@@ -1,9 +1,11 @@
 //! Window-local route state. Back follows page hierarchy, independently of visit
 //! order; restoring presentation state has no execution or configuration effects.
 use crate::application::{Shell, client, gpui, ui};
+use crate::pages::Control;
 use gpui::{prelude::*, *};
+use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::{
-    IconName, Sizable, TitleBar,
+    IconName, TitleBar,
     button::{Button, ButtonVariants},
 };
 use pot_protocol::TaskQuery;
@@ -12,6 +14,7 @@ use serde_json::json;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
     Assistant(String, Box<Route>),
+    Assistants,
     Chat,
     Tasks(bool),
     Task(String),
@@ -25,6 +28,14 @@ pub enum Route {
 #[derive(Clone)]
 pub struct State {
     assistant_id: String,
+    assistant_list: bool,
+    assistant_overview: bool,
+    assistant_offset: Point<Pixels>,
+    assistant_pane_open: bool,
+    expanded: std::collections::HashSet<String>,
+    configuration_assistant: Option<String>,
+    usage_location: String,
+    settings_return: Option<(super::spaces::Owner, String)>,
     page: u64,
     selected: String,
     show_tasks: bool,
@@ -36,13 +47,23 @@ pub struct State {
     days: u32,
     group_offset: usize,
     settings_section: u64,
-    offsets: [Point<Pixels>; 5],
+    offsets: [Point<Pixels>; 6],
     task_anchor: Option<(String, f32)>,
     machine_selection: serde_json::Value,
 }
 impl Route {
+    fn scoped(self, identity: &str) -> Self {
+        // The directory spans every owner; its return context belongs to the
+        // window, while conversation and task contexts belong to their owner.
+        if self == Self::Assistants {
+            self
+        } else {
+            Self::Assistant(identity.into(), Box::new(self))
+        }
+    }
     pub fn browser_page(&self) -> &'static str {
         match self {
+            Self::Assistants => "assistants",
             Self::Chat => "chat",
             Self::Task(_) => "task",
             Self::Tasks(true) | Self::Schedule(_) => "schedules",
@@ -58,9 +79,8 @@ impl Route {
 
     pub fn parent(&self) -> Option<Self> {
         match self {
-            Self::Assistant(id, route) => route
-                .parent()
-                .map(|parent| Self::Assistant(id.clone(), Box::new(parent))),
+            Self::Assistant(id, route) => route.parent().map(|parent| parent.scoped(id)),
+            Self::Chat => Some(Self::Assistants),
             Self::Task(_) => Some(Self::Tasks(false)),
             Self::Schedule(_) => Some(Self::Tasks(true)),
             Self::ConversationUsage(id) if id.is_empty() => Some(Self::Chat),
@@ -129,6 +149,7 @@ impl Shell {
             }
             _ if self.show_tasks => Route::Tasks(self.schedule_tab),
             _ if !view.selected.is_empty() => Route::Task(view.selected.clone()),
+            _ if self.assistant_overview => Route::Assistants,
             _ => Route::Chat,
         }
     }
@@ -137,53 +158,75 @@ impl Shell {
             return;
         }
         let v = self.client.view.lock().unwrap().clone();
-        let route = Route::Assistant(
-            format!(
-                "{}/{}",
-                v.runtime["runtime_id"].as_str().unwrap_or_default(),
-                v.assistant_id()
-            ),
-            Box::new(self.route(&v)),
-        );
+        let route = self.route(&v).scoped(&format!(
+            "{}/{}",
+            v.runtime["runtime_id"].as_str().unwrap_or_default(),
+            v.assistant_id()
+        ));
+        self.navigation.observe(route, self.capture_navigation());
+    }
+    pub(super) fn capture_navigation(&self) -> State {
+        let v = self.client.view.lock().unwrap().clone();
         let y = -f32::from(self.tasks_scroll.offset().y);
         let task_anchor = v
             .tasks
             .get((y / 80.).floor() as usize)
             .map(|t| (t.id.clone(), y % 80.));
-        self.navigation.observe(
-            route,
-            State {
-                assistant_id: v.assistant_id().to_owned(),
-                page: self.host["page"].as_u64().unwrap_or(0),
-                selected: v.selected,
-                show_tasks: self.show_tasks,
-                machine_selection: pot_ui::machine_state::selection(
-                    &v.machines,
-                    &self.machine_selection,
-                ),
-                schedule_tab: self.schedule_tab,
-                query: v.task_query,
-                schedule_selected: v.schedule_selected,
-                schedule_offset: v.schedule_offset,
-                runs_offset: v.runs_offset,
-                days: self.usage_ui.days,
-                group_offset: self.usage_ui.group_offset,
-                settings_section: self.host["settings"]["section"].as_u64().unwrap_or(0),
-                task_anchor,
-                offsets: [
-                    self.scroll.offset(),
-                    self.tasks_scroll.offset(),
-                    self.settings.scroll.offset(),
-                    self.schedules_ui.scroll.offset(),
-                    self.usage_ui.scroll.offset(),
-                ],
-            },
-        );
+        State {
+            assistant_id: v.assistant_id().to_owned(),
+            assistant_list: self.assistant_list,
+            assistant_overview: self.assistant_overview,
+            assistant_offset: self.assistant_list_scroll.offset(),
+            assistant_pane_open: self.assistant_pane_open,
+            expanded: self.expanded.clone(),
+            configuration_assistant: self.configuration_assistant.clone(),
+            usage_location: self.usage_location.clone(),
+            settings_return: self.settings_return.clone(),
+            page: self.host["page"].as_u64().unwrap_or(0),
+            selected: v.selected,
+            show_tasks: self.show_tasks,
+            machine_selection: pot_ui::machine_state::selection(
+                &v.machines,
+                &self.machine_selection,
+            ),
+            schedule_tab: self.schedule_tab,
+            query: v.task_query,
+            schedule_selected: v.schedule_selected,
+            schedule_offset: v.schedule_offset,
+            runs_offset: v.runs_offset,
+            days: self.usage_ui.days,
+            group_offset: self.usage_ui.group_offset,
+            settings_section: self.host["settings"]["section"].as_u64().unwrap_or(0),
+            task_anchor,
+            offsets: [
+                self.scroll.offset(),
+                self.tasks_scroll.offset(),
+                self.settings.scroll.offset(),
+                self.schedules_ui.scroll.offset(),
+                self.usage_ui.scroll.offset(),
+                self.machines_scroll.offset(),
+            ],
+        }
     }
     pub fn navigate_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.editors.is_empty() {
+            self.editor_intents.push(json!({"action":"editor-back"}));
+            cx.notify();
+            return;
+        }
         self.observe_navigation();
         let view = self.client.view.lock().unwrap().clone();
         let route = self.route(&view);
+        if matches!(route, Route::Chat) {
+            self.chat_positions.insert(
+                format!(
+                    "{}/{}",
+                    view.runtime["runtime_id"].as_str().unwrap_or_default(),
+                    view.assistant_id()
+                ),
+                self.scroll.offset(),
+            );
+        }
         let Some(parent) = route.parent() else {
             return;
         };
@@ -192,7 +235,7 @@ impl Shell {
             view.runtime["runtime_id"].as_str().unwrap_or_default(),
             view.assistant_id()
         );
-        let scoped = |route| Route::Assistant(identity.clone(), Box::new(route));
+        let scoped = |route: Route| route.scoped(&identity);
         let Some(mut state) = self
             .navigation
             .state(&scoped(parent.clone()))
@@ -202,6 +245,13 @@ impl Shell {
         };
         // Direct links can open a child before its parent was ever visited.
         match parent {
+            Route::Assistants => {
+                state.page = 0;
+                state.show_tasks = false;
+                state.assistant_overview = true;
+                state.assistant_list = false;
+                state.selected.clear();
+            }
             Route::Tasks(scheduled) => {
                 state.page = 3;
                 state.show_tasks = true;
@@ -222,6 +272,23 @@ impl Shell {
             }
             _ => unreachable!("parent routes are defined by Route::parent"),
         }
+        self.restore_navigation(state, window, cx);
+    }
+    pub(super) fn restore_navigation(
+        &mut self,
+        state: State,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.assistant_list = state.assistant_list;
+        self.assistant_overview = state.assistant_overview;
+        self.assistant_list_scroll
+            .set_offset(state.assistant_offset);
+        self.assistant_pane_open = state.assistant_pane_open;
+        self.expanded = state.expanded;
+        self.configuration_assistant = state.configuration_assistant;
+        self.usage_location = state.usage_location;
+        self.settings_return = state.settings_return;
         self.client.select_assistant(state.assistant_id);
         self.client.select(state.selected);
         self.show_tasks = state.show_tasks;
@@ -233,6 +300,8 @@ impl Shell {
         self.schedule_tab = state.schedule_tab;
         self.task_search
             .update(cx, |f, cx| f.set_value(state.query.q.clone(), window, cx));
+        self.client.view.lock().unwrap().task_query.execution_target =
+            state.query.execution_target.clone();
         self.client
             .filter_tasks(state.query.scope, state.query.q, state.query.offset);
         {
@@ -262,6 +331,7 @@ impl Shell {
         self.settings.scroll.set_offset(state.offsets[2]);
         self.schedules_ui.scroll.set_offset(state.offsets[3]);
         self.usage_ui.scroll.set_offset(state.offsets[4]);
+        self.machines_scroll.set_offset(state.offsets[5]);
         // The next snapshot refresh must not scroll a restored conversation.
         self.last_content = self
             .client
@@ -281,9 +351,9 @@ impl Shell {
         self.first = false;
         self.host["page"] = json!(state.page);
         if state.page == 2 {
-            ui::command(json!({"action":"history-section","value":state.settings_section}));
+            self.settings_state.state["section"] = json!(state.settings_section);
         }
-        ui::command(json!({"action":"page","value":state.page}));
+        self.project_page(state.page);
         cx.notify();
     }
     pub fn titlebar(
@@ -295,6 +365,7 @@ impl Shell {
         let route = self.route(view);
         let title: String = match &route {
             Route::Assistant(_, _) => unreachable!("cache identity only"),
+            Route::Assistants => crate::application::i18n::text("spaces.assistants").into(),
             Route::Chat => {
                 if self.assistant_list {
                     crate::application::i18n::text("spaces.assistants").into()
@@ -334,6 +405,9 @@ impl Shell {
                 crate::application::i18n::text("navigation.conversation-usage").into()
             }
         };
+        let editing = !self.editors.is_empty();
+        let has_parent = route.parent().is_some() && (!matches!(route, Route::Chat) || self.narrow);
+        let title = self.editor_title().unwrap_or(title);
         let actions_width = match route {
             Route::Chat => {
                 if pot_ui::design::compact(cx) {
@@ -345,19 +419,42 @@ impl Shell {
             Route::Task(_) => 152.,
             _ => 0.,
         };
-        let chat_back = false;
-        let back_width = if route.parent().is_some() || chat_back {
-            36.
+        let chat_back = editing;
+        let back_label = if editing {
+            crate::application::i18n::text("navigation.back")
         } else {
-            0.
+            route.back_label()
         };
+        let back_width = if has_parent || chat_back { 36. } else { 0. };
+        let mobile = pot_ui::design::mobile(cx);
+        let mobile_insets = if super::platform::with(|p| p.native_window()) {
+            112.
+        } else {
+            28.
+        } + if !editing && !has_parent { 52. } else { 0. }
+            + if has_parent || editing { 52. } else { 0. }
+            + if !editing && matches!(route, Route::Chat) && !self.assistant_list {
+                84.
+            } else {
+                0.
+            };
         let title_width = (window.fully_visible_bounds().size.width
-            - px(112. + back_width + actions_width))
-        .max(px(80.));
+            - px(if mobile {
+                mobile_insets
+            } else {
+                112. + back_width + actions_width
+            }))
+        .max(px(40.));
         let visible_title = pot_ui::pages::single_line_title(&title, 14., title_width, window, cx);
         TitleBar::new()
             .h(px(ui::TITLEBAR))
-            .pl(px(if super::platform::with(|p| p.native_window()) {
+            .pl(px(if mobile {
+                if super::platform::with(|p| p.native_window()) {
+                    96.
+                } else {
+                    12.
+                }
+            } else if super::platform::with(|p| p.native_window()) {
                 96. + self.assistant_pane_width(cx)
             } else {
                 72. + self.assistant_pane_width(cx)
@@ -372,41 +469,52 @@ impl Shell {
                     .gap_2()
                     .flex_1()
                     .min_w_0()
-                    .when(route.parent().is_some() || chat_back, |el| {
+                    .when(mobile && !editing && !has_parent, |el| {
+                        el.child(
+                            Button::new("open-navigation")
+                                .ghost()
+                                .control(cx)
+                                .icon(IconName::Menu)
+                                .accessibility_label(crate::application::i18n::text(
+                                    "navigation.open-menu",
+                                ))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.navigation_return_focus = window.focused(cx);
+                                    this.set_navigation_open(true, cx);
+                                    this.navigation_focus.focus(window, cx);
+                                    cx.notify();
+                                })),
+                        )
+                    })
+                    .when(has_parent || chat_back, |el| {
                         el.child(
                             Button::new("navigate-up")
                                 .ghost()
-                                .small()
+                                .control(cx)
                                 .icon(IconName::ChevronLeft)
-                                .accessibility_label(route.back_label())
-                                .tooltip(route.back_label())
+                                .accessibility_label(back_label)
+                                .tooltip(back_label)
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.navigate_up(window, cx)),
                                 ),
                         )
                     })
-                    .when(matches!(route, Route::Chat), |el| {
+                    .when(!editing && matches!(route, Route::Chat) && !mobile, |el| {
                         el.child(
                             Button::new("toggle-assistant-pane")
                                 .ghost()
-                                .small()
+                                .control(cx)
                                 .accessibility_label(crate::application::i18n::text(
                                     "assistant.toggle-list",
                                 ))
-                                .icon(
-                                    if self.assistant_pane_width(cx) > 0. || self.assistant_drawer {
-                                        IconName::ChevronLeft
-                                    } else {
-                                        IconName::ChevronRight
-                                    },
-                                )
+                                .icon(if self.assistant_pane_width(cx) > 0. {
+                                    IconName::ChevronLeft
+                                } else {
+                                    IconName::ChevronRight
+                                })
                                 .tooltip(crate::application::i18n::text("assistant.toggle-list"))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if this.assistant_compact(cx) {
-                                        this.assistant_drawer = !this.assistant_drawer;
-                                    } else {
-                                        this.assistant_pane_open = !this.assistant_pane_open;
-                                    }
+                                    this.assistant_pane_open = !this.assistant_pane_open;
                                     cx.notify();
                                 })),
                         )
@@ -450,19 +558,26 @@ impl Shell {
                             ),
                     )
                     .when(
-                        matches!(self.route(view), Route::Chat) && !self.assistant_list,
+                        !mobile
+                            && !editing
+                            && matches!(self.route(view), Route::Chat)
+                            && !self.assistant_list,
                         |el| {
                             let owner = view.assistant_id().to_owned();
-                            el.when_some(
-                                self.space_directory.spaces.get(&view.client_mode),
-                                |el, s| {
-                                    el.child(crate::application::spaces_ui::badge(s, "titlebar"))
-                                },
-                            )
+                            el.when(!mobile, |el| {
+                                el.when_some(
+                                    self.space_directory.spaces.get(&view.client_mode),
+                                    |el, s| {
+                                        el.child(crate::application::spaces_ui::badge(
+                                            s, "titlebar",
+                                        ))
+                                    },
+                                )
+                            })
                             .child(
                                 Button::new("edit-chat-assistant")
                                     .ghost()
-                                    .small()
+                                    .control(cx)
                                     .icon(IconName::Settings)
                                     .tooltip(crate::application::i18n::text(
                                         "spaces.edit-assistant",
@@ -470,16 +585,72 @@ impl Shell {
                                     .accessibility_label(crate::application::i18n::text(
                                         "spaces.edit-assistant",
                                     ))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.assistants_ui.form_only = true;
-                                        this.assistants_ui.select(&owner);
-                                        cx.notify();
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_assistant_editor(&owner, window, cx);
                                     })),
                             )
                         },
                     )
                     .when(
-                        matches!(self.route(view), Route::Chat)
+                        mobile && !editing && matches!(route, Route::Chat) && !self.assistant_list,
+                        |el| {
+                            let entity = cx.entity();
+                            let owner = view.assistant_id().to_owned();
+                            el.child(
+                                Button::new("conversation-actions")
+                                    .ghost()
+                                    .control(cx)
+                                    .icon(IconName::Ellipsis)
+                                    .accessibility_label(crate::application::i18n::text(
+                                        "navigation.conversation-actions",
+                                    ))
+                                    .dropdown_menu(move |menu, _, cx| {
+                                        let edit_entity = entity.clone();
+                                        let owner = owner.clone();
+                                        let usage_entity = entity.clone();
+                                        menu.item(
+                                            crate::pages::menu_item(
+                                                crate::application::i18n::text(
+                                                    "spaces.edit-assistant",
+                                                ),
+                                                cx,
+                                            )
+                                            .on_click(
+                                                move |_, window, cx| {
+                                                    edit_entity.update(cx, |this, cx| {
+                                                        this.open_assistant_editor(
+                                                            &owner, window, cx,
+                                                        );
+                                                    });
+                                                },
+                                            ),
+                                        )
+                                        .item(
+                                            crate::pages::menu_item(
+                                                crate::application::i18n::text(
+                                                    "navigation.conversation-usage",
+                                                ),
+                                                cx,
+                                            )
+                                            .on_click(
+                                                move |_, _, cx| {
+                                                    usage_entity.update(cx, |this, cx| {
+                                                        this.usage_ui.open_settings();
+                                                        ui::command(
+                                                            json!({"action":"page","value":5}),
+                                                        );
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            ),
+                                        )
+                                    }),
+                            )
+                        },
+                    )
+                    .when(
+                        !editing
+                            && matches!(self.route(view), Route::Chat)
                             && !self.assistant_list
                             && !pot_ui::design::compact(cx),
                         |el| {
@@ -498,7 +669,9 @@ impl Shell {
                         },
                     )
                     .when(
-                        !self.show_tasks
+                        !editing
+                            && !self.show_tasks
+                            && (!mobile || !matches!(route, Route::Chat))
                             && matches!(self.route(view), Route::Chat | Route::Task(_))
                             && !self.assistant_list,
                         |el| el.child(crate::application::usage_ui::entry(view, cx)),
@@ -511,7 +684,7 @@ impl Shell {
 mod tests {
     use super::{Navigation, Route};
     fn scoped(assistant: &str, route: Route) -> Route {
-        Route::Assistant(assistant.into(), Box::new(route))
+        route.scoped(assistant)
     }
     #[test]
     fn back_follows_hierarchy_even_when_opened_from_chat() {
@@ -539,7 +712,9 @@ mod tests {
     }
     #[test]
     fn browser_routes_preserve_the_same_detail_and_overview_semantics() {
+        assert_eq!(Route::Assistants.browser_page(), "assistants");
         assert_eq!(Route::Chat.browser_page(), "chat");
+        assert_eq!(Route::Chat.parent(), Some(Route::Assistants));
         assert_eq!(Route::Task("task".into()).browser_page(), "task");
         assert_eq!(Route::Tasks(false).browser_page(), "tasks");
         assert_eq!(Route::Tasks(true).browser_page(), "schedules");
@@ -552,7 +727,7 @@ mod tests {
     #[test]
     fn root_pages_have_no_back() {
         for route in [
-            Route::Chat,
+            Route::Assistants,
             Route::Tasks(false),
             Route::Tasks(true),
             Route::Settings,
@@ -565,6 +740,17 @@ mod tests {
             Route::Task("direct".into()).parent(),
             Some(Route::Tasks(false))
         );
+    }
+    #[test]
+    fn assistant_directory_return_context_is_shared_across_owners() {
+        let mut states = Navigation::default();
+        states.observe(scoped("runtime/a", Route::Assistants), 1);
+        states.observe(scoped("runtime/b", Route::Chat), 2);
+        states.observe(scoped("runtime/b", Route::Assistants), 3);
+        states.observe(scoped("runtime/a", Route::Chat), 4);
+        let parent = scoped("runtime/a", Route::Chat).parent().unwrap();
+        assert_eq!(states.state(&parent), Some(3));
+        assert_eq!(states.state(&scoped("runtime/b", Route::Chat)), Some(2));
     }
     #[test]
     fn route_cache_is_scoped_and_retains_parent_state() {

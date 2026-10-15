@@ -1,11 +1,12 @@
 //! Shared assistant selector/editor; shells provide I/O and retain drafts by owner.
+use crate::pages::Control;
 use crate::{
     localization::Catalog,
     pages::{self, Handler},
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    Disableable, Sizable,
+    Disableable,
     button::{Button, ButtonVariants},
     input::{Input, InputState, Textarea, TextareaState},
 };
@@ -90,7 +91,7 @@ impl Editor {
                             d["id"].as_str().unwrap_or_default()
                         )))
                         .ghost()
-                        .small()
+                        .control(cx)
                         .label(d["name"].as_str().unwrap_or_default().to_owned())
                         .toggled(d["id"] == current)
                         .on_click(pages::on(
@@ -102,7 +103,7 @@ impl Editor {
                     .child(
                         Button::new("assistant-new")
                             .ghost()
-                            .small()
+                            .control(cx)
                             .label(catalog.text("assistant.new"))
                             .on_click(pages::on(&handler, "assistant-new", Value::Null)),
                     ),
@@ -176,7 +177,7 @@ impl Editor {
                 .flex_col()
                 .gap_3()
                 .child(div().child(catalog.text("assistant.name")))
-                .child(Input::new(&draft.name))
+                .child(Input::new(&draft.name).control(cx))
                 .when(owner != "new", |el| {
                     el.child(div().child("AGENTS.md"))
                         .child(Textarea::new(&draft.rules).h(px(220.)))
@@ -185,9 +186,11 @@ impl Editor {
                 .child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .gap_2()
                         .child(
                             Button::new("assistant-save")
+                                .control(cx)
                                 .primary()
                                 .label(catalog.text("assistant.save"))
                                 .on_click(move |_, window, cx| {
@@ -197,6 +200,7 @@ impl Editor {
                         .when(owner != "new", |el| {
                             el.child(
                                 Button::new("assistant-model")
+                                    .control(cx)
                                     .ghost()
                                     .label(catalog.text("assistant.model"))
                                     .on_click(pages::on(&handler, "assistant-model", json!(owner))),
@@ -204,6 +208,7 @@ impl Editor {
                         })
                         .child(
                             Button::new("assistant-close")
+                                .control(cx)
                                 .ghost()
                                 .label(catalog.text("assistant.close"))
                                 .on_click(pages::on(&handler, "assistant-close", Value::Null)),
@@ -263,7 +268,7 @@ impl Editor {
                 models = models.child(
                     Button::new(SharedString::from(format!("create-profile-{id}")))
                         .ghost()
-                        .small()
+                        .control(cx)
                         .label(format!(
                             "{} · {}",
                             profile["name"].as_str().unwrap_or(""),
@@ -281,7 +286,7 @@ impl Editor {
                     .flex_col()
                     .gap_3()
                     .child(pages::hint(catalog.text("assistant.name"), cx))
-                    .child(Input::new(&draft.name).disabled(view.pending))
+                    .child(Input::new(&draft.name).control(cx).disabled(view.pending))
                     .child(pages::hint(catalog.text("assistant.model"), cx))
                     .child(models)
                     .when_some(view.location, |el, location| el.child(location)),
@@ -292,14 +297,30 @@ impl Editor {
         let profile = draft.profile.clone();
         let source = view.source.to_owned();
         let save = handler.clone();
-        body.child(Button::new("assistant-create").primary().label(catalog.text("assistant.create"))
+        body.child(Button::new("assistant-create").control(cx).primary().label(catalog.text("assistant.create"))
                 .disabled(view.pending)
                 .on_click(move |_, window, cx| save(&pages::PageAction { kind: "assistant-save", value: json!({"owner":"new","request_id":key,"name":name.read(cx).value().to_string(),"profile_id":profile,"source_assistant":source}) }, window, cx)))
-            .child(Button::new("assistant-create-advanced").ghost().small()
+            .child(Button::new("assistant-create-advanced").ghost().control(cx)
                 .label(catalog.text(if self.advanced { "assistant.fewer-settings" } else { "assistant.more-settings" }))
                 .disabled(view.pending).on_click(pages::on(&handler, "assistant-create-advanced", Value::Null)))
-            .when(view.can_close, |body| body.child(Button::new("assistant-create-close").ghost().small().disabled(view.pending)
+            .when(view.can_close, |body| body.child(Button::new("assistant-create-close").ghost().control(cx).disabled(view.pending)
                 .label(catalog.text("assistant.close")).on_click(pages::on(&handler, "assistant-close", Value::Null))))
+    }
+    pub fn editor_values(&self, cx: &App) -> Value {
+        if self.selected == "new" {
+            return self.creation.as_ref().map(|draft| json!({"name":draft.name.read(cx).value().to_string(),"profile":draft.profile})).unwrap_or(Value::Null);
+        }
+        self.drafts.get(&self.selected).map(|draft| json!({"name":draft.name.read(cx).value().to_string(),"rules":draft.rules.read(cx).value().to_string()})).unwrap_or(Value::Null)
+    }
+    pub fn close(&mut self, discard: bool) {
+        if discard {
+            self.drafts.remove(&self.selected);
+            if self.selected == "new" {
+                self.creation = None;
+                self.advanced = false;
+            }
+        }
+        self.open = false;
     }
     pub fn saved(&mut self, owner: &str) {
         if owner == "new" {

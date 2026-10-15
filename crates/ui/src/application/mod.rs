@@ -2,6 +2,8 @@
 mod assets;
 mod assistant_pane;
 mod composer;
+mod editor;
+mod mobile_navigation;
 mod navigation;
 mod schedules_ui;
 pub mod settings_state;
@@ -37,6 +39,11 @@ struct ModeCache {
     machine_selection: serde_json::Value,
 }
 pub struct Shell {
+    editors: Vec<editor::Frame>,
+    editor_intents: Vec<serde_json::Value>,
+    editor_leave: Option<serde_json::Value>,
+    editor_prompt_focus: FocusHandle,
+    editor_resume_focus: Option<FocusHandle>,
     page: u64,
     pending_search: Option<String>,
     configuration_assistant: Option<String>,
@@ -45,8 +52,18 @@ pub struct Shell {
     composer: composer::Composer,
     other_mode: Option<ModeCache>,
     assistant_list: bool,
+    assistant_overview: bool,
+    assistant_list_scroll: ScrollHandle,
+    narrow: bool,
+    swipe: Option<mobile_navigation::Swipe>,
+    navigation_pan_owned: bool,
+    navigation_pan_pending: bool,
+    menu_fraction: f32,
+    menu_animation: Option<(f32, web_time::Instant)>,
     assistant_pane_open: bool,
-    assistant_drawer: bool,
+    navigation_open: bool,
+    navigation_focus: FocusHandle,
+    navigation_return_focus: Option<FocusHandle>,
     assistant_search: Entity<InputState>,
     seen_replies: std::collections::HashMap<String, (String, u64)>,
     avatar_animations: crate::avatar::Animations,
@@ -58,9 +75,10 @@ pub struct Shell {
     pub client: client::Client,
     scroll: ScrollHandle,
     tasks_scroll: ScrollHandle,
+    machines_scroll: ScrollHandle,
     navigation: navigation::Navigation<navigation::State>,
     pending_up: bool,
-    pending_offsets: Option<[Point<Pixels>; 5]>,
+    pending_offsets: Option<[Point<Pixels>; 6]>,
     pending_task_anchor: Option<(String, f32)>,
     last_content: String,
     bridge_projection: serde_json::Value,
@@ -88,8 +106,7 @@ pub struct Shell {
 impl Shell {
     fn switch_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if backend::toggle_mode().is_err() {
-            self.machine_connections.connect();
-            ui::command(serde_json::json!({"action":"page","value":1}));
+            self.open_machine_editor(window, cx);
             return;
         }
         let mut other = self.other_mode.take().unwrap_or_else(|| ModeCache {
@@ -143,17 +160,17 @@ impl Shell {
                     return;
                 };
                 match event.kind {
-                    "assistant-edit" => { this.assistants_ui.form_only = true; this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
-                    "assistant-new" => { this.assistants_ui.form_only = true; this.assistants_ui.select("new"); },
+                    "assistant-edit" => this.open_assistant_editor(event.value.as_str().unwrap_or("main"), window, cx),
+                    "assistant-new" => this.open_assistant_editor("new", window, cx),
                     "assistant-select" => { this.client.select_assistant(event.value.as_str().unwrap_or("main").into()); this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
                     "assistant-reload" => this.assistants_ui.reload(event.value.as_str().unwrap_or("main")),
-                    "assistant-close" => {
-                        this.assistants_ui.open = false;
-                        this.assistant_list = !this.client.view.lock().unwrap().assistants["assistants"].as_array().is_some_and(|a| !a.is_empty());
-                    },
+                    "assistant-close" => this.close_assistant_editor(cx),
                     "assistant-create-advanced" => this.assistants_ui.advanced = !this.assistants_ui.advanced,
                     "assistant-create-profile" => this.assistants_ui.choose_profile(event.value.as_str().unwrap_or("").into()),
-                    "machine-connections-toggle" => this.machine_connections.open = !this.machine_connections.open,
+                    "machine-connections-toggle" => {
+                        if this.machine_connections.open { this.editor_intents.push(serde_json::json!({"action":"editor-back"})); }
+                        else { this.open_machine_editor(window, cx); }
+                    },
                     "machine-command" => this.client.machine_command(event.value),
                     "assistant-save" => this.client.assistant_save(event.value),
                     "assistant-model" => ui::command(serde_json::json!({"action":"ai-open","owner":event.value,"return_to_chat":true})),
@@ -294,6 +311,7 @@ impl Shell {
                         .or_insert_with(|| (reply.clone(), count));
                     if self.page == 0
                         && !self.assistant_list
+                        && !self.assistant_overview
                         && !self.assistants_ui.open
                         && view.client_mode == space.mode
                         && view.assistant_id() == id
@@ -313,15 +331,20 @@ impl Shell {
             .take()
         {
             self.assistants_ui.saved(&owner);
+            self.editor_intents
+                .push(serde_json::json!({"action":"assistant-editor-saved"}));
         }
         let created = self.client.view.lock().unwrap().created_assistant.take();
         if let Some(owner) = created {
             self.client.select_assistant(owner.clone());
             self.client.select(String::new());
             self.assistant_list = false;
+            self.assistant_overview = false;
             self.show_tasks = false;
             self.assistants_ui.open = false;
             self.assistants_ui.saved("new");
+            self.editor_intents
+                .push(serde_json::json!({"action":"assistant-editor-saved"}));
             ui::command(serde_json::json!({"action":"page","value":0}));
         }
         if self.assistant_list && !self.assistants_ui.open {
@@ -375,50 +398,17 @@ impl Shell {
         let intents_changed = !events.is_empty();
         for event in events {
             match event["action"].as_str() {
-                Some("navigation-command") => {
-                    self.project_page(event["value"]["value"].as_u64().unwrap_or(0))
-                }
-                Some("navigation") => {
-                    let page = event["value"].as_u64().unwrap_or(0);
-                    if page == 2 {
-                        self.settings_state.state["return_to_chat"] = false.into();
-                    }
-                    if page == 0 {
-                        self.assistant_list =
-                            !self.client.view.lock().unwrap().assistants["assistants"]
-                                .as_array()
-                                .is_some_and(|a| !a.is_empty());
-                        self.client.select(String::new());
-                    }
-                    self.show_tasks = page == 3;
-                    self.schedule_tab = false;
-                    self.project_page(page);
+                Some(
+                    "navigation-command" | "navigation" | "editor-back" | "editor-discard"
+                    | "editor-stay",
+                ) => {
+                    self.editor_intents.push(event);
                 }
                 Some("task-query-projection") => {
                     self.pending_search = event["q"].as_str().map(str::to_owned)
                 }
                 Some("settings-changed") => self.settings_state.invalidate(),
-                Some("configuration-command") => {
-                    let value = &event["value"];
-                    if value["action"] == "ai-open"
-                        && let Some(owner) = value["owner"].as_str()
-                    {
-                        self.configuration_assistant = Some(owner.into());
-                        let view = self.client.view.lock().unwrap();
-                        self.settings_state.bind(
-                            &view.client_mode,
-                            view.runtime["runtime_id"].as_str().unwrap_or_default(),
-                            owner,
-                        );
-                    }
-
-                    if matches!(value["action"].as_str(), Some("ai-open" | "task-profile")) {
-                        self.project_page(2);
-                    }
-                    for request in self.settings_state.command(value) {
-                        platform::with(|p| p.request(request));
-                    }
-                }
+                Some("configuration-command") => self.editor_intents.push(event),
                 Some("configuration-reply") => {
                     for request in self.settings_state.reply(
                         event["id"].as_u64().unwrap_or(0),
@@ -443,6 +433,7 @@ impl Shell {
                 }
                 Some("route") => {
                     let page = event["page"].as_str().unwrap_or("chat");
+                    self.assistant_overview = page == "assistants";
                     self.page = match page {
                         "machines" => 1,
                         "settings" => 2,
@@ -636,7 +627,7 @@ impl Shell {
         self.last_content = content;
         let state = serde_json::json!({
             "page":self.page,"completions": if view.selected.is_empty() { view.completions.clone() } else { serde_json::Value::Null },
-            "assistant_list":self.assistant_list || self.assistants_ui.open || !view.assistants["assistants"].as_array().is_some_and(|a| a.iter().any(|a| a["id"] == view.assistant_id())),"can_back":self.route(&view).parent().is_some(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
+            "assistant_list":self.assistant_overview || self.assistant_list || self.assistants_ui.open || !view.assistants["assistants"].as_array().is_some_and(|a| a.iter().any(|a| a["id"] == view.assistant_id())),"can_back":!self.editors.is_empty() || (self.route(&view).parent().is_some() && (self.narrow || !matches!(self.route(&view), navigation::Route::Chat))),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
             "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),
             "model":snapshot.map(|s|s.agent.model.as_str()).unwrap_or(crate::application::i18n::text("main.connecting")),
@@ -793,6 +784,13 @@ impl Shell {
             Some(1) => return self.render_spaces_machines(window, cx),
             _ => {}
         }
+        if self.assistant_overview
+            && !self.assistants_ui.open
+            && !self.assistant_list
+            && !self.show_tasks
+        {
+            return self.assistant_directory(cx);
+        }
         if !self.show_tasks
             && view.selected.is_empty()
             && (self.assistant_list
@@ -863,9 +861,8 @@ impl Shell {
                                 .ghost()
                                 .self_start()
                                 .label(crate::application::i18n::text("onboarding.connect-server"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.machine_connections.connect();
-                                    ui::command(serde_json::json!({"action":"page","value":1}));
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_machine_editor(window, cx);
                                     cx.notify();
                                 })),
                         ),
@@ -955,12 +952,12 @@ impl Shell {
         let latest_assistant = messages.iter().rposition(|m| m.role == Role::Assistant);
         div()
             .size_full()
-            .pl(px(56.))
+            .pl(px(design::sidebar_width(cx)))
             .flex()
             .flex_col()
             .bg(rgb(bg))
             .text_color(rgb(ink))
-            .text_size(px(15.))
+            .text_size(px(if design::touch(cx) {16.} else {15.}))
             .font_family(".AppleSystemUIFont")
 
             .when(!view.selected.is_empty(), |el| {
@@ -1068,8 +1065,8 @@ impl Shell {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .px_8()
-                    .pt_8()
+                    .px(px(if design::mobile(cx) {16.} else {32.}))
+                    .pt(px(if design::mobile(cx) {16.} else {32.}))
                     .pb_4()
                     .flex()
                     .flex_col()
@@ -1110,7 +1107,7 @@ impl Shell {
                         }));
                         pot_ui::chat::message(pot_ui::chat::MessageView {
                             message: m, source: &source, labels: &labels, artifact,
-                            options: pot_ui::chat::MessageOptions { dark, expanded:self.expanded.contains(&m.id), latest_reply, touch:false, available_width:f32::from(window.fully_visible_bounds().size.width) },
+                            options: pot_ui::chat::MessageOptions { dark, expanded:self.expanded.contains(&m.id), latest_reply, touch:design::touch(cx), available_width:f32::from(window.fully_visible_bounds().size.width)-design::sidebar_width(cx)-self.assistant_pane_width(cx)-if design::mobile(cx) {32.} else {64.} },
                         }, handler, cx)
                             .when(view.selected.is_empty() && pot_ui::onboarding::missing_desktop(m), |el| {
                                 el.child(ui::card(cx).mt_2()
@@ -1123,9 +1120,8 @@ impl Shell {
                                         })
                                         .child(Button::new(SharedString::from(format!("desktop-connect-{}", m.id)))
                                             .ghost().small().label(crate::application::i18n::text("onboarding.connect-desktop"))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.machine_connections.connect();
-                                                ui::command(serde_json::json!({"action":"page","value":1}));
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.open_machine_editor(window, cx);
                                                 cx.notify();
                                             }))))
                                 )
@@ -1215,8 +1211,25 @@ impl Shell {
 }
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.narrow = window.fully_visible_bounds().size.width < px(720.);
         cx.set_global(design::Viewport(window.fully_visible_bounds().size.width));
+        cx.set_global(design::Touch(
+            platform::with(|p| p.state())["touch"] == true,
+        ));
+        if !self.narrow {
+            self.navigation_open = false;
+            self.swipe = None;
+            self.navigation_pan_owned = false;
+            self.navigation_pan_pending = false;
+            self.menu_fraction = 0.;
+            self.menu_animation = None;
+        }
+        self.animate_menu(window, cx);
+        // Kit's rem-based control geometry follows the surface density too.
+        window.set_rem_size(px(if design::touch(cx) { 16. } else { 14. }));
         self.tick(cx);
+        self.process_editor_intents(window, cx);
+        cx.set_global(design::Editing(!self.editors.is_empty()));
         self.avatar_animations.release_images(window, cx);
         if let Some(search) = self.pending_search.take() {
             self.task_search
@@ -1254,9 +1267,11 @@ impl Render for Shell {
             self.settings.scroll.set_offset(offsets[2]);
             self.schedules_ui.scroll.set_offset(offsets[3]);
             self.usage_ui.scroll.set_offset(offsets[4]);
+            self.machines_scroll.set_offset(offsets[5]);
         }
         let body = self.render_content(window, cx);
         self.observe_navigation();
+        self.observe_editor(cx);
         self.project_route();
         let view = self.client.view.lock().unwrap().clone();
         let body = div()
@@ -1287,11 +1302,18 @@ impl Render for Shell {
             .flex_col()
             .bg(cx.theme().background)
             .child(self.titlebar(&view, window, cx))
-            .child(self.notification_banner(cx))
+            .when(self.editors.is_empty(), |el| {
+                el.child(self.notification_banner(cx))
+            })
             .child(body)
-            .child(self.rail(cx))
+            .when(!design::mobile(cx), |el| el.child(self.rail(cx)))
+            .when(self.editor_leave.is_some(), |el| {
+                el.child(self.editor_leave_prompt(cx))
+            })
             .when(
-                self.host["page"] == 2 && self.host["settings"]["retry"] == true,
+                self.editors.is_empty()
+                    && self.host["page"] == 2
+                    && self.host["settings"]["retry"] == true,
                 |el| {
                     el.child(
                         Button::new("configuration-retry")
@@ -1311,9 +1333,14 @@ impl Render for Shell {
                 el.child(self.composer_frame(window, cx))
             })
             .when(
-                self.page == 0 && (self.assistant_pane_width(cx) > 0. || self.assistant_drawer),
+                self.page == 0 && !self.assistant_overview && self.assistant_pane_width(cx) > 0.,
                 |el| el.child(self.assistant_pane(cx)),
             )
+            .when(
+                design::mobile(cx) && self.menu_fraction > 0. && self.editors.is_empty(),
+                |el| el.child(self.navigation_drawer(cx)),
+            )
+            .child(self.navigation_gestures(cx))
     }
 }
 
@@ -1335,6 +1362,11 @@ fn task_phase(p: &pot_protocol::TaskPhase) -> &'static str {
 impl Shell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
+            editors: Vec::new(),
+            editor_intents: Vec::new(),
+            editor_leave: None,
+            editor_prompt_focus: cx.focus_handle(),
+            editor_resume_focus: None,
             page: 0,
             pending_search: None,
             configuration_assistant: None,
@@ -1352,8 +1384,18 @@ impl Shell {
             composer: composer::Composer::new(window, cx),
             other_mode: None,
             assistant_list: true,
+            assistant_overview: window.fully_visible_bounds().size.width < px(720.),
+            assistant_list_scroll: ScrollHandle::new(),
+            narrow: window.fully_visible_bounds().size.width < px(720.),
+            swipe: None,
+            navigation_pan_owned: false,
+            navigation_pan_pending: false,
+            menu_fraction: 0.,
+            menu_animation: None,
             assistant_pane_open: true,
-            assistant_drawer: false,
+            navigation_open: false,
+            navigation_focus: cx.focus_handle(),
+            navigation_return_focus: None,
             assistant_search: {
                 let field = cx.new(|cx| {
                     InputState::new(window, cx).placeholder(i18n::text("assistant.search"))
@@ -1378,6 +1420,7 @@ impl Shell {
             machine_selection: serde_json::Value::Null,
             scroll: ScrollHandle::new(),
             tasks_scroll: ScrollHandle::new(),
+            machines_scroll: ScrollHandle::new(),
             navigation: navigation::Navigation::default(),
             pending_up: false,
             pending_offsets: None,
@@ -1419,6 +1462,9 @@ impl Shell {
 
 impl Shell {
     fn composer_visible(&self, view: &client::View) -> bool {
+        if !self.editors.is_empty() || self.assistant_overview {
+            return false;
+        }
         view.assistants["assistants"]
             .as_array()
             .is_some_and(|a| a.iter().any(|a| a["id"] == view.assistant_id()))
@@ -1430,6 +1476,86 @@ impl Shell {
                 .snapshot
                 .as_ref()
                 .is_some_and(|s| s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration)
+    }
+    fn navigation_drawer(&self, cx: &mut Context<Self>) -> Div {
+        div()
+            .absolute()
+            .inset_0()
+            .occlude()
+            .track_focus(&self.navigation_focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "escape" {
+                    this.close_navigation(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                div()
+                    .id("navigation-dismiss")
+                    .absolute()
+                    .inset_0()
+                    .bg(gpui::black().opacity(0.25))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_navigation(window, cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("navigation-panel")
+                    .overflow_y_scroll()
+                    .absolute()
+                    .left(relative(self.menu_fraction - 1.))
+                    .top_0()
+                    .bottom_0()
+                    .w_full()
+                    .bg(design::navigation(cx))
+                    .p_3()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        Button::new("close-navigation")
+                            .ghost()
+                            .large()
+                            .h(px(44.))
+                            .label(i18n::text("navigation.close-menu"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_navigation(window, cx);
+                            })),
+                    )
+                    .children(
+                        [
+                            (
+                                0,
+                                gpui_kit::assets::IconName::MessageCircle,
+                                "spaces.assistants",
+                            ),
+                            (3, gpui_kit::assets::IconName::Inbox, "navigation.tasks"),
+                            (1, gpui_kit::assets::IconName::Monitor, "machines.title"),
+                            (4, gpui_kit::assets::IconName::ChartPie, "navigation.usage"),
+                            (2, gpui_kit::assets::IconName::Settings, "ui.settings"),
+                        ]
+                        .into_iter()
+                        .map(|(page, icon, key)| {
+                            self.rail_button(page, icon, key, self.page, cx)
+                                .when(page == 0, |b| b.child(i18n::text(key)))
+                                .when(page != 0, |b| b.label(i18n::text(key)))
+                                .w_full()
+                                .justify_start()
+                                .px_4()
+                                .h(px(44.))
+                                .flex_shrink_0()
+                                .large()
+                        }),
+                    ),
+            )
+    }
+    fn close_navigation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_navigation_open(false, cx);
+        if let Some(focus) = self.navigation_return_focus.take() {
+            focus.focus(window, cx);
+        }
+        cx.notify();
     }
     fn rail(&self, cx: &mut Context<Self>) -> Div {
         let page = self.host["page"].as_u64().unwrap_or(0);
@@ -1519,24 +1645,16 @@ impl Shell {
                         )
                     })
             })
-            .w(px(36.))
-            .h(px(36.))
+            .w(px(if design::touch(cx) { 44. } else { 36. }))
+            .h(px(if design::touch(cx) { 44. } else { 36. }))
             .rounded(px(10.))
             .toggled(selected == page)
             .accessibility_label(i18n::text(key))
             .tooltip(i18n::text(key))
             .on_click(cx.listener(move |this, _, _, cx| {
-                if page == 2 { this.settings_state.state["return_to_chat"] = false.into(); }
-                if page == 0 {
-                    this.assistant_list = !this.client.view.lock().unwrap().assistants["assistants"].as_array().is_some_and(|a| !a.is_empty());
-                    this.assistants_ui.open = false;
-                    this.client.select(String::new());
-                }
-                this.show_tasks = page == 3;
-                this.schedule_tab = false;
-                ui::command(
-                    serde_json::json!({"action":"page","value":page,"assistant_list":this.assistant_list}),
-                );
+                this.set_navigation_open(false, cx);
+                this.editor_intents
+                    .push(serde_json::json!({"action":"navigation","value":page}));
                 cx.notify();
             }))
     }

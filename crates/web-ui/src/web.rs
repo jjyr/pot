@@ -1,4 +1,5 @@
 //! Browser platform adapter. All product presentation lives in pot-ui.
+use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{prelude::*, *};
 use pot_ui::application::{
     Shell,
@@ -58,9 +59,10 @@ impl Browser {
     fn publish(&self, data: Value) {
         let page = data["page"].as_str().unwrap_or("chat");
         let selected = data["selected"].as_str().unwrap_or_default();
+        // Owner changes update the selected data, not the page intent. Emitting
+        // a stale overview route while a row opens Chat races cached responses.
         let route = format!(
-            "{page}/{selected}/{}/{}",
-            data["assistant_id"].as_str().unwrap_or("main"),
+            "{page}/{selected}/{}",
             data["schedule_selected"].as_str().unwrap_or_default()
         );
         if *self.route.borrow() != route {
@@ -242,6 +244,7 @@ impl Browser {
             "quota" => 6,
             _ => 0,
         });
+        state["touch"] = data["touch"].clone();
         state["timezone"] = data["timezone"].clone();
         state["command_key"] = data["command_key"].clone();
         if !data["settings"].is_null() {
@@ -364,11 +367,16 @@ impl Platform for Browser {
     fn refresh_directory(&self) {}
     fn command(&self, v: Value) {
         match v["action"].as_str().unwrap_or_default() {
-            "configuration-command" | "navigation-command" => {
+            "configuration-command"
+            | "navigation-command"
+            | "editor-back"
+            | "editor-stay"
+            | "editor-discard" => {
                 self.events.borrow_mut().push(v);
                 action("wake", "");
             }
             "page" => action("route", &v.to_string()),
+            "editor-depth" => action("editor-depth", &v.to_string()),
             "execution-target-desktop" => action("desktop", v["id"].as_str().unwrap_or_default()),
             "file-download" => action("file-download", &v.to_string()),
             "section" | "history-section" => {
@@ -418,6 +426,18 @@ pub fn ui_reply(reply: &str) {
         });
         action("wake", "");
     }
+}
+#[wasm_bindgen]
+pub fn touch_started() {
+    HANDLE.with(|cell| {
+        if let Some(app) = cell.borrow().as_ref() {
+            VIEW.with(|v| {
+                if let Some(v) = v.borrow().as_ref() {
+                    app.update(|cx| v.update(cx, |shell, _| shell.touch_started()));
+                }
+            });
+        }
+    });
 }
 #[wasm_bindgen]
 pub fn wake() {
@@ -503,6 +523,21 @@ pub fn run() {
                 host.publish(data);
             }
         });
+        pot_ui::application::i18n::set_locale(
+            host.state.borrow()["settings"]["locale"]
+                .as_str()
+                .unwrap_or("en"),
+        );
+        Theme::change(
+            if *host.dark.borrow() {
+                ThemeMode::Dark
+            } else {
+                ThemeMode::Light
+            },
+            None,
+            cx,
+        );
+        pot_ui::design::install(cx);
         platform::install(host);
         let (_, content) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
             cx.new(|cx| Shell::new(window, cx))

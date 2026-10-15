@@ -1,11 +1,12 @@
 //! Machine-wide execution policy and shared development environment.
+use crate::pages::Control;
 use crate::{
     localization::Catalog,
     pages::{self, Handler, Layout},
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable,
+    ActiveTheme, Disableable, IconName,
     button::{Button, ButtonVariants},
 };
 use serde_json::{Value, json};
@@ -89,7 +90,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                         catalog.text("ui.settings"),
                         Button::new(SharedString::from(format!("machine-settings-{runtime}")))
                             .ghost()
-                            .small()
+                            .control(cx)
                             .icon(IconName::Settings)
                             .toggled(settings_open)
                             .accessibility_label(catalog.text("ui.settings"))
@@ -119,7 +120,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
             card = card.child(
                 Button::new(SharedString::from(format!("edit-tags-{runtime}")))
                     .ghost()
-                    .small()
+                    .control(cx)
                     .label(catalog.text("machines.edit-tags"))
                     .on_click(pages::on(&handler, "machine-labels", json!(runtime))),
             );
@@ -138,7 +139,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                         "execution-mode-{runtime}-{mode}"
                     )))
                     .ghost()
-                    .small()
+                    .control(cx)
                     .label(catalog.text(&format!("machines.execution-{mode}")))
                     .toggled(policy["execution_mode"] == mode)
                     .disabled(mode == "host" && policy["host_access"] == "deny")
@@ -167,7 +168,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                         "host-access-{runtime}-{decision}"
                     )))
                     .ghost()
-                    .small()
+                    .control(cx)
                     .label(catalog.text(&format!("machines.host-{decision}")))
                     .toggled(policy["host_access"] == decision)
                     .disabled(decision == "deny" && policy["execution_mode"] == "host")
@@ -196,7 +197,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                 .child(
                     Button::new(SharedString::from(format!("shared-lifecycle-{runtime}")))
                         .ghost()
-                        .small()
+                        .control(cx)
                         .label(catalog.text(if shared_running {
                             "machines.stop-shared"
                         } else {
@@ -247,7 +248,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                     Button::new(SharedString::from(format!(
                         "limit-{runtime}-{key}-{increase}"
                     )))
-                    .small()
+                    .control(cx)
                     .w(px(28.))
                     .disabled(
                         shared_running
@@ -298,6 +299,7 @@ pub fn content(view: MachinesView<'_>, catalog: Catalog, handler: Handler, cx: &
                 .ghost()
                 .w_full()
                 .h(px(36.))
+                .when(crate::design::mobile(cx), |b| b.control(cx))
                 .justify_start()
                 .icon(if expanded {
                     IconName::ChevronDown

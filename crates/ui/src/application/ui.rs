@@ -3,10 +3,11 @@ mod ai;
 pub(crate) use pot_ui::pages::brand_icon;
 mod routing;
 use crate::application::{Shell, gpui};
+use crate::pages::{Control, FieldHelp};
 use gpui::{prelude::*, *};
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Sizable,
+    ActiveTheme, Disableable, IconName, Sizable,
     button::{Button, ButtonVariants},
     form::Form,
     input::{Input, InputEvent, InputState},
@@ -30,7 +31,7 @@ pub fn command(value: Value) {
     };
     super::platform::with(|p| p.command(value));
 }
-pub use pot_ui::pages::{card, empty, field, form, hint, notice, section, segments, sheet, title};
+pub use pot_ui::pages::{card, empty, field, form, hint, notice, section, segments, title};
 pub fn page(cx: &App) -> Div {
     pot_ui::pages::page(
         pot_ui::pages::Layout {
@@ -58,15 +59,29 @@ fn settings_header(selected: u64, busy: bool, location: Option<Div>, cx: &App) -
             segments(cx).children(
                 [
                     (0, crate::application::i18n::text("ui.general")),
-                    (1, crate::application::i18n::text("ui.ai-configuration")),
-                    (4, crate::application::i18n::text("ui.task-configuration")),
+                    (
+                        1,
+                        crate::application::i18n::text(if pot_ui::design::mobile(cx) {
+                            "settings.ai-tab"
+                        } else {
+                            "ui.ai-configuration"
+                        }),
+                    ),
+                    (
+                        4,
+                        crate::application::i18n::text(if pot_ui::design::mobile(cx) {
+                            "settings.tasks-tab"
+                        } else {
+                            "ui.task-configuration"
+                        }),
+                    ),
                 ]
                 .into_iter()
                 .map(|(i, name)| {
                     Button::new(("settings-tab", i as usize))
                         .ghost()
-                        .small()
-                        .h(px(28.))
+                        .control(cx)
+                        .when(!pot_ui::design::touch(cx), |b| b.h(px(28.)))
                         .label(name)
                         .toggled(selected == i)
                         .when(selected == i, |b| {
@@ -90,6 +105,7 @@ fn settings_header(selected: u64, busy: bool, location: Option<Div>, cx: &App) -
 
 pub struct Settings {
     pub scroll: ScrollHandle,
+    reveal: pot_ui::pages::InputReveal,
     locale: String,
     fields: Vec<Entity<InputState>>,
     revision: Option<i64>,
@@ -98,8 +114,57 @@ pub struct Settings {
     draft_revision: Option<i64>,
     pub advanced: bool,
     api_advanced: bool,
+    shortcuts_open: bool,
 }
 impl Settings {
+    pub(super) fn adopt_revision(&mut self, state: &Value) {
+        self.revision = state["revision"].as_i64();
+        self.secret_revision = state["secret_revision"].as_i64();
+        self.draft_revision = state["draft_revision"].as_i64();
+    }
+    pub(super) fn editor_values(&self, state: &Value, cx: &App) -> Value {
+        let fields: &[usize] = match state["ai_screen"].as_str() {
+            Some("manage") => &[14, 15, 16, 23, 24, 25],
+            Some("main-edit") => &[22],
+            _ => return Value::Null,
+        };
+        json!({"fields":fields.iter().map(|&i|self.fields[i].read(cx).value().to_string()).collect::<Vec<_>>(),
+            "protocol":state["api_protocol"],"profile":state["draft_profile"]})
+    }
+    pub(super) fn reveal_connection_error(
+        &mut self,
+        value: &Value,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) {
+        let invalid = if value["model"].as_str().unwrap_or("").trim().is_empty() {
+            Some(16)
+        } else if value["name"].as_str().unwrap_or("").trim().is_empty() {
+            Some(23)
+        } else {
+            [("context", 24), ("output", 25)]
+                .into_iter()
+                .find_map(|(key, index)| {
+                    let text = value[key].as_str().unwrap_or("").trim();
+                    (!text.is_empty()
+                        && text
+                            .parse::<u64>()
+                            .ok()
+                            .is_none_or(|n| n == 0 || n > 9_007_199_254_740_991))
+                    .then_some(index)
+                })
+        };
+        if let Some(index) = invalid {
+            self.reveal.reset();
+            if index >= 23 {
+                self.api_advanced = true;
+            }
+            self.fields[index]
+                .read(cx)
+                .focus_handle(cx)
+                .focus(window, cx);
+        }
+    }
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         let fields: Vec<Entity<InputState>> = (0..27)
             .map(|i| {
@@ -131,6 +196,7 @@ impl Settings {
         }
         Self {
             scroll: ScrollHandle::new(),
+            reveal: Default::default(),
             locale: String::new(),
             fields,
             revision: None,
@@ -139,6 +205,7 @@ impl Settings {
             draft_revision: None,
             advanced: false,
             api_advanced: false,
+            shortcuts_open: false,
         }
     }
     pub fn localize(&mut self, window: &mut Window, cx: &mut Context<Shell>) -> bool {
@@ -147,6 +214,7 @@ impl Settings {
             return false;
         }
         self.locale = locale;
+        self.reveal.reset();
         for (i, field) in self.fields.iter().enumerate() {
             if matches!(i, 24 | 25) {
                 continue;
@@ -239,7 +307,7 @@ impl Settings {
                 cx,
             )
         });
-        if clear_secrets && state["ai_screen"] == "manage" {
+        if clear_secrets && state["ai_screen"] == "manage" && !pot_ui::design::narrow_editor(cx) {
             self.fields[15].read(cx).focus_handle(cx).focus(window, cx);
         }
     }
@@ -251,10 +319,10 @@ impl Settings {
         let mut form = form(cx);
         let mut preferences = div().flex().flex_col().gap_4();
         let input = |i: usize, name: &'static str, description: &'static str| {
-            field(name).description(description).child(
+            field(name).help(description).child(
                 div()
                     .w(px(128.))
-                    .child(Input::new(&self.fields[i]).aria_label(name)),
+                    .child(Input::new(&self.fields[i]).control(cx).aria_label(name)),
             )
         };
         match section {
@@ -262,14 +330,13 @@ impl Settings {
                 preferences = preferences.child(
                     div().flex().items_center().justify_between().gap_4().flex_wrap()
                         .child(div().flex().flex_col().gap_1()
-                            .child(crate::application::i18n::text("settings.language"))
-                            .child(hint(crate::application::i18n::text("settings.language.hint"), cx)))
-                        .child(Button::new("language-picker").small().w(px(180.)).dropdown_caret(true)
+                            .child(crate::application::i18n::text("settings.language")))
+                        .child(Button::new("language-picker").control(cx).w(px(180.)).when(pot_ui::design::mobile(cx), |b| b.w_full()).dropdown_caret(true)
                             .label(pot_ui::localization::LANGUAGES.iter().find(|(locale, _)| state["locale"] == *locale).map(|(_, name)| *name).unwrap_or("English"))
                             .dropdown_menu({
                                 let locale = state["locale"].as_str().unwrap_or("en").to_owned();
-                                move |menu, _, _| pot_ui::localization::LANGUAGES.iter().copied().fold(menu, |menu, (value, name)| {
-                                    menu.item(gpui_kit::component::menu::PopupMenuItem::new(name).checked(locale == value)
+                                move |menu, _, cx| pot_ui::localization::LANGUAGES.iter().copied().fold(menu, |menu, (value, name)| {
+                                    menu.item(pot_ui::pages::menu_item(name, cx).checked(locale == value)
                                         .on_click(move |_, _, _| command(json!({"action":"language","value":value}))))
                                 })
                             }))
@@ -277,10 +344,10 @@ impl Settings {
                     div().flex().items_center().justify_between().gap_4().flex_wrap()
                         .pt_4().border_t_1().border_color(cx.theme().border)
                         .child(crate::application::i18n::text("ui.appearance"))
-                        .child(segments(cx).children([
+                        .child(segments(cx).when(pot_ui::design::mobile(cx), |el| el.w_full()).children([
                             crate::application::i18n::text("ui.system"), crate::application::i18n::text("ui.light"), crate::application::i18n::text("ui.dark")
                         ].into_iter().enumerate().map(|(i, name)| {
-                            Button::new(("appearance", i)).ghost().small().min_w(px(64.)).h(px(28.))
+                            Button::new(("appearance", i)).ghost().control(cx).min_w(px(64.)).when(!pot_ui::design::touch(cx), |b| b.h(px(28.)))
                                 .label(name).toggled(state["appearance"].as_u64() == Some(i as u64))
                                 .when(state["appearance"].as_u64() == Some(i as u64), |b| b.bg(pot_ui::design::surface(cx)).shadow_sm())
                                 .on_click(move |_, _, _| command(json!({"action":"appearance","value":i})))
@@ -301,7 +368,7 @@ impl Settings {
                         .child(
                             Button::new("task-usage-policy")
                                 .ghost()
-                                .small()
+                                .control(cx)
                                 .label(crate::application::i18n::text(
                                     "ui.set-allowance-and-automatic-resume",
                                 ))
@@ -336,9 +403,9 @@ impl Settings {
         let fields = self.fields.clone();
         let mut actions = div().flex().items_center().justify_end().gap_2();
         if section == 4 {
-            actions = actions.child(Button::new("advanced").ghost().small().label(if self.advanced {crate::application::i18n::text("ui.hide-advanced-limits")} else {crate::application::i18n::text("ui.advanced-limits")})
+            actions = actions.child(Button::new("advanced").ghost().control(cx).label(if self.advanced {crate::application::i18n::text("ui.hide-advanced-limits")} else {crate::application::i18n::text("ui.advanced-limits")})
                 .on_click(cx.listener(|this,_,_,cx|{this.settings.advanced = !this.settings.advanced;cx.notify();})))
-                .child(Button::new("save-task-limits").primary().small().label(crate::application::i18n::text("ui.apply-global-limits")).on_click(move|_,_,cx|
+                .child(Button::new("save-task-limits").primary().control(cx).label(crate::application::i18n::text("ui.apply-global-limits")).on_click(move|_,_,cx|
                     command(json!({"action":"save-agent","limit":fields[1].read(cx).value(),"tokens":fields[2].read(cx).value(),"per_turn":fields[3].read(cx).value(),"parallel":fields[7].read(cx).value()}))));
         }
 
@@ -350,21 +417,25 @@ impl Settings {
                     location,
                     cx,
                 ))
-                .child(hint(
-                    match section {
-                        0 => crate::application::i18n::text("ui.make-pot-work-the-way-you-prefer"),
-                        1 => crate::application::i18n::text(
-                            "ui.connect-an-agent-and-choose-the-model",
-                        ),
-                        4 => crate::application::i18n::text(
-                            "ui.new-tasks-follow-the-chat-configuration-by",
-                        ),
-                        _ => crate::application::i18n::text(
-                            "ui.resource-changes-apply-after-restarting-chat-and",
-                        ),
-                    },
-                    cx,
-                ))
+                .when(section != 0, |el| {
+                    el.child(hint(
+                        match section {
+                            0 => crate::application::i18n::text(
+                                "ui.make-pot-work-the-way-you-prefer",
+                            ),
+                            1 => crate::application::i18n::text(
+                                "ui.connect-an-agent-and-choose-the-model",
+                            ),
+                            4 => crate::application::i18n::text(
+                                "ui.new-tasks-follow-the-chat-configuration-by",
+                            ),
+                            _ => crate::application::i18n::text(
+                                "ui.resource-changes-apply-after-restarting-chat-and",
+                            ),
+                        },
+                        cx,
+                    ))
+                })
                 .child(
                     div()
                         .id(SharedString::from(format!(
@@ -417,49 +488,69 @@ impl Settings {
                             el.child(
                                 card(cx)
                                     .mt_4()
-                                    .child(pot_ui::pages::section(crate::application::i18n::text(
-                                        "ui.keyboard-shortcuts",
-                                    )))
-                                    .children(
-                                        [
-                                            ("settings.shortcuts.parent", "⌘ ["),
-                                            ("machines.title", "⌘ D"),
-                                            ("ui.settings", "⌘ ,"),
-                                            ("settings.shortcuts.new-line", "⇧ ↵"),
-                                        ]
-                                        .into_iter()
-                                        .enumerate()
-                                        .map(
-                                            |(index, (label, keys))| {
-                                                div()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_between()
-                                                    .gap_4()
-                                                    .when(index > 0, |row| {
-                                                        row.pt_3()
-                                                            .border_t_1()
-                                                            .border_color(cx.theme().border)
-                                                    })
-                                                    .child(hint(
-                                                        crate::application::i18n::text(label),
-                                                        cx,
-                                                    ))
-                                                    .child(
-                                                        div()
-                                                            .min_w(px(64.))
-                                                            .px_2()
-                                                            .py_1()
-                                                            .rounded(px(5.))
-                                                            .border_1()
-                                                            .border_color(cx.theme().border)
-                                                            .bg(cx.theme().muted)
-                                                            .text_center()
-                                                            .text_size(px(12.))
-                                                            .child(shortcut_keys(keys)),
-                                                    )
-                                            },
-                                        ),
+                                    .child(
+                                        Button::new("keyboard-shortcuts-toggle")
+                                            .ghost()
+                                            .control(cx)
+                                            .label(crate::application::i18n::text(
+                                                "ui.keyboard-shortcuts",
+                                            ))
+                                            .when(pot_ui::design::mobile(cx), |b| {
+                                                b.icon(if self.shortcuts_open {
+                                                    IconName::ChevronDown
+                                                } else {
+                                                    IconName::ChevronRight
+                                                })
+                                            })
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.settings.shortcuts_open =
+                                                    !this.settings.shortcuts_open;
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .when(
+                                        !pot_ui::design::mobile(cx) || self.shortcuts_open,
+                                        |el| {
+                                            el.children(
+                                                [
+                                                    ("settings.shortcuts.parent", "⌘ ["),
+                                                    ("machines.title", "⌘ D"),
+                                                    ("ui.settings", "⌘ ,"),
+                                                    ("settings.shortcuts.new-line", "⇧ ↵"),
+                                                ]
+                                                .into_iter()
+                                                .enumerate()
+                                                .map(|(index, (label, keys))| {
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_between()
+                                                        .gap_4()
+                                                        .when(index > 0, |row| {
+                                                            row.pt_3()
+                                                                .border_t_1()
+                                                                .border_color(cx.theme().border)
+                                                        })
+                                                        .child(hint(
+                                                            crate::application::i18n::text(label),
+                                                            cx,
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .min_w(px(64.))
+                                                                .px_2()
+                                                                .py_1()
+                                                                .rounded(px(5.))
+                                                                .border_1()
+                                                                .border_color(cx.theme().border)
+                                                                .bg(cx.theme().muted)
+                                                                .text_center()
+                                                                .text_size(px(12.))
+                                                                .child(shortcut_keys(keys)),
+                                                        )
+                                                }),
+                                            )
+                                        },
                                     ),
                             )
                         })
@@ -471,7 +562,7 @@ impl Settings {
                                     card(cx).mt_4().child(
                                         Button::new("settings-resource-cache")
                                             .ghost()
-                                            .small()
+                                            .control(cx)
                                             .self_start()
                                             .label(crate::application::i18n::text(
                                                 "resources.cache",
@@ -507,7 +598,7 @@ impl Settings {
                                             |(action, key)| {
                                                 Button::new(action)
                                                     .ghost()
-                                                    .small()
+                                                    .control(cx)
                                                     .self_start()
                                                     .label(crate::application::i18n::text(key))
                                                     .on_click(move |_, _, _| {
@@ -523,7 +614,9 @@ impl Settings {
                             !state["result"].as_str().unwrap_or("").is_empty(),
                             |el| {
                                 el.child(notice(
-                                    state["result"].as_str().unwrap_or("").to_owned(),
+                                    crate::application::i18n::message(
+                                        state["result"].as_str().unwrap_or(""),
+                                    ),
                                     false,
                                     cx,
                                 ))

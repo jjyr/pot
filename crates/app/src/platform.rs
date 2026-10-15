@@ -113,10 +113,19 @@ impl Platform for Native {
     fn command(&self, v: Value) {
         if matches!(
             v["action"].as_str(),
-            Some("configuration-command" | "navigation-command")
+            Some(
+                "configuration-command"
+                    | "navigation-command"
+                    | "editor-back"
+                    | "editor-stay"
+                    | "editor-discard"
+            )
         ) {
             self.events.lock().unwrap().push(v);
             crate::wake_ui();
+            return;
+        }
+        if v["action"] == "editor-depth" {
             return;
         }
         if v["action"] == "reveal-file" {

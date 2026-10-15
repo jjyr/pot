@@ -36,6 +36,42 @@ pub struct Request {
     pub path: String,
     pub body: Option<Value>,
 }
+pub(super) struct EditorDraft {
+    state: Value,
+    profile: Value,
+    draft_id: String,
+    mode: String,
+    control: String,
+    assistant: String,
+}
+const DRAFT_KEYS: &[&str] = &[
+    "section",
+    "ai_screen",
+    "return_to_chat",
+    "routing_owner",
+    "routing_owner_name",
+    "connection_kind",
+    "connection_profile_id",
+    "connection_model",
+    "connection_name",
+    "connection_context",
+    "connection_output",
+    "connection_protocol_override",
+    "api_endpoint",
+    "api_protocol",
+    "has_api_key",
+    "draft_profile",
+    "draft_model",
+    "more_providers",
+    "context_default",
+    "output_default",
+    "routing_profile",
+    "result",
+    "check_message",
+    "model_options",
+    "connection_draft_id",
+];
+
 #[derive(Default)]
 pub struct SettingsState {
     pub state: Value,
@@ -56,6 +92,30 @@ pub struct SettingsState {
     retry: Option<(&'static str, Request)>,
 }
 impl SettingsState {
+    pub(super) fn capture_editor(&self) -> EditorDraft {
+        EditorDraft {
+            state: json!(
+                DRAFT_KEYS
+                    .iter()
+                    .map(|key| ((*key).to_owned(), self.state[*key].clone()))
+                    .collect::<serde_json::Map<String, Value>>()
+            ),
+            profile: self.profile.clone(),
+            draft_id: self.draft_id.clone(),
+            mode: self.mode.clone(),
+            control: self.control.clone(),
+            assistant: self.assistant.clone(),
+        }
+    }
+    pub(super) fn restore_editor(&mut self, draft: EditorDraft) {
+        self.bind(&draft.mode, &draft.control, &draft.assistant);
+        for key in DRAFT_KEYS {
+            self.state[*key] = draft.state[*key].clone();
+        }
+        self.profile = draft.profile;
+        self.draft_id = draft.draft_id;
+    }
+
     pub fn bind(&mut self, mode: &str, control: &str, assistant: &str) {
         let context = format!("{mode}/{control}/{assistant}");
         if self.context == context {
@@ -228,7 +288,12 @@ impl SettingsState {
     }
     pub fn command(&mut self, v: &Value) -> Vec<Request> {
         let action = v["action"].as_str().unwrap_or("");
-        if !self.pending.is_empty() && !matches!(action, "section" | "history-section") {
+        if !self.pending.is_empty()
+            && !matches!(
+                action,
+                "section" | "history-section" | "ai-open" | "task-profile"
+            )
+        {
             return vec![];
         }
         let mut requests = vec![];
@@ -650,6 +715,7 @@ impl SettingsState {
                 self.state["check_message"] = body["message"].clone();
             }
             "saved" => {
+                self.state["editor_save_pending"] = json!(true);
                 if request.path == "/api/v1/agent/config"
                     && body["pending"] != true
                     && self.state["routing_owner"] != "main"
@@ -691,13 +757,14 @@ impl SettingsState {
                     self.state["return_to_chat"] = false.into();
                 }
             }
-            self.state["result"] = super::i18n::text(
-                "settingspanel.configuration-loaded-existing-tasks-keep-their-original",
-            )
-            .into();
+            self.state["result"] = "".into();
         }
         if let Some(error) = &self.load_error {
             self.state["result"] = error.clone().into();
+        }
+        if self.pending.is_empty() && self.state["editor_save_pending"] == true {
+            self.state["editor_save_pending"] = false.into();
+            self.state["editor_saved"] = true.into();
         }
         self.revision();
         vec![]
@@ -757,6 +824,53 @@ pub fn endpoint(value: &str, protocol: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn editor_return_restores_the_parent_draft_without_rolling_back_live_data_or_requests() {
+        let mut m = model();
+        load(&mut m);
+        m.command(&json!({"action":"ai-new","kind":"custom"}));
+        m.state["connection_model"] = json!("parent-unsaved-model");
+        m.state["more_providers"] = json!(true);
+        let parent_id = m.draft_id.clone();
+        let parent = m.capture_editor();
+        m.command(&json!({"action":"ai-new","kind":"custom"}));
+        m.state["profiles"] = json!([{"id":"fresh-profile","model":"fresh-model"}]);
+        let request = m.request("check", "/api/v1/providers/check", None);
+        let revision = m.state["revision"].clone();
+        m.restore_editor(parent);
+        assert_eq!(m.state["connection_model"], "parent-unsaved-model");
+        assert_eq!(m.state["more_providers"], true);
+        assert_eq!(m.draft_id, parent_id);
+        assert_eq!(m.state["profiles"][0]["id"], "fresh-profile");
+        assert_eq!(m.state["revision"], revision);
+        assert!(m.pending.contains_key(&request.id));
+        m.reply(
+            request.id,
+            &request.context,
+            json!({"models":["discovered"]}),
+            None,
+            false,
+        );
+        assert_eq!(m.state["model_options"], json!(["discovered"]));
+    }
+    #[test]
+    fn editor_return_restores_its_original_assistant_without_overwriting_another_context() {
+        let mut m = model();
+        load(&mut m);
+        m.state["connection_model"] = json!("original-draft");
+        let source = m.capture_editor();
+        let source_context = m.context.clone();
+        m.bind("local", "control-a", "other");
+        m.state["connection_model"] = json!("other-draft");
+        let other_context = m.context.clone();
+        m.restore_editor(source);
+        assert_eq!(m.context, source_context);
+        assert_eq!(m.state["connection_model"], "original-draft");
+        assert_eq!(
+            m.cached[&other_context].state["connection_model"],
+            "other-draft"
+        );
+    }
     fn model() -> SettingsState {
         let mut model = SettingsState::default();
         model.bind("local", "control-a", "main");

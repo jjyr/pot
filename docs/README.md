@@ -10,8 +10,8 @@ is the single phase progress table.
 | Build, test and release | [Development](development.md) |
 | Delivered scope and remaining work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
-| Chat, Tasks, Machines and configuration interactions | [UI specification](ui-ux-design.md), [design language](design-language.md) |
-| Native multi-Space UI (#47) | [Multi-Space UI](multi-space-ui.md) |
+| Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
+| Native Space ownership, combined views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
 | Backend responsibilities and API contracts | [Crates](backend-crates.md), [Runtime](../crates/runtime/README.md), [Control](../crates/control/README.md) |
 | Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |

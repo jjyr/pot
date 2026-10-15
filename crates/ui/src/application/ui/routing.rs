@@ -1,46 +1,47 @@
 use super::*;
+use crate::pages::{Control, FieldHelp};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
 impl Settings {
-    pub(super) fn routing_form(&self, state: &Value, _cx: &mut Context<Shell>) -> Form {
+    pub(super) fn routing_form(&self, state: &Value, cx: &mut Context<Shell>) -> Form {
         let busy = state["routing_busy"] == true;
         let selected = state["routing_profile"].as_str().unwrap_or("");
         let profiles = state["profiles"].as_array().cloned().unwrap_or_default();
         if profiles.is_empty() {
-            return form(_cx)
+            return form(cx)
                 .child(
                     field(crate::application::i18n::text(
                         "routing.background-task-agent",
                     ))
                     .child(hint(
                         crate::application::i18n::text("routing.follow-chat"),
-                        _cx,
+                        cx,
                     )),
                 )
                 .child(
                     field(crate::application::i18n::text(
                         "routing.no-configurations-yet",
                     ))
-                    .description(crate::application::i18n::text(
+                    .help(crate::application::i18n::text(
                         "routing.add-an-agent-in-ai-configuration-first",
                     ))
                     .child(
                         Button::new("routing-connect-agent")
-                            .small()
+                            .control(cx)
                             .max_w(px(240.))
                             .label(crate::application::i18n::text("ai.connect-agent-58"))
                             .on_click(|_, _, _| command(json!({"action":"section","value":1}))),
                     ),
                 );
         }
-        let mut form = form(_cx).child(
+        let mut form = form(cx).child(
             field(crate::application::i18n::text(
                 "routing.saved-configurations",
             ))
             .child(
                 Button::new("routing-refresh")
                     .ghost()
-                    .small()
+                    .control(cx)
                     .max_w(px(260.))
                     .justify_start()
                     .label(crate::application::i18n::text(
@@ -77,12 +78,12 @@ impl Settings {
             field(crate::application::i18n::text(
                 "routing.background-task-agent",
             ))
-            .description(crate::application::i18n::text(
+            .help(crate::application::i18n::text(
                 "routing.follows-chat-by-default-independent-selection-affects",
             ))
             .child(
                 Button::new("worker-follow-chat")
-                    .small()
+                    .control(cx)
                     .max_w(px(260.))
                     .self_start()
                     .label(if independent {
@@ -98,7 +99,7 @@ impl Settings {
             ),
         );
         if state["routing_owner"] == "main" {
-            form = form.child(field(crate::application::i18n::text("routing.independent-task-configuration")).child(Button::new("worker-pick").small().self_start().max_w(px(320.)).label(worker_label).dropdown_caret(true).disabled(busy)
+            form = form.child(field(crate::application::i18n::text("routing.independent-task-configuration")).child(Button::new("worker-pick").control(cx).self_start().max_w(px(320.)).label(worker_label).dropdown_caret(true).disabled(busy)
                 .dropdown_menu(move|menu,_,_| worker_choices.iter().fold(menu,|menu,p| {let id=p["id"].as_str().unwrap_or("").to_owned();
                     menu.item(PopupMenuItem::new(p["name"].as_str().unwrap_or("Agent").to_owned()).on_click(move|_,_,_|command(json!({"action":"routing-choice","kind":"worker","id":id}))))}))));
         }
@@ -108,7 +109,7 @@ impl Settings {
             ))
             .child(
                 Button::new("routing-details")
-                    .small()
+                    .control(cx)
                     .self_start()
                     .max_w(px(320.))
                     .label(details_label)
@@ -152,7 +153,7 @@ impl Settings {
                 ))
                 .child(
                     Button::new("task-ai-manage")
-                        .small()
+                        .control(cx)
                         .label(crate::application::i18n::text(
                             "routing.manage-the-selected-agent-connection",
                         ))
@@ -164,7 +165,7 @@ impl Settings {
             field(crate::application::i18n::text("routing.advanced-routing")).child(
                 Button::new("routing-advanced")
                     .ghost()
-                    .small()
+                    .control(cx)
                     .label(if self.advanced {
                         crate::application::i18n::text("routing.hide-advanced-routing")
                     } else {
@@ -172,7 +173,7 @@ impl Settings {
                             "routing.show-advanced-routing-permissions-and-allowances",
                         )
                     })
-                    .on_click(_cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, _, _, cx| {
                         this.settings.advanced = !this.settings.advanced;
                         cx.notify();
                     })),
@@ -180,7 +181,7 @@ impl Settings {
         );
         if !self.advanced && state["routing_owner"] == "main" {
             let fields = self.fields.clone();
-            return form.child(field(crate::application::i18n::text("ui.task-configuration")).child(Button::new("routing-save-simple").primary().small().label(crate::application::i18n::text("routing.save-task-configuration")).disabled(busy)
+            return form.child(field(crate::application::i18n::text("ui.task-configuration")).child(Button::new("routing-save-simple").primary().control(cx).label(crate::application::i18n::text("routing.save-task-configuration")).disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"routing-save","profile_limit":fields[19].read(cx).value(),"provider_limit":fields[20].read(cx).value()})))));
         }
         for (i, p) in profiles.iter().enumerate() {
@@ -192,7 +193,7 @@ impl Settings {
                 field(p["name"].as_str().unwrap_or("Agent").to_owned()).child(
                     Button::new(("routing-hint", i))
                         .ghost()
-                        .small()
+                        .control(cx)
                         .label(if allowed {
                             crate::application::i18n::text("routing.allow-agent-selection")
                         } else {
@@ -230,9 +231,11 @@ impl Settings {
             ),
         ] {
             form = form.child(
-                field(label)
-                    .description(description)
-                    .child(Input::new(&self.fields[index]).aria_label(label)),
+                field(label).help(description).child(
+                    Input::new(&self.fields[index])
+                        .control(cx)
+                        .aria_label(label),
+                ),
             );
         }
         form = form.child(
@@ -270,8 +273,8 @@ impl Settings {
                 periods = periods.child(
                     Button::new(("provider-period", i))
                         .ghost()
-                        .small()
-                        .small()
+                        .control(cx)
+                        .control(cx)
                         .label(name)
                         .toggled(state["provider_period"] == period)
                         .disabled(busy)
@@ -291,7 +294,7 @@ impl Settings {
                     field(crate::application::i18n::text(
                         "routing.provider-token-allowance",
                     ))
-                    .description(crate::application::i18n::tr!(
+                    .help(crate::application::i18n::tr!(
                         "routing.applies-alongside-the-global-allowance-time-zone",
                         quota["policy"]["timezone"]
                             .as_str()
@@ -299,20 +302,22 @@ impl Settings {
                         quota["used"].as_u64().unwrap_or(0),
                         quota["reserved"].as_u64().unwrap_or(0)
                     ))
-                    .child(Input::new(&self.fields[21]).aria_label(
-                        crate::application::i18n::text("routing.provider-token-allowance"),
-                    )),
+                    .child(
+                        Input::new(&self.fields[21]).control(cx).aria_label(
+                            crate::application::i18n::text("routing.provider-token-allowance"),
+                        ),
+                    ),
                 )
                 .child(
                     field(crate::application::i18n::text("routing.allowance-reset"))
-                        .description(crate::application::i18n::text(
+                        .help(crate::application::i18n::text(
                             "routing.automatic-resume-also-requires-safe-checkpoint-support",
                         ))
                         .child(
                             Button::new("provider-auto")
                                 .ghost()
-                                .small()
-                                .small()
+                                .control(cx)
+                                .control(cx)
                                 .label(if state["provider_auto_resume"] == true {
                                     crate::application::i18n::text("routing.resume-automatically")
                                 } else {
@@ -325,7 +330,7 @@ impl Settings {
                         ),
                 );
             let fields = self.fields.clone();
-            form = form.child(field(crate::application::i18n::text("routing.provider-allowance")).child(Button::new("provider-save").small().label(crate::application::i18n::text("routing.save-provider-allowance")).disabled(busy)
+            form = form.child(field(crate::application::i18n::text("routing.provider-allowance")).child(Button::new("provider-save").control(cx).label(crate::application::i18n::text("routing.save-provider-allowance")).disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"provider-save","tokens":fields[21].read(cx).value()})))));
         } else {
             form = form.child(
@@ -342,13 +347,13 @@ impl Settings {
         let mut actions = div().flex().flex_wrap().gap_2();
         for (i, copy) in [false, true].into_iter().enumerate() {
             let fields = self.fields.clone();
-            actions = actions.child(Button::new(("save-profile",i)).small().label(if copy {crate::application::i18n::text("routing.copy-as-new-configuration")}else{crate::application::i18n::text("routing.save-configuration")}).disabled(busy)
+            actions = actions.child(Button::new(("save-profile",i)).control(cx).label(if copy {crate::application::i18n::text("routing.copy-as-new-configuration")}else{crate::application::i18n::text("routing.save-configuration")}).disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"profile-save","copy":copy,"name":fields[17].read(cx).value(),"model":fields[18].read(cx).value()}))));
         }
         if state["routing_owner"] != "main" {
             actions = actions.child(
                 Button::new("profile-main")
-                    .small()
+                    .control(cx)
                     .label(crate::application::i18n::text(
                         "routing.save-and-change-this-task-s-agent",
                     ))
@@ -358,7 +363,7 @@ impl Settings {
         }
         let fields = self.fields.clone();
         form.child(field(crate::application::i18n::text("routing.configuration-actions")).child(actions))
-            .child(field(crate::application::i18n::text("routing.task-routing")).child(Button::new("save-routing").primary().small().small().label(crate::application::i18n::text("routing.save-defaults-allowlist-and-concurrency-limits")).disabled(busy)
+            .child(field(crate::application::i18n::text("routing.task-routing")).child(Button::new("save-routing").primary().control(cx).control(cx).label(crate::application::i18n::text("routing.save-defaults-allowlist-and-concurrency-limits")).disabled(busy)
                 .on_click(move|_,_,cx|command(json!({"action":"routing-save","profile_limit":fields[19].read(cx).value(),"provider_limit":fields[20].read(cx).value()})))))
     }
 }

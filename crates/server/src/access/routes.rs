@@ -397,6 +397,8 @@ async fn assets(State(a): State<Access>, req: Request) -> Response {
         "/icon-512.png" => ("icon-512.png", "image/png"),
         "/install.js" => ("install.js", "text/javascript"),
         "/auth.js" => ("auth.js", "text/javascript"),
+        "/preferences.js" => ("preferences.js", "text/javascript"),
+        "/editor-history.js" => ("editor-history.js", "text/javascript"),
         "/events.js" => ("events.js", "text/javascript"),
         "/errors.js" => ("errors.js", "text/javascript"),
         "/style.css" => ("style.css", "text/css"),

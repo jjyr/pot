@@ -72,7 +72,11 @@ impl Shell {
         true
     }
     pub fn notification_banner(&self, cx: &mut Context<Self>) -> Div {
-        let mut row = div().ml(px(56.)).flex().items_center().gap_2();
+        let mut row = div()
+            .ml(px(pot_ui::design::sidebar_width(cx)))
+            .flex()
+            .items_center()
+            .gap_2();
         for space in self.space_directory.spaces.values() {
             if let Some((assistant, _)) = space
                 .permissions
@@ -286,9 +290,8 @@ impl Shell {
                                 .ghost()
                                 .self_start()
                                 .label(crate::application::i18n::text("onboarding.connect-server"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.machine_connections.connect();
-                                    ui::command(json!({"action":"page","value":1}));
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_machine_editor(window, cx);
                                     cx.notify();
                                 })),
                         )
@@ -355,9 +358,10 @@ impl Shell {
                 .toggled(selected)
                 .when(selected, |b| b.bg(pot_ui::design::navigation(cx)))
                 .disabled(
-                    purpose != "usage"
-                        && (!space.error.is_empty()
-                            || self.client.view.lock().unwrap().assistant_pending),
+                    !self.editors.is_empty()
+                        || purpose != "usage"
+                            && (!space.error.is_empty()
+                                || self.client.view.lock().unwrap().assistant_pending),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if purpose == "usage" {
@@ -387,7 +391,10 @@ impl Shell {
         if purpose == "settings" || purpose == "create" {
             row.w_auto().mx_0().p_0()
         } else {
-            div().pl(px(56.)).flex_shrink_0().child(row)
+            div()
+                .pl(px(pot_ui::design::sidebar_width(cx)))
+                .flex_shrink_0()
+                .child(row)
         }
     }
     pub fn render_spaces_machines(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -428,8 +435,12 @@ impl Shell {
             window,
             cx,
         );
+        if self.machine_connections.open {
+            return connections;
+        }
         let mut body = div()
             .id("spaces-machines")
+            .track_scroll(&self.machines_scroll)
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
@@ -464,6 +475,7 @@ impl Shell {
             let handler: pot_ui::pages::Handler = std::rc::Rc::new(cx.listener(
                 move |this, event: &pot_ui::pages::PageAction, window, cx| {
                     if event.kind == "machine-labels" {
+                        this.begin_editor(super::editor::Kind::Machine, window, cx);
                         this.machine_connections.mode = Some(source.mode.clone());
                         this.machine_connections
                             .edit_labels(event.value.as_str().unwrap_or_default().to_owned());
@@ -526,7 +538,12 @@ impl Shell {
                                             .label(crate::application::i18n::text(
                                                 "machines.add-executor",
                                             ))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.begin_editor(
+                                                    super::editor::Kind::Machine,
+                                                    window,
+                                                    cx,
+                                                );
                                                 this.machine_connections.mode = Some(mode.clone());
                                                 this.machine_connections.manage_members();
                                                 this.client.view.lock().unwrap().machine_reply =
@@ -585,31 +602,28 @@ impl Shell {
                         Button::new("cloud-connect")
                             .small()
                             .label(crate::application::i18n::text("onboarding.connect-server"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.machine_connections.connect();
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_machine_editor(window, cx);
                                 cx.notify();
                             })),
                     ),
             );
         }
-        ui::page(cx)
-            .relative()
-            .child(
-                ui::content(cx)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .flex_shrink_0()
-                            .child(ui::hint(
-                                crate::application::i18n::text("machines.title"),
-                                cx,
-                            )),
-                    )
-                    .child(body),
-            )
-            .when(self.machine_connections.open, |el| el.child(connections))
+        ui::page(cx).relative().child(
+            ui::content(cx)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .flex_shrink_0()
+                        .child(ui::hint(
+                            crate::application::i18n::text("machines.title"),
+                            cx,
+                        )),
+                )
+                .child(body),
+        )
     }
     pub fn render_space_schedules(&self, cx: &mut Context<Self>) -> Div {
         let mut entries = vec![];

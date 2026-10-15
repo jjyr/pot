@@ -1,7 +1,8 @@
 use crate::application::{Shell, client, gpui, ui};
+use crate::pages::{Control, FieldHelp};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Sizable,
+    ActiveTheme, Disableable,
     button::{Button, ButtonVariants},
     input::{Input, InputState},
 };
@@ -17,7 +18,7 @@ pub fn navigation(scheduled: bool, cx: &mut Context<Shell>) -> Div {
         .map(|(value, label)| {
             Button::new(if value { "nav-schedules" } else { "nav-tasks" })
                 .ghost()
-                .small()
+                .control(cx)
                 .label(label)
                 .toggled(value == scheduled)
                 .when(value == scheduled, |b| {
@@ -33,6 +34,7 @@ pub fn navigation(scheduled: bool, cx: &mut Context<Shell>) -> Div {
 }
 pub struct SchedulesUI {
     pub scroll: ScrollHandle,
+    reveal: pot_ui::pages::InputReveal,
     fields: Vec<Entity<InputState>>,
     pub open: bool,
     editing: Option<String>,
@@ -43,11 +45,17 @@ pub struct SchedulesUI {
     pub success: u64,
     error: String,
     delete_confirm: bool,
+    instructions_open: bool,
 }
 impl SchedulesUI {
+    pub(super) fn editor_values(&self, cx: &App) -> serde_json::Value {
+        json!({"fields":self.fields.iter().map(|f|f.read(cx).value().to_string()).collect::<Vec<_>>(),
+            "kind":self.kind,"notify":self.notify,"misfire":self.misfire,"enabled":self.enabled})
+    }
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         Self {
             scroll: ScrollHandle::new(),
+            reveal: Default::default(),
             fields: (0..7)
                 .map(|_| cx.new(|cx| InputState::new(window, cx)))
                 .collect(),
@@ -60,9 +68,11 @@ impl SchedulesUI {
             success: 0,
             error: String::new(),
             delete_confirm: false,
+            instructions_open: false,
         }
     }
     fn edit(&mut self, plan: Option<&ScheduleInfo>, window: &mut Window, cx: &mut Context<Shell>) {
+        self.reveal.reset();
         self.open = true;
         self.error.clear();
         self.delete_confirm = false;
@@ -115,9 +125,28 @@ impl SchedulesUI {
                 )))
             })
             .child(ui::hint(
-                crate::application::i18n::text("schedules-ui.describe-a-goal-and-time-in-the"),
+                crate::application::i18n::text("schedules-ui.creation-hint"),
                 cx,
-            ));
+            ))
+            .child(
+                Button::new("schedule-instructions")
+                    .ghost()
+                    .control(cx)
+                    .self_start()
+                    .label(crate::application::i18n::text(
+                        "schedules-ui.run-instructions",
+                    ))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.schedules_ui.instructions_open = !this.schedules_ui.instructions_open;
+                        cx.notify();
+                    })),
+            )
+            .when(self.instructions_open, |el| {
+                el.child(ui::hint(
+                    crate::application::i18n::text("schedules-ui.describe-a-goal-and-time-in-the"),
+                    cx,
+                ))
+            });
         if !v.schedule_error.is_empty() || !self.error.is_empty() {
             body = body.child(ui::notice(
                 format!(
@@ -132,8 +161,8 @@ impl SchedulesUI {
         if self.open {
             let input = |i, name, description| {
                 ui::field(name)
-                    .description(description)
-                    .child(Input::new(&self.fields[i]).aria_label(name))
+                    .help(description)
+                    .child(Input::new(&self.fields[i]).control(cx).aria_label(name))
             };
             let mut form = ui::form(cx)
                 .child(input(
@@ -178,7 +207,7 @@ impl SchedulesUI {
                             .map(|(value, label)| {
                                 Button::new(SharedString::from(format!("kind-{value}")))
                                     .ghost()
-                                    .small()
+                                    .control(cx)
                                     .label(label)
                                     .when(self.kind == value, |b| b.bg(cx.theme().secondary))
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -243,7 +272,7 @@ impl SchedulesUI {
                             .map(|(value, label)| {
                                 Button::new(SharedString::from(format!("miss-{value}")))
                                     .ghost()
-                                    .small()
+                                    .control(cx)
                                     .label(label)
                                     .when(self.misfire == value, |b| b.bg(cx.theme().secondary))
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -276,7 +305,7 @@ impl SchedulesUI {
                             .map(|(value, label)| {
                                 Button::new(SharedString::from(format!("notify-{value}")))
                                     .ghost()
-                                    .small()
+                                    .control(cx)
                                     .label(label)
                                     .when(self.notify == value, |b| b.bg(cx.theme().secondary))
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -291,7 +320,7 @@ impl SchedulesUI {
                     ui::field(crate::application::i18n::text("schedules-ui.status")).child(
                         Button::new("schedule-enabled")
                             .ghost()
-                            .small()
+                            .control(cx)
                             .label(if self.enabled {
                                 crate::application::i18n::text("schedules-ui.enabled")
                             } else {
@@ -303,17 +332,50 @@ impl SchedulesUI {
                             })),
                     ),
                 );
-            body=body.child(div().id("schedule-editor-scroll").track_scroll(&self.scroll).flex_1().min_h_0().overflow_y_scroll().child(ui::card(cx).child(form)))
-                .child(div().flex().gap_2()
-                    .child(Button::new("save-schedule").primary().small().label(crate::application::i18n::text("schedules-ui.save-schedule")).disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx| {
+            let scroller = div()
+                .id("schedule-editor-scroll")
+                .track_scroll(&self.scroll)
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(ui::card(cx).child(form))
+                .when(
+                    !self.error.is_empty() || !v.schedule_error.is_empty(),
+                    |el| {
+                        el.child(ui::notice(
+                            format!(
+                                "{} {}",
+                                crate::application::i18n::message(&self.error),
+                                crate::application::i18n::message(&v.schedule_error)
+                            ),
+                            true,
+                            cx,
+                        ))
+                    },
+                );
+            let save = Button::new("save-schedule").primary().control(cx).label(crate::application::i18n::text("editor.save")).disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx| {
                         let e=&mut this.schedules_ui;let values:Vec<String>=e.fields.iter().map(|f|f.read(cx).value().to_string()).collect();
                         let minutes=if e.kind=="interval" {match values[4].parse::<u64>() {Ok(n)=>n,Err(_)=>{e.error=crate::application::i18n::text("schedules-ui.interval-must-be-a-whole-number-of").into();cx.notify();return;}}}else{60};
                         let days:Vec<u32>=if e.kind=="weekly" {match values[6].split(',').map(|s|s.trim().parse()).collect::<Result<Vec<_>,_>>() {Ok(v)=>v,Err(_)=>{e.error=crate::application::i18n::text("schedules-ui.use-comma-separated-weekdays-such-as-1").into();cx.notify();return;}}}else{vec![]};
                         this.client.schedule_action(json!({"action":"update","schedule_id":e.editing,"spec":{"title":values[0],"goal":values[1],"timezone":values[2],"kind":e.kind,"at":values[3],"every_minutes":minutes,"time":values[5],"weekdays":days,"misfire":e.misfire,"notify":e.notify,"enabled":e.enabled}}));cx.notify();
-                    })))
-                    .child(Button::new("cancel-schedule-edit").ghost().small().label(crate::application::i18n::text("schedules-ui.cancel")).disabled(v.schedule_pending).on_click(cx.listener(|this,_,_,cx|{this.schedules_ui.open=false;cx.notify();})))
-                );
-            return ui::page(cx).child(body);
+                    }));
+            let cancel = Button::new("cancel-schedule-edit")
+                .ghost()
+                .control(cx)
+                .label(crate::application::i18n::text("schedules-ui.cancel"))
+                .disabled(v.schedule_pending)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.editor_intents.push(json!({"action":"editor-back"}));
+                    cx.notify();
+                }));
+            let actions = pot_ui::pages::editor_actions(vec![cancel], Some(save), cx);
+            let scroller = pot_ui::pages::reveal_inputs(
+                scroller,
+                self.fields.clone(),
+                self.scroll.clone(),
+                &self.reveal,
+            );
+            return pot_ui::pages::editor_page(scroller, actions, cx);
         }
         if let Some(plan) = &v.schedules.selected {
             let id = plan.id.clone();
@@ -325,11 +387,11 @@ impl SchedulesUI {
                     .child(ui::hint(rule(plan),cx)).child(ui::hint(pot_ui::machine_state::schedule_location(&plan.spec), cx)).child(ui::hint(plan.spec.goal.clone(),cx))
                     .child(ui::hint(crate::application::i18n::tr!("schedules-ui.next",if plan.next_label.is_empty(){crate::application::i18n::text("schedules-ui.not-scheduled")}else{&plan.next_label}),cx))
                     .when(!plan.last_error.is_empty(),|el|el.child(ui::hint(crate::application::i18n::tr!("schedules-ui.schedule-error",crate::application::i18n::message(&plan.last_error)),cx)))
-                    .child(div().flex().gap_2()
-                        .child(Button::new("schedule-run").primary().small().label(crate::application::i18n::text("schedules-ui.run-now")).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":"run","schedule_id":run_id}));cx.notify();})))
-                        .child(Button::new("schedule-pause").ghost().small().label(if plan.spec.enabled {crate::application::i18n::text("schedules-ui.paused")}else{crate::application::i18n::text("schedules-ui.resume")}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":action,"schedule_id":toggle_id}));cx.notify();})))
-                        .child(Button::new("schedule-edit").ghost().small().label(crate::application::i18n::text("schedules-ui.edit")).disabled(v.schedule_pending).on_click(cx.listener(|this,_,window,cx|{let plan=this.client.view.lock().unwrap().schedules.selected.clone();this.schedules_ui.edit(plan.as_ref(),window,cx);cx.notify();})))
-                        .child(Button::new("schedule-delete").ghost().small().text_color(cx.theme().danger).label(if self.delete_confirm {crate::application::i18n::text("schedules-ui.confirm-removal")}else{crate::application::i18n::text("schedules-ui.remove")}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{if this.schedules_ui.delete_confirm {this.client.schedule_action(json!({"action":"delete","schedule_id":delete_id}));this.schedules_ui.delete_confirm=false;}else{this.schedules_ui.delete_confirm=true;}cx.notify();})))
+                    .child(div().flex().flex_wrap().gap_2()
+                        .child(Button::new("schedule-run").primary().control(cx).label(crate::application::i18n::text("schedules-ui.run-now")).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":"run","schedule_id":run_id}));cx.notify();})))
+                        .child(Button::new("schedule-pause").ghost().control(cx).label(if plan.spec.enabled {crate::application::i18n::text("schedules-ui.pause")}else{crate::application::i18n::text("schedules-ui.resume")}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{this.client.schedule_action(json!({"action":action,"schedule_id":toggle_id}));cx.notify();})))
+                        .child(Button::new("schedule-edit").ghost().control(cx).label(crate::application::i18n::text("schedules-ui.edit")).disabled(v.schedule_pending).on_click(cx.listener(|this,_,window,cx|{let plan=this.client.view.lock().unwrap().schedules.selected.clone();this.begin_editor(super::editor::Kind::Schedule,window,cx);this.schedules_ui.edit(plan.as_ref(),window,cx);cx.notify();})))
+                        .child(Button::new("schedule-delete").ghost().control(cx).text_color(cx.theme().danger).label(if self.delete_confirm {crate::application::i18n::text("schedules-ui.confirm-removal")}else{crate::application::i18n::text("schedules-ui.remove")}).disabled(v.schedule_pending).on_click(cx.listener(move|this,_,_,cx|{if this.schedules_ui.delete_confirm {this.client.schedule_action(json!({"action":"delete","schedule_id":delete_id}));this.schedules_ui.delete_confirm=false;}else{this.schedules_ui.delete_confirm=true;}cx.notify();})))
                     ).child(ui::hint(crate::application::i18n::text("schedules-ui.pausing-or-removing-only-affects-future-runs"),cx))
                 )
                 .child(ui::hint(crate::application::i18n::text("schedules-ui.run-history-latest-100-click-a-task"),cx))
@@ -337,11 +399,11 @@ impl SchedulesUI {
                     let task=run.task_id.clone();
                     ui::card(cx).mb_2().child(ui::hint(format!("{} · {}",run.scheduled_label,state(&run.state)),cx))
                         .child(ui::hint(if matches!(run.state.as_str(), "skipped_overlap" | "skipped_missed" | "cancelled" | "interrupted") {crate::application::i18n::message(&run.summary)} else {run.summary.clone()},cx))
-                        .when(task.is_some(),|el|el.child(Button::new(SharedString::from(format!("run-{}",run.id))).ghost().small().label(crate::application::i18n::text("schedules-ui.view-task")).on_click(cx.listener(move|this,_,_,cx|{this.show_tasks=false;this.client.select(task.clone().unwrap());this.first=true;cx.notify();}))))
+                        .when(task.is_some(),|el|el.child(Button::new(SharedString::from(format!("run-{}",run.id))).ghost().control(cx).label(crate::application::i18n::text("schedules-ui.view-task")).on_click(cx.listener(move|this,_,_,cx|{this.show_tasks=false;this.client.select(task.clone().unwrap());this.first=true;cx.notify();}))))
                 })))
-                .child(div().flex().gap_2()
-                    .child(Button::new("runs-newer").ghost().small().label(crate::application::i18n::text("schedules-ui.newer-entries")).disabled(v.runs_offset==0).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();v.runs_offset=v.runs_offset.saturating_sub(20);drop(v);this.client.refresh();cx.notify();})))
-                    .child(Button::new("runs-older").ghost().small().label(crate::application::i18n::text("schedules-ui.older-entries")).disabled(v.schedules.runs_next_offset.is_none()).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();if let Some(offset)=v.schedules.runs_next_offset{v.runs_offset=offset;}drop(v);this.client.refresh();cx.notify();})))
+                .child(div().flex().flex_wrap().gap_2()
+                    .child(Button::new("runs-newer").ghost().control(cx).label(crate::application::i18n::text("schedules-ui.newer-entries")).disabled(v.runs_offset==0).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();v.runs_offset=v.runs_offset.saturating_sub(20);drop(v);this.client.refresh();cx.notify();})))
+                    .child(Button::new("runs-older").ghost().control(cx).label(crate::application::i18n::text("schedules-ui.older-entries")).disabled(v.schedules.runs_next_offset.is_none()).on_click(cx.listener(|this,_,_,cx|{let mut v=this.client.view.lock().unwrap();if let Some(offset)=v.schedules.runs_next_offset{v.runs_offset=offset;}drop(v);this.client.refresh();cx.notify();})))
                 );
         } else {
             body = body
@@ -371,7 +433,7 @@ impl SchedulesUI {
                                         plan.id
                                     )))
                                     .ghost()
-                                    .small()
+                                    .control(cx)
                                     .justify_start()
                                     .label(plan.spec.title.clone())
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -420,7 +482,7 @@ impl SchedulesUI {
                                 .child(
                                     Button::new("schedule-prev")
                                         .ghost()
-                                        .small()
+                                        .control(cx)
                                         .label(crate::application::i18n::text(
                                             "schedules-ui.previous",
                                         ))
@@ -437,7 +499,7 @@ impl SchedulesUI {
                                 .child(
                                     Button::new("schedule-next")
                                         .ghost()
-                                        .small()
+                                        .control(cx)
                                         .label(crate::application::i18n::text(
                                             "schedules-ui.next-52",
                                         ))

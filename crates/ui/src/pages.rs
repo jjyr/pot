@@ -5,6 +5,7 @@ use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Sizable,
     button::{Button, ButtonVariants},
     form::{Field, Form},
+    input::Input,
 };
 use serde_json::Value;
 use std::rc::Rc;
@@ -48,9 +49,98 @@ pub fn retry(handler: &Handler, catalog: Catalog) -> Button {
 }
 macro_rules! tr { ($catalog:expr, $key:expr $(,$arg:expr)* $(,)?) => { $catalog.format($key, &[$($arg.to_string()),*]) }; }
 pub(crate) use tr;
+/// Touch menus keep the same 44px target as their invoking controls.
+pub fn menu_item(
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    use gpui_kit::component::menu::PopupMenuItem;
+    let label = label.into();
+    if design::touch(cx) {
+        PopupMenuItem::element(move |_, _| {
+            div()
+                .h(px(44.))
+                .min_w(px(180.))
+                .flex()
+                .items_center()
+                .text_size(px(16.))
+                .child(label.clone())
+        })
+    } else {
+        PopupMenuItem::new(label)
+    }
+}
+
 pub const PAGE_WIDTH: f32 = 820.;
 pub const SIDEBAR: f32 = 56.;
 pub const SANDBOX_HEADER: f32 = 56.;
+
+/// Shared density for native and browser surfaces, selected by usable width.
+pub trait Control: Sized {
+    fn control(self, cx: &App) -> Self;
+}
+impl Control for Button {
+    fn control(self, cx: &App) -> Self {
+        if design::touch(cx) {
+            self.large().min_w(px(44.)).h(px(44.)).flex_shrink_0()
+        } else {
+            self.small()
+        }
+    }
+}
+impl Control for Input {
+    fn control(self, cx: &App) -> Self {
+        if design::touch(cx) {
+            self.large().h(px(44.)).text_size(px(16.))
+        } else {
+            self
+        }
+    }
+}
+impl Control for Form {
+    fn control(self, cx: &App) -> Self {
+        if design::touch(cx) {
+            self.large()
+        } else {
+            self.small()
+        }
+    }
+}
+pub trait FieldHelp {
+    fn help(self, text: impl Into<SharedString>) -> Self;
+}
+impl FieldHelp for Field {
+    fn help(self, text: impl Into<SharedString>) -> Self {
+        let text = text.into();
+        self.description_fn(move |_, cx| hint(text.clone(), cx))
+    }
+}
+
+/// Secondary actions precede a full-width primary action on phones.
+pub fn editor_actions(secondary: Vec<Button>, primary: Option<Button>, cx: &App) -> Div {
+    let mobile = design::mobile(cx);
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .justify_end()
+        .gap_2()
+        .when(mobile, |el| el.flex_col())
+        .when(!secondary.is_empty(), |el| {
+            el.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .justify_end()
+                    .gap_2()
+                    .min_w_0()
+                    .children(secondary.into_iter().map(|button| button.control(cx))),
+            )
+        })
+        .when_some(primary, |el, button| {
+            el.child(button.control(cx).when(mobile, |b| b.w_full()))
+        })
+}
 
 /// Shape against the actual column width: GPUI's intrinsic text measurement can
 /// otherwise clip a child before the inherited ellipsis is painted.
@@ -135,10 +225,12 @@ pub fn page(_layout: Layout, cx: &App) -> Div {
         .size_full()
         .min_h_0()
         .min_w_0()
-        .pl(px(SIDEBAR))
+        .pl(px(design::sidebar_width(cx)))
         .bg(cx.theme().background)
         .text_color(cx.theme().foreground)
-        .text_size(px(14.))
+        .text_size(px(if design::mobile(cx) { 16. } else { 14. }))
+        .font_weight(FontWeight::NORMAL)
+        .line_height(relative(1.5))
         .font_family(cx.theme().font_family.clone())
 }
 pub fn content(layout: Layout) -> Div {
@@ -164,7 +256,11 @@ pub fn title(text: impl Into<SharedString>) -> Div {
 }
 pub fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
     div()
-        .text_size(px(13.))
+        .min_w_0()
+        .whitespace_normal()
+        .text_size(px(if design::mobile(cx) { 14. } else { 13. }))
+        .font_weight(FontWeight::NORMAL)
+        .line_height(relative(1.5))
         .text_color(cx.theme().muted_foreground)
         .child(text.into())
 }
@@ -172,6 +268,7 @@ pub fn card(cx: &App) -> Div {
     div()
         .w_full()
         .p_5()
+        .when(design::mobile(cx), |el| el.p_3())
         .rounded(px(10.))
         .border_1()
         .border_color(cx.theme().border)
@@ -179,6 +276,109 @@ pub fn card(cx: &App) -> Div {
         .flex()
         .flex_col()
         .gap_4()
+}
+
+/// Shared editor frame. The Shell supplies its contextual titlebar and Back.
+pub fn editor_page(body: impl IntoElement, actions: impl IntoElement, cx: &App) -> Div {
+    page(
+        Layout {
+            compact: design::compact(cx),
+        },
+        cx,
+    )
+    .child(
+        content(Layout {
+            compact: design::compact(cx),
+        })
+        .max_w(px(760.))
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(body),
+        )
+        .child(
+            div()
+                .flex_shrink_0()
+                .min_w_0()
+                .pt_3()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .child(actions),
+        ),
+    )
+}
+
+/// Reveal focused controls after focus or the visible viewport changes (keyboard).
+#[derive(Clone, Default)]
+pub struct InputReveal(std::rc::Rc<std::cell::RefCell<Option<FocusedViewport>>>);
+#[derive(PartialEq)]
+struct FocusedViewport {
+    input: EntityId,
+    bounds: Bounds<Pixels>,
+}
+impl InputReveal {
+    pub fn reset(&self) {
+        self.0.borrow_mut().take();
+    }
+}
+
+pub fn reveal_inputs(
+    body: impl IntoElement,
+    fields: Vec<Entity<gpui_kit::component::input::InputState>>,
+    scroll: ScrollHandle,
+    reveal: &InputReveal,
+) -> Div {
+    let reveal = reveal.clone();
+    div()
+        .size_full()
+        .min_h_0()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .child(body)
+        .on_children_prepainted(move |_, window, cx| {
+            let Some(input) = fields
+                .iter()
+                .find(|field| field.read(cx).focus_handle(cx).is_focused(window))
+            else {
+                reveal.reset();
+                return;
+            };
+            let bounds = input.read(cx).input_bounds();
+            let viewport = scroll.bounds();
+            if bounds.size.height <= px(0.) || viewport.size.height <= px(0.) {
+                return;
+            }
+            let signature = FocusedViewport {
+                input: input.entity_id(),
+                bounds: viewport,
+            };
+            if reveal.0.borrow().as_ref() == Some(&signature) {
+                return;
+            }
+            *reveal.0.borrow_mut() = Some(signature);
+            // InputState reports the text bounds; include the control's padding
+            // and border, especially for 44 px touch inputs.
+            let inset = px(if design::mobile(cx) { 16. } else { 8. });
+            let delta = if bounds.bottom() + inset > viewport.bottom() {
+                bounds.bottom() + inset - viewport.bottom()
+            } else if bounds.top() - inset < viewport.top() {
+                bounds.top() - inset - viewport.top()
+            } else {
+                return;
+            };
+            let scroll = scroll.clone();
+            window.on_next_frame(move |window, _| {
+                let mut offset = scroll.offset();
+                offset.y -= delta;
+                scroll.set_offset(offset);
+                window.refresh();
+            });
+        })
 }
 
 /// Quiet grouped choices, with compact native proportions.
@@ -201,7 +401,7 @@ pub fn form(cx: &App) -> Form {
     } else {
         Form::horizontal().label_width(px(184.))
     })
-    .small()
+    .control(cx)
     .gap_4()
 }
 pub fn field(label: impl Into<SharedString>) -> Field {
@@ -213,20 +413,6 @@ pub fn field(label: impl Into<SharedString>) -> Field {
             .font_weight(FontWeight::MEDIUM)
             .child(label.clone())
     })
-}
-/// Animate a newly opened panel without replaying motion on routine refreshes.
-pub fn sheet(panel: Div, key: SharedString, cx: &App) -> AnyElement {
-    if cx.reduce_motion() {
-        panel.into_any_element()
-    } else {
-        panel
-            .with_animation(
-                key,
-                Animation::new(std::time::Duration::from_millis(200)),
-                |el, t| el.opacity(0.92 + 0.08 * t),
-            )
-            .into_any_element()
-    }
 }
 pub fn section(text: impl Into<SharedString>) -> Div {
     div()
@@ -275,9 +461,17 @@ pub fn notice(text: impl Into<SharedString>, error: bool, cx: &App) -> Div {
         .flex()
         .gap_2()
         .text_size(px(13.))
+        .font_weight(FontWeight::NORMAL)
+        .line_height(relative(1.5))
         .text_color(color)
         .child(Icon::new(IconName::Info).size(px(15.)))
-        .child(text.into())
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .whitespace_normal()
+                .child(text.into()),
+        )
 }
 
 pub fn brand_icon(kind: &str) -> Icon {

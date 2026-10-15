@@ -1,7 +1,8 @@
 use crate::application::{Shell, client, gpui, ui};
+use crate::pages::Control;
 use gpui::prelude::*;
 use gpui_kit::component::{
-    ActiveTheme, Sizable,
+    ActiveTheme,
     button::{Button, ButtonVariants},
 };
 pub use pot_ui::usage::UsageUI;
@@ -16,7 +17,7 @@ fn tokens(v: &Value) -> u64 {
 pub fn entry(v: &client::View, cx: &mut Context<Shell>) -> Button {
     Button::new("conversation-usage")
         .ghost()
-        .small()
+        .control(cx)
         .icon(gpui_kit::component::IconName::ChartPie)
         .text_color(cx.theme().muted_foreground)
         .label(if pot_ui::design::compact(cx) {
