@@ -5,7 +5,7 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    Sizable,
+    Disableable, Sizable,
     button::{Button, ButtonVariants},
     input::{Input, InputState, Textarea, TextareaState},
 };
@@ -18,8 +18,16 @@ struct Draft {
     rules_revision: Value,
     request_id: String,
 }
+struct Creation {
+    source: String,
+    name: Entity<InputState>,
+    request_id: String,
+    profile: Option<String>,
+}
 #[derive(Default)]
 pub struct Editor {
+    creation: Option<Creation>,
+    pub advanced: bool,
     pub open: bool,
     pub form_only: bool,
     selected: String,
@@ -204,7 +212,100 @@ impl Editor {
         );
         body
     }
+    pub fn choose_profile(&mut self, id: String) {
+        if let Some(draft) = self.creation.as_mut() {
+            draft.profile = Some(id);
+        }
+    }
+    pub fn render_create(
+        &mut self,
+        view: CreateView<'_>,
+        catalog: Catalog,
+        handler: Handler,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Div {
+        if self
+            .creation
+            .as_ref()
+            .is_some_and(|draft| draft.source != view.source)
+        {
+            self.creation = None;
+        }
+        let draft = self.creation.get_or_insert_with(|| {
+            let name = cx.new(|cx| InputState::new(window, cx));
+            name.update(cx, |f, cx| f.set_value("Pot", window, cx));
+            Creation {
+                source: view.source.into(),
+                name,
+                request_id: uuid::Uuid::new_v4().to_string(),
+                profile: None,
+            }
+        });
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_4()
+            .child(avatar(&draft.request_id, 56., cx))
+            .child(
+                div()
+                    .text_size(px(18.))
+                    .child(draft.name.read(cx).value().to_string()),
+            );
+        if self.advanced {
+            let selected = draft.profile.as_deref().unwrap_or(view.active_profile);
+            let mut models = div().flex().flex_wrap().gap_2();
+            for profile in view.profiles.as_array().into_iter().flatten() {
+                let Some(id) = profile["id"].as_str() else {
+                    continue;
+                };
+                models = models.child(
+                    Button::new(SharedString::from(format!("create-profile-{id}")))
+                        .ghost()
+                        .small()
+                        .label(format!(
+                            "{} · {}",
+                            profile["name"].as_str().unwrap_or(""),
+                            profile["model"].as_str().unwrap_or("")
+                        ))
+                        .toggled(id == selected)
+                        .disabled(view.pending)
+                        .on_click(pages::on(&handler, "assistant-create-profile", json!(id))),
+                );
+            }
+            body = body.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(pages::hint(catalog.text("assistant.name"), cx))
+                    .child(Input::new(&draft.name).disabled(view.pending))
+                    .child(pages::hint(catalog.text("assistant.model"), cx))
+                    .child(models)
+                    .when_some(view.location, |el, location| el.child(location)),
+            );
+        }
+        let key = draft.request_id.clone();
+        let name = draft.name.clone();
+        let profile = draft.profile.clone();
+        let source = view.source.to_owned();
+        let save = handler.clone();
+        body.child(Button::new("assistant-create").primary().label(catalog.text("assistant.create"))
+                .disabled(view.pending)
+                .on_click(move |_, window, cx| save(&pages::PageAction { kind: "assistant-save", value: json!({"owner":"new","request_id":key,"name":name.read(cx).value().to_string(),"profile_id":profile,"source_assistant":source}) }, window, cx)))
+            .child(Button::new("assistant-create-advanced").ghost().small()
+                .label(catalog.text(if self.advanced { "assistant.fewer-settings" } else { "assistant.more-settings" }))
+                .disabled(view.pending).on_click(pages::on(&handler, "assistant-create-advanced", Value::Null)))
+            .when(view.can_close, |body| body.child(Button::new("assistant-create-close").ghost().small().disabled(view.pending)
+                .label(catalog.text("assistant.close")).on_click(pages::on(&handler, "assistant-close", Value::Null))))
+    }
     pub fn saved(&mut self, owner: &str) {
+        if owner == "new" {
+            self.creation = None;
+            self.advanced = false;
+        }
         self.drafts.remove(owner);
         self.saved_owner = owner.into();
     }
@@ -212,4 +313,16 @@ impl Editor {
         self.drafts.remove(owner);
         self.saved_owner.clear();
     }
+}
+
+pub struct CreateView<'a> {
+    pub profiles: &'a Value,
+    pub active_profile: &'a str,
+    pub source: &'a str,
+    pub pending: bool,
+    pub can_close: bool,
+    pub location: Option<Div>,
+}
+pub fn avatar(key: &str, size: f32, cx: &mut App) -> Div {
+    crate::avatar::default_image(key, size, cx)
 }

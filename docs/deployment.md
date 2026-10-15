@@ -98,10 +98,17 @@ pot --root "$HOME/.pot-control" api /api/v1/runtime/control "$PWD/enable-control
 
 Allow clients and Runners to reach the configured listener. Connection identity and
 membership details are in [Control listener and membership](#control-listener-and-membership).
-Create an assistant by saving this as `assistant.json`:
+Enabling Control creates no assistants. Connect the App using this Control's URL
+and client credential, save AI configuration, then create the prefilled Pot
+assistant from Chat. The Web client offers the same separate setup and creation
+states. No local API configuration is required to open assistants already present
+on this Control.
+
+After AI setup, operators may alternatively create an assistant by saving this as
+`assistant.json`:
 
 ```json
-{"request_id":"assistant-1","resource":{"kind":"assistant","name":"Assistant"}}
+{"request_id":"assistant-1","resource":{"kind":"assistant","name":"Pot"}}
 ```
 
 ```sh
@@ -258,8 +265,10 @@ restores definitions without replaying shell/model/VM-start effects. Current
 product definitions are adopted during versioned resource upgrade; this does
 not import assistant instruction files or saved routing preferences.
 
-App creates its default assistant through the same resource API. New resource
-creation UI is deferred by user choice. Native management authority and
+App startup and standalone Control enablement expose AI configuration with an empty
+assistant registry. Saving a connection does not register an assistant. Chat offers
+a separate prefilled Pot creation action through `/api/v1/assistants`, also used by
+the assistant pane’s + action. Host/Sandbox resource creation UI remains deferred. Native management authority and
 Control membership remains separate; this endpoint is not a member execution
 authorization mechanism. Remote Task Agents start on the selected execution
 Runtime; Control retains model credentials, budgets and approvals. See

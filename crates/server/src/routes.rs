@@ -207,10 +207,8 @@ async fn assistant_list(
             "Owner authority required",
         );
     }
-    match hub.definitions() {
-        Ok(definitions) => {
-            axum::Json(serde_json::json!({"assistants": definitions})).into_response()
-        }
+    match hub.catalogue() {
+        Ok(catalogue) => axum::Json(catalogue).into_response(),
         Err(error) => rejected(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             &error.to_string(),
@@ -229,9 +227,11 @@ async fn assistant_create(
             "Owner authority required",
         );
     }
-    match hub.create(
+    match hub.create_from(
         args["request_id"].as_str().unwrap_or(""),
-        args["name"].as_str().unwrap_or(""),
+        args["name"].as_str().unwrap_or("Pot"),
+        args["source_assistant"].as_str().unwrap_or("main"),
+        args["profile_id"].as_str(),
     ) {
         Ok(d) => axum::Json(d).into_response(),
         Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),

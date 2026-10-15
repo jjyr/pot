@@ -235,6 +235,26 @@ pub async fn send(
     Json(req): Json<SendMessage>,
 ) -> ApiResult<Json<SendMessageAccepted>> {
     s.authorized(&h)?;
+    if !s.is_worker
+        && let Some(hub) = s
+            .agent_service
+            .resources
+            .assistants
+            .lock()
+            .unwrap()
+            .upgrade()
+        && !hub
+            .definitions()
+            .map_err(internal)?
+            .iter()
+            .any(|d| d.id == s.assistant_id)
+    {
+        return Err(error(
+            StatusCode::NOT_FOUND,
+            "assistant_missing",
+            "Create an assistant before chatting",
+        ));
+    }
     if req.conversation_id != s.conversation_id()
         || req.request_id.is_empty()
         || req.text.trim().is_empty()

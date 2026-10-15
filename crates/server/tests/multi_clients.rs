@@ -58,6 +58,11 @@ impl Host {
         }
         backend.enable_assistant_resources(config).await.unwrap();
         backend
+            .assistants()
+            .unwrap()
+            .create("fixture-main", "Pot")
+            .unwrap();
+        backend
             .state()
             .unwrap()
             .set_secret_key_source(std::sync::Arc::new(

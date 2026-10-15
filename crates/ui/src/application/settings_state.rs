@@ -192,6 +192,7 @@ impl SettingsState {
 
         match action {
             "section" | "history-section" => {
+                self.state["return_to_chat"] = false.into();
                 self.state["section"] = v["value"].clone();
                 self.state["routing_owner"] = "main".into();
                 if v["value"] == 1 || v["value"] == 4 {

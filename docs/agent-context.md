@@ -118,15 +118,17 @@ service, allow a Profile or grant execution authority. `create_task` retains
 `selection_reason`; dedicated preference tools and `preference_revision` have
 been removed with user agreement. Existing tasks retain configuration snapshots.
 
-Click the current assistant name to select/create an assistant or edit its name
-and AGENTS.md. Edits remain drafts until Save. Each assistant retains its draft
+Use the persistent Chat assistant pane to select assistants and its + action to
+create one. The Chat edit action changes the current assistant’s name and AGENTS.md. Edits remain drafts until Save. Each assistant retains its draft
 when switching; saving compares the definition revision and the rules revision. A conflict preserves the draft and reports that the saved version changed.
 Agent edits use `read_agent_instructions` and `update_agent_instructions`.
 Updates require fresh owner approval; the server captures the review baseline, and existing grants
 cannot skip review. UI and model edits share the DB record and conflict checks.
 Host file tools no longer edit the assistant's live rule record.
 
-The initial assistant retains the current conversation and Tasks. Assistant
+A fresh registry has no assistants. AI settings can be saved before explicitly
+creating the first assistant; configuration saves and restarts never register one.
+Existing registered assistants retain their conversations and Tasks. Assistant
 rules are read exclusively from the current DB record. Old assistant files and
 saved preference metadata are not imported or converted. Existing DB rules are
 preserved. Project AGENTS.md files continue to be discovered independently for

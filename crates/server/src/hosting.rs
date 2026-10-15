@@ -141,7 +141,7 @@ impl Server {
         let backend =
             crate::resources::Resources::open_policy(backend, config.runtime, !embedded).await?;
         if embedded {
-            backend.ensure_app_assistant().await?;
+            backend.ensure_configuration().await?;
         }
         if let Some((access, _, _)) = &mut access {
             let (router, source) = web_router.expect("explicit Control router");

@@ -7,7 +7,7 @@ chrome. The current App design is the visual and interaction baseline.
 ```text
                          pot-ui
       +-----------------------------------------------+
-      | Shell: titlebar, icon rail, parent navigation  |
+      | Shell: titlebar, feature rail, assistant pane  |
       | Assistants | Chat | Tasks | Schedules          |
       | Machines   | Usage | General / AI / Task       |
       | Composer frame, drafts, reference completion   |
@@ -32,10 +32,14 @@ chrome. The current App design is the visual and interaction baseline.
 `application` owns root views, page entities, navigation caches, configuration
 state, assistant and machine editors, titlebar content, notifications and the
 composer. Existing `chat`, `tasks`, `machines`, `usage`, `permissions`, `resources`
-and Markdown components remain inside the same crate. There is no separate UI
-crate for either target.
+and Markdown components remain inside the same crate. `pot-avatar` composes default
+Pot image avatars and transforms the whole raster for reply reactions. The shared
+image component, cache and reply detector give App and Web identical behavior,
+without depending on font glyph coverage. There is no separate UI crate for either target.
 
-The shared shell uses the App's 56-pixel icon rail and 44-pixel titlebar. Page
+The shared shell uses the App's 56-pixel feature rail, a collapsible 220-pixel
+assistant pane in Chat and a 44-pixel titlebar. The assistant pane becomes an
+overlay below 720 pixels; other destinations keep the full content width. Page
 columns, cards, typography, message rows and the 760-pixel composer follow App
 geometry. Below 900 pixels, the same pages use compact spacing and controls;
 density depends on viewport width, not the hosting platform. Native titlebars

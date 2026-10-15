@@ -1,6 +1,6 @@
 # Pot design language
 
-Approved design direction: 2026-10-06. Tracking: [issue #9](https://github.com/jjyr/pot/issues/9).
+Approved design direction: 2026-10-15. Tracking: [issue #9](https://github.com/jjyr/pot/issues/9).
 
 This document defines the target visual and interaction language for Pot. It is a design baseline, not a record of shipped behavior. The [UI specification](ui-ux-design.md) describes the existing implementation; update it as changes are delivered. Authentication, execution, accounting and desktop-control capabilities still depend on their respective implementation contracts.
 
@@ -21,6 +21,8 @@ The following values are reference tokens. Validate actual rendered contrast in 
 | Canvas | `#FDFDFD` | `#202020` | Unified window and content background, including Chat |
 | Surface | `#FFFFFF` | `#2B2B2B` | Composer, forms and grouped content |
 | Navigation | `#F4F4F4` | `#282828` | Quiet sidebar and embedded desktop controls |
+| Assistant pane | `#E9EEF5` | `#303640` | Cool gray conversation navigation, distinct from the feature rail and Chat canvas |
+| Assistant selection | `#D9E4F3` | `#3B475B` | Selected assistant row against the assistant pane |
 | Primary text | `#262626` | `#F2F2F2` | Titles and body |
 | Secondary text | `#646464` | `#B7B7B7` | Descriptions and metadata |
 | Divider | `#E8E8E8` | `#414141` | Quiet separators and borders |
@@ -35,6 +37,12 @@ The following values are reference tokens. Validate actual rendered contrast in 
 Toolbar/sidebar light surfaces may vary between `#F5F5F5` and `#F6F6F6`. The light-mode send control may use `#3478F6`; navigation highlights may use `#E8EEF7`. These are contextual variants, not additional page-specific palettes.
 
 Keep assistant responses mostly unboxed. Reserve surface fills for the composer, interactive groups and relevant details. Use a fine composer border and a soft shadow; avoid giving every row a floating-card treatment. Separate control boundaries from decorative dividers: a control must remain identifiable even when a faint divider is unnecessary.
+
+Default assistant avatars pair the Pot Companion mark with independently selected
+foreground and background preset colors. Their raster image stays the same across
+themes. A completed live reply gives the whole image one 650 ms scale-and-tilt
+rebound, with a slow start and quick settle. Keep layout fixed and honor Reduce
+Motion. See [Multi-Space UI](multi-space-ui.md#assistants) for identity and trigger rules.
 
 Target WCAG AA text contrast. Secondary text must remain readable against its actual surface. Color never carries status alone, and an outline must not be the only indication of keyboard focus.
 
@@ -67,7 +75,7 @@ Avoid uniformly applying one large radius to every element. Touch-oriented surfa
 
 ## Application shell and navigation
 
-Keep the compact 56 px icon-only sidebar: Chat, Tasks, Machines, Usage and Settings. The Pot icon is the Chat entry; there is no separate brand block or chat-bubble entry. Show names in hover/focus tooltips and accessibility labels. Place Settings at the bottom. Tasks contains Tasks / Schedules rather than another top-level navigation entry.
+Keep the compact 56 px icon-only sidebar: Chat, Tasks, Machines, Usage and Settings. Chat adds a collapsible 220 px assistant pane; other destinations use the full content width. Compact windows expose the pane as a drawer. See [Multi-Space UI](multi-space-ui.md) for row content and onboarding. The Pot icon is the Chat entry; there is no separate brand block or chat-bubble entry. Show names in hover/focus tooltips and accessibility labels. Place Settings at the bottom. Tasks contains Tasks / Schedules rather than another top-level navigation entry.
 
 The target design removes the user-facing Terminal page, consistent with [AI configuration #7](https://github.com/jjyr/pot/issues/7). This does not itself remove shell tools or background agent execution.
 
@@ -164,7 +172,7 @@ Use General / AI Configuration / Task Configuration. General contains language, 
 
 Use one compact provider grid and shared connection panel. Browser authorization progresses from Not connected to Waiting for authorization to verified account/model selection in the same panel. Keep Reopen browser / Cancel available while waiting. Unknown status is not Connected.
 
-Provider API forms keep Check / Save adjacent. Custom API exposes endpoint, key, format and model. First setup ends with Save and start chatting, restores the Chat draft and does not automatically send it. Ordinary additions do not silently replace the main Agent. See #7 for authentication and activation behavior; previews do not establish backend support.
+Provider API forms keep Check / Save adjacent. Custom API exposes endpoint, key, format and model. AI setup entered from Chat ends with Save and return to chat, restores its draft and does not automatically send it or create an assistant. The empty Chat state separately offers one-click creation with optional settings collapsed. Ordinary additions do not silently replace the main Agent. See #7 for authentication and activation behavior; previews do not establish backend support.
 
 Persistent task-executor preferences follow [#3](https://github.com/jjyr/pot/issues/3) and remain managed through Chat in its first version; do not add a routing-rule editor as a design prerequisite.
 
@@ -197,7 +205,7 @@ Set the exact unread count and actual execution state in the accessibility label
 
 ## Motion
 
-Motion supplies liveliness through continuity and tactile feedback. Use gentle settling, typically `cubic-bezier(.22,1,.36,1)`, with no repeated bounce or overshoot. Every effect follows a user action or a meaningful state transition. Do not delay input or block controls for animation.
+Motion supplies liveliness through continuity and tactile feedback. Use gentle settling, typically `cubic-bezier(.22,1,.36,1)`, with no repeated bounce. Reserve overshoot for the single avatar reply rebound below. Every effect follows a user action or a meaningful state transition. Do not delay input or block controls for animation.
 
 | Interaction | Target motion | Constraint |
 | --- | --- | --- |
@@ -212,6 +220,7 @@ Motion supplies liveliness through continuity and tactile feedback. Use gentle s
 | Running-task dot | Gentle brightness/muted-color cycle, approximately 2.4–3 seconds | Only for executing, visible tasks; stable text; static under Reduce Motion |
 | Running-task removal | 180–220 ms row collapse | No forced scrolling, stale completed rows or lost focus |
 | Pot execution icon | Gentle simmering/steam cycle while work executes | Static empty/simmering shapes remain distinct; no whole-icon bounce |
+| Assistant reply avatar | 650 ms, scale 1 → 1.16 → 0.94 → 1, slight tilt | Whole image; one rebound; stable layout; static under Reduce Motion |
 | Loading | Small indicator with reserved space | No fabricated percentages or decorative looping |
 
 Activity cycles are semantic execution indicators, not decorative loops: run them only while work is executing and the relevant surface is visible. Respect Reduce Motion: remove animated transforms, activity cycles and disclosure transitions, while preserving necessary selection positioning. Use static execution indicators and immediate state changes or restrained opacity feedback. Announce meaningful results accessibly and do not announce every hover, activity cycle or streamed token.

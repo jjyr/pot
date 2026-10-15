@@ -60,6 +60,15 @@ impl Store {
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
     }
+    /// Read one settled reply for navigation, without loading a conversation transcript.
+    pub fn last_completed_reply(&self) -> Result<Option<Message>> {
+        let body: Option<String> = self.0.query_row(
+            "SELECT body FROM messages WHERE json_extract(body,'$.role')='assistant' AND json_extract(body,'$.status')='complete' AND trim(json_extract(body,'$.text'))<>'' ORDER BY rowid DESC LIMIT 1",
+            [], |row| row.get(0),
+        ).optional()?;
+        body.map(|body| Ok(serde_json::from_str(&body)?))
+            .transpose()
+    }
     pub fn message(&self, message_id: &str) -> Result<Option<Message>> {
         let body: Option<String> = self
             .0
@@ -108,6 +117,13 @@ impl Store {
             Ok(e)
         })
         .collect()
+    }
+    pub fn notification_count(&self) -> Result<u64> {
+        Ok(self
+            .0
+            .query_row("SELECT COUNT(*) FROM main_message_outbox", [], |row| {
+                row.get(0)
+            })?)
     }
     pub fn notification_sequence(&self) -> Result<i64> {
         Ok(self.0.query_row(

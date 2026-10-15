@@ -3327,6 +3327,10 @@ pub(crate) mod tests {
             }),
         )
         .unwrap();
+        pot_assistant::registry::Registry::open(&s.data.join("pot-v2.sqlite"), "main")
+            .unwrap()
+            .create("fixture-main", "Pot")
+            .unwrap();
         s
     }
     #[tokio::test]

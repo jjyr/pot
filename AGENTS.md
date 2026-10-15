@@ -9,7 +9,7 @@ task response instead.
 
 # Tool interfaces
 
-Changes to model-visible tool names, additions/removals, arguments or behavior require explicit user agreement before implementation. Keep each tool focused on its existing responsibility; do not merge or split tools without that agreement.
+Keep each tool focused on its responsibility. Update affected callers, tests and documentation when tool interfaces change.
 
 # Development
 

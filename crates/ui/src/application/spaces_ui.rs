@@ -201,144 +201,108 @@ impl Shell {
         body
     }
     pub fn render_assistant_list(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let mut body = ui::content(cx).child(
-            div()
-                .flex()
-                .justify_between()
-                .items_center()
+        if !self.assistants_ui.open {
+            let current_mode = self.client.view.lock().unwrap().client_mode.clone();
+            let candidate = self
+                .space_directory
+                .spaces
+                .values()
+                .filter(|s| s.mode != current_mode && s.connected)
+                .find_map(|s| {
+                    s.assistants["assistants"]
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .and_then(|a| a["id"].as_str())
+                        .map(|id| s.owner(id))
+                });
+            if let Some(owner) = candidate
+                && self.activate_owner(&owner, window, cx)
+            {
+                self.assistant_list = false;
+                cx.notify();
+            }
+        }
+        let view = self.client.view.lock().unwrap().clone();
+        let configured = self.settings_state.state["active_spec"]["model"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty());
+        let mut body = ui::content(cx).max_w(px(540.)).justify_center();
+        if configured {
+            let location = Some(self.location_bar("create", cx));
+            let handler = self.page_handler(cx);
+            body = body
+                .child(ui::title(crate::application::i18n::text(
+                    if view.assistants["assistants"]
+                        .as_array()
+                        .is_none_or(|a| a.is_empty())
+                    {
+                        "onboarding.create-first"
+                    } else {
+                        "assistant.new"
+                    },
+                )))
+                .child(
+                    self.assistants_ui.render_create(
+                        pot_ui::assistants::CreateView {
+                            profiles: &self.settings_state.state["profiles"],
+                            active_profile:
+                                self.settings_state.state["active_spec"]["source_profile_id"]
+                                    .as_str()
+                                    .unwrap_or(""),
+                            source: view.assistant_id(),
+                            pending: view.assistant_pending,
+                            can_close: view.assistants["assistants"]
+                                .as_array()
+                                .is_some_and(|a| !a.is_empty()),
+                            location,
+                        },
+                        self.catalog(),
+                        handler,
+                        window,
+                        cx,
+                    ),
+                );
+        } else {
+            body = body
+                .child(ui::title(crate::application::i18n::text(
+                    "onboarding.welcome",
+                )))
                 .child(ui::hint(
-                    crate::application::i18n::text("spaces.assistants"),
+                    crate::application::i18n::text("onboarding.connect-ai"),
                     cx,
                 ))
                 .child(
-                    Button::new("assistant-new-top")
+                    Button::new("empty-configure-ai")
                         .primary()
-                        .small()
-                        .icon(IconName::Plus)
-                        .label(crate::application::i18n::text("assistant.new"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.assistants_ui.form_only = true;
-                            this.assistants_ui.select("new");
-                            cx.notify();
-                        })),
-                ),
-        );
-        if self.assistants_ui.open {
-            body = body.child(self.location_bar("create", cx));
-            let view = self.client.view.lock().unwrap().clone();
-            self.assistants_ui.form_only = true;
-            let handler = self.page_handler(cx);
-            body = body.child(self.assistants_ui.render(
-                pot_ui::assistants::View {
-                    assistants: &view.assistants,
-                    current: view.assistant_id(),
-                    rules: &view.assistant_rules,
-                },
-                self.catalog(),
-                handler,
-                window,
-                cx,
-            ));
-            if !view.command_error.is_empty() {
-                body = body.child(ui::notice(view.command_error, true, cx));
-            }
-        }
-        let spaces = self
-            .space_directory
-            .spaces
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        let names: Vec<String> = spaces
-            .iter()
-            .flat_map(|s| {
-                s.assistants["assistants"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|a| a["name"].as_str().map(str::to_owned))
-            })
-            .collect();
-        let mut list = div()
-            .id("all-assistants")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col();
-        for s in spaces {
-            for a in s.assistants["assistants"].as_array().into_iter().flatten() {
-                let owner = s.owner(a["id"].as_str().unwrap_or("main"));
-                let name = a["name"].as_str().unwrap_or("Pot").to_owned();
-                let label = if names.iter().filter(|n| **n == name).count() > 1 {
-                    format!("{name} · {}", s.name)
-                } else {
-                    name
-                };
-                list = list.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .py_2()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
-                        .child(
-                            Button::new(SharedString::from(format!(
-                                "assistant-open-{}",
-                                owner.key()
-                            )))
-                            .ghost()
-                            .accessibility_label(label.clone())
-                            .child(
-                                div()
-                                    .w_full()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(gpui_kit::component::Icon::new(
-                                        gpui_kit::assets::IconName::MessageCircle,
-                                    ))
-                                    .child(label),
-                            )
-                            .h(px(52.))
-                            .flex_1()
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    if this.activate_owner(&owner, window, cx) {
-                                        this.assistant_list = false;
-                                        this.assistants_ui.open = false;
-                                        this.show_tasks = false;
-                                        ui::command(json!({"action":"page","value":0}));
-                                    }
+                        .self_start()
+                        .label(crate::application::i18n::text("onboarding.configure-ai"))
+                        .on_click(|_, _, _| ui::command(json!({"action":"ai-open"}))),
+                )
+                .when(
+                    backend::control_projection()["configured"] != true && backend::mode() != "web",
+                    |el| {
+                        el.child(
+                            Button::new("empty-connect-pot")
+                                .ghost()
+                                .self_start()
+                                .label(crate::application::i18n::text("onboarding.connect-server"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.machine_connections.connect();
+                                    ui::command(json!({"action":"page","value":1}));
                                     cx.notify();
-                                },
-                            )),
+                                })),
                         )
-                        .child(badge(&s, a["id"].as_str().unwrap_or("main")))
-                        .when(!s.error.is_empty(), |el| {
-                            el.child(ui::hint(
-                                crate::application::i18n::text(if s.connected {
-                                    "spaces.stale"
-                                } else {
-                                    "machines.offline"
-                                }),
-                                cx,
-                            ))
-                        }),
+                    },
                 );
+            if self.assistants_ui.open && self.assistants_ui.advanced {
+                body = body.child(self.location_bar("create", cx));
             }
         }
-        if self.space_directory.spaces.is_empty() {
-            list = list.child(ui::hint(
-                crate::application::i18n::text("client.loading"),
-                cx,
-            ));
+        if !view.command_error.is_empty() {
+            body = body.child(ui::notice(view.command_error.clone(), true, cx));
         }
-        body = body.child(list);
-        let error = self.space_directory.error();
-        if !error.is_empty() {
-            body = body.child(ui::notice(error, true, cx));
+        if !view.error.is_empty() {
+            body = body.child(ui::hint(view.error.clone(), cx));
         }
         ui::page(cx).child(body)
     }
@@ -390,7 +354,11 @@ impl Shell {
                 .label(space.label())
                 .toggled(selected)
                 .when(selected, |b| b.bg(pot_ui::design::navigation(cx)))
-                .disabled(purpose != "usage" && !space.error.is_empty())
+                .disabled(
+                    purpose != "usage"
+                        && (!space.error.is_empty()
+                            || self.client.view.lock().unwrap().assistant_pending),
+                )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if purpose == "usage" {
                         this.usage_location = owner.mode.clone();

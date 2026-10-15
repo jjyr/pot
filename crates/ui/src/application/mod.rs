@@ -1,5 +1,6 @@
 //! One application presentation tree for native and browser hosts.
 mod assets;
+mod assistant_pane;
 mod composer;
 mod navigation;
 mod schedules_ui;
@@ -44,6 +45,12 @@ pub struct Shell {
     composer: composer::Composer,
     other_mode: Option<ModeCache>,
     assistant_list: bool,
+    assistant_pane_open: bool,
+    assistant_drawer: bool,
+    assistant_search: Entity<InputState>,
+    seen_replies: std::collections::HashMap<String, (String, u64)>,
+    avatar_animations: crate::avatar::Animations,
+    chat_positions: std::collections::HashMap<String, Point<Pixels>>,
     space_directory: spaces::Directory,
     usage_location: String,
     settings_return: Option<(spaces::Owner, String)>,
@@ -140,7 +147,12 @@ impl Shell {
                     "assistant-new" => { this.assistants_ui.form_only = true; this.assistants_ui.select("new"); },
                     "assistant-select" => { this.client.select_assistant(event.value.as_str().unwrap_or("main").into()); this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
                     "assistant-reload" => this.assistants_ui.reload(event.value.as_str().unwrap_or("main")),
-                    "assistant-close" => this.assistants_ui.open = false,
+                    "assistant-close" => {
+                        this.assistants_ui.open = false;
+                        this.assistant_list = !this.client.view.lock().unwrap().assistants["assistants"].as_array().is_some_and(|a| !a.is_empty());
+                    },
+                    "assistant-create-advanced" => this.assistants_ui.advanced = !this.assistants_ui.advanced,
+                    "assistant-create-profile" => this.assistants_ui.choose_profile(event.value.as_str().unwrap_or("").into()),
                     "machine-connections-toggle" => this.machine_connections.open = !this.machine_connections.open,
                     "machine-command" => this.client.machine_command(event.value),
                     "assistant-save" => this.client.assistant_save(event.value),
@@ -234,6 +246,8 @@ impl Shell {
         }
         let directory = spaces::directory().lock().unwrap().clone();
         let directory_changed = directory != self.space_directory;
+        self.avatar_animations
+            .observe(&directory, self.page == 0, cx);
         for space in directory.spaces.values() {
             if let Some(previous) = self
                 .space_directory
@@ -261,6 +275,34 @@ impl Shell {
         if self.notifications.len() > 20 {
             self.notifications.drain(..self.notifications.len() - 20);
         }
+        {
+            let view = self.client.view.lock().unwrap();
+            for space in directory.spaces.values() {
+                for a in space.assistants["assistants"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    let Some(id) = a["id"].as_str() else {
+                        continue;
+                    };
+                    let reply = a["reply_id"].as_str().unwrap_or("").to_owned();
+                    let count = a["reply_count"].as_u64().unwrap_or(0);
+                    let seen = self
+                        .seen_replies
+                        .entry(space.owner(id).key())
+                        .or_insert_with(|| (reply.clone(), count));
+                    if self.page == 0
+                        && !self.assistant_list
+                        && !self.assistants_ui.open
+                        && view.client_mode == space.mode
+                        && view.assistant_id() == id
+                    {
+                        *seen = (reply, count);
+                    }
+                }
+            }
+        }
         self.space_directory = directory;
         if let Some(owner) = self
             .client
@@ -278,9 +320,25 @@ impl Shell {
             self.client.select(String::new());
             self.assistant_list = false;
             self.show_tasks = false;
-            self.assistants_ui.form_only = true;
-            self.assistants_ui.select(&owner);
+            self.assistants_ui.open = false;
+            self.assistants_ui.saved("new");
             ui::command(serde_json::json!({"action":"page","value":0}));
+        }
+        if self.assistant_list && !self.assistants_ui.open {
+            let view = self.client.view.lock().unwrap().clone();
+            if let Some(items) = view.assistants["assistants"]
+                .as_array()
+                .filter(|a| !a.is_empty())
+            {
+                let id = items
+                    .iter()
+                    .find(|a| a["id"] == view.assistant_id())
+                    .or_else(|| items.first())
+                    .and_then(|a| a["id"].as_str())
+                    .unwrap_or("main");
+                self.client.select_assistant(id.into());
+                self.assistant_list = false;
+            }
         }
         let old_tasks = self.show_tasks;
         {
@@ -308,7 +366,7 @@ impl Shell {
                     .unwrap_or_else(|| view.assistant_id()),
             );
         }
-        if self.client.view.lock().unwrap().snapshot.is_some() {
+        if self.client.view.lock().unwrap().runtime["runtime_id"].is_string() {
             for request in self.settings_state.ensure_loaded() {
                 platform::with(|p| p.request(request));
             }
@@ -322,8 +380,14 @@ impl Shell {
                 }
                 Some("navigation") => {
                     let page = event["value"].as_u64().unwrap_or(0);
+                    if page == 2 {
+                        self.settings_state.state["return_to_chat"] = false.into();
+                    }
                     if page == 0 {
-                        self.assistant_list = true;
+                        self.assistant_list =
+                            !self.client.view.lock().unwrap().assistants["assistants"]
+                                .as_array()
+                                .is_some_and(|a| !a.is_empty());
                         self.client.select(String::new());
                     }
                     self.show_tasks = page == 3;
@@ -390,7 +454,10 @@ impl Shell {
                     };
                     self.show_tasks = matches!(page, "tasks" | "schedules");
                     self.schedule_tab = page == "schedules";
-                    self.assistant_list = page == "assistants";
+                    self.assistant_list = page == "chat"
+                        && !self.client.view.lock().unwrap().assistants["assistants"]
+                            .as_array()
+                            .is_some_and(|a| !a.is_empty());
                 }
                 Some("composer-key") => self
                     .composer
@@ -412,7 +479,8 @@ impl Shell {
                     self.show_tasks = true;
                 }
                 Some("main") => {
-                    self.assistant_list = true;
+                    self.assistant_list = false;
+                    self.assistants_ui.open = false;
                     self.show_tasks = false;
                     self.client.select(String::new());
                     self.first = true;
@@ -422,7 +490,9 @@ impl Shell {
         }
         if let Some(page) = self.settings_state.state["navigate_page"].as_u64() {
             self.settings_state.state["navigate_page"] = serde_json::Value::Null;
-            self.assistant_list = false;
+            self.assistant_list = !self.client.view.lock().unwrap().assistants["assistants"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty());
             self.project_page(page);
         }
         if self.pending_search.is_none() {
@@ -566,7 +636,7 @@ impl Shell {
         self.last_content = content;
         let state = serde_json::json!({
             "page":self.page,"completions": if view.selected.is_empty() { view.completions.clone() } else { serde_json::Value::Null },
-            "assistant_list":self.assistant_list,"can_back":(!self.assistant_list && !self.show_tasks && view.selected.is_empty()) || self.route(&view).parent().is_some(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
+            "assistant_list":self.assistant_list || self.assistants_ui.open || !view.assistants["assistants"].as_array().is_some_and(|a| a.iter().any(|a| a["id"] == view.assistant_id())),"can_back":self.route(&view).parent().is_some(),"boot_id":snapshot.map(|s|s.boot_id.as_str()),"has_snapshot":snapshot.is_some(),"running":view.is_cooking(),"selected_running":running,"selected":view.selected,"assistant_id":view.assistant_id(),"client_mode":view.client_mode,"conversation":format!("{}/{}",view.client_mode,if view.selected.is_empty() {view.assistant_id()} else {&view.selected}),"task_list":self.show_tasks,"can_send":view.can_send(),"connected":view.error.is_empty() && snapshot.is_some(),
             "needs_configuration":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::NeedsConfiguration),
             "error":snapshot.is_some_and(|s|s.agent.phase == pot_protocol::AgentPhase::Failed),
             "model":snapshot.map(|s|s.agent.model.as_str()).unwrap_or(crate::application::i18n::text("main.connecting")),
@@ -643,8 +713,10 @@ impl Shell {
             Theme::change(mode, Some(window), cx);
             design::install(cx);
         }
-        cx.set_global(design::Viewport(window.fully_visible_bounds().size.width));
         if self.settings.localize(window, cx) {
+            self.assistant_search.update(cx, |input, cx| {
+                input.set_placeholder(i18n::text("assistant.search"), window, cx)
+            });
             self.task_search.update(cx, |input, cx| {
                 input.set_placeholder(
                     crate::application::i18n::text("main.search-task-title-or-id-47"),
@@ -721,7 +793,13 @@ impl Shell {
             Some(1) => return self.render_spaces_machines(window, cx),
             _ => {}
         }
-        if !self.show_tasks && view.selected.is_empty() && self.assistant_list {
+        if !self.show_tasks
+            && view.selected.is_empty()
+            && (self.assistant_list
+                || !view.assistants["assistants"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|a| a["id"] == view.assistant_id())))
+        {
             return self.render_assistant_list(window, cx);
         }
         if !self.show_tasks && view.selected.is_empty() && self.assistants_ui.open {
@@ -1137,7 +1215,9 @@ impl Shell {
 }
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        cx.set_global(design::Viewport(window.fully_visible_bounds().size.width));
         self.tick(cx);
+        self.avatar_animations.release_images(window, cx);
         if let Some(search) = self.pending_search.take() {
             self.task_search
                 .update(cx, |input, cx| input.set_value(search, window, cx));
@@ -1179,7 +1259,12 @@ impl Render for Shell {
         self.observe_navigation();
         self.project_route();
         let view = self.client.view.lock().unwrap().clone();
-        let body = div().flex_1().min_h_0().child(body);
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .pl(px(self.assistant_pane_width(cx)))
+            .child(body);
         let body = if cx.reduce_motion() {
             body.into_any_element()
         } else {
@@ -1225,6 +1310,10 @@ impl Render for Shell {
             .when(self.composer_visible(&view), |el| {
                 el.child(self.composer_frame(window, cx))
             })
+            .when(
+                self.page == 0 && (self.assistant_pane_width(cx) > 0. || self.assistant_drawer),
+                |el| el.child(self.assistant_pane(cx)),
+            )
     }
 }
 
@@ -1263,6 +1352,18 @@ impl Shell {
             composer: composer::Composer::new(window, cx),
             other_mode: None,
             assistant_list: true,
+            assistant_pane_open: true,
+            assistant_drawer: false,
+            assistant_search: {
+                let field = cx.new(|cx| {
+                    InputState::new(window, cx).placeholder(i18n::text("assistant.search"))
+                });
+                cx.observe(&field, |_, _, cx| cx.notify()).detach();
+                field
+            },
+            seen_replies: Default::default(),
+            avatar_animations: Default::default(),
+            chat_positions: Default::default(),
             space_directory: Default::default(),
             usage_location: if platform::with(|p| p.aggregates_spaces()) {
                 String::new()
@@ -1318,7 +1419,11 @@ impl Shell {
 
 impl Shell {
     fn composer_visible(&self, view: &client::View) -> bool {
-        !self.assistant_list
+        view.assistants["assistants"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|a| a["id"] == view.assistant_id()))
+            && !self.assistant_list
+            && !self.assistants_ui.open
             && !self.show_tasks
             && [0, 3].contains(&self.host["page"].as_u64().unwrap_or(0))
             && !view
@@ -1421,14 +1526,16 @@ impl Shell {
             .accessibility_label(i18n::text(key))
             .tooltip(i18n::text(key))
             .on_click(cx.listener(move |this, _, _, cx| {
+                if page == 2 { this.settings_state.state["return_to_chat"] = false.into(); }
                 if page == 0 {
-                    this.assistant_list = true;
+                    this.assistant_list = !this.client.view.lock().unwrap().assistants["assistants"].as_array().is_some_and(|a| !a.is_empty());
+                    this.assistants_ui.open = false;
                     this.client.select(String::new());
                 }
                 this.show_tasks = page == 3;
                 this.schedule_tab = false;
                 ui::command(
-                    serde_json::json!({"action":"page","value":page,"assistant_list":page==0}),
+                    serde_json::json!({"action":"page","value":page,"assistant_list":this.assistant_list}),
                 );
                 cx.notify();
             }))
@@ -1450,7 +1557,7 @@ impl Shell {
             self.page = if view.selected.is_empty() { 0 } else { 3 };
             self.host["page"] = serde_json::json!(self.page);
         }
-        let route = self.route(&view).browser_page(self.assistant_list);
+        let route = self.route(&view).browser_page();
         let projection = serde_json::json!({"action":"page","value":self.page,"route":route,"assistant":view.assistant_id(),"task":view.selected,"schedule":view.schedule_selected});
         if projection != self.route_projection {
             platform::with(|p| p.command(projection.clone()));

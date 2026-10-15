@@ -188,7 +188,7 @@ fn refresh(
             .and_then(|url| url.host_str().map(str::to_owned))
             .unwrap_or_else(|| id.clone())
     };
-    if changed("assistants") {
+    if changed("assistants") || changed("conversation") || changed("tasks") {
         space.assistants = read(&agent, "/api/v1/assistants")?;
     }
     if changed("machines") {
@@ -332,7 +332,12 @@ mod tests {
             };
             refresh(&mut local, Some((7, "UTC".into())), None).unwrap();
             assert!(!local.id.is_empty());
-            assert_eq!(local.assistants["assistants"].as_array().unwrap().len(), 1);
+            assert!(
+                local.assistants["assistants"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
             assert!(local.error.is_empty());
             let mut remote = Space {
                 mode: "remote".into(),

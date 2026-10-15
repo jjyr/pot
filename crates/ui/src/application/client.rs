@@ -63,8 +63,18 @@ pub struct View {
     pub main_snapshot: Option<Snapshot>,
     pub generation: u64,
     pub cached_tasks: HashMap<String, Arc<Snapshot>>,
+    pub cached_assistants: HashMap<String, Arc<Snapshot>>,
 }
 impl View {
+    pub fn set_runtime(&mut self, runtime: Value) {
+        if self.runtime["runtime_id"] != runtime["runtime_id"] {
+            self.cached_assistants.clear();
+            self.cached_tasks.clear();
+            self.snapshot = None;
+            self.main_snapshot = None;
+        }
+        self.runtime = runtime;
+    }
     pub fn assistant_id(&self) -> &str {
         if self.selected_assistant.is_empty() {
             "main"
@@ -76,11 +86,25 @@ impl View {
         if self.assistant_id() == id || self.pending {
             return false;
         }
+        let runtime = self.runtime["runtime_id"].as_str().unwrap_or("");
+        if let Some(snapshot) = &self.main_snapshot {
+            if self.cached_assistants.len() >= 64 {
+                self.cached_assistants.clear();
+            }
+            self.cached_assistants.insert(
+                format!("{runtime}/{}", self.assistant_id()),
+                Arc::new(snapshot.clone()),
+            );
+        }
+        let cached = self
+            .cached_assistants
+            .get(&format!("{runtime}/{id}"))
+            .map(|s| s.as_ref().clone());
         self.generation += 1;
         self.selected_assistant = id;
         self.selected.clear();
-        self.snapshot = None;
-        self.main_snapshot = None;
+        self.snapshot = cached.clone();
+        self.main_snapshot = cached;
         self.cached_tasks.clear();
         self.permissions = Value::Null;
         self.usage_pending = false;
@@ -94,7 +118,11 @@ impl View {
         self.selected_task = None;
         self.running_tasks.clear();
         self.running_total = 0;
-        self.error = super::i18n::text("client.loading").into();
+        self.error = if self.snapshot.is_some() {
+            String::new()
+        } else {
+            super::i18n::text("client.loading").into()
+        };
         true
     }
     pub fn is_cooking(&self) -> bool {
@@ -297,5 +325,44 @@ pub fn task_progress(snapshot: &Snapshot) -> String {
             super::i18n::text("client.generating-a-reply").into()
         }
         _ => super::i18n::text("client.working").into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    fn snapshot(owner: &str) -> Snapshot {
+        Snapshot {
+            api_version: API_VERSION,
+            budget: None,
+            boot_id: "boot".into(),
+            cursor: 1,
+            agent: AgentStatus {
+                model: "fixture".into(),
+                phase: AgentPhase::Ready,
+                detail: None,
+            },
+            conversation_id: owner.into(),
+            messages: vec![],
+            turn: None,
+        }
+    }
+    #[test]
+    fn assistant_switch_restores_cached_history_and_control_change_discards_it() {
+        let mut view = View::default();
+        view.set_runtime(json!({"runtime_id":"control-a"}));
+        view.main_snapshot = Some(snapshot("main"));
+        view.snapshot = view.main_snapshot.clone();
+        assert!(view.select_assistant("second".into()));
+        assert!(view.snapshot.is_none());
+        view.main_snapshot = Some(snapshot("second"));
+        assert!(view.select_assistant("main".into()));
+        assert_eq!(view.snapshot.as_ref().unwrap().conversation_id, "main");
+        assert!(view.error.is_empty());
+        view.set_runtime(json!({"runtime_id":"control-b"}));
+        assert!(view.main_snapshot.is_none());
+        assert!(view.snapshot.is_none());
+        assert!(view.cached_assistants.is_empty());
     }
 }

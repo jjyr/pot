@@ -1691,6 +1691,7 @@ impl Authority {
             &Some(Listen { address, ..config }),
         )?;
         let client_token = self.client_token()?;
+        resources.ensure_configuration().await?;
         let native_token = resources.host().await.endpoint(0).token;
         let client_routes = control_client_router(resources.router(), client_token, native_token);
         let handle = axum_server::Handle::new();

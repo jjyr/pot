@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/relay", "crates/resource", "crates/sandbox-images", "crates/app", "crates/protocol", "crates/core", "crates/storage", "crates/usage", "crates/secrets", "crates/assistant", "crates/runner", "crates/agent", "crates/tool-executor", "crates/gateway", "crates/model-protocol", "crates/runtime", "crates/runtime-execution", "crates/control", "crates/server", "crates/eval", "crates/web-ui", "crates/ui", "crates/sandbox", "crates/sandbox-providers/macos-apple-container", "crates/sandbox-providers/macos-apple-vm", "crates/sandbox-providers/linux-podman"]
+members = ["crates/relay", "crates/resource", "crates/sandbox-images", "crates/app", "crates/protocol", "crates/core", "crates/storage", "crates/usage", "crates/secrets", "crates/assistant", "crates/runner", "crates/agent", "crates/tool-executor", "crates/gateway", "crates/model-protocol", "crates/runtime", "crates/runtime-execution", "crates/control", "crates/server", "crates/eval", "crates/web-ui", "crates/ui", "crates/avatar", "crates/sandbox", "crates/sandbox-providers/macos-apple-container", "crates/sandbox-providers/macos-apple-vm", "crates/sandbox-providers/linux-podman"]
 default-members = ["crates/relay", "crates/app"]
 
 [workspace.package]
@@ -11,6 +11,7 @@ authors = ["JJy <jjyruby@gmail.com>"]
 repository = "https://github.com/jjyr/pot"
 
 [workspace.dependencies]
+pot-avatar = { path = "crates/avatar" }
 gpui-kit = { version = "=0.7.3", features = ["gpui-fast"] }
 pot-relay = { path = "crates/relay" }
 pot-resource = { path = "crates/resource" }

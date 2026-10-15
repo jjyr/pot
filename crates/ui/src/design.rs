@@ -23,6 +23,12 @@ pub fn surface(cx: &App) -> Hsla {
 pub fn navigation(cx: &App) -> Hsla {
     color(0xf4f4f4, 0x282828, cx)
 }
+pub fn assistant_pane(cx: &App) -> Hsla {
+    color(0xe9eef5, 0x303640, cx)
+}
+pub fn assistant_selection(cx: &App) -> Hsla {
+    color(0xd9e4f3, 0x3b475b, cx)
+}
 pub fn attention(cx: &App) -> Hsla {
     color(0x885b13, 0xd7af66, cx)
 }

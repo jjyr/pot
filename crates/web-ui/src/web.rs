@@ -71,7 +71,7 @@ impl Browser {
         }
         let mut view = self.view.lock().unwrap();
         view.client_mode = "web".into();
-        view.runtime = data["runtime"].clone();
+        view.set_runtime(data["runtime"].clone());
         view.assistants = data["assistants"].clone();
         view.pending = false;
         view.select_assistant(data["assistant_id"].as_str().unwrap_or("main").into());

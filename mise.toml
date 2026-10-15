@@ -168,7 +168,7 @@ run = "python scripts/tests/web-assets.py"
 
 [tasks."test:ui"]
 description = "Test portable shared UI state and locale contracts"
-run = "cargo test --locked -p pot-ui -j 4"
+run = "cargo test --locked -p pot-ui -p pot-avatar -j 4"
 
 [tasks."build:cli"]
 description = "Build standalone CLI with embedded Web UI and a release archive"
