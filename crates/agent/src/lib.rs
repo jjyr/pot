@@ -3,6 +3,7 @@ mod extensions;
 mod meter;
 mod orchestration;
 mod skills;
+mod token_estimate;
 pub use skills::{Skill, SkillCatalog, discover_skills, format_skills_for_prompt};
 #[cfg(test)]
 mod processes {

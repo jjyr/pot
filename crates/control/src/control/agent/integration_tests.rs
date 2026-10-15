@@ -478,7 +478,9 @@ async fn native_agent_compaction_is_persisted_and_metered() {
         .unwrap()
         .last_mut()
         .unwrap();
-    last["text"] = json!("old context ".repeat(6000));
+    // 144,000 UTF-8 bytes = 36,000 estimated tokens under the Codex rule,
+    // large enough to trigger the unchanged default compaction threshold.
+    last["text"] = json!("old context ".repeat(12000));
     last["replay"]["content"] = last["text"].clone();
     pot_assistant::threads::save_context(&s.conversation.inner.lock().unwrap().store, &value)
         .unwrap();

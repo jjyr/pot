@@ -167,8 +167,8 @@ mod tests {
             Some(&anchor),
         )
         .unwrap();
-        assert!(result > 120 && result < 300);
-        assert!(
+        assert_eq!(result, 123);
+        assert_eq!(
             estimate(
                 &Defaults,
                 &protocol,
@@ -178,9 +178,46 @@ mod tests {
                 &[],
                 None
             )
-            .unwrap()
-                > 7000
+            .unwrap(),
+            1761
         );
+    }
+    #[test]
+    fn usage_anchor_adds_new_logical_items_before_protocol_message_merging() {
+        for protocol in [
+            Protocol::OpenaiChat,
+            Protocol::OpenaiResponses,
+            Protocol::AnthropicMessages,
+            Protocol::Gemini,
+        ] {
+            let mut reply = Message::text("assistant", "ok".into());
+            reply.usage = Some(TokenUsage {
+                input: 100,
+                output: 20,
+            });
+            let mut messages = vec![Message::text("user", "hello".into()), reply];
+            let anchor = UsageAnchor::capture(&protocol, "model", "system", &messages, &[])
+                .unwrap()
+                .unwrap();
+            messages.extend([
+                Message::text("user", "a".into()),
+                Message::text("user", "b".into()),
+            ]);
+            assert_eq!(
+                estimate(
+                    &Defaults,
+                    &protocol,
+                    "model",
+                    "system",
+                    &messages,
+                    &[],
+                    Some(&anchor)
+                )
+                .unwrap(),
+                122,
+                "{protocol:?}"
+            );
+        }
     }
     #[test]
     fn edits_tools_models_and_compaction_invalidate_measured_prefix() {

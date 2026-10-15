@@ -268,7 +268,7 @@ async fn browser_model_configuration_selects_schema_and_typed_observations() {
     }
 }
 #[test]
-fn image_context_estimate_counts_tiles_instead_of_base64_text() {
+fn image_context_estimate_uses_codex_content_cost_instead_of_base64_text() {
     let mut message = Message::text("tool", "observed page".into());
     message.images.push(model::ModelImage {
         mime_type: "image/jpeg".into(),
@@ -279,7 +279,9 @@ fn image_context_estimate_counts_tiles_instead_of_base64_text() {
     let tokens = Defaults
         .estimate_tokens(&Protocol::OpenaiChat, "model", "system", &[message], &[])
         .unwrap();
-    assert!(tokens > 2500 && tokens < 10000);
+    // Base instructions=2; the tool's 13 text bytes and 7373 image bytes share
+    // one logical FunctionCallOutput item, costing 1847 tokens before wrapping.
+    assert_eq!(tokens, 1849);
 }
 struct Config;
 impl ProfileConfig for Config {
@@ -545,7 +547,7 @@ async fn provider_calibration_switch_changes_compaction_decision_without_changin
     for calibrated in [true, false] {
         let mut f = Fixture::new("openai_chat");
         f.thread.config.params.agent.auto_compact = true;
-        f.thread.config.params.agent.compact_at = Some(500);
+        f.thread.config.params.agent.compact_at = Some(200);
         f.thread.config.params.agent.use_provider_usage = calibrated;
         let mut state = compact_history();
         state.messages[1].usage = Some(model::TokenUsage {
@@ -578,6 +580,10 @@ async fn provider_calibration_switch_changes_compaction_decision_without_changin
             usize::from(!calibrated)
         );
         let events = f.feedback.observations.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event,
+            ExecutionObservation::ContextEstimated {tokens, threshold}
+            if *tokens == if calibrated {129} else {264} && *threshold == 200
+        )));
         assert_eq!(
             events
                 .iter()
@@ -875,6 +881,45 @@ async fn interrupted_stream_matrix_never_executes_or_persists_incomplete_calls()
         }
     }
 }
+#[tokio::test]
+async fn default_context_window_accepts_first_turn_without_counting_bytes_as_tokens() {
+    for protocol in [
+        "openai_chat",
+        "openai_responses",
+        "anthropic_messages",
+        "gemini",
+    ] {
+        for (repetitions, accepted) in [(1500, true), (6000, false)] {
+            let mut f = Fixture::new(protocol);
+            f.context.role = ExecutionRole::Main;
+            f.services.rpc_tools = Some(serde_json::from_str(pot_core::TOOL_SCHEMA).unwrap());
+            f.thread.config.params.agent = AgentSettings::default();
+            f.thread.config.params.max_output_tokens = 8192;
+            assert_eq!(f.thread.config.context_window, 32768);
+            f.context.instructions = "Follow workspace rules.\n".repeat(repetitions);
+            f.services.queue(wire(protocol, "done", &[]));
+            let result = f.turn(false).await;
+            assert_eq!(result.is_ok(), accepted, "{protocol}: {result:?}");
+            let requests = f.services.requests.lock().unwrap();
+            assert_eq!(requests.len(), usize::from(accepted));
+            if accepted {
+                // The old bytes-as-tokens guard rejected this first request. No
+                // context-window increase, compaction or paid model call is needed.
+                assert!(requests[0]["body"].to_string().len() > 32768);
+                assert!(f.services.lifecycle.lock().unwrap().is_empty());
+                assert!(f.feedback.observations.lock().unwrap().iter().any(|e|matches!(e,ExecutionObservation::ContextEstimated{tokens,..} if *tokens > 8192 && *tokens + 8192 <= 32768)));
+            } else {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("Context exceeds configured window")
+                );
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn context_window_guard_includes_output_reservation_and_rejects_before_transport() {
     for (estimate, output, window, accepted) in [
