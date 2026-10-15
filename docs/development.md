@@ -2,7 +2,7 @@
 
 ## Development and running
 
-Requires Apple Silicon, macOS 26+, Xcode/Swift 6.2+, and [mise](https://mise.jdx.dev/). `mise.toml` pins Rust, Python, Zig, cargo-zigbuild, and check tools; Swift uses the selected Xcode.
+Requires Apple Silicon, macOS 26+, Xcode/Swift 6.2+, and [mise](https://mise.jdx.dev/) 2026.9.2 or newer. `mise.toml` pins Rust/Cargo, mr-boxington, Python, Zig, cargo-zigbuild, and check tools; Swift uses the selected Xcode.
 
 ```sh
 mise trust
@@ -173,12 +173,23 @@ compiler changes require an initial cold build. All existing checks remain enabl
 
 Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk run pre-push --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.
 
-Cargo's target-directory cache and compiler-wrapper caches are separate. If the machine
-uses kache, inspect `kache doctor` and `kache report --root "$PWD/.local/poc" --since 2h`
-for this checkout's compiler-cache hits and misses. A Cargo `Checking` or `Compiling`
-line alone does not indicate a kache miss. Compile work avoided in the report is
-aggregate compiler time, not wall-clock time saved by a parallel build. Machine-wide
-wrapper configuration belongs in machine inventory, not repository configuration.
+Cargo commands run through mr-boxington (`mbx`) via mise's native Rust integration.
+Use `mise run` tasks or `mise exec -- cargo ...`; calling `~/.cargo/bin/cargo`
+directly bypasses this integration. `mise exec -- mbx doctor --json` checks the
+active tools, and `mise exec -- mbx explain --last` explains the latest build's
+cache results. Remove other compiler-cache wrappers before using mbx: an existing
+`RUSTC_WRAPPER` or Cargo `build.rustc-wrapper` can bypass mbx's own compiler cache.
+Native mise integration does not require `mbx setup` or a standalone Cargo shim;
+inside `mise exec`, Cargo resolves to mise's command wrapper.
+
+The shared mbx compiler store is separate from this checkout's explicit
+`CARGO_TARGET_DIR` (`.local/poc/cargo-target`), which mbx leaves in place. Builds
+reuse matching compiler outputs across checkouts; tests still execute normally.
+The native toolchain is pinned to Rust 1.100 beta (`beta-2026-10-14`). This meets
+mbx's Cargo requirement for dependency build seeding in managed targets; the
+explicit target directory above continues to use compiler-action caching. Keep
+the pinned nightly used by `build:web-ui` separate from this native toolchain.
+Machine-wide wrapper configuration belongs in machine inventory.
 
 ## Code entry points
 

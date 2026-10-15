@@ -99,12 +99,11 @@ impl ExecutionFeedback for Feedback {
     fn owner_authorization_available(&self) -> Result<bool> {
         self.check()?;
         #[cfg(test)]
-        if self.service.test_tool_executor.is_some()
-            && !self.service.execution_service.permissions.configured()
-        {
-            return Ok(false);
-        }
-        Ok(true)
+        let available = self.service.test_tool_executor.is_none()
+            || self.service.execution_service.permissions.configured();
+        #[cfg(not(test))]
+        let available = true;
+        Ok(available)
     }
     fn request_permission(&self, request: Value) -> BoxFuture<'_, Result<Value>> {
         Box::pin(async move {

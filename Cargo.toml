@@ -35,7 +35,6 @@ pot-gateway = { path = "crates/gateway" }
 pot-control = { path = "crates/control" }
 pot-runtime-execution = { path = "crates/runtime-execution" }
 pot-runtime = { path = "crates/runtime" }
-pot-eval = { path = "crates/eval" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 

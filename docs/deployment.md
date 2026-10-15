@@ -17,7 +17,8 @@ Provider credentials are configured on Control and encrypted in SQLite; see
 
 Server is installed from Git with Cargo; no prebuilt Server download is provided.
 Control and execution-only (Runner) use the same `pot` binary on Linux or macOS.
-Install Rust/Cargo through rustup (the repository pins Rust 1.98.1 in `mise.toml`), Git, Python 3
+Install Rust/Cargo through rustup (the repository pins the Rust 1.100 beta toolchain
+`beta-2026-10-14` in `mise.toml`), Git, Python 3
 (available as `python3`), a native C/C++ build toolchain, CMake, pkg-config, Make
 and Perl for native dependencies including vendored OpenSSL. The default Web UI
 also requires Brotli CLI and curl. On macOS,

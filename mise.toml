@@ -1,7 +1,8 @@
 [tools]
 "conda:brotli-bin" = "1.2.0"
 go = "1.25.5"
-rust = "1.98.1"
+rust = { version = "beta-2026-10-14", mr_boxington = true }
+mr-boxington = "1.24.0"
 python = "3.12.13"
 zig = "0.15.2"
 "cargo:cargo-zigbuild" = "0.23.4"
