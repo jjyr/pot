@@ -299,6 +299,12 @@ Secrets owns encrypted values. These are libraries in the same process, not extr
 services to deploy. Local Agent service calls stay in memory; network adapters
 are only required across machines.
 
+Control also owns the shared offline [model directory](model-directory.md): a
+bundled seed, persistent cache and independent 24-hour refresh task. App and Web
+consume the same provider/model/logo projection and nullable parameter overrides.
+Control resolves local model facts into concrete execution specs; Agent and
+Runner never fetch catalog data, and running/paused specs remain fixed.
+
 Provider metadata and secrets use Control's SQLite database. Provider snapshots
 contain credential references, never plaintext keys. Secrets use AES-256-GCM;
 the master key is external to SQLite (macOS Keychain or `~/.pot/secrets/master.key` on other platforms,

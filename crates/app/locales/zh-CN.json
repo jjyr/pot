@@ -842,5 +842,11 @@
   "assistant.unread": "有未读回复",
   "assistant.waiting-approval": "等待你批准",
   "assistant.configure-required": "AI 配置需要更新",
-  "assistant.reply-failed": "回复失败"
+  "assistant.reply-failed": "回复失败",
+  "ai.search-providers": "搜索供应商",
+  "ai.more-providers": "更多供应商",
+  "ai.fewer-providers": "收起供应商",
+  "ai.context-window": "上下文窗口（tokens）",
+  "ai.max-output-tokens": "单次最大输出（tokens）",
+  "ai.invalid-token-limit": "请输入正整数 Token 数量。"
 }

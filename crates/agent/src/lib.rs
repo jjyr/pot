@@ -447,7 +447,10 @@ async fn compact(
         .saturating_add(settings.context_reserve);
     let threshold = settings
         .compact_at
-        .unwrap_or_else(|| thread.config.context_window.saturating_sub(reserve).max(1));
+        .unwrap_or_else(|| thread.config.context_window.saturating_sub(reserve).max(1))
+        .min(settings.max_input_tokens.map_or(u64::MAX, |n| {
+            n.saturating_sub(settings.context_reserve).max(1)
+        }));
     s.feedback
         .observe(&ExecutionObservation::ContextEstimated { tokens, threshold })?;
     // UTF-8 bytes conservatively bound token counts; retain complete recent user turns.
@@ -799,7 +802,9 @@ async fn run(
                 compact(services,s,thread,&mut state,emit,extensions,&system,&available).await?;
                 let mut input = portable_context(&thread.config, &state.messages);
                 extensions.prepare_context(s, &mut input)?;
-                ensure!(meter::estimate(extensions, &protocol, &thread.config.model, &system, &input, &available, state.usage_anchor.as_ref().filter(|_| settings.use_provider_usage))?.saturating_add(thread.config.params.max_output_tokens) <= thread.config.context_window, "Context exceeds configured window; compact, trim, or raise the profile limit");
+                let estimated = meter::estimate(extensions, &protocol, &thread.config.model, &system, &input, &available, state.usage_anchor.as_ref().filter(|_| settings.use_provider_usage))?;
+                ensure!(estimated.saturating_add(thread.config.params.max_output_tokens) <= thread.config.context_window, "Context exceeds configured window; compact, trim, or raise the profile limit");
+                ensure!(settings.max_input_tokens.is_none_or(|n| estimated <= n), "Context exceeds model input limit; compact or trim the input");
                 emit(Update::MessageStarted)?;
                 let response = sample(services,s,thread,&system,&input,&available,None,emit).await?;
                 input.push(response.clone());

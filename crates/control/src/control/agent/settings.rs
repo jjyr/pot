@@ -58,6 +58,47 @@ pub fn apply_pending(s: &Service, at_turn_boundary: bool) -> Result<()> {
     s.invalidate("settings");
     Ok(())
 }
+/// Only a fresh main-assistant turn may adopt updated local model facts. Task
+/// manifests, running turns and paused/checkpointed executions keep their spec.
+pub(crate) fn refresh_model_defaults(s: &Service) -> Result<()> {
+    if s.is_worker || crate::usage::paused(s)?.is_some() {
+        return Ok(());
+    }
+    let (mut thread, profile) = {
+        let inner = s.conversation.inner.lock().unwrap();
+        if pending(&inner.store)?.is_some() {
+            return Ok(());
+        }
+        let Some(thread) = current(&inner.store)? else {
+            return Ok(());
+        };
+        let profile = profiles(&inner.store)?.into_iter().find(|p| {
+            p.id == thread.config.source_profile_id
+                && p.revision == thread.config.source_profile_revision
+                && p.model_settings.is_some()
+        });
+        (thread, profile)
+    };
+    let Some(profile) = profile else {
+        return Ok(());
+    };
+    let spec = gateway::resolve(s, &profile)?;
+    if spec == thread.config {
+        return Ok(());
+    }
+    thread.config = spec;
+    thread.generation = thread
+        .generation
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("Execution generation overflow"))?;
+    s.conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .set(storage::THREAD, &serde_json::to_string(&thread)?)?;
+    Ok(())
+}
 #[derive(Deserialize)]
 pub struct Select {
     request_id: String,

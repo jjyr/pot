@@ -9,7 +9,7 @@ use gpui_kit::component::{
     ActiveTheme, Disableable, Sizable,
     button::{Button, ButtonVariants},
     form::Form,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
 };
 use serde_json::{Value, json};
 
@@ -101,7 +101,7 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields = (0..24)
+        let fields: Vec<Entity<InputState>> = (0..27)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
@@ -114,12 +114,27 @@ impl Settings {
                 })
             })
             .collect();
+        for i in [16, 24, 26] {
+            cx.subscribe(&fields[i], move |_, field, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = field.read(cx).value().to_string();
+                    if i == 16 {
+                        command(json!({"action":"ai-model-input","model":value}));
+                    }
+                    if i == 24 {
+                        command(json!({"action":"ai-context-input","value":value}));
+                    }
+                    cx.notify();
+                }
+            })
+            .detach();
+        }
         Self {
             scroll: ScrollHandle::new(),
             locale: String::new(),
             fields,
             revision: None,
-            synced_values: vec![String::new(); 24],
+            synced_values: vec![String::new(); 27],
             secret_revision: None,
             draft_revision: None,
             advanced: false,
@@ -133,10 +148,15 @@ impl Settings {
         }
         self.locale = locale;
         for (i, field) in self.fields.iter().enumerate() {
+            if matches!(i, 24 | 25) {
+                continue;
+            }
             field.update(cx, |input, cx| {
                 input.set_placeholder(
                     crate::application::i18n::text(if i == 0 {
                         "ui.leave-blank-to-keep-the-saved-key"
+                    } else if i == 26 {
+                        "ai.search-providers"
                     } else {
                         "ui.enter-a-value"
                     }),
@@ -162,7 +182,7 @@ impl Settings {
         }
         let reset_model = self.draft_revision != state["draft_revision"].as_i64();
         self.draft_revision = state["draft_revision"].as_i64();
-        let field_keys: [&str; 24] = [
+        let field_keys: [&str; 27] = [
             "key",
             "limit",
             "tokens",
@@ -187,19 +207,38 @@ impl Settings {
             "provider_tokens",
             "draft_model",
             "connection_name",
+            "connection_context",
+            "connection_output",
+            "",
         ];
         for (i, key) in field_keys.iter().enumerate() {
+            if i == 26 {
+                continue;
+            }
             let key = if i == 16 { "connection_model" } else { *key };
             let value = state[key].as_str().unwrap_or("").to_owned();
             if first
                 || self.synced_values[i] != value
                 || (i == 22 && reset_model)
-                || (clear_secrets && matches!(i, 0 | 8 | 9 | 14 | 15 | 16 | 23))
+                || (clear_secrets && matches!(i, 0 | 8 | 9 | 14 | 15 | 16 | 23 | 24 | 25))
             {
                 self.synced_values[i] = value.clone();
                 self.fields[i].update(cx, |field, cx| field.set_value(value, window, cx));
             }
         }
+        for (i, key, default) in [(24, "context_default", 32768), (25, "output_default", 8192)] {
+            let placeholder = state[key].as_u64().unwrap_or(default).to_string();
+            self.fields[i].update(cx, |field, cx| {
+                field.set_placeholder(placeholder, window, cx)
+            });
+        }
+        self.fields[26].update(cx, |field, cx| {
+            field.set_placeholder(
+                crate::application::i18n::text("ai.search-providers"),
+                window,
+                cx,
+            )
+        });
         if clear_secrets && state["ai_screen"] == "manage" {
             self.fields[15].read(cx).focus_handle(cx).focus(window, cx);
         }

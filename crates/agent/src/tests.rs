@@ -955,6 +955,45 @@ async fn context_window_guard_includes_output_reservation_and_rejects_before_tra
     }
 }
 #[tokio::test]
+async fn model_input_limit_is_separate_from_total_context_and_output_limit() {
+    for (estimate, accepted) in [(500, true), (501, false)] {
+        let mut f = Fixture::new("openai_chat");
+        f.thread.config.context_window = 2000;
+        f.thread.config.params.max_output_tokens = 128;
+        f.thread.config.params.agent.max_input_tokens = Some(500);
+        f.services.queue(wire("openai_chat", "done", &[]));
+        let result = run(
+            &f.context,
+            &f.thread,
+            &TurnRequest {
+                request_id: "input-guard".into(),
+                text: "task".into(),
+            },
+            false,
+            &Estimate(estimate),
+            Some(&f.services),
+            &mut |_| Ok(()),
+        )
+        .await;
+        if let Some(executor) = &f.context.tool_executor {
+            executor.finish(&f.context).await.unwrap();
+        }
+        assert_eq!(result.is_ok(), accepted);
+        assert_eq!(
+            f.services.requests.lock().unwrap().len(),
+            usize::from(accepted)
+        );
+        if !accepted {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("model input limit")
+            );
+        }
+    }
+}
+#[tokio::test]
 async fn interrupted_started_and_unstarted_tool_calls_are_not_replayed_after_reopen() {
     let f = Fixture::new("openai_chat");
     let mut state = context(vec![Message::text("user", "task".into())]);

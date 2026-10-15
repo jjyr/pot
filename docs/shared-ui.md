@@ -59,8 +59,10 @@ the shared application asset source and design tokens. The sidebar Companion
 uses transparent idle/cooking exports from the existing native vector master;
 `mise run icons` regenerates those shared assets. Platform font resolution
 and operating-system window controls remain host responsibilities.
-Provider marks and their attribution live in `crates/ui/assets/agents`; both
-targets embed them through the shared page components.
+AI connection marks and provider/model options come from Control's local
+[model directory](model-directory.md), with the shared embedded marks in
+`crates/ui/assets/agents` as fallbacks. Both targets render the same chooser,
+search and inline parameter overrides without upstream networking in UI.
 
 ## Platform boundary
 

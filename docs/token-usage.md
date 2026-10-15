@@ -65,7 +65,10 @@ usage remains unknown. Calibration never uses cumulative session spending as the
 current context size.
 
 The configured context window and output reservation remain independent of this
-heuristic. In particular, a 32,768-token window does not reject a request solely
+heuristic. Control resolves [model defaults and user overrides](model-directory.md)
+from its local directory. A known model input limit also bounds input and the
+compaction threshold independently of the total context window. In particular,
+a 32,768-token window does not reject a request solely
 because its encoded JSON exceeds 32,768 bytes. Requests whose estimated context
 plus configured output cap exceed the window are still rejected before transport.
 Usage allowance reservations retain their separate conservative byte-based

@@ -842,5 +842,11 @@
   "assistant.unread": "Unread reply",
   "assistant.waiting-approval": "Waiting for your approval",
   "assistant.configure-required": "AI configuration needs updating",
-  "assistant.reply-failed": "Reply failed"
+  "assistant.reply-failed": "Reply failed",
+  "ai.search-providers": "Search providers",
+  "ai.more-providers": "More providers",
+  "ai.fewer-providers": "Fewer providers",
+  "ai.context-window": "Context window (tokens)",
+  "ai.max-output-tokens": "Maximum output (tokens)",
+  "ai.invalid-token-limit": "Enter a positive whole number of tokens."
 }

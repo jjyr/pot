@@ -1,43 +1,56 @@
 use super::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
-fn brand_name(kind: &str) -> &'static str {
-    match kind {
-        "anthropic" => "Claude",
-        "gemini" => "Gemini",
-        "openai" => "OpenAI API",
-        "deepseek" => "DeepSeek",
-        "opencode-go" => "OpenCode Go",
-        "opencode-zen" => "OpenCode Zen",
-        _ => crate::application::i18n::text("ai.custom-api"),
+fn directory_provider<'a>(state: &'a Value, id: &str) -> Option<&'a Value> {
+    state["directory"]
+        .as_array()?
+        .iter()
+        .find(|p| p["id"] == id)
+}
+fn provider_name(state: &Value, id: &str) -> String {
+    directory_provider(state, id)
+        .and_then(|p| p["name"].as_str())
+        .unwrap_or(crate::application::i18n::text("ai.custom-api"))
+        .to_owned()
+}
+fn provider_icon(state: &Value, id: &str) -> gpui_kit::component::Icon {
+    if let Some(logo) = directory_provider(state, id).and_then(|p| p["logo"].as_str()) {
+        gpui_kit::component::Icon::empty().data(logo.as_bytes())
+    } else {
+        brand_icon(if id == "google" { "gemini" } else { id })
     }
 }
-
 fn profile_brand<'a>(state: &'a Value, profile: &'a Value) -> &'a str {
-    let endpoint = state["connections"]
+    state["connections"]
         .as_array()
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|item| item["profile_id"] == profile["id"])
-        })
-        .and_then(|item| item["endpoint"].as_str())
-        .unwrap_or("");
-    if endpoint.starts_with("https://api.openai.com/") {
-        "openai"
-    } else if endpoint.starts_with("https://api.anthropic.com/") {
-        "anthropic"
-    } else if endpoint.starts_with("https://generativelanguage.googleapis.com/") {
-        "gemini"
-    } else if endpoint.starts_with("https://api.deepseek.com/") {
-        "deepseek"
-    } else if endpoint.starts_with("https://opencode.ai/zen/go/") {
-        "opencode-go"
-    } else if endpoint.starts_with("https://opencode.ai/zen/") {
-        "opencode-zen"
-    } else {
-        "custom"
-    }
+        .into_iter()
+        .flatten()
+        .find(|p| p["profile_id"] == profile["id"])
+        .and_then(|p| p["model_settings"]["catalog_provider"].as_str())
+        .unwrap_or("custom")
+}
+
+fn provider_choice(
+    id: impl Into<ElementId>,
+    name: String,
+    icon: gpui_kit::component::Icon,
+    busy: bool,
+) -> Button {
+    Button::new(id)
+        .w_full()
+        .h(px(52.))
+        .small()
+        .accessibility_label(name.clone())
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .min_w_0()
+                .child(icon.size(px(28.)).flex_shrink_0())
+                .child(div().min_w_0().text_ellipsis().child(name)),
+        )
+        .disabled(busy)
 }
 
 impl Settings {
@@ -69,92 +82,118 @@ impl Settings {
                 crate::application::i18n::text("ai.choose-the-ai-you-want-to-use"),
                 cx,
             ));
+            body = body.child(
+                Input::new(&self.fields[26])
+                    .aria_label(crate::application::i18n::text("ai.search-providers")),
+            );
+            let query = self.fields[26].read(cx).value().trim().to_lowercase();
+            let providers = super::super::settings_state::provider_choices(state, &query);
             let mut choices = div().flex().flex_wrap().gap_3();
-            for (i, id) in [
-                "openai",
-                "anthropic",
-                "gemini",
-                "deepseek",
-                "opencode-go",
-                "opencode-zen",
-                "custom",
-            ]
-            .into_iter()
-            .enumerate()
+            for (i, provider) in providers
+                .iter()
+                .filter(|p| !query.is_empty() || p["common"] == true)
+                .enumerate()
             {
+                let id = provider["id"].as_str().unwrap_or("custom").to_owned();
                 choices = choices.child(
                     div().w(relative(0.31)).child(
-                        Button::new(("ai-add-kind", i))
-                            .w_full()
-                            .h(px(52.))
-                            .small()
-                            .label(brand_name(id))
-                            .icon(brand_icon(id).size(px(20.)))
-                            .disabled(busy)
-                            .on_click(move |_, _, _| command(json!({"action":"ai-new","kind":id}))),
+                        provider_choice(
+                            ("ai-add-kind", i),
+                            provider_name(state, &id),
+                            provider_icon(state, &id),
+                            busy,
+                        )
+                        .on_click(move |_, _, _| command(json!({"action":"ai-new","kind":id}))),
+                    ),
+                );
+            }
+            if query.is_empty() || "custom api 自定义".contains(&query) {
+                choices = choices.child(
+                    div().w(relative(0.31)).child(
+                        provider_choice(
+                            "ai-add-custom",
+                            crate::application::i18n::text("ai.custom-api").to_owned(),
+                            brand_icon("custom"),
+                            busy,
+                        )
+                        .on_click(|_, _, _| command(json!({"action":"ai-new","kind":"custom"}))),
                     ),
                 );
             }
             body = body.child(choices);
+            if query.is_empty() {
+                body = body.child(
+                    Button::new("ai-more-providers")
+                        .ghost()
+                        .small()
+                        .label(crate::application::i18n::text(
+                            if state["more_providers"] == true {
+                                "ai.fewer-providers"
+                            } else {
+                                "ai.more-providers"
+                            },
+                        ))
+                        .on_click(|_, _, _| command(json!({"action":"ai-more-providers"}))),
+                );
+                if state["more_providers"] == true {
+                    let mut more = div().flex().flex_wrap().gap_3();
+                    for (i, provider) in
+                        providers.iter().filter(|p| p["common"] != true).enumerate()
+                    {
+                        let id = provider["id"].as_str().unwrap_or("").to_owned();
+                        more = more.child(
+                            div().w(relative(0.31)).child(
+                                provider_choice(
+                                    ("ai-more-kind", i),
+                                    provider_name(state, &id),
+                                    provider_icon(state, &id),
+                                    busy,
+                                )
+                                .on_click(move |_, _, _| {
+                                    command(json!({"action":"ai-new","kind":id}))
+                                }),
+                            ),
+                        );
+                    }
+                    body = body.child(more);
+                }
+            }
         } else if screen == "manage" {
             let kind = state["connection_kind"].as_str().unwrap_or("").to_owned();
             let mut form = super::form(cx);
-            if self.api_advanced {
+            if kind == "custom" && !self.api_advanced {
                 form = form.child(
-                    field(crate::application::i18n::text("schedules-ui.name")).child(
-                        Input::new(&self.fields[23])
-                            .aria_label(crate::application::i18n::text("ai.agent-name")),
+                    field(crate::application::i18n::text("ai.api-url")).child(
+                        Input::new(&self.fields[14])
+                            .aria_label(crate::application::i18n::text("ai.api-url")),
                     ),
+                );
+                let mut formats = div().flex().flex_wrap().gap_2();
+                for (i, (protocol, label)) in [
+                    ("openai_chat", "OpenAI Chat Completions"),
+                    ("openai_responses", "OpenAI Responses"),
+                    ("anthropic_messages", "Claude Messages"),
+                    ("gemini", "Gemini"),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    formats = formats.child(
+                        Button::new(("ai-custom-protocol", i))
+                            .ghost()
+                            .small()
+                            .label(label)
+                            .toggled(state["api_protocol"] == protocol)
+                            .on_click(move |_, _, _| {
+                                command(json!({"action":"api-protocol","protocol":protocol}))
+                            }),
+                    );
+                }
+                form = form.child(
+                    field(crate::application::i18n::text("ai.request-format")).child(formats),
                 );
             }
             {
-                if kind == "custom" || self.api_advanced {
-                    form = form.child(
-                        field(crate::application::i18n::text("ai.api-url"))
-                            .description(crate::application::i18n::text(
-                                "ai.enter-an-https-base-url-or-full",
-                            ))
-                            .child(
-                                Input::new(&self.fields[14])
-                                    .aria_label(crate::application::i18n::text("ai.api-url")),
-                            ),
-                    );
-                }
-                if (kind == "custom" || self.api_advanced)
-                    && matches!(
-                        state["api_protocol"].as_str(),
-                        Some("openai_chat" | "openai_responses" | "anthropic_messages" | "gemini")
-                    )
-                {
-                    let mut formats = div().flex().flex_wrap().gap_2();
-                    for (i, (protocol, label)) in [
-                        ("openai_chat", "OpenAI Chat Completions"),
-                        ("openai_responses", "OpenAI Responses"),
-                        ("anthropic_messages", "Claude Messages"),
-                        ("gemini", "Gemini"),
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    {
-                        formats = formats.child(
-                            Button::new(("ai-protocol", i))
-                                .ghost()
-                                .small()
-                                .label(label)
-                                .toggled(state["api_protocol"] == protocol)
-                                .when(state["api_protocol"] == protocol, |b| {
-                                    b.bg(cx.theme().secondary)
-                                })
-                                .disabled(busy)
-                                .on_click(move |_, _, _| {
-                                    command(json!({"action":"api-protocol","protocol":protocol}))
-                                }),
-                        );
-                    }
-                    form = form.child(
-                        field(crate::application::i18n::text("ai.request-format")).child(formats),
-                    );
-                }
                 form = form.child(
                     field("API key")
                         .description(if state["has_api_key"] == true {
@@ -169,9 +208,9 @@ impl Settings {
             }
             let key_url = match kind.as_str() {
                 "anthropic" => Some("https://platform.claude.com/settings/keys"),
-                "gemini" => Some("https://aistudio.google.com/api-keys"),
+                "google" => Some("https://aistudio.google.com/api-keys"),
                 "deepseek" => Some("https://platform.deepseek.com/api_keys"),
-                "opencode-go" | "opencode-zen" => Some("https://opencode.ai/auth"),
+                "opencode-go" | "opencode" => Some("https://opencode.ai/auth"),
                 "openai" => Some("https://platform.openai.com/api-keys"),
                 _ => None,
             };
@@ -193,39 +232,134 @@ impl Settings {
                             .aria_label(crate::application::i18n::text("ai.connection-model")),
                     ),
                 );
-                if let Some(models) = state["model_options"].as_array().filter(|m| !m.is_empty()) {
-                    let models: Vec<String> = models
-                        .iter()
-                        .filter_map(|m| m.as_str().map(str::to_owned))
-                        .collect();
-                    let field = self.fields[16].clone();
+                let mut models = std::collections::BTreeMap::<String, String>::new();
+                if let Some(provider) = directory_provider(state, &kind) {
+                    for model in provider["models"].as_array().into_iter().flatten() {
+                        if let Some(id) = model["id"].as_str() {
+                            models.insert(
+                                id.to_owned(),
+                                model["name"].as_str().unwrap_or(id).to_owned(),
+                            );
+                        }
+                    }
+                }
+                for model in state["model_options"].as_array().into_iter().flatten() {
+                    if let Some(id) = model.as_str() {
+                        models.entry(id.to_owned()).or_insert_with(|| id.to_owned());
+                    }
+                }
+                let current = self.fields[16].read(cx).value().to_string();
+                let query = if models.contains_key(&current) {
+                    String::new()
+                } else {
+                    current.to_lowercase()
+                };
+                let models: Vec<_> = models
+                    .into_iter()
+                    .filter(|(id, name)| {
+                        query.is_empty()
+                            || id.to_lowercase().contains(&query)
+                            || name.to_lowercase().contains(&query)
+                    })
+                    .collect();
+                if !models.is_empty() {
                     model_field = model_field.child(
                         Button::new("ai-model-options")
                             .small()
                             .label(crate::application::i18n::text("ai.choose"))
                             .dropdown_caret(true)
                             .dropdown_menu(move |menu, _, _| {
-                                models.iter().fold(menu, |menu, model| {
-                                    let field = field.clone();
-                                    let model = model.clone();
-                                    menu.item(PopupMenuItem::new(model.clone()).on_click(
-                                        move |_, window, cx| {
-                                            field.update(cx, |f, cx| {
-                                                f.set_value(model.clone(), window, cx)
-                                            })
+                                models.iter().fold(menu, |menu, (id, name)| {
+                                    let id = id.clone();
+                                    menu.item(PopupMenuItem::new(name.clone()).on_click(
+                                        move |_, _, _| {
+                                            command(json!({"action":"ai-model","model":id}))
                                         },
                                     ))
                                 })
                             }),
                     );
                 }
+                form = form
+                    .child(field(crate::application::i18n::text("ai.model")).child(model_field));
+            }
+            form = form.child(
+                field("").child(
+                    Button::new("ai-advanced")
+                        .ghost()
+                        .small()
+                        .label(crate::application::i18n::text("ai.advanced-settings"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.settings.api_advanced = !this.settings.api_advanced;
+                            cx.notify();
+                        })),
+                ),
+            );
+            if self.api_advanced {
                 form = form.child(
-                    field(crate::application::i18n::text("ai.model"))
-                        .description(crate::application::i18n::text(
-                            "ai.choose-a-result-or-enter-a-model",
-                        ))
-                        .child(model_field),
+                    field(crate::application::i18n::text("schedules-ui.name")).child(
+                        Input::new(&self.fields[23])
+                            .aria_label(crate::application::i18n::text("ai.agent-name")),
+                    ),
                 );
+            }
+            if self.api_advanced {
+                form = form.child(
+                    field(crate::application::i18n::text("ai.api-url")).child(
+                        Input::new(&self.fields[14])
+                            .aria_label(crate::application::i18n::text("ai.api-url")),
+                    ),
+                );
+            }
+            if self.api_advanced
+                && matches!(
+                    state["api_protocol"].as_str(),
+                    Some("openai_chat" | "openai_responses" | "anthropic_messages" | "gemini")
+                )
+            {
+                let mut formats = div().flex().flex_wrap().gap_2();
+                for (i, (protocol, label)) in [
+                    ("openai_chat", "OpenAI Chat Completions"),
+                    ("openai_responses", "OpenAI Responses"),
+                    ("anthropic_messages", "Claude Messages"),
+                    ("gemini", "Gemini"),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    formats = formats.child(
+                        Button::new(("ai-protocol", i))
+                            .ghost()
+                            .small()
+                            .label(label)
+                            .toggled(state["api_protocol"] == protocol)
+                            .when(state["api_protocol"] == protocol, |b| {
+                                b.bg(cx.theme().secondary)
+                            })
+                            .disabled(busy)
+                            .on_click(move |_, _, _| {
+                                command(json!({"action":"api-protocol","protocol":protocol}))
+                            }),
+                    );
+                }
+                form = form.child(
+                    field(crate::application::i18n::text("ai.request-format")).child(formats),
+                );
+            }
+            if self.api_advanced {
+                form = form
+                    .child(
+                        field(crate::application::i18n::text("ai.context-window")).child(
+                            Input::new(&self.fields[24])
+                                .aria_label(crate::application::i18n::text("ai.context-window")),
+                        ),
+                    )
+                    .child(
+                        field(crate::application::i18n::text("ai.max-output-tokens"))
+                            .child(Input::new(&self.fields[25]).aria_label(
+                                crate::application::i18n::text("ai.max-output-tokens"),
+                            )),
+                    );
             }
             let fields = self.fields.clone();
             let check_fields = self.fields.clone();
@@ -237,26 +371,11 @@ impl Settings {
             actions = actions.child(Button::new("ai-save-connection").primary().small().label(if state["active_spec"]["model"].as_str().is_none() && state["routing_owner"] == "main" {
                     if state["return_to_chat"] == true { crate::application::i18n::text("ai.save-and-start-chatting") } else { crate::application::i18n::text("ai.save-and-set-as-main-agent") }
                 } else { crate::application::i18n::text("ai.save-connection") }).disabled(busy)
-                .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value()}))));
+                .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"context":fields[24].read(cx).value(),"output":fields[25].read(cx).value()}))));
             let mut details = div().flex().flex_col().gap_4();
             details = details.child(form);
-            {
-                details =
-                    details
-                        .child(hint(
-                            crate::application::i18n::text(
-                                "ai.check-to-fetch-available-models-or-save",
-                            ),
-                            cx,
-                        ))
-                        .when(
-                            !state["check_message"].as_str().unwrap_or("").is_empty(),
-                            |el| {
-                                el.child(div().whitespace_normal().child(
-                                    state["check_message"].as_str().unwrap_or("").to_owned(),
-                                ))
-                            },
-                        );
+            if let Some(message) = state["check_message"].as_str().filter(|s| !s.is_empty()) {
+                details = details.child(hint(message.to_owned(), cx));
             }
             body = body.child(
                 details.child(
@@ -265,18 +384,6 @@ impl Settings {
                         .items_center()
                         .justify_between()
                         .gap_2()
-                        .when(kind == "custom", |row| {
-                            row.child(
-                                Button::new("ai-advanced")
-                                    .ghost()
-                                    .small()
-                                    .label(crate::application::i18n::text("ai.advanced-settings"))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.settings.api_advanced = !this.settings.api_advanced;
-                                        cx.notify();
-                                    })),
-                            )
-                        })
                         .child(actions),
                 ),
             );
@@ -346,7 +453,7 @@ impl Settings {
                                 .items_center()
                                 .gap_3()
                                 .child(
-                                    brand_icon(
+                                    provider_icon(state,
                                         active_profile
                                             .map(|p| profile_brand(state, p))
                                             .unwrap_or("custom"),
@@ -449,7 +556,7 @@ impl Settings {
                         .when(i > 0, |row| {
                             row.border_t_1().border_color(cx.theme().border)
                         })
-                        .child(brand_icon(profile_brand(state, p)).size(px(20.)))
+                        .child(provider_icon(state, profile_brand(state, p)).size(px(20.)))
                         .child(
                             div()
                                 .flex_1()
@@ -515,8 +622,8 @@ impl Settings {
                     .flex().items_center().justify_center().child(
                         sheet(card(cx).rounded(px(12.)).w(px(620.)).max_w(relative(0.95)).max_h(relative(0.92)).min_h_0()
                             .child(div().flex().items_center().gap_3()
-                                .when(screen == "manage", |row| row.child(brand_icon(kind).size(px(28.))))
-                                .child(div().flex_1().child(title(if screen == "add" { crate::application::i18n::text("ai.connect-agent-58") } else if screen == "main-edit" { crate::application::i18n::text("ai.main-agent") } else { brand_name(kind) })))
+                                .when(screen == "manage", |row| row.child(provider_icon(state,kind).size(px(28.))))
+                                .child(div().flex_1().child(title(if screen == "add" { crate::application::i18n::text("ai.connect-agent-58").to_owned() } else if screen == "main-edit" { crate::application::i18n::text("ai.main-agent").to_owned() } else { provider_name(state,kind) })))
                                 .when(screen == "manage" && state["connection_profile_id"].as_str().unwrap_or("").is_empty(), |row| row.child(
                                     Button::new("ai-back-choices").ghost().small().label(crate::application::i18n::text("usage-ui.back"))
                                         .disabled(busy).on_click(|_,_,_| command(json!({"action":"ai-screen","screen":"add"}))),

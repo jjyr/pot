@@ -8,6 +8,7 @@ pub(crate) mod budget;
 pub mod gateway;
 pub(crate) mod local_services;
 pub(crate) mod model_config;
+pub(crate) mod model_directory;
 pub mod orchestration;
 pub mod schedules;
 pub(crate) mod services;
