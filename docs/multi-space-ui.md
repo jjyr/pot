@@ -144,12 +144,14 @@ delivery must depend on actual pending messages, not merely having a remote Spac
 
 ## Implementation and validation boundaries
 
-`crates/app/src/spaces.rs` maintains independently refreshed Space catalogues,
-merges task pages and raw Usage buckets, and retains cached data on refresh errors.
-`spaces_ui.rs` renders the unified views and binds actions to explicit owners.
+`crates/app/src/spaces.rs` refreshes native Space catalogues independently and
+retains cached data on refresh errors. `crates/ui/src/application/spaces.rs`
+owns portable projections and merges task pages and raw Usage buckets.
+`crates/ui/src/application/spaces_ui.rs` renders the unified views and binds
+actions to explicit owners through the platform adapter.
 Existing scoped Chat clients preserve drafts; configuration navigation captures and
 restores the originating assistant and task. Usage limits require a specific Space.
-The native asset source includes the local and cloud icons.
+The shared asset source includes the local and cloud icons.
 
 This implementation adds no model-visible tools or special handoff protocol.
 The shared message record gains equality comparison only; its wire format is unchanged.

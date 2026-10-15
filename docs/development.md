@@ -112,9 +112,14 @@ directory to PATH. This is a developer build artifact, not a published Server
 download. Enable web-ui-server through the [explicit Web UI setup](deployment.md#explicit-web-ui).
 MacOS Sandbox helpers/resources require additional provider setup.
 
-## Mobile browser pilot
+## Browser UI
 
-See [Web UI deployment](deployment.md#explicit-web-ui) and [Tailscale HTTPS](deployment.md#tailscale-https) for the configurable web-ui-server listener, QR/Token administration and `mise run build:web-ui`. Native Runtime remains loopback-only when mobile access is configured. Desktop broker/control and physical-device qualification are separate gates.
+App and browser mount the same `pot-ui` application; see [Shared UI](shared-ui.md)
+for the adapter boundary. See [Web UI deployment](deployment.md#explicit-web-ui)
+and [Tailscale HTTPS](deployment.md#tailscale-https) for the configurable
+web-ui-server listener, QR/Token administration and `mise run build:web-ui`.
+The App's embedded Runtime remains loopback-only. Desktop broker/control and
+physical-device qualification are separate gates.
 
 ## Validation
 
@@ -124,7 +129,8 @@ mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
 mise run test          # Backend / protocol, no real model calls
 mise run test:app
 mise run test:executor # Guest receipt, idle expiry and cleanup contracts without a VM
-mise run test:ui      # Portable shared chat/page state and localization
+mise run test:ui        # Portable shared state and localization (no GPUI feature)
+mise exec -- cargo test --locked -p pot-ui --features presentation -j 4 # Shared application state
 mise run licenses      # Enforce Rust license policy and generate dependency notices
 mise run test:licenses # Check approved, disallowed and unknown license cases
 mise run test:release   # ZIP metadata, permissions, symlinks and Cask checksum
@@ -172,9 +178,9 @@ Rust workspace members and their bundled assets live under `crates/`. The browse
 
 | Directory | Responsibility |
 |---|---|
-| `crates/app/` | Native GPUI shell, Swift bridge, configuration |
-| `crates/ui/` | Shared Chat/Tasks/Sandbox/Usage components, page/chat state, Markdown, tokens and localization |
-| `crates/web-ui/` | WASM/browser shell, authenticated transport, PWA and push |
+| `crates/app/` | Native bootstrap, transport and platform adapter; Swift text input and system services |
+| `crates/ui/` | Complete shared GPUI application, navigation, pages, configuration, composer, tokens and localization |
+| `crates/web-ui/` | WASM bootstrap and browser adapter, authenticated transport, history, PWA and push |
 | `helper/` | Swift Containerization, VM lifecycle |
 | `crates/server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
 | `crates/assistant/` | Assistant identity, instructions, conversations and durable mailboxes |

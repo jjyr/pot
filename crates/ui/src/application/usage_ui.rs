@@ -1,4 +1,4 @@
-use crate::{Shell, client, gpui, ui};
+use crate::application::{Shell, client, gpui, ui};
 use gpui::prelude::*;
 use gpui_kit::component::{
     ActiveTheme, Sizable,
@@ -19,12 +19,14 @@ pub fn entry(v: &client::View, cx: &mut Context<Shell>) -> Button {
         .small()
         .icon(gpui_kit::component::IconName::ChartPie)
         .text_color(cx.theme().muted_foreground)
-        .label(if v.usage.is_null() {
-            crate::i18n::text("navigation.usage").into()
+        .label(if pot_ui::design::compact(cx) {
+            String::new()
+        } else if v.usage.is_null() {
+            crate::application::i18n::text("navigation.usage").into()
         } else {
             format!("{} tokens", count(tokens(&v.usage["lifetime"])))
         })
-        .tooltip(crate::i18n::text(
+        .tooltip(crate::application::i18n::text(
             "usage-ui.view-total-usage-for-this-conversation",
         ))
         .on_click(cx.listener(|this, _, _, cx| {

@@ -4,7 +4,7 @@ import WebKit
 
 var bridge: PotBridge?
 
-/// GPUI renders chat. Native siblings own navigation, IME composer and desktop.
+/// GPUI renders product UI. Native siblings supply text editing/IME and desktop services.
 @MainActor final class HostView: NSView {
     var resized: (() -> Void)?
     private var previousBounds: NSRect?
@@ -17,68 +17,6 @@ var bridge: PotBridge?
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance(); wakeNativeUI()
-    }
-}
-
-@MainActor class RailButton: NSButton {
-    var selected = false {
-        didSet {
-            if oldValue != selected {
-                refresh()
-            }
-        }
-    }
-
-    private var lastBackground: CGColor?
-    fileprivate var hovered = false
-    private var tracking: NSTrackingArea?
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking {
-            removeTrackingArea(tracking)
-        }
-        tracking = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(tracking!)
-    }
-
-    override func mouseEntered(with _: NSEvent) {
-        hovered = true; refresh()
-    }
-
-    override func mouseExited(with _: NSEvent) {
-        hovered = false; refresh()
-    }
-
-    override var isHighlighted: Bool {
-        didSet { refresh() }
-    }
-
-    func refresh() {
-        let color = isHighlighted ? NSColor.controlAccentColor.withAlphaComponent(0.20) :
-            selected ? NSColor.controlAccentColor.withAlphaComponent(hovered ? 0.05 : 0) :
-            (hovered ? NSColor.labelColor.withAlphaComponent(0.07) : .clear)
-        if lastBackground != color.cgColor {
-            let previous = layer?.presentation()?.backgroundColor ?? layer?.backgroundColor
-            lastBackground = color.cgColor
-            layer?.backgroundColor = color.cgColor
-            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let previous {
-                let animation = CABasicAnimation(keyPath: "backgroundColor")
-                animation.fromValue = previous; animation.toValue = color.cgColor
-                animation.duration = isHighlighted ? 0 : 0.09; layer?.add(animation, forKey: "selection")
-            }
-        }
-        contentTintColor = selected || hovered ? .controlAccentColor : .secondaryLabelColor
-    }
-}
-
-@MainActor final class PlaceholderLabel: NSTextField {
-    override func hitTest(_: NSPoint) -> NSView? {
-        nil
     }
 }
 
@@ -122,22 +60,13 @@ var bridge: PotBridge?
     let rootView: HostView
     let status: NSStatusItem
     let web: WKWebView
-    let rail = NSVisualEffectView()
     let composer = Composer()
-    let completionBox = NSStackView()
-    var completionItems: [[String: String]] = []
-    var completionIndex = 0
-    var completionQuery = ""
-    var displayedCompletions = ""
-    var dismissedCompletion: String?
 
+    var editorGeometry: NSRect?
+    var completionActive = false
     let composerBox = NSView()
     let composerScroll = NSScrollView()
-    let placeholder = PlaceholderLabel(labelWithString: L.text("bridge.message-pot"))
-    let sendButton = NSButton()
     var settings = SettingsPanel()
-    var otherSettings: SettingsPanel?
-    var navigation: [NSButton] = []
     var page = 0
     var composerDark: Bool?
     var webDark: Bool?
@@ -146,7 +75,6 @@ var bridge: PotBridge?
     var localRuntime: LocalRuntime?
     var termination: DispatchSourceSignal?
     var keyMonitor: Any?
-    let railHighlight = PlaceholderLabel(labelWithString: "")
     var backMenuItem: NSMenuItem?
     var animation: Timer?
     var events: [[String: Any]] = [] {
@@ -160,14 +88,11 @@ var bridge: PotBridge?
     var snapshot: [String: Any] = [:]
     var selectedRunning = false
     var selected = ""
-    var draftKey = ""
-    var drafts: [String: String] = [:]
     var running = false
     var ready = false
     var failed = false
     var unread = 0
     var unreadTracker = UnreadTracker()
-    var companionCompleted: Set<String>?
     var savedSeen: [String]?
     var tick: Double = 0
     var lastIconState = ""
@@ -190,7 +115,7 @@ var bridge: PotBridge?
         "seen-assistant:" + (localRuntime?.root.path ?? "default")
     }
 
-    init(host: NSWindow, html _: String) {
+    init(host: NSWindow) {
         self.host = host; gpuiView = host.contentView!
         rootView = HostView(frame: gpuiView.frame)
         web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -202,35 +127,10 @@ var bridge: PotBridge?
         rootView.wantsLayer = true
         host.contentView = rootView
         rootView.addSubview(gpuiView)
-        rootView.addSubview(rail)
-        rail.material = .sidebar; rail.blendingMode = .behindWindow; rail.state = .followsWindowActiveState
-        rail.wantsLayer = true
-        railHighlight.wantsLayer = true; railHighlight.layer?.cornerRadius = 10
-        rail.addSubview(railHighlight)
-        for (index, symbol, title) in [
-            (0, "bubble.left", L.text("navigation.chat")),
-            (3, "list.bullet.rectangle", L.text("navigation.tasks")),
-            (1, "desktopcomputer", L.text("machines.title")),
-            (4, "chart.bar.xaxis", L.text("navigation.usage")),
-            (2, "gearshape", L.text("ui.settings")),
-        ] {
-            let button = index == 0 ? CompanionButton() : RailButton(
-                image: NSImage(systemSymbolName: symbol, accessibilityDescription: title)!,
-                target: self,
-                action: #selector(navigate(_:))
-            )
-            button.target = self; button.action = #selector(navigate(_:))
-            button.title = ""
-            button.tag = index; button.toolTip = title; button.setAccessibilityLabel(title)
-            button.isBordered = false; button.imageScaling = .scaleProportionallyDown
-            button.wantsLayer = true; button.layer?.cornerRadius = 10
-            rail.addSubview(button); navigation.append(button)
-        }
         rootView.addSubview(web); web.isHidden = true; web.navigationDelegate = self
         web.configuration.userContentController.add(self, name: "potDesktop")
         settings.bridge = self
-        rootView.addSubview(composerBox); composerBox.wantsLayer = true; composerBox.layer?
-            .cornerRadius = 16; composerBox.layer?.borderWidth = 1
+        rootView.addSubview(composerBox)
         composer.isRichText = false; composer.font = .systemFont(ofSize: 15); composer.drawsBackground = false; composer
             .textContainerInset = NSSize(
                 width: 8,
@@ -239,22 +139,21 @@ var bridge: PotBridge?
         composer.isVerticallyResizable = true; composer.isHorizontallyResizable = false
         composer.autoresizingMask = [.width]; composer.textContainer?.widthTracksTextView = true
         composer.delegate = self; composer.submit = { [weak self] in self?.sendMessage() }
-        composer.completeKey = { [weak self] event in self?.completionKey(event) ?? false }
-        completionBox.orientation = .vertical; completionBox.spacing = 2
-        completionBox.alignment = .leading; completionBox.wantsLayer = true
-        completionBox.layer?.cornerRadius = 8; completionBox.isHidden = true
-        rootView.addSubview(completionBox)
-
+        composer.completeKey = { [weak self] event in
+            guard let self, self.completionActive,
+                  !event.modifierFlags.contains(.shift) else { return false }
+            let key: String
+            switch event
+                .keyCode
+            {
+            case 125: key = "down"; case 126: key = "up"; case 36: key = "enter"; case 53: key =
+                "escape"; default: return false
+            }
+            self.events.append(["action": "composer-key", "key": key]); return true
+        }
         composerScroll.documentView = composer; composerScroll.hasVerticalScroller = true; composerScroll
             .autohidesScrollers = true; composerScroll.drawsBackground = false
         composerBox.addSubview(composerScroll)
-        placeholder.textColor = .placeholderTextColor; placeholder.font = .systemFont(ofSize: 15); composerBox
-            .addSubview(placeholder)
-        sendButton.target = self; sendButton.action = #selector(sendMessage); sendButton.isBordered = false
-        sendButton.title = ""
-        sendButton.image = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: nil)
-        sendButton.wantsLayer = true; sendButton.layer?.cornerRadius = 16
-        composerBox.addSubview(sendButton)
         rootView.resized = { [weak self] in self?.layout() }
         status.button?.imagePosition = .imageLeading
         status.menu = nil
@@ -296,8 +195,8 @@ var bridge: PotBridge?
                     switch event.charactersIgnoringModifiers {
                     case "q": self.quitApp(); return nil
                     case "w": self.hideWindow(); return nil
-                    case "d": self.selectPage(self.page == 1 ? 0 : 1); return nil
-                    case ",": self.selectPage(2); return nil
+                    case "d": self.events.append(["action": "navigation", "value": self.page == 1 ? 0 : 1]); return nil
+                    case ",": self.events.append(["action": "navigation", "value": 2]); return nil
                     case ".": self.events.append(["action": "cancel"]); return nil
                     default: break
                     }
@@ -337,30 +236,9 @@ var bridge: PotBridge?
         lastIconState = ""
         installMenu()
         backMenuItem?.isEnabled = (lastUIState["can_back"] as? Bool) ?? false
-        let labels = [
-            0: "navigation.chat",
-            3: "navigation.tasks",
-            1: "machines.title",
-            4: "navigation.usage",
-            2: "ui.settings",
-        ]
-        for button in navigation {
-            let key = labels[button.tag] ?? "machines.title"
-            let title = L.text(key)
-            button.toolTip = title; button.setAccessibilityLabel(title)
-        }
-        localizeComposer()
+        composer.setAccessibilityLabel(L.text("mobile.message"))
         updateIcon()
         localizeWeb()
-    }
-
-    func localizeComposer() {
-        placeholder.stringValue = selected == "new" ? L.text("bridge.describe-the-goal-of-a-new-task") : selected
-            .isEmpty ? L.text("bridge.message-pot") : L
-            .text("bridge.add-instructions-interrupted-tasks-resume-next-turn")
-        let stopping = selectedRunning && composer.string.isEmpty
-        sendButton.toolTip = stopping ? L.text("bridge.stop-task-41") : L.text("bridge.send-enter-new-line-shift-enter")
-        sendButton.setAccessibilityLabel(stopping ? L.text("bridge.stop-task") : L.text("bridge.send-message"))
     }
 
     func localizeWeb() {
@@ -443,15 +321,6 @@ var bridge: PotBridge?
 
     func layout() {
         let b = rootView.bounds
-        rail.frame = NSRect(x: 0, y: 0, width: 56, height: max(0, b.height - 44))
-        for (index, button) in navigation.enumerated() {
-            button.frame = NSRect(
-                x: 10,
-                y: button.tag == 2 ? 16 : rail.bounds.height - 60 - CGFloat(index) * 48,
-                width: 36,
-                height: 36
-            )
-        }
         let area = NSRect(x: 56, y: 0, width: max(0, b.width - 56), height: b.height)
         // GPUI uses window coordinates; reserve the rail in Rust layout.
         if gpuiView.frame != b {
@@ -462,12 +331,17 @@ var bridge: PotBridge?
         if web.frame != desktopArea {
             web.frame = desktopArea
         }
-        let width = min(760, area.width - 64)
+        let width = editorGeometry?.width ?? min(760, area.width - 64)
         composer.layoutManager?.ensureLayout(for: composer.textContainer!)
         let used = (composer.layoutManager?.usedRect(for: composer.textContainer!).height ?? 24) +
             (composer.string.hasSuffix("\n") ? composer.layoutManager?.extraLineFragmentRect.height ?? 0 : 0)
-        let height = min(150, max(48, used + 20))
-        let boxFrame = NSRect(x: 56 + (area.width - width) / 2, y: 24, width: width, height: height)
+        let height = editorGeometry?.height ?? 48
+        let boxFrame = NSRect(
+            x: editorGeometry?.minX ?? 56 + (area.width - width) / 2,
+            y: editorGeometry?.minY ?? 24,
+            width: (editorGeometry?.width ?? width) - 50,
+            height: height
+        )
         if composerBox.frame != boxFrame {
             composerBox.frame = boxFrame; wakeNativeUI()
         }
@@ -479,53 +353,14 @@ var bridge: PotBridge?
         if composer.frame.size != textSize {
             composer.setFrameSize(textSize)
         }
-        completionBox.frame = NSRect(x: boxFrame.minX, y: boxFrame.maxY + 6, width: width,
-                                     height: CGFloat(min(completionItems.count, 6)) * 34)
-        completionBox.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        completionBox.isHidden = completionItems.isEmpty || composerBox.isHidden
-        placeholder.frame = NSRect(x: 18, y: height - 33, width: width - 90, height: 22)
-        sendButton.frame = NSRect(x: width - 42, y: 8, width: 32, height: 32)
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         if webDark != dark {
             webDark = dark
             web.evaluateJavaScript("document.documentElement.dataset.theme='" + (dark ? "dark" : "light") + "'")
         }
         let background = NSColor(white: dark ? 32.0 / 255 : 253.0 / 255, alpha: 1)
-        let sidebar = NSColor(white: dark ? 40.0 / 255 : 244.0 / 255, alpha: 1)
         host.backgroundColor = background
         rootView.layer?.backgroundColor = background.cgColor
-        rail.layer?.backgroundColor = sidebar
-            .withAlphaComponent(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.9).cgColor
-        composerBox.layer?.backgroundColor = NSColor(white: dark ? 0.169 : 1, alpha: 1).cgColor
-        composerBox.layer?.shadowColor = NSColor.black.cgColor
-        composerBox.layer?.shadowOpacity = dark ? 0.12 : 0.04
-        composerBox.layer?.shadowRadius = 6
-        composerBox.layer?.shadowOffset = NSSize(width: 0, height: -1)
-        composerBox.layer?.borderColor = NSColor(white: dark ? 0.255 : 0.91, alpha: 1).cgColor
-        for button in navigation {
-            (button as? RailButton)?.selected = button
-                .tag == (page == 6 ? 4 : page == 5 ? (selected.isEmpty ? 0 : 3) : page)
-            (button as? RailButton)?.refresh()
-        }
-        if let selectedButton = navigation.first(where: { ($0 as? RailButton)?.selected == true }) {
-            railHighlight.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
-            if railHighlight.frame != selectedButton.frame {
-                if railHighlight.frame.isEmpty || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                    railHighlight.frame = selectedButton.frame
-                } else {
-                    NSAnimationContext.runAnimationGroup { context in
-                        context.duration = 0.22
-                        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1, 0.36, 1)
-                        railHighlight.animator().frame = selectedButton.frame
-                    }
-                }
-            }
-        }
-        sendButton.layer?.backgroundColor = (selectedRunning || ready ? NSColor.systemBlue : NSColor(
-            white: dark ? 0.28 : 0.8,
-            alpha: 1
-        )).cgColor
-        sendButton.contentTintColor = .white
         // Runtime snapshots arrive every 200 ms. Reassigning text attributes
         // restarts NSTextView's insertion-point blink even when nothing changed.
         if composerDark != dark {
@@ -536,84 +371,11 @@ var bridge: PotBridge?
     }
 
     func textDidChange(_: Notification) {
-        placeholder.isHidden = !composer.string.isEmpty; refreshCompletions(); layout()
+        wakeNativeUI(); layout()
     }
 
     func textViewDidChangeSelection(_: Notification) {
-        refreshCompletions(); layout()
-    }
-
-    func completionRange() -> NSRange? {
-        guard !composer.hasMarkedText() else { return nil }
-        return ComposerReferenceQuery.range(in: composer.string, selection: composer.selectedRange())
-    }
-
-    func refreshCompletions() {
-        let identity = "\(draftKey):\(composer.selectedRange().location):\(composer.string)"
-        completionItems = []
-        if page == 0, selected.isEmpty, dismissedCompletion != identity,
-           let range = completionRange(),
-           let catalog = lastUIState["completions"] as? [String: Any],
-           let items = catalog["items"] as? [[String: String]]
-        {
-            let query = String((composer.string as NSString).substring(with: range).dropFirst()).lowercased()
-            if completionQuery != query {
-                completionIndex = 0; completionQuery = query
-            }
-            completionItems = Array(items.filter { item in
-                ["token", "label", "detail"].contains { key in (item[key] ?? "").lowercased().contains(query) } || query
-                    .isEmpty
-            }.prefix(30))
-        }
-        completionIndex = min(completionIndex, max(0, completionItems.count - 1))
-        completionBox.isHidden = completionItems.isEmpty || composerBox.isHidden
-        let display = "\(completionIndex):\(completionItems)"
-        guard display != displayedCompletions else { return }
-        displayedCompletions = display
-        for view in completionBox
-            .arrangedSubviews
-        {
-            completionBox.removeArrangedSubview(view); view.removeFromSuperview()
-        }
-        let start = max(0, completionIndex - 5)
-        for index in start ..< min(start + 6, completionItems.count) {
-            let item = completionItems[index]
-            let kind = (item["token"] ?? "").split(separator: ":").first.map(String.init) ?? ""
-            let button = NSButton(
-                title: "\(index == completionIndex ? "›" : " ") \(item["label"] ?? "") · \(kind)",
-                target: self,
-                action: #selector(chooseCompletion(_:))
-            )
-            button.tag = index; button.isBordered = false; button.alignment = .left
-            button.toolTip = item["detail"]; button.setAccessibilityLabel(button.title)
-            completionBox.addArrangedSubview(button)
-            button.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        }
-        completionBox.isHidden = completionItems.isEmpty || composerBox.isHidden
-    }
-
-    func completionKey(_ event: NSEvent) -> Bool {
-        guard !completionItems.isEmpty else { return false }
-        switch event.keyCode {
-        case 125: completionIndex = (completionIndex + 1) % completionItems.count
-        case 126: completionIndex = (completionIndex + completionItems.count - 1) % completionItems.count
-        case 36 where !event.modifierFlags.contains(.shift): insertCompletion(completionIndex); return true
-        case 53: dismissedCompletion = "\(draftKey):\(composer.selectedRange().location):\(composer.string)"
-        default: return false
-        }
-        refreshCompletions(); layout(); return true
-    }
-
-    @objc func chooseCompletion(_ sender: NSButton) {
-        insertCompletion(sender.tag)
-    }
-
-    func insertCompletion(_ index: Int) {
-        guard completionItems.indices.contains(index), let range = completionRange(),
-              let token = completionItems[index]["token"] else { return }
-        composer.insertText(token + " ", replacementRange: range)
-        host.makeFirstResponder(composer)
-        refreshCompletions(); layout()
+        wakeNativeUI(); layout()
     }
 
     @objc func sendMessage() {
@@ -649,16 +411,6 @@ var bridge: PotBridge?
             settings.refreshStatus()
         }
         layout()
-    }
-
-    @objc func navigate(_ sender: NSButton) {
-        if sender.tag == 0 {
-            events.append(["action": "main"])
-        }; if sender
-            .tag == 3
-        {
-            events.append(["action": "tasks"])
-        }; selectPage(sender.tag)
     }
 
     /// The toolbar is GPUI, above WKWebView. A web menu cannot extend into
@@ -1171,54 +923,30 @@ var bridge: PotBridge?
     }
 
     func update(_ value: [String: Any]) {
+        if let nextPage = value["page"] as? Int, page != nextPage {
+            page = nextPage
+        }
         runtime.assistantID = value["assistant_id"] as? String ?? "main"
         runtime.remoteMode = value["client_mode"] as? String == "remote"
         lastUIState = value
         snapshot = value
         running = value["running"] as? Bool ?? false
         selectedRunning = value["selected_running"] as? Bool ?? false
-        if let accepted = value["accepted"] as? String,
-           let conversation = value["accepted_conversation"] as? String
-        {
-            var text = composer.string
-            if DraftReceipt.apply(accepted: accepted, conversation: conversation, selected: draftKey,
-                                  text: &text, drafts: &drafts)
-            {
-                composer.string = text
-                textDidChange(Notification(name: NSText.didChangeNotification))
-            }
-        }
         backMenuItem?.isEnabled = value["can_back"] as? Bool ?? false
         let next = value["selected"] as? String ?? ""
-        let conversationKey = value["conversation"] as? String ?? next
-        let nextDraft = conversationKey == "main" ? "" : conversationKey
-        if nextDraft != draftKey {
-            drafts[draftKey] = composer.string
-            draftKey = nextDraft; selected = next; composer.string = drafts[nextDraft] ?? ""
-            if page == 0, !next.isEmpty {
-                page = 3
-            }
-            textDidChange(Notification(name: NSText.didChangeNotification))
+        selected = next
+        if page == 0, !next.isEmpty {
+            page = 3
         }
         composerBox
             .isHidden = (page != 0 && page != 3) || value["task_list"] as? Bool == true ||
             value["assistant_list"] as? Bool == true
-        placeholder.stringValue = next == "new" ? L.text("bridge.describe-the-goal-of-a-new-task") : next.isEmpty ? L
-            .text("bridge.message-pot") : L.text("bridge.add-instructions-interrupted-tasks-resume-next-turn")
         if page == 0 && value["needs_configuration"] as? Bool == true {
             composerBox.isHidden = true
         }
-        refreshCompletions()
+        wakeNativeUI()
         ready = (value["can_send"] as? Bool ?? false) && !isApplying
         failed = (value["error"] as? Bool ?? false) || localPhase == "failed"
-        sendButton.image = NSImage(
-            systemSymbolName: selectedRunning && composer.string.isEmpty ? "stop.fill" : "arrow.up",
-            accessibilityDescription: selectedRunning && composer.string.isEmpty ? L.text("bridge.stop-task") : L
-                .text("bridge.send-message")
-        )
-        sendButton.toolTip = selectedRunning && composer.string.isEmpty ? L.text("bridge.stop-task-41") : L
-            .text("bridge.send-enter-new-line-shift-enter")
-        sendButton.isEnabled = selectedRunning || ready
         if value["has_snapshot"] as? Bool == true, let messages = value["messages"] as? [[String: Any]] {
             let completed = Set(messages.filter { ($0["role"] as? String) == "assistant" && [
                 "complete",
@@ -1226,17 +954,10 @@ var bridge: PotBridge?
                 "cancelled",
             ].contains($0["status"] as? String ?? "") }.compactMap { $0["id"] as? String })
             let previous = unreadTracker.seen
-            let successful = Set(messages.filter { $0["role"] as? String == "assistant" &&
-                    $0["status"] as? String == "complete"
-            }.compactMap { $0["id"] as? String })
-            if let known = companionCompleted, !successful.subtracting(known).isEmpty {
-                (navigation.first as? CompanionButton)?.celebrate()
-            }
-            companionCompleted = successful
             let failedIDs = Set(messages.filter { $0["status"] as? String == "failed" }
                 .compactMap { $0["id"] as? String })
             if !failedIDs.subtracting(previous).isEmpty {
-                settings.refreshAI()
+                wakeNativeUI()
             }
             if !unreadTracker.initialized {
                 savedSeen = UserDefaults.standard.stringArray(forKey: seenKey)
@@ -1269,7 +990,6 @@ var bridge: PotBridge?
         } else if !animate {
             animation?.invalidate(); animation = nil
         }
-        (navigation.first as? CompanionButton)?.update(cooking: running)
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let waiting = (snapshot["needs_configuration"] as? Bool ?? false)
         let highlighted = status.button?.cell?.isHighlighted ?? false
@@ -1292,20 +1012,13 @@ var bridge: PotBridge?
         status.button?.title = ""
         status.button?.toolTip = nil
         status.button?.setAccessibilityLabel(label)
-        navigation.first?
-            .setAccessibilityLabel(L.format("bridge.chat-0", [String(describing: state)]) + (unread > 0 ? L.format(
-                "bridge.0-unread",
-                [String(describing: unread)]
-            ) : ""))
     }
 }
 
-@_cdecl("pot_bridge_install") public func install(_ html: UnsafePointer<CChar>) {
-    let content = String(cString: html)
+@_cdecl("pot_bridge_install") public func install() {
     DispatchQueue.main
         .async { guard let host = NSApp.windows.first(where: { $0.title == "Pot" }) else { return }; bridge = PotBridge(
-            host: host,
-            html: content
+            host: host
         ) }
 }
 
@@ -1347,11 +1060,6 @@ var bridge: PotBridge?
         ]) == .darkAqua }
 }
 
-@_cdecl("pot_bridge_composer_height") public func composerHeight() -> Double {
-    MainActor
-        .assumeIsolated { Double(bridge?.composerBox.frame.height ?? 48) + 48 }
-}
-
 /// Coalesced by the Rust channel; asynchronous configuration updates must not
 /// wait for the geometry/snapshot fallback timer to become visible.
 @MainActor func wakeNativeUI() {
@@ -1367,6 +1075,16 @@ private var bridgeWake: (@convention(c) () -> Void)?
     MainActor.assumeIsolated {
         guard let bridge else { return 0 }
         let state: [String: Any] = [
+            "unread": bridge.unread,
+            "editor": [
+                "text": bridge.composer.string,
+                "caret": (bridge.composer.string as NSString).substring(to: min(
+                    bridge.composer.selectedRange().location,
+                    (bridge.composer.string as NSString).length
+                )).utf8.count,
+                "selection": bridge.composer.selectedRange().length > 0,
+                "composing": bridge.composer.hasMarkedText(),
+            ],
             "page": bridge.page,
             "visible": bridge.host.isVisible && bridge.host.occlusionState.contains(.visible),
             "timezone": TimeZone.current.identifier,
@@ -1408,68 +1126,57 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 if domains.contains(where: { $0 == "machines" || $0 == "resources" }) {
                     bridge.refreshSandboxes()
                 }
-                if domains.contains(where: { $0 == "settings" || $0 == "settings/" + bridge.runtime.assistantID }),
-                   bridge.page == 2
-                {
-                    settings.configurationChanged()
-                    if settings.section == 1 {
-                        settings.refreshAI()
-                    } else if settings.section == 4 {
-                        settings.refreshRouting(preserveDraft: true)
-                    }
-                }
             }
         case "resource-command": bridge.resourceCommand(
                 v["request_id"] as? String ?? "",
                 v["operation"] as? String ?? ""
             )
         case "resource-cache": bridge.showResourceCache()
-        case "provider-period": settings.providerPeriod = v["period"] as? String ?? "none"
-        case "provider-auto": settings.providerAutoResume.toggle()
-        case "provider-save": settings.saveProviderAllowance(tokens: v["tokens"] as? String ?? "")
-        case "routing-refresh": settings.refreshRouting()
-        case "routing-edit": settings.editRoutingProfile(v["id"] as? String ?? "")
-        case "routing-choice": settings.routingChoice(v["kind"] as? String ?? "", v["id"] as? String ?? "")
-        case "routing-save": settings.saveRouting(
-                profileLimit: v["profile_limit"] as? String ?? "",
-                providerLimit: v["provider_limit"] as? String ?? ""
-            )
-        case "profile-save": settings.saveProfile(
-                name: v["name"] as? String ?? "",
-                model: v["model"] as? String ?? "",
-                copy: v["copy"] as? Bool ?? false
-            )
-        case "profile-main": settings.useProfileForOwner()
-        case "task-profile":
-            settings.routingOwner = v["owner"] as? String ?? "main"
-            settings.routingOwnerName = v["title"] as? String ?? L.text("bridge.this-task")
-            settings.section = 4; bridge.selectPage(2); settings.refreshRouting()
-        case "history-section": settings.section = v["value"] as? Int ?? 0
-        case "section": settings.section = v["value"] as? Int ?? 0; settings
-            .result = ""; settings.returnToChat = false; if settings.section == 1 {
-                settings.routingOwner = "main"; settings.aiScreen = "main"
-                settings.refreshAI()
-            } else if settings.section == 4 {
-                settings.routingOwner = "main"; settings.routingOwnerName = L
-                    .text("routing.main-conversation"); settings.refreshRouting()
-            }
         case "language":
             if let locale = v["value"] as? String, L.select(locale) {
                 bridge.localize(); bridgeWake?()
             }
         case "appearance": settings.changeAppearance(v["value"] as? Int ?? 0)
         case "save-agent":
-            settings.key = v["key"] as? String ?? ""; settings.limit = v["limit"] as? String ?? ""; settings
+            settings.limit = v["limit"] as? String ?? ""; settings
                 .tokens = v["tokens"] as? String ?? ""; settings.perTurn = v["per_turn"] as? String ?? ""; settings
-                .parallel = v["parallel"] as? String ?? ""; settings.saveAgent(); settings.key = ""
+                .parallel = v["parallel"] as? String ?? ""; settings.saveAgent()
         case "workspace": bridge.openWorkspace()
         case "mode-changed":
             bridge.runtime.remoteMode = v["mode"] as? String == "remote"
-            let previous = bridge.settings
-            bridge.settings = bridge.otherSettings ?? SettingsPanel()
-            bridge.settings.bridge = bridge; bridge.otherSettings = previous
             bridge.localRuntime?.viewGeneration += 1; bridge.web.stopLoading(); bridge.web.isHidden = true
             bridge.settings.refreshStatus()
+        case "editor-geometry":
+            let frame = NSRect(
+                x: v["x"] as? Double ?? 0,
+                y: v["y"] as? Double ?? 24,
+                width: v["width"] as? Double ?? 0,
+                height: v["height"] as? Double ?? 48
+            )
+            if bridge.editorGeometry != frame {
+                bridge.editorGeometry = frame; bridge.layout()
+            }
+        case "completion-active": bridge.completionActive = v["value"] as? Bool ?? false
+        case "editor-set":
+            let text = v["text"] as? String ?? ""
+            if bridge.composer.string != text {
+                bridge.composer.string = text; bridge.layout(); wakeNativeUI()
+            }
+        case "editor-replace":
+            let text = bridge.composer.string
+            let start = min(max(0, v["start"] as? Int ?? 0), text.utf8.count)
+            let end = min(max(start, v["end"] as? Int ?? start), text.utf8.count)
+            if let a = String.Index(text.utf8.index(text.utf8.startIndex, offsetBy: start), within: text),
+               let b = String.Index(
+                   text.utf8.index(text.utf8.startIndex, offsetBy: end),
+                   within: text
+               )
+            {
+                bridge.composer
+                    .insertText(v["text"] as? String ?? "", replacementRange: NSRange(a ..< b, in: text)); bridge.host
+                    .makeFirstResponder(bridge.composer); bridge.layout(); wakeNativeUI()
+            }
+        case "composer-send": bridge.sendMessage()
         case "page": bridge.selectPage(v["value"] as? Int ?? 0)
         case "manage", "sandbox-settings": bridge.editSandbox(create: false)
         case "sandbox-new": bridge.editSandbox(create: true)
@@ -1488,27 +1195,6 @@ private var bridgeWake: (@convention(c) () -> Void)?
                 bridge.openSandboxDesktop(id)
             }
         case "start": bridge.startSandbox()
-        case "api-protocol": settings.apiProtocol = v["protocol"] as? String ?? "openai_chat"
-        case "ai-open": settings.routingOwner = "main"; settings.openAI(fromChat: true, owner: v["owner"] as? String)
-        case "ai-back":
-            settings.aiScreen = "main"
-            if settings.routingOwner != "main" {
-                settings.section = 4
-            }
-        case "ai-screen": if !settings.aiBusy {
-                settings.aiScreen = v["screen"] as? String ?? "main"
-            }
-        case "ai-new": settings.newConnection(v["kind"] as? String ?? "custom")
-        case "ai-manage": settings.editConnection(v["id"] as? String ?? "")
-        case "ai-choose": settings.chooseAI(v["id"] as? String ?? "")
-        case "ai-api-check": settings.checkAPI(endpoint: v["endpoint"] as? String ?? "", key: v["key"] as? String ?? "")
-        case "ai-save-connection": settings.saveConnection(
-                name: v["name"] as? String ?? "",
-                model: v["model"] as? String ?? "",
-                endpoint: v["endpoint"] as? String ?? "",
-                key: v["key"] as? String ?? ""
-            )
-        case "ai-save-main": settings.saveMain(model: v["model"] as? String ?? "")
         case "viewer":
             if let id = v["id"] as? String, ["take", "info", "more", "connect"].contains(id) {
                 if id == "more" {
@@ -1525,119 +1211,4 @@ private var bridgeWake: (@convention(c) () -> Void)?
 
 @_cdecl("pot_bridge_reduce_motion") public func reduceMotion() -> Bool {
     MainActor.assumeIsolated { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-}
-
-/// Animate only the character, leaving the navigation hit area and highlight stable.
-@MainActor final class CompanionButton: RailButton {
-    private var cooking = false
-    private var visible = false
-    private var reduced = false
-    private var intro = -Double.infinity
-    private var pressed = -Double.infinity
-    private var completed = -Double.infinity
-    private var hoverChanged = -Double.infinity
-    private var hoverFrom: CGFloat = 0
-    private var hoverTo: CGFloat = 0
-    private var steamChanged = -Double.infinity
-    private var steamFrom: CGFloat = 0
-    private var steamTo: CGFloat = 0
-    private var frames: Timer?
-
-    private func blend(_ from: CGFloat, _ to: CGFloat, since start: Double, at now: Double) -> CGFloat {
-        let t = CGFloat(min(1, max(0, (now - start) / 0.18)))
-        return from + (to - from) * t * t * (3 - 2 * t)
-    }
-
-    func update(cooking next: Bool) {
-        let now = ProcessInfo.processInfo.systemUptime
-        let onScreen = window?.isVisible == true && window?.occlusionState.contains(.visible) == true
-        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if onScreen && !visible {
-            intro = now
-        }
-        if next != cooking {
-            steamFrom = blend(steamFrom, steamTo, since: steamChanged, at: now)
-            steamTo = next ? 1 : 0; steamChanged = now
-            cooking = next
-            needsDisplay = true
-        }
-        if reduce != reduced || onScreen != visible {
-            needsDisplay = true
-        }
-        visible = onScreen; reduced = reduce
-        if reduced {
-            intro = -.infinity; pressed = -.infinity; completed = -.infinity
-            hoverFrom = hoverTo; steamFrom = steamTo
-        }
-        scheduleFrames()
-    }
-
-    private func scheduleFrames() {
-        let now = ProcessInfo.processInfo.systemUptime
-        let moving = cooking || now - intro < 0.36 || now - pressed < 0.28 ||
-            now - completed < 0.85 || now - hoverChanged < 0.18 || now - steamChanged < 0.18
-        guard visible, !reduced, moving else {
-            frames?.invalidate(); frames = nil
-            return
-        }
-        guard frames == nil else { return }
-        let timer = Timer(timeInterval: 1 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.update(cooking: self.cooking)
-                self.needsDisplay = true
-            }
-        }
-        frames = timer
-        RunLoop.main.add(timer, forMode: .common)
-    }
-
-    private func animateHover() {
-        let now = ProcessInfo.processInfo.systemUptime
-        hoverFrom = blend(hoverFrom, hoverTo, since: hoverChanged, at: now)
-        hoverTo = hovered ? 1 : 0; hoverChanged = now
-        update(cooking: cooking); needsDisplay = true
-    }
-
-    func celebrate() {
-        guard window?.isVisible == true, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        completed = ProcessInfo.processInfo.systemUptime
-        update(cooking: cooking); needsDisplay = true
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        super.mouseEntered(with: event); animateHover()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event); animateHover()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        pressed = ProcessInfo.processInfo.systemUptime
-        update(cooking: cooking); needsDisplay = true
-        super.mouseDown(with: event)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        let now = ProcessInfo.processInfo.systemUptime
-        let hover = reduced ? hoverTo : blend(hoverFrom, hoverTo, since: hoverChanged, at: now)
-        let steam = reduced ? steamTo : blend(steamFrom, steamTo, since: steamChanged, at: now)
-        let entry = reduced ? 1 : min(1, max(0, (now - intro) / 0.36))
-        let pressAge = now - pressed
-        let compression = !reduced && pressAge >= 0 && pressAge < 0.28 ? sin(pressAge / 0.28 * .pi) * 0.05 : 0
-        let blinkAge = now - intro
-        let blink = !reduced && blinkAge > 0.13 && blinkAge < 0.29 ?
-            1 - sin((blinkAge - 0.13) / 0.16 * .pi) * 0.95 : 1
-        let happy = !reduced && now - completed < 0.85 ? sin((now - completed) / 0.85 * .pi) : 0
-        let size = CGFloat(28 * (1 - compression))
-        let rect = NSRect(x: (bounds.width - size) / 2,
-                          y: (bounds.height - size) / 2 - (reduced ? 0 : hover * 0.7) + CGFloat(1 - entry) * 2,
-                          width: size, height: size)
-        companionIcon(blink: CGFloat(blink), smile: hover * 0.4 + CGFloat(happy) * 0.6,
-                      steam: steam, phase: now.truncatingRemainder(dividingBy: 3) / 3)
-            .draw(in: rect, from: .zero, operation: .sourceOver, fraction: CGFloat(0.8 + 0.2 * entry),
-                  respectFlipped: true, hints: nil)
-    }
 }

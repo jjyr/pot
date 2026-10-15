@@ -1,6 +1,6 @@
 //! Window-local route state. Back follows page hierarchy, independently of visit
 //! order; restoring presentation state has no execution or configuration effects.
-use crate::{Shell, client, gpui, ui};
+use crate::application::{Shell, client, gpui, ui};
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
     IconName, Sizable, TitleBar,
@@ -41,6 +41,22 @@ pub struct State {
     machine_selection: serde_json::Value,
 }
 impl Route {
+    pub fn browser_page(&self, overview: bool) -> &'static str {
+        match self {
+            Self::Chat if overview => "assistants",
+            Self::Chat => "chat",
+            Self::Task(_) => "task",
+            Self::Tasks(true) | Self::Schedule(_) => "schedules",
+            Self::Tasks(false) => "tasks",
+            Self::Settings => "settings",
+            Self::Machines(_) => "machines",
+            Self::Usage => "usage",
+            Self::ConversationUsage(_) => "conversation-usage",
+            Self::Quota => "quota",
+            Self::Assistant(_, route) => route.browser_page(overview),
+        }
+    }
+
     pub fn parent(&self) -> Option<Self> {
         match self {
             Self::Assistant(id, route) => route
@@ -55,7 +71,7 @@ impl Route {
         }
     }
     fn back_label(&self) -> &'static str {
-        crate::i18n::text(match self {
+        crate::application::i18n::text(match self {
             Self::Task(_) => "navigation.back-tasks",
             Self::Schedule(_) => "navigation.back-schedules",
             Self::ConversationUsage(_) => "navigation.back-conversation",
@@ -100,7 +116,7 @@ impl<S: Clone> Navigation<S> {
 }
 impl Shell {
     pub fn route(&self, view: &client::View) -> Route {
-        match self.native["page"].as_u64().unwrap_or(0) {
+        match self.host["page"].as_u64().unwrap_or(0) {
             1 => Route::Machines(pot_ui::machine_state::selection(
                 &view.machines,
                 &self.machine_selection,
@@ -139,7 +155,7 @@ impl Shell {
             route,
             State {
                 assistant_id: v.assistant_id().to_owned(),
-                page: self.native["page"].as_u64().unwrap_or(0),
+                page: self.host["page"].as_u64().unwrap_or(0),
                 selected: v.selected,
                 show_tasks: self.show_tasks,
                 machine_selection: pot_ui::machine_state::selection(
@@ -153,7 +169,7 @@ impl Shell {
                 runs_offset: v.runs_offset,
                 days: self.usage_ui.days,
                 group_offset: self.usage_ui.group_offset,
-                settings_section: self.native["settings"]["section"].as_u64().unwrap_or(0),
+                settings_section: self.host["settings"]["section"].as_u64().unwrap_or(0),
                 task_anchor,
                 offsets: [
                     self.scroll.offset(),
@@ -169,9 +185,10 @@ impl Shell {
         if !self.assistant_list
             && !self.show_tasks
             && self.client.view.lock().unwrap().selected.is_empty()
-            && self.native["page"] == 0
+            && self.host["page"] == 0
         {
             self.assistant_list = true;
+            ui::command(json!({"action":"page","value":0,"assistant_list":true}));
             cx.notify();
             return;
         }
@@ -244,7 +261,7 @@ impl Shell {
                 self.client.view.lock().unwrap().selected.clone()
             },
             state.days,
-            self.native["timezone"]
+            self.host["timezone"]
                 .as_str()
                 .unwrap_or("Asia/Shanghai")
                 .into(),
@@ -273,7 +290,7 @@ impl Shell {
             })
             .unwrap_or_default();
         self.first = false;
-        self.native["page"] = json!(state.page);
+        self.host["page"] = json!(state.page);
         if state.page == 2 {
             ui::command(json!({"action":"history-section","value":state.settings_section}));
         }
@@ -291,7 +308,7 @@ impl Shell {
             Route::Assistant(_, _) => unreachable!("cache identity only"),
             Route::Chat => {
                 if self.assistant_list {
-                    crate::i18n::text("spaces.assistants").into()
+                    crate::application::i18n::text("spaces.assistants").into()
                 } else {
                     view.assistants["assistants"]
                         .as_array()
@@ -303,7 +320,7 @@ impl Shell {
                         .to_owned()
                 }
             }
-            Route::Tasks(scheduled) => crate::i18n::text(if *scheduled {
+            Route::Tasks(scheduled) => crate::application::i18n::text(if *scheduled {
                 "navigation.schedules"
             } else {
                 "navigation.tasks"
@@ -313,23 +330,29 @@ impl Shell {
                 .selected_task
                 .as_ref()
                 .map(|task| task.title.clone())
-                .unwrap_or(crate::i18n::text("navigation.task-details").into()),
+                .unwrap_or(crate::application::i18n::text("navigation.task-details").into()),
             Route::Schedule(_) => view
                 .schedules
                 .selected
                 .as_ref()
                 .map(|schedule| schedule.spec.title.clone())
-                .unwrap_or(crate::i18n::text("navigation.schedule-details").into()),
-            Route::Settings => crate::i18n::text("ui.settings").into(),
-            Route::Machines(_) => crate::i18n::text("machines.title").into(),
-            Route::Usage => crate::i18n::text("navigation.usage").into(),
-            Route::Quota => crate::i18n::text("navigation.usage-limits").into(),
+                .unwrap_or(crate::application::i18n::text("navigation.schedule-details").into()),
+            Route::Settings => crate::application::i18n::text("ui.settings").into(),
+            Route::Machines(_) => crate::application::i18n::text("machines.title").into(),
+            Route::Usage => crate::application::i18n::text("navigation.usage").into(),
+            Route::Quota => crate::application::i18n::text("navigation.usage-limits").into(),
             Route::ConversationUsage(_) => {
-                crate::i18n::text("navigation.conversation-usage").into()
+                crate::application::i18n::text("navigation.conversation-usage").into()
             }
         };
         let actions_width = match route {
-            Route::Chat => 400.,
+            Route::Chat => {
+                if pot_ui::design::compact(cx) {
+                    104.
+                } else {
+                    400.
+                }
+            }
             Route::Task(_) => 152.,
             _ => 0.,
         };
@@ -339,13 +362,17 @@ impl Shell {
         } else {
             0.
         };
-        let title_width =
-            (window.viewport_size().width - px(112. + back_width + actions_width)).max(px(80.));
-        let visible_title =
-            pot_ui::pages::single_line_title(&title, 14., title_width, true, window, cx);
+        let title_width = (window.fully_visible_bounds().size.width
+            - px(112. + back_width + actions_width))
+        .max(px(80.));
+        let visible_title = pot_ui::pages::single_line_title(&title, 14., title_width, window, cx);
         TitleBar::new()
             .h(px(ui::TITLEBAR))
-            .pl(px(96.))
+            .pl(px(if super::platform::with(|p| p.native_window()) {
+                96.
+            } else {
+                72.
+            }))
             .pr_4()
             .bg(pot_ui::design::navigation(cx))
             .border_b_0()
@@ -396,15 +423,21 @@ impl Shell {
                             let owner = view.assistant_id().to_owned();
                             el.when_some(
                                 self.space_directory.spaces.get(&view.client_mode),
-                                |el, s| el.child(crate::spaces_ui::badge(s, "titlebar")),
+                                |el, s| {
+                                    el.child(crate::application::spaces_ui::badge(s, "titlebar"))
+                                },
                             )
                             .child(
                                 Button::new("edit-chat-assistant")
                                     .ghost()
                                     .small()
                                     .icon(IconName::Settings)
-                                    .tooltip(crate::i18n::text("spaces.edit-assistant"))
-                                    .accessibility_label(crate::i18n::text("spaces.edit-assistant"))
+                                    .tooltip(crate::application::i18n::text(
+                                        "spaces.edit-assistant",
+                                    ))
+                                    .accessibility_label(crate::application::i18n::text(
+                                        "spaces.edit-assistant",
+                                    ))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.assistants_ui.form_only = true;
                                         this.assistants_ui.select(&owner);
@@ -414,15 +447,17 @@ impl Shell {
                         },
                     )
                     .when(
-                        matches!(self.route(view), Route::Chat) && !self.assistant_list,
+                        matches!(self.route(view), Route::Chat)
+                            && !self.assistant_list
+                            && !pot_ui::design::compact(cx),
                         |el| {
                             el.child(div().max_w(px(240.)).truncate().child(ui::hint(
                                 format!(
                             "{} · {}",
-                            self.native["settings"]["active_name"]
+                            self.host["settings"]["active_name"]
                                 .as_str()
                                 .unwrap_or("Agent"),
-                            self.native["settings"]["active_spec"]["model"]
+                            self.host["settings"]["active_spec"]["model"]
                                 .as_str()
                                 .unwrap_or("")
                         ),
@@ -434,7 +469,7 @@ impl Shell {
                         !self.show_tasks
                             && matches!(self.route(view), Route::Chat | Route::Task(_))
                             && !self.assistant_list,
-                        |el| el.child(crate::usage_ui::entry(view, cx)),
+                        |el| el.child(crate::application::usage_ui::entry(view, cx)),
                     ),
             )
     }
@@ -469,6 +504,22 @@ mod tests {
             Some(Route::Tasks(true))
         );
         assert_eq!(Route::Quota.parent(), Some(Route::Usage));
+    }
+    #[test]
+    fn browser_routes_preserve_the_same_detail_and_overview_semantics() {
+        assert_eq!(Route::Chat.browser_page(true), "assistants");
+        assert_eq!(Route::Chat.browser_page(false), "chat");
+        assert_eq!(Route::Task("task".into()).browser_page(false), "task");
+        assert_eq!(Route::Tasks(false).browser_page(false), "tasks");
+        assert_eq!(Route::Tasks(true).browser_page(false), "schedules");
+        assert_eq!(
+            Route::Schedule("plan".into()).browser_page(false),
+            "schedules"
+        );
+        assert_eq!(
+            Route::ConversationUsage("task".into()).browser_page(false),
+            "conversation-usage"
+        );
     }
     #[test]
     fn root_pages_have_no_back() {

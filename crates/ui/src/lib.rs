@@ -1,4 +1,4 @@
-//! Shared Pot presentation and chat state. Platform shells own I/O and navigation.
+//! The Pot application UI and portable presentation state. Hosts provide platform services.
 #[cfg(feature = "presentation")]
 extern crate gpui_kit as gpui;
 #[cfg(feature = "presentation")]
@@ -12,7 +12,6 @@ pub mod state;
 
 #[cfg(feature = "presentation")]
 pub mod pages;
-#[cfg(feature = "presentation")]
 #[cfg(feature = "presentation")]
 pub mod tasks;
 
@@ -40,3 +39,7 @@ pub mod machines;
 pub mod machine_connections;
 
 pub mod onboarding;
+
+#[cfg(feature = "presentation")]
+pub mod application;
+extern crate self as pot_ui;

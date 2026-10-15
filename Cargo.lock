@@ -6410,6 +6410,7 @@ dependencies = [
  "serde_json",
  "unicode-segmentation",
  "uuid",
+ "web-time",
 ]
 
 [[package]]

@@ -44,7 +44,7 @@ is the single phase progress table.
 
 [Machine labels and composer references](validation/machine-labels-20261012.md).
 
-Current [component boundaries and regression checks](validation/component-boundaries-20261011.md).
+[Component boundaries and regression checks](validation/component-boundaries-20261011.md).
 
 These historical reports establish only their recorded test scope. Do not add new
 validation reports to the repository; report checks and limitations in the task

@@ -60,14 +60,21 @@ keep business components independent of composition. See [Runtime](../crates/run
 for lifecycle and failure semantics.
 
 The App owns its local Control connection and can also connect to a remote Control.
-The current UI selects one conversation Space at a time with a local/remote icon;
-its selection does not affect background Assistant message relay. App alone runs
+The shared UI lists assistants from both Spaces with ownership badges. Opening
+an assistant selects its conversation Space; Tasks and overall Usage aggregate
+both Spaces. This selection does not affect background Assistant message relay. App alone runs
 `pot-relay`, reusing those connections to transfer messages between independent
 Controls. Same-Space delivery stays within Control. Assistant communication has
 no special handoff or task-migration operation: agents coordinate through ordinary
 messages. Protocol types live in `pot-protocol::message`, durable mailboxes in
 `pot-assistant::message`. See [Assistant messages](assistant-messages.md) for the
 single message contract, processing isolation and recovery rules.
+
+`pot-ui::application::Shell` implements the complete product UI for App and Web.
+App supplies native input, system services and local/remote client transports;
+Web supplies browser input, URL history and its web-ui-server transport. Neither
+host implements a separate set of product pages. Web remains bound to its serving
+Control. See [Shared UI](shared-ui.md) for presentation and adapter boundaries.
 Data, drafts, event cursors and cached results are scoped
 by mode/Runtime/owner. Remote failures never select local execution. Resource creation
 UI is deferred. Machines shows lightweight status cards, expandable Host/Sandbox rows and

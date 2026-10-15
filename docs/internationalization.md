@@ -8,19 +8,25 @@ Pot supports English (`en`) and Simplified Chinese (`zh-CN`). Language is a loca
 
 Settings → General starts with Language, above Appearance. Its menu is generated from the catalog files and their `language.name` values, with the current language checked. Selecting one saves it immediately and refreshes Rust views, Kit components, native menus/tooltips/accessibility names/composer labels, and the embedded desktop. Changing macOS language later does not override the saved choice.
 
-Swift owns the preference. The existing bridge exposes `settings.locale`; Rust synchronizes the shared rust-i18n locale through `gpui_kit::component::set_locale`. Startup uses the native preference before creating input entities. Language changes update input placeholders without resetting values, focus, configuration revisions, secrets, navigation, scroll positions, or chat drafts. They never restart the backend or desktop.
+The App stores its preference in Swift UserDefaults; Web uses browser local storage.
+Each adapter exposes `settings.locale` to the same `pot-ui` shell, which updates
+its presentation catalog and Kit controls through `gpui_kit::component::set_locale`.
+Startup uses the saved preference before creating input entities. Language changes
+update input placeholders without resetting values, focus, configuration revisions,
+secrets, navigation, scroll positions, or chat drafts. They never restart the
+backend or desktop.
 
 ## Translation resources
 
 `crates/app/locales/*.json` are the source of truth. Builds discover the supported languages from these files; each catalog supplies its own `language.name` for the picker. Stable semantic keys separate text from code. English is the fallback.
 
 - Rust static labels use `i18n::text`. All locale catalogues are cached once for controls requiring static references.
-- `crates/app/build.rs` generates checked Rust formatting macros from `localization-format-keys.json`. All generated language branches use Rust `format!`, so argument counts/types remain compiler checked. `localization-plurals.json` identifies count arguments and `.one` translations for English singular forms. Parameters are evaluated once.
-- The same build step generates the Swift dictionary. `L.text` and `L.format` translate native UI. Numbered native parameters are substituted in one pass; braces inside credentials, identifiers, diagnostics, or user text are literal. `LocalizedMessage` captures a notice's key/arguments so saved results follow live language changes.
+- `crates/ui/build.rs` generates checked Rust formatting macros for shared presentation from `localization-format-keys.json`; `crates/app/build.rs` does the same for native client notices. All generated language branches use Rust `format!`, so argument counts/types remain compiler checked. `localization-plurals.json` identifies count arguments and `.one` translations for English singular forms. Parameters are evaluated once.
+- The App build also generates the Swift dictionary. `L.text` and `L.format` translate native services. Numbered native parameters are substituted in one pass; braces inside credentials, identifiers, diagnostics, or user text are literal. `LocalizedMessage` captures a notice's key/arguments so saved results follow live language changes.
 - `scripts/localize-web` validates catalogs and builds `desktop/index.template.html` and `crates/sandbox-images/linux/default/index.template.html` into `index.html`, the shared `desktop/i18n.js`, and page-specific `locales.json`. Templates retain English fallback labels and translation keys; dictionaries contain only keys used by that page. Generated assets live in `.local/web/{desktop,sandbox}`, never in tracked HTML. `--check` validates sources without modifying them.
 - Runtime's Cargo build generates and embeds its desktop resources in `OUT_DIR`, so both App and CLI receive fresh assets even with a direct Cargo build. The desktop page and its relative resource routes share ticket authorization and no-store headers. Python 3 is required by this generation step.
 - App preparation, Apple VM image construction and Podman image construction copy the generated Sandbox assets. The broker serves the external resources next to the page and validates locale writes against their supported languages. Rebuild the image to distribute changes.
-- Native Swift resources, shared Rust catalogs, the App language picker and Mobile catalog generation all discover the same locale files. Browser matching uses exact tags before language-base fallback. Translation loading completes before desktop initialization; a native language selection made during loading is preserved. Live updates leave the noVNC connection and clipboard value intact.
+- Native Swift resources, shared Rust catalogs, the shared language picker and browser catalog generation all discover the same locale files. Browser matching uses exact tags before language-base fallback. Translation loading completes before desktop initialization; a native language selection made during loading is preserved. Live updates leave the noVNC connection and clipboard value intact.
 
 To add a language, add a complete `crates/app/locales/<BCP-47-tag>.json` with the same keys/placeholders and its own `language.name`, then rebuild. Existing count templates support `.one` and the default form; languages needing additional plural categories require extending that contract. Web Push's built-in generic notification text currently remains English/Chinese.
 

@@ -1,164 +1,105 @@
-# Shared native and browser UI
+# Shared App and browser UI
 
-The `pot-ui` crate holds transport-independent page behavior and GPUI presentation.
-Native App and Web use shared Chat, Tasks, Machines and Usage components.
-Navigation chrome, native settings, Schedules, the Swift composer, desktop viewer
-and browser authentication remain platform adapters.
+`pot-ui` implements the complete GPUI application. App and Web instantiate the
+same `application::Shell`; neither host implements product pages or navigation
+chrome. The current App design is the visual and interaction baseline.
 
-The workspace pins `gpui-kit` 0.7.3 with its `gpui-fast` feature. Native App,
-shared presentation and Web/WASM inherit that dependency, selecting GPUI Fast
-for the core, platform, components and assets through the Kit facade. Existing
-`gpui_kit` imports (including the local `gpui` alias) therefore use Fast types.
-Kit still compiles upstream `gpui-pre` dependencies because its Cargo features
-are additive; their presence in the lockfile does not select the upstream backend.
+```text
+                         pot-ui
+      +-----------------------------------------------+
+      | Shell: titlebar, icon rail, parent navigation  |
+      | Assistants | Chat | Tasks | Schedules          |
+      | Machines   | Usage | General / AI / Task       |
+      | Composer frame, drafts, reference completion   |
+      | Configuration state, request ownership, retry  |
+      +-----------------------+-----------------------+
+                              | Platform / Driver
+                  +-----------+-----------+
+                  |                       |
+             Native App                Browser
+       AppKit text editing/IME     GPUI textarea + browser IME
+       in-process / remote IO      same-origin fetch + SSE
+       native window / Finder      URL history / downloads
+       local Runtime preferences   installation / push / login
+                  |                       |
+           local + remote Spaces   fixed web-ui-server
+                  |                       |
+                  +-------- Control ------+
+```
 
-## Boundaries
+## Presentation
 
-| Shared module | Responsibility |
-| --- | --- |
-| `state` | Pending request identity, same-ID retry, authoritative snapshot reconciliation, conversation-bound receipts, editor draft ownership and send eligibility |
-| `pages` | Shared geometry, typography, cards, grouped choices, tooltips, icons and action dispatch |
-| `tasks` / `page_state` | Task rows, status, search, filters, empty/error states, counts and authoritative pagination; viewing a Sandbox does not alter its execution default |
-| `machines` / `machine_state` | Machine cards with Host/Sandbox status, exact-location task filters and capability-controlled desktop actions |
-| `usage` / `usage_state` | Statistics, charts, grouping, pagination, quotas, tool output, allowance editing and exact K/M input parsing |
-| `permissions` | Exact Host operation approval cards shared by native and Web; Machines configures machine-wide execution policy and resource budgets |
-| `chat` | User/assistant styling, Markdown, tool folding/status, copy actions, task-report links and message lifecycle labels |
-| `markdown` | Stable text IDs, parsing/selection, code/link styling and HTTP(S) link dispatch |
-| `design` | Existing Pot theme tokens and compact-viewport policy |
-| `localization` | Locale-explicit shared catalogs and generated-wrapper translation; canonical user/model text remains literal |
+`application` owns root views, page entities, navigation caches, configuration
+state, assistant and machine editors, titlebar content, notifications and the
+composer. Existing `chat`, `tasks`, `machines`, `usage`, `permissions`, `resources`
+and Markdown components remain inside the same crate. There is no separate UI
+crate for either target.
 
-GPUI presentation is an opt-in `presentation` feature. Page transitions, allowance parsing and localization stay
-portable and require no GPUI, Swift, network client or browser API, including in
-Linux backend CI. Native and WASM clients enable presentation for their targets.
-The shared layer receives protocol data and dispatches actions; it never fetches
-an endpoint, reads a native token, retrieves a browser Token or changes OS settings.
+The shared shell uses the App's 56-pixel icon rail and 44-pixel titlebar. Page
+columns, cards, typography, message rows and the 760-pixel composer follow App
+geometry. Below 900 pixels, the same pages use compact spacing and controls;
+density depends on viewport width, not the hosting platform. Native titlebars
+reserve space for macOS window controls. GPUI owns browser visible bounds and
+safe areas.
 
-App supplies in-process/HTTP request and SSE transports, native navigation/history, native file-save actions,
-its running-task summary extension, AppKit/Swift input and editor storage. Mobile
-supplies same-origin fetch/cookies, browser history, GPUI Textarea editor entities,
-Token/PWA and the mobile navigation shell. Browser JS delegates pending
-request construction, receipt validation and snapshot reconciliation to Rust.
-Native keeps its existing automatic same-ID transport retries; Mobile keeps
-explicit retry after an uncertain send. These are adapter policies around the
-same request identity and receipt rules.
+AppKit supplies text, byte-based caret position, selection/composition status
+and editing operations. It does not render the rail, composer frame, send button
+or completion menu. The browser uses a GPUI textarea in the same frame. Drafts
+are scoped by mode, Control identity and conversation. Matching authoritative
+receipts clear only the submitted draft. Reference completion uses the same
+catalog, query rules, menu and keyboard behavior on both hosts; marked text is
+left to the input method.
 
-## Desktop appearance contract
+Native and browser builds pin `gpui-kit` 0.7.3 with `gpui-fast`. Both hosts load
+the shared application asset source and design tokens. The sidebar Companion
+uses transparent idle/cooking exports from the existing native vector master;
+`mise run icons` regenerates those shared assets. Platform font resolution
+and operating-system window controls remain host responsibilities.
+Provider marks and their attribution live in `crates/ui/assets/agents`; both
+targets embed them through the shared page components.
 
-The message element IDs, geometry, padding, colors, Markdown styles, copy-row
-reservation and tool labels were moved from App without changing the desktop
-layout. Finder and running-task elements attach through native extensions.
-The existing Swift composer is intentionally retained so its IME, sizing,
-shortcuts and appearance do not change during this migration.
+## Platform boundary
 
-On narrow browser viewports the same renderer bounds message width to the
-available column and shows copy actions without hover. Mobile shares catalogs
-with an explicit locale, so changing its language cannot change Mac preferences.
-Its reduced-motion preference is passed to GPUI. Embedded chat icons avoid an
-external CDN dependency. Physical phone/IME/accessibility qualification remains
-separate from emulated viewport observations.
+`Platform` supplies projections, capabilities and native/browser services;
+`Driver` dispatches user intents to the host's existing client transport.
+`pot-ui` has no Server, HTTP client, browser API, filesystem or Swift dependency.
+GPUI presentation remains opt-in through the `presentation` feature. Portable
+chat, permission, task, machine and usage state remains available without GPUI.
 
-Browser Sandbox has a desktop launch action; the scoped viewer opens in a separate
-tab. Execution target administration and Usage editing remain owner CLI-only.
-Desktop authority comes from login-bound Server tickets, not shared components.
-Shared locale formatting uses the existing plural catalog and decimal precision,
-while leaving parameter contents literal. Allowance saves read the current
-editor at click time, avoiding a stale value captured during rendering.
+App aggregates local and remote Spaces. Every assistant, task, schedule and
+notification retains its Control and owner identity. Web connects to exactly
+one Control through its configured web-ui-server. Both project those sources
+into the same page data and renderers. Viewing a machine never changes an
+execution default. Offline inventory and late-response identity fences remain
+part of the client contract.
 
-See [chat validation](validation/shared-ui-20261007.md) and
-[page migration validation](validation/shared-pages-20261007.md).
+General settings show the same language and appearance controls. Capabilities
+expose native resource-cache/local Runtime services or browser installation,
+notifications and login services in the common settings page. Local execution
+limits remain a local Runtime service; browser and remote configuration use
+Control APIs. Browser desktop launch uses authenticated viewer tickets; App
+uses its available native transport.
 
-## Multiple assistants
+## Configuration and asynchronous actions
 
-App and Web share the assistant name entry, selector/new assistant form and
-name/AGENTS.md editor. Drafts are retained by owner and saves use definition and
-content revisions. Shared task rows carry assistant identity and group matching
-Tasks beneath assistant names. Native and browser transports capture the owner
-before asynchronous writes; late snapshots are discarded on owner changes.
-App navigation history includes Runtime and owner identity. The Server exposes
-bounded in-process and HTTP/HTTPS client adapters; Control membership, client transports and App mode isolation are implemented.
-Remote desktop transport remains deferred.
+AI connections, profile selection, routing and provider allowances share a
+configuration state machine. Hosts execute its scoped API requests and return
+replies tagged with request and Control/assistant context. Replies from another
+context cannot replace current configuration or drafts. Configuration loading
+is independent of response order. Secrets remain transient request inputs.
 
-## Machines
+A save whose transport outcome is uncertain retains its original body and
+request ID for explicit retry. An authoritative rejection permits correction.
+Saving or checking configuration does not send a model message. Send identity,
+receipt reconciliation and conversation events use the same portable chat
+state; automatic native retries and explicit browser retries are transport
+policies exposed through the shared composer.
 
-`pot-ui::machines` supplies top-level machine cards and expandable Host/Sandbox
-rows. View selection is separate from execution defaults; cached offline inventory
-remains visible. View Tasks filters by the exact Runtime and target before pagination.
-Only implemented client transports expose desktop entries. Resource creation is
-API-only; technical management stays in Chat. No plugin/session/artifact panels or
-management shortcut buttons are present.
+The authenticated browser boundary permits the exact configuration, allowance
+and schedule routes used by these pages. Execution, terminals, resource
+provisioning and Control administration remain outside that allowlist. Tokens,
+cookies, installation, notifications and URL history belong to the browser
+adapter, not product views.
 
-App configures one Control and switches local/remote with one icon. Web stays fixed
-to its configured Control. Transport captures mode/Runtime/owner before each request
-and rejects late results after navigation changes.
-
-## Responsive browser shell
-
-Web selects its shell from the visible viewport width: below 900 CSS pixels,
-Chat/Tasks/Machines/More use bottom navigation; at 900 pixels and above, a 176-pixel
-sidebar also exposes Usage and Schedules directly. The selected destination is
-highlighted. Task detail includes a return-to-tasks action without resetting the
-list query. Content and composer share an 820-pixel maximum column; page density
-and task metadata adapt to the available space.
-
-The shell uses GPUI's fully visible bounds, including safe-area and visual-viewport
-changes, instead of the browser layout height alone. Under 500 pixels of visible
-height the composer reduces from 80 to 48 pixels. Content scrolls independently
-from navigation and input. Existing editor entities and owner-bound drafts survive
-resize and page changes. Canvas safe areas are handled once by GPUI; the HTML
-login form applies its own CSS safe-area padding.
-
-See [responsive browser validation](validation/responsive-web-20261012.md) for
-emulated desktop/phone coverage and physical-device limits.
-
-## Composer references
-
-Both composers complete `/machine:`, `/tag:` and `/skill:` references from the
-selected assistant's Control catalog. Type `/` to search, use Up/Down and Enter to
-insert, Escape to dismiss, or click/tap a result. Selection inserts editable text;
-Enter accepting a result does not send the message. Input-method composition is
-left to the platform. Drafts and exact send retries include reference text.
-See [Agent context](agent-context.md#message-references-and-machine-labels) for scope.
-
-The native Machines page connects only to Control through the Cloud section's
-Connect server entry. It has no duplicate global Connect machine button. Each
-remote Control group offers Add execution machine for Control-owned invitations
-and membership management. Runner enrollment remains an outbound join to Control;
-the App never connects directly to a Runner. The server address form contains only
-Control connection fields, and backend validation rejects non-Control endpoints.
-
-Machines shows each machine's labels. Edit labels lives inside each machine's
-settings disclosure and opens a dedicated sheet for that machine. Label and
-membership commands target the selected group's backend, independently of the
-active chat location. The label sheet renders labels as removable
-chips; spaces, commas and Enter commit a draft, duplicates and empty labels are ignored,
-and Backspace on an empty draft removes the last chip. Pasted lists use the same
-delimiters. Blur and Save commit any remaining draft, and explicit Save persists the
-machine's labels. Nonempty drafts offer matching labels from the machine directory
-and standard `task-runner`, `desktop`, `macos`, `linux` and `windows` labels, excluding
-already selected labels. Prefix matches rank first; Up/Down and Enter select a
-suggestion, Escape dismisses suggestions, and custom labels remain supported.
-IME composition is not tokenized until committed. Private CA input is
-under a collapsed Advanced connection options disclosure; folding it preserves the PEM.
-Permissions and resource limits are
-collapsed behind the machine settings disclosure. Resource creation stays API-only.
-
-## Event-driven updates
-
-Native and Web use coalesced Control invalidations and conversation SSE instead of
-healthy-state UI polling. See [UI events](ui-events.md) for scope, cursor/snapshot
-ordering, cancellation, recovery and the remaining backend lifecycle monitor.
-
-## Machine execution settings
-
-Machines expose **Run inside a sandbox** and **Run directly on this machine
-(Host)**, with separate Host options **Ask before each operation**, **Allow
-directly**, and **Never allow**. Copy explains that Host operations use the Runtime
-account and can change machine files/configuration. Machine pages do not display
-assistant access lists or Sandbox assignments. The shared development environment remains visible when stopped. Machine
-settings offer start/stop; active work disables stopping and resource changes. Host approval cards display the full
-operation and offer a single-operation decision rather than permanent grants.
-
-Start/stop uses owner-only `POST /api/v1/sandboxes/shared` with `request_id`,
-`runtime_id` and `action` (`start` or `stop`). The authenticated Web boundary
-allows only this narrow endpoint; arbitrary creation, mounts and rebuild remain
-native owner administration. Remote actions use signed, durable lifecycle receipts.
+See [multi-Space behavior](multi-space-ui.md), [UI specification](ui-ux-design.md),
+[event updates](ui-events.md) and [deployment](deployment.md).

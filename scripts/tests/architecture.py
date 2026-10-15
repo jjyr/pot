@@ -13,6 +13,17 @@ def dependencies(component):
 
 
 class ComponentBoundaries(unittest.TestCase):
+    def test_app_and_browser_mount_one_shared_product_root(self):
+        for host in ("app", "web-ui"):
+            source = "\n".join(
+                p.read_text() for p in (ROOT / "crates" / host / "src").rglob("*.rs")
+            )
+            self.assertIn("Shell::new(window, cx)", source)
+            self.assertNotIn("impl Render for", source)
+            self.assertNotIn("struct Mobile", source)
+            self.assertNotIn("mod schedules_ui", source)
+        self.assertFalse(dependencies("ui") & {"pot-server", "reqwest", "tokio", "wasm-bindgen"})
+
     def test_domain_components_do_not_depend_on_composition(self):
         for component in (
             "assistant",

@@ -7,7 +7,7 @@ transport and network protection, including Tailscale. HTTP itself does not
 encrypt credentials or content.
 
 Pot has one backend with two hosts: `pot serve` runs it independently; the macOS
-App owns it inside its own process. App requests, including the Swift settings
+App owns it inside its own process. App requests, including the native configuration
 adapter, dispatch in memory. App does not connect to a daemon or management
 socket. Closing App shuts down its local Control and Runner before the Sandbox Helper.
 Provider credentials are configured on Control and encrypted in SQLite; see
@@ -481,7 +481,7 @@ cache is provided.
 
 ## Add Pot to the Home Screen
 
-After configuring the access Token, browser **More** provides **Add to Home Screen**.
+After configuring the access Token, browser **Settings → General** provides **Add to Home Screen**.
 The Token configuration page has no installation action. Installation does not request notification permission.
 The manifest uses a stable origin-scoped app ID, standalone display and dedicated
 192/512 px icons. iOS also receives Apple Home Screen metadata and its touch icon.
@@ -492,8 +492,9 @@ Pot Companion. `mise run icons` generates both the rounded Mac icon
 (`PotHomeScreen.png`) so mobile operating systems can apply their own masks.
 `scripts/build-web-ui` produces the touch icon and 192/512 px `any maskable` icons
 from that master. Versioned icon URLs distinguish this design from previously
-installed icons without changing the manifest's stable application ID. Mobile's
-GPUI header embeds the matching Mac image. README uses the same application icon.
+installed icons without changing the manifest's stable application ID. The shared
+GPUI rail uses transparent idle/cooking Companion assets from the same vector
+master in App and Web. README uses the application icon.
 
 On Android Chrome/Edge or another supporting browser, the button opens the
 browser's installation prompt when available. If it is unavailable or dismissed,

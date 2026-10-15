@@ -11,6 +11,7 @@ pub fn set_locale(locale: &str) -> bool {
     true
 }
 
+#[cfg(test)]
 pub fn is_chinese() -> bool {
     &*rust_i18n::locale() == "zh-CN"
 }
@@ -18,12 +19,15 @@ pub fn is_chinese() -> bool {
 pub fn text(key: &str) -> &'static str {
     pot_ui::localization::Catalog::new(&rust_i18n::locale()).text(key)
 }
+#[cfg(test)]
 pub fn matches_message(key: &str, value: &str) -> bool {
     pot_ui::localization::Catalog::new(&rust_i18n::locale()).matches_message(key, value)
 }
+#[cfg(test)]
 pub fn message(value: &str) -> String {
     pot_ui::localization::Catalog::new(&rust_i18n::locale()).message(value)
 }
+#[cfg(test)]
 pub fn report(value: &str) -> String {
     pot_ui::localization::Catalog::new(&rust_i18n::locale()).report(value)
 }
