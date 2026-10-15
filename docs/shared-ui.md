@@ -50,16 +50,22 @@ receipts clear only the submitted draft. Reference completion uses the same
 catalog, query rules, menu and keyboard behavior on both hosts; marked text is
 left to the input method.
 
-Native and browser builds pin `gpui-kit` 0.7.3 with `gpui-fast`. Both hosts load
+Native and browser builds pin `gpui-kit` 0.7.3 with the GPUI Fast Git fork below. Both hosts load
 the shared application asset source and design tokens. The sidebar Companion
 uses transparent idle/cooking exports from the existing native vector master;
 `mise run icons` regenerates those shared assets. Platform font resolution
 and operating-system window controls remain host responsibilities.
 
-`vendor/gpui-fast` contains the crates.io 0.1.7 sources with one clock fix:
-wheel hover suppression uses `scheduler::Instant`, which supports WASM. The
-upstream `std::time::Instant` panics on the first browser wheel event and stops
-input dispatch. Keep the Cargo patch until an upstream release includes this fix.
+The workspace patches GPUI Kit's `gpui-pre-*` dependencies to the compatibility
+crates in [`jjyr/gpui-fast` at `1beaef379aa91b0dbd4bacf87b66617f65f4c1c0`](https://github.com/jjyr/gpui-fast/commit/1beaef379aa91b0dbd4bacf87b66617f65f4c1c0).
+These re-export one GPUI Fast core for both hosts. The commit uses the WASM-safe
+`scheduler::Instant` for wheel hover suppression and profiling; the standard
+clock can panic during browser wheel dispatch and stop input handling.
+Follow the fork's `compat/README.md`; its Git development package names differ
+from the crates.io `gpui-fast` releases, so the published backend feature is not
+enabled. Crates using its macros alias `gpui-kit` as `gpui` at their root.
+`Cargo.lock` pins the Git source, and its hash participates in Web build cache
+invalidation. Keep the overrides until an upstream release includes the fix.
 
 Provider marks and their attribution live in `crates/ui/assets/agents`; both
 targets embed them through the shared page components.

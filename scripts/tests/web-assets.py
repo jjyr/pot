@@ -39,10 +39,10 @@ class WebAssets(unittest.TestCase):
     def test_browser_error_reporting(self):
         subprocess.run(["node", ROOT / "scripts/tests/web-errors.js"], check=True)
 
-    def test_vendored_dependency_changes_invalidate_browser_assets(self):
+    def test_dependency_pin_changes_invalidate_browser_assets(self):
         names = package.sources()
-        patched_source = "vendor/gpui-fast/src/fast/layers/hover_freeze.rs"
-        self.assertIn(patched_source, names)
+        self.assertIn("Cargo.toml", names)
+        self.assertIn("Cargo.lock", names)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in names:
@@ -51,12 +51,16 @@ class WebAssets(unittest.TestCase):
                 path.write_bytes(b"original")
             with patch.object(package, "ROOT", root):
                 before = package.sources()
-                (root / patched_source).write_bytes(b"patched clock")
-                after = package.sources()
-            self.assertEqual(before.keys(), after.keys())
-            self.assertEqual(
-                {name for name in before if before[name] != after[name]}, {patched_source}
-            )
+                for changed in ("Cargo.toml", "Cargo.lock"):
+                    with self.subTest(changed=changed):
+                        path = root / changed
+                        path.write_bytes(b"new dependency revision")
+                        after = package.sources()
+                        self.assertEqual(before.keys(), after.keys())
+                        self.assertEqual(
+                            {name for name in before if before[name] != after[name]}, {changed}
+                        )
+                        path.write_bytes(b"original")
 
     def test_browser_scripts_are_all_packaged(self):
         scripts = {path.name for path in (ROOT / "crates/web-ui/web").glob("*.js")}

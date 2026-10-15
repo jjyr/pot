@@ -47,7 +47,6 @@ fn main() {
         "crates/protocol/src",
         "crates/localization/src",
         "crates/app/locales",
-        "vendor/gpui-fast",
         "desktop",
     ] {
         if root.join(name).exists() {

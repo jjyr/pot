@@ -61,7 +61,6 @@ def sources():
         "crates/protocol",
         "crates/localization",
         "crates/app/locales",
-        "vendor/gpui-fast",
         "desktop",
     ]:
         paths.extend(
