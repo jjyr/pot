@@ -753,7 +753,7 @@
   "machines.runtime": "Runtime",
   "machines.sandbox-unavailable": "This sandbox is unavailable. Check the installed provider and resources.",
   "machines.connections": "Connect machine",
-  "machines.address": "HTTPS address",
+  "machines.address": "HTTP / HTTPS address",
   "main.waiting-for-remote-machine": "Waiting for remote machine",
   "backend.remote-waiting-receipt": "Waiting for the remote machine to reconcile the original operation; it will not be replayed",
   "backend.remote-unconfirmed-receipt": "Remote operation result needs reconciliation; no replay. You can cancel the task",

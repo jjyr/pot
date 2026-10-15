@@ -29,10 +29,6 @@ impl AccessConfig {
         let bind: std::net::SocketAddr = std::env::var("POT_ACCESS_BIND")
             .unwrap_or_else(|_| "127.0.0.1:17701".into())
             .parse()?;
-        ensure!(
-            origin.scheme() == "https" || bind.ip().is_loopback(),
-            "Local HTTP must bind loopback"
-        );
         Ok(Some(Self {
             origin,
             bind,
@@ -54,9 +50,8 @@ impl AccessConfig {
     }
     pub fn validate_origin(origin: &Url) -> Result<()> {
         ensure!(
-            (origin.scheme() == "https" && origin.domain().is_some())
-                || (origin.scheme() == "http" && origin.host_str() == Some("localhost")),
-            "Remote access requires a stable HTTPS domain; HTTP is allowed only on localhost"
+            matches!(origin.scheme(), "http" | "https") && origin.host_str().is_some(),
+            "Web origin must use HTTP or HTTPS with a hostname or IP address"
         );
         ensure!(
             origin.username().is_empty()

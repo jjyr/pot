@@ -18,7 +18,7 @@
 | pot-runtime | Runtime composition, shared execution manager and component lifecycle |
 | pot-runtime-execution | Destination-local Agent invocation, queue, concurrency, cancellation and execution tracing |
 | pot-tool-executor | Production Host/guest commands, patches and process sessions |
-| pot-server | Standalone/App adapters, authenticated APIs, Control and Web transport |
+| pot-server | Standalone/App adapters, authenticated APIs, Control transport and web-ui-server browser API adapter |
 | pot-protocol | Public client DTOs, Assistant message contracts and API constants |
 | pot-sandbox | Definitions, lifecycle, scopes, leases, receipts and recovery |
 | pot-sandbox-linux-podman | Rootless Linux Podman lifecycle and guest transport |

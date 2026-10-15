@@ -185,9 +185,11 @@ Drafts, caches and cursors are scoped by Control/assistant. Remote failure never
 selects local execution. Assistant message relay operates independently of the
 selected assistant; see [Assistant messages](assistant-messages.md).
 
-Web UI is explicitly enabled by `pot serve --ui --control URL` and remains fixed
-to that Control. It has no local/remote switch. App has no Web UI/Tailscale hosting
-settings. Browser Token controls belong to the standalone host; see
+web-ui-server is explicitly enabled by `pot serve --ui --control URL`. It serves
+Web UI, authenticates browser clients and forwards browser APIs to that fixed
+Control. Browser access and the backend Control connection independently use HTTP
+or HTTPS. Web UI has no local/remote switch. App has no Web UI/Tailscale hosting
+settings. Browser Token controls belong to web-ui-server; see
 [deployment](deployment.md).
 
 ### Interaction feedback

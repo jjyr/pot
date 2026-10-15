@@ -38,7 +38,7 @@ impl Server {
     async fn bind_mode(config: ServerConfig, embedded: bool) -> Result<Self> {
         // Validate the destination and bind listeners before initializing product data.
         let web_router = match &config.web_control {
-            Some(control) => Some(crate::web_control::connect(control).await?),
+            Some(control) => Some(crate::web_ui_server::connect(control).await?),
             None => None,
         };
         let listener = tokio::net::TcpListener::bind(&config.bind).await?;
@@ -64,23 +64,16 @@ impl Server {
             "Mobile access administration requires a loopback native listener"
         );
         let access_listener = if let Some(ref cfg) = access_config {
-            let tls = if cfg.origin.scheme() == "https" {
+            // Public Origin describes browser access; certificate files select listener TLS.
+            // A reverse proxy may expose HTTPS while this listener uses HTTP.
+            if !cfg.private_key.as_os_str().is_empty() {
                 use std::os::unix::fs::PermissionsExt;
                 anyhow::ensure!(
                     std::fs::metadata(&cfg.private_key)?.permissions().mode() & 0o077 == 0,
                     "TLS private key must not be accessible to group/others"
                 );
-                let _ = rustls::crypto::ring::default_provider().install_default();
-                Some(
-                    axum_server::tls_rustls::RustlsConfig::from_pem_file(
-                        &cfg.certificate,
-                        &cfg.private_key,
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
+            }
+            let tls = crate::tls::config(&cfg.certificate, &cfg.private_key).await?;
             let listener = std::net::TcpListener::bind(cfg.bind)?;
             listener.set_nonblocking(true)?;
             Some((listener, tls))

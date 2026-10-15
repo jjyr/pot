@@ -39,7 +39,7 @@ impl ServerConfig {
     }
 }
 
-/// Explicit Web UI destination. The credential is never included in Debug output.
+/// web-ui-server backend Control destination. The credential is never included in Debug output.
 #[derive(Clone)]
 pub struct WebControlConfig {
     pub url: String,

@@ -53,13 +53,8 @@ impl RemoteClient {
     pub fn with_ca(endpoint: &str, token: String, ca_pem: Option<&str>) -> Result<Self> {
         let endpoint = url::Url::parse(endpoint)?;
         ensure!(
-            endpoint.scheme() == "https"
-                || (endpoint.scheme() == "http"
-                    && matches!(
-                        endpoint.host_str(),
-                        Some("localhost" | "127.0.0.1" | "[::1]")
-                    )),
-            "Remote clients require HTTPS or loopback HTTP"
+            matches!(endpoint.scheme(), "http" | "https") && endpoint.host_str().is_some(),
+            "Remote client address must be an HTTP or HTTPS origin"
         );
         ensure!(
             endpoint.username().is_empty()
@@ -164,12 +159,19 @@ mod tests {
     #[tokio::test]
     async fn remote_adapter_rejects_unsafe_origins_and_paths() {
         for origin in [
-            "http://remote.example",
+            "ftp://remote.example",
             "https://user:secret@example.com",
             "https://example.com/path",
             "https://example.com/?token=x",
         ] {
             assert!(RemoteClient::new(origin, "test".into()).is_err());
+        }
+        for origin in [
+            "http://remote.example",
+            "http://100.64.0.1:19443",
+            "https://example.com",
+        ] {
+            assert!(RemoteClient::new(origin, "test".into()).is_ok());
         }
         let client = RemoteClient::new("https://example.com", "test".into()).unwrap();
         for path in [

@@ -1,4 +1,4 @@
-//! Fixed Control transport for explicit Web hosting. No local fallback or browser credentials.
+//! web-ui-server backend adapter: fixed Control transport, server-held credentials and API relay.
 use crate::{RemoteClient, WebControlConfig};
 use anyhow::{Result, ensure};
 use axum::{

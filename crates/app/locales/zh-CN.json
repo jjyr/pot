@@ -753,7 +753,7 @@
   "machines.runtime": "运行服务",
   "machines.sandbox-unavailable": "此沙箱不可用，请检查已安装的 Provider 和资源。",
   "machines.connections": "连接机器",
-  "machines.address": "HTTPS 地址",
+  "machines.address": "HTTP / HTTPS 地址",
   "main.waiting-for-remote-machine": "等待远程机器",
   "backend.remote-waiting-receipt": "等待远程机器连接并核对原操作；不会重放",
   "backend.remote-unconfirmed-receipt": "远程操作结果待核对；不会重放，可取消任务",

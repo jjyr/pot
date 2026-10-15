@@ -6,7 +6,7 @@ is the single phase progress table.
 
 | Topic | Read |
 |---|---|
-| Deployment, resource APIs, Control membership and Web access | [Deployment](deployment.md) |
+| Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
 | Build, test and release | [Development](development.md) |
 | Delivered scope and remaining work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
