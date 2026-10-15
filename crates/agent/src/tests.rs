@@ -1244,21 +1244,26 @@ async fn cancelling_two_shell_sessions_cleans_both_process_groups() {
             .unwrap();
         ids.push(result["session_id"].as_str().unwrap().to_owned());
     }
-    for _ in 0..100 {
-        if f.dir.join("pid-0").exists() && f.dir.join("pid-1").exists() {
-            break;
+    let pids = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let pids = (0..2)
+                .map(|i| {
+                    std::fs::read_to_string(f.dir.join(format!("pid-{i}")))
+                        .ok()?
+                        .trim()
+                        .parse::<i32>()
+                        .ok()
+                        .filter(|pid| *pid > 0)
+                })
+                .collect::<Option<Vec<_>>>();
+            if let Some(pids) = pids {
+                break pids;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    let pids = (0..2)
-        .map(|i| {
-            std::fs::read_to_string(f.dir.join(format!("pid-{i}")))
-                .unwrap()
-                .trim()
-                .parse::<i32>()
-                .unwrap()
-        })
-        .collect::<Vec<_>>();
+    })
+    .await
+    .expect("Both shells must publish their PIDs before cancellation");
     f.feedback.cancelled.store(true, Ordering::SeqCst);
     f.feedback.changed.notify_waiters();
     processes.shutdown().await.unwrap();
