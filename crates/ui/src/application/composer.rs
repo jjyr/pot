@@ -145,8 +145,9 @@ impl Shell {
         let view = self.client.view.lock().unwrap().clone();
         let native = platform::with(|p| p.capabilities().external_text_input);
         let height = self.composer.height;
+        let touch = design::touch(cx);
         let width = (f32::from(window.fully_visible_bounds().size.width)
-            - 120.
+            - (design::sidebar_width(cx) + if design::mobile(cx) { 32. } else { 64. })
             - self.assistant_pane_width(cx))
         .clamp(0., 760.);
         let retry = view.pending
@@ -173,7 +174,7 @@ impl Shell {
         let menu = self.completion_menu(window, cx);
         div()
             .absolute()
-            .left(px(56. + self.assistant_pane_width(cx)))
+            .left(px(design::sidebar_width(cx) + self.assistant_pane_width(cx)))
             .right_0()
             .bottom(px(24.))
             .flex()
@@ -193,10 +194,10 @@ impl Shell {
                             div()
                                 .absolute()
                                 .left(px(18.))
-                                .right(px(50.))
+                                .right(px(if touch { 62. } else { 50. }))
                                 .truncate()
-                                .top(px(12.))
-                                .text_size(px(15.))
+                                .top(px(if touch { 18. } else { 12. }))
+                                .text_size(px(if touch { 16. } else { 15. }))
                                 .text_color(cx.theme().muted_foreground)
                                 .child(i18n::text(if view.selected == "new" {
                                     "bridge.describe-the-goal-of-a-new-task"
@@ -265,16 +266,16 @@ impl Shell {
                                 ))
                                 .absolute()
                                 .left(px(8.))
-                                .right(px(50.))
+                                .right(px(if touch { 62. } else { 50. }))
                                 .top(px(8.))
                                 .bottom(px(8.))
                                 .child(
                                     Textarea::new(&self.composer.input)
                                         .small()
-                                        .line_height(px(18.))
+                                        .line_height(px(if touch { 20. } else { 18. }))
                                         .appearance(false)
                                         .bordered(false)
-                                        .text_size(px(15.))
+                                        .text_size(px(if touch { 16. } else { 15. }))
                                         .aria_label(i18n::text("mobile.message"))
                                         .h(px(height - 16.)),
                                 ),
@@ -283,8 +284,8 @@ impl Shell {
                     .child(
                         Button::new("composer-submit")
                             .primary()
-                            .w(px(32.))
-                            .h(px(32.))
+                            .w(px(if touch { 44. } else { 32. }))
+                            .h(px(if touch { 44. } else { 32. }))
                             .rounded_full()
                             .absolute()
                             .right(px(8.))
@@ -492,20 +493,30 @@ impl Shell {
 impl Shell {
     pub(super) fn layout_composer(&mut self, window: &mut Window, cx: &App) {
         let visible = window.fully_visible_bounds();
-        let width =
-            (f32::from(visible.size.width) - 120. - self.assistant_pane_width(cx)).clamp(0., 760.);
+        let width = (f32::from(visible.size.width)
+            - (design::sidebar_width(cx) + if design::mobile(cx) { 32. } else { 64. })
+            - self.assistant_pane_width(cx))
+        .clamp(0., 760.);
+        let touch = design::touch(cx);
+        let font_size = px(if touch { 16. } else { 15. });
         let editor = self.editor_snapshot(cx);
         let text: SharedString = editor.text.into();
         let style = TextStyle {
             font_family: cx.theme().font_family.clone(),
-            font_size: px(15.).into(),
+            font_size: font_size.into(),
             color: cx.theme().foreground,
             ..Default::default()
         };
         let runs = [style.to_run(text.len())];
         let rows = window
             .text_system()
-            .shape_text(text, px(15.), &runs, Some(px((width - 74.).max(1.))), None)
+            .shape_text(
+                text,
+                font_size,
+                &runs,
+                Some(px((width - if touch { 86. } else { 74. }).max(1.))),
+                None,
+            )
             .map(|lines| {
                 lines
                     .iter()
@@ -513,10 +524,11 @@ impl Shell {
                     .sum::<usize>()
             })
             .unwrap_or(1);
-        self.composer.height = (rows as f32 * 18. + 20.).clamp(48., 150.);
+        self.composer.height = (rows as f32 * if touch { 20. } else { 18. } + 20.)
+            .clamp(if touch { 60. } else { 48. }, 150.);
         if platform::with(|p| p.capabilities().external_text_input) {
             platform::with(|p| {
-                p.command(json!({"action":"editor-geometry","x":f32::from(visible.origin.x)+56.+self.assistant_pane_width(cx)+(f32::from(visible.size.width)-56.-self.assistant_pane_width(cx)-width)/2.,"y":24.,"width":width,"height":self.composer.height}))
+                p.command(json!({"action":"editor-geometry","x":f32::from(visible.origin.x)+design::sidebar_width(cx)+self.assistant_pane_width(cx)+(f32::from(visible.size.width)-design::sidebar_width(cx)-self.assistant_pane_width(cx)-width)/2.,"y":24.,"width":width,"height":self.composer.height}))
             });
         }
     }

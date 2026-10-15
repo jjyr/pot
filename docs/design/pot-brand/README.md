@@ -33,7 +33,9 @@ manifest app ID. Existing installed Home Screen icons may require an OS refresh.
 Opening/revealing, hover, press and successful-completion expressions keep their
 existing timings. Execution adds a gentle steam indicator; waiting narrows the single
 eye. Idle remains static. Reduce Motion and hidden-window behavior remain unchanged.
-See the [UI specification](../../ui-ux-design.md) for exact state semantics.
+See the [design language](../../design-language.md#motion) for motion rules and
+[activity/unread behavior](../../design-language.md#menu-bar-pot-activity-and-unread-indicator)
+for state semantics.
 
 ## Reference generation
 

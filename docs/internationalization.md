@@ -9,6 +9,16 @@ Pot supports English (`en`) and Simplified Chinese (`zh-CN`). Language is a loca
 Settings → General starts with Language, above Appearance. Its menu is generated from the catalog files and their `language.name` values, with the current language checked. Selecting one saves it immediately and refreshes Rust views, Kit components, native menus/tooltips/accessibility names/composer labels, and the embedded desktop. Changing macOS language later does not override the saved choice.
 
 The App stores its preference in Swift UserDefaults; Web uses browser local storage.
+Web's synchronous `preferences.js` runs before the stylesheet and application
+module. It reads `pot-locale` and `pot-appearance` (0 System, 1 Light, 2 Dark),
+applies the resolved theme, document language and browser theme color, and tolerates
+unavailable storage. The catalog loader validates the locale against discovered
+languages before showing authentication text or starting the shared UI. Resolved
+preferences are passed to WASM before `run`, so theme and locale are installed
+before Shell and input entities are created, independently of backend data loading.
+Live preference and system-appearance changes update presentation immediately;
+they do not wait for API refreshes or reset editor drafts.
+
 Each adapter exposes `settings.locale` to the same `pot-ui` shell, which updates
 its presentation catalog and Kit controls through `gpui_kit::component::set_locale`.
 Startup uses the saved preference before creating input entities. Language changes

@@ -9,6 +9,9 @@ import {createInstaller, isInstalled} from '/install.js';
 import {subscribe} from '/events.js';
 let commandError='',scheduleSending=false;
 let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
+// Publish physical contact boundaries before GPUI dispatches scroll phases.
+// A finger that catches a fling does not produce another Scroll Started.
+addEventListener('pointerdown',event=>{if(event.pointerType==='touch'&&event.isPrimary&&event.target instanceof HTMLCanvasElement)module?.touch_started();},true);
 let scheduleSelected='',scheduleOffset=0,runsOffset=0,scheduleSuccess=0,scheduleError='';
 let execution_target='', scope='active', query='', offset=0, nextOffset=null, usageDays=7, usageOffset=0, pushStatus;
 let assistantId=initialAssistant(), pendingOwner='main', assistantSavedOwner=null, assistantSaveSequence=0, assistantSaving=false,assistantCreatedOwner=null;
@@ -17,13 +20,13 @@ let pageData={}, connectionNotice=false, accessToken='', authenticated=false;
 const incomingToken=new URLSearchParams(location.hash.slice(1)).get('access_token');
 if(incomingToken!==null)history.replaceState(history.state,'',location.pathname+location.search);
 const initialRoute=new URLSearchParams(location.search);
-task=initialRoute.get('task')||'';page=(['chat','task','tasks','machines','settings','usage','schedules','conversation-usage','quota'].includes(initialRoute.get('page'))?initialRoute.get('page'):(task?'task':'chat'));
+task=initialRoute.get('task')||'';page=(['assistants','chat','task','tasks','machines','settings','usage','schedules','conversation-usage','quota'].includes(initialRoute.get('page'))?initialRoute.get('page'):(task?'task':(!initialRoute.has('assistant')&&innerWidth<720?'assistants':'chat')));
 function apiExecutionTarget(value){try{const v=JSON.parse(value);return v.execution_target?JSON.stringify(v.execution_target):value;}catch{return value;}}
 scheduleSelected=initialRoute.get('schedule')||'';
 function navigate(){
   const state={page,task,scope,query,offset,assistantId,execution_target,scheduleSelected,scheduleOffset,runsOffset};
   const url='/?page='+page+(task?'&task='+encodeURIComponent(task):'')+(page==='schedules'&&scheduleSelected?'&schedule='+encodeURIComponent(scheduleSelected):'')+'&assistant='+encodeURIComponent(assistantId);
-  if(location.pathname+location.search===url)history.replaceState(state,'',url);else history.pushState(state,'',url);
+  if(window.potEditorHistory.active||location.pathname+location.search===url)history.replaceState({...history.state,...state},'',url);else history.pushState(state,'',url);
 }
 history.replaceState({page,task,scope,query,offset,assistantId,execution_target,scheduleSelected,scheduleOffset,runsOffset},'',location.pathname+location.search);
 
@@ -40,6 +43,9 @@ const languages=Object.keys(catalogs).sort();
 function matchLocale(value){const normalized=value.replaceAll('_','-').toLowerCase();return languages.find(l=>l.toLowerCase()===normalized)||languages.find(l=>l.toLowerCase().split('-')[0]===normalized.split('-')[0]);}
 function initialLocale(){try{const saved=localStorage.getItem('pot-locale');if(saved&&matchLocale(saved))return matchLocale(saved);}catch{}return (navigator.languages||[]).map(matchLocale).find(Boolean)||'en';}
 let language=initialLocale();
+window.potPreferences.setLocale(language);
+function preferences(){return {touch:navigator.maxTouchPoints>0||matchMedia('(any-pointer: coarse)').matches,locale:language,dark:window.potPreferences.dark,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches,settings:{locale:language,appearance:window.potPreferences.appearance}};}
+function publishPreferences(){if(module){pageData={...pageData,...preferences(),settings:{...pageData.settings,...preferences().settings}};module.update_view(JSON.stringify(pageData));}}
 const t=key=>catalogs[language]?.[key]||catalogs.en?.[key]||key;
 window.potErrors?.setTranslator(t);
 const installer=createInstaller(t,()=>refresh());
@@ -140,9 +146,9 @@ async function refresh(){
       const machines=await projection('/api/v1/machines');
       if(requestedGeneration!==streamGeneration||requestedRevision!==cacheRevision||requestedAssistant!==assistantId||requestedPage!==page)return;
       const local=machines.machines.find(m=>m.local);
-      const data={command_key:window.potCommandKey(),connected:true,page,selected:task,assistant_id:requestedAssistant,assistants:await projection('/api/v1/assistants'),locale:language,runtime:directory,machines,machine_reply:machineReply,machine_pending:machinePending,
+      const data={...preferences(),command_key:window.potCommandKey(),connected:true,page,selected:task,assistant_id:requestedAssistant,assistants:await projection('/api/v1/assistants'),locale:language,runtime:directory,machines,machine_reply:machineReply,machine_pending:machinePending,
         sandbox_inventory:{items:local?.execution_targets.filter(e=>e.execution_target?.target.kind==='sandbox')||[],selected:local?.default},
-        dark:Number(localStorage.getItem('pot-appearance')||0)===2||(Number(localStorage.getItem('pot-appearance')||0)===0&&matchMedia('(prefers-color-scheme: dark)').matches),reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches};
+        dark:window.potPreferences.dark,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches};
       data.space_permissions=await sourcePermissions(data.assistants.assistants);data.permissions=data.space_permissions[requestedAssistant];data.directory_tasks=await sourceTasks();if(requestedGeneration!==streamGeneration||requestedRevision!==cacheRevision||requestedAssistant!==assistantId||requestedPage!==page)return;refreshDelay=250;pageData=data;module.update_view(JSON.stringify(data));return;
     }
     const current=await projection(route?`/api/v1/tasks/${encodeURIComponent(route)}`:'/api/v1/snapshot',undefined,requestedAssistant);
@@ -150,12 +156,12 @@ async function refresh(){
     snapshot=current;
     const receipt=pendingOwner===requestedAssistant?JSON.parse(module.reconcile_send(JSON.stringify(current))):null;
     if(receipt){accepted=receipt;notice=t('mobile.shell.received');}
-    const data={command_key:window.potCommandKey(),connected:true,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches,page,selected:task,conversation:task||assistantId,locale:language,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,command_error:commandError,schedule_pending:scheduleSending,settings:{result:notice,locale:language,appearance:Number(localStorage.getItem('pot-appearance')||0)},notice,snapshot,accepted,installed:isInstalled(),dark:Number(localStorage.getItem('pot-appearance')||0)===2||(Number(localStorage.getItem('pot-appearance')||0)===0&&matchMedia('(prefers-color-scheme: dark)').matches)};
+    const data={...preferences(),command_key:window.potCommandKey(),connected:true,reduce_motion:matchMedia('(prefers-reduced-motion: reduce)').matches,page,selected:task,conversation:task||assistantId,locale:language,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,command_error:commandError,schedule_pending:scheduleSending,settings:{result:notice,locale:language,appearance:window.potPreferences.appearance},notice,snapshot,accepted,installed:isInstalled(),dark:window.potPreferences.dark};
     data.runtime=directory;data.assistant_id=requestedAssistant;data.assistants=await projection('/api/v1/assistants');data.created_assistant=assistantCreatedOwner;data.assistant_saved_owner=assistantSavedOwner;data.assistant_save_sequence=assistantSaveSequence;data.assistant_pending=assistantSaving;
     data.space_permissions=await sourcePermissions(data.assistants.assistants);data.directory_tasks=await sourceTasks();
     if(page==='chat')data.assistant_mail=await mailbox(requestedAssistant);
     if(page==='schedules')data.space_schedules=await spaceSchedules(data.assistants.assistants);
-    if(page==='chat'||page==='settings'){data.completions=await projection('/api/v1/completions',undefined,requestedAssistant);data.assistant_rules=await projection(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await projection('/api/v1/agent',undefined,requestedAssistant);}
+    if(page==='assistants'||page==='chat'||page==='settings'){data.completions=await projection('/api/v1/completions',undefined,requestedAssistant);data.assistant_rules=await projection(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await projection('/api/v1/agent',undefined,requestedAssistant);}
     if(page==='chat'||page==='task'){data.executing=await projection('/api/v1/tasks/query?phase=running&limit=3',undefined,requestedAssistant);data.running_snapshots=Object.fromEntries(await Promise.all(data.executing.items.map(async item=>{try{return [item.id,await projection('/api/v1/tasks/'+encodeURIComponent(item.id),undefined,requestedAssistant)];}catch{return [item.id,null];}})));}
     if(page==='chat'||page==='task')data.permissions=await projection('/api/v1/permissions',undefined,requestedAssistant);
     if(page==='tasks'||page==='task'){const result=await projection(`/api/v1/assistant-tasks?scope=${scope}&q=${encodeURIComponent(query)}&execution_target=${encodeURIComponent(apiExecutionTarget(execution_target))}&offset=${offset}&selected=${encodeURIComponent(task)}&limit=20`);data.task_page=result;data.task_query={scope,q:query,execution_target,offset,limit:20,selected:task};nextOffset=result.next_offset;}
@@ -169,10 +175,12 @@ async function refresh(){
   finally{refreshing=false;ensureSubscriptions();if(refreshAgain){refreshAgain=false;queueMicrotask(refresh);}}
 }
 async function start(){
-  pushStatus=await api('/access/status');authenticated=pushStatus.authenticated;el('configure-token').disabled=false;if(authenticated)el('auth').hidden=true;
+  pushStatus=await api('/access/status');authenticated=pushStatus.authenticated;el('configure-token').disabled=false;el('auth').hidden=authenticated;
   if(pushStatus.authenticated&&module){await refresh();ensureSubscriptions();}
   if(pushStatus.authenticated&&!module){
-    module=await import('/pkg/pot_web_ui.js');await module.default();module.run();
+    module=await import('/pkg/pot_web_ui.js');await module.default();
+    pageData={...preferences(),page,selected:task,assistant_id:assistantId,command_key:window.potCommandKey()};
+    module.update_view(JSON.stringify(pageData));module.run();
     history.replaceState({page,task,scope,query,offset,assistantId,execution_target},'');
     await refresh();ensureSubscriptions();
     setInterval(()=>{if(authenticated&&pushStatus.push_available)api('/access/push/heartbeat',{visible:document.visibilityState==='visible'&&page==='chat'}).catch(()=>{});},10000);
@@ -186,7 +194,9 @@ async function sendPending(){
   const receipt=JSON.parse(module.accept_send(sent.request_id,JSON.stringify(result)));
   if(receipt)accepted=receipt;notice=t('mobile.shell.received');
 }
+addEventListener('pot-editor-back',event=>module?.ui_reply(JSON.stringify({action:'editor-back',levels:event.detail})));
 window.potAction=async(action,value)=>{
+  if(action==='editor-depth'){window.potEditorHistory.setDepth(JSON.parse(value).depth);return;}
   if(action==='wake'){queueMicrotask(()=>module.wake());return;}
   if(action==='ui-request'){
     const request=JSON.parse(value);
@@ -249,7 +259,7 @@ window.potAction=async(action,value)=>{
     if(action==='schedule'){if(scheduleSending)return;scheduleSending=true;module.update_view(JSON.stringify({...pageData,schedule_pending:true}));const owner=assistantId;try{await api('/api/v1/schedules',JSON.parse(value),owner);if(owner===assistantId){scheduleSuccess++;scheduleError='';}}catch(error){if(owner===assistantId)scheduleError=error.message;}finally{scheduleSending=false;}}
     if(action==='permission-owner'){const q=JSON.parse(value);await api('/api/v1/permissions',q.body,q.owner);}
     if(action==='usage-action'){const q=JSON.parse(value);await api('/api/v1/usage/'+q.path,q.body);}
-    if(action==='settings-command'){const v=JSON.parse(value);if(v.action==='language'){language=matchLocale(v.value)||'en';window.potErrors?.setTranslator(t);localStorage.setItem('pot-locale',language);if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}else if(v.action==='appearance'){localStorage.setItem('pot-appearance',String(v.value));}else if(['install','notifications','notifications-off','configure-token','logout'].includes(v.action)){await window.potAction(v.action,v.value||'');}else if(v.action==='open-url'){window.open(v.url,'_blank','noopener');}}
+    if(action==='settings-command'){const v=JSON.parse(value);if(v.action==='language'){language=matchLocale(v.value)||'en';window.potErrors?.setTranslator(t);window.potPreferences.setLocale(language);publishPreferences();if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}else if(v.action==='appearance'){window.potPreferences.setAppearance(v.value);publishPreferences();}else if(['install','notifications','notifications-off','configure-token','logout'].includes(v.action)){await window.potAction(v.action,v.value||'');}else if(v.action==='open-url'){window.open(v.url,'_blank','noopener');}}
     if(action==='task-query'){const q=JSON.parse(value);scope=q.scope;query=q.q;offset=q.offset;execution_target=q.execution_target||'';history.replaceState({...history.state,scope,query,offset,execution_target},'',location.pathname+location.search);}
     if(action==='sandbox-lifecycle'){const body=JSON.parse(value);body.request_id=requestUUID();delete body.sandbox_id;await api('/api/v1/sandboxes/shared',body);}
     if(action==='permission-decision')await api('/api/v1/permissions',JSON.parse(value));
@@ -292,7 +302,7 @@ el('configure-token').textContent=t('web.configure-token');el('scope').textConte
 el('access-token').placeholder=t('web.access-token');el('access-token').setAttribute('aria-label',t('web.access-token'));
 try{
   if(incomingToken!==null)await configure(incomingToken);
-  else {accessToken=await tokenStore()||'';if(accessToken)await configure(accessToken);}
+  else {accessToken=await tokenStore()||'';if(accessToken)await configure(accessToken);else await start();}
 }catch(e){configureNotice(e.message);}
 
 addEventListener('hashchange',()=>{
@@ -302,6 +312,6 @@ addEventListener('hashchange',()=>{
   attempt(async()=>{await configure(token);await refresh();});
 });
 
-for(const query of ['(prefers-color-scheme: dark)','(prefers-reduced-motion: reduce)'])matchMedia(query).addEventListener('change',()=>refresh());
+for(const query of ['(prefers-color-scheme: dark)','(prefers-reduced-motion: reduce)'])matchMedia(query).addEventListener('change',()=>{publishPreferences();refresh();});
 addEventListener('pagehide',stopSubscriptions);
 addEventListener('online',()=>{stopSubscriptions();invalidate(['*']);refresh();});

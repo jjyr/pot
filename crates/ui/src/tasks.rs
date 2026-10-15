@@ -1,3 +1,4 @@
+use crate::pages::Control;
 use crate::pages::tr;
 use crate::{
     design,
@@ -6,7 +7,7 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable,
+    ActiveTheme, Disableable, IconName,
     button::{Button, ButtonVariants},
     input::{Input, InputState},
     list::ListItem,
@@ -88,7 +89,7 @@ pub fn render(
                                 Button::new(SharedString::from(format!("task-scope-{scope}")))
                                     .ghost()
                                     .when(layout.compact, |b| b.min_h(px(44.)))
-                                    .small()
+                                    .control(cx)
                                     .toggled(view.task_query.scope == scope)
                                     .label(format!("{label} {count}"))
                                     .when(view.task_query.scope == scope, |b| {
@@ -101,7 +102,7 @@ pub fn render(
                     .child(
                         div().flex_1().min_w(px(180.)).child(
                             Input::new(search)
-                                .small()
+                                .control(cx)
                                 .when(layout.compact, |input| input.h(px(44.)))
                                 .aria_label(catalog.text("main.search-task-title-or-id")),
                         ),
@@ -162,7 +163,7 @@ pub fn render(
                                 Button::new("clear-task-search")
                                     .ghost()
                                     .when(layout.compact, |b| b.min_h(px(44.)))
-                                    .small()
+                                    .control(cx)
                                     .label(catalog.text("main.clear-search"))
                                     .on_click(pages::on(
                                         &handler,
@@ -220,7 +221,7 @@ pub fn render(
                                                 15.,
                                                 (if !layout.compact {
                                                     window.viewport_size().width
-                                                        - px(pages::SIDEBAR)
+                                                        - px(crate::design::sidebar_width(cx))
                                                 } else {
                                                     cx.global::<design::Viewport>().0
                                                 })
@@ -321,7 +322,7 @@ pub fn render(
                                                         task.id
                                                     )))
                                                     .ghost()
-                                                    .small()
+                                                    .control(cx)
                                                     .icon(if d["space_mode"] == "local" {
                                                         gpui_kit::assets::IconName::Monitor
                                                     } else {

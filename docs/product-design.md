@@ -8,7 +8,7 @@ independent assistant persona or assistant AGENTS.md.
 The App starts/exits with its own Runtime and supports independent local use or
 one remote Control. Control coordinates the user's machines, model configuration,
 global resources and approvals. [Architecture](architecture.md) defines ownership;
-[UI specification](ui-ux-design.md) defines the minimal Chat/Tasks/Machines flows.
+[Design language and interactions](design-language.md) defines the Chat/Tasks/Machines flows.
 
 Short questions can be answered directly. Longer work can be delegated with an
 explicit model, execution target and goal. Guidance is marked received, then applied;

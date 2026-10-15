@@ -1,4 +1,5 @@
 use crate::pages::tr;
+use crate::pages::{Control, FieldHelp};
 use crate::{
     localization::Catalog,
     pages::{self, Handler, Layout, PageAction},
@@ -145,7 +146,7 @@ impl UsageUI {
                                 Button::new(SharedString::from(format!("quota-{value}")))
                                     .ghost()
                                     .when(layout.compact, |b| b.min_h(px(44.)))
-                                    .small()
+                                    .control(cx)
                                     .label(label)
                                     .when(self.period == value, |b| {
                                         b.bg(crate::design::surface(cx)).shadow_sm()
@@ -158,11 +159,10 @@ impl UsageUI {
                 .when(self.period != "none", |f| {
                     f.child(
                         pages::field(catalog.text("usage-ui.allowance"))
-                            .description(
-                                catalog.text("usage-ui.input-output-cached-tokens-are-part-of"),
-                            )
+                            .help(catalog.text("usage-ui.input-output-cached-tokens-are-part-of"))
                             .child(
                                 Input::new(&self.limit)
+                                    .control(cx)
                                     .aria_label(catalog.text("usage-ui.token-allowance-value")),
                             ),
                     )
@@ -174,7 +174,7 @@ impl UsageUI {
                                 Button::new("quota-auto")
                                     .ghost()
                                     .when(layout.compact, |b| b.min_h(px(44.)))
-                                    .small()
+                                    .control(cx)
                                     .label(if self.auto_resume {
                                         catalog.text("usage-ui.resume-automatically")
                                     } else {
@@ -229,7 +229,7 @@ impl UsageUI {
                             .child(
                                 Button::new("save-quota")
                                     .primary()
-                                    .small()
+                                    .control(cx)
                                     .label(catalog.text("usage-ui.save"))
                                     .disabled(v.usage_pending || d.is_null() || !v.controls)
                                     .on_click(pages::on(&handler, "usage-save", Value::Null)),
@@ -238,7 +238,7 @@ impl UsageUI {
                                 el.child(
                                     Button::new("quota-back")
                                         .ghost()
-                                        .small()
+                                        .control(cx)
                                         .label(catalog.text("usage-ui.back"))
                                         .on_click(pages::on(&handler, "usage-page", json!(4))),
                                 )
@@ -261,7 +261,7 @@ impl UsageUI {
                         Button::new("quota-settings")
                             .ghost()
                             .when(layout.compact, |b| b.min_h(px(44.)))
-                            .small()
+                            .control(cx)
                             .label(catalog.text("navigation.usage-limits"))
                             .disabled(!v.controls)
                             .on_click(pages::on(&handler, "usage-page", json!(6))),
@@ -303,7 +303,7 @@ impl UsageUI {
                         Button::new(("usage-days", days as usize))
                             .ghost()
                             .when(layout.compact, |b| b.min_h(px(44.)))
-                            .small()
+                            .control(cx)
                             .label(label)
                             .when(self.days == days, |b| {
                                 b.bg(crate::design::surface(cx)).shadow_sm()
@@ -494,7 +494,7 @@ impl UsageUI {
                             Button::new("agent-model-prev")
                                 .ghost()
                                 .when(layout.compact, |b| b.min_h(px(44.)))
-                                .small()
+                                .control(cx)
                                 .label(catalog.text("schedules-ui.previous"))
                                 .disabled(self.group_offset == 0)
                                 .on_click(pages::on(&handler, "usage-group-prev", Value::Null)),
@@ -503,7 +503,7 @@ impl UsageUI {
                             Button::new("agent-model-next")
                                 .ghost()
                                 .when(layout.compact, |b| b.min_h(px(44.)))
-                                .small()
+                                .control(cx)
                                 .label(catalog.text("schedules-ui.next-52"))
                                 .disabled(next.is_none())
                                 .on_click(pages::on(&handler, "usage-group-next", json!(next))),
@@ -697,7 +697,7 @@ impl UsageUI {
                         Button::new("usage-more-tools")
                             .ghost()
                             .when(layout.compact, |b| b.min_h(px(44.)))
-                            .small()
+                            .control(cx)
                             .label(if self.show_all_tools {
                                 catalog.text("usage-ui.show-less").into()
                             } else {
@@ -829,7 +829,7 @@ impl UsageUI {
                         Button::new("usage-resume")
                             .ghost()
                             .when(layout.compact, |b| b.min_h(px(44.)))
-                            .small()
+                            .control(cx)
                             .label(catalog.text("usage-ui.continue"))
                             .disabled(v.usage_pending || !v.controls)
                             .on_click(pages::on(
@@ -845,7 +845,7 @@ impl UsageUI {
                 Button::new("cancel-usage-wait")
                     .ghost()
                     .when(layout.compact, |b| b.min_h(px(44.)))
-                    .small()
+                    .control(cx)
                     .label(catalog.text("usage-ui.cancel-wait"))
                     .disabled(v.usage_pending || !v.controls)
                     .on_click(pages::on(&handler, "usage-cancel", Value::Null)),

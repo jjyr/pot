@@ -2,6 +2,7 @@ use gpui::*;
 gpui_kit::assets::icon_assets!(
     Icons,
     [
+        Menu,
         Cloud,
         Monitor,
         MessageCircle,

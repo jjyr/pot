@@ -1,4 +1,5 @@
 //! Control membership. Joining a machine gives Control its configured resources.
+use crate::pages::Control;
 use crate::{
     localization::Catalog,
     pages::{self, Handler},
@@ -6,7 +7,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable,
+    ActiveTheme, Disableable, IconName,
     button::{Button, ButtonVariants},
 };
 use serde_json::{Value, json};
@@ -17,8 +18,9 @@ pub struct Editor {
     pub machine: Option<String>,
     pub members: bool,
     focus: Option<FocusHandle>,
-    return_focus: Option<FocusHandle>,
     presented: bool,
+    scroll: ScrollHandle,
+    reveal: pages::InputReveal,
     fields: Option<Fields>,
     tags: std::collections::HashMap<String, Entity<TagInput>>,
 }
@@ -36,6 +38,40 @@ pub struct View<'a> {
     pub pending: bool,
 }
 impl Editor {
+    pub fn title(&self, catalog: Catalog) -> &'static str {
+        catalog.text(if self.machine.is_some() {
+            "machines.edit-tags"
+        } else if self.members {
+            "machines.add-executor"
+        } else {
+            "onboarding.connect-server"
+        })
+    }
+    pub fn editor_values(&self, cx: &App) -> Value {
+        if let Some(machine) = &self.machine {
+            return self
+                .tags
+                .get(machine)
+                .map(|input| {
+                    let input = input.read(cx);
+                    json!({"tags":input.tags,"input":input.input.read(cx).value().to_string()})
+                })
+                .unwrap_or(Value::Null);
+        }
+        self.fields
+            .as_ref()
+            .map(|f| {
+                json!({"address":f.address.read(cx).value().to_string(),
+            "token":f.token.read(cx).value().to_string(),"ca":f.ca.read(cx).value().to_string()})
+            })
+            .unwrap_or(Value::Null)
+    }
+    pub fn close(&mut self) {
+        self.open = false;
+        self.presented = false;
+        self.fields = None;
+        self.tags.clear();
+    }
     pub fn connect(&mut self) {
         self.open = true;
         self.mode = None;
@@ -62,37 +98,36 @@ impl Editor {
         cx: &mut App,
     ) -> Div {
         if !self.open {
-            if self.presented {
-                if let Some(focus) = self.return_focus.take() {
-                    focus.focus(window, cx);
-                }
-                self.presented = false;
-            }
+            self.presented = false;
             return div();
         }
         let focus = self.focus.get_or_insert_with(|| cx.focus_handle()).clone();
         if !self.presented {
-            self.return_focus = window.focused(cx);
             focus.focus(window, cx);
             self.presented = true;
         }
         let close = handler.clone();
+        let cancel = Button::new("close-machine-connections")
+            .ghost()
+            .control(cx)
+            .disabled(view.pending)
+            .label(catalog.text("schedules-ui.cancel"))
+            .on_click(pages::on(
+                &handler,
+                "machine-connections-toggle",
+                Value::Null,
+            ));
+        let mut primary = None;
         let mut body = div()
-            .id("machine-connection-panel")
-            .w_full()
-            .max_w(px(520.))
-            .max_h(window.viewport_size().height - px(120.))
+            .id("machine-connection-page")
+            .track_scroll(&self.scroll)
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
             .overflow_y_scroll()
             .flex()
             .flex_col()
             .gap_4()
-            .p_6()
-            .rounded(px(12.))
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(crate::design::surface(cx))
-            .shadow_lg()
-            .occlude()
             .track_focus(&focus)
             .on_key_down(move |event, window, cx| {
                 if event.keystroke.key == "escape" {
@@ -106,34 +141,7 @@ impl Editor {
                     );
                     cx.stop_propagation();
                 }
-            })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(pages::section(catalog.text(if self.machine.is_some() {
-                        "machines.edit-tags"
-                    } else if self.members {
-                        "machines.add-executor"
-                    } else {
-                        "onboarding.connect-server"
-                    })))
-                    .child(pages::action_tooltip(
-                        "close-machine-connections-tip",
-                        catalog.text("assistant.close"),
-                        Button::new("close-machine-connections")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Close)
-                            .accessibility_label(catalog.text("assistant.close"))
-                            .on_click(pages::on(
-                                &handler,
-                                "machine-connections-toggle",
-                                Value::Null,
-                            )),
-                    )),
-            );
+            });
         if let Some(error) = view.reply["error"].as_str() {
             body = body.child(pages::notice(error.to_owned(), true, cx));
         }
@@ -170,11 +178,13 @@ impl Editor {
                     .child(div().child(catalog.text("machines.control-address")))
                     .child(
                         Input::new(&fields.address)
+                            .control(cx)
                             .aria_label(catalog.text("machines.control-address")),
                     )
                     .child(div().child(catalog.text("machines.control-token")))
                     .child(
                         Input::new(&fields.token)
+                            .control(cx)
                             .aria_label(catalog.text("machines.control-token")),
                     )
                     .child(fields.advanced.clone());
@@ -182,7 +192,7 @@ impl Editor {
                 let token = fields.token.clone();
                 let ca = fields.ca.clone();
                 let h = handler.clone();
-                body=body.child(Button::new("configure-control").primary().self_end().disabled(view.pending).label(catalog.text("machines.add-control"))
+                primary=Some(Button::new("configure-control").control(cx).primary().self_end().disabled(view.pending).label(catalog.text("machines.add-control"))
                     .on_click(move|_,window,cx|{let pem=ca.read(cx).value().to_string();h(&pages::PageAction {kind:"machine-command",value:json!({"command":{"action":"configure_control","url":address.read(cx).value().to_string(),"token":token.read(cx).value().to_string(),"ca_pem":if pem.trim().is_empty(){None}else{Some(pem)}}})},window,cx);}));
             }
         }
@@ -228,9 +238,19 @@ impl Editor {
             let h = handler.clone();
             let runtime = id.to_owned();
             let field = input.clone();
-            body = body.child(pages::hint(format!("{} · {}", machine["name"].as_str().unwrap_or(catalog.text("machines.local")), catalog.text("machines.tags")), cx))
-                .child(input.clone())
-                .child(Button::new(SharedString::from(format!("save-tags-{id}"))).small().self_end().disabled(view.pending)
+            body = body
+                .child(pages::hint(
+                    format!(
+                        "{} · {}",
+                        machine["name"]
+                            .as_str()
+                            .unwrap_or(catalog.text("machines.local")),
+                        catalog.text("machines.tags")
+                    ),
+                    cx,
+                ))
+                .child(input.clone());
+            primary = Some(Button::new(SharedString::from(format!("save-tags-{id}"))).control(cx).self_end().disabled(view.pending)
                     .label(catalog.text("machines.save-tags")).on_click(move |_, window, cx| {
                         let tags = field.update(cx, |state, cx| { state.commit(true, window, cx); state.tags.clone() });
                         h(&pages::PageAction { kind: "machine-command", value: json!({"command":{"action":"set_tags","runtime_id":runtime,"tags":tags}}) }, window, cx);
@@ -243,6 +263,7 @@ impl Editor {
         if self.members && authority["role"] == "control" {
             body = body.child(
                 Button::new("machine-invitation")
+                    .control(cx)
                     .ghost()
                     .disabled(view.pending)
                     .label(catalog.text("machines.create-invitation"))
@@ -256,6 +277,7 @@ impl Editor {
                 let copy = invitation.to_owned();
                 body = body.child(pages::hint(invitation.to_owned(), cx)).child(
                     Button::new("copy-invitation")
+                        .control(cx)
                         .ghost()
                         .label(catalog.text("machines.copy-invitation"))
                         .on_click(move |_, _, cx| {
@@ -277,18 +299,14 @@ impl Editor {
         {
             body = body.child(pages::hint(url.to_owned(), cx));
         }
-        div()
-            .absolute()
-            .inset_0()
-            .size_full()
-            .bg(gpui::black().opacity(0.12))
-            .flex()
-            .items_start()
-            .justify_center()
-            .pt_8()
-            .px_4()
-            .occlude()
-            .child(body)
+        let mut inputs = self
+            .fields
+            .as_ref()
+            .map(|fields| vec![fields.address.clone(), fields.token.clone()])
+            .unwrap_or_default();
+        inputs.extend(self.tags.values().map(|input| input.read(cx).input.clone()));
+        let body = pages::reveal_inputs(body, inputs, self.scroll.clone(), &self.reveal);
+        pages::editor_page(body, pages::editor_actions(vec![cancel], primary, cx), cx)
     }
 }
 
@@ -305,6 +323,7 @@ impl Render for CaOptions {
             .gap_3()
             .child(
                 Button::new("advanced-connection")
+                    .control(cx)
                     .ghost()
                     .self_start()
                     .icon(if self.open {
@@ -506,7 +525,7 @@ impl Render for TagInput {
                     .child(
                         Button::new(("remove-tag", index))
                             .ghost()
-                            .xsmall()
+                            .control(cx)
                             .icon(IconName::Close)
                             .accessibility_label(
                                 self.catalog
@@ -522,6 +541,7 @@ impl Render for TagInput {
             .child(
                 div().min_w(px(120.)).flex_1().child(
                     Input::new(&self.input)
+                        .control(cx)
                         .appearance(false)
                         .aria_label(self.catalog.text("machines.tags")),
                 ),

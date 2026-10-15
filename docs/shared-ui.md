@@ -1,143 +1,112 @@
 # Shared App and browser UI
 
-`pot-ui` implements the complete GPUI application. App and Web instantiate the
-same `application::Shell`; neither host implements product pages or navigation
-chrome. The current App design is the visual and interaction baseline.
+`pot-ui::application::Shell` implements the GPUI product pages, navigation,
+composer and interaction state for native App and Web. Hosts supply services
+through `Platform` and `Driver`; they do not maintain separate mobile or desktop
+page implementations. Visual and interaction contracts belong in
+[Design language](design-language.md).
 
 ```text
-                         pot-ui
-      +-----------------------------------------------+
-      | Shell: titlebar, feature rail, assistant pane  |
-      | Assistants | Chat | Tasks | Schedules          |
-      | Machines   | Usage | General / AI / Task       |
-      | Composer frame, drafts, reference completion   |
-      | Configuration state, request ownership, retry  |
-      +-----------------------+-----------------------+
-                              | Platform / Driver
-                  +-----------+-----------+
-                  |                       |
-             Native App                Browser
-       AppKit text editing/IME     GPUI textarea + browser IME
-       in-process / remote IO      same-origin fetch + SSE
-       native window / Finder      URL history / downloads
-       local Runtime preferences   installation / push / login
-                  |                       |
-           local + remote Spaces   fixed web-ui-server
-                  |                       |
-                  +-------- Control ------+
+pot-ui: Shell, pages, composer, drafts, configuration, navigation
+                         | Platform / Driver
+            +------------+-------------+
+            |                          |
+       Native App                    Web
+ AppKit text editing/IME      GPUI textarea/browser IME
+ in-process + remote IO       same-origin fetch + SSE
+ native window/downloads      browser history/downloads
+ local + remote Spaces        one serving Control
 ```
 
-## Presentation
+## Presentation and platform boundary
 
-`application` owns root views, page entities, navigation caches, configuration
-state, assistant and machine editors, titlebar content, notifications and the
-composer. Existing `chat`, `tasks`, `machines`, `usage`, `permissions`, `resources`
-and Markdown components remain inside the same crate. `pot-avatar` composes default
-Pot image avatars and transforms the whole raster for reply reactions. The shared
-image component, cache and reply detector give App and Web identical behavior,
-without depending on font glyph coverage. There is no separate UI crate for either target.
+`application` owns page entities, route caches, titlebar, editor sessions,
+notifications and the composer. Chat, Tasks, Machines, Usage, approvals and
+Markdown components live in the same crate. The `presentation` feature enables
+GPUI; portable state remains usable without it. `pot-ui` contains no HTTP client,
+filesystem, Swift or browser API integration.
 
-The shared shell uses the App's 56-pixel feature rail, a collapsible 220-pixel
-assistant pane in Chat and a 44-pixel titlebar. The assistant pane becomes an
-overlay below 720 pixels; other destinations keep the full content width. Page
-columns, cards, typography, message rows and the 760-pixel composer follow App
-geometry. Below 900 pixels, the same pages use compact spacing and controls;
-density depends on viewport width, not the hosting platform. Native titlebars
-reserve space for macOS window controls. GPUI owns browser visible bounds and
-safe areas.
+Both targets load the shared assets and [`design.rs`](../crates/ui/src/design.rs)
+tokens. [`pages.rs`](../crates/ui/src/pages.rs) supplies common controls, forms and
+editor frames. [`pot-avatar`](../crates/avatar) composes raster avatars; shared
+presentation caches the 64 color combinations. Layout follows available width;
+touch density is independent of layout. The active window publishes width and
+touch capability to the shared design context.
 
-AppKit supplies text, byte-based caret position, selection/composition status
-and editing operations. It does not render the rail, composer frame, send button
-or completion menu. The browser uses a GPUI textarea in the same frame. Drafts
-are scoped by mode, Control identity and conversation. Matching authoritative
-receipts clear only the submitted draft. Reference completion uses the same
-catalog, query rules, menu and keyboard behavior on both hosts; marked text is
-left to the input method.
+AppKit supplies text, byte-based caret/selection, composition status and editing
+operations within the shared composer. Browser input uses the GPUI textarea.
+Draft keys include client mode, Control and conversation; matching authoritative
+receipts clear only the submitted draft. Reference completion is shared, leaving
+marked text to the input method.
 
-Native and browser builds pin `gpui-kit` 0.7.3 with the GPUI Fast Git fork below. Both hosts load
-the shared application asset source and design tokens. The sidebar Companion
-uses transparent idle/cooking exports from the existing native vector master;
-`mise run icons` regenerates those shared assets. Platform font resolution
-and operating-system window controls remain host responsibilities.
+`Platform` supplies projections, capabilities, preferences and host services;
+`Driver` dispatches intents through existing transports. Native adapters own window
+controls, menu-bar status and desktop viewing. Browser adapters own authentication,
+installation/push, downloads, preference bootstrap, history and viewport/input
+updates. The shared shell owns destination selection, edge gestures and dirty-exit
+decisions. See [Internationalization](internationalization.md) for startup preferences.
 
-The workspace patches GPUI Kit's `gpui-pre-*` dependencies to the compatibility
-crates in [`jjyr/gpui-fast` at `1beaef379aa91b0dbd4bacf87b66617f65f4c1c0`](https://github.com/jjyr/gpui-fast/commit/1beaef379aa91b0dbd4bacf87b66617f65f4c1c0).
-These re-export one GPUI Fast core for both hosts. The commit uses the WASM-safe
-`scheduler::Instant` for wheel hover suppression and profiling; the standard
-clock can panic during browser wheel dispatch and stop input handling.
-Follow the fork's `compat/README.md`; its Git development package names differ
-from the crates.io `gpui-fast` releases, so the published backend feature is not
-enabled. Crates using its macros alias `gpui-kit` as `gpui` at their root.
-`Cargo.lock` pins the Git source, and its hash participates in Web build cache
-invalidation. Keep the overrides until an upstream release includes the fix.
+Native App aggregates local/remote Spaces; Web uses its serving Control. Objects,
+requests, caches and late-response fences retain owner identity. See
+[Multi-Space UI](multi-space-ui.md) and [UI events](ui-events.md).
 
-AI connection marks and provider/model options come from Control's local
-[model directory](model-directory.md), with the shared embedded marks in
-`crates/ui/assets/agents` as fallbacks. Both targets render the same chooser,
-search and inline parameter overrides without upstream networking in UI.
+### GPUI dependencies
 
-## Platform boundary
-
-`Platform` supplies projections, capabilities and native/browser services;
-`Driver` dispatches user intents to the host's existing client transport.
-`pot-ui` has no Server, HTTP client, browser API, filesystem or Swift dependency.
-GPUI presentation remains opt-in through the `presentation` feature. Portable
-chat, permission, task, machine and usage state remains available without GPUI.
-
-App aggregates local and remote Spaces. Every assistant, task, schedule and
-notification retains its Control and owner identity. Web connects to exactly
-one Control through its configured web-ui-server. Both project those sources
-into the same page data and renderers. Viewing a machine never changes an
-execution default. Offline inventory and late-response identity fences remain
-part of the client contract.
-
-General settings show the same language and appearance controls. Capabilities
-expose native resource-cache/local Runtime services or browser installation,
-notifications and login services in the common settings page. Local execution
-limits remain a local Runtime service; browser and remote configuration use
-Control APIs. Browser desktop launch uses authenticated viewer tickets; App
-uses its available native transport.
+Workspace Cargo manifests and `Cargo.lock` pin GPUI Kit and the GPUI Fast Git fork.
+The `gpui-pre-*` compatibility crates re-export one core for both targets; macro
+users alias `gpui-kit` as `gpui`. Follow the fork's `compat/README.md` when updating
+patches. The fork uses WASM-safe scheduler time during wheel dispatch; replacing
+it with standard time can trap browser input. Its locked source participates in
+Web cache invalidation. Asset generation and build commands belong in
+[Development](development.md).
 
 ## Configuration and asynchronous actions
 
+Shell owns [editing sessions](design-language.md#editing-pages-replacing-complex-modals)
+for AI, assistant, machine and schedule forms. Business components own field
+entities, validation and requests. AI/machine/schedule frames use
+`pages::editor_page`; assistant forms keep inline actions. Both hosts use the same
+return context and dirty-exit guard.
+
+Return contexts contain presentation and draft state, not backend snapshots.
+Nested AI steps retain parent field entities and draft checkpoints; restoration
+keeps live profiles, revisions and pending/retry ownership. Contexts belong to the
+originating window and owner. A changed client mode/Runtime identity prevents
+restoration into a different scope.
+
+`web/editor-history.js` stores session/depth markers and ordinary route metadata.
+During an active editor session, browser Back restores its current entry before
+asking the shared leave guard, then traverses to an accepted destination. Declining
+discard retains editor and history state. Credentials and field values stay in
+memory, outside URLs/history; reload recovery is not part of this contract.
+
 AI connections, profile selection, routing and provider allowances share a
-configuration state machine. Hosts execute its scoped API requests and return
-replies tagged with request and Control/assistant context. Replies from another
-context cannot replace current configuration or drafts. Configuration loading
-is independent of response order. Secrets remain transient request inputs.
+configuration state machine. Requests/replies carry request and Control/assistant
+identity; a late reply cannot replace another owner's drafts. Loading is independent
+of response order. Field entities synchronize authoritative values on configuration
+revision changes rather than every background refresh.
 
-A save whose transport outcome is uncertain retains its original body and
-request ID for explicit retry. An authoritative rejection permits correction.
-Saving or checking configuration does not send a model message. Send identity,
-receipt reconciliation and conversation events use the same portable chat
-state; automatic native retries and explicit browser retries are transport
-policies exposed through the shared composer.
+An uncertain configuration save retains its body and request ID for explicit
+retry/reconciliation; an authoritative rejection permits correction. Checking or
+saving does not send a model message. The portable chat state owns send identity,
+receipt reconciliation and events; automatic native retries and explicit browser
+retries remain transport policy.
 
-The authenticated browser boundary permits the exact configuration, allowance
-and schedule routes used by these pages. Execution, terminals, resource
-provisioning and Control administration remain outside that allowlist. Tokens,
-cookies, installation, notifications and URL history belong to the browser
-adapter, not product views.
-
-See [multi-Space behavior](multi-space-ui.md), [UI specification](ui-ux-design.md),
-[event updates](ui-events.md) and [deployment](deployment.md).
+The browser boundary permits the configuration, allowance and schedule routes
+used by its pages. Execution, terminals, resource provisioning and Control
+administration stay outside that allowlist. See [Deployment](deployment.md) for
+endpoint authorization and transport responsibilities.
 
 ## Browser crash reporting
 
-The browser loads `errors.js` before the application module. Rust's panic hook
-reports directly to this DOM layer and retains the console panic hook; global
-`error` and `unhandledrejection` listeners capture uncaught JavaScript failures.
-These handlers show a red, non-modal toast independently of GPUI/WASM, so a
-trapped application can still explain the failure and offer a manual refresh.
-Handled request errors keep their existing presentation.
+`web/errors.js` loads before the application module. Rust panics, uncaught JS
+errors and unhandled rejections reach a non-modal DOM toast outside GPUI/WASM;
+handled request errors retain their page presentation. The toast offers manual
+refresh and diagnostic copying, hides after eight seconds unless hovered/focused/
+expanded, and merges repeats without resetting the timer. Error log reopens details.
 
-The toast hides after eight seconds, pauses while hovered, focused or expanded,
-and merges repeated errors without restarting its timer. Details offer copying
-the diagnostic log. A small Error log button reopens details after dismissal
-or reload. Up to 20 bounded entries (time, kind, message, stack, page and repeat
-count) remain in memory and same-tab session storage; new entries are also sent
-to the browser console. Storage/clipboard failures do not interrupt reporting.
-Logs omit page query parameters and fragments and redact common credential
-patterns; no request bodies, form values or transcript data are collected.
-There is no automatic log upload or refresh. A blocked JavaScript main thread
-cannot run these hooks; this mechanism detects exceptions, not all hangs.
+Up to 20 bounded records remain in memory and same-tab session storage. Diagnostics
+also reach the console. URL queries/fragments and common credential patterns are
+redacted; the reporter does not collect request bodies, form fields or transcripts.
+Storage/clipboard failures do not interrupt reporting. There is no automatic upload
+or refresh, and a blocked JS main thread cannot run exception handlers.

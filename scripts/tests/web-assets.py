@@ -39,6 +39,9 @@ class WebAssets(unittest.TestCase):
     def test_browser_error_reporting(self):
         subprocess.run(["node", ROOT / "scripts/tests/web-errors.js"], check=True)
 
+    def test_startup_preferences_and_editor_history(self):
+        subprocess.run(["node", ROOT / "scripts/tests/web-preferences.js"], check=True)
+
     def test_dependency_pin_changes_invalidate_browser_assets(self):
         names = package.sources()
         self.assertIn("Cargo.toml", names)

@@ -1,4 +1,5 @@
 use super::*;
+use crate::pages::{Control, FieldHelp};
 use gpui_kit::component::IconName;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
@@ -36,11 +37,12 @@ fn provider_choice(
     name: String,
     icon: gpui_kit::component::Icon,
     busy: bool,
+    cx: &App,
 ) -> Button {
     Button::new(id)
         .w_full()
         .h(px(52.))
-        .small()
+        .control(cx)
         .accessibility_label(name.clone())
         .child(
             div()
@@ -54,6 +56,39 @@ fn provider_choice(
         .disabled(busy)
 }
 
+fn connection_summary(
+    icon: gpui_kit::component::Icon,
+    name: String,
+    model: String,
+    cx: &App,
+) -> Div {
+    div()
+        .flex_1()
+        .min_w(px(140.))
+        .flex()
+        .items_center()
+        .gap_3()
+        .when(pot_ui::design::mobile(cx), |el| el.w_full())
+        .child(icon.size(px(20.)).flex_shrink_0())
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(name),
+                )
+                .child(hint(model, cx).w_full().overflow_hidden().text_ellipsis()),
+        )
+}
+
 impl Settings {
     pub(super) fn render_ai(
         &self,
@@ -63,6 +98,24 @@ impl Settings {
     ) -> Div {
         let busy = state["ai_busy"] == true;
         let screen = state["ai_screen"].as_str().unwrap_or("main");
+        let column_width = if cx.global::<pot_ui::design::Viewport>().0 < px(500.) {
+            1.
+        } else if cx.global::<pot_ui::design::Viewport>().0 < px(900.) {
+            0.48
+        } else {
+            0.31
+        };
+        let mut secondary = Vec::new();
+        let mut primary = None;
+        if screen != "main" {
+            secondary.push(
+                Button::new("ai-cancel")
+                    .ghost()
+                    .label(crate::application::i18n::text("schedules-ui.cancel"))
+                    .disabled(busy)
+                    .on_click(|_, _, _| command(json!({"action":"ai-back"}))),
+            );
+        }
         let mut body = div()
             .id(SharedString::from(format!(
                 "ai-scroll-{}-{}",
@@ -71,9 +124,8 @@ impl Settings {
             )))
             .flex_1()
             .min_h_0()
-            .when(state["design_underlay"] != true, |el| {
-                el.track_scroll(&self.scroll)
-            })
+            .min_w_0()
+            .track_scroll(&self.scroll)
             .overflow_y_scroll()
             .flex()
             .flex_col()
@@ -85,6 +137,7 @@ impl Settings {
             ));
             body = body.child(
                 Input::new(&self.fields[26])
+                    .control(cx)
                     .aria_label(crate::application::i18n::text("ai.search-providers")),
             );
             let query = self.fields[26].read(cx).value().trim().to_lowercase();
@@ -97,12 +150,13 @@ impl Settings {
             {
                 let id = provider["id"].as_str().unwrap_or("custom").to_owned();
                 choices = choices.child(
-                    div().w(relative(0.31)).child(
+                    div().w(relative(column_width)).child(
                         provider_choice(
                             ("ai-add-kind", i),
                             provider_name(state, &id),
                             provider_icon(state, &id),
                             busy,
+                            cx,
                         )
                         .on_click(move |_, _, _| command(json!({"action":"ai-new","kind":id}))),
                     ),
@@ -110,12 +164,13 @@ impl Settings {
             }
             if query.is_empty() || "custom api 自定义".contains(&query) {
                 choices = choices.child(
-                    div().w(relative(0.31)).child(
+                    div().w(relative(column_width)).child(
                         provider_choice(
                             "ai-add-custom",
                             crate::application::i18n::text("ai.custom-api").to_owned(),
                             brand_icon("custom"),
                             busy,
+                            cx,
                         )
                         .on_click(|_, _, _| command(json!({"action":"ai-new","kind":"custom"}))),
                     ),
@@ -126,7 +181,7 @@ impl Settings {
                 body = body.child(
                     Button::new("ai-more-providers")
                         .ghost()
-                        .small()
+                        .control(cx)
                         .label(crate::application::i18n::text(
                             if state["more_providers"] == true {
                                 "ai.fewer-providers"
@@ -143,12 +198,13 @@ impl Settings {
                     {
                         let id = provider["id"].as_str().unwrap_or("").to_owned();
                         more = more.child(
-                            div().w(relative(0.31)).child(
+                            div().w(relative(column_width)).child(
                                 provider_choice(
                                     ("ai-more-kind", i),
                                     provider_name(state, &id),
                                     provider_icon(state, &id),
                                     busy,
+                                    cx,
                                 )
                                 .on_click(move |_, _, _| {
                                     command(json!({"action":"ai-new","kind":id}))
@@ -166,10 +222,17 @@ impl Settings {
                 form = form.child(
                     field(crate::application::i18n::text("ai.api-url")).child(
                         Input::new(&self.fields[14])
+                            .control(cx)
                             .aria_label(crate::application::i18n::text("ai.api-url")),
                     ),
                 );
-                let mut formats = div().flex().flex_wrap().gap_2();
+                let mut formats = div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .when(pot_ui::design::mobile(cx), |el| el.flex_col());
                 for (i, (protocol, label)) in [
                     ("openai_chat", "OpenAI Chat Completions"),
                     ("openai_responses", "OpenAI Responses"),
@@ -181,8 +244,9 @@ impl Settings {
                 {
                     formats = formats.child(
                         Button::new(("ai-custom-protocol", i))
+                            .when(pot_ui::design::mobile(cx), |b| b.w_full())
                             .ghost()
-                            .small()
+                            .control(cx)
                             .label(label)
                             .toggled(state["api_protocol"] == protocol)
                             .on_click(move |_, _, _| {
@@ -197,14 +261,18 @@ impl Settings {
             {
                 form = form.child(
                     field("API key")
-                        .description(if state["has_api_key"] == true {
+                        .help(if state["has_api_key"] == true {
                             crate::application::i18n::text("ai.saved-leave-blank-to-keep-the-key")
                         } else {
                             crate::application::i18n::text(
                                 "ai.provide-your-service-credentials-and-pot-will",
                             )
                         })
-                        .child(Input::new(&self.fields[15]).aria_label("API key")),
+                        .child(
+                            Input::new(&self.fields[15])
+                                .control(cx)
+                                .aria_label("API key"),
+                        ),
                 );
             }
             let key_url = match kind.as_str() {
@@ -220,19 +288,26 @@ impl Settings {
                     field("").child(
                         Button::new("ai-get-key")
                             .ghost()
-                            .small()
+                            .control(cx)
                             .label(crate::application::i18n::text("ai.get-api-key"))
                             .on_click(move |_, _, cx| cx.open_url(url)),
                     ),
                 );
             }
             {
-                let mut model_field = div().flex().items_center().gap_2().child(
-                    div().flex_1().min_w_0().child(
-                        Input::new(&self.fields[16])
-                            .aria_label(crate::application::i18n::text("ai.connection-model")),
-                    ),
-                );
+                let mut model_field = div()
+                    .flex()
+                    .flex_wrap()
+                    .min_w_0()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(&self.fields[16])
+                                .control(cx)
+                                .aria_label(crate::application::i18n::text("ai.connection-model")),
+                        ),
+                    );
                 let mut models = std::collections::BTreeMap::<String, String>::new();
                 if let Some(provider) = directory_provider(state, &kind) {
                     for model in provider["models"].as_array().into_iter().flatten() {
@@ -266,7 +341,7 @@ impl Settings {
                 if !models.is_empty() {
                     model_field = model_field.child(
                         Button::new("ai-model-options")
-                            .small()
+                            .control(cx)
                             .label(crate::application::i18n::text("ai.choose"))
                             .dropdown_caret(true)
                             .dropdown_menu(move |menu, _, _| {
@@ -288,7 +363,7 @@ impl Settings {
                 field("").child(
                     Button::new("ai-advanced")
                         .ghost()
-                        .small()
+                        .control(cx)
                         .label(crate::application::i18n::text("ai.advanced-settings"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.settings.api_advanced = !this.settings.api_advanced;
@@ -300,6 +375,7 @@ impl Settings {
                 form = form.child(
                     field(crate::application::i18n::text("schedules-ui.name")).child(
                         Input::new(&self.fields[23])
+                            .control(cx)
                             .aria_label(crate::application::i18n::text("ai.agent-name")),
                     ),
                 );
@@ -308,6 +384,7 @@ impl Settings {
                 form = form.child(
                     field(crate::application::i18n::text("ai.api-url")).child(
                         Input::new(&self.fields[14])
+                            .control(cx)
                             .aria_label(crate::application::i18n::text("ai.api-url")),
                     ),
                 );
@@ -318,7 +395,13 @@ impl Settings {
                     Some("openai_chat" | "openai_responses" | "anthropic_messages" | "gemini")
                 )
             {
-                let mut formats = div().flex().flex_wrap().gap_2();
+                let mut formats = div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .when(pot_ui::design::mobile(cx), |el| el.flex_col());
                 for (i, (protocol, label)) in [
                     ("openai_chat", "OpenAI Chat Completions"),
                     ("openai_responses", "OpenAI Responses"),
@@ -330,8 +413,9 @@ impl Settings {
                 {
                     formats = formats.child(
                         Button::new(("ai-protocol", i))
+                            .when(pot_ui::design::mobile(cx), |b| b.w_full().justify_start())
                             .ghost()
-                            .small()
+                            .control(cx)
                             .label(label)
                             .toggled(state["api_protocol"] == protocol)
                             .when(state["api_protocol"] == protocol, |b| {
@@ -352,42 +436,46 @@ impl Settings {
                     .child(
                         field(crate::application::i18n::text("ai.context-window")).child(
                             Input::new(&self.fields[24])
+                                .control(cx)
                                 .aria_label(crate::application::i18n::text("ai.context-window")),
                         ),
                     )
                     .child(
-                        field(crate::application::i18n::text("ai.max-output-tokens"))
-                            .child(Input::new(&self.fields[25]).aria_label(
-                                crate::application::i18n::text("ai.max-output-tokens"),
-                            )),
+                        field(crate::application::i18n::text("ai.max-output-tokens")).child(
+                            Input::new(&self.fields[25])
+                                .control(cx)
+                                .aria_label(crate::application::i18n::text("ai.max-output-tokens")),
+                        ),
                     );
             }
             let fields = self.fields.clone();
             let check_fields = self.fields.clone();
-            let mut actions = div().flex().flex_wrap().justify_end().gap_2();
+
             {
-                actions = actions.child(Button::new("ai-api-check").small().label(crate::application::i18n::text("ai.check-connection"))
+                secondary.push(Button::new("ai-api-check").control(cx).label(crate::application::i18n::text("ai.check-connection"))
                     .disabled(busy).on_click(move |_, _, cx| command(json!({"action":"ai-api-check","endpoint":check_fields[14].read(cx).value(),"key":check_fields[15].read(cx).value()}))));
             }
-            actions = actions.child(Button::new("ai-save-connection").primary().small().label(if state["active_spec"]["model"].as_str().is_none() && state["routing_owner"] == "main" {
-                    if state["return_to_chat"] == true { crate::application::i18n::text("ai.save-and-start-chatting") } else { crate::application::i18n::text("ai.save-and-set-as-main-agent") }
-                } else { crate::application::i18n::text("ai.save-connection") }).disabled(busy)
+            primary = Some(Button::new("ai-save-connection").primary().control(cx).label(crate::application::i18n::text("editor.save")).disabled(busy)
                 .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"context":fields[24].read(cx).value(),"output":fields[25].read(cx).value()}))));
             let mut details = div().flex().flex_col().gap_4();
-            details = details.child(form);
+            details = details.child(form).when(
+                state["active_spec"]["model"].as_str().is_none()
+                    && state["routing_owner"] == "main",
+                |el| {
+                    el.child(hint(
+                        crate::application::i18n::text(if state["return_to_chat"] == true {
+                            "editor.save-returns-chat"
+                        } else {
+                            "editor.save-sets-main"
+                        }),
+                        cx,
+                    ))
+                },
+            );
             if let Some(message) = state["check_message"].as_str().filter(|s| !s.is_empty()) {
                 details = details.child(hint(message.to_owned(), cx));
             }
-            body = body.child(
-                details.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .child(actions),
-                ),
-            );
+            body = body.child(details.flex_shrink_0().min_w_0());
         } else {
             let profiles = state["profiles"].as_array().cloned().unwrap_or_default();
             let draft = state["draft_profile"].as_str().unwrap_or("").to_owned();
@@ -402,7 +490,7 @@ impl Settings {
                 .child(
                     field("Agent").child(
                         Button::new("ai-main-picker")
-                            .small()
+                            .control(cx)
                             .label(label)
                             .dropdown_caret(true)
                             .disabled(busy)
@@ -426,11 +514,12 @@ impl Settings {
                 )
                 .child(
                     field(crate::application::i18n::text("ai.model"))
-                        .description(crate::application::i18n::text(
+                        .help(crate::application::i18n::text(
                             "ai.enter-a-model-supported-by-this-agent",
                         ))
                         .child(
                             Input::new(&model_input)
+                                .control(cx)
                                 .aria_label(crate::application::i18n::text("ai.chat-model"))
                                 .disabled(busy),
                         ),
@@ -451,34 +540,18 @@ impl Settings {
                         .child(
                             div()
                                 .flex()
+                                .flex_wrap()
                                 .items_center()
                                 .gap_3()
-                                .child(
-                                    provider_icon(state,
-                                        active_profile
-                                            .map(|p| profile_brand(state, p))
-                                            .unwrap_or("custom"),
-                                    )
-                                    .size(px(20.)),
-                                )
-                                .child(
-                                    div().flex_1().child(
-                                        state["active_name"]
-                                            .as_str()
-                                            .filter(|_| active["model"].as_str().is_some())
-                                            .unwrap_or(crate::application::i18n::text("ai.not-configured"))
-                                            .to_owned(),
-                                    ),
-                                )
-                                .child(hint(
-                                    active["model"].as_str().unwrap_or(crate::application::i18n::text(
-                                        "ai.connect-an-agent-then-choose-a-model",
-                                    )),
-                                    cx,
-                                ))
+                                .child(connection_summary(
+                                    provider_icon(state, active_profile.map(|p| profile_brand(state, p)).unwrap_or("custom")),
+                                    state["active_name"].as_str()
+                                        .filter(|_| active["model"].as_str().is_some())
+                                        .unwrap_or(crate::application::i18n::text("ai.not-configured")).to_owned(),
+                                    active["model"].as_str().unwrap_or(crate::application::i18n::text("ai.connect-an-agent-then-choose-a-model")).to_owned(), cx))
                                 .child(
                                     Button::new("ai-edit-main")
-                                        .small()
+                                        .control(cx)
                                         .label(if active["model"].as_str().is_some() {
                                             crate::application::i18n::text("ai.change")
                                         } else {
@@ -498,17 +571,14 @@ impl Settings {
                         ),
                 );
             } else {
-                body = body
-                    .child(form)
-                    .child(hint(crate::application::i18n::text("ai.save-to-apply-existing-tasks-keep-their"), cx))
-                    .child(
+                body = body.child(form).child(hint(
+                    crate::application::i18n::text("ai.save-to-apply-existing-tasks-keep-their"),
+                    cx,
+                ));
+                primary = Some(
                         Button::new("ai-save-main")
                             .primary()
-                            .small().label(if state["return_to_chat"] == true {
-                                crate::application::i18n::text("ai.save-and-start-chatting")
-                            } else {
-                                crate::application::i18n::text("ai.save-changes")
-                            })
+                            .control(cx).label(crate::application::i18n::text("editor.save"))
                             .disabled(busy || profiles.is_empty())
                             .on_click(move |_, _, cx| {
                                 command(
@@ -522,6 +592,8 @@ impl Settings {
                     div()
                         .flex()
                         .items_center()
+                        .flex_wrap()
+                        .gap_3()
                         .justify_between()
                         .child(section(crate::application::i18n::text(
                             "ai.integrated-agents",
@@ -529,7 +601,7 @@ impl Settings {
                         .child(
                             div().flex().gap_2().child(
                                 Button::new("ai-add")
-                                    .small()
+                                    .control(cx)
                                     .icon(IconName::Plus)
                                     .label(crate::application::i18n::text("ai.connect-agent"))
                                     .disabled(busy)
@@ -555,26 +627,20 @@ impl Settings {
                         .px_4()
                         .py_3()
                         .flex()
+                        .flex_wrap()
                         .items_center()
                         .justify_between()
                         .gap_4()
                         .when(i > 0, |row| {
                             row.border_t_1().border_color(cx.theme().border)
                         })
-                        .child(provider_icon(state, profile_brand(state, p)).size(px(20.)))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(p["name"].as_str().unwrap_or("Agent").to_owned())
-                                .child(hint(
-                                    format!("{} · {}", status, p["model"].as_str().unwrap_or("")),
-                                    cx,
-                                )),
-                        )
+                        .child(connection_summary(
+                            provider_icon(state, profile_brand(state, p)),
+                            p["name"].as_str().unwrap_or("Agent").to_owned(),
+                            p["model"].as_str().unwrap_or("").to_owned(),
+                            cx,
+                        ))
+                        .child(hint(status, cx))
                         .when(active["source_profile_id"] == id, |row| {
                             row.child(
                                 div()
@@ -589,7 +655,7 @@ impl Settings {
                         .child(
                             Button::new(("ai-manage", i))
                                 .ghost()
-                                .small()
+                                .control(cx)
                                 .label(
                                     if status
                                         == crate::application::i18n::text("ai.sign-in-required")
@@ -611,35 +677,30 @@ impl Settings {
             }
         }
         if screen != "main" {
-            let kind = state["connection_kind"].as_str().unwrap_or("");
-            let mut background = state.clone();
-            background["ai_screen"] = json!("main");
-            background["ai_busy"] = json!(true);
-            background["design_underlay"] = json!(true);
-            let main = self.render_ai(&background, location, cx);
-            return div().relative().size_full().child(main).child(
-                div().id("ai-config-overlay").absolute().inset_0().bg(cx.theme().background.opacity(0.84))
-                    .on_key_down(move |event, _, cx| {
-                        if event.keystroke.key == "escape" && !busy {
-                            command(json!({"action":"ai-back"})); cx.stop_propagation();
-                        }
-                    })
-                    .flex().items_center().justify_center().child(
-                        sheet(card(cx).rounded(px(12.)).w(px(620.)).max_w(relative(0.95)).max_h(relative(0.92)).min_h_0()
-                            .child(div().flex().items_center().gap_3()
-                                .when(screen == "manage", |row| row.child(provider_icon(state,kind).size(px(28.))))
-                                .child(div().flex_1().child(title(if screen == "add" { crate::application::i18n::text("ai.connect-agent-58").to_owned() } else if screen == "main-edit" { crate::application::i18n::text("ai.main-agent").to_owned() } else { provider_name(state,kind) })))
-                                .when(screen == "manage" && state["connection_profile_id"].as_str().unwrap_or("").is_empty(), |row| row.child(
-                                    Button::new("ai-back-choices").ghost().small().label(crate::application::i18n::text("usage-ui.back"))
-                                        .disabled(busy).on_click(|_,_,_| command(json!({"action":"ai-screen","screen":"add"}))),
-                                ))
-                                .child(Button::new("ai-panel-close").ghost().small().label(crate::application::i18n::text("ai.close")).disabled(busy)
-                                    .on_click(|_,_,_| command(json!({"action":"ai-back"}))))
-                            )
-                            .child(body)
-                            .when(screen != "add" && !state["result"].as_str().unwrap_or("").is_empty(), |panel| panel.child(hint(state["result"].as_str().unwrap_or("").to_owned(), cx))),
-                            SharedString::from(format!("ai-panel-{}-{}", screen, state["secret_revision"].as_i64().unwrap_or(0))), cx),
-                    ),
+            if screen != "add" && !state["result"].as_str().unwrap_or("").is_empty() {
+                body = body.child(hint(
+                    crate::application::i18n::message(state["result"].as_str().unwrap_or("")),
+                    cx,
+                ));
+            }
+            if state["retry"] == true {
+                secondary.push(
+                    Button::new("ai-editor-retry")
+                        .control(cx)
+                        .label(crate::application::i18n::text("ui.retry"))
+                        .on_click(|_, _, _| command(json!({"action":"ai-retry"}))),
+                );
+            }
+            let body = pot_ui::pages::reveal_inputs(
+                body,
+                self.fields.clone(),
+                self.scroll.clone(),
+                &self.reveal,
+            );
+            return pot_ui::pages::editor_page(
+                body,
+                pot_ui::pages::editor_actions(secondary, primary, cx),
+                cx,
             );
         }
         page(cx).child(
@@ -653,7 +714,7 @@ impl Settings {
                     el.child(
                         Button::new("ai-back")
                             .ghost()
-                            .small()
+                            .control(cx)
                             .label(
                                 if state["routing_owner"].as_str().is_some_and(|o| o != "main") {
                                     crate::application::i18n::text("ai.back-to-task-configuration")
@@ -668,7 +729,7 @@ impl Settings {
                 .child(body)
                 .when(!state["result"].as_str().unwrap_or("").is_empty(), |el| {
                     el.child(notice(
-                        state["result"].as_str().unwrap_or("").to_owned(),
+                        crate::application::i18n::message(state["result"].as_str().unwrap_or("")),
                         false,
                         cx,
                     ))
@@ -677,7 +738,7 @@ impl Settings {
                     el.child(
                         Button::new("ai-return-chat")
                             .ghost()
-                            .small()
+                            .control(cx)
                             .label(crate::application::i18n::text(
                                 "ai.set-up-later-back-to-chat",
                             ))

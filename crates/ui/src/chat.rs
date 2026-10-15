@@ -1,4 +1,5 @@
 use crate::markdown;
+use crate::pages::Control;
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
     IconName, Sizable,
@@ -167,7 +168,8 @@ pub fn message(view: MessageView<'_>, handler: ChatHandler, cx: &App) -> Div {
                         Button::new(SharedString::from(format!("tool-{}", m.id)))
                             .ghost()
                             .cursor_pointer()
-                            .text_size(px(13.))
+                            .control(cx)
+                            .text_size(px(if options.touch { 14. } else { 13. }))
                             .label(label)
                             .on_click({
                                 let handler = handler.clone();
@@ -232,17 +234,33 @@ pub fn message(view: MessageView<'_>, handler: ChatHandler, cx: &App) -> Div {
                                 style.visible()
                             })
                     })
-                    .child(
-                        Clipboard::new(SharedString::from(format!("copy-{}", m.id)))
-                            .value(m.text.clone())
-                            .tooltip(labels.copy.clone())
-                            .small(),
-                    )
+                    .when(!options.touch, |row| {
+                        row.child(
+                            Clipboard::new(SharedString::from(format!("copy-{}", m.id)))
+                                .value(m.text.clone())
+                                .tooltip(labels.copy.clone())
+                                .small(),
+                        )
+                    })
+                    .when(options.touch, |row| {
+                        let text = m.text.clone();
+                        row.child(
+                            Button::new(SharedString::from(format!("copy-touch-{}", m.id)))
+                                .ghost()
+                                .control(cx)
+                                .icon(IconName::Copy)
+                                .tooltip(labels.copy.clone())
+                                .accessibility_label(labels.copy.clone())
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
+                                }),
+                        )
+                    })
                     .when_some(task_report_id(m), |row, task| {
                         row.child(
                             Button::new(SharedString::from(format!("open-{}", m.id)))
                                 .ghost()
-                                .small()
+                                .control(cx)
                                 .icon(IconName::ExternalLink)
                                 .tooltip(labels.view_task.clone())
                                 .accessibility_label(labels.view_task.clone())

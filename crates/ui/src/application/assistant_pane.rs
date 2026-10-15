@@ -1,5 +1,6 @@
 //! Persistent conversation navigation, shared by App and Web.
 use super::*;
+use crate::pages::Control;
 use gpui_kit::component::{Disableable, input::Input};
 use serde_json::json;
 impl Shell {
@@ -7,13 +8,29 @@ impl Shell {
         cx.global::<design::Viewport>().0 < px(720.)
     }
     pub(super) fn assistant_pane_width(&self, cx: &App) -> f32 {
-        if self.page == 0 && !self.assistant_compact(cx) && self.assistant_pane_open {
+        if self.page == 0
+            && self.editors.is_empty()
+            && !self.assistant_overview
+            && !self.assistant_compact(cx)
+            && self.assistant_pane_open
+        {
             220.
         } else {
             0.
         }
     }
     pub(super) fn assistant_pane(&mut self, cx: &mut Context<Self>) -> Div {
+        self.assistant_directory(cx)
+            .absolute()
+            .left(px(design::sidebar_width(cx)))
+            .top(px(44.))
+            .bottom_0()
+            .h_auto()
+            .w(px(220.))
+            .border_r_1()
+            .border_color(cx.theme().border)
+    }
+    pub(super) fn assistant_directory(&mut self, cx: &mut Context<Self>) -> Div {
         let view = self.client.view.lock().unwrap().clone();
         let search = self.assistant_search.read(cx).value().to_lowercase();
         let mut list = div()
@@ -21,6 +38,7 @@ impl Shell {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.assistant_list_scroll)
             .flex()
             .flex_col()
             .gap_1();
@@ -49,7 +67,8 @@ impl Shell {
                 let reply = a["reply_id"].as_str().unwrap_or("").to_owned();
                 let selected = view.client_mode == owner.mode
                     && view.assistant_id() == owner.assistant
-                    && !self.assistant_list;
+                    && !self.assistant_list
+                    && !self.assistant_overview;
                 let count = a["reply_count"].as_u64().unwrap_or(0);
                 let seen = self
                     .seen_replies
@@ -130,6 +149,11 @@ impl Shell {
                                                         .flex_1()
                                                         .min_w_0()
                                                         .truncate()
+                                                        .text_size(px(if design::touch(cx) {
+                                                            16.
+                                                        } else {
+                                                            14.
+                                                        }))
                                                         .child(label),
                                                 )
                                                 .child(spaces_ui::badge(&space, &key))
@@ -160,7 +184,11 @@ impl Shell {
                                             div()
                                                 .w_full()
                                                 .truncate()
-                                                .text_size(px(12.))
+                                                .text_size(px(if design::touch(cx) {
+                                                    14.
+                                                } else {
+                                                    12.
+                                                }))
                                                 .text_color(cx.theme().muted_foreground)
                                                 .child(preview),
                                         ),
@@ -173,11 +201,13 @@ impl Shell {
                                 previous.runtime["runtime_id"].as_str().unwrap_or(""),
                                 previous.assistant_id()
                             );
-                            this.chat_positions.insert(old, this.scroll.offset());
+                            if !this.assistant_overview {
+                                this.chat_positions.insert(old, this.scroll.offset());
+                            }
                             if this.activate_owner(&owner, window, cx) {
                                 this.assistant_list = false;
+                                this.assistant_overview = false;
                                 this.assistants_ui.open = false;
-                                this.assistant_drawer = false;
                                 this.show_tasks = false;
                                 if let Some(offset) = this.chat_positions.get(&owner.key()) {
                                     this.scroll.set_offset(*offset);
@@ -187,7 +217,7 @@ impl Shell {
                                     this.first = true;
                                 }
                                 this.last_content.clear();
-                                ui::command(json!({"action":"page","value":0}));
+                                ui::command(json!({"action":"page","value":0,"route":"chat"}));
                             }
                             cx.notify();
                         })),
@@ -202,14 +232,14 @@ impl Shell {
             );
         }
         div()
-            .absolute()
-            .left(px(56.))
-            .top(px(44.))
-            .bottom_0()
-            .w(px(220.))
+            .h_full()
+            .w_full()
+            .pl(px(if self.assistant_overview {
+                design::sidebar_width(cx)
+            } else {
+                0.
+            }))
             .bg(design::assistant_pane(cx))
-            .border_r_1()
-            .border_color(cx.theme().border)
             .p_2()
             .flex()
             .flex_col()
@@ -225,19 +255,16 @@ impl Shell {
                     .child(
                         Button::new("assistant-pane-new")
                             .ghost()
-                            .small()
+                            .control(cx)
                             .icon(IconName::Plus)
                             .tooltip(i18n::text("assistant.new"))
                             .disabled(view.assistant_pending)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.assistant_list = true;
-                                this.assistants_ui.select("new");
-                                this.assistant_drawer = false;
-                                cx.notify();
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_assistant_editor("new", window, cx);
                             })),
                     ),
             )
-            .child(Input::new(&self.assistant_search).small())
+            .child(Input::new(&self.assistant_search).control(cx))
             .child(list)
     }
 }

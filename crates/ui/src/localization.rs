@@ -272,6 +272,14 @@ mod tests {
         assert!(report.contains("标题 {0}"));
         assert!(report.ends_with("Literal body 已完成 {0}"));
         assert_eq!(en.message("Literal unknown {0}"), "Literal unknown {0}");
+        for key in [
+            "editor.saved",
+            "ai.invalid-token-limit",
+            "settingspanel.configuration-loaded-existing-tasks-keep-their-original",
+        ] {
+            assert_eq!(zh.message(en.text(key)), zh.text(key));
+            assert_eq!(en.message(zh.text(key)), en.text(key));
+        }
         assert_eq!(
             zh.message(en.text("mobile.shell.received")),
             zh.text("mobile.shell.received")

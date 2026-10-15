@@ -266,3 +266,43 @@ opaque maskable Home Screen PNGs, monochrome menu-bar exports, the shared avatar
 mask (`crates/avatar/assets/PotMask.png`) and Sandbox wallpaper.
 The generator links `crates/app/swift/PotIcon.swift`, the same vector master used by
 native navigation and menu-bar rendering. See [brand design](design/pot-brand/README.md).
+
+## Responsive UI regression
+
+Use the isolated `scripts/tests/shared-ui-fixture.py --pages` with assets from
+`mise run build:web-ui`; never point synthetic UI checks at an active user root.
+The fixture supplies multiple assistants, messages, schedules, settings and usage
+without sending model requests. Shared state tests run with
+`mise exec -- cargo test --locked -p pot-ui --features presentation -j 4`.
+
+Start the fixture on port 17908 with `--root /tmp/pot-responsive-fixture`, `--pages`
+and `--mobile-assets .local/poc/cargo-target/pot-web/dist`, then open its URL in a
+headless Playwright CLI session. Run the browser checks in that same session:
+
+```sh
+playwright-cli run-code "$(cat scripts/tests/responsive-navigation.js)"
+playwright-cli run-code "$(cat scripts/tests/responsive-layout.js)"
+```
+
+The scripts refuse a Runtime whose identity is not the synthetic fixture. The
+navigation checks exercise touch cancellation, menu destinations, cached assistant
+switches, per-assistant drafts, list/reading positions, editor guards and resizing.
+The layout checks capture Canvas screenshots under `output/playwright/devices/`
+and check visible bounds, saved theme and runtime errors. Review those screenshots
+for clipping and typography; the checks do not replace visual review.
+
+The supported viewport matrix includes phone widths 390, 393 and 430; iPad widths
+768, 820 and 1024 in both orientations; and computer widths 1280 and above. Include
+719/720 and 899/900 to exercise layout transitions, plus a short visible viewport
+for the phone keyboard. Verify touch density independently of width. Smaller
+320/360-pixel windows are not release targets.
+
+In a real browser, check both languages and appearances, menu button and touch
+swipes (complete, short, reversed and cancelled), vertical scroll, assistant search,
+conversation Back, per-assistant drafts and reading position, editor dirty guards,
+return to the exact caller state, and resizing across layout thresholds while a
+draft is open. Inspect screenshots of Canvas content; DOM overflow measurements
+alone cannot detect clipped GPUI controls. Use headless Chromium for reproducible
+Canvas capture on Retina hosts; qualify Safari safe areas, keyboard and system
+edge gestures on physical iPhone/iPad before a release. Native compilation checks
+shared Rust integration; native visual checks remain a separate step.

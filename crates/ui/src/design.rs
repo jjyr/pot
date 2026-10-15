@@ -6,6 +6,24 @@ use std::time::Duration;
 
 pub struct Viewport(pub Pixels);
 impl Global for Viewport {}
+#[derive(Default)]
+pub struct Touch(pub bool);
+impl Global for Touch {}
+pub fn touch(cx: &App) -> bool {
+    mobile(cx) || cx.try_global::<Touch>().is_some_and(|state| state.0)
+}
+#[derive(Default)]
+pub struct Editing(pub bool);
+impl Global for Editing {}
+pub fn narrow_editor(cx: &App) -> bool {
+    cx.try_global::<Editing>().is_some_and(|state| state.0) && mobile(cx)
+}
+pub fn mobile(cx: &App) -> bool {
+    cx.global::<Viewport>().0 < px(720.)
+}
+pub fn sidebar_width(cx: &App) -> f32 {
+    if mobile(cx) { 0. } else { 56. }
+}
 pub fn compact(cx: &App) -> bool {
     cx.global::<Viewport>().0 < px(900.)
 }
