@@ -12,6 +12,7 @@ struct Owner {
 pub struct Hub {
     pub(crate) root: Service,
     registry: Registry,
+    creation: Mutex<()>,
     pub(crate) mailbox: pot_assistant::message::Mailbox,
     pub(crate) mail_sessions: Mutex<BTreeMap<String, Service>>,
     owners: Mutex<BTreeMap<String, Owner>>,
@@ -28,6 +29,7 @@ impl Hub {
             mail_sessions: Default::default(),
             root,
             registry,
+            creation: Mutex::new(()),
             owners: Mutex::new(BTreeMap::new()),
         };
         let _ = crate::assistant_instructions::read(&hub.root)?;
@@ -97,6 +99,50 @@ impl Hub {
         feed.messages.truncate(32);
         Ok(feed)
     }
+    /// Compact operator projection: no transcript or extra model requests.
+    pub fn catalogue(&self) -> Result<Value> {
+        let mut items = Vec::new();
+        for definition in self.definitions()? {
+            let service = self.service(&definition.id)?;
+            let (reply, responding, failed, reply_count) = {
+                let inner = service.conversation.inner.lock().unwrap();
+                (
+                    inner.store.last_completed_reply()?,
+                    inner.turn.is_some(),
+                    inner.agent.phase == AgentPhase::Failed,
+                    inner.store.notification_count()?,
+                )
+            };
+            let mut item = serde_json::to_value(&definition)?;
+            item["preview"] = json!(
+                reply
+                    .as_ref()
+                    .map(|m| m
+                        .text
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .chars()
+                        .take(120)
+                        .collect::<String>())
+                    .unwrap_or_default()
+            );
+            item["reply_id"] = json!(reply.as_ref().map(|m| m.id.as_str()).unwrap_or(""));
+            item["responding"] = json!(responding);
+            item["failed"] = json!(failed);
+            item["reply_count"] = json!(reply_count);
+            item["needs_configuration"] = json!(!agent::configured(&service));
+            let query = TaskQuery {
+                scope: "active".into(),
+                limit: 1,
+                ..Default::default()
+            };
+            let page = tasks::page(&service, &query).map_err(|e| anyhow!(e.1.0.message))?;
+            item["working"] = json!(page.counts.active);
+            items.push(item);
+        }
+        Ok(json!({"assistants":items}))
+    }
     pub fn definitions(&self) -> Result<Vec<Definition>> {
         self.registry.definitions()
     }
@@ -154,6 +200,14 @@ impl Hub {
     }
     fn start(&self, owner: &str) -> Result<()> {
         let (service, rx) = self.build(owner)?;
+        self.start_prepared(owner, service, rx)
+    }
+    fn start_prepared(
+        &self,
+        owner: &str,
+        service: Service,
+        rx: mpsc::UnboundedReceiver<SendMessage>,
+    ) -> Result<()> {
         orchestration::initialize(&service)?;
         tasks::restore(&service)?;
         let main = crate::component::start_main(service.clone(), rx);
@@ -226,10 +280,90 @@ impl Hub {
         Ok((service, rx))
     }
     pub fn create(&self, request: &str, name: &str) -> Result<Definition> {
+        self.create_from(request, name, "main", None)
+    }
+    pub fn create_from(
+        &self,
+        request: &str,
+        name: &str,
+        source: &str,
+        profile: Option<&str>,
+    ) -> Result<Definition> {
+        let _guard = self.creation.lock().unwrap();
         anyhow::ensure!(!self.root.stopping(), "Control is stopping");
+        validate_name(name)?;
+        anyhow::ensure!(
+            !request.is_empty() && request.len() <= 128,
+            "Invalid request identity"
+        );
+        let intent =
+            json!({"name":name,"source":source,"profile":profile.filter(|p| !p.is_empty())})
+                .to_string();
+        let intent_key = format!("assistant.creation:{request}");
+        if let Some(saved) = self
+            .root
+            .conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .get(&intent_key)?
+        {
+            anyhow::ensure!(saved == intent, "Conflicting assistant creation request");
+        }
+        if self.definitions()?.iter().any(|d| d.request_id == request) {
+            return self.registry.create(request, name);
+        }
+        let source = self.service(source)?;
+        let config = if let Some(profile) = profile.filter(|id| !id.is_empty()) {
+            let profile = agent::profiles(&source.conversation.inner.lock().unwrap().store)?
+                .into_iter()
+                .find(|p| p.id == profile)
+                .ok_or_else(|| anyhow!("Profile missing"))?;
+            let spec = gateway::resolve(&source, &profile)?;
+            gateway::validate_spec(&source, &spec)?;
+            Some(spec)
+        } else {
+            agent::current(&source.conversation.inner.lock().unwrap().store)?.map(|t| t.config)
+        };
+        self.root
+            .conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .set(&intent_key, &intent)?;
         let definition = self.registry.create(request, name)?;
-        if self.service(&definition.id).is_err() {
-            self.start(&definition.id)?;
+        if definition.id != self.root.usage_scope {
+            // Prepare the destination from the selected assistant, before starting its loops.
+            let (service, rx) = self.build(&definition.id)?;
+            let mut inner = service.conversation.inner.lock().unwrap();
+            if let Some(profiles) = source
+                .conversation
+                .inner
+                .lock()
+                .unwrap()
+                .store
+                .get(agent::PROFILES)?
+            {
+                inner.store.set(agent::PROFILES, &profiles)?;
+            }
+            if let Some(config) = config {
+                if agent::current(&inner.store)?.is_some() {
+                    agent::assign_new(&mut inner.store, config)?;
+                } else {
+                    agent::select_initial(&mut inner.store, &definition.id, config)?;
+                }
+            }
+            drop(inner);
+            self.start_prepared(&definition.id, service, rx)?;
+        } else if let Some(config) = config {
+            let mut inner = self.root.conversation.inner.lock().unwrap();
+            if agent::current(&inner.store)?.is_some() {
+                agent::assign_new(&mut inner.store, config)?;
+            } else {
+                agent::select_initial(&mut inner.store, &definition.id, config)?;
+            }
         }
         self.root.changes().notify("assistants");
         Ok(definition)
@@ -357,6 +491,55 @@ impl Hub {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn catalogue_previews_only_settled_replies_and_keeps_identity_after_rename() {
+        let root = crate::control::tasks::tests::fixture();
+        agent::initialize(&root).unwrap();
+        let hub = Hub::open(root.clone()).unwrap();
+        let definition = hub.create("preview-assistant", "Research").unwrap();
+        let service = hub.service(&definition.id).unwrap();
+        for (id, status, text) in [
+            (
+                "settled",
+                MessageStatus::Complete,
+                "Final answer\nwith details",
+            ),
+            ("stream", MessageStatus::Streaming, "unfinished"),
+        ] {
+            service
+                .save(Message {
+                    id: id.into(),
+                    conversation_id: definition.id.clone(),
+                    role: Role::Assistant,
+                    text: text.into(),
+                    status,
+                    created_at_ms: now(),
+                    request_id: None,
+                })
+                .unwrap();
+        }
+        let catalogue = hub.catalogue().unwrap();
+        let row = catalogue["assistants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == definition.id)
+            .unwrap();
+        assert_eq!(row["preview"], "Final answer with details");
+        assert_eq!(row["reply_id"], "settled");
+        assert_eq!(row["reply_count"], 1);
+        hub.rename(&definition.id, "Renamed", definition.revision)
+            .unwrap();
+        let renamed = hub
+            .definitions()
+            .unwrap()
+            .into_iter()
+            .find(|d| d.id == definition.id)
+            .unwrap();
+        assert_eq!(renamed.request_id, definition.request_id);
+        hub.shutdown().await;
+        std::fs::remove_dir_all(root.data.parent().unwrap()).unwrap();
+    }
     #[tokio::test]
     async fn assistants_share_control_credentials_without_copying_them() {
         let root = crate::control::tasks::tests::fixture();

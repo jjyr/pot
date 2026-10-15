@@ -10,6 +10,8 @@ pub struct AgentSettings {
     #[serde(skip_serializing_if = "crate::plugins::is_default")]
     pub plugins: std::collections::BTreeMap<String, crate::plugins::PluginConfig>,
     pub context_window: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<u64>,
     /// None derives the threshold from the context window and output reservation.
     pub compact_at: Option<u64>,
     pub auto_compact: bool,
@@ -29,6 +31,7 @@ impl Default for AgentSettings {
             model_catalog: None,
             plugins: crate::plugins::defaults(),
             context_window: 32768,
+            max_input_tokens: None,
             compact_at: None,
             auto_compact: true,
             use_provider_usage: true,
@@ -92,6 +95,10 @@ impl AgentSettings {
             catalog.validate()?;
         }
         ensure!(self.context_window > 0, "Context window must be positive");
+        ensure!(
+            self.max_input_tokens.is_none_or(|n| n > 0),
+            "Input limit must be positive"
+        );
         ensure!(
             self.context_reserve < self.context_window,
             "Context reserve exceeds window"

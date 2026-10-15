@@ -1,7 +1,7 @@
 # Multi-Space App UI
 
-Native App implementation for [#47](https://github.com/jjyr/pot/issues/47), updated
-2026-10-13. See [validation](validation/multi-space-ui-20261013.md) for tested scope.
+Shared assistant navigation and native multi-Space UI for [#47](https://github.com/jjyr/pot/issues/47), updated
+2026-10-15. The [historical validation](validation/multi-space-ui-20261013.md) covers only its recorded scope.
 The backend contract is [Assistant messages](assistant-messages.md).
 
 ## Navigation and ownership
@@ -24,30 +24,76 @@ local execution when a remote operation fails.
 
 ## Assistants
 
-Show assistants in one list without Space groups. Place New assistant at the top,
-in the position previously proposed for a switching dropdown. Each row shows the
-assistant name with a local computer or cloud icon. Hover and keyboard-accessible
-help name the concrete Space. Accessibility labels include the same information.
-Same-name assistants also show a short Space label so disambiguation does not
-require hovering. Connection state is separate from the ownership icon.
+Chat uses a persistent 220 px assistant pane beside the existing 56 px feature
+rail. The pane is visible only in Chat; Tasks, Machines, Usage and Settings retain
+the full content width. Selecting Chat restores the last conversation instead of
+opening a separate assistant directory. Chat is a root destination with no parent
+chevron. The pane can collapse; windows below 720 px use a toggleable overlay drawer.
+The feature rail, assistant pane and Chat canvas have separate surface colors in
+both themes. The pane uses a cool gray fill and a stronger selected-row fill;
+the same tokens apply when the pane becomes a drawer. See the palette in
+[Design language](design-language.md#color-and-surfaces).
 
-```text
-Assistants                            + New assistant
------------------------------------------------------
-Daily assistant           [local]
-Development assistant     [local]
-Work assistant            [cloud]
-Research assistant        [cloud]   Offline
-```
+List assistants together without Space groups. A row contains a procedural avatar,
+name, ownership badge, one-line conversation preview and an unread reply count.
+Same-name assistants include the Space name. Keep registry order stable; receiving
+a reply must not reorder the list. Search filters names without changing selection.
+Preserve each conversation's input draft, cached history and reading position when
+switching. Keys include Control identity and assistant identity.
 
-Clicking a row opens that assistant's Chat. Its header displays its name and
-ownership icon without a switching dropdown. Preserve assistant editing through
-an explicit edit action; selecting an assistant does not open its editor.
+The ownership badge is a computer or cloud, with a tooltip and accessibility label
+naming its Space; it does not describe execution placement. Disconnected Spaces
+retain cached assistants and previews, marked offline. Replies, pending approvals,
+configuration failures and background activity have separate status text. Once
+activity finishes, restore the latest completed assistant response preview. The
+compact operator catalogue supplies this preview, reply identity and durable completed-reply count for every
+assistant; clients do not fetch every transcript or invoke a model to generate it.
+Initial history does not count as unread. Opening a conversation clears its unread
+indicator. Offline/approval/activity indicators do not change its avatar.
 
-New assistant defaults to the current assistant's Space and explicitly offers a
-location field. Creation opens that assistant's editor, with AI configuration
-loaded from its destination. Changing the destination does not copy configuration IDs. An
-existing assistant's location is read-only; editing it does not migrate it.
+Default avatars are raster images of the canonical Pot Companion mark on a rounded
+solid background. A stable hash of the durable random creation request identity
+independently selects one of eight foreground colors and one of eight background
+colors, giving 64 combinations. Colors stay fixed across themes, restart and rename.
+Creation previews, assistant rows and Chat titles share the same image. The portable
+`pot-avatar` crate composes the image; the shared UI caches the 64 possible rasters.
+
+A new completed live reply animates the whole image, including its background,
+for 650 ms: scale 1 → 1.16 → 0.94 → 1 and rotation 0° → −6° → 3° → 0°.
+Nonlinear timing gives a slow expansion, fast contraction and short settle, with
+one rebound and no layout movement. Background assistants also react. Initial
+history, duplicate refreshes, clearing unread state and reconnect catch-up do not
+replay reactions. Hidden pages do not queue reactions; Reduce Motion stays static.
+Transient animation images are released after use. Model tools for changing
+avatars and names are outside this increment.
+
+### First use and creation
+
+Fresh App and Control configuration contain zero registered assistants. AI setup
+is available before registration. In Chat, an unconfigured destination offers
+Set up AI and the secondary link “Already have Pot? Connect to a Pot server.”
+(Chinese: “已有 Pot? 连接 Pot 服务器。”). A browser is already connected to its serving
+Control and does not offer the native server-connection action. Connecting an
+existing Control makes its assistants immediately selectable without local setup.
+
+AI configuration is an independent Settings page, not a step in a creation wizard.
+Saving configuration sends no inference request and creates no assistant. Entry
+from Chat saves and returns there; entry from Settings remains in Settings. Chat
+then offers a separate Create your first assistant state. It prefills Pot, the
+current model, destination and avatar; one Create assistant click registers it
+and opens Chat. Closing creation retains configuration. Restart never provisions
+an assistant implicitly, and retries reuse the creation request identity.
+
+The pane's + action reuses the same creation surface. More settings reveals the
+name, model and destination; rules belong in the existing assistant editor after
+creation. The destination defaults to the current assistant's Space, or the Space
+whose AI setup was just completed. Destination changes load that Space's own
+configuration and never copy configuration IDs or credentials. If it has no model,
+show its setup action before creation. Existing assistant location remains read-only.
+Creating from another assistant copies the selected resolved model configuration;
+credentials remain shared by their owning Control. Selecting a row opens Chat,
+not its editor. The Chat title shows the same avatar, name, ownership and explicit
+assistant-edit action.
 
 ## Chat and background coordination
 

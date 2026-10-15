@@ -26,8 +26,19 @@ pub struct Profile {
     pub provider: String,
     pub model: String,
     pub auth_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_settings: Option<ModelSettings>,
     pub params: Parameters,
     pub tool_policy: ToolPolicy,
+}
+/// Editable model defaults. None inherits Control's local catalog; resolved specs
+/// contain concrete values and never consult that catalog during execution.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSettings {
+    pub catalog_provider: Option<String>,
+    pub context_window: Option<u64>,
+    pub max_output_tokens: Option<u64>,
 }
 impl Profile {
     pub fn api(config: &impl ProfileConfig) -> Self {
@@ -38,6 +49,7 @@ impl Profile {
             provider: "deepseek".into(),
             model: config.model().to_owned(),
             auth_ref: "provider:deepseek".into(),
+            model_settings: None,
             params: Parameters {
                 max_output_tokens: config.max_tokens(),
                 reasoning_effort: None,

@@ -145,7 +145,10 @@ impl Shell {
         let view = self.client.view.lock().unwrap().clone();
         let native = platform::with(|p| p.capabilities().external_text_input);
         let height = self.composer.height;
-        let width = (f32::from(window.fully_visible_bounds().size.width) - 120.).clamp(0., 760.);
+        let width = (f32::from(window.fully_visible_bounds().size.width)
+            - 120.
+            - self.assistant_pane_width(cx))
+        .clamp(0., 760.);
         let retry = view.pending
             && !view.command_error.is_empty()
             && platform::with(|p| p.capabilities().explicit_send_retry);
@@ -170,7 +173,7 @@ impl Shell {
         let menu = self.completion_menu(window, cx);
         div()
             .absolute()
-            .left(px(56.))
+            .left(px(56. + self.assistant_pane_width(cx)))
             .right_0()
             .bottom(px(24.))
             .flex()
@@ -489,7 +492,8 @@ impl Shell {
 impl Shell {
     pub(super) fn layout_composer(&mut self, window: &mut Window, cx: &App) {
         let visible = window.fully_visible_bounds();
-        let width = (f32::from(visible.size.width) - 120.).clamp(0., 760.);
+        let width =
+            (f32::from(visible.size.width) - 120. - self.assistant_pane_width(cx)).clamp(0., 760.);
         let editor = self.editor_snapshot(cx);
         let text: SharedString = editor.text.into();
         let style = TextStyle {
@@ -512,7 +516,7 @@ impl Shell {
         self.composer.height = (rows as f32 * 18. + 20.).clamp(48., 150.);
         if platform::with(|p| p.capabilities().external_text_input) {
             platform::with(|p| {
-                p.command(json!({"action":"editor-geometry","x":f32::from(visible.origin.x)+56.+(f32::from(visible.size.width)-56.-width)/2.,"y":24.,"width":width,"height":self.composer.height}))
+                p.command(json!({"action":"editor-geometry","x":f32::from(visible.origin.x)+56.+self.assistant_pane_width(cx)+(f32::from(visible.size.width)-56.-self.assistant_pane_width(cx)-width)/2.,"y":24.,"width":width,"height":self.composer.height}))
             });
         }
     }

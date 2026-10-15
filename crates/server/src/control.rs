@@ -1691,6 +1691,7 @@ impl Authority {
             &Some(Listen { address, ..config }),
         )?;
         let client_token = self.client_token()?;
+        resources.ensure_configuration().await?;
         let native_token = resources.host().await.endpoint(0).token;
         let client_routes = control_client_router(resources.router(), client_token, native_token);
         let handle = axum_server::Handle::new();
@@ -1848,6 +1849,9 @@ mod tests {
             .restore_listener(resources.clone())
             .await
             .unwrap();
+        // Verify the restored listener and persisted credential using a new
+        // connection pool; the old listener's keep-alive sockets were closed.
+        let client = crate::RemoteClient::new(&url, token.clone()).unwrap();
         assert!(
             client
                 .request("/api/v1/runtime", None)

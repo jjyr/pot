@@ -6,6 +6,7 @@ pub struct Component {
     main: Option<tokio::task::JoinHandle<()>>,
     mail: Mutex<Option<tokio::task::JoinHandle<()>>>,
     coordinator: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    model_directory: Mutex<Option<tokio::task::JoinHandle<()>>>,
     activated: std::sync::atomic::AtomicBool,
 }
 impl Component {
@@ -29,6 +30,13 @@ impl Component {
             "Control already activated"
         );
         orchestration::initialize(&self.state)?;
+        *self.model_directory.lock().unwrap() = Some(tokio::spawn(
+            self.state
+                .control_config
+                .models
+                .clone()
+                .run(self.state.stop.subscribe(), self.state.changes()),
+        ));
         tasks::restore(&self.state)?;
         *self.coordinator.lock().unwrap() = Some(tasks::start(self.state.clone()));
         self.assistants.activate()?;
@@ -39,6 +47,10 @@ impl Component {
     }
     pub async fn shutdown(&mut self) {
         self.state.stop.send_replace(true);
+        let model_directory = self.model_directory.lock().unwrap().take();
+        if let Some(mut task) = model_directory {
+            settle(&mut task).await;
+        }
         tasks::request_shutdown(&self.state);
         terminal::shutdown(&self.state).await;
         let mail = self.mail.lock().unwrap().take();
@@ -68,6 +80,9 @@ impl Drop for Component {
             task.abort();
         }
         if let Some(task) = self.coordinator.get_mut().unwrap().take() {
+            task.abort();
+        }
+        if let Some(task) = self.model_directory.get_mut().unwrap().take() {
             task.abort();
         }
     }
@@ -204,6 +219,7 @@ pub async fn open(
         main: Some(main),
         mail: Default::default(),
         coordinator: Mutex::new(None),
+        model_directory: Mutex::new(None),
         activated: Default::default(),
     })
 }

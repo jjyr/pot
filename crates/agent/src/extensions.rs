@@ -2,10 +2,7 @@
 use anyhow::Result;
 use futures::future::BoxFuture;
 use pot_core::ExecutionContext;
-use pot_model_protocol::{
-    codecs::Protocol,
-    model::{self, Message},
-};
+use pot_model_protocol::{codecs::Protocol, model::Message};
 use serde_json::Value;
 
 pub trait AgentExtensions: Send + Sync {
@@ -47,7 +44,8 @@ pub trait AgentExtensions: Send + Sync {
     ) -> Result<()> {
         Ok(())
     }
-    /// A caller may supply its own tokenizer; the default conservatively counts bytes.
+    /// A caller may supply its own tokenizer; the default uses Codex's content-cost
+    /// rules (UTF-8 bytes / 4, rounded per item). This is not billed usage.
     fn estimate_tokens(
         &self,
         protocol: &Protocol,
@@ -56,27 +54,7 @@ pub trait AgentExtensions: Send + Sync {
         messages: &[Message],
         tools: &[Value],
     ) -> Result<u64> {
-        // Image payload bytes are transport data, not textual tokens. Count bounded
-        // image tiles separately instead of charging Base64 as ordinary prose.
-        let mut messages = messages.to_vec();
-        let mut image_tokens = 0u64;
-        for message in &mut messages {
-            for image in &message.images {
-                image.validate()?;
-                image_tokens = image_tokens.saturating_add(
-                    u64::from(image.width.div_ceil(512))
-                        * u64::from(image.height.div_ceil(512))
-                        * 256
-                        + 1024,
-                );
-            }
-            message.images.clear();
-        }
-        Ok((serde_json::to_vec(&model::context_payload(
-            protocol, model, system, &messages, tools,
-        )?)?
-        .len() as u64)
-            .saturating_add(image_tokens))
+        crate::token_estimate::estimate(protocol, model, system, messages, tools)
     }
 }
 pub(crate) struct Defaults;

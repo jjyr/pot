@@ -53,6 +53,30 @@ impl Drop for Fixture {
 }
 
 #[tokio::test]
+async fn fresh_embedded_app_exposes_configuration_without_default_assistants() {
+    let fixture = Fixture::new();
+    let server = Server::embedded(fixture.config()).await.unwrap();
+    let client = server.local_client();
+    let reply = client.request("/api/v1/assistants", None).await.unwrap();
+    assert!(reply.status.is_success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply.body).unwrap()["assistants"],
+        json!([])
+    );
+    assert!(
+        client
+            .request("/api/v1/agent", None)
+            .await
+            .unwrap()
+            .status
+            .is_success()
+    );
+    assert!(!fixture.0.join("data/runtime-resources.json").exists());
+    drop(client);
+    server.serve(async {}).await.unwrap();
+}
+
+#[tokio::test]
 async fn standalone_server_auth_persistence_sse_and_shutdown_without_app() {
     let fixture = Fixture::new();
     let server = fixture.start().await;

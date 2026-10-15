@@ -51,6 +51,7 @@ Server. Runtime has no direct database or HTTP dependencies. Control contains
 adapters that bind product state to the independently testable components; it is
 not a second Agent implementation. Gateway remains in the Control process.
 
-Assistant configuration handles are shared across owners and Tasks. Provider
-metadata and encrypted secrets live in Control's `control.sqlite`; creating an
+Assistant configuration handles are shared across owners and Tasks. Public model
+facts are cached and refreshed by Control; see the [model directory](model-directory.md).
+Provider connections and encrypted secrets live in Control's `control.sqlite`; creating an
 assistant does not copy credentials. See [secrets](secrets.md).

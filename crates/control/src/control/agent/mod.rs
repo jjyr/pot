@@ -87,6 +87,7 @@ pub async fn run(s: &Service, mut req: SendMessage) -> Result<()> {
         "Agent stop was not confirmed; restart the execution target before another turn"
     );
     settings::apply_pending(s, true)?;
+    settings::refresh_model_defaults(s)?;
     let spec = thread(s)?.config;
     {
         let mut inner = s.conversation.inner.lock().unwrap();

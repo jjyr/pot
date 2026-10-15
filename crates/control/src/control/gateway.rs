@@ -95,7 +95,7 @@ pub fn agent_budget(s: &Service, max_output_tokens: u64) -> Result<budget::Budge
 }
 
 pub fn resolve(s: &Service, profile: &agent::Profile) -> Result<agent::ResolvedSpec> {
-    let mut spec = profile.resolve()?;
+    let mut spec = s.control_config.models.apply(profile)?.resolve()?;
     let route = provider(s, &spec)?;
     spec.set_gateway_protocol(route.protocol.name())?;
     Ok(spec)

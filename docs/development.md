@@ -66,7 +66,8 @@ mise exec -- cargo build --locked -p pot-server
 POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants, enable Host execution and define sandboxes through the resource API; enable Web UI explicitly with its fixed Control address. Unconfigured assistants offer AI Configuration. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants, enable Host execution and define sandboxes through the resource API; enable Web UI explicitly with its fixed Control address. Enabling Control exposes AI Configuration before registration. Fresh App registries
+are empty; configure AI, then explicitly create the first assistant in Chat. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
 
 App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](deployment.md) for CLI installation, local OS authority and packaging.
 
@@ -261,6 +262,7 @@ resources, asynchronous startup and automatic third-language discovery.
 ### Brand assets
 
 Run `mise run icons` on macOS to regenerate the ICNS, application/README PNGs,
-opaque maskable Home Screen PNGs, monochrome menu-bar exports and Sandbox wallpaper.
+opaque maskable Home Screen PNGs, monochrome menu-bar exports, the shared avatar
+mask (`crates/avatar/assets/PotMask.png`) and Sandbox wallpaper.
 The generator links `crates/app/swift/PotIcon.swift`, the same vector master used by
 native navigation and menu-bar rendering. See [brand design](design/pot-brand/README.md).

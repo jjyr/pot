@@ -41,9 +41,8 @@ pub struct State {
     machine_selection: serde_json::Value,
 }
 impl Route {
-    pub fn browser_page(&self, overview: bool) -> &'static str {
+    pub fn browser_page(&self) -> &'static str {
         match self {
-            Self::Chat if overview => "assistants",
             Self::Chat => "chat",
             Self::Task(_) => "task",
             Self::Tasks(true) | Self::Schedule(_) => "schedules",
@@ -53,7 +52,7 @@ impl Route {
             Self::Usage => "usage",
             Self::ConversationUsage(_) => "conversation-usage",
             Self::Quota => "quota",
-            Self::Assistant(_, route) => route.browser_page(overview),
+            Self::Assistant(_, route) => route.browser_page(),
         }
     }
 
@@ -182,16 +181,6 @@ impl Shell {
         );
     }
     pub fn navigate_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.assistant_list
-            && !self.show_tasks
-            && self.client.view.lock().unwrap().selected.is_empty()
-            && self.host["page"] == 0
-        {
-            self.assistant_list = true;
-            ui::command(json!({"action":"page","value":0,"assistant_list":true}));
-            cx.notify();
-            return;
-        }
         self.observe_navigation();
         let view = self.client.view.lock().unwrap().clone();
         let route = self.route(&view);
@@ -298,7 +287,7 @@ impl Shell {
         cx.notify();
     }
     pub fn titlebar(
-        &self,
+        &mut self,
         view: &client::View,
         window: &Window,
         cx: &mut Context<Self>,
@@ -350,13 +339,13 @@ impl Shell {
                 if pot_ui::design::compact(cx) {
                     104.
                 } else {
-                    400.
+                    180.
                 }
             }
             Route::Task(_) => 152.,
             _ => 0.,
         };
-        let chat_back = matches!(route, Route::Chat) && !self.assistant_list;
+        let chat_back = false;
         let back_width = if route.parent().is_some() || chat_back {
             36.
         } else {
@@ -369,9 +358,9 @@ impl Shell {
         TitleBar::new()
             .h(px(ui::TITLEBAR))
             .pl(px(if super::platform::with(|p| p.native_window()) {
-                96.
+                96. + self.assistant_pane_width(cx)
             } else {
-                72.
+                72. + self.assistant_pane_width(cx)
             }))
             .pr_4()
             .bg(pot_ui::design::navigation(cx))
@@ -396,6 +385,32 @@ impl Shell {
                                 ),
                         )
                     })
+                    .when(matches!(route, Route::Chat), |el| {
+                        el.child(
+                            Button::new("toggle-assistant-pane")
+                                .ghost()
+                                .small()
+                                .accessibility_label(crate::application::i18n::text(
+                                    "assistant.toggle-list",
+                                ))
+                                .icon(
+                                    if self.assistant_pane_width(cx) > 0. || self.assistant_drawer {
+                                        IconName::ChevronLeft
+                                    } else {
+                                        IconName::ChevronRight
+                                    },
+                                )
+                                .tooltip(crate::application::i18n::text("assistant.toggle-list"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if this.assistant_compact(cx) {
+                                        this.assistant_drawer = !this.assistant_drawer;
+                                    } else {
+                                        this.assistant_pane_open = !this.assistant_pane_open;
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -403,6 +418,23 @@ impl Shell {
                             .flex()
                             .items_center()
                             .gap_2()
+                            .when(matches!(route, Route::Chat) && !self.assistant_list, |el| {
+                                let key = view.assistants["assistants"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .find(|a| a["id"] == view.assistant_id())
+                                    .and_then(|a| a["request_id"].as_str())
+                                    .unwrap_or(view.assistant_id());
+                                let owner = self
+                                    .space_directory
+                                    .spaces
+                                    .values()
+                                    .find(|s| s.mode == view.client_mode)
+                                    .map(|s| s.owner(view.assistant_id()).key())
+                                    .unwrap_or_default();
+                                el.child(self.avatar_animations.render(&owner, key, 24., cx))
+                            })
                             .child(
                                 div()
                                     .id("route-title")
@@ -507,17 +539,13 @@ mod tests {
     }
     #[test]
     fn browser_routes_preserve_the_same_detail_and_overview_semantics() {
-        assert_eq!(Route::Chat.browser_page(true), "assistants");
-        assert_eq!(Route::Chat.browser_page(false), "chat");
-        assert_eq!(Route::Task("task".into()).browser_page(false), "task");
-        assert_eq!(Route::Tasks(false).browser_page(false), "tasks");
-        assert_eq!(Route::Tasks(true).browser_page(false), "schedules");
+        assert_eq!(Route::Chat.browser_page(), "chat");
+        assert_eq!(Route::Task("task".into()).browser_page(), "task");
+        assert_eq!(Route::Tasks(false).browser_page(), "tasks");
+        assert_eq!(Route::Tasks(true).browser_page(), "schedules");
+        assert_eq!(Route::Schedule("plan".into()).browser_page(), "schedules");
         assert_eq!(
-            Route::Schedule("plan".into()).browser_page(false),
-            "schedules"
-        );
-        assert_eq!(
-            Route::ConversationUsage("task".into()).browser_page(false),
+            Route::ConversationUsage("task".into()).browser_page(),
             "conversation-usage"
         );
     }

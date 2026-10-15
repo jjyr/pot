@@ -132,13 +132,14 @@ fn receive(view: &Arc<Mutex<View>>, dirty: Option<&BTreeSet<String>>) -> Result<
     {
         let mut v = view.lock().unwrap();
         if v.assistant_id() == assistant_id {
-            v.runtime = directory;
+            v.set_runtime(directory);
             v.permissions = Value::Null;
             v.snapshot = None;
         }
         return Err("Runtime conversation capability unavailable".into());
     }
-    let assistants: Value = if changed("assistants") {
+    let assistants: Value = if changed("assistants") || changed("conversation") || changed("tasks")
+    {
         agent
             .get("/api/v1/assistants")
             .call()?
@@ -344,7 +345,7 @@ fn receive(view: &Arc<Mutex<View>>, dirty: Option<&BTreeSet<String>>) -> Result<
         v.cached_tasks.clear();
     }
     v.machines = machines;
-    v.runtime = directory;
+    v.set_runtime(directory);
     v.permissions = permissions;
     v.completions = completions;
     v.assistants = assistants;
@@ -923,16 +924,17 @@ impl Client {
             state.assistant_pending = true;
         }
         crate::wake_ui();
+        let destination = requests(&self.view);
         let view = self.view.clone();
         let refresh = self.refresh.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<Value, String> {
-                let requests = requests(&view);
+                let requests = destination;
                 let owner = value["owner"].as_str().unwrap_or_default();
                 if owner == "new" {
                     return requests
                         .post("/api/v1/assistants")
-                        .send_json(json!({"request_id":value["request_id"],"name":value["name"]}))?
+                        .send_json(json!({"request_id":value["request_id"],"name":value["name"],"profile_id":value["profile_id"],"source_assistant":value["source_assistant"]}))?
                         .body_mut()
                         .read_json()
                         .map_err(|e| e.to_string());

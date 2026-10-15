@@ -118,7 +118,7 @@ impl Resources {
         let inner = self.inner.lock().await;
         ensure!(
             inner.backend.assistants().is_none(),
-            "A local Control with assistants cannot join as an execution Runner; use a separate data directory"
+            "A local Control with AI configuration cannot join as an execution Runner; use a separate data directory"
         );
         self.control.join(request).await
     }
@@ -186,6 +186,9 @@ impl Resources {
             }
             *this.routes.write().unwrap() = crate::hosting::backend_router(&inner.backend);
         }
+        if this.config.data.join("pot-v2.sqlite").exists() && !this.control.is_member() {
+            this.ensure_configuration().await?;
+        }
         this.control.restore_listener(this.clone()).await?;
         Ok(this)
     }
@@ -201,27 +204,13 @@ impl Resources {
                     !self.control.is_member(),
                     "Execution Runner cannot own assistants; create them on Control"
                 );
-                let first = backend.assistants().is_none();
-                let existing = self.config.data.join("pot-v2.sqlite").exists();
                 backend.register_sandbox_providers(crate::hosting::installed_providers()?)?;
                 backend
                     .enable_assistant_resources(self.config.clone())
                     .await?;
                 backend.state()?.set_remote_execution(self.control.clone());
                 let hub = backend.assistants().unwrap();
-                if first {
-                    if let Some(result) = &entry.result {
-                        return Ok(result.clone());
-                    }
-                    let main = hub
-                        .definitions()?
-                        .into_iter()
-                        .find(|d| d.id == "main")
-                        .unwrap();
-                    Ok(
-                        json!({"kind":"assistant","definition":if existing { main } else { hub.rename("main", name, main.revision)? }}),
-                    )
-                } else if let Some(result) = &entry.result {
+                if let Some(result) = &entry.result {
                     Ok(result.clone())
                 } else {
                     Ok(
@@ -318,25 +307,26 @@ impl Resources {
                 }
             }))
     }
-    pub async fn ensure_app_assistant(self: &Arc<Self>) -> Result<()> {
-        if self.optional_state().await.is_some() {
-            return Ok(());
-        }
-        let mut headers = HeaderMap::new();
-        headers.insert("authorization", format!("Bearer {}", self.token).parse()?);
-        let response = create(
-            State(self.clone()),
-            headers,
-            Json(Create {
-                request_id: "app-default-assistant".into(),
-                resource: Resource::Assistant { name: "Pot".into() },
-            }),
-        )
-        .await;
+    /// Assemble Control configuration without provisioning an assistant or execution resources.
+    pub async fn ensure_configuration(&self) -> Result<()> {
+        let mut inner = self.inner.lock().await;
         ensure!(
-            response.status().is_success(),
-            "App assistant resource creation failed"
+            !self.control.is_member(),
+            "Execution Runner cannot own AI configuration"
         );
+        // Register support for later tasks; this creates no Sandbox or instance.
+        inner
+            .backend
+            .register_sandbox_providers(crate::hosting::installed_providers()?)?;
+        inner
+            .backend
+            .enable_assistant_resources(self.config.clone())
+            .await?;
+        inner
+            .backend
+            .state()?
+            .set_remote_execution(self.control.clone());
+        *self.routes.write().unwrap() = crate::hosting::backend_router(&inner.backend);
         Ok(())
     }
     #[cfg(test)]
@@ -375,9 +365,6 @@ impl Resources {
         }
         self.control.stop_operations().await;
         self.inner.lock().await.backend.shutdown().await;
-    }
-    pub async fn optional_state(&self) -> Option<pot_control::control::Service> {
-        self.inner.lock().await.backend.optional_state()
     }
 }
 /// UI discovery is separate from native resource-management authority.
@@ -519,6 +506,139 @@ async fn create(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn configuration_and_restart_never_provision_assistants() {
+        let root =
+            std::env::temp_dir().join(format!("pot-empty-assistants-{}", uuid::Uuid::new_v4()));
+        let config = RuntimeConfig {
+            data: root.join("product"),
+            workspace: root.join("workspace"),
+        };
+        let resources = Resources::open(
+            pot_runtime::initialize(config.clone()).await.unwrap(),
+            config.clone(),
+        )
+        .await
+        .unwrap();
+        resources.ensure_configuration().await.unwrap();
+        resources.ensure_configuration().await.unwrap();
+        {
+            let manager = resources
+                .inner
+                .lock()
+                .await
+                .backend
+                .sandbox_manager()
+                .unwrap();
+            assert!(
+                manager.creation_config(None).is_ok(),
+                "later local tasks retain their installed Provider"
+            );
+            assert_eq!(
+                manager.sandbox_count(),
+                0,
+                "configuration must not create an execution environment"
+            );
+        }
+        let hub = resources.assistant_hub().await.unwrap();
+        hub.service("main")
+            .unwrap()
+            .set_secret_key_source(Arc::new(pot_secrets::MemoryKey::new(vec![31; 32]).unwrap()));
+        let client = crate::LocalClient::new(
+            resources.router(),
+            resources.token.clone(),
+            resources.host().await.instance_lock(),
+        );
+        let read = |reply: crate::LocalReply| serde_json::from_slice::<Value>(&reply.body).unwrap();
+        assert_eq!(
+            read(client.request("/api/v1/assistants", None).await.unwrap())["assistants"],
+            json!([])
+        );
+        let save = client.request("/api/v1/providers", Some(json!({
+            "request_id":uuid::Uuid::new_v4().to_string(), "expected_revision":0,
+            "profile_id":"configured-api", "name":"Configured AI", "model":"fixture-model",
+            "endpoint":"https://example.invalid/v1/chat/completions", "protocol":"openai_chat", "api_key":"fixture-secret"
+        }))).await.unwrap();
+        assert!(
+            save.status.is_success(),
+            "{}",
+            String::from_utf8_lossy(&save.body)
+        );
+        assert!(hub.definitions().unwrap().is_empty());
+        let rejected = client.request("/api/v1/messages", Some(json!({"conversation_id":"main","request_id":"no-assistant","text":"must not execute"}))).await.unwrap();
+        assert_eq!(rejected.status, StatusCode::NOT_FOUND);
+        resources.shutdown().await;
+        drop(client);
+        drop(hub);
+        drop(resources);
+
+        let resources = Resources::open(
+            pot_runtime::initialize(config.clone()).await.unwrap(),
+            config.clone(),
+        )
+        .await
+        .unwrap();
+        let hub = resources.assistant_hub().await.unwrap();
+        hub.service("main")
+            .unwrap()
+            .set_secret_key_source(Arc::new(pot_secrets::MemoryKey::new(vec![31; 32]).unwrap()));
+        assert!(hub.definitions().unwrap().is_empty());
+        let client = crate::LocalClient::new(
+            resources.router(),
+            resources.token.clone(),
+            resources.host().await.instance_lock(),
+        );
+        let state = read(client.request("/api/v1/agent", None).await.unwrap());
+        assert_eq!(state["thread"]["config"]["model"], "fixture-model");
+        let request = json!({"request_id":uuid::Uuid::new_v4().to_string(),"name":"Pot"});
+        let created = client
+            .request("/api/v1/assistants", Some(request.clone()))
+            .await
+            .unwrap();
+        assert!(
+            created.status.is_success(),
+            "{}",
+            String::from_utf8_lossy(&created.body)
+        );
+        assert_eq!(read(created)["name"], "Pot");
+        assert!(
+            client
+                .request("/api/v1/assistants", Some(request))
+                .await
+                .unwrap()
+                .status
+                .is_success()
+        );
+        assert_eq!(hub.definitions().unwrap().len(), 1);
+        assert_eq!(
+            read(client.request("/api/v1/snapshot", None).await.unwrap())["messages"],
+            json!([])
+        );
+        resources.shutdown().await;
+        drop(client);
+        drop(hub);
+        drop(resources);
+
+        let resources = Resources::open(
+            pot_runtime::initialize(config.clone()).await.unwrap(),
+            config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resources
+                .assistant_hub()
+                .await
+                .unwrap()
+                .definitions()
+                .unwrap()
+                .len(),
+            1
+        );
+        resources.shutdown().await;
+        drop(resources);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[tokio::test]
     async fn shared_environment_registers_lazily_and_restores_without_resource_creation() {
         let root =

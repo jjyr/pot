@@ -25,11 +25,18 @@ and Sandbox definitions through `/api/v1/runtime/resources`. Creating an assista
 does not request a model or enable Host execution. Creating a Sandbox does not start
 its instance. Installed Providers describe supported operations, not permissions.
 
-The App owns its embedded Runtime composition (local Control and Runner) and creates its default assistant through the
-resource API. Embedded Control cannot open the remote Control listener, including when a data root
+The App owns its embedded Runtime composition (local Control and Runner) and
+assembles Control configuration without creating an assistant. Enabling standalone
+Control likewise exposes configuration before assistant registration. Fresh
+registries are empty. Saving AI setup persists the default configuration; a separate
+explicit creation request registers the first assistant (prefilled as Pot in UI).
+The root Service holds setup/default configuration before its first conversational
+identity is registered; it cannot accept chat messages until that registration.
+Restoring configuration and UI-created identities does not depend on an App startup
+resource-creation request. Embedded Control cannot open the remote Control listener, including when a data root
 contains a persisted Control listener intent. A standalone Runtime may explicitly
 enable Control. A joined execution Runtime cannot become Control simultaneously or create assistants.
-A local Control with assistants cannot join as a Runner; use a separate data root.
+A local Control with AI configuration or assistants cannot join as a Runner; use a separate data root.
 
 Control owns remote conversations, assistant instructions, Tasks, schedules,
 global plugin and skill sources, model configuration, budgets and approvals. Chat
@@ -71,13 +78,15 @@ messages. Protocol types live in `pot-protocol::message`, durable mailboxes in
 single message contract, processing isolation and recovery rules.
 
 `pot-ui::application::Shell` implements the complete product UI for App and Web.
+`pot-avatar` supplies portable Pot raster composition and reply-motion frames;
+the shared UI owns image caching and live-reply detection.
 App supplies native input, system services and local/remote client transports;
 Web supplies browser input, URL history and its web-ui-server transport. Neither
 host implements a separate set of product pages. Web remains bound to its serving
 Control. See [Shared UI](shared-ui.md) for presentation and adapter boundaries.
 Data, drafts, event cursors and cached results are scoped
-by mode/Runtime/owner. Remote failures never select local execution. Resource creation
-UI is deferred. Machines shows lightweight status cards, expandable Host/Sandbox rows and
+by mode/Runtime/owner. Remote failures never select local execution. Host/Sandbox resource creation
+UI is deferred; assistant creation is available from Chat. Machines shows lightweight status cards, expandable Host/Sandbox rows and
 Tasks filtered by the exact execution target. Machine settings provide shared-environment start/stop and resource limits.
 Advanced native owner APIs provide rebuild and mappings. File delivery uses Chat;
 Machines and Task pages do not expose artifact-download lists. File delivery uses clickable Chat links:
@@ -289,6 +298,12 @@ Gateway owns Provider transport and configuration, Usage owns accounting, and
 Secrets owns encrypted values. These are libraries in the same process, not extra
 services to deploy. Local Agent service calls stay in memory; network adapters
 are only required across machines.
+
+Control also owns the shared offline [model directory](model-directory.md): a
+bundled seed, persistent cache and independent 24-hour refresh task. App and Web
+consume the same provider/model/logo projection and nullable parameter overrides.
+Control resolves local model facts into concrete execution specs; Agent and
+Runner never fetch catalog data, and running/paused specs remain fixed.
 
 Provider metadata and secrets use Control's SQLite database. Provider snapshots
 contain credential references, never plaintext keys. Secrets use AES-256-GCM;

@@ -57,6 +57,7 @@ def sources():
     for directory in [
         "crates/web-ui",
         "crates/ui",
+        "crates/avatar",
         "crates/core",
         "crates/protocol",
         "crates/localization",

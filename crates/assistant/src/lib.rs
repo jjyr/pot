@@ -15,6 +15,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("control.sqlite");
         let registry = registry::Registry::open(&path, "main").unwrap();
+        assert!(registry.definitions().unwrap().is_empty());
         let assistant = registry.create("create-one", "Research").unwrap();
         assert_eq!(
             registry.create("create-one", "Research").unwrap().id,
@@ -34,7 +35,7 @@ mod tests {
             registry::Registry::open(&path, "main")
                 .unwrap()
                 .definitions()
-                .unwrap()[1]
+                .unwrap()[0]
                 .name,
             renamed.name
         );

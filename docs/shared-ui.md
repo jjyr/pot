@@ -7,7 +7,7 @@ chrome. The current App design is the visual and interaction baseline.
 ```text
                          pot-ui
       +-----------------------------------------------+
-      | Shell: titlebar, icon rail, parent navigation  |
+      | Shell: titlebar, feature rail, assistant pane  |
       | Assistants | Chat | Tasks | Schedules          |
       | Machines   | Usage | General / AI / Task       |
       | Composer frame, drafts, reference completion   |
@@ -32,10 +32,14 @@ chrome. The current App design is the visual and interaction baseline.
 `application` owns root views, page entities, navigation caches, configuration
 state, assistant and machine editors, titlebar content, notifications and the
 composer. Existing `chat`, `tasks`, `machines`, `usage`, `permissions`, `resources`
-and Markdown components remain inside the same crate. There is no separate UI
-crate for either target.
+and Markdown components remain inside the same crate. `pot-avatar` composes default
+Pot image avatars and transforms the whole raster for reply reactions. The shared
+image component, cache and reply detector give App and Web identical behavior,
+without depending on font glyph coverage. There is no separate UI crate for either target.
 
-The shared shell uses the App's 56-pixel icon rail and 44-pixel titlebar. Page
+The shared shell uses the App's 56-pixel feature rail, a collapsible 220-pixel
+assistant pane in Chat and a 44-pixel titlebar. The assistant pane becomes an
+overlay below 720 pixels; other destinations keep the full content width. Page
 columns, cards, typography, message rows and the 760-pixel composer follow App
 geometry. Below 900 pixels, the same pages use compact spacing and controls;
 density depends on viewport width, not the hosting platform. Native titlebars
@@ -67,8 +71,10 @@ enabled. Crates using its macros alias `gpui-kit` as `gpui` at their root.
 `Cargo.lock` pins the Git source, and its hash participates in Web build cache
 invalidation. Keep the overrides until an upstream release includes the fix.
 
-Provider marks and their attribution live in `crates/ui/assets/agents`; both
-targets embed them through the shared page components.
+AI connection marks and provider/model options come from Control's local
+[model directory](model-directory.md), with the shared embedded marks in
+`crates/ui/assets/agents` as fallbacks. Both targets render the same chooser,
+search and inline parameter overrides without upstream networking in UI.
 
 ## Platform boundary
 

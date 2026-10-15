@@ -16,8 +16,12 @@ pub struct Setup {
     name: String,
     #[serde(default = "follow_main")]
     follow_main: bool,
-    #[serde(default = "output_limit")]
-    max_output_tokens: u64,
+    #[serde(default)]
+    max_output_tokens: Option<u64>,
+    #[serde(default)]
+    context_window: Option<u64>,
+    #[serde(default)]
+    catalog_provider: Option<String>,
 }
 fn default_profile() -> String {
     "apot-default".into()
@@ -28,9 +32,6 @@ fn default_name() -> String {
 fn follow_main() -> bool {
     true
 }
-fn output_limit() -> u64 {
-    8192
-}
 
 pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
@@ -38,12 +39,14 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
         agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
     let mut connections = Vec::new();
     for profile in profiles {
+        // Editing a connection must remain available even if refreshed metadata
+        // makes a previously saved override exceed a newly advertised limit.
         let spec = profile.resolve().map_err(internal)?;
         if spec.auth_ref.starts_with("provider:")
             && let Ok(p) = stored_provider(&s, &spec)
         {
             connections.push(json!({"profile_id": profile.id, "endpoint":p.endpoint,
-                    "model":spec.model,"protocol":p.protocol,"has_key":!p.secret_ref.is_empty()}));
+                    "model":spec.model,"protocol":p.protocol,"has_key":!p.secret_ref.is_empty(),"model_settings":profile.model_settings}));
         }
     }
     let thread = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
@@ -54,7 +57,7 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
             .cloned()
     });
     Ok(Json(
-        json!({"connection":connection,"connections":connections}),
+        json!({"connection":connection,"connections":connections,"directory":s.control_config.models.options()}),
     ))
 }
 
@@ -127,17 +130,30 @@ pub async fn save(
     let id = format!("api-{request}");
     let next = Provider {
         id: id.clone(),
-        endpoint: input.endpoint,
+        endpoint: input.endpoint.clone(),
         allowed_hosts: vec![url.host_str().unwrap().into()],
         secret_ref: format!("provider/{id}"),
         protocol: input.protocol,
     };
     let config = execution::Config {
         model: input.model.clone(),
-        max_tokens: input.max_output_tokens,
+        max_tokens: input.max_output_tokens.unwrap_or(8192),
         ..Default::default()
     };
-    let mut profile = agent::Profile::api(&config);
+    let previous = agent::profiles(&s.conversation.inner.lock().unwrap().store)
+        .map_err(internal)?
+        .into_iter()
+        .find(|p| p.id == input.profile_id);
+    let mut profile = previous.unwrap_or_else(|| agent::Profile::api(&config));
+    profile.model = input.model;
+    profile.model_settings = Some(pot_core::ModelSettings {
+        catalog_provider: input
+            .catalog_provider
+            .filter(|id| !id.is_empty())
+            .or_else(|| s.control_config.models.infer(&input.endpoint)),
+        context_window: input.context_window,
+        max_output_tokens: input.max_output_tokens,
+    });
     profile.id = input.profile_id;
     profile.name = input.name;
     profile.revision = input
@@ -146,8 +162,9 @@ pub async fn save(
         .ok_or_else(|| error(StatusCode::BAD_REQUEST, "revision", "Invalid revision"))?;
     profile.provider = id.clone();
     profile.auth_ref = format!("provider:{id}");
-    profile
-        .validate()
+    s.control_config
+        .models
+        .apply(&profile)
         .map_err(|e| error(StatusCode::BAD_REQUEST, "profile", &e.to_string()))?;
     s.control_config
         .registry()
@@ -162,6 +179,86 @@ pub async fn save(
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    #[tokio::test]
+    async fn model_limits_inherit_override_clear_and_pin_execution_snapshots() {
+        let mut s = crate::tests::service();
+        let root = std::env::temp_dir().join(format!("pot-model-settings-{}", id()));
+        s.control_config = Arc::new(crate::model_config::ControlConfig::new(root.clone()));
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer test-token".parse().unwrap());
+        let request = |revision, context: Value, output: Value, follow| json!({"request_id":id(),"expected_revision":revision,"profile_id":"fixture","name":"Claude","endpoint":"https://api.anthropic.com/v1/messages","protocol":"anthropic_messages","model":"claude-sonnet-4-5","api_key":"fixture-secret","catalog_provider":"anthropic","context_window":context,"max_output_tokens":output,"follow_main":follow});
+        let _ = save(
+            State(s.clone()),
+            h.clone(),
+            Json(serde_json::from_value(request(0, Value::Null, Value::Null, true)).unwrap()),
+        )
+        .await
+        .unwrap();
+        let initial = agent::thread(&s).unwrap();
+        assert_eq!(initial.config.context_window, 200000);
+        assert_eq!(initial.config.params.max_output_tokens, 8192);
+        let _ = save(
+            State(s.clone()),
+            h.clone(),
+            Json(serde_json::from_value(request(1, json!(64000), json!(4096), false)).unwrap()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(agent::thread(&s).unwrap().config, initial.config);
+        let public = get(State(s.clone()), h.clone()).await.unwrap().0;
+        assert_eq!(
+            public["connections"][0]["model_settings"]["context_window"],
+            64000
+        );
+        assert_eq!(
+            public["connections"][0]["model_settings"]["max_output_tokens"],
+            4096
+        );
+        assert!(!public.to_string().contains("fixture-secret"));
+        let _ = save(
+            State(s.clone()),
+            h.clone(),
+            Json(serde_json::from_value(request(2, json!(64000), json!(4096), true)).unwrap()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(agent::thread(&s).unwrap().config.context_window, 64000);
+        let _ = save(
+            State(s.clone()),
+            h.clone(),
+            Json(serde_json::from_value(request(3, Value::Null, Value::Null, true)).unwrap()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(agent::thread(&s).unwrap().config.context_window, 200000);
+        let pinned = agent::thread(&s).unwrap().config;
+        let mut catalog: Value =
+            serde_json::from_str(include_str!("../../../assets/model-directory.json")).unwrap();
+        catalog["providers"]["anthropic"]["models"]["claude-sonnet-4-5"]["limit"]["context"] =
+            json!(300000);
+        std::fs::create_dir_all(root.join("models-dev")).unwrap();
+        std::fs::write(
+            root.join("models-dev/catalog.json"),
+            serde_json::to_vec(&catalog).unwrap(),
+        )
+        .unwrap();
+        s.control_config = Arc::new(crate::model_config::ControlConfig::new(root.clone()));
+        assert_eq!(agent::thread(&s).unwrap().config, pinned);
+        agent::settings::refresh_model_defaults(&s).unwrap();
+        assert_eq!(agent::thread(&s).unwrap().config.context_window, 300000);
+        assert_eq!(pinned.context_window, 200000);
+        assert!(
+            save(
+                State(s.clone()),
+                h,
+                Json(serde_json::from_value(request(4, json!(1000), json!(2000), true)).unwrap())
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(agent::thread(&s).unwrap().config.context_window, 300000);
+        let _ = std::fs::remove_dir_all(root);
+    }
     #[tokio::test]
     async fn connection_check_reads_metadata_only_and_does_not_mutate_profiles() {
         use axum::{Router, routing::get};

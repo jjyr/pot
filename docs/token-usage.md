@@ -11,7 +11,7 @@ Rust Runtime captures provider usage through the generic model gateway. Shared S
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
 - Tools show calls, failures, duration, and output estimates (serialized UTF-8 bytes / 4). Estimates are not provider billing and are not added to actual totals.
-- Pot Agent compacts completed older user turns when its context estimate approaches the profile-configured window, reserving room for output. Estimates use the actual provider-native context projection without duplicate display/replay fields. Complete usage calibrates an unchanged request prefix; later input is estimated locally. Cache is included once in input and reasoning once in output. Edits, tool/system/provider/model changes and compaction invalidate old calibration. Missing usage supplies no new calibration; new context is estimated from a valid earlier prefix, or locally when no prefix is valid, and missing billed usage remains unknown. Context estimates and allowance reservations do not contribute to actual token totals. The replacement summary and complete recent turn are persisted through Storage.
+- Pot Agent compacts completed older user turns when its context estimate approaches the profile-configured window, reserving room for output. [Context estimation](#context-estimation) uses Codex's content-cost rules with provider-native replay. Context estimates and allowance reservations do not contribute to actual token totals. The replacement summary and complete recent turn are persisted through Storage.
 - Agent reports compaction lifecycle directly to Runtime. Start persists before its ID tags the metered gateway request. Summary usage is a subset of request usage, never counted twice.
 - Session details have no tabs/per-request list. Horizontal stacks show recorded conversation/compaction tokens and proportions, with input/output/cache hover. Hide zero compaction; show empty state without confirmed usage. Rank tools by output bytes using a shared maximum bar scale, with estimated tokens/calls, top 5 by default and expandable. Hide empty tools; tool output contributes neither to model proportions nor totals.
 - Underlying request/compaction lifecycle records and archived records remain; API detail pagination remains supported. Context sizes before/after compaction are estimates, not billing.
@@ -19,6 +19,60 @@ Rust Runtime captures provider usage through the generic model gateway. Shared S
 - Pi development sessions and old usage databases are not imported; this revision starts a new usage database.
 
 Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages. App refreshes on demand every 3 seconds, rejects stale query responses, and does not present old disconnected data as new. Charts reuse gpui-kit `BarChart` hover/tooltips/ticks/themes; allowances use `Progress`, shared cards, and Kit forms.
+
+## Context estimation
+
+The default estimator follows the Codex source baseline `822e58cc3d`, specifically
+`codex-rs/utils/string/src/truncate.rs` and
+`codex-rs/core/src/context_manager/history.rs`. It uses the same arithmetic and
+rounding boundaries for the item types Pot supports. Protocol adapters map Chat
+Completions, Responses, Anthropic Messages and Gemini to those content rules;
+they do not select different token ratios. Callers may inject a tokenizer through
+`AgentExtensions::estimate_tokens`.
+
+- Text costs `ceil(UTF-8 bytes / 4)`, rounded separately for base instructions and
+  each model item. Message content parts are summed before that item's rounding.
+  Boundaries follow logical history items, before protocol encoders merge adjacent
+  messages or wrap tool images in synthetic user messages.
+  This is a coarse heuristic, not a tokenizer-accurate or billed count.
+- Count decoded text, not its outer JSON escaping, role, message ID, status or
+  display metadata. Native assistant replay replaces duplicate display text and
+  calls. Plaintext reasoning is excluded from local replay accounting.
+- A function call counts its name, namespace (default `functions`) and argument
+  JSON content. Function outputs count their content and the call ID, plus the
+  optional name/namespace when present. Keep JSON syntax that is itself content,
+  such as argument objects and tool schemas. Pot maps its supplied logical tool
+  catalog to one Codex `AdditionalTools` item; provider transport wrappers are
+  excluded. Tool results containing JSON remain text unless the protocol marks
+  them as structured content.
+- Normal-detail images cost 7,373 equivalent bytes each (1,844 tokens for an
+  image-only item), independent of Base64 length or dimensions. Parts in the same
+  message or tool output share one rounding boundary. Pot currently sends normal
+  image detail; it does not expose Codex's original-detail or audio inputs.
+- Encrypted Responses reasoning/compaction uses
+  `max(floor(encoded_length * 3 / 4) - 650, 0)` equivalent bytes. Encrypted function
+  output uses `ceil(encoded_length * 9 / 16)` equivalent bytes. Convert these byte
+  estimates to tokens using the same per-item rule. No provider-specific safety
+  multiplier is applied.
+
+Complete provider usage calibrates an unchanged request prefix: use actual input
+plus output tokens, then add only the local estimate of new content. Cached input
+is already included in input; reasoning output is already included in output.
+Neither is added twice. Edits, tools, system instructions, provider/model changes
+and compaction invalidate old calibration. Missing or zero usage supplies no new
+baseline; use a valid earlier prefix or a full local estimate. Missing billed
+usage remains unknown. Calibration never uses cumulative session spending as the
+current context size.
+
+The configured context window and output reservation remain independent of this
+heuristic. Control resolves [model defaults and user overrides](model-directory.md)
+from its local directory. A known model input limit also bounds input and the
+compaction threshold independently of the total context window. In particular,
+a 32,768-token window does not reject a request solely
+because its encoded JSON exceeds 32,768 bytes. Requests whose estimated context
+plus configured output cap exceed the window are still rejected before transport.
+Usage allowance reservations retain their separate conservative byte-based
+policy described below; they are not context estimates.
 
 ## Main-chat routing subset
 

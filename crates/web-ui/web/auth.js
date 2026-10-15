@@ -8,7 +8,7 @@ let machineReply=null,machinePending=false;
 import {createInstaller, isInstalled} from '/install.js';
 import {subscribe} from '/events.js';
 let commandError='',scheduleSending=false;
-let module, page='assistants', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
+let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
 let scheduleSelected='',scheduleOffset=0,runsOffset=0,scheduleSuccess=0,scheduleError='';
 let execution_target='', scope='active', query='', offset=0, nextOffset=null, usageDays=7, usageOffset=0, pushStatus;
 let assistantId=initialAssistant(), pendingOwner='main', assistantSavedOwner=null, assistantSaveSequence=0, assistantSaving=false,assistantCreatedOwner=null;
@@ -17,7 +17,7 @@ let pageData={}, connectionNotice=false, accessToken='', authenticated=false;
 const incomingToken=new URLSearchParams(location.hash.slice(1)).get('access_token');
 if(incomingToken!==null)history.replaceState(history.state,'',location.pathname+location.search);
 const initialRoute=new URLSearchParams(location.search);
-task=initialRoute.get('task')||'';page=(['chat','assistants','task','tasks','machines','settings','usage','schedules','conversation-usage','quota'].includes(initialRoute.get('page'))?initialRoute.get('page'):(task?'task':'assistants'));
+task=initialRoute.get('task')||'';page=(['chat','task','tasks','machines','settings','usage','schedules','conversation-usage','quota'].includes(initialRoute.get('page'))?initialRoute.get('page'):(task?'task':'chat'));
 function apiExecutionTarget(value){try{const v=JSON.parse(value);return v.execution_target?JSON.stringify(v.execution_target):value;}catch{return value;}}
 scheduleSelected=initialRoute.get('schedule')||'';
 function navigate(){
@@ -80,7 +80,7 @@ function domain(path){
 }
 function invalidate(topics){
   cacheRevision++;
-  for(const key of projections.keys())if(topics.includes('*')||topics.some(t=>t.split('/')[0]===domain(key)))projections.delete(key);
+  for(const key of projections.keys())if(topics.includes('*')||topics.some(t=>t.split('/')[0]===domain(key)||(domain(key)==='assistants'&&['conversation','tasks','settings'].includes(t.split('/')[0]))))projections.delete(key);
 }
 async function projection(path,unused,owner=assistantId){
   const key=scopedPath(path,owner);if(projections.has(key))return projections.get(key);
@@ -134,7 +134,7 @@ async function refresh(){
   const requestedAssistant=assistantId, route=task, requestedPage=page, requestedQuery=`${scope}:${query}:${execution_target}:${offset}:${usageDays}:${usageOffset}:${scheduleSelected}:${scheduleOffset}:${runsOffset}`;
   try{
     const directory=await projection('/api/v1/runtime');
-    const required={assistants:'conversation',settings:'conversation',chat:'conversation',task:'tasks',tasks:'tasks',usage:'accounting',schedules:'schedules'}[requestedPage];
+    const required={settings:'conversation',chat:'conversation',task:'tasks',tasks:'tasks',usage:'accounting',schedules:'schedules'}[requestedPage];
     if(required&&!directory.capabilities?.includes(required))throw Error('Runtime capability unavailable: '+required);
     if(requestedPage==='machines'){
       const machines=await projection('/api/v1/machines');
@@ -155,7 +155,7 @@ async function refresh(){
     data.space_permissions=await sourcePermissions(data.assistants.assistants);data.directory_tasks=await sourceTasks();
     if(page==='chat')data.assistant_mail=await mailbox(requestedAssistant);
     if(page==='schedules')data.space_schedules=await spaceSchedules(data.assistants.assistants);
-    if(page==='chat'||page==='assistants'||page==='settings'){data.completions=await projection('/api/v1/completions',undefined,requestedAssistant);data.assistant_rules=await projection(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await projection('/api/v1/agent',undefined,requestedAssistant);}
+    if(page==='chat'||page==='settings'){data.completions=await projection('/api/v1/completions',undefined,requestedAssistant);data.assistant_rules=await projection(`/api/v1/assistants/${encodeURIComponent(requestedAssistant)}/instructions`);data.assistant_configuration=await projection('/api/v1/agent',undefined,requestedAssistant);}
     if(page==='chat'||page==='task'){data.executing=await projection('/api/v1/tasks/query?phase=running&limit=3',undefined,requestedAssistant);data.running_snapshots=Object.fromEntries(await Promise.all(data.executing.items.map(async item=>{try{return [item.id,await projection('/api/v1/tasks/'+encodeURIComponent(item.id),undefined,requestedAssistant)];}catch{return [item.id,null];}})));}
     if(page==='chat'||page==='task')data.permissions=await projection('/api/v1/permissions',undefined,requestedAssistant);
     if(page==='tasks'||page==='task'){const result=await projection(`/api/v1/assistant-tasks?scope=${scope}&q=${encodeURIComponent(query)}&execution_target=${encodeURIComponent(apiExecutionTarget(execution_target))}&offset=${offset}&selected=${encodeURIComponent(task)}&limit=20`);data.task_page=result;data.task_query={scope,q:query,execution_target,offset,limit:20,selected:task};nextOffset=result.next_offset;}
@@ -226,7 +226,7 @@ window.potAction=async(action,value)=>{
     }
     if(action==='assistant-save'){
       const draft=JSON.parse(value), owner=draft.owner;
-      if(owner==='new'){const created=await api('/api/v1/assistants',{request_id:draft.request_id,name:draft.name});assistantCreatedOwner=created.id;}
+      if(owner==='new'){const created=await api('/api/v1/assistants',{request_id:draft.request_id,name:draft.name,profile_id:draft.profile_id,source_assistant:draft.source_assistant});assistantCreatedOwner=created.id;}
       else {
         await api(`/api/v1/assistants/${encodeURIComponent(owner)}/definition`,draft);
       }

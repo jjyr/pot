@@ -6,6 +6,7 @@ use std::{
 pub(crate) struct ControlConfig {
     root: PathBuf,
     keys: RwLock<Arc<dyn pot_secrets::KeySource>>,
+    pub(crate) models: Arc<super::model_directory::Directory>,
 }
 impl ControlConfig {
     pub(crate) fn new(root: PathBuf) -> Self {
@@ -16,6 +17,7 @@ impl ControlConfig {
         #[cfg(test)]
         let keys = Arc::new(pot_secrets::MemoryKey::new(vec![19; 32]).unwrap());
         Self {
+            models: Arc::new(super::model_directory::Directory::open(root.clone())),
             root,
             keys: RwLock::new(keys),
         }

@@ -20,6 +20,7 @@ struct Book {
 }
 pub struct Registry {
     store: Mutex<Store>,
+    root: String,
 }
 impl Registry {
     pub fn open(path: &Path, root: &str) -> Result<Self> {
@@ -29,22 +30,14 @@ impl Registry {
                 KEY,
                 &serde_json::to_string(&Book {
                     schema_version: 1,
-                    definitions: vec![Definition {
-                        id: root.into(),
-                        name: "Pot".into(),
-                        revision: 1,
-                        request_id: "initial".into(),
-                    }],
+                    definitions: vec![],
                 })?,
             )?;
         }
-        let book = load(&store)?;
-        ensure!(
-            book.definitions.iter().any(|d| d.id == root),
-            "Initial assistant missing"
-        );
+        load(&store)?;
         Ok(Self {
             store: Mutex::new(store),
+            root: root.into(),
         })
     }
     pub fn definitions(&self) -> Result<Vec<Definition>> {
@@ -68,7 +61,11 @@ impl Registry {
         }
         ensure!(book.definitions.len() < 64, "Assistant limit reached");
         let definition = Definition {
-            id: id(),
+            id: if book.definitions.is_empty() {
+                self.root.clone()
+            } else {
+                id()
+            },
             name: name.into(),
             revision: 1,
             request_id: request.into(),

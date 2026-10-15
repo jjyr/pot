@@ -2,6 +2,9 @@
 #[cfg(feature = "presentation")]
 extern crate gpui_kit as gpui;
 #[cfg(feature = "presentation")]
+pub mod avatar;
+pub mod avatar_state;
+#[cfg(feature = "presentation")]
 pub mod chat;
 #[cfg(feature = "presentation")]
 pub mod design;
