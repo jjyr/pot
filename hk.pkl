@@ -9,10 +9,10 @@ hooks {
     steps {
       ["sources"] {
         glob = List("**/*.rs", "**/*.swift", "**/*.py", "**/*.sh", "scripts/*", "mise.toml", "ruff.toml", ".swiftformat", "hk.pkl")
-        check = "mise exec -- python scripts/dev-check lint {{files}}"
+        check = "python scripts/timed-check pre-commit:sources mise exec -- python scripts/dev-check lint {{files}}"
       }
       ["whitespace"] {
-        check = "git diff --cached --check"
+        check = "python scripts/timed-check pre-commit:whitespace git diff --cached --check"
       }
     }
   }
@@ -21,20 +21,20 @@ hooks {
     steps {
       ["rust"] {
         check = new Script {
-          macos = "mise run check:rust && mise run clippy:backend && mise run clippy && mise run test && mise run test:ui && mise run test:app && mise run test:eval"
-          linux = "mise run clippy:backend && mise run test && mise run test:ui && mise run test:eval"
+          macos = "python scripts/timed-check pre-push:rust sh -c 'mise run clippy && mise run test && mise run test:ui && mise run test:app && mise run test:eval'"
+          linux = "python scripts/timed-check pre-push:rust sh -c 'mise run clippy:backend && mise run test && mise run test:ui && mise run test:eval'"
         }
       }
       ["macos"] {
         check = new Script {
-          macos = "mise run lint && mise run check:swift"
+          macos = "python scripts/timed-check pre-push:macos sh -c 'mise run lint && mise run check:swift'"
         }
       }
       ["scripts"] {
-        check = "mise run test:release && mise run test:executor && mise run test:skills && mise run test:skill-authoring"
+        check = "python scripts/timed-check pre-push:scripts sh -c 'mise run test:hooks && mise run test:release && mise run test:executor && mise run test:skills && mise run test:skill-authoring'"
       }
       ["licenses"] {
-        check = "mise run licenses && mise run test:licenses"
+        check = "python scripts/timed-check pre-push:licenses sh -c 'mise run licenses && mise run test:licenses'"
       }
     }
   }

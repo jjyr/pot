@@ -62,6 +62,10 @@ cargo test --locked -p pot-core -p pot-storage -p pot-usage -p pot-agent -p pot-
 description = "Verify executor receipts, idle expiry and orphan cleanup without a VM"
 run = "python scripts/tests/executor-lifecycle.py"
 
+[tasks."test:hooks"]
+description = "Verify hook timing and failure propagation"
+run = "python scripts/tests/hook-timing.py"
+
 [tasks."test:operation-prepare"]
 description = "Verify guest argument preparation without authorization state"
 run = "python scripts/tests/operation-prepare.py"

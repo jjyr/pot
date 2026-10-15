@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Time a hook group without changing its command's output or exit status."""
+
+import argparse
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("group")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    if not args.command:
+        parser.error("a command is required")
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    started = time.monotonic()
+    print(f"[hook] {args.group}: started", flush=True)
+    code = 1
+    try:
+        result = subprocess.run(args.command)
+        code = result.returncode if result.returncode >= 0 else 128 - result.returncode
+    except KeyboardInterrupt:
+        code = 130
+    except OSError as error:
+        print(f"[hook] {args.group}: {error}", file=sys.stderr, flush=True)
+        code = 127 if isinstance(error, FileNotFoundError) else 126
+    finally:
+        elapsed = time.monotonic() - started
+        status = "passed" if code == 0 else "failed"
+        print(f"[hook] {args.group}: {status} in {elapsed:.2f}s (exit {code})", flush=True)
+        record = {
+            "group": args.group,
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "elapsed_seconds": round(elapsed, 6),
+            "exit_code": code,
+        }
+        try:
+            log = Path(".local/hooks/timings.jsonl")
+            log.parent.mkdir(parents=True, exist_ok=True)
+            # One append write keeps records intact across hk's parallel groups.
+            fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(fd, (json.dumps(record) + "\n").encode())
+            finally:
+                os.close(fd)
+        except OSError as error:
+            print(f"[hook] Could not write timing log: {error}", file=sys.stderr, flush=True)
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
