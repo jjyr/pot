@@ -41,6 +41,7 @@ function matchLocale(value){const normalized=value.replaceAll('_','-').toLowerCa
 function initialLocale(){try{const saved=localStorage.getItem('pot-locale');if(saved&&matchLocale(saved))return matchLocale(saved);}catch{}return (navigator.languages||[]).map(matchLocale).find(Boolean)||'en';}
 let language=initialLocale();
 const t=key=>catalogs[language]?.[key]||catalogs.en?.[key]||key;
+window.potErrors?.setTranslator(t);
 const installer=createInstaller(t,()=>refresh());
 const decode=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
 async function tokenStore(value, remove=false){
@@ -248,7 +249,7 @@ window.potAction=async(action,value)=>{
     if(action==='schedule'){if(scheduleSending)return;scheduleSending=true;module.update_view(JSON.stringify({...pageData,schedule_pending:true}));const owner=assistantId;try{await api('/api/v1/schedules',JSON.parse(value),owner);if(owner===assistantId){scheduleSuccess++;scheduleError='';}}catch(error){if(owner===assistantId)scheduleError=error.message;}finally{scheduleSending=false;}}
     if(action==='permission-owner'){const q=JSON.parse(value);await api('/api/v1/permissions',q.body,q.owner);}
     if(action==='usage-action'){const q=JSON.parse(value);await api('/api/v1/usage/'+q.path,q.body);}
-    if(action==='settings-command'){const v=JSON.parse(value);if(v.action==='language'){language=matchLocale(v.value)||'en';localStorage.setItem('pot-locale',language);if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}else if(v.action==='appearance'){localStorage.setItem('pot-appearance',String(v.value));}else if(['install','notifications','notifications-off','configure-token','logout'].includes(v.action)){await window.potAction(v.action,v.value||'');}else if(v.action==='open-url'){window.open(v.url,'_blank','noopener');}}
+    if(action==='settings-command'){const v=JSON.parse(value);if(v.action==='language'){language=matchLocale(v.value)||'en';window.potErrors?.setTranslator(t);localStorage.setItem('pot-locale',language);if(pushStatus.subscription?.enabled)await api('/access/push/preferences',{locale:language});}else if(v.action==='appearance'){localStorage.setItem('pot-appearance',String(v.value));}else if(['install','notifications','notifications-off','configure-token','logout'].includes(v.action)){await window.potAction(v.action,v.value||'');}else if(v.action==='open-url'){window.open(v.url,'_blank','noopener');}}
     if(action==='task-query'){const q=JSON.parse(value);scope=q.scope;query=q.q;offset=q.offset;execution_target=q.execution_target||'';history.replaceState({...history.state,scope,query,offset,execution_target},'',location.pathname+location.search);}
     if(action==='sandbox-lifecycle'){const body=JSON.parse(value);body.request_id=requestUUID();delete body.sandbox_id;await api('/api/v1/sandboxes/shared',body);}
     if(action==='permission-decision')await api('/api/v1/permissions',JSON.parse(value));

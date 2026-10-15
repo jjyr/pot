@@ -29,8 +29,8 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
-          version: 2026.6.0
-          install_args: rust python github:EmbarkStudios/cargo-about
+          version: 2026.10.10
+          install_args: rust mr-boxington python github:EmbarkStudios/cargo-about
       - name: Restore license sources
         id: license-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -61,8 +61,8 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
-          version: 2026.6.0
-          install_args: rust python conda:brotli-bin
+          version: 2026.10.10
+          install_args: rust mr-boxington python conda:brotli-bin
       - run: mise exec -- rustup component add clippy
       - name: Identify Rust compiler
         id: rust-version
@@ -107,8 +107,8 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
-          version: 2026.6.0
-          install_args: rust python conda:brotli-bin ruff shfmt shellcheck swiftformat
+          version: 2026.10.10
+          install_args: rust mr-boxington python conda:brotli-bin ruff shfmt shellcheck swiftformat
       - name: Check platform prerequisites
         run: |
           test "$(uname -m)" = arm64

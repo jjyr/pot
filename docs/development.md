@@ -2,7 +2,7 @@
 
 ## Development and running
 
-Requires Apple Silicon, macOS 26+, Xcode/Swift 6.2+, and [mise](https://mise.jdx.dev/). `mise.toml` pins Rust, Python, Zig, cargo-zigbuild, and check tools; Swift uses the selected Xcode.
+Requires Apple Silicon, macOS 26+, Xcode/Swift 6.2+, and [mise](https://mise.jdx.dev/) 2026.9.2 or newer. `mise.toml` pins Rust/Cargo, mr-boxington, Python, Zig, cargo-zigbuild, and check tools; Swift uses the selected Xcode.
 
 ```sh
 mise trust
@@ -167,10 +167,29 @@ compiler changes require an initial cold build. All existing checks remain enabl
 `mise run setup` installs repository-local hk pre-commit/pre-push hooks without changing global hooks. Run it once per clone. Git hooks load tools through mise without shell activation; mise itself must be on PATH.
 
 - pre-commit: checks formatting/scripts for changed files; Rust formatting covers the workspace, and rule/check-entry changes trigger all lightweight checks. Also checks staged whitespace.
-- pre-push: every push runs CI checks in four parallel groups: Rust, macOS formatting/Swift, script tests, and licenses. Cargo tasks run sequentially; shared CI tasks run once. Linux runs portable backend checks and skips macOS-only checks.
+- pre-push: every push runs checks in four parallel groups: Rust, macOS formatting/Swift, script tests, and licenses. macOS runs one full-workspace Clippy pass with all targets, followed by backend, UI, App and deterministic eval tests. Clippy covers compilation checking, so the hook does not repeat `check:rust` or the backend-only Clippy pass. Linux runs backend Clippy and portable tests, skipping macOS-only checks. Cargo tasks run sequentially.
 - Hooks only check; they neither fix nor stage. Source checks read the working tree, so partially staged content must also be formatted. Image/VM/paid model tests are excluded. A new machine may compile slowly; later runs reuse caches.
+- Each pre-commit step and pre-push group prints its elapsed seconds and exit code, including failures. `scripts/timed-check` also appends UTC start/end times, elapsed seconds and exit code to the ignored `.local/hooks/timings.jsonl` in the current checkout. Groups run concurrently, so their durations must not be added to infer total hook time. A timing-log write failure is reported without changing the check's result. `mise run test:hooks` verifies the wrapper.
 
 Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk run pre-push --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.
+
+Cargo commands run through mr-boxington (`mbx`) via mise's native Rust integration.
+Use `mise run` tasks or `mise exec -- cargo ...`; calling `~/.cargo/bin/cargo`
+directly bypasses this integration. `mise exec -- mbx doctor --json` checks the
+active tools, and `mise exec -- mbx explain --last` explains the latest build's
+cache results. Remove other compiler-cache wrappers before using mbx: an existing
+`RUSTC_WRAPPER` or Cargo `build.rustc-wrapper` can bypass mbx's own compiler cache.
+Native mise integration does not require `mbx setup` or a standalone Cargo shim;
+inside `mise exec`, Cargo resolves to mise's command wrapper.
+
+The shared mbx compiler store is separate from this checkout's explicit
+`CARGO_TARGET_DIR` (`.local/poc/cargo-target`), which mbx leaves in place. Builds
+reuse matching compiler outputs across checkouts; tests still execute normally.
+The native toolchain is pinned to Rust 1.100 beta (`beta-2026-10-14`). This meets
+mbx's Cargo requirement for dependency build seeding in managed targets; the
+explicit target directory above continues to use compiler-action caching. Keep
+the pinned nightly used by `build:web-ui` separate from this native toolchain.
+Machine-wide wrapper configuration belongs in machine inventory.
 
 ## Code entry points
 

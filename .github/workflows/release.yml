@@ -36,7 +36,7 @@ jobs:
           clean: true
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
-          version: 2026.6.0
+          version: 2026.10.10
       - name: Prepare build prerequisites
         run: |
           mise exec -- rustup component add rustfmt clippy

@@ -11,7 +11,7 @@ authors = ["JJy <jjyruby@gmail.com>"]
 repository = "https://github.com/jjyr/pot"
 
 [workspace.dependencies]
-gpui-kit = { version = "=0.7.3", features = ["gpui-fast"] }
+gpui-kit = "=0.7.3"
 pot-relay = { path = "crates/relay" }
 pot-resource = { path = "crates/resource" }
 pot-sandbox-images = { path = "crates/sandbox-images" }
@@ -34,12 +34,20 @@ pot-gateway = { path = "crates/gateway" }
 pot-control = { path = "crates/control" }
 pot-runtime-execution = { path = "crates/runtime-execution" }
 pot-runtime = { path = "crates/runtime" }
-pot-eval = { path = "crates/eval" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
 [profile.dev]
 debug = 0
+
+[patch.crates-io]
+# The fork's compatibility crates re-export the patched GPUI core under the
+# package names GPUI Kit pins. Keep all overrides on the same immutable commit.
+gpui-pre = { git = "https://github.com/jjyr/gpui-fast", rev = "1beaef379aa91b0dbd4bacf87b66617f65f4c1c0" }
+gpui-pre-platform = { git = "https://github.com/jjyr/gpui-fast", rev = "1beaef379aa91b0dbd4bacf87b66617f65f4c1c0" }
+gpui-pre-macros = { git = "https://github.com/jjyr/gpui-fast", rev = "1beaef379aa91b0dbd4bacf87b66617f65f4c1c0" }
+gpui-pre-sum-tree = { git = "https://github.com/jjyr/gpui-fast", rev = "1beaef379aa91b0dbd4bacf87b66617f65f4c1c0" }
+gpui-pre-web = { git = "https://github.com/jjyr/gpui-fast", rev = "1beaef379aa91b0dbd4bacf87b66617f65f4c1c0" }
 
 [profile.release]
 strip = true

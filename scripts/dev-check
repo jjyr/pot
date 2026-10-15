@@ -33,6 +33,7 @@ def doctor():
     print(swift.strip())
     for binary in [
         "cargo",
+        "mbx",
         "cargo-zigbuild",
         "zig",
         "python",
