@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "default_linux_bundle": "linux-arm64-cf60a4144d497e5e",
+  "default_linux_bundle": "linux-arm64-369f463dd6297281",
   "resources": {
     "kernel-fb2cfb79eb1ae194": {
       "release_tag": "sandbox-go-resources-v0.1.0",
@@ -25,6 +25,22 @@
       "size_bytes": 540166421,
       "unpacked_bytes": 543532584,
       "format": "oci-tar-gzip"
+    },
+    "boot-4f479ca52b9e4236": {
+      "release_tag": "sandbox-go-resources-v0.2.0",
+      "filename": "linux-arm64-boot-4f479ca52b9e4236.tar.gz",
+      "sha256": "4f479ca52b9e423684888c85ee1fec2ba1ad05abd053a125dac1b060e44e4791",
+      "size_bytes": 68582380,
+      "unpacked_bytes": 69255307,
+      "format": "oci-tar-gzip"
+    },
+    "image-699f996f2ccdec3d": {
+      "release_tag": "sandbox-go-resources-v0.2.0",
+      "filename": "linux-arm64-image-699f996f2ccdec3d.tar.gz",
+      "sha256": "699f996f2ccdec3d48dcc62ac3599983e52bd8cb5093038c552478ab10e209ac",
+      "size_bytes": 645553992,
+      "unpacked_bytes": 650500587,
+      "format": "oci-tar-gzip"
     }
   },
   "bundles": {
@@ -33,6 +49,16 @@
       "boot": "boot-17ba31ff7cc3bde2",
       "image": "image-707c6070d625c96d",
       "image_reference": "pot.local/sandbox:d7f180af7d9f3f091bff",
+      "boot_reference": "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",
+      "bootstrap_version": "pot-executor-v2",
+      "os": "linux",
+      "architecture": "arm64"
+    },
+    "linux-arm64-369f463dd6297281": {
+      "kernel": "kernel-fb2cfb79eb1ae194",
+      "boot": "boot-4f479ca52b9e4236",
+      "image": "image-699f996f2ccdec3d",
+      "image_reference": "pot.local/sandbox:f8203a562aec9c92b971",
       "boot_reference": "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",
       "bootstrap_version": "pot-executor-v2",
       "os": "linux",
