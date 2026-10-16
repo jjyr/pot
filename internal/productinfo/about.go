@@ -46,6 +46,7 @@ func Read(directory string) (About, error) {
 		{"Go dependencies and runtime", "GoDependencyLicenses.txt", true},
 		{"Swift Helper dependencies", "SwiftDependencyLicenses.txt", false},
 		{"IBM Plex Sans", "FrontendFontLicense.txt", true},
+		{"Lucide and Feather icons", "FrontendIconLicense.txt", true},
 		{"models.dev catalog and artwork", "ModelDirectoryLicense.txt", true},
 		{"Node.js and bundled dependencies", "node/LICENSE", true},
 		{"noVNC", "novnc/LICENSE.txt", true},
@@ -80,7 +81,7 @@ func Read(directory string) (About, error) {
 	}
 	// Swift notices are platform-specific. The cross-platform notices must
 	// all be present before the UI labels a packaged set as available.
-	required := map[string]bool{"Pot": false, "Go dependencies and runtime": false, "IBM Plex Sans": false, "models.dev catalog and artwork": false, "Node.js and bundled dependencies": false, "noVNC": false}
+	required := map[string]bool{"Pot": false, "Go dependencies and runtime": false, "IBM Plex Sans": false, "Lucide and Feather icons": false, "models.dev catalog and artwork": false, "Node.js and bundled dependencies": false, "noVNC": false}
 	for _, notice := range out.Licenses {
 		if _, ok := required[notice.Name]; ok {
 			required[notice.Name] = true

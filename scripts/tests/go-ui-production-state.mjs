@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import {createEditorSession,createRequestGate} from '../../web/src/state/editor.mjs';
-import {scopedPath,normalizeSnapshot,createProductionClient,APIError} from '../../web/src/adapters/production.mjs';
+import {scopedPath,normalizeSnapshot,createProductionClient,decodeDesktopResponse,APIError} from '../../web/src/adapters/production.mjs';
 import {createTopicVersions} from '../../web/src/state/changes.mjs';
+const cancelledPreparation={id:'request-proof',sandbox_id:'shared',bundle_id:'linux-fixture',state:'cancelled',error:'Cancelled by owner'};
+assert.deepEqual(decodeDesktopResponse(JSON.stringify(cancelledPreparation)),cancelledPreparation,'Successful native cancellation retains its domain error text without a false HTTP failure');
+assert.equal(decodeDesktopResponse(cancelledPreparation),cancelledPreparation,'Object DTO identity is preserved');
+assert.deepEqual(decodeDesktopResponse({status:200,error:'Optional domain diagnostic'}),{status:200,error:'Optional domain diagnostic'});
+assert.throws(()=>decodeDesktopResponse(JSON.stringify({status:409,error:{code:'request_failed',message:'Actual native request failure'}})),error=>error instanceof APIError&&error.status===409&&error.code==='request_failed'&&error.message==='Actual native request failure');
+assert.throws(()=>decodeDesktopResponse({status:404,error:{code:'not_found',message:'Resource is unavailable'}}),error=>error instanceof APIError&&error.status===404);
 const changed=createTopicVersions();
 assert.deepEqual(changed({assistants:1,usage:2},'a','boot1'),['assistants','usage']);
 assert.deepEqual(changed({assistants:1,usage:3},'a','boot1'),['usage']);

@@ -3,6 +3,16 @@ import {createTopicVersions} from '../state/changes.mjs';
 export class APIError extends Error {
   constructor(status, value) { super(value?.message || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
 }
+export function decodeDesktopResponse(raw) {
+  const value=typeof raw==='string'?JSON.parse(raw):raw;
+  // Service.Call failures have this exact envelope. Domain DTOs also contain
+  // error text (for example a successfully cancelled preparation request).
+  if(value&&typeof value==='object'&&Object.keys(value).length===2
+      &&Number.isInteger(value.status)&&value.status>=400&&value.status<=599
+      &&value.error&&typeof value.error==='object'&&!Array.isArray(value.error)
+      &&typeof value.error.code==='string'&&typeof value.error.message==='string')throw new APIError(value.status,value.error);
+  return value;
+}
 export function scopedPath(path, {owner = '', space = ''} = {}) {
   const [base, query = ''] = path.split('?');
   const params = new URLSearchParams(query);
@@ -33,10 +43,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        // Wails carries the same JSON envelope/errors as the HTTP handler.
-        if (result?.error) throw new APIError(result.status || 400, result.error);
-        return result;
+        return decodeDesktopResponse(raw);
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',

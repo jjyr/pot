@@ -291,6 +291,9 @@ def prepare_resources(destination, platform):
     shutil.copy2(
         ROOT / "web/src/assets/IBMPlexSans-OFL.txt", destination / "FrontendFontLicense.txt"
     )
+    shutil.copy2(
+        ROOT / "web/src/assets/Lucide-LICENSE.txt", destination / "FrontendIconLicense.txt"
+    )
     if platform == "darwin-arm64":
         copy_tree(ROOT / "resources/sandbox/macos/xcode", destination / "macos-bootstrap")
         go_build(

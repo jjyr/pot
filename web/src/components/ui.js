@@ -1,3 +1,4 @@
+import {icon} from './icons.mjs';
 import {messages} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, ownerKey, setDraft, settleSend, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
@@ -7,31 +8,11 @@ import {createLiveResourceRequests} from './resources.mjs';
 import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
 
-const paths = {
-  menu: 'M4 6h16M4 12h16M4 18h16', back: 'm14 5-7 7 7 7', plus: 'M12 5v14M5 12h14',
-  tasks: 'M9 5h11M9 12h11M9 19h11M3 5h1M3 12h1M3 19h1',
-  machines: 'M3 4h18v12H3zM8 20h8M12 16v4', usage: 'M5 20V10M12 20V4M19 20v-7',
-  settings: 'm9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3zM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
-  more: 'M5 12h.01M12 12h.01M19 12h.01', send: 'm6 10 6-6 6 6M12 4v16',
-  open: 'M14 3h7v7M21 3l-9 9M10 3H3v18h18v-7',
-  stop: 'M6 6h12v12H6z', down: 'm6 9 6 6 6-6', close: 'm6 6 12 12M6 18 18 6',
-  cloud:'M6 18h12a4 4 0 0 0 0-8h-1a6 6 0 0 0-11 1 3.5 3.5 0 0 0 0 7',
-  clock:'M12 8v5h4M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
-  copy: 'M9 9h11v11H9zM15 5V3H3v12h2',
-};
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
   if (text !== undefined) element.textContent = text;
   return element;
-}
-function icon(name) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  for (const [key, value] of Object.entries({viewBox: '0 0 24 24', width: '20', height: '20', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true'})) svg.setAttribute(key, value);
-  const path = document.createElementNS(svg.namespaceURI, 'path');
-  path.setAttribute('d', paths[name] || paths.more);
-  svg.append(path);
-  return svg;
 }
 function button(name, label, className = 'icon-button') {
   const item = el('button', className);
@@ -321,7 +302,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const more = button(client.production?'more':'settings', t(client.production ? 'preferences' : 'more'));
     more.setAttribute('aria-haspopup', 'dialog');
     more.onclick = () => { preferencesOpen = true; renderPreferences(); preferences.showModal(); };
-    titlebar.append(more);
+    if(!client.production||route==='chat')titlebar.append(more);
     if(!client.production&&titlebar.querySelector('.title-meta'))titlebar.insertBefore(more,titlebar.querySelector('.title-meta'));
     notice.textContent = client.production ? '' : t('notice');
     input.placeholder = t('composer');

@@ -267,3 +267,25 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .guidance-received{display:inline-flex;align-items:center;color:var(--muted);height:16px;margin-top:4px}.guidance-received svg{width:12px;height:12px}
 
 .resource-notices{flex:none;max-height:45vh;overflow:auto;padding:12px 28px}.resource-notices>.page-card{max-width:760px;margin:0 auto 10px}.resource-request{display:flex;flex-direction:column;gap:8px}.resource-consent .page-toolbar{justify-content:flex-end;margin-top:16px}@media(max-width:719px){.resource-notices{padding:12px 16px}}
+
+/* The established density rule is narrow OR coarse; tray remains compact. */
+.machine-icon{display:inline-flex;align-items:center;flex:none}.machine-icon svg{width:16px;height:16px}.machine-header .control{display:inline-flex;align-items:center;justify-content:center}.machine-header .control svg{width:16px;height:16px}
+.machine-host-summary{min-height:36px;display:flex;align-items:center;justify-content:center;gap:12px;list-style:none;cursor:pointer}.machine-host-summary::-webkit-details-marker{display:none}.machine-host-summary svg{width:20px;height:20px;flex:none}.machine-target[open]>.machine-host-summary svg{transform:rotate(90deg)}
+@media(max-width:719px),(pointer:coarse){
+ .pot-app:not(.surface-tray){--control-height:44px}
+ .pot-app:not(.surface-tray) .control,.pot-app:not(.surface-tray) .field-input:not([type=checkbox]){min-height:44px;font-size:16px}
+ .pot-app:not(.surface-tray) .control{min-width:44px}
+ .pot-app:not(.surface-tray) .send-button{width:44px;height:44px;margin-bottom:8px}
+ .pot-app:not(.surface-tray) .role-user .copy-message{visibility:visible}
+ .pot-app:not(.surface-tray) .machine-header .control{min-width:44px;width:44px;height:44px;padding:0}
+ .pot-app:not(.surface-tray) .machine-header .control svg{width:24px;height:24px}
+ .pot-app:not(.surface-tray) .machine-host-summary{min-height:44px;font-size:16px;padding:0 8px}
+}
+@media(max-width:719px){
+ .pot-app:not(.surface-tray) .page-card{gap:16px}
+ .pot-app:not(.surface-tray) .shortcut-card{gap:0}
+ .pot-app:not(.surface-tray) .titlebar .narrow-navigation{margin-right:16px}
+ .pot-app:not(.surface-tray) .titlebar .narrow-navigation svg{width:24px;height:24px}
+ .pot-app:not(.surface-tray) .window-title{font-size:14px}
+}
+.surface-tray{--control-height:28px}.surface-tray .control,.surface-tray .field-input:not([type=checkbox]){min-height:28px;font-size:14px}
