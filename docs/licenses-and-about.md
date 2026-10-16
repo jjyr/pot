@@ -32,7 +32,7 @@ App resources and portable CLI archives include these original plain-text files:
 |---|---|
 | `LICENSE.txt` | Pot's own source |
 | `GoDependencyLicenses.txt` | Go modules linked by the packaged entry points and the Go runtime |
-| `SwiftDependencyLicenses.txt` | Retained macOS Helpers' resolved package metadata and checkout notices; macOS packages only |
+| `SwiftDependencyLicenses.txt` | Native macOS VM Swift Helper dependency notices; macOS packages only |
 | `FrontendFontLicense.txt` | IBM Plex Sans under the SIL Open Font License |
 | `FrontendIconLicense.txt` | Retained Lucide/Feather icons under ISC/MIT terms |
 | `ModelDirectoryLicense.txt` | The models.dev catalog seed and provider artwork |
@@ -76,7 +76,7 @@ and macOS packages additionally include the Swift Helper notices.
 
 ## Retained and guest assets
 
-JS plugins, built-in Skills, Python guest brokers and Swift Helpers remain in
+JS plugins, built-in Skills, Python guest brokers and the native macOS VM Swift Helper remain in
 their existing runtimes. Their own source headers and bundled license files
 remain with the distributed assets. Brand artwork is generated from the retained
 `resources/app/PotIcon.swift` master; the Wails tray atlases use the same drawing.

@@ -80,7 +80,9 @@ Task concurrency is configured separately. Configure machine policy and resource
 in separate requests so each write has one authority. Changes require a stopped environment
 with no active execution leases or unsettled operations and apply on next start.
 The Runtime validates the Provider's resource bounds. Disk sizing depends on the
-Provider: Podman does not enforce a disk quota; Apple disk resizing requires an
-explicit rebuild. These settings do not constrain Host processes.
+Provider: Podman accepts `disk_gib: 0` and does not enforce a per-container disk
+quota. Its storage uses the Linux host filesystem or the shared Podman machine
+disk on macOS. Native macOS VM disk size is fixed by the enrolled raw disk;
+resizing is rejected. These settings do not constrain Host processes.
 
 Sources: `internal/control/permissions.go`, `internal/agent` and `internal/sandbox`.

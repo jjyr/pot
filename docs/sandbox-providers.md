@@ -1,62 +1,65 @@
 # Sandbox providers
 
-Execution target references distinguish Host execution from managed Sandbox instances;
-remote is a relationship to a Runtime. [Architecture](architecture.md) defines
-ownership, machine policy and execution records.
+Sandbox Manager owns definitions, selection, lifecycle serialization, scopes,
+leases, receipts and recovery. Control supplies policy/approval; Providers own
+workspace paths, lifecycle and authenticated guest transport. Registration starts
+no guest or download. [Architecture](architecture.md) defines execution ownership.
 
-## Implemented contracts
+| Provider | Host | Execution |
+|---|---|---|
+| `podman` | macOS or Linux | Linux containers using the same architecture-specific Debian OCI image |
+| `macos.apple-virtualization` | macOS | Owner-prepared native macOS VM using the signed Swift Helper |
 
-Sandbox Manager owns definitions, default selection, explicit Provider registration,
-lifecycle serialization, scoped execution, leases, receipts, cancellation and
-recovery. Control supplies policy and approval; Runtime supplies execution scopes. Providers supply
-platform configuration, workspace paths, lifecycle and authenticated guest transport.
-Resource creation registers installed Providers without starting an instance.
+Linux uses local rootless Podman with cgroup v2/systemd. macOS uses a dedicated
+Podman machine per Runtime execution root, selected explicitly instead of the
+user's default connection. Containers share its Linux kernel/storage; Tasks in
+a shared container are not mutually untrusted security boundaries. Swift owns
+only native macOS VMs; see [enrollment](macos-sandbox.md).
 
-| Provider | Host | Execution | Qualification |
-|---|---|---|---|
-| macos.apple-containerization | macOS | Linux container guest | Local support; see resource/executor acceptance |
-| linux.podman | Linux | Rootless Podman guest | Linux-host support; actual remote plugin qualification pending |
-| macos.apple-virtualization | macOS | Prepared macOS VM | Implementation present; real VM qualification pending |
+On the dedicated macOS FCOS engine, container SELinux type `container_engine_t`
+permits the broker's scope mounts while retaining MCS labels and machine-wide
+SELinux enforcement.
 
-Provider descriptors report shell/files/desktop/shared-execution support. These
-are execution validation, not model tool-catalog selection. Control's configured
-tools stay visible; unsupported calls return explicit errors. No configuration,
-model, target or plugin replacement occurs. Worker calls are fixed to their
-assigned execution context and cannot manage lifecycle. Same-machine Host exceptions return through Control for authorization.
+## Machine and mount boundaries
 
-Start completes only after authenticated execution readiness. Runtime may prepare
-the already bound Sandbox; it cannot allocate a different one as fallback.
-Stop/delete respect active scopes and uncertain outcomes. Deleted IDs are retired;
-workspace artifacts remain. Automatic Tasks reuse the machine-owned shared Linux development environment.
-Stop preserves its writable layer; explicit rebuild/delete removes it. Prepared
-macOS VM bundles retain their existing operator-managed lifecycle.
+The macOS machine shares `podman-shared`, exact trusted Skill roots and explicit
+mapping roots fixed at first initialization. Product databases, credentials, the
+complete execution root and the owner's home directory stay outside it.
+Containers receive their workspace, role-specific Skill mounts and explicit
+owner mappings. A later mapping outside pinned machine shares fails; Pot never
+restarts sibling containers to expand those shares. Machine capacity, private
+paths and runtime prerequisites are documented in
+[Deployment](deployment.md#linux-sandbox-runtime).
+
+## Lifecycle and cleanup
+
+Start waits for authenticated readiness of the bound Sandbox, with no replacement
+or Host fallback. Descriptors validate capabilities without hiding model tools;
+unsupported calls fail explicitly. Workers cannot manage lifecycle. Same-machine
+Host exceptions return through Control for authorization.
+
+Task completion/cancellation drains only that execution's exact process scope,
+never sibling Tasks or the shared desktop. Unknown cleanup retains quarantine.
+Owner stop/rebuild/delete require admission checks for active leases, unsettled
+receipts and retained references. Stop keeps the writable container; rebuild
+resets installed software/shared toolchains while retaining Task files/records.
+Deleted IDs are retired. See [execution lifecycle](executor.md#shared-machine-execution-environment).
+
+Per-Sandbox stop/delete targets only its container. Orderly Runtime shutdown
+stops owned containers, proves that the dedicated engine has no running
+containers, then stops the macOS machine. Uncertain cleanup or a remaining
+foreign container returns an error and leaves the machine running.
 
 ## Desktop boundary
 
-Manager owns opaque expiring desktop tickets, boot checks, revocation and exclusive
-viewer input. Provider endpoints and credentials stay private. Closing a viewer
-does not close task scopes or stop the VM. Server gates input independently of
-noVNC viewOnly. Viewer arbitration does not fence all guest-local automation.
-Supported local desktop transport is implemented; outward remote streaming through
-Control and broader takeover qualification remain in #39.
+Manager owns expiring desktop tickets, boot checks, revocation and exclusive
+viewer input; endpoints and credentials stay private. Server gates input
+independently of noVNC viewOnly. Closing a viewer does not close Task scopes or
+stop the environment. Viewer arbitration does not fence all guest automation.
+Desktop viewing is local to the exact Runtime; remote streaming through Control
+remains outside the current transport contract. Layout, fonts, theme and
+interaction rules are shared across hosts; see [image contents](sandbox-image.md).
 
-## Platform and resource details
-
-See [macOS setup](macos-sandbox.md), [resource delivery](sandbox-resources.md),
-[image recipes](sandbox-image.md) and [command execution](executor.md).
-MacOS VM preparation requires an enrolled compatible instance and qualified toolchain;
-IPSW installation media is not a ready development VM. Android, iOS and Windows
-Providers, allocation catalogs and automatic template cloning are outside current
-implementation. They add no unused public interfaces or tool schemas.
-
-Owner rebuild uses the existing native Sandbox API with `action: "rebuild"`.
-It rejects occupied/quarantined environments, resets the writable layer and
-shared development tools, and retains Task files and records. Container Providers
-implement explicit destruction separately from stop. Stopped retained environments
-remain discoverable and can be restarted with their installed software.
-
-Control initialization registers installed Providers without creating instances.
-On execution nodes, an authenticated command for the shared environment lazily
-registers Providers; no separate Sandbox creation call is needed. Persisted shared
-definitions restore registration before lease reconciliation on Runtime restart.
-Registration itself neither starts a VM nor downloads assets.
+Linux image preparation uses [verified resource bundles](sandbox-resources.md).
+Platform expansion and automatic template cloning are covered by
+[product scope](development-plan.md), separately from these Provider contracts.

@@ -1,8 +1,14 @@
 # macOS Sandbox enrollment and execution
 
-Updated: 2026-10-07. Prepared-instance implementation, awaiting real macOS/Xcode VM qualification. Linux remains the default. Android/iOS are deferred.
+Native macOS VMs use a complete owner-prepared instance. Linux remains the default
+Sandbox; automatic OS installation is not provided.
 
-Server registers `pot-sandbox-macos-apple-vm` alongside Linux; Runtime calls `pot-sandbox` without production dependencies on either Provider. `PotMacOSHelper` is a separately signed Swift executable using public Virtualization.framework. Registration does not boot or download anything. Missing optional files show an unavailable macOS definition while leaving chat and Linux available.
+Runtime registers `macos.apple-virtualization` alongside the shared Podman
+provider. `PotMacOSHelper` is a separately signed Swift executable using public
+Virtualization.framework for native macOS VMs. Linux containers use the dedicated
+Podman machine described in [Sandbox providers](sandbox-providers.md).
+Registration does not boot or download anything. Missing optional files show an
+unavailable macOS definition while leaving chat and Linux available.
 
 The `pot-macos-executor-v3` bootstrap adds authenticated session inspection. Previously enrolled v2 guests must install the current bootstrap and update their manifest before use; the Provider rejects an older manifest before execution.
 
@@ -47,7 +53,7 @@ No installer/first-run automation is delivered. Prepare the complete platform wi
 
 ## Bootstrap and enroll
 
-Build the Host components with `mise run check:swift` and the native runner with `mise run build:go`. Sign Helper with `helper/virtualization.entitlements`. App bundling includes/signs the separate Helper and places the native runner/bootstrap assets in `runtime/macos-bootstrap/`; standalone installations must include `PotMacOSHelper` in runtime resources, or configure the trusted `POT_MACOS_HELPER` path. These paths are owner configuration, never Agent arguments.
+Build the Host components with `mise run check:swift` and the native runner with `mise run build:go`. Packaging signs the separate Helper with `helper/virtualization.entitlements`, places it beside the Host executable and includes native runner/bootstrap assets in `Resources/macos-bootstrap/`. Custom installations select the Helper directory through `serve -helpers` and runtime assets through `-resources`. These paths are owner configuration, never Agent arguments.
 
 1. Generate per-instance assets on Host:
 
@@ -65,15 +71,19 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    The broker uses Xcode's available `/usr/bin/python3` (3.9+ required), launchd and the credential-free native Go runner. It checks the account is standard and has no sudo grants. Control keys/config/SQLite stay under root-private `/var/db/pot-executor`; child environments carry no token. Remove Guest staging assets and shut the VM down before copying its complete platform bundle.
 
-3. Place only the CA certificate and matching token in the private Host prepared bundle above. Keep guest private keys on private guest disk, never workspace or Host skill shares. Record actual OS/Xcode versions in the manifest. Start the Pot Server/App, then enroll through the owner CLI:
+3. Place only the CA certificate and matching token in the private Host prepared bundle above. Keep guest private keys on private guest disk, never workspace or Host Skill shares. Record actual OS/Xcode versions in the manifest and keep the complete source instance stopped.
 
-   ```sh
-   pot --root INSTANCE_ROOT sandbox enroll-macos mac-dev /PRIVATE/PREPARED_INSTANCE
-   ```
+   The Go host retains the Provider, prepared-bundle validation and Swift Helper,
+   but currently exposes no owner CLI/API that imports and registers a new
+   prepared macOS instance. The former `sandbox enroll-macos` command is not
+   available. New enrollment tooling remains outside this migration; the bundle
+   contract above must not be treated as a completed enrollment operation.
 
-   Enrollment copies the complete fixed-file bundle, rejects symlinks/non-private files and existing instances, and creates a macOS definition through the local management API. It requires the source to be stopped; it cannot prove the state of a third-party VM engine. A failed final API registration retains the private copy for owner inspection. Do not simply retry over an existing copy. Raw whole-GiB disk size is recorded in the instance resource config; disk resizing is rejected. CPU/RAM changes apply after stopping, subject to VZ validation.
-
-4. The owner manages the prepared macOS VM through the machine management API. Models do not manage its lifecycle. Automatic task sandboxes use disposable Linux containers; enrolled macOS VMs are not selected or deleted by that automatic lifecycle. Session IDs and receipts use the common Manager contracts.
+   For registered instances, raw whole-GiB disk size is fixed by the enrolled
+   disk; resizing is rejected. CPU/RAM changes apply after stopping, subject to
+   VZ validation. Models do not manage VM lifecycle. Automatic Tasks use the
+   retained shared Linux container, independently of native macOS VM lifecycle.
+   Session IDs and receipts use the common Manager contracts.
 
 Control owns all machine grants. The guest broker exposes `/prepare` only for argument normalization and keeps no authorization file. Reprovision the broker after this incompatible protocol change.
 

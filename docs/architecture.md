@@ -3,7 +3,8 @@
 Pot uses Go for product logic, Wails v3 with the system WebView for the macOS
 App, and a shared HTML/CSS/JS frontend. The main window, tray panel and browser
 use the same components, styles and state contracts. Swift retains the macOS
-Sandbox implementation; Node/JavaScript plugins and Python guest services retain
+VM implementation; Linux Sandboxes use the same Go Podman provider on macOS and
+Linux. Node/JavaScript plugins and Python guest services retain
 their existing responsibilities. See [component boundaries](backend-components.md).
 
 ```text
@@ -141,8 +142,10 @@ are separate. Creating/selecting a definition does not boot a guest. Main and
 Workers may share a Sandbox; task workspaces and processes are scoped separately,
 but they are not mutual security boundaries. Provider/mapping/resource changes
 and deletion obey stopped-state, active-lease, receipt and retained-reference
-checks. Unknown cleanup requires explicit recovery. The Swift Helper remains the
-macOS virtualization boundary. See [Sandbox providers](sandbox-providers.md).
+checks. Unknown cleanup requires explicit recovery. On macOS, Linux containers
+share a dedicated Pot-managed Podman machine; Linux hosts use rootless local
+Podman. Container boundaries share the underlying Linux kernel. The retained
+Swift Helper owns native macOS VMs. See [Sandbox providers](sandbox-providers.md).
 
 ## Persistence and updates
 

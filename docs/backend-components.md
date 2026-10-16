@@ -21,7 +21,7 @@ module uses the toolchain pinned in `mise.toml`.
 | `internal/execution` | Shared destination Agent queue, concurrency, cancellation and uncertainty fences |
 | `internal/terminal` | Ephemeral user-operated PTYs, bounded replay and explicit process cleanup |
 | `internal/sandbox` | Definitions, selection, lifecycle, scopes, leases, receipts, mappings and recovery |
-| `internal/sandboxprovider`, `internal/platformhelper` | Linux Podman and retained Swift macOS Helper adapters |
+| `internal/sandboxprovider`, `internal/platformhelper` | Shared macOS/Linux Podman provider and retained Swift native macOS VM adapter |
 | `internal/resource`, `internal/resourcecontrol`, `internal/sandboxresources` | Verified resource delivery, owner consent and embedded image catalog |
 | `internal/runtime` | Composition, root ownership and component lifecycle |
 | `internal/transport`, `internal/spaces` | Private/native API adapters and owner-scoped local/remote client aggregation |
@@ -42,7 +42,7 @@ through the destination's shared execution manager. Control owns provider keys,
 approvals, accounting and global resources. Connected Workers run beside their
 fixed Host/Sandbox target and call Control through run-bound signed ports.
 
-The macOS Sandbox implementation stays in `helper/` using Swift. JavaScript
+Native macOS VM support stays in `helper/` using Swift. JavaScript
 plugins, Node execution and Python guest services retain their existing roles.
 Go replaces Rust product logic; it does not translate these runtime assets.
 

@@ -17,8 +17,8 @@ mise run build:cli
 ```
 
 CLI archives include the Go executables and retained runtime assets. macOS
-archives include signed Swift Helpers; Linux Sandbox execution additionally
-requires rootless Podman and an owner-installed immutable image. See
+archives include the signed native macOS VM Swift Helper. Linux Sandbox execution
+uses Podman on both hosts and separately prepared, verified OCI image resources. See
 [Development](development.md) for artifact layout and build options. Upgrade
 Control, Runners and App from the same revision.
 
@@ -36,6 +36,37 @@ stable Go identity. Previous Rust data/configuration and machine registration ar
 not imported. App and standalone Runtime cannot open the same root concurrently.
 Keep each root private and preserve its identity and secret master key across
 restarts. See [Secrets](secrets.md).
+
+## Linux Sandbox runtime
+
+Install Podman for the account running Pot. On macOS, use `brew install podman`;
+on Linux, install the distribution's rootless Podman packages with cgroup v2 and
+systemd support. Host-only Runtime operation does not require a running Sandbox.
+
+Both hosts use the `podman` provider and the architecture-specific OCI bundle in
+the embedded catalog. Start/Rebuild prepares missing resources through the
+[owner download confirmation](sandbox-resources.md#consent-progress-and-cache); an arbitrary
+locally tagged image cannot replace that verified bundle. Offline provisioning
+uses `pot resources import` as documented in [resource delivery](sandbox-resources.md).
+
+On macOS, Pot creates and selects a dedicated Podman machine for its Runtime
+execution root. Its initial capacity is 4 CPUs, 8 GiB memory and 50 GiB disk.
+These machine settings are distinct from per-container CPU/memory limits, and
+there is no public machine-sizing option. Each Sandbox uses `disk_gib: 0` for
+shared managed capacity. Pot neither adopts the user's default machine nor
+reconfigures an existing shared machine to satisfy one container request.
+The first explicit prepare/start can also download the digest-pinned official
+Podman machine OS using the `applehv` backend. This is a runtime prerequisite
+separate from Pot's Debian image catalog; its transfer is not included in the
+catalog's image consent byte count. Prepare it as well for offline operation.
+
+Machine state lives under the execution root's `podman-machine` directory.
+Workspace data lives under `podman-shared`, shared into the machine at
+`/mnt/pot/shared`; product databases and tokens stay outside it. Machine shares
+also include exact trusted Skill roots and any explicit mapping roots fixed at
+first initialization. A later Host mapping outside those pinned roots fails
+explicitly; Pot does not restart sibling containers to add it.
+Lifecycle and cleanup boundaries are defined in [Providers](sandbox-providers.md).
 
 ## Standalone Control
 
@@ -82,8 +113,7 @@ Listener and resource paths can be persisted without changing the running proces
   "tls_key": "",
   "workspace": "/absolute/agent-workspace",
   "resources": "/absolute/Resources",
-  "helpers": "/absolute/Helpers",
-  "sandbox_image": ""
+  "helpers": "/absolute/Helpers"
 }
 ```
 
@@ -203,12 +233,12 @@ Example Linux definition:
   "kind": "sandbox",
   "sandbox_id": "development",
   "name": "Development",
-  "provider": "linux.podman",
-  "resources": {"cpus": 4, "memory_gib": 8, "disk_gib": 32}
+  "provider": "podman",
+  "resources": {"cpus": 4, "memory_gib": 8, "disk_gib": 0}
 }
 ```
 
-Apple Containerization uses `macos.apple-containerization`; prepared macOS VMs
+The `podman` provider is the same on macOS and Linux; prepared native macOS VMs
 use `macos.apple-virtualization`. See [Providers](sandbox-providers.md),
 [macOS Sandbox](macos-sandbox.md), [Host mappings](sandbox-image.md) and
 [resource delivery](sandbox-resources.md).

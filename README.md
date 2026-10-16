@@ -6,7 +6,10 @@
 
 Pot is an open-source implementation of the Dot experience.
 
-Pot runs its Agent locally with separately managed Linux sandboxes. Pot manages machines, sandboxes and background tasks—you simply tell it what to do and provide guidance along the way.
+Pot runs its Agent locally with managed Linux sandboxes. macOS and Linux use the
+same Podman container provider; macOS runs its Linux containers in one dedicated
+Pot-managed Podman machine. Pot manages machines, sandboxes and background tasks—you
+simply tell it what to do and provide guidance along the way.
 
 ## Install
 
@@ -38,8 +41,8 @@ Both modes use the same CLI:
 
 Go hosts the product logic. The macOS App uses Wails v3 and the system WebView;
 main window, tray and the independent browser service share HTML/CSS/JavaScript.
-Swift Sandbox Helpers, Node plugins and Python guest services retain their
-platform responsibilities. See [Deployment](docs/deployment.md) for resource
+Swift retains native macOS VM support; Node plugins and Python guest services
+retain their runtime responsibilities. See [Deployment](docs/deployment.md) for resource
 setup, private data roots and browser publication.
 
 ## Features

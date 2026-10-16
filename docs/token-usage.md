@@ -81,7 +81,7 @@ The `routing_total` summary reports whole main-chat turns that attempt task dele
 
 ## Display and limits
 
-Pot Agent executes direct API connections; the model service determines billing. API connections default to no periodic limit, hiding allowance cards/reset times. Settings -> Agent or Usage configures **Pot usage limits**: unlimited/daily/weekly, positive integer tokens with K/M, and automatic continuation after recovery (on by default). Saving applies immediately without VM restart.
+Pot Agent executes direct API connections; the model service determines billing. API connections default to no periodic limit, hiding allowance cards/reset times. Settings -> Agent or Usage configures **Pot usage limits**: unlimited/daily/weekly, positive integer tokens with K/M, and automatic continuation after recovery (on by default). Saving applies immediately without restarting the execution environment.
 
 Daily reset is 00: 00 in the configured zone, weekly Monday 00: 00. The policy explicitly stores its zone and uses calendar DST rules. Chart ranges do not affect allowance windows; changing periods preserves history.
 
@@ -103,7 +103,7 @@ reservations remain conservative even when a completed wait record is cleared.
 
 When allowance is insufficient, gateway rejects the unsent request without consuming a request count. The Control execution adapter persists an allowance-waiting conversation or Runner state only after tools settle and the Agent checkpoint is saved. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
 
-When allowance is sufficient and automatic continuation enabled, the scheduler resumes. Otherwise click Continue in session usage. Cancel waiting discards pending work for that turn. After App/VM restart, only explicit persistent checkpoints can resume; unknown execution remains interrupted.
+When allowance is sufficient and automatic continuation enabled, the scheduler resumes. Otherwise click Continue in session usage. Cancel waiting discards pending work for that turn. After App or execution-environment restart, only explicit persistent checkpoints can resume; unknown execution remains interrupted.
 
 Resume reuses the saved Agent context, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed tool cleanup, or unknown crash side effects cannot retry automatically.
 

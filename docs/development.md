@@ -38,21 +38,24 @@ production browser authentication, provider transport or Sandbox isolation.
 | `mise run build:go` | Portable CLI and executor under `.local/go/bin` |
 | `mise run build:go-linux` | CGO-free Linux amd64/arm64 entry points |
 | `mise run build:cli` | Target CLI/runtime archive with retained resources |
-| `mise run build:go-app` | Complete Wails macOS bundle and signed Swift Helpers |
+| `mise run build:go-app` | Complete Wails macOS bundle and signed native macOS VM Swift Helper |
 | `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
 | `mise run build:web` | Localized retained viewer/Sandbox pages |
-| `mise run build:sandbox-image` | Go Linux VM guest image, independent of App packaging |
-| `mise run build:container-image` | Rootless Podman image with Go executor |
+| `mise run build:sandbox-image` | Podman Linux OCI image, independent of App packaging |
+| `mise run build:container-image` | Alias of the shared Podman OCI builder |
 | `mise run export:sandbox-resources` | Deterministic export validation against the embedded catalog |
 | `mise run release -- VERSION` | Local release archive/checksum/cask; publishing is separate |
 
 `scripts/build-go-app`, `scripts/build-go-cli` and `scripts/go_packaging.py` own
 asset layout and pinned Node checksums. Packaging includes plugin/Skill sources,
 viewer resources, component notices and the correct target executor. It neither
-builds a VM image implicitly nor replaces an existing running service.
+builds a Sandbox image implicitly nor replaces an existing running service.
+Image build architectures, explicit macOS connections and reviewed resource export
+commands are documented below in [Sandbox image resources](#sandbox-image-resources).
 
-Swift Helpers build through `helper/Package.swift`; platform virtualization stays
-Swift. JavaScript plugins and Node remain their own runtime; Python guest broker,
+The native macOS VM Helper builds through `helper/Package.swift` and retains
+Virtualization.framework ownership. Linux containers use the Go Podman provider
+on both hosts. JavaScript plugins and Node remain their own runtime; Python guest broker,
 browser and desktop support remain Python. Go replaces product Rust logic and
 runs tool compositions through a process-isolated goja worker. Heap/process and
 turn-lifecycle limits belong at that worker boundary; goja itself supplies no
@@ -61,6 +64,55 @@ per-runtime hard heap limit.
 Standalone startup and browser serving use [Deployment](deployment.md). CLI and
 App default to the new Go root, not previous product data. Use explicit private
 temporary roots for integration checks; never run two hosts against one root.
+
+## Sandbox image resources
+
+Install pinned tools and a working Podman builder. `build:sandbox-image` and
+`build:container-image` use the same script. macOS requires an explicitly prepared
+build connection; the script never starts/selects a default machine:
+
+```sh
+mise exec -- python scripts/build-go-container-image --arch arm64 --connection BUILD_CONNECTION
+```
+
+On native Linux, omit `--connection` and select `--arch amd64` or `arm64`.
+Output is `.local/go/images/linux-ARCH/{sandbox-image,sandbox-image.json}`.
+Transferable contexts use `--prepare-only --context FRESH_DIRECTORY`, followed
+by `--prepared-context DIRECTORY --arch ARCH --output DIRECTORY` on the builder.
+
+Export the reviewed OCI layout and update that architecture's catalog explicitly:
+
+```sh
+mise exec -- python scripts/export-go-sandbox-resources \
+  --source .local/go/images/linux-arm64 --arch arm64 \
+  --tag sandbox-go-resources-v0.3.0 --update-catalog
+```
+
+Retain exact exports under `.local/go/releases/resources`, review/commit the
+catalog, then build clients. Keep image-only bundles needed by pinned instances;
+unchanged digests retain their release tag. Omit `--update-catalog` to verify.
+Archive export is deterministic for identical OCI inputs; a clean image rebuild
+can change installation metadata/timestamps. Do not reuse filenames for new bytes.
+
+Publication workflow `.github/workflows/sandbox-resources.yml` requires the
+absolute reviewed export directory as `prepared_assets` and its committed tag.
+It never rebuilds or changes the catalog. Local staging uses the same verifier:
+
+```sh
+mise exec -- python scripts/verify-go-sandbox-resources \
+  --source ABSOLUTE_EXPORT_DIRECTORY --output ABSOLUTE_FRESH_DIRECTORY \
+  --tag sandbox-go-resources-v0.3.0
+```
+
+The verifier copies/hashes only catalog files belonging to that tag, rejects
+unsafe names/symlinks/existing output and fails on missing/changed files. The
+workflow uploads that explicit list and never overwrites a release. Clients
+embed no OCI layers. Release accessibility must match the download audience;
+catalog publication does not make a private repository anonymously accessible.
+
+For offline provisioning, stop the Runtime and run
+`pot resources import -root ROOT -directory RELEASE_ASSETS_DIRECTORY`. Embedded
+size/hash/extraction checks still apply. It adds no model-controlled import port.
 
 ## Checks
 

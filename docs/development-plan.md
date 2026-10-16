@@ -25,7 +25,9 @@ result transcripts and file delivery retain their original owner/run identity.
 Unknown effects require reconciliation rather than replacement execution.
 See [Task coordination](task-coordination.md) and [Permissions](permissions.md).
 
-The macOS Sandbox boundary remains Swift. JavaScript plugins and Node execution,
+Native macOS VM support remains Swift. Linux Sandbox execution uses Go and the
+same Podman provider on macOS and Linux; macOS hosts share a dedicated Pot-managed
+Podman machine. JavaScript plugins and Node execution,
 Python guest services and the desktop viewer keep their existing responsibilities.
 Go tool composition uses goja. Linux Sandbox resources are separately distributed,
 versioned and verified; client packages do not silently download them. Local

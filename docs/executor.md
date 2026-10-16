@@ -52,7 +52,7 @@ polling, resizing and stopping check current machine capability authorization as
 well as Agent/epoch/target ownership. Host policy is checked per operation; allow-once approvals identify the exact call and arguments.
 
 Normal turn completion closes sessions. Runtime binds them to owner, Agent
-binding epoch, Sandbox and VM generation. A main default selection change does
+binding epoch, Sandbox and environment boot generation. A main default selection change does
 not move existing sessions. Workers cannot retarget or access another owner's
 sessions; an old epoch cannot use a new Agent's execution scope. Completed output
 is retained until read, capacity reclamation or runner expiry. Session capacity
@@ -109,7 +109,7 @@ doubles exercise cross-turn routing, original-execution target binding, epoch an
 generation invalidation, parking/reactivation, restart quarantine and cleanup.
 `mise run test:executor` covers broker receipts, failed cleanup, idle expiry and
 orphan drainage using isolated SQLite/cgroup doubles. See the [dated acceptance
-report](validation/executor-sessions-20261007.md) for what was actually run; these are not substitutes for real Linux VM
+report](validation/executor-sessions-20261007.md) for what was actually run; these are not substitutes for real Linux container
 cgroup/desktop acceptance.
 
 ## Shared machine execution environment
@@ -128,9 +128,8 @@ Unknown cleanup outcomes retain quarantine and prevent new uncertain effects.
 
 Explicit owner stop requires no active leases or unsettled operations. It stops
 the environment while preserving the writable filesystem and workspace. Podman
-restarts the retained container; Apple Containerization reuses the retained ext4
-rootfs with a new VM/network identity. Runtime shutdown stops environments but
-retains their disks. Rebuild explicitly destroys the writable environment and
+restarts the retained container on macOS and Linux. Runtime shutdown stops owned
+environments while retaining their stored files. Rebuild explicitly destroys the writable environment and
 shared development toolchain directories; Task files/transcripts remain. There
 is no idle container destruction or automatic rebuild.
 
@@ -145,7 +144,7 @@ Rustup files remain accessible. Role-specific read-only Skill mounts and separat
 process scopes remain in force. The guest receives no Control credentials.
 
 Owner-enrolled macOS VMs remain separate operator resources. The default shared
-Sandbox uses the installed Linux Provider; missing support fails without Host
+Sandbox uses Podman; missing support fails without Host
 fallback. Native desktop Task automation remains unsupported. `cua_repl` uses
 independent headless Chromium sessions in Host or Sandbox, so browser automation
 does not require desktop ownership.
