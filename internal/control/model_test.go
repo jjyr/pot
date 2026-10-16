@@ -158,3 +158,71 @@ func TestDeepSeekCompatibilityUsesPinnedServiceMetadataInsteadOfRouteID(t *testi
 		t.Fatal("immutable generated route dropped DeepSeek wire policy")
 	}
 }
+
+func TestModelManualWaitGateSurvivesLateTaskResumeAndMailInvocation(t *testing.T) {
+	for _, role := range []string{"task", "mail"} {
+		t.Run(role, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n")
+			}))
+			defer server.Close()
+			session := modelSession(t, server.URL)
+			session.Scope = role
+			session.Turn = "original-run"
+			session.Role = role
+			if role == "mail" {
+				session.WaitScope = "correspondence"
+			}
+			waitScope := session.WaitScope
+			if waitScope == "" {
+				waitScope = session.Scope
+			}
+			ctx := context.Background()
+			at := session.Clock().UnixMilli()
+			policy := usage.Policy{Period: "day", Limit: 10000, Timezone: "UTC", AutoResume: false}
+			if err := session.Usage.SetPolicy(ctx, policy); err != nil {
+				t.Fatal(err)
+			}
+			if err := session.Usage.Wait(ctx, usage.WaitRequest{Scope: waitScope, Turn: session.Turn, AtMS: at, Required: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := session.Model(ctx, request("unreleased")); err == nil || calls.Load() != 0 {
+				t.Fatal("manual gate bypassed with available quota", calls.Load(), err)
+			}
+			first, _ := session.Usage.Waiting(ctx, waitScope)
+			if _, err := session.Usage.AdmitWaitRelease(ctx, "owner", "resume-original", *first); err != nil {
+				t.Fatal(err)
+			}
+			stream, err := session.Model(ctx, request("released"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			io.ReadAll(stream)
+			stream.Close()
+			if err = session.Usage.Wait(ctx, usage.WaitRequest{Scope: waitScope, Turn: session.Turn, AtMS: at, Required: 1}); err != nil {
+				t.Fatal(err)
+			}
+			// Calling the original Task/model port again represents a late resume after
+			// the same fixed run has reached another manual allowance boundary.
+			if _, err = session.Model(ctx, request("late-original-resume")); err == nil || calls.Load() != 1 {
+				t.Fatal("late same-run invocation bypassed later manual wait", calls.Load(), err)
+			}
+			policy.AutoResume = true
+			if err = session.Usage.SetPolicy(ctx, policy); err != nil {
+				t.Fatal(err)
+			}
+			stream, err = session.Model(ctx, request("automatic"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			io.ReadAll(stream)
+			stream.Close()
+			if calls.Load() != 2 {
+				t.Fatal("automatic allowance continuation changed", calls.Load())
+			}
+		})
+	}
+}

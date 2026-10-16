@@ -113,6 +113,22 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 	if waitScope == "" {
 		waitScope = s.Scope
 	}
+	// A late original resume may reach a later allowance boundary in the same
+	// run. The pre-request boundary independently enforces its current manual gate.
+	if waiting, e := s.Usage.Waiting(ctx, waitScope); e != nil {
+		return nil, e
+	} else if waiting != nil {
+		if waiting.Turn != s.Turn {
+			return nil, protocol.APIError{Code: "pot_token_limit", Message: "Allowance wait belongs to another original turn"}
+		}
+		ready, e := s.Usage.Ready(ctx, waitScope, at.UnixMilli())
+		if e != nil {
+			return nil, e
+		}
+		if !ready {
+			return nil, protocol.APIError{Code: "pot_token_limit", Message: "Pot token allowance requires its original wait to be released"}
+		}
+	}
 	request := usage.ReserveRequest{ID: r.ID, Scope: s.Scope, Turn: s.Turn, AtMS: atMS, Model: s.Spec.Model, InputEstimate: int64(len(body)) + 1024, MaxOutput: int64(cap), Route: &usage.Route{Provider: provider.ID, Generation: int64(s.Generation), SpecHash: s.Spec.SpecHash, Agent: s.Role, ProfileID: s.Spec.SourceProfileID}}
 	reservation, err := s.Usage.ReserveRouted(ctx, request)
 	if err != nil {

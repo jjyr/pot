@@ -356,13 +356,11 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			s.Changes.Notify("usage")
 			return map[string]bool{"saved": err == nil}, err
 		case "/api/v1/usage/resume":
-			var body struct {
-				Scope string `json:"scope"`
-			}
+			var body control.ResumeAllowanceCommand
 			if err = decode(r.Body, &body); err != nil {
 				return nil, err
 			}
-			err = s.ResumeAllowance(ctx, owner, body.Scope)
+			err = s.ResumeAllowance(ctx, owner, body)
 			return map[string]bool{"accepted": err == nil}, err
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {

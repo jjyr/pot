@@ -216,19 +216,37 @@ func TestAssistantMailAllowanceWaitResumesSameEnvelopeWithoutMainWaitOrReplay(t 
 	if waiting, err := s.Usage.Waiting(ctx, peer.ID); err != nil || waiting != nil {
 		t.Fatal("mail overwrote Main wait", waiting, err)
 	}
-	if err = s.ResumeAllowance(ctx, "main", waits[0].Scope); err == nil {
+	if err = s.ResumeAllowance(ctx, "main", ResumeAllowanceCommand{RequestID: "wrong-owner", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err == nil {
 		t.Fatal("another assistant released correspondence")
 	}
 	if err = s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 100000, Timezone: "UTC", AutoResume: false}); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.ResumeAllowance(ctx, peer.ID, waits[0].Scope); err != nil {
+	if err = s.ResumeAllowance(ctx, peer.ID, ResumeAllowanceCommand{RequestID: "resume-mail", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err != nil {
 		t.Fatal(err)
 	}
 	waitState("processed")
 	if calls.Load() != 1 {
 		t.Fatal("mail replayed model", calls.Load())
 	}
+	// A completed resume receipt remains tied to the old envelope when the same
+	// correspondence later has a different wait.
+	if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: waits[0].Scope, Turn: "later-envelope", AtMS: time.Now().UnixMilli() + 1, Required: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ResumeAllowance(ctx, peer.ID, ResumeAllowanceCommand{RequestID: "resume-mail", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ResumeAllowance(ctx, peer.ID, ResumeAllowanceCommand{RequestID: "stale-mail", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err == nil {
+		t.Fatal("stale correspondence action released later envelope")
+	}
+	if later, e := s.Usage.Waiting(ctx, waits[0].Scope); e != nil || later == nil || later.Released {
+		t.Fatal(later, e)
+	}
+	if err = s.Usage.ClearWaitForTurn(ctx, waits[0].Scope, "later-envelope"); err != nil {
+		t.Fatal(err)
+	}
+
 	_, raw, err := s.Mailbox.Session(ctx, message, spec)
 	if err != nil {
 		t.Fatal(err)

@@ -3,11 +3,11 @@ package transport
 import (
 	"context"
 	"errors"
+	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/storage"
-	"github.com/jjyr/pot/internal/usage"
 	"net/url"
 	"strconv"
 	"strings"
@@ -195,23 +195,14 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 				err = errors.New("POST required")
 				break
 			}
-			record, e := s.Tasks.Get(ctx, owner, id)
-			err = e
-			if err == nil && (record == nil || record.Launch == nil || record.Info.Phase != protocol.TaskWaiting || record.Info.RemoteWaiting) {
-				err = errors.New("Task is not safely allowance-waiting")
-			}
-			if err == nil {
-				var waiting *usage.Waiting
-				waiting, err = s.Usage.Waiting(ctx, id)
-				if err == nil && (waiting == nil || waiting.Turn != record.RunID) {
-					err = errors.New("Task allowance wait does not match original run")
+			var command control.ResumeAllowanceCommand
+			if err = decode(r.Body, &command); err == nil {
+				if command.Scope != "" && command.Scope != id {
+					err = errors.New("Task allowance scope changed")
+				} else {
+					command.Scope = id
+					err = s.ResumeAllowance(ctx, owner, command)
 				}
-			}
-			if err == nil {
-				err = s.Usage.ReleaseWait(ctx, id)
-			}
-			if err == nil {
-				err = s.Tasks.ResumeWaiting(ctx, owner, id)
 			}
 			result = map[string]bool{"accepted": err == nil}
 		default:

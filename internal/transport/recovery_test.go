@@ -9,6 +9,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/internal/webui"
 )
 
@@ -38,5 +39,32 @@ func TestRecoveryOwnerAcceptsOnlyIdentityAndIntent(t *testing.T) {
 		if webui.Allowed("POST", path) {
 			t.Fatal("private recovery published to browser", path)
 		}
+	}
+}
+
+func TestAllowanceResumeRequiresDisplayedOriginalTurnAndWaitToken(t *testing.T) {
+	manager, _ := execution.New("local", "boot", execution.DefaultLimits())
+	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
+	service, err := control.Open(control.Options{Root: t.TempDir(), RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	ctx := context.Background()
+	if _, err = service.Registry.Create(ctx, "create", "Pot"); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.Usage.Wait(ctx, usage.WaitRequest{Scope: "main", Turn: "new-turn", AtMS: 100, Required: 1}); err != nil {
+		t.Fatal(err)
+	}
+	app := Application{Control: service, RuntimeID: "local", BootID: "boot"}
+	for _, body := range []string{`{"request_id":"resume"}`, `{"request_id":"resume","turn":"new-turn"}`, `{"request_id":"resume","turn":"old-turn","since":99}`} {
+		if _, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/usage/resume", Body: json.RawMessage(body)}); err == nil {
+			t.Fatal("stale/unbound allowance action admitted", body)
+		}
+	}
+	waiting, err := service.Usage.Waiting(ctx, "main")
+	if err != nil || waiting == nil || waiting.Released {
+		t.Fatal(waiting, err)
 	}
 }

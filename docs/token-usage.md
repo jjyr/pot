@@ -114,7 +114,7 @@ Usage query/policy/recovery APIs require the main Runtime token; workers cannot 
 - `GET /api/v1/usage/summary?days=7&timezone=Asia/Shanghai&scope=&offset=0`: empty scope = global; `main` or task ID = session. Task totals ignore days; requests and Agent/model categories paginate in 20-item offset pages. `agent_models` contains the current category page; `agent_model_next_offset` is the next offset.
 - Compaction lifecycle enters Control through injected execution services or the original run-bound signed port; Workers cannot read global usage or change policies.
 - `POST /api/v1/usage/policy`: `{period: none|day|week, limit, timezone, auto_resume}`.
-- `POST /api/v1/usage/resume?assistant_id=OWNER`: optional `{scope}` clears the manual gate for that owner’s original Main turn, Task or correspondence, still requiring allowance. Omission selects Main.
+- `POST /api/v1/usage/resume?assistant_id=OWNER`: requires `{request_id, turn, since, scope?}`. The displayed original `turn`/`since` wait token and originating assistant must match the retained Main, Task or correspondence wait. Omitted `scope` selects Main. The exact wait-instance release and request receipt commit together; stale actions reject, and exact retries retain the original result without releasing a later wait. Available allowance is still required. `/api/v1/tasks/{id}/resume` requires the same `request_id`, `turn` and `since`; its path fixes the Task scope.
 - `POST /api/v1/turn/cancel` cancels the exact Main user-message turn, including allowance waiting; Tasks use their interrupt/cancel APIs.
 
 `GET /api/v1/agent/diagnostics` provides bounded execution metadata; diagnostic responses omit prompt text, tool arguments, output and error payloads.

@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"time"
 	_ "time/tzdata"
@@ -131,6 +130,8 @@ CREATE INDEX IF NOT EXISTS usage_turn ON requests(scope,turn_id,at);
 CREATE TABLE IF NOT EXISTS request_routes(request_id TEXT PRIMARY KEY REFERENCES requests(id),provider TEXT NOT NULL,generation INTEGER NOT NULL,spec_hash TEXT NOT NULL,agent TEXT NOT NULL,profile_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0,provider TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS wait_sequences(scope TEXT PRIMARY KEY,since INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS wait_release_requests(owner TEXT NOT NULL,request_id TEXT NOT NULL,scope TEXT NOT NULL,turn_id TEXT NOT NULL,since INTEGER NOT NULL,complete INTEGER NOT NULL,PRIMARY KEY(owner,request_id));
 CREATE TABLE IF NOT EXISTS routing_turns(turn_id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS tools(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,name TEXT NOT NULL,at INTEGER NOT NULL,end_at INTEGER,bytes INTEGER,failed INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS tools_scope ON tools(scope,at);
@@ -392,7 +393,7 @@ type Waiting struct {
 }
 
 func (l *Ledger) Wait(ctx context.Context, r WaitRequest) error {
-	if r.Scope == "" || r.Turn == "" || r.Required < 1 || r.Required > MaxSafeInteger {
+	if r.Scope == "" || r.Turn == "" || r.AtMS < 0 || r.AtMS > MaxSafeInteger || r.Required < 1 || r.Required > MaxSafeInteger {
 		return errors.New("invalid allowance wait")
 	}
 	return storage.Transaction(ctx, l.db, func(tx *sql.Tx) error {
@@ -410,7 +411,31 @@ func (l *Ledger) Wait(ctx context.Context, r WaitRequest) error {
 				reset = max(reset, q.ResetAt)
 			}
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO waits(scope,turn_id,at,reset_at,required,provider) VALUES (?,?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET turn_id=excluded.turn_id,reset_at=excluded.reset_at,required=excluded.required,released=0,provider=excluded.provider", r.Scope, r.Turn, r.AtMS, reset, r.Required, r.Provider)
+		var lastSince int64
+		sequenceErr := tx.QueryRowContext(ctx, "SELECT since FROM wait_sequences WHERE scope=?", r.Scope).Scan(&lastSince)
+		if sequenceErr != nil && !errors.Is(sequenceErr, sql.ErrNoRows) {
+			return sequenceErr
+		}
+		since := r.AtMS
+		var oldTurn string
+		var oldSince int64
+		var released bool
+		err := tx.QueryRowContext(ctx, "SELECT turn_id,at,released FROM waits WHERE scope=?", r.Scope).Scan(&oldTurn, &oldSince, &released)
+		if err == nil && oldTurn == r.Turn && !released {
+			since = oldSince
+		} else {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if max(lastSince, oldSince) >= MaxSafeInteger {
+				return errors.New("allowance wait token exhausted")
+			}
+			since = max(since, lastSince+1, oldSince+1)
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO wait_sequences VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET since=MAX(since,excluded.since)", r.Scope, since); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO waits(scope,turn_id,at,reset_at,required,provider) VALUES (?,?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET turn_id=excluded.turn_id,at=excluded.at,reset_at=excluded.reset_at,required=excluded.required,released=0,provider=excluded.provider", r.Scope, r.Turn, since, reset, r.Required, r.Provider)
 		return err
 	})
 }
@@ -444,20 +469,6 @@ func (l *Ledger) Ready(ctx context.Context, scope string, atMS int64) (bool, err
 		}
 	}
 	return true, nil
-}
-func (l *Ledger) ReleaseWait(ctx context.Context, scope string) error {
-	result, err := l.db.ExecContext(ctx, "UPDATE waits SET released=1 WHERE scope=?", scope)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return fmt.Errorf("waiting scope unavailable")
-	}
-	return nil
 }
 func (l *Ledger) ClearWait(ctx context.Context, scope string) error {
 	_, err := l.db.ExecContext(ctx, "DELETE FROM waits WHERE scope=?", scope)

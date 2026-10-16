@@ -481,11 +481,24 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 	}
 	return nil
 }
-func (c *Conversation) Resume(ctx context.Context) error {
+func (c *Conversation) Resume(ctx context.Context) error { return c.resumeOriginal(ctx, "") }
+func (c *Conversation) ResumeOriginal(ctx context.Context, turn string) error {
+	if turn == "" {
+		return errors.New("original turn is required")
+	}
+	return c.resumeOriginal(ctx, turn)
+}
+func (c *Conversation) resumeOriginal(ctx context.Context, turn string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed || c.ctx.Err() != nil {
 		return errors.New("conversation closed")
+	}
+	if turn != "" && (c.turn == nil || c.turn.Request.RequestID != turn) {
+		return errors.New("original allowance turn changed")
+	}
+	if turn != "" && c.turn != nil && c.turn.Resuming && (c.turn.State == "queued" || c.turn.State == "running") {
+		return nil
 	}
 	if c.turn == nil || c.turn.State != "waiting" || c.turn.Cancelling || c.blocked {
 		return errors.New("no safe waiting turn to resume")

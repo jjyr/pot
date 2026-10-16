@@ -194,7 +194,11 @@ func TestCalendarDSTAndManualResumeBothPolicies(t *testing.T) {
 	if ready, err := l.Ready(ctx, "main", at); err != nil || ready {
 		t.Fatal(ready, err)
 	}
-	if err = l.ReleaseWait(ctx, "main"); err != nil {
+	originalWait, err := l.Waiting(ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = l.AdmitWaitRelease(ctx, "main", "resume", *originalWait); err != nil {
 		t.Fatal(err)
 	}
 	if ready, err := l.Ready(ctx, "main", at); err != nil || ready {

@@ -152,7 +152,10 @@ func TestConversationWaitingResumeUsesOriginalInput(t *testing.T) {
 	waitSnapshot(t, c, func(s protocol.Snapshot) bool {
 		return s.Turn != nil && s.Agent.Detail != nil && strings.Contains(*s.Agent.Detail, "Waiting")
 	})
-	if err := c.Resume(ctx); err != nil {
+	if err := c.ResumeOriginal(ctx, "another-turn"); err == nil {
+		t.Fatal("stale allowance turn resumed current input")
+	}
+	if err := c.ResumeOriginal(ctx, "turn"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
