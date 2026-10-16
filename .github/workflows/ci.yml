@@ -2,8 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
     tags: ["v*.*.*"]
+  release:
+    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,14 +44,6 @@ jobs:
           restore-keys: license-sources-v1-${{ runner.os }}-
       - run: mise run licenses
       - run: mise run test:licenses
-      - name: Save license sources
-        if: github.ref == 'refs/heads/main' && steps.license-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ steps.license-cache.outputs.cache-primary-key }}
 
   backend:
     name: Linux backend and deterministic eval
@@ -86,16 +80,6 @@ jobs:
       - run: mise run test:executor
       - run: mise run test:skills
       - run: mise run test:eval
-      # Release tags restore main's cache without saving multi-GB snapshots.
-      - name: Save Rust build cache
-        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .local/poc/cargo-target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   macos:
     name: macOS formatting, App and Swift Helper
@@ -154,22 +138,3 @@ jobs:
       - run: mise run test:executor
       - run: mise run test:skills
       - run: mise run test:skill-authoring
-      # Release tags restore main's cache without saving multi-GB snapshots.
-      - name: Save Rust build cache
-        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .local/poc/cargo-target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-      - name: Save Swift build cache
-        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            .local/d1/helper-build
-            .local/d1/swift-modules
-            .local/d1/clang-modules
-          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
