@@ -453,6 +453,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         fixture_writes.append(dict(path=self.path, body=value))
         if self.path == "/access/token":
             self.data(dict(accepted=True))
+        elif path == "/__fixture/chat" and args.pages:
+            if value.get("boot_id") != "ui-fixture" or value.get("conversation_id") != "main":
+                self.send_error(400)
+                return
+            snapshot.clear()
+            snapshot.update(value)
+            self.data(dict(accepted=True))
         elif path == "/api/v1/assistant-mail":
             self.data([])
         elif path == "/api/v1/providers/check":

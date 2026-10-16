@@ -195,7 +195,7 @@ models autonomously, guided by its instructions.
 ### Chat and task conversation
 
 The composer, send/stop control, draft ownership and reference completion are
-shared. AppKit supplies native text editing/IME; Web uses a GPUI textarea. `/`
+shared. AppKit supplies native text editing/IME; Web uses a browser-native textarea. `/`
 completes machine, label and Skill references at the caret; arrows/Enter, Escape
 and click/tap operate the same menu. See [Agent context](agent-context.md).
 
@@ -209,7 +209,17 @@ full-title tooltips.
 Main Chat shows up to three executing background tasks below only the latest
 assistant message, with a dot, title and overflow entry. Rows open task details;
 queued, waiting and finished tasks are excluded. The region is presentation state,
-not persisted assistant prose. Guidance distinguishes Received from Applied.
+not persisted assistant prose. Queued guidance has a clock with a Received tooltip;
+applied instructions do not retain a status caption.
+
+Current-turn activity appears at the end of the conversation as a lightweight
+assistant bubble: Sending, Thinking, Working or Stopping. Waiting dots use a smooth
+1.4-second staggered cycle; streamed replies replace the waiting bubble and retain
+a small activity dot while text arrives. Reduced Motion uses static indicators.
+Animations exist only while the turn is active. Repeated failure text in an
+unfinished reply and its generated system notice is presented once, preserving
+partial prose and exposing the original error behind a details control. Ordinary
+messages do not repeat turn failure, stopped or applied captions underneath them.
 
 Task file links download through the owning Control; App requests a save location
 and Web uses browser downloads. Delivery constraints belong in

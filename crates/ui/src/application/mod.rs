@@ -448,6 +448,10 @@ impl Shell {
                 Some("composer-key") => self
                     .composer
                     .key(event["key"].as_str().unwrap_or("").into()),
+                Some("composer-shortcut") => {
+                    self.composer
+                        .key(format!("shortcut:{}", event["key"].as_str().unwrap_or("")));
+                }
                 Some("send") => {
                     if let Some(text) = event["text"].as_str() {
                         self.client.send(text.into());
@@ -680,13 +684,14 @@ impl Shell {
         }
         let snapshot = view.snapshot.as_ref();
         let running = snapshot.is_some_and(|s| s.turn.is_some());
-        let stopping = snapshot
-            .and_then(|s| s.turn.as_ref())
-            .is_some_and(|t| t.cancelling);
+        let activity =
+            crate::chat_state::activity(snapshot, view.pending && view.command_error.is_empty());
         let messages = if view.selected == "new" {
             vec![]
         } else {
-            snapshot.map(|s| s.messages.clone()).unwrap_or_default()
+            snapshot
+                .map(|s| crate::chat_state::messages_for_display(&s.messages))
+                .unwrap_or_default()
         };
         let at_bottom = self.scroll.max_offset().y + self.scroll.offset().y <= px(32.);
         let dark = platform::with(|p| p.dark());
@@ -1146,6 +1151,7 @@ impl Shell {
                                         .on_click(cx.listener(|this, _, window, cx| { this.task_search.update(cx, |field, cx| field.set_value("", window, cx)); ui::command(serde_json::json!({"action":"page", "value":3})); this.show_tasks=true; this.schedule_tab=false; this.client.filter_tasks("active".into(), String::new(), 0); cx.notify(); })))))
                             })
                     }))
+                    .when_some(activity, |el, status| el.child(pot_ui::chat::activity(status, |key| i18n::text(key).into(), cx)))
                     .child(self.collaboration_updates(&view,cx)),
             )
             .child(
@@ -1159,13 +1165,6 @@ impl Shell {
                         .when(!error.is_empty(), |el| el.child(div().py_2().child(error)))
                         .when_some(self.host["sandbox_error"].as_str().filter(|error| !error.is_empty()), |el, error| {
                             el.child(div().py_2().child(error.to_owned()))
-                        })
-                        .when(running, |el| {
-                            el.child(div().py_2().child(if stopping {
-                                crate::application::i18n::text("main.stopping")
-                            } else {
-                                crate::application::i18n::text("main.pot-is-working")
-                            }))
                         })
                         .when(
                             snapshot
@@ -1277,6 +1276,11 @@ impl Render for Shell {
             .min_w_0()
             .pl(px(self.assistant_pane_width(cx)))
             .child(body);
+        if platform::with(|p| p.capabilities().browser_access) {
+            platform::with(|p| {
+                p.command(serde_json::json!({"action":"editor-visible","value":self.composer_visible(&view) && self.menu_fraction == 0. && self.editor_leave.is_none()}))
+            });
+        }
         let body = if cx.reduce_motion() {
             body.into_any_element()
         } else {

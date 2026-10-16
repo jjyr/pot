@@ -21,6 +21,7 @@ NAMES = [
     "icon-512.png",
     "install.js",
     "auth.js",
+    "composer.js",
     "preferences.js",
     "editor-history.js",
     "events.js",

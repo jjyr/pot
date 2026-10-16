@@ -10,7 +10,7 @@ async (page) => {
   const defaultModel=definitions.find(p=>p.id===providers.default_provider_id).model;
   const wait=()=>page.waitForTimeout(500);
   let checks=0;const assert=(ok,message)=>{if(!ok)throw Error(message);checks++;};
-  const input=async(x,y)=>{await page.mouse.click(x,y);await page.waitForTimeout(100);return page.locator('textarea').inputValue();};
+  const input=async(x,y)=>{await page.mouse.click(x,y);await page.waitForTimeout(100);return page.locator('textarea:not(#pot-composer)').inputValue();};
   const set=async(x,y,text)=>{await page.mouse.click(x,y);await page.keyboard.press('Meta+A');await page.keyboard.type(text);};
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.evaluate(()=>{sessionStorage.removeItem('pot-ui-errors');localStorage.setItem('pot-locale','en');localStorage.setItem('pot-appearance','1');});

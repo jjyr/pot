@@ -6,6 +6,7 @@ pub mod avatar;
 pub mod avatar_state;
 #[cfg(feature = "presentation")]
 pub mod chat;
+pub mod chat_state;
 #[cfg(feature = "presentation")]
 pub mod design;
 pub mod localization;

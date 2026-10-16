@@ -165,6 +165,10 @@ impl Shell {
         }
         let keys = std::mem::take(&mut self.composer.keys);
         for key in keys {
+            if let Some(key) = key.strip_prefix("shortcut:") {
+                self.composer_shortcut(key, window, cx);
+                continue;
+            }
             if !self.completion_key(&key, window, cx) && key == "enter" {
                 // Native input may change between its key event and the next
                 // frame. A menu that just closed must not swallow submission.
@@ -189,25 +193,29 @@ impl Shell {
                     .border_color(cx.theme().border)
                     .bg(design::surface(cx))
                     .shadow_sm()
-                    .when(self.editor_snapshot(cx).text.is_empty(), |el| {
-                        el.child(
-                            div()
-                                .absolute()
-                                .left(px(18.))
-                                .right(px(if touch { 62. } else { 50. }))
-                                .truncate()
-                                .top(px(if touch { 18. } else { 12. }))
-                                .text_size(px(if touch { 16. } else { 15. }))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(i18n::text(if view.selected == "new" {
-                                    "bridge.describe-the-goal-of-a-new-task"
-                                } else if view.selected.is_empty() {
-                                    "bridge.message-pot"
-                                } else {
-                                    "bridge.add-instructions-interrupted-tasks-resume-next-turn"
-                                })),
-                        )
-                    })
+                    .when(
+                        self.editor_snapshot(cx).text.is_empty()
+                            && !platform::with(|p| p.capabilities().browser_access),
+                        |el| {
+                            el.child(
+                                div()
+                                    .absolute()
+                                    .left(px(18.))
+                                    .right(px(if touch { 62. } else { 50. }))
+                                    .truncate()
+                                    .top(px(if touch { 18. } else { 12. }))
+                                    .text_size(px(if touch { 16. } else { 15. }))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(i18n::text(if view.selected == "new" {
+                                        "bridge.describe-the-goal-of-a-new-task"
+                                    } else if view.selected.is_empty() {
+                                        "bridge.message-pot"
+                                    } else {
+                                        "bridge.add-instructions-interrupted-tasks-resume-next-turn"
+                                    })),
+                            )
+                        },
+                    )
                     .child(menu)
                     .when(!native, |el| {
                         el.child(
@@ -334,6 +342,7 @@ impl Shell {
                 caret: input.cursor(),
                 selection: !input.selected_range().is_empty(),
                 composing: platform::with(|p| p.is_composing()),
+                content_height: None,
             }
         })
     }
@@ -462,30 +471,38 @@ impl Shell {
         }
         let primary = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
         if primary {
-            let handled = match event.keystroke.key.as_str() {
-                "[" => {
-                    self.navigate_up(window, cx);
-                    true
-                }
-                "," => {
-                    ui::command(json!({"action":"page","value":2}));
-                    true
-                }
-                "d" => {
-                    let page = if self.host["page"] == 1 { 0 } else { 1 };
-                    ui::command(json!({"action":"page","value":page}));
-                    true
-                }
-                "." => {
-                    self.client.cancel();
-                    true
-                }
-                _ => false,
-            };
+            let handled = self.composer_shortcut(&event.keystroke.key, window, cx);
             if handled {
                 cx.stop_propagation();
                 window.prevent_default();
             }
+        }
+    }
+    pub(super) fn composer_shortcut(
+        &mut self,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match key {
+            "[" => {
+                self.navigate_up(window, cx);
+                true
+            }
+            "," => {
+                ui::command(json!({"action":"page","value":2}));
+                true
+            }
+            "d" => {
+                let page = if self.host["page"] == 1 { 0 } else { 1 };
+                ui::command(json!({"action":"page","value":page}));
+                true
+            }
+            "." => {
+                self.client.cancel();
+                true
+            }
+            _ => false,
         }
     }
 }
@@ -500,6 +517,7 @@ impl Shell {
         let touch = design::touch(cx);
         let font_size = px(if touch { 16. } else { 15. });
         let editor = self.editor_snapshot(cx);
+        let content_height = editor.content_height;
         let text: SharedString = editor.text.into();
         let style = TextStyle {
             font_family: cx.theme().font_family.clone(),
@@ -524,11 +542,26 @@ impl Shell {
                     .sum::<usize>()
             })
             .unwrap_or(1);
-        self.composer.height = (rows as f32 * if touch { 20. } else { 18. } + 20.)
+        let browser = platform::with(|p| p.capabilities().browser_access);
+        let line_height = if touch { 20. } else { 18. };
+        let inset_y = if browser {
+            if touch { 20. } else { 15. }
+        } else {
+            10.
+        };
+        self.composer.height = (content_height.unwrap_or(rows as f32 * line_height) + 2. * inset_y)
             .clamp(if touch { 60. } else { 48. }, 150.);
         if platform::with(|p| p.capabilities().external_text_input) {
+            let selected = self.client.view.lock().unwrap().selected.clone();
+            let placeholder = i18n::text(if selected == "new" {
+                "bridge.describe-the-goal-of-a-new-task"
+            } else if selected.is_empty() {
+                "bridge.message-pot"
+            } else {
+                "bridge.add-instructions-interrupted-tasks-resume-next-turn"
+            });
             platform::with(|p| {
-                p.command(json!({"action":"editor-geometry","x":f32::from(visible.origin.x)+design::sidebar_width(cx)+self.assistant_pane_width(cx)+(f32::from(visible.size.width)-design::sidebar_width(cx)-self.assistant_pane_width(cx)-width)/2.,"y":24.,"width":width,"height":self.composer.height}))
+                p.command(json!({"action":"editor-geometry","x":f32::from(visible.origin.x)+design::sidebar_width(cx)+self.assistant_pane_width(cx)+(f32::from(visible.size.width)-design::sidebar_width(cx)-self.assistant_pane_width(cx)-width)/2.,"y":24.,"top":f32::from(visible.origin.y+visible.size.height)-24.-self.composer.height,"width":width,"height":self.composer.height,"inset_y":inset_y,"right":if touch {62.} else {50.},"font_size":if touch {16.} else {15.},"line_height":line_height,"placeholder":placeholder,"label":i18n::text("mobile.message")}))
             });
         }
     }

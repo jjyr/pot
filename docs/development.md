@@ -283,11 +283,19 @@ headless Playwright CLI session. Run the browser checks in that same session:
 playwright-cli run-code "$(cat scripts/tests/responsive-navigation.js)"
 playwright-cli run-code "$(cat scripts/tests/responsive-layout.js)"
 playwright-cli run-code "$(cat scripts/tests/assistant-provider.js)"
+playwright-cli run-code "$(cat scripts/tests/chat-composer.js)"
+playwright-cli run-code "$(cat scripts/tests/component-input.js)"
 ```
 
 The scripts refuse a Runtime whose identity is not the synthetic fixture.
 The assistant/Provider flow writes only disposable fixture configurations and
 assistant definitions; it never sends a model request. The
+composer checks send only fixture messages and use its isolated chat-state
+endpoint for waiting, streaming, tool, cancellation and failure screenshots. They
+exercise browser IME composition, reference completion/undo, draft ownership,
+auto-growth and Reduced Motion, restoring the fixture transcript afterwards. The
+component input checks exercise the same IME boundary in search, assistant names,
+multiline instructions, machine tags and Token fields, without saving forms. The
 navigation checks exercise touch cancellation, menu destinations, cached assistant
 switches, per-assistant drafts, list/reading positions, editor guards and resizing.
 The layout checks capture Canvas screenshots under `output/playwright/devices/`

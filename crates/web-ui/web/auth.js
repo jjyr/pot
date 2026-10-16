@@ -1,6 +1,14 @@
 let composing=false;
 addEventListener("compositionstart",()=>{composing=true;},true);
 addEventListener("compositionend",()=>{composing=false;},true);
+// GPUI dispatches key bindings before inspecting composition state. The first
+// IME key can also precede compositionstart (keyCode 229). Leave these keys to
+// the browser/IME; composition and input events still reach the editor.
+addEventListener('keydown',event=>{
+  if((event.target instanceof HTMLTextAreaElement||event.target instanceof HTMLInputElement)
+    &&event.target.id!=='pot-composer'&&(composing||event.isComposing||event.keyCode===229))
+    event.stopImmediatePropagation();
+},true);
 window.potIsComposing=()=>composing;
 window.potCommandKey=()=>/Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -9,6 +17,11 @@ import {createInstaller, isInstalled} from '/install.js';
 import {subscribe} from '/events.js';
 let commandError='',scheduleSending=false;
 let module, page='chat', task='', snapshot, notice='', sending=false, refreshing=false, accepted;
+import {createComposer} from '/composer.js';
+const composer=createComposer({wake:()=>queueMicrotask(()=>module?.wake()),emit:event=>module?.ui_reply(JSON.stringify(event))});
+window.potEditorSnapshot=()=>JSON.stringify(composer.snapshot());
+window.potEditorCommand=value=>composer.command(JSON.parse(value));
+window.potEditorProject=value=>composer.project(JSON.parse(value));
 // Publish physical contact boundaries before GPUI dispatches scroll phases.
 // A finger that catches a fling does not produce another Scroll Started.
 addEventListener('pointerdown',event=>{if(event.pointerType==='touch'&&event.isPrimary&&event.target instanceof HTMLCanvasElement)module?.touch_started();},true);

@@ -210,6 +210,7 @@ impl Platform for Native {
         }
         let e = &state["editor"];
         Some(pot_ui::application::platform::EditorSnapshot {
+            content_height: None,
             text: e["text"].as_str().unwrap_or_default().into(),
             caret: e["caret"].as_u64().unwrap_or(0) as usize,
             selection: e["selection"] == true,

@@ -23,6 +23,12 @@ extern "C" {
     fn is_composing() -> bool;
     #[wasm_bindgen(js_namespace=window,js_name=potCommandKey)]
     fn command_key() -> bool;
+    #[wasm_bindgen(js_namespace=window,js_name=potEditorSnapshot)]
+    fn editor_snapshot() -> String;
+    #[wasm_bindgen(js_namespace=window,js_name=potEditorCommand)]
+    fn editor_command(value: &str);
+    #[wasm_bindgen(js_namespace=window,js_name=potEditorProject)]
+    fn editor_project(value: &str);
 }
 thread_local! {
  static SEND:RefCell<pot_ui::state::SendState>=RefCell::new(Default::default());
@@ -336,6 +342,7 @@ impl Platform for Browser {
     fn capabilities(&self) -> platform::Capabilities {
         platform::Capabilities {
             browser_access: true,
+            external_text_input: true,
             command_key: self.state.borrow()["command_key"] == true,
             explicit_send_retry: true,
             ..Default::default()
@@ -367,6 +374,8 @@ impl Platform for Browser {
     fn refresh_directory(&self) {}
     fn command(&self, v: Value) {
         match v["action"].as_str().unwrap_or_default() {
+            "editor-visible" | "editor-geometry" | "editor-set" | "editor-replace"
+            | "completion-active" | "composer-send" => editor_command(&v.to_string()),
             "configuration-command"
             | "navigation-command"
             | "editor-back"
@@ -383,7 +392,7 @@ impl Platform for Browser {
                 self.state.borrow_mut()["settings"]["section"] = v["value"].clone();
                 action("settings-command", &v.to_string());
             }
-            "completion-active" | "machines-detail" | "mode-changed" | "backend-changed" => {}
+            "machines-detail" | "mode-changed" | "backend-changed" => {}
             _ => action("settings-command", &v.to_string()),
         }
     }
@@ -394,9 +403,25 @@ impl Platform for Browser {
         action("ui-request", &serde_json::to_string(&request).unwrap());
     }
     fn state(&self) -> Value {
-        self.state.borrow().clone()
+        let mut state = self.state.borrow().clone();
+        state["editor"] = serde_json::from_str(&editor_snapshot()).unwrap_or_default();
+        state
     }
-    fn project(&self, _v: &Value) {}
+    fn project(&self, v: &Value) {
+        editor_project(&v.to_string());
+    }
+    fn editor(&self) -> Option<platform::EditorSnapshot> {
+        let editor: Value = serde_json::from_str(&editor_snapshot()).ok()?;
+        Some(platform::EditorSnapshot {
+            content_height: editor["content_height"]
+                .as_f64()
+                .map(|height| height as f32),
+            text: editor["text"].as_str().unwrap_or_default().into(),
+            caret: editor["caret"].as_u64().unwrap_or(0) as usize,
+            selection: editor["selection"] == true,
+            composing: editor["composing"] == true,
+        })
+    }
     fn dark(&self) -> bool {
         *self.dark.borrow()
     }
