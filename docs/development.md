@@ -1,5 +1,46 @@
 # Development guide
 
+## Go migration preview
+
+The root Go module uses Go 1.27.2, pinned in mise.toml. The Go entry points are
+development previews alongside the current Rust product; they do not open the
+existing Pot data root or offer production Control/Runner services.
+
+```sh
+mise install go
+mise run check:go
+mise run test:go
+mise run test:go-ui
+mise run build:go
+mise run build:go-linux
+mise run preview:go
+```
+
+The browser preview listens only on `http://127.0.0.1:17702`. It keeps disposable
+sample conversations in memory, streams deterministic replies and makes no model
+or tool calls. Theme/language preferences are separate origin-scoped preview
+settings. Restarting clears sample messages; requests and cancellation are bound
+to the preview boot and turn. The browser requires the same origin and loopback
+Host; this fixture is not the production browser authentication implementation.
+
+On macOS, `mise run preview:go-app` builds and opens
+`.local/go/PotGoPreview.app`, with independent bundle ID `dev.pot.go-preview`.
+Its main window and tray use the same embedded frontend and preview service via
+Wails bindings/events; they do not connect to the browser preview process. Close
+hides a window; Quit ends the preview. `mise run build:go-app` only builds it.
+Building the bundle requires the pinned Go toolchain and the macOS C toolchain;
+the retained Swift sandbox is not started by this preview.
+
+The Go executor currently provides only `--version` and fails other operations.
+Do not replace the product/guest executor with that skeleton. The composition
+package and Node Host adapter are independently tested foundations, not production
+tool registration. goja has no per-runtime hard heap limit; production resource
+policy and the turn-scoped exec/wait manager are still pending.
+
+See the temporary [migration rules](migrations/go-wails.md) for accepted scope,
+visual consistency gates and retirement conditions. Progress and test evidence
+belong in [issue #66](https://github.com/jjyr/pot/issues/66).
+
 ## Development and running
 
 Requires Apple Silicon, macOS 26+, Xcode/Swift 6.2+, and [mise](https://mise.jdx.dev/) 2026.9.2 or newer. `mise.toml` pins Rust/Cargo, mr-boxington, Python, Zig, cargo-zigbuild, and check tools; Swift uses the selected Xcode.

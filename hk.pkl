@@ -8,7 +8,7 @@ hooks {
     fix = false
     steps {
       ["sources"] {
-        glob = List("**/*.rs", "**/*.swift", "**/*.py", "**/*.sh", "scripts/*", "mise.toml", "ruff.toml", ".swiftformat", "hk.pkl")
+        glob = List("**/*.rs", "**/*.go", "**/*.swift", "**/*.py", "**/*.sh", "scripts/*", "mise.toml", "ruff.toml", ".swiftformat", "hk.pkl")
         check = "python scripts/timed-check pre-commit:sources mise exec -- python scripts/dev-check lint {{files}}"
       }
       ["whitespace"] {

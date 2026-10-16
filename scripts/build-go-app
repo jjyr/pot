@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Build an independently identified, disposable Wails UI preview bundle."""
+
+import os
+from pathlib import Path
+import platform
+import plistlib
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+
+if platform.system() != "Darwin":
+    raise SystemExit("The Go desktop preview targets macOS.")
+
+bundle = ROOT / ".local/go/PotGoPreview.app"
+contents = bundle / "Contents"
+binary = contents / "MacOS/pot-app"
+resources = contents / "Resources"
+binary.parent.mkdir(parents=True, exist_ok=True)
+resources.mkdir(parents=True, exist_ok=True)
+environment = os.environ.copy()
+environment["MACOSX_DEPLOYMENT_TARGET"] = "26.0"
+for name in ("CGO_CFLAGS", "CGO_LDFLAGS"):
+    environment[name] = environment.get(name, "-O2 -g") + " -mmacosx-version-min=26.0"
+subprocess.run(
+    ["go", "build", "-o", str(binary), "./cmd/pot-app"],
+    cwd=ROOT,
+    env=environment,
+    check=True,
+)
+shutil.copy2(ROOT / "crates/app/assets/Pot.icns", resources / "Pot.icns")
+shutil.copy2(ROOT / "LICENSE", resources / "LICENSE.txt")
+subprocess.run(
+    [
+        sys.executable,
+        str(ROOT / "scripts/go-notices"),
+        "--output",
+        str(resources / "GoDependencyLicenses.txt"),
+        "./cmd/pot-app",
+    ],
+    cwd=ROOT,
+    env=environment,
+    check=True,
+)
+with (contents / "Info.plist").open("wb") as target:
+    plistlib.dump(
+        {
+            "CFBundleIdentifier": "dev.pot.go-preview",
+            "CFBundleName": "Pot Go Preview",
+            "CFBundleDisplayName": "Pot Go Preview",
+            "CFBundleExecutable": binary.name,
+            "CFBundlePackageType": "APPL",
+            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleVersion": "1",
+            "CFBundleIconFile": "Pot.icns",
+            "LSMinimumSystemVersion": "26.0",
+            "NSHighResolutionCapable": True,
+        },
+        target,
+    )
+print(bundle)

@@ -76,3 +76,13 @@ for the actual linked modules and the Go runtime, failing when a module has no
 notice. App and CLI archives include `TailscaleDependencyLicenses.txt`. This
 inventory is separate from the Cargo-only report. Pot's adapter does not modify
 the vendored upstream files; its source is in `tailscale/pot.go`.
+
+## Go migration preview notices
+
+`scripts/go-notices` collects root-module license/notice files for the actual
+linked Go dependencies and the Go runtime, failing on a missing notice.
+`mise run build:go-app` includes this inventory as `GoDependencyLicenses.txt`
+and Pot's own `LICENSE.txt` in the independent preview bundle. This inventory
+does not cover retained Node/Swift/Python or guest assets and is not a replacement
+for the existing Rust license-policy check. The preview does not yet implement
+the production About panel or its complete distribution inventory.

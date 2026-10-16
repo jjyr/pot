@@ -21,6 +21,30 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
+  go-migration:
+    name: Go migration (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          install_args: go python
+      - run: mise run check:go
+      - run: mise run test:go
+      - run: mise run test:go-ui
+      - run: mise run build:go
+      - run: mise run build:go-linux
+      - if: runner.os == 'macOS'
+        run: mise run build:go-app
+
   licenses:
     name: Rust dependency licenses
     runs-on: ubuntu-24.04

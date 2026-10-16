@@ -65,12 +65,14 @@ def sources(args):
             .decode()
             .split("\0")
         )
-    groups = {kind: [] for kind in ["rust", "swift", "python", "shell"]}
+    groups = {kind: [] for kind in ["rust", "go", "swift", "python", "shell"]}
     for name in sorted(set(candidates)):
         path = Path(name)
         if not path.is_file() or path.is_symlink():
             continue
-        kind = {".rs": "rust", ".swift": "swift", ".py": "python", ".sh": "shell"}.get(path.suffix)
+        kind = {".rs": "rust", ".go": "go", ".swift": "swift", ".py": "python", ".sh": "shell"}.get(
+            path.suffix
+        )
         if not kind and path.parent == Path("scripts"):
             first = path.read_bytes().split(b"\n", 1)[0]
             if first.startswith(b"#!") and b"python" in first:
@@ -87,6 +89,13 @@ def check(mode, args):
     fix = mode == "fmt"
     if files["rust"]:
         run("cargo", "fmt", "--all", *([] if fix else ["--check"]))
+    if files["go"]:
+        if fix:
+            run("gofmt", "-w", *files["go"])
+        else:
+            unformatted = subprocess.check_output(["gofmt", "-l", *files["go"]], text=True)
+            if unformatted:
+                raise SystemExit("Run gofmt on:\n" + unformatted)
     if files["swift"]:
         run("swiftformat", *files["swift"], *([] if fix else ["--lint", "--strict"]))
     if files["python"]:

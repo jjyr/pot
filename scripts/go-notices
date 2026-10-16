@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Collect notices for the actual linked Go modules and runtime."""
+
+import argparse
+import json
+from pathlib import Path
+import subprocess
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("packages", nargs="+")
+args = parser.parse_args()
+listed = subprocess.check_output(
+    ["go", "list", "-mod=readonly", "-deps", "-json", *args.packages], text=True
+)
+decoder = json.JSONDecoder()
+modules = {}
+while listed.strip():
+    listed = listed.lstrip()
+    package, end = decoder.raw_decode(listed)
+    listed = listed[end:]
+    module = package.get("Module")
+    if module and module.get("Dir") and not module.get("Main"):
+        modules[module["Path"]] = module
+notices = ["Go dependencies linked by: " + ", ".join(args.packages) + "\n"]
+for module in sorted(modules.values(), key=lambda value: value["Path"]):
+    directory = Path(module["Dir"])
+    licenses = sorted(
+        path
+        for path in directory.iterdir()
+        if path.is_file() and path.name.upper().startswith(("LICENSE", "COPYING", "NOTICE"))
+    )
+    if not licenses:
+        raise SystemExit(f"Missing license notice: {module['Path']}")
+    notices.append(f"\n{module['Path']} {module.get('Version', '')}\n")
+    notices.extend(path.read_text(errors="replace") for path in licenses)
+goroot = subprocess.check_output(["go", "env", "GOROOT"], text=True).strip()
+notices.append("\nGo runtime\n" + (Path(goroot) / "LICENSE").read_text())
+args.output.parent.mkdir(parents=True, exist_ok=True)
+args.output.write_text("\n".join(notices))
+print(args.output)

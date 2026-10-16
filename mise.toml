@@ -1,6 +1,6 @@
 [tools]
 "conda:brotli-bin" = "1.2.0"
-go = "1.25.5"
+go = "1.27.2"
 rust = { version = "beta-2026-10-14", mr_boxington = true }
 mr-boxington = "1.24.0"
 python = "3.12.13"
@@ -205,6 +205,40 @@ run = "python scripts/build-tailscale"
 [tasks."test:architecture"]
 description = "Guard independently testable component dependency boundaries"
 run = "python scripts/tests/architecture.py"
+
+[tasks."check:go"]
+description = "Check formatting, vet and package boundaries for the Go migration"
+run = "go run ./scripts/check-go"
+
+[tasks."test:go"]
+description = "Test Go migration components with the race detector"
+run = "go test -race ./..."
+
+[tasks."test:go-ui"]
+description = "Verify shared DOM composer and owner-scoped preview state"
+run = "node scripts/tests/go-ui-state.mjs"
+
+[tasks."build:go"]
+description = "Build Go CLI and executor skeletons independently of the desktop"
+run = "go build -o .local/go/bin/ ./cmd/pot ./cmd/pot-tool-executor"
+
+[tasks."build:go-linux"]
+description = "Cross-build Go headless entry points without CGO or GUI dependencies"
+run = "go build -o .local/go/linux-arm64/ ./cmd/pot ./cmd/pot-tool-executor"
+env = { GOOS = "linux", GOARCH = "arm64", CGO_ENABLED = "0" }
+
+[tasks."build:go-app"]
+description = "Build the macOS Wails migration preview"
+run = "python scripts/build-go-app"
+
+[tasks."preview:go"]
+description = "Run the disposable loopback shared UI preview (no model or product data)"
+run = "go run ./cmd/pot preview"
+
+[tasks."preview:go-app"]
+description = "Run the disposable Wails main-window and tray preview"
+depends = ["build:go-app"]
+run = "open .local/go/PotGoPreview.app"
 
 [tasks.icons]
 description = "Generate all brand assets from the canonical native vector master"

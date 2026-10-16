@@ -1,0 +1,26 @@
+export const messages = {
+  en: {
+    assistants: 'Assistants', chat: 'Chat', tasks: 'Tasks', machines: 'Machines', usage: 'Usage', settings: 'Settings',
+    search: 'Search assistants', assistant: 'Pot', local: 'Local', preview: 'Go developer preview',
+    notice: 'Migration preview · Replies are deterministic fixtures. No model or tools are executed.',
+    composer: 'Message Pot…', send: 'Send', stop: 'Stop', stopping: 'Stopping…', working: 'Thinking',
+    connected: 'Connected', offline: 'Preview service unavailable', connecting: 'Connecting…', retry: 'Retry',
+    first: 'Start a conversation', back: 'Back to Assistants', menu: 'Open navigation', close: 'Close', more: 'Preview preferences',
+    language: 'Language', appearance: 'Appearance', system: 'System', light: 'Light', dark: 'Dark',
+    openMain: 'Open main window', identityChanged: 'Preview identity changed. Retry to reconnect.',
+    latest: 'Latest message', copy: 'Copy message', copied: 'Copied', unavailable: 'This page has not been migrated yet.',
+    searchEmpty: 'No matching assistants', cancelError: 'Could not stop the preview. Please retry.',
+  },
+  'zh-CN': {
+    assistants: '助手', chat: '聊天', tasks: '任务', machines: '机器', usage: '用量', settings: '设置',
+    search: '搜索助手', assistant: 'Pot', local: '本地', preview: 'Go 开发预览',
+    notice: '迁移预览 · 回复为固定演示内容，不会调用模型或执行工具。',
+    composer: '给 Pot 发消息…', send: '发送', stop: '停止', stopping: '正在停止…', working: '思考中',
+    connected: '已连接', offline: '预览服务不可用', connecting: '正在连接…', retry: '重试',
+    first: '开始对话', back: '返回助手列表', menu: '打开导航', close: '关闭', more: '预览偏好设置',
+    language: '语言', appearance: '外观', system: '跟随系统', light: '浅色', dark: '深色',
+    openMain: '打开主窗口', identityChanged: '预览身份已变更，请重试以重新连接。',
+    latest: '最新消息', copy: '复制消息', copied: '已复制', unavailable: '此页面尚未迁移。',
+    searchEmpty: '没有匹配的助手', cancelError: '无法停止预览，请重试。',
+  },
+};

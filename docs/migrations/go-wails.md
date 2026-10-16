@@ -1,8 +1,8 @@
 # Go/Wails migration plan and rules
 
 This is a temporary, user-authorized migration document. It defines the agreed
-scope, implementation order and acceptance rules; it does not describe delivered
-Go functionality. [Issue #66](https://github.com/jjyr/pot/issues/66) owns progress,
+scope, implementation order and acceptance rules; it does not claim that the
+production migration is delivered. [Issue #66](https://github.com/jjyr/pot/issues/66) owns progress,
 completion evidence, decisions and validation limits. Code and the regular
 [architecture](../architecture.md) describe current behavior.
 
@@ -30,6 +30,10 @@ new VM manager as part of this migration.
 
 Use goja preferentially for the tool-composition JavaScript currently hosted by
 Rust/QuickJS. This is separate from Node plugin and REPL execution.
+
+Use a recent stable Go release; mise.toml pins the development toolchain and the
+root go.mod records its version. A dependency's older minimum Go version is not
+a reason to retain an older development toolchain.
 
 Fresh databases, configuration, identities and machine registration are allowed.
 Historical data import and mixed Rust/Go production-node compatibility are not
@@ -207,6 +211,9 @@ Preserve the current contracts linked from the documentation index, especially:
   capacity/cancellation; remote waiting consumes no local Agent slot.
 - Resource synchronization, project rules/Skills, selected plugins and run-fixed
   configuration retain their existing ownership and integrity checks.
+- Preserve the current append-only classified context, section comparison and
+  compaction/restart semantics from [Agent context](../agent-context.md); keep
+  real user text separate from runtime context and result notifications.
 - Duplicate requests reconcile original identities/receipts. Unknown outcomes
   fence effects; restart must not silently repeat commands or launch another run.
 - Cancellation, turn end, shutdown and generation changes clean up sessions,
