@@ -2,24 +2,15 @@ package transport
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/storage"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
-
-type Download struct {
-	Name string `json:"name"`
-	Data []byte `json:"data"`
-}
 
 func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, owner string, r Request) (any, error, bool) {
 	s := a.Control
@@ -126,38 +117,18 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 			break
 		}
 		switch parts[1] {
-		case "file", "file-download":
+		case "file":
 			if method != "GET" {
 				err = errors.New("GET required")
 				break
 			}
 			name := u.Query().Get("path")
-			var data []byte
-			data, err = s.ReadTaskFile(ctx, owner, id, name, 16*1024*1024)
-			if err != nil {
-				break
-			}
-			if parts[1] == "file-download" {
-				result = Download{Name: filepath.Base(name), Data: data}
-				break
-			}
 			var offset uint64
 			offset, err = integer("offset")
-			if err != nil {
-				break
+			if err == nil {
+				result, err = s.ReadTaskFileChunk(ctx, owner, id, name, offset, u.Query().Get("revision"))
 			}
-			hash := sha256.Sum256(data)
-			revision := hex.EncodeToString(hash[:])
-			if expected := u.Query().Get("revision"); expected != "" && expected != revision {
-				err = errors.New("Task file changed between chunks")
-				break
-			}
-			if offset > uint64(len(data)) {
-				err = errors.New("Task file offset exceeds size")
-				break
-			}
-			end := min(offset+256*1024, uint64(len(data)))
-			result = protocol.FileChunk{Size: uint64(len(data)), Offset: offset, Revision: revision, Data: base64.StdEncoding.EncodeToString(data[offset:end])}
+
 		case "messages":
 			if method == "GET" {
 				result, err = s.Tasks.Inputs(ctx, owner, id)

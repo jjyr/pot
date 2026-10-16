@@ -7,6 +7,10 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +18,7 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	product "github.com/jjyr/pot/internal/runtime"
+	"github.com/jjyr/pot/internal/spaces"
 	"github.com/jjyr/pot/internal/transport"
 	assets "github.com/jjyr/pot/web"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -26,13 +31,15 @@ type Service struct {
 	ctx           context.Context
 	app           *application.App
 	api           *transport.Application
+	spaces        *spaces.Manager
+	native        *nativeDesktop
 	main, tray    *application.WebviewWindow
 	mu            sync.Mutex
 	subscriptions map[string]context.CancelFunc
 }
 
 func (s *Service) Call(ctx context.Context, method, path, body string) (string, error) {
-	value, err := s.api.JSON(ctx, method, path, body)
+	value, err := s.call(ctx, method, path, body)
 	if err == nil {
 		return value, nil
 	}
@@ -47,48 +54,24 @@ func (s *Service) Call(ctx context.Context, method, path, body string) (string, 
 }
 func (s *Service) OpenMain() { s.tray.Hide(); s.main.Show(); s.main.Focus() }
 func (s *Service) Subscribe(space, owner string) (string, error) {
-	if space != "" && space != "local" {
-		return "", errors.New("Space unavailable")
+	if _, err := s.spaces.Space(space); err != nil {
+		return "", err
 	}
 	if !core.Identifier(owner) {
 		return "", errors.New("invalid assistant identity")
 	}
 	ctx, cancel := context.WithCancel(s.ctx)
-	c, err := s.api.Control.Conversation(ctx, owner)
-	if err != nil {
-		cancel()
-		return "", err
-	}
-	updates, remove, err := c.Subscribe(ctx)
-	if err != nil {
-		cancel()
-		return "", err
-	}
 	token := rand.Text()
 	s.mu.Lock()
 	if len(s.subscriptions) >= 128 {
 		s.mu.Unlock()
 		cancel()
-		remove()
 		return "", errors.New("too many subscriptions")
 	}
 	s.subscriptions[token] = cancel
 	s.mu.Unlock()
-	go func() {
-		defer remove()
-		defer s.Unsubscribe(token)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case snapshot, ok := <-updates:
-				if !ok {
-					return
-				}
-				s.app.Event.Emit("pot:snapshot", map[string]any{"space_id": space, "owner": owner, "snapshot": snapshot})
-			}
-		}
-	}()
+	go func() { defer s.Unsubscribe(token); s.streamSpace(ctx, space, owner) }()
+
 	return token, nil
 }
 func (s *Service) Unsubscribe(token string) {
@@ -119,13 +102,44 @@ func Run(root string) error {
 		socket.Close(ctx)
 	}()
 	service := &Service{ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}}
-	app := application.New(application.Options{Name: "Pot Go", Description: "Pot", Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets.FS())}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
+	localClient := socket.Endpoint.Client()
+	localClient.Timeout = 0
+	manager, err := spaces.Open(ctx, spaces.Options{Path: filepath.Join(runtime.Root.Path, "app-spaces.json"), Local: spaces.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnChange: func(space string, topics json.RawMessage) {
+		if service.app != nil {
+			var value any
+			if json.Unmarshal(topics, &value) == nil {
+				service.app.Event.Emit("pot:changed", map[string]any{"space_id": space, "topics": value})
+			}
+		}
+	}})
+	if err != nil {
+		return err
+	}
+	defer manager.Close()
+	service.spaces = manager
+	native, err := startNativeDesktop(ctx, runtime.Sandboxes, os.DirFS(runtime.AssetDirectory))
+	if err != nil {
+		return err
+	}
+	defer native.close()
+	service.native = native
+	files := application.AssetFileServerFS(assets.FS())
+	assetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/desktop/") {
+			http.Error(w, "Use native desktop viewer", 404)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+
+	app := application.New(application.Options{Name: "Pot Go", Description: "Pot", Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: assetHandler}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
 		stop()
 		service.mu.Lock()
 		for _, cancel := range service.subscriptions {
 			cancel()
 		}
 		service.mu.Unlock()
+		_ = manager.Close()
 		_ = runtime.Close()
 	}})
 	service.app = app
@@ -149,20 +163,22 @@ func Run(root string) error {
 	trayMenu.Add("Quit Pot").OnClick(func(*application.Context) { app.Quit() })
 	status.SetMenu(trayMenu)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		forward := func(sub *core.Subscription) {
-			go func() {
-				defer sub.Close()
-				for {
-					topics, err := sub.Next(ctx)
-					if err != nil {
-						return
-					}
-					app.Event.Emit("pot:changed", map[string]any{"space_id": "local", "topics": topics})
+		go func() {
+			sub := manager.Changes.Subscribe()
+			defer sub.Close()
+			for {
+				topics, err := sub.Next(ctx)
+				if err != nil {
+					return
 				}
-			}()
-		}
-		forward(runtime.Control.Changes.Subscribe())
-		forward(runtime.Control.Permissions.Changes.Subscribe())
+				catalog := manager.Snapshot()
+				service.app.Event.Emit("pot:changed", map[string]any{"space_id": "", "topics": topics})
+				for _, space := range catalog.Items {
+					service.app.Event.Emit("pot:changed", map[string]any{"space_id": space.ID, "topics": topics})
+				}
+			}
+		}()
+
 	})
 	return app.Run()
 }

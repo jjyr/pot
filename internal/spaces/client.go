@@ -53,6 +53,7 @@ func (f Functions) Stream(ctx context.Context, path string, receive func(Event) 
 
 type HTTPClient struct {
 	origin, token, expectedID string
+	prefix                    string
 	client                    *http.Client
 	transport                 *http.Transport
 }
@@ -81,7 +82,21 @@ func NewHTTPClient(origin, token, caPEM, expectedID string) (*HTTPClient, error)
 		transport.TLSClientConfig.RootCAs = roots
 	}
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &HTTPClient{strings.TrimSuffix(origin, "/"), token, expectedID, client, transport}, nil
+	return &HTTPClient{origin: strings.TrimSuffix(origin, "/"), token: token, expectedID: expectedID, prefix: "/control/v1/owner", client: client, transport: transport}, nil
+}
+
+// NewLocalHTTPClient uses an injected private Unix-socket HTTP transport. The
+// token stays in the native host, and only streams disable the Client timeout;
+// ordinary calls retain their own bounded request context.
+func NewLocalHTTPClient(client *http.Client, credential, expectedID string) *HTTPClient {
+	var local *http.Client
+	if client != nil {
+		copy := *client
+		copy.Timeout = 0
+		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		local = &copy
+	}
+	return &HTTPClient{origin: "http://runtime", token: credential, expectedID: expectedID, client: local}
 }
 func operatorPath(path string) (string, error) {
 	u, err := url.ParseRequestURI(path)
@@ -99,6 +114,9 @@ func operatorPath(path string) (string, error) {
 	return u.RequestURI(), nil
 }
 func (c *HTTPClient) request(ctx context.Context, method, path string, body json.RawMessage) (*http.Response, error) {
+	if c.client == nil || c.token == "" {
+		return nil, errors.New("native Space transport unavailable")
+	}
 	if method != "GET" && method != "POST" {
 		return nil, errors.New("Space request method must be GET or POST")
 	}
@@ -106,7 +124,7 @@ func (c *HTTPClient) request(ctx context.Context, method, path string, body json
 	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, method, c.origin+"/control/v1/owner"+path, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, method, c.origin+c.prefix+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -220,4 +238,9 @@ func (c *HTTPClient) Stream(ctx context.Context, path string, receive func(Event
 	}
 	return io.EOF
 }
-func (c *HTTPClient) Close() error { c.transport.CloseIdleConnections(); return nil }
+func (c *HTTPClient) Close() error {
+	if c.transport != nil {
+		c.transport.CloseIdleConnections()
+	}
+	return nil
+}
