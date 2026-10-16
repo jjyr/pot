@@ -1,65 +1,7 @@
 #!/usr/bin/env python3
-"""Build a Debian/glibc Podman guest with the pinned Go and Node executors."""
+"""Build the shared Linux Sandbox OCI image using an explicit Podman builder."""
 
-import argparse
-import os
-from pathlib import Path
-import platform
-import shutil
-import subprocess
-import tempfile
+from go_packaging import guest_image_main
 
-from go_packaging import ROOT, prepare_guest_assets
-
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument(
-    "--arch",
-    choices=["amd64", "arm64"],
-    default={"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine()),
-)
-parser.add_argument("--tag", default="localhost/pot-go-sandbox:development")
-parser.add_argument("--context", type=Path, help="Explicit disposable build-context directory")
-parser.add_argument("--prepare-only", action="store_true")
-args = parser.parse_args()
-if not args.arch:
-    parser.error("Specify --arch for this host")
-context = (args.context or ROOT / ".local/go/container-image" / args.arch).resolve()
-if args.context and context.exists() and any(context.iterdir()):
-    parser.error("An explicit build context must be absent or empty")
-context.parent.mkdir(parents=True, exist_ok=True)
-with tempfile.TemporaryDirectory(dir=context.parent) as temporary:
-    staged = Path(temporary) / "context"
-    staged.mkdir()
-    manifest = prepare_guest_assets(staged / "assets", args.arch)
-    shutil.copy2(ROOT / "resources/sandbox/linux/default/Dockerfile", staged / "Dockerfile")
-    # Complete preparation before replacing an older disposable build context.
-    backup = Path(temporary) / "previous"
-    if context.exists():
-        context.rename(backup)
-    try:
-        staged.rename(context)
-    except BaseException:
-        if backup.exists():
-            backup.rename(context)
-        raise
-if not args.prepare_only:
-    subprocess.run(
-        [
-            "podman",
-            "--remote=false",
-            "build",
-            "--format=oci",
-            "--network=private",
-            "--platform=linux/" + args.arch,
-            "--file",
-            context / "Dockerfile",
-            "--build-arg",
-            "BASE_IMAGE=" + manifest["base"]["base_image"],
-            "--tag",
-            args.tag,
-            context,
-        ],
-        cwd=ROOT,
-        check=True,
-    )
-print(context)
+if __name__ == "__main__":
+    guest_image_main()

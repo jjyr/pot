@@ -19,7 +19,7 @@ func TestSameSandboxExecutionsCancelIndependentlyAndReuseConfirmedResources(t *t
 		calls.Add(1)
 		select {
 		case <-gate:
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("verified fixture bytes")), ContentLength: 22}, nil
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fixtureData())), ContentLength: int64(len(fixtureData()))}, nil
 		case <-r.Context().Done():
 			return nil, r.Context().Err()
 		}

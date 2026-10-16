@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"syscall"
 
@@ -250,10 +249,7 @@ func (m *Manager) EnsureShared(ctx context.Context) (Definition, error) {
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return Definition{}, err
 	}
-	provider := AppleContainer
-	if runtime.GOOS == "linux" {
-		provider = Podman
-	}
+	provider := Podman
 	definition, err := m.Create(ctx, SharedID, "Shared development environment", provider, Resources{})
 	if err != nil {
 		if existing, lookup := m.definition(ctx, SharedID); lookup == nil {

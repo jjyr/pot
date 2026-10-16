@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def selected_assets(catalog, tag):
     if not re.fullmatch(r"sandbox-go-resources-v\d+\.\d+\.\d+", tag):
         raise ValueError("Invalid Sandbox resource release tag")
-    if catalog.get("schema_version") != 1 or not isinstance(catalog.get("resources"), dict):
+    if catalog.get("schema_version") != 2 or not isinstance(catalog.get("resources"), dict):
         raise ValueError("Unsupported Sandbox resource catalog")
     assets = []
     names = set()

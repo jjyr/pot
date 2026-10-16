@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 
@@ -174,10 +175,13 @@ func (m *Manager) notify() {
 
 // Snapshot only verifies cache bytes; it never starts a transfer or a VM.
 func (m *Manager) Snapshot(ctx context.Context) (Status, error) {
-	out := Status{DefaultBundle: m.options.Catalog.DefaultLinuxBundle, Bundles: []BundleStatus{}, Requests: []Request{}}
+	out := Status{DefaultBundle: m.options.Catalog.DefaultBundle(), Bundles: []BundleStatus{}, Requests: []Request{}}
 	for id, b := range m.options.Catalog.Bundles {
+		if b.Architecture != runtime.GOARCH {
+			continue
+		}
 		item := BundleStatus{ID: id, Ready: true, Resources: []ResourceStatus{}}
-		for _, rid := range []string{b.Kernel, b.Boot, b.Image} {
+		for _, rid := range []string{b.Image} {
 			r := m.options.Catalog.Resources[rid]
 			_, cached, err := m.options.Store.Cached(ctx, r)
 			diagnostic := ""
@@ -235,12 +239,12 @@ func (m *Manager) requestFor(ctx context.Context, sandboxID, bundleID, owner, tu
 			}
 		}
 		if bundleID == "" {
-			bundleID = m.options.Catalog.DefaultLinuxBundle
+			bundleID = m.options.Catalog.DefaultBundle()
 		}
 	}
-	if _, ok := m.options.Catalog.Bundles[bundleID]; !ok {
+	if b, ok := m.options.Catalog.Bundles[bundleID]; !ok || b.Architecture != runtime.GOARCH {
 		m.mu.Unlock()
-		return Request{}, errors.New("unknown resource bundle")
+		return Request{}, errors.New("unknown resource bundle or incompatible Runtime architecture")
 	}
 	if m.options.ValidateSandbox != nil {
 		if err := m.options.ValidateSandbox(ctx, sandboxID); err != nil {

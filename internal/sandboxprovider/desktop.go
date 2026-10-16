@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -95,75 +93,6 @@ func desktopCredential(raw json.RawMessage) (string, error) {
 func linuxDesktopCapabilities() sandbox.DesktopCapabilities {
 	return sandbox.DesktopCapabilities{Viewing: true, Input: true, Clipboard: true, Browser: true, Protocol: "rfb-3.8"}
 }
-func (p *AppleContainer) DesktopCapabilities() sandbox.DesktopCapabilities {
-	return linuxDesktopCapabilities()
-}
-func (p *AppleContainer) desktopEndpoint(ctx context.Context, i sandbox.Instance) (desktopEndpoint, error) {
-	raw, err := p.Request(ctx, i, "desktop", json.RawMessage(`{}`), 30*time.Second)
-	if err != nil {
-		return desktopEndpoint{}, err
-	}
-	token, err := desktopCredential(raw)
-	if err != nil {
-		return desktopEndpoint{}, err
-	}
-	state, err := p.state(ctx, i, "status")
-	if err != nil {
-		return desktopEndpoint{}, err
-	}
-	address, _ := state["ip"].(string)
-	ip := net.ParseIP(address)
-	if ip == nil {
-		return desktopEndpoint{}, errors.New("desktop address unavailable")
-	}
-	return desktopEndpoint{url: "http://" + net.JoinHostPort(ip.String(), "17681"), token: token, transport: &http.Transport{Proxy: nil}}, nil
-}
-func (p *AppleContainer) PrepareDesktop(ctx context.Context, i sandbox.Instance) error {
-	e, err := p.desktopEndpoint(ctx, i)
-	if err != nil {
-		return err
-	}
-	return e.prepare(ctx)
-}
-func (p *AppleContainer) OpenDesktop(ctx context.Context, i sandbox.Instance) (io.ReadWriteCloser, error) {
-	e, err := p.desktopEndpoint(ctx, i)
-	if err != nil {
-		return nil, err
-	}
-	return e.open(ctx)
-}
-func (p *AppleContainer) DesktopMetrics(ctx context.Context, i sandbox.Instance) (json.RawMessage, error) {
-	e, err := p.desktopEndpoint(ctx, i)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := e.request(ctx, http.MethodGet, "/api/metrics", nil)
-	if err != nil {
-		return nil, err
-	}
-	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(raw, &fields); err != nil {
-		return nil, err
-	}
-	if fields == nil {
-		return nil, errors.New("desktop metrics object required")
-	}
-	var prepared sandbox.PreparedResources
-	if err = loadJSON(filepath.Join(i.Directory(), "prepared-resources.json"), &prepared); err != nil {
-		return nil, err
-	}
-	fields["image"], _ = json.Marshal(prepared.ImageReference)
-	return json.Marshal(fields)
-}
-func (p *AppleContainer) DesktopBrowser(ctx context.Context, i sandbox.Instance) error {
-	e, err := p.desktopEndpoint(ctx, i)
-	if err != nil {
-		return err
-	}
-	_, err = e.request(ctx, http.MethodPost, "/api/browser", map[string]any{})
-	return err
-}
-
 func (p *Podman) DesktopCapabilities() sandbox.DesktopCapabilities { return linuxDesktopCapabilities() }
 func (p *Podman) desktopEndpoint(ctx context.Context, i sandbox.Instance) (desktopEndpoint, error) {
 	raw, err := p.Request(ctx, i, "desktop", json.RawMessage(`{}`), 30*time.Second)

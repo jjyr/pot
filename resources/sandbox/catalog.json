@@ -1,65 +1,40 @@
 {
-  "schema_version": 1,
-  "default_linux_bundle": "linux-arm64-369f463dd6297281",
+  "schema_version": 2,
+  "default_linux_bundles": {
+    "amd64": "linux-amd64-0ff10d38a450d26b",
+    "arm64": "linux-arm64-6d71d71ab32cf7c7"
+  },
   "resources": {
-    "kernel-fb2cfb79eb1ae194": {
-      "release_tag": "sandbox-go-resources-v0.1.0",
-      "filename": "linux-arm64-kernel-fb2cfb79eb1ae194",
-      "sha256": "fb2cfb79eb1ae19447a85d75682d7fa5cfec97e24beb2609a492b806e8072c8d",
-      "size_bytes": 30423552,
-      "unpacked_bytes": 30423552,
-      "format": "raw"
-    },
-    "boot-17ba31ff7cc3bde2": {
-      "release_tag": "sandbox-go-resources-v0.1.0",
-      "filename": "linux-arm64-boot-17ba31ff7cc3bde2.tar.gz",
-      "sha256": "17ba31ff7cc3bde201085f2281dab5de215ca5adde67a99387d9d9a0340a9cda",
-      "size_bytes": 68582375,
-      "unpacked_bytes": 69255307,
+    "image-b07564480032e3b4": {
+      "release_tag": "sandbox-go-resources-v0.3.0",
+      "filename": "linux-amd64-image-b07564480032e3b4.tar.gz",
+      "sha256": "b07564480032e3b4271c387878b9251afaf3655a56f1895270fe80eeb046db8a",
+      "size_bytes": 757027186,
+      "unpacked_bytes": 766983747,
       "format": "oci-tar-gzip"
     },
-    "image-707c6070d625c96d": {
-      "release_tag": "sandbox-go-resources-v0.1.0",
-      "filename": "linux-arm64-image-707c6070d625c96d.tar.gz",
-      "sha256": "707c6070d625c96d2944b2d1eb6fe0e0266ff8513de5c8d2aa842811d2394f8b",
-      "size_bytes": 540166421,
-      "unpacked_bytes": 543532584,
-      "format": "oci-tar-gzip"
-    },
-    "boot-4f479ca52b9e4236": {
-      "release_tag": "sandbox-go-resources-v0.2.0",
-      "filename": "linux-arm64-boot-4f479ca52b9e4236.tar.gz",
-      "sha256": "4f479ca52b9e423684888c85ee1fec2ba1ad05abd053a125dac1b060e44e4791",
-      "size_bytes": 68582380,
-      "unpacked_bytes": 69255307,
-      "format": "oci-tar-gzip"
-    },
-    "image-699f996f2ccdec3d": {
-      "release_tag": "sandbox-go-resources-v0.2.0",
-      "filename": "linux-arm64-image-699f996f2ccdec3d.tar.gz",
-      "sha256": "699f996f2ccdec3d48dcc62ac3599983e52bd8cb5093038c552478ab10e209ac",
-      "size_bytes": 645553992,
-      "unpacked_bytes": 650500587,
+    "image-0a2e13d5b7140b27": {
+      "release_tag": "sandbox-go-resources-v0.3.0",
+      "filename": "linux-arm64-image-0a2e13d5b7140b27.tar.gz",
+      "sha256": "0a2e13d5b7140b27a1ac2a088986fe9a6f212a2dc106b6d3e7741791bf3c425d",
+      "size_bytes": 742354037,
+      "unpacked_bytes": 752423171,
       "format": "oci-tar-gzip"
     }
   },
   "bundles": {
-    "linux-arm64-cf60a4144d497e5e": {
-      "kernel": "kernel-fb2cfb79eb1ae194",
-      "boot": "boot-17ba31ff7cc3bde2",
-      "image": "image-707c6070d625c96d",
-      "image_reference": "pot.local/sandbox:d7f180af7d9f3f091bff",
-      "boot_reference": "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",
+    "linux-amd64-0ff10d38a450d26b": {
+      "image": "image-b07564480032e3b4",
+      "image_reference": "localhost/pot-sandbox:8a841bf3732f4ddf6ed7-amd64",
+      "manifest_digest": "sha256:3fb376b27eb18dc04e39030767367515499b009ffa0a9867fd14768f664c6222",
       "bootstrap_version": "pot-executor-v2",
       "os": "linux",
-      "architecture": "arm64"
+      "architecture": "amd64"
     },
-    "linux-arm64-369f463dd6297281": {
-      "kernel": "kernel-fb2cfb79eb1ae194",
-      "boot": "boot-4f479ca52b9e4236",
-      "image": "image-699f996f2ccdec3d",
-      "image_reference": "pot.local/sandbox:f8203a562aec9c92b971",
-      "boot_reference": "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",
+    "linux-arm64-6d71d71ab32cf7c7": {
+      "image": "image-0a2e13d5b7140b27",
+      "image_reference": "localhost/pot-sandbox:b9700030696692fbeff7-arm64",
+      "manifest_digest": "sha256:acf004033a705653d900cac62192538d07b5094f51a243e71fc4df598731b86c",
       "bootstrap_version": "pot-executor-v2",
       "os": "linux",
       "architecture": "arm64"

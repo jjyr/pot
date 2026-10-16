@@ -18,7 +18,7 @@ type instructionProvider struct {
 }
 
 func (p instructionProvider) Descriptor() sandbox.Descriptor {
-	return sandbox.Descriptor{ID: sandbox.AppleContainer, OS: "linux", HostOS: "macos", Engine: "apple-containerization"}
+	return sandbox.Descriptor{ID: sandbox.Podman, OS: "linux", HostOS: "macos", Engine: "podman"}
 }
 func (p instructionProvider) DefaultResources() sandbox.Resources {
 	return sandbox.Resources{CPUs: 1, MemoryGiB: 1, DiskGiB: 4}

@@ -20,12 +20,12 @@ import (
 )
 
 type Options struct {
-	Root                                             string
-	ResourceDirectory, HelperDirectory, SandboxImage string
-	SandboxProviders                                 []sandbox.Provider
-	Control                                          control.Options
-	Limits                                           *execution.Limits
-	DisableMetadataRefresh                           bool
+	Root                               string
+	ResourceDirectory, HelperDirectory string
+	SandboxProviders                   []sandbox.Provider
+	Control                            control.Options
+	Limits                             *execution.Limits
+	DisableMetadataRefresh             bool
 }
 type Runtime struct {
 	Root           *instance.Root

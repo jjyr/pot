@@ -10,10 +10,12 @@ import (
 	"github.com/jjyr/pot/internal/resource"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
-func TestRawKernelBindsVerifiedFileAndOCIBindsVerifiedDirectory(t *testing.T) {
+func TestOCIImageBindsVerifiedDirectory(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	store, err := resource.New(filepath.Join(t.TempDir(), "cache"), resource.Options{})
@@ -21,7 +23,6 @@ func TestRawKernelBindsVerifiedFileAndOCIBindsVerifiedDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close(ctx)
-	kernel := []byte("test kernel")
 	var archive bytes.Buffer
 	gz := gzip.NewWriter(&archive)
 	tw := tar.NewWriter(gz)
@@ -44,23 +45,29 @@ func TestRawKernelBindsVerifiedFileAndOCIBindsVerifiedDirectory(t *testing.T) {
 		}
 		return resource.Resource{ReleaseTag: "fixture", Filename: name, SHA256: hex.EncodeToString(sum[:]), SizeBytes: uint64(len(data)), UnpackedBytes: unpacked, Format: format}
 	}
-	c := Catalog{SchemaVersion: 1, DefaultLinuxBundle: "linux", Resources: map[string]resource.Resource{"kernel": makeResource("kernel", kernel, resource.Raw, uint64(len(kernel))), "oci": makeResource("oci.tar.gz", archive.Bytes(), resource.OCITarGzip, uint64(len(payload)+len(layout)))}, Bundles: map[string]Bundle{"linux": {Kernel: "kernel", Boot: "oci", Image: "oci", ImageReference: "fixture:image", BootReference: "fixture:boot", BootstrapVersion: "pot-executor-v2", OS: "linux", Architecture: "arm64"}}}
+	c := Catalog{SchemaVersion: 2, DefaultLinuxBundles: map[string]string{runtime.GOARCH: "linux"}, Resources: map[string]resource.Resource{"oci": makeResource("oci.tar.gz", archive.Bytes(), resource.OCITarGzip, uint64(len(payload)+len(layout)))}, Bundles: map[string]Bundle{"linux": {Image: "oci", ImageReference: "fixture:image", ManifestDigest: "sha256:" + strings.Repeat("a", 64), BootstrapVersion: "pot-executor-v2", OS: "linux", Architecture: runtime.GOARCH}}}
 	prepared, err := c.Import(ctx, store, "", directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(prepared.Kernel)
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatal("kernel bound a directory", prepared.Kernel, err)
+	info, err := os.Stat(prepared.Image)
+	if err != nil || !info.IsDir() {
+		t.Fatal(prepared.Image, err)
 	}
-	for _, path := range []string{prepared.Boot, prepared.Image} {
-		info, err = os.Stat(path)
-		if err != nil || !info.IsDir() {
-			t.Fatal(path, err)
+	if prepared.Architecture != runtime.GOARCH || prepared.ManifestDigest != c.Bundles["linux"].ManifestDigest {
+		t.Fatal("image identity lost", prepared)
+	}
+	for arch := range map[string]bool{"arm64": true, "amd64": true} {
+		c.DefaultLinuxBundles = map[string]string{arch: "linux"}
+		b := c.Bundles["linux"]
+		b.Architecture = arch
+		c.Bundles["linux"] = b
+		if err := c.Validate(); err != nil {
+			t.Fatal(err)
 		}
 	}
-	data, err := os.ReadFile(prepared.Kernel)
-	if err != nil || !bytes.Equal(data, kernel) {
-		t.Fatal(err)
+	c.SchemaVersion = 1
+	if err := c.Validate(); err == nil {
+		t.Fatal("retired kernel/boot catalog accepted")
 	}
 }

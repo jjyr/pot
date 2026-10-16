@@ -18,8 +18,8 @@ loader = importlib.machinery.SourceFileLoader(
 spec = importlib.util.spec_from_loader(loader.name, loader)
 verifier = importlib.util.module_from_spec(spec)
 loader.exec_module(verifier)
-OLD = "sandbox-go-resources-v0.1.0"
-NEW = "sandbox-go-resources-v0.2.0"
+OLD = "sandbox-go-resources-v0.2.0"
+NEW = "sandbox-go-resources-v0.3.0"
 
 
 class ReviewedResources(unittest.TestCase):
@@ -32,9 +32,9 @@ class ReviewedResources(unittest.TestCase):
         self.output = self.root / "published"
         self.catalog = self.root / "catalog.json"
         self.resources = {}
-        self.asset("old-kernel", b"retained kernel", OLD)
-        self.asset("a-new-image", b"reviewed new image", NEW)
-        self.asset("b-new-boot", b"reviewed new boot", NEW)
+        self.asset("old-arm64-image", b"retained image", OLD)
+        self.asset("a-arm64-image", b"reviewed new image", NEW)
+        self.asset("b-amd64-image", b"reviewed amd64 image", NEW)
         (self.source / "unreviewed-extra").write_bytes(b"never publish")
 
     def asset(self, name, data, tag):
@@ -47,7 +47,7 @@ class ReviewedResources(unittest.TestCase):
         }
 
     def stage(self, tag=NEW, source=None):
-        self.catalog.write_text(json.dumps({"schema_version": 1, "resources": self.resources}))
+        self.catalog.write_text(json.dumps({"schema_version": 2, "resources": self.resources}))
         return verifier.stage_assets(source or self.source, self.output, tag, self.catalog)
 
     def assert_no_partial_output(self):
@@ -55,7 +55,7 @@ class ReviewedResources(unittest.TestCase):
         self.assertEqual(list(self.root.glob(".pot-resources-*")), [])
 
     def test_only_requested_tag_files_are_staged_and_returned(self):
-        for tag, names in ((NEW, ["a-new-image", "b-new-boot"]), (OLD, ["old-kernel"])):
+        for tag, names in ((NEW, ["a-arm64-image", "b-amd64-image"]), (OLD, ["old-arm64-image"])):
             with self.subTest(tag=tag):
                 result = self.stage(tag)
                 self.assertEqual(
@@ -70,27 +70,27 @@ class ReviewedResources(unittest.TestCase):
                 self.output.rmdir()
 
     def test_missing_asset_cleans_already_staged_files(self):
-        (self.source / "b-new-boot").unlink()
+        (self.source / "b-amd64-image").unlink()
         with self.assertRaises(FileNotFoundError):
             self.stage()
         self.assert_no_partial_output()
 
     def test_same_size_corruption_cleans_already_staged_files(self):
-        path = self.source / "b-new-boot"
+        path = self.source / "b-amd64-image"
         path.write_bytes(b"x" * path.stat().st_size)
         with self.assertRaisesRegex(ValueError, "checksum"):
             self.stage()
         self.assert_no_partial_output()
 
     def test_wrong_size_asset_is_rejected(self):
-        (self.source / "b-new-boot").write_bytes(b"truncated")
+        (self.source / "b-amd64-image").write_bytes(b"truncated")
         with self.assertRaisesRegex(ValueError, "size"):
             self.stage()
         self.assert_no_partial_output()
 
     def test_symlink_files_and_source_directory_are_rejected(self):
-        path = self.source / "b-new-boot"
-        real = self.root / "real-boot"
+        path = self.source / "b-amd64-image"
+        real = self.root / "real-image"
         path.rename(real)
         path.symlink_to(real)
         with self.assertRaises(OSError):
@@ -103,7 +103,7 @@ class ReviewedResources(unittest.TestCase):
         self.assert_no_partial_output()
 
     def test_nonregular_asset_is_rejected_without_blocking(self):
-        path = self.source / "b-new-boot"
+        path = self.source / "b-amd64-image"
         path.unlink()
         verifier.os.mkfifo(path)
         with self.assertRaisesRegex(ValueError, "type"):
@@ -111,14 +111,14 @@ class ReviewedResources(unittest.TestCase):
         self.assert_no_partial_output()
 
     def test_unsafe_and_duplicate_catalog_names_are_rejected(self):
-        original = self.resources["b-new-boot"]["filename"]
-        for name in ("../outside", "/absolute", ".", "name#label", "a-new-image"):
+        original = self.resources["b-amd64-image"]["filename"]
+        for name in ("../outside", "/absolute", ".", "name#label", "a-arm64-image"):
             with self.subTest(name=name):
-                self.resources["b-new-boot"]["filename"] = name
+                self.resources["b-amd64-image"]["filename"] = name
                 with self.assertRaisesRegex(ValueError, "catalog asset"):
                     self.stage()
                 self.assert_no_partial_output()
-        self.resources["b-new-boot"]["filename"] = original
+        self.resources["b-amd64-image"]["filename"] = original
 
     def test_existing_output_and_output_symlink_are_preserved(self):
         self.output.mkdir()

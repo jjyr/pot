@@ -26,15 +26,23 @@ import (
 )
 
 type PodmanConfig struct {
-	Binary        string
-	Image         string
-	UserSkills    string
-	BuiltinSkills string
+	Binary           string
+	UserSkills       string
+	BuiltinSkills    string
+	RuntimeRoot      string
+	MachineName      string
+	MachineImage     string
+	MachineCPUs      uint64
+	MachineMemoryGiB uint64
+	MachineDiskGiB   uint64
 }
 type Podman struct {
-	config    PodmanConfig
-	mu        sync.Mutex
-	instances map[string]sandbox.Instance
+	config              PodmanConfig
+	hostOS              string
+	machineMu           sync.Mutex
+	prepareMachineImage func(context.Context, string, string) (string, error)
+	mu                  sync.Mutex
+	instances           map[string]sandbox.Instance
 }
 type podmanInstance struct {
 	Name       string `json:"name"`
@@ -44,15 +52,40 @@ type podmanInstance struct {
 
 func NewPodman(config PodmanConfig) *Podman {
 	if config.Binary == "" {
-		config.Binary = "podman"
+		config.Binary = findPodmanBinary(runtime.GOOS, []string{"/opt/podman/bin/podman", "/opt/homebrew/bin/podman", "/usr/local/bin/podman"})
 	}
-	if config.Image == "" {
-		config.Image = "localhost/pot-sandbox:0.1.0"
+	if config.MachineImage == "" {
+		config.MachineImage = defaultPodmanMachineImage
 	}
-	return &Podman{config: config, instances: map[string]sandbox.Instance{}}
+	if config.MachineCPUs == 0 {
+		config.MachineCPUs = 4
+	}
+	if config.MachineMemoryGiB == 0 {
+		config.MachineMemoryGiB = 8
+	}
+	if config.MachineDiskGiB == 0 {
+		config.MachineDiskGiB = 50
+	}
+	return &Podman{config: config, hostOS: runtime.GOOS, instances: map[string]sandbox.Instance{}}
+}
+
+// Finder-launched applications do not inherit an interactive shell's PATH.
+// Discover an already installed engine without changing the host installation.
+func findPodmanBinary(goos string, candidates []string) string {
+	if path, err := exec.LookPath("podman"); err == nil {
+		return path
+	}
+	if goos == "darwin" {
+		for _, path := range candidates {
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
+				return path
+			}
+		}
+	}
+	return "podman"
 }
 func (p *Podman) Descriptor() sandbox.Descriptor {
-	return sandbox.Descriptor{ID: sandbox.Podman, OS: "linux", HostOS: "linux", Engine: "podman", Capabilities: sandbox.Capabilities{Shell: true, Files: true, Desktop: true, SharedExecution: true}}
+	return sandbox.Descriptor{ID: sandbox.Podman, OS: "linux", HostOS: p.hostOS, Engine: "podman", Capabilities: sandbox.Capabilities{Shell: true, Files: true, Desktop: true, SharedExecution: true}}
 }
 func (p *Podman) DefaultResources() sandbox.Resources {
 	return sandbox.Resources{CPUs: 4, MemoryGiB: 8, DiskGiB: 0}
@@ -64,12 +97,29 @@ func (p *Podman) ValidateResources(instance sandbox.Instance, value sandbox.Reso
 	return nil
 }
 func (p *Podman) Workspace(instance sandbox.Instance) string {
-	return filepath.Join(instance.Directory(), "workspace/workspace")
+	return filepath.Join(p.dataDirectory(instance), "workspace")
 }
 func (p *Podman) GuestWorkspace() string               { return "/data/workspace" }
 func (p *Podman) CleanupPolicy() sandbox.CleanupPolicy { return sandbox.ProcessContainment }
-func (p *Podman) BindResources(context.Context, sandbox.Instance, sandbox.PreparedResources) error {
-	return errors.New("Podman uses an owner-installed local OCI image; it does not consume Apple kernel/boot resources")
+func (p *Podman) BindResources(ctx context.Context, instance sandbox.Instance, resources sandbox.PreparedResources) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if resources.Architecture != runtime.GOARCH {
+		return errors.New("prepared OCI architecture differs from this Runtime")
+	}
+	verified, err := verifyPodmanImage(resources)
+	if err != nil {
+		return err
+	}
+	saved, err := p.load(instance)
+	if err != nil {
+		return err
+	}
+	if saved != nil && saved.Image != strings.TrimPrefix(verified.ConfigDigest, "sha256:") {
+		return errors.New("Sandbox image is pinned to its accepted OCI configuration; rebuild before binding another image")
+	}
+	return immutableResources(instance, resources)
 }
 
 type commandOutput struct {
@@ -85,12 +135,38 @@ func (w *commandOutput) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 func (p *Podman) command(ctx context.Context, args ...string) ([]byte, int, error) {
-	if runtime.GOOS != "linux" {
-		return nil, -1, errors.New("Podman Provider requires a Linux host")
+	prefix := []string{"--remote=false"}
+	if p.hostOS == "darwin" {
+		name, _, err := p.machineIdentity()
+		if err != nil {
+			return nil, -1, err
+		}
+		prefix = []string{"--remote=true", "--connection=" + name}
+	} else if p.hostOS != "linux" {
+		return nil, -1, errors.New("Podman requires macOS or Linux")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	return p.runCommand(ctx, nil, append(prefix, args...)...)
+}
+func (p *Podman) runCommand(ctx context.Context, input io.Reader, args ...string) ([]byte, int, error) {
+	timeout := 60 * time.Second
+	for _, arg := range args {
+		if arg == "load" {
+			timeout = 10 * time.Minute
+		}
+	}
+	if len(args) > 1 && args[0] == "machine" {
+		if args[1] == "init" {
+			timeout = 15 * time.Minute
+		}
+		if args[1] == "start" {
+			timeout = 2 * time.Minute
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, p.config.Binary, append([]string{"--remote=false"}, args...)...)
+	command := exec.CommandContext(ctx, p.config.Binary, args...)
+	command.Stdin = input
+	command.Env = p.commandEnvironment()
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.WaitDelay = time.Second
 	command.Cancel = func() error {
@@ -103,21 +179,14 @@ func (p *Podman) command(ctx context.Context, args ...string) ([]byte, int, erro
 		}
 		return err
 	}
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "CONTAINER_HOST=") && !strings.HasPrefix(entry, "CONTAINER_CONNECTION=") {
-			command.Env = append(command.Env, entry)
-		}
-	}
 	var stdout commandOutput
 	stdout.limit = 4 * 1024 * 1024
 	command.Stdout = &stdout
 	command.Stderr = io.Discard
 	err := command.Run()
-	code := 0
+	code := -1
 	if command.ProcessState != nil {
 		code = command.ProcessState.ExitCode()
-	} else {
-		code = -1
 	}
 	if ctx.Err() != nil {
 		return nil, code, errors.Join(core.ErrCleanupUnconfirmed, errors.New("Podman command timed out; inspect before retrying"))
@@ -128,6 +197,7 @@ func (p *Podman) command(ctx context.Context, args ...string) ([]byte, int, erro
 	}
 	return stdout.data, code, nil
 }
+
 func (p *Podman) checked(ctx context.Context, args ...string) (json.RawMessage, error) {
 	data, code, err := p.command(ctx, args...)
 	if err != nil {
@@ -201,6 +271,35 @@ func bootGeneration(row map[string]any) uint64 {
 	hash := sha256.Sum256([]byte(started))
 	return binary.BigEndian.Uint64(hash[:8])
 }
+
+// A stopped, positively identified dedicated VM proves that its containers are
+// stopped. It does not provide an execution receipt or authorize replacement of
+// a missing machine. Status never boots the engine just to inspect a container.
+func (p *Podman) dedicatedMachineStopped(ctx context.Context) (bool, error) {
+	if p.hostOS != "darwin" {
+		return false, nil
+	}
+	p.machineMu.Lock()
+	defer p.machineMu.Unlock()
+	if _, err := p.loadMachine(); err != nil {
+		return false, errors.Join(core.ErrCleanupUnconfirmed, err, errors.New("accepted container's dedicated machine ownership unavailable"))
+	}
+	state, err := p.machineInspect(ctx)
+	if err != nil {
+		return false, errors.Join(core.ErrCleanupUnconfirmed, err)
+	}
+	if state == nil {
+		return false, errors.Join(core.ErrCleanupUnconfirmed, errors.New("accepted container's dedicated machine is missing; recover explicitly"))
+	}
+	switch state["State"] {
+	case "stopped":
+		return true, nil
+	case "running":
+		return false, nil
+	default:
+		return false, errors.Join(core.ErrCleanupUnconfirmed, errors.New("dedicated machine state is not confirmed"))
+	}
+}
 func (p *Podman) state(ctx context.Context, instance sandbox.Instance) (sandbox.Status, error) {
 	saved, err := p.load(instance)
 	if err != nil {
@@ -208,6 +307,11 @@ func (p *Podman) state(ctx context.Context, instance sandbox.Instance) (sandbox.
 	}
 	if saved == nil {
 		return sandbox.Status{Phase: "stopped"}, nil
+	}
+	if stopped, err := p.dedicatedMachineStopped(ctx); err != nil {
+		return sandbox.Status{}, err
+	} else if stopped {
+		return sandbox.Status{Phase: "stopped", Generation: saved.Generation}, nil
 	}
 	row, err := p.inspect(ctx, *saved)
 	if err != nil {
@@ -223,6 +327,18 @@ func (p *Podman) state(ctx context.Context, instance sandbox.Instance) (sandbox.
 	return sandbox.Status{Phase: "stopped", Generation: saved.Generation}, nil
 }
 func (p *Podman) prepare(ctx context.Context, instance sandbox.Instance) (*podmanInstance, error) {
+	saved, err := p.load(instance)
+	if err != nil {
+		return nil, err
+	}
+	if saved != nil {
+		if _, err := p.dedicatedMachineStopped(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if err := p.ensureMachine(ctx, instance); err != nil {
+		return nil, err
+	}
 	info, err := p.checked(ctx, "info", "--format=json")
 	if err != nil {
 		return nil, err
@@ -231,28 +347,33 @@ func (p *Podman) prepare(ctx context.Context, instance sandbox.Instance) (*podma
 	if json.Unmarshal(info, &value) != nil || nested(value, "host", "security", "rootless") != true || nested(value, "host", "cgroupVersion") != "v2" || nested(value, "host", "cgroupManager") != "systemd" {
 		return nil, errors.New("rootless Podman with cgroup v2/systemd is required")
 	}
-	saved, err := p.load(instance)
-	if err != nil || saved != nil {
-		return saved, err
+	if saved != nil {
+		return saved, nil
 	}
-	data, err := p.checked(ctx, "image", "inspect", p.config.Image)
+	image, err := p.preparedImage(ctx, instance)
 	if err != nil {
 		return nil, err
 	}
-	var images []map[string]any
-	if json.Unmarshal(data, &images) != nil || len(images) != 1 || nested(images[0], "Labels", "dev.pot.bootstrap") != "pot-executor-v2" {
-		return nil, errors.New("install the pinned Pot OCI image with its guest executor before preparing Sandbox")
-	}
-	image, _ := images[0]["Id"].(string)
-	if image == "" {
-		return nil, errors.New("Podman image identity missing")
-	}
+
 	saved = &podmanInstance{Name: "pot-" + rand.Text(), Image: image}
 	if err := privateJSON(filepath.Join(instance.Directory(), "podman.json"), saved); err != nil {
 		return nil, err
 	}
 	return saved, nil
 }
+
+// The pinned macOS machine labels virtiofs shares nfs_t. Its root broker
+// needs the engine domain to create private read-only skill bind mounts.
+// Keep SELinux labels/MCS, seccomp and no-new-privileges enabled; Linux retains
+// its installed host policy without any label override.
+func podmanSecurityOptions(hostOS string) []string {
+	options := []string{"--security-opt=no-new-privileges"}
+	if hostOS == "darwin" {
+		options = append(options, "--security-opt=label=type:container_engine_t")
+	}
+	return options
+}
+
 func (p *Podman) start(ctx context.Context, instance sandbox.Instance) (sandbox.Status, error) {
 	saved, err := p.prepare(ctx, instance)
 	if err != nil {
@@ -277,7 +398,7 @@ func (p *Podman) start(ctx context.Context, instance sandbox.Instance) (sandbox.
 	if err := p.ValidateResources(instance, instance.Resources); err != nil {
 		return sandbox.Status{}, err
 	}
-	work := filepath.Join(instance.Directory(), "workspace")
+	work := p.dataDirectory(instance)
 	if err := os.MkdirAll(filepath.Join(work, "workspace"), 0700); err != nil {
 		return sandbox.Status{}, err
 	}
@@ -308,7 +429,8 @@ func (p *Podman) start(ctx context.Context, instance sandbox.Instance) (sandbox.
 	if err := privateJSON(filepath.Join(instance.Directory(), "podman.json"), saved); err != nil {
 		return sandbox.Status{}, err
 	}
-	args := []string{"run", "--detach", "--pull=never", "--name", saved.Name, "--label", "dev.pot.instance=" + saved.Name, "--userns=keep-id:uid=1000,gid=1000", "--user=0:0", "--cgroupns=private", "--systemd=always", "--stop-signal=SIGTERM", "--cap-add=SYS_ADMIN", "--security-opt=no-new-privileges", "--network=pasta:--no-map-gw", "--no-hosts", "--publish=127.0.0.1::17701", "--publish=127.0.0.1::17681", fmt.Sprintf("--cpus=%d", instance.Resources.CPUs), fmt.Sprintf("--memory=%dg", instance.Resources.MemoryGiB), "--pids-limit=2048", "--env-file", envPath}
+	args := []string{"run", "--detach", "--pull=never", "--name", saved.Name, "--label", "dev.pot.instance=" + saved.Name, "--userns=keep-id:uid=1000,gid=1000", "--user=0:0", "--cgroupns=private", "--systemd=always", "--stop-signal=SIGTERM", "--cap-add=SYS_ADMIN", "--network=pasta:--no-map-gw", "--no-hosts", "--publish=127.0.0.1::17701", "--publish=127.0.0.1::17681", fmt.Sprintf("--cpus=%d", instance.Resources.CPUs), fmt.Sprintf("--memory=%dg", instance.Resources.MemoryGiB), "--pids-limit=2048", "--env-file", envPath}
+	args = append(args, podmanSecurityOptions(p.hostOS)...)
 	for _, mount := range []struct{ source, destination, mode string }{{work, "/data", "rw"}, {user, "/run/pot-skill-sources/user", "rw"}, {builtin, "/run/pot-skill-sources/builtin", "ro"}} {
 		canonical, err := filepath.EvalSymlinks(mount.source)
 		if err != nil {
@@ -317,7 +439,11 @@ func (p *Podman) start(ctx context.Context, instance sandbox.Instance) (sandbox.
 		if strings.ContainsAny(canonical, ":,") {
 			return sandbox.Status{}, errors.New("unsupported mount path")
 		}
-		args = append(args, "--volume", canonical+":"+mount.destination+":"+mount.mode)
+		source, err := p.mountSource(canonical)
+		if err != nil {
+			return sandbox.Status{}, err
+		}
+		args = append(args, "--volume", source+":"+mount.destination+":"+mount.mode)
 	}
 	if err := sandbox.ValidateMappings(instance.Mappings); err != nil {
 		return sandbox.Status{}, err
@@ -327,7 +453,11 @@ func (p *Podman) start(ctx context.Context, instance sandbox.Instance) (sandbox.
 		if mapping.ReadOnly {
 			mode = "ro"
 		}
-		args = append(args, "--volume", mapping.Source+":"+mapping.Destination+":"+mode)
+		source, err := p.mountSource(mapping.Source)
+		if err != nil {
+			return sandbox.Status{}, err
+		}
+		args = append(args, "--volume", source+":"+mapping.Destination+":"+mode)
 	}
 	args = append(args, saved.Image, "tini", "--", "/bin/sh", "/opt/pot/sandbox.sh")
 	if _, code, err := p.command(ctx, args...); err != nil || code != 0 {
@@ -355,6 +485,19 @@ func (p *Podman) Lifecycle(ctx context.Context, instance sandbox.Instance, metho
 			return sandbox.Status{}, err
 		}
 		if saved != nil {
+			stopped, err := p.dedicatedMachineStopped(ctx)
+			if err != nil {
+				return sandbox.Status{}, err
+			}
+			if stopped && method == "stop" {
+				return sandbox.Status{Phase: "stopped", Generation: saved.Generation}, nil
+			}
+			if stopped {
+				// Engine startup does not start retained sibling containers.
+				if err := p.ensureMachine(ctx, instance); err != nil {
+					return sandbox.Status{}, errors.Join(core.ErrCleanupUnconfirmed, err)
+				}
+			}
 			row, err := p.inspect(ctx, *saved)
 			if err != nil {
 				return sandbox.Status{}, err
@@ -394,6 +537,11 @@ func (p *Podman) guest(ctx context.Context, instance sandbox.Instance) (platform
 	saved, err := p.load(instance)
 	if err != nil || saved == nil {
 		return platformhelper.GuestClient{}, errors.New("Podman Sandbox not prepared")
+	}
+	if stopped, err := p.dedicatedMachineStopped(ctx); err != nil {
+		return platformhelper.GuestClient{}, err
+	} else if stopped {
+		return platformhelper.GuestClient{}, errors.Join(core.ErrCleanupUnconfirmed, errors.New("dedicated machine stopped before original guest cleanup was acknowledged"))
 	}
 	row, err := p.inspect(ctx, *saved)
 	if err != nil {
@@ -457,6 +605,9 @@ func (p *Podman) Shutdown(ctx context.Context) error {
 		if _, err := p.Lifecycle(ctx, instance, "stop"); err != nil {
 			result = errors.Join(result, core.ErrCleanupUnconfirmed, err)
 		}
+	}
+	if result == nil {
+		result = p.stopMachine(ctx)
 	}
 	return result
 }

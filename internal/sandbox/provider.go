@@ -15,10 +15,9 @@ import (
 )
 
 const (
-	AppleContainer = "macos.apple-containerization"
-	AppleVM        = "macos.apple-virtualization"
-	Podman         = "linux.podman"
-	SharedID       = "shared"
+	AppleVM  = "macos.apple-virtualization"
+	Podman   = "podman"
+	SharedID = "shared"
 )
 
 type Capabilities struct {
@@ -41,11 +40,10 @@ type Resources struct {
 }
 type PreparedResources struct {
 	BundleID       string `json:"bundle_id"`
-	Kernel         string `json:"kernel"`
-	Boot           string `json:"boot"`
 	Image          string `json:"image"`
 	ImageReference string `json:"image_reference"`
-	BootReference  string `json:"boot_reference"`
+	ManifestDigest string `json:"manifest_digest"`
+	Architecture   string `json:"architecture"`
 }
 
 // Instance is constructed from durable owner configuration, never model paths.

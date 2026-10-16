@@ -364,15 +364,18 @@ def swift_helpers():
             "--disable-sandbox",
             "--scratch-path",
             scratch,
-            "--force-resolved-versions",
+            "--product",
+            "PotMacOSHelper",
             "-j",
             "4",
         ],
         env=environment,
     )
     destination = BUILD / "helper-build/release"
-    destination.mkdir(parents=True, exist_ok=True)
-    for name in ("PotHelper", "PotMacOSHelper", "PotImageBuilder"):
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
+    for name in ("PotMacOSHelper",):
         shutil.copy2(scratch / "release" / name, destination / name)
         call(
             [
@@ -385,22 +388,10 @@ def swift_helpers():
                 destination / name,
             ]
         )
-    notices = [
-        "Unmodified Swift Helper dependencies; pinned sources in helper/Package.resolved.\n",
-        (ROOT / "helper/Package.resolved").read_text(),
-    ]
-    for checkout in sorted((scratch / "checkouts").iterdir()):
-        for license_file in sorted(checkout.iterdir()):
-            if license_file.is_file() and license_file.name.upper().startswith(
-                ("LICENSE", "NOTICE", "COPYING")
-            ):
-                notices.extend(
-                    [
-                        f"\n{checkout.name}/{license_file.name}\n",
-                        license_file.read_text(errors="replace"),
-                    ]
-                )
-    (destination / "SwiftDependencyLicenses.txt").write_text("\n".join(notices))
+    (destination / "SwiftDependencyLicenses.txt").write_text(
+        "PotMacOSHelper uses Apple Foundation and Virtualization system frameworks.\n"
+        "No third-party Swift package dependencies are bundled.\n"
+    )
     return destination
 
 
@@ -446,6 +437,11 @@ def prepare_resources(destination, platform):
 
 def verify_oci_layout(layout):
     layout = Path(layout)
+    if layout.is_symlink() or not layout.is_dir():
+        raise ValueError("Unsafe OCI image layout")
+    for item in layout.rglob("*"):
+        if item.is_symlink() or not (item.is_file() or item.is_dir()):
+            raise ValueError("Unsafe OCI image layout member")
     if json.loads((layout / "oci-layout").read_text()) != {"imageLayoutVersion": "1.0.0"}:
         raise ValueError("OCI image layout version is invalid")
     seen = set()
@@ -487,70 +483,258 @@ def verify_oci_layout(layout):
     return value
 
 
-def publish_guest_images(inputs, resources, metadata):
-    """Validate both layouts completely, then replace outputs with rollback."""
-    inputs, resources = Path(inputs), Path(resources)
-    for name in ("sandbox-image", "init-image"):
-        value = verify_oci_layout(inputs / name)
-        if (
-            name == "sandbox-image"
-            and value["manifests"][0]["digest"] != metadata["manifest_digest"]
-        ):
-            raise ValueError("Guest metadata does not match the built image")
-    resources.mkdir(parents=True, exist_ok=True)
-    names = ("sandbox-image", "init-image", "sandbox-image.json")
-    with tempfile.TemporaryDirectory(prefix=".image-publish-", dir=resources.parent) as temporary:
-        staging, backups = Path(temporary) / "new", Path(temporary) / "old"
-        staging.mkdir()
-        backups.mkdir()
-        for name in names[:-1]:
-            shutil.copytree(inputs / name, staging / name)
-        (staging / names[-1]).write_text(json.dumps(metadata, indent=2) + "\n")
-        published = []
+def oci_image_descriptor(layout, architecture):
+    """Return the one Linux image manifest and validate its actual config CPU."""
+    layout = Path(layout)
+    root = verify_oci_layout(layout)
+    images = []
+
+    def visit(descriptor):
+        value = json.loads(
+            (layout / "blobs/sha256" / descriptor["digest"].split(":", 1)[1]).read_bytes()
+        )
+        if "manifests" in value:
+            for child in value["manifests"]:
+                visit(child)
+            return
+        config = json.loads(
+            (layout / "blobs/sha256" / value["config"]["digest"].split(":", 1)[1]).read_bytes()
+        )
+        if config.get("os") != "linux" or config.get("architecture") != architecture:
+            raise ValueError("OCI image architecture does not match the selected Linux target")
+        images.append((descriptor, config))
+
+    for descriptor in root["manifests"]:
+        visit(descriptor)
+    if len(images) != 1:
+        raise ValueError("One architecture-specific OCI image is required")
+    return images[0]
+
+
+def publish_guest_image(layout, output, metadata):
+    """Publish one verified image/metadata directory, retaining old output on failure."""
+    layout, output = Path(layout), Path(output)
+    descriptor, _ = oci_image_descriptor(layout, metadata["architecture"])
+    if descriptor["digest"] != metadata["manifest_digest"]:
+        raise ValueError("Guest metadata does not match the built image")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".image-publish-", dir=output.parent) as temporary:
+        staged, previous = Path(temporary) / "new", Path(temporary) / "old"
+        staged.mkdir()
+        shutil.copytree(layout, staged / "sandbox-image")
+        (staged / "sandbox-image.json").write_text(json.dumps(metadata, indent=2) + "\n")
+        if output.exists():
+            output.rename(previous)
         try:
-            for name in names:
-                target = resources / name
-                if target.exists():
-                    target.rename(backups / name)
-                (staging / name).rename(target)
-                published.append(name)
+            staged.rename(output)
         except BaseException:
-            for name in reversed(names):
-                target = resources / name
-                if name in published:
-                    if target.is_dir():
-                        shutil.rmtree(target)
-                    else:
-                        target.unlink()
-                if (backups / name).exists():
-                    (backups / name).rename(target)
+            if previous.exists():
+                previous.rename(output)
             raise
 
 
-def prepare_image_inputs():
-    resources = BUILD / "resources"
-    resources.mkdir(parents=True, exist_ok=True)
-    kernel = resources / "vmlinux"
-    kernel_hash = "fb2cfb79eb1ae19447a85d75682d7fa5cfec97e24beb2609a492b806e8072c8d"
-    if not kernel.exists():
-        archive = download(
-            "https://github.com/kata-containers/kata-containers/releases/download/3.32.0/kata-static-3.32.0-arm64.tar.zst",
-            BUILD / "downloads/kata-static-3.32.0-arm64.tar.zst",
-            "8736c054d9223974735394f822000823baef509e1c33405ec798240fa9b6e4b5",
+def context_fingerprint(context):
+    fingerprint = hashlib.sha256()
+    for path in sorted(Path(context).rglob("*")):
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            raise ValueError("Guest build context must contain only regular files/directories")
+        if path.is_file() and path.relative_to(context).as_posix() != "build-inputs.json":
+            fingerprint.update(path.relative_to(context).as_posix().encode() + b"\0")
+            with path.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    fingerprint.update(chunk)
+            fingerprint.update(b"\0")
+    return fingerprint.hexdigest()
+
+
+def prepare_guest_context(context, architecture):
+    context = Path(context)
+    if context.exists() and (not context.is_dir() or any(context.iterdir())):
+        raise ValueError("Guest build context must be fresh or empty")
+    context.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=context.parent) as temporary:
+        staged = Path(temporary) / "context"
+        staged.mkdir()
+        manifest = prepare_guest_assets(staged / "assets", architecture)
+        shutil.copy2(ROOT / "resources/sandbox/linux/default/Dockerfile", staged / "Dockerfile")
+        manifest["source_hash"] = context_fingerprint(staged)
+        (staged / "build-inputs.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        if context.exists():
+            context.rmdir()
+        staged.rename(context)
+    return manifest
+
+
+def validate_guest_context(context, architecture):
+    context = Path(context)
+    manifest = json.loads((context / "build-inputs.json").read_text())
+    if manifest.get("architecture") != architecture or manifest.get("base") != guest_image_config():
+        raise ValueError("Prepared context does not match the selected architecture/base")
+    if manifest.get("source_hash") != context_fingerprint(context):
+        raise ValueError("Prepared context checksum changed")
+    return manifest
+
+
+def unpack_oci_archive(archive, destination):
+    destination = Path(destination)
+    if destination.exists():
+        raise ValueError("OCI unpack destination must not exist")
+    with tarfile.open(archive) as source:
+        seen = set()
+        for entry in source:
+            name = entry.name.removeprefix("./")
+            if name in {"", "."} and entry.isdir():
+                continue
+            if (
+                Path(name).is_absolute()
+                or ".." in Path(name).parts
+                or entry.issym()
+                or entry.islnk()
+                or not (entry.isfile() or entry.isdir())
+                or name in seen
+            ):
+                raise ValueError("Unsafe or duplicate OCI archive member")
+            seen.add(name)
+            tarfile.data_filter(entry, destination)
+        destination.mkdir(parents=True)
+        try:
+            source.extractall(destination, filter="data")
+            verify_oci_layout(destination)
+        except BaseException:
+            shutil.rmtree(destination)
+            raise
+
+
+def podman_command(connection=None, system=None):
+    import platform
+
+    if system is None:
+        system = platform.system()
+    if connection:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", connection):
+            raise ValueError("A named dedicated Podman connection is required")
+        return ["podman", "--connection", connection]
+    if system == "Darwin":
+        raise ValueError(
+            "macOS image builds require --connection for an explicitly provisioned dedicated Podman builder"
         )
-        with kernel.open("wb") as target:
-            call(
-                ["tar", "xOf", archive, "opt/kata/share/kata-containers/vmlinux-6.18.35-197-debug"],
-                stdout=target,
-            )
-    if digest(kernel) != kernel_hash:
-        raise ValueError("Pinned guest kernel checksum mismatch")
-    with tempfile.TemporaryDirectory(dir=BUILD) as temporary:
-        prepared = Path(temporary) / "assets"
-        prepare_guest_assets(prepared, "arm64")
-        destination = BUILD / "image-inputs/arm64"
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        copy_tree(prepared, destination)
-    # Always let SwiftPM check sources; a cached builder may target another base.
-    swift_helpers()
-    return destination
+    if system != "Linux":
+        raise ValueError("Podman image builds require Linux or macOS")
+    return ["podman", "--remote=false"]
+
+
+def build_guest_image(context, output, architecture, connection=None, reference=None):
+    context, output = Path(context), Path(output)
+    manifest = validate_guest_context(context, architecture)
+    command = podman_command(connection)
+    reference = reference or f"localhost/pot-sandbox:{manifest['source_hash'][:20]}-{architecture}"
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._:/@-]{0,250}", reference):
+        raise ValueError("Invalid image reference")
+    call(
+        [
+            *command,
+            "build",
+            "--format=oci",
+            "--network=private",
+            "--platform=linux/" + architecture,
+            "--file",
+            context / "Dockerfile",
+            "--build-arg",
+            "BASE_IMAGE=" + manifest["base"]["base_image"],
+            "--label",
+            "dev.pot.input.sha256=" + manifest["source_hash"],
+            "--tag",
+            reference,
+            context,
+        ]
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".image-export-", dir=output.parent) as temporary:
+        archive, layout = Path(temporary) / "image.oci.tar", Path(temporary) / "image"
+        call([*command, "save", "--format=oci-archive", "--output", archive, reference])
+        unpack_oci_archive(archive, layout)
+        descriptor, config = oci_image_descriptor(layout, architecture)
+        if (
+            config.get("config", {}).get("Labels", {}).get("dev.pot.input.sha256")
+            != manifest["source_hash"]
+        ):
+            raise ValueError("Exported image does not match the reviewed build context")
+        metadata = {
+            "schema_version": 1,
+            "os": "linux",
+            "architecture": architecture,
+            "reference": reference,
+            "manifest_digest": descriptor["digest"],
+            "source_hash": manifest["source_hash"],
+            "base": manifest["base"],
+        }
+        publish_guest_image(layout, output, metadata)
+    return metadata
+
+
+def guest_image_main():
+    import argparse
+    import platform
+
+    parser = argparse.ArgumentParser(
+        description="Build/export one architecture-specific Debian OCI image using Podman"
+    )
+    parser.add_argument(
+        "--arch",
+        choices=["amd64", "arm64"],
+        default={"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine()),
+    )
+    parser.add_argument(
+        "--connection",
+        help="Dedicated Podman builder connection (required on macOS; never starts a machine)",
+    )
+    parser.add_argument("--tag", help="Local image reference; nothing is pushed")
+    parser.add_argument("--context", type=Path, help="Fresh/empty prepared-context destination")
+    parser.add_argument(
+        "--prepared-context",
+        type=Path,
+        help="Use an existing checksum-verified context without rebuilding inputs",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Image output directory; defaults to .local/go/images/linux-ARCH",
+    )
+    parser.add_argument("--prepare-only", action="store_true")
+    args = parser.parse_args()
+    if not args.arch:
+        parser.error("Specify --arch for this host")
+    if args.context and args.prepared_context:
+        parser.error("Choose --context or --prepared-context")
+    if not args.prepare_only:
+        podman_command(args.connection)
+    context = (
+        args.prepared_context or args.context or BUILD / "container-image" / args.arch
+    ).resolve()
+    if args.prepared_context:
+        validate_guest_context(context, args.arch)
+    elif args.context:
+        prepare_guest_context(context, args.arch)
+    else:
+        context.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=context.parent) as temporary:
+            staged = Path(temporary) / "context"
+            prepare_guest_context(staged, args.arch)
+            previous = Path(temporary) / "previous"
+            if context.exists():
+                context.rename(previous)
+            try:
+                staged.rename(context)
+            except BaseException:
+                if previous.exists():
+                    previous.rename(context)
+                raise
+    if args.prepare_only:
+        print(context)
+        return
+    output = (args.output or BUILD / "images" / ("linux-" + args.arch)).resolve()
+    print(
+        json.dumps(
+            build_guest_image(context, output, args.arch, args.connection, args.tag), indent=2
+        )
+    )

@@ -163,7 +163,7 @@ func (p *AppleVM) Lifecycle(ctx context.Context, instance sandbox.Instance, meth
 			return sandbox.Status{}, err
 		}
 	}
-	value, err := (platformhelper.Client{SocketPath: socket, Protocol: platformhelper.MacOSVirtualization, Timeout: 60 * time.Second}).Call(ctx, platformhelper.Request{Method: method})
+	value, err := (platformhelper.Client{SocketPath: socket, Timeout: 60 * time.Second}).Call(ctx, platformhelper.Request{Method: method})
 	if err != nil {
 		return sandbox.Status{}, err
 	}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +21,7 @@ import (
 func TestRealLinuxSandboxQualification(t *testing.T) {
 	root := os.Getenv("POT_GO_SANDBOX_QUALIFY_ROOT")
 	if root == "" {
-		t.Skip("requires isolated real Apple Linux VM or rootless Podman")
+		t.Skip("requires isolated real shared Podman machine or rootless Linux Podman")
 	}
 	if !filepath.IsAbs(root) {
 		t.Fatal("qualification root must be absolute")
@@ -30,6 +29,35 @@ func TestRealLinuxSandboxQualification(t *testing.T) {
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatalf("qualification root must be fresh: %v", err)
 	}
+	if seed := os.Getenv("POT_GO_PODMAN_MACHINE_IMAGE_CACHE"); seed != "" {
+		source, err := os.Open(seed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := source.Stat()
+		if err != nil || !info.Mode().IsRegular() || info.Size() != podmanAppleHVImage.Size {
+			source.Close()
+			t.Fatal("machine image seed must be the pinned regular archive")
+		}
+		cache := filepath.Join(root, "podman-machine/cache")
+		if err = os.MkdirAll(cache, 0700); err != nil {
+			source.Close()
+			t.Fatal(err)
+		}
+		destination, err := os.OpenFile(filepath.Join(cache, "machine-os-"+podmanAppleHVImage.SHA256+".raw.zst"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			source.Close()
+			t.Fatal(err)
+		}
+		_, err = io.Copy(destination, source)
+		source.Close()
+		closeErr := destination.Close()
+		if err != nil || closeErr != nil {
+			t.Fatal(err, closeErr)
+		}
+		// Production prepare still hashes every byte before using this seed.
+	}
+
 	user, builtin := filepath.Join(root, "user-skills"), filepath.Join(root, "builtin-skills")
 	for _, dir := range []string{user, builtin} {
 		if err := os.Mkdir(dir, 0700); err != nil {
@@ -43,15 +71,8 @@ func TestRealLinuxSandboxQualification(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(userBundle, "SKILL.md"), []byte("---\nname: qualification-user\ndescription: isolated test\n---\nQualification only.\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	var provider sandbox.Provider
-	if runtime.GOOS == "darwin" {
-		apple := NewAppleContainer(os.Getenv("POT_GO_SANDBOX_HELPER"), os.Getenv("POT_GO_SANDBOX_RESOURCES"))
-		apple.UserSkills = user
-		provider = apple
-	} else {
-		provider = NewPodman(PodmanConfig{Image: os.Getenv("POT_GO_SANDBOX_IMAGE"), UserSkills: user, BuiltinSkills: builtin})
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	provider := NewPodman(PodmanConfig{RuntimeRoot: root, Binary: os.Getenv("POT_GO_SANDBOX_BINARY"), MachineName: os.Getenv("POT_GO_PODMAN_MACHINE_NAME"), UserSkills: user, BuiltinSkills: builtin})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	manager, err := sandbox.Open(ctx, sandbox.Config{Root: root, RuntimeID: "go-qualification", Providers: []sandbox.Provider{provider}})
 	if err != nil {
@@ -69,7 +90,7 @@ func TestRealLinuxSandboxQualification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS == "darwin" {
+	{
 		var prepared sandbox.PreparedResources
 		data, err := os.ReadFile(os.Getenv("POT_GO_SANDBOX_PREPARED"))
 		if err != nil {

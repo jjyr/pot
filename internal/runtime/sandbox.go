@@ -56,12 +56,12 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 	providers := options.SandboxProviders
 	if providers == nil {
 		switch runtime.GOOS {
-		case "darwin":
-			apple := sandboxprovider.NewAppleContainer(filepath.Join(helpers, "PotHelper"), resources)
-			apple.UserSkills = filepath.Join(config.AgentHome, "skills")
-			providers = []sandbox.Provider{apple, sandboxprovider.NewAppleVM(sandboxprovider.AppleVMConfig{Helper: filepath.Join(helpers, "PotMacOSHelper"), UserSkills: filepath.Join(config.AgentHome, "skills"), BuiltinSkills: config.BuiltinSkills})}
-		case "linux":
-			providers = []sandbox.Provider{sandboxprovider.NewPodman(sandboxprovider.PodmanConfig{Image: options.SandboxImage, UserSkills: filepath.Join(config.AgentHome, "skills"), BuiltinSkills: config.BuiltinSkills})}
+		case "darwin", "linux":
+			providers = []sandbox.Provider{sandboxprovider.NewPodman(sandboxprovider.PodmanConfig{RuntimeRoot: filepath.Join(r.Root.Path, "execution"), UserSkills: filepath.Join(config.AgentHome, "skills"), BuiltinSkills: config.BuiltinSkills})}
+			if runtime.GOOS == "darwin" {
+				providers = append(providers, sandboxprovider.NewAppleVM(sandboxprovider.AppleVMConfig{Helper: filepath.Join(helpers, "PotMacOSHelper"), UserSkills: filepath.Join(config.AgentHome, "skills"), BuiltinSkills: config.BuiltinSkills}))
+			}
+
 		}
 	}
 	var err error
@@ -83,8 +83,8 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 			if err != nil {
 				return err
 			}
-			if d.Retired || d.Provider != sandbox.AppleContainer {
-				return errors.New("Sandbox does not accept Linux VM resource bundles")
+			if d.Retired || d.Provider != sandbox.Podman {
+				return errors.New("Sandbox does not accept OCI image bundles")
 			}
 			return nil
 		}
@@ -94,8 +94,8 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 		}
 		for _, d := range definitions {
 			if d.ID == id && !d.Retired {
-				if d.Provider != sandbox.AppleContainer {
-					return errors.New("Sandbox uses an owner-installed image or prepared macOS VM")
+				if d.Provider != sandbox.Podman {
+					return errors.New("Sandbox uses a prepared macOS VM")
 				}
 				return nil
 			}
@@ -107,8 +107,8 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 			if err != nil {
 				return err
 			}
-			if definition.Provider != sandbox.AppleContainer {
-				return errors.New("this Sandbox uses an owner-installed image or prepared macOS VM")
+			if definition.Provider != sandbox.Podman {
+				return errors.New("this Sandbox uses a prepared macOS VM")
 			}
 		}
 		return r.Sandboxes.BindResources(ctx, id, prepared)
@@ -128,7 +128,7 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 		}
 		for _, d := range definitions {
 			if d.ID == id {
-				if d.Provider == sandbox.AppleContainer {
+				if d.Provider == sandbox.Podman {
 					return r.Provisioning.Wait(ctx, id, "")
 				}
 				return nil
@@ -151,7 +151,7 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 				return nil, err
 			}
 			for _, definition := range definitions {
-				if definition.ID == op.Target.Target.SandboxID && definition.Provider == sandbox.AppleContainer {
+				if definition.ID == op.Target.Target.SandboxID && definition.Provider == sandbox.Podman {
 					if err = r.Provisioning.WaitFor(ctx, definition.ID, "", op.Owner, op.Turn); err != nil {
 						return nil, err
 					}
@@ -198,8 +198,8 @@ func (r *Runtime) ImportSandboxResources(ctx context.Context, directory string) 
 	if err != nil {
 		return err
 	}
-	if definition.Provider != sandbox.AppleContainer {
-		return errors.New("this Provider uses an owner-installed OCI image instead of Apple resource bundles")
+	if definition.Provider != sandbox.Podman {
+		return errors.New("this Provider uses a prepared macOS VM instead of OCI image resources")
 	}
 	request, err := r.Provisioning.Request(ctx, definition.ID, "")
 	if err != nil {

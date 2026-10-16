@@ -1,6 +1,9 @@
 package resourcecontrol
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,14 +27,26 @@ import (
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func fixtureData() string {
+	var out bytes.Buffer
+	gz := gzip.NewWriter(&out)
+	tw := tar.NewWriter(gz)
+	for _, item := range [][2]string{{"index.json", `{"schemaVersion":2}`}, {"oci-layout", `{"imageLayoutVersion":"1.0.0"}`}} {
+		_ = tw.WriteHeader(&tar.Header{Name: item[0], Mode: 0644, Size: int64(len(item[1]))})
+		_, _ = tw.Write([]byte(item[1]))
+	}
+	_ = tw.Close()
+	_ = gz.Close()
+	return out.String()
+}
 func fixture(t *testing.T, transfer http.RoundTripper) (Options, func()) {
 	t.Helper()
 	root := t.TempDir()
-	data := "verified fixture bytes"
+	data := fixtureData()
 	sum := sha256.Sum256([]byte(data))
-	res := resource.Resource{ReleaseTag: "sandbox-go-resources-v0.1.0", Filename: "fixture.bin", SHA256: hex.EncodeToString(sum[:]), SizeBytes: uint64(len(data)), UnpackedBytes: uint64(len(data)), Format: resource.Raw}
-	b := sandboxresources.Bundle{Kernel: "asset", Boot: "asset", Image: "asset", ImageReference: "fixture:immutable", BootReference: "boot:immutable", BootstrapVersion: "pot-executor-v2", OS: "linux", Architecture: "arm64"}
-	c := sandboxresources.Catalog{SchemaVersion: 1, DefaultLinuxBundle: "bundle", Resources: map[string]resource.Resource{"asset": res}, Bundles: map[string]sandboxresources.Bundle{"bundle": b, "other": b}}
+	res := resource.Resource{ReleaseTag: "sandbox-go-resources-v0.1.0", Filename: "fixture.tar.gz", SHA256: hex.EncodeToString(sum[:]), SizeBytes: uint64(len(data)), UnpackedBytes: uint64(len(`{"schemaVersion":2}`) + len(`{"imageLayoutVersion":"1.0.0"}`)), Format: resource.OCITarGzip}
+	b := sandboxresources.Bundle{Image: "asset", ImageReference: "fixture:immutable", ManifestDigest: "sha256:" + strings.Repeat("a", 64), BootstrapVersion: "pot-executor-v2", OS: "linux", Architecture: runtime.GOARCH}
+	c := sandboxresources.Catalog{SchemaVersion: 2, DefaultLinuxBundles: map[string]string{runtime.GOARCH: "bundle"}, Resources: map[string]resource.Resource{"asset": res}, Bundles: map[string]sandboxresources.Bundle{"bundle": b, "other": b}}
 	if transfer == nil {
 		transfer = roundTrip(func(r *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(data)), ContentLength: int64(len(data))}, nil
@@ -73,7 +89,7 @@ func TestConsentPinsSharedPreparationAndCachedReuse(t *testing.T) {
 	var downloads atomic.Int32
 	options, closeStore := fixture(t, roundTrip(func(r *http.Request) (*http.Response, error) {
 		downloads.Add(1)
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("verified fixture bytes")), ContentLength: 22}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fixtureData())), ContentLength: int64(len(fixtureData()))}, nil
 	}))
 	defer closeStore()
 	var mu sync.Mutex
@@ -147,7 +163,7 @@ func TestIndependentCancellationAndRestartDoesNotDownload(t *testing.T) {
 			return nil, r.Context().Err()
 		case <-release:
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("verified fixture bytes")), ContentLength: 22}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fixtureData())), ContentLength: int64(len(fixtureData()))}, nil
 	}))
 	defer closeStore()
 	m, err := Open(options)
@@ -204,7 +220,7 @@ func TestOfflineImportAndInterruptedCheckpoint(t *testing.T) {
 	}
 	r, _ := m.Request(context.Background(), "offlineSandbox", "")
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "fixture.bin"), []byte("verified fixture bytes"), 0600)
+	os.WriteFile(filepath.Join(dir, "fixture.tar.gz"), []byte(fixtureData()), 0600)
 	if _, err = m.Import(r.ID, dir); err != nil {
 		t.Fatal(err)
 	}

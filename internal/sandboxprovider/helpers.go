@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -46,9 +45,6 @@ func (p *helperProcesses) owned(root string) (*helperChild, error) {
 	}
 }
 func (p *helperProcesses) launch(ctx context.Context, root, socket, binary string, args ...string) error {
-	return p.launchWithEnv(ctx, root, socket, binary, nil, args...)
-}
-func (p *helperProcesses) launchWithEnv(ctx context.Context, root, socket, binary string, overrides map[string]string, args ...string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if child := p.children[root]; child != nil {
@@ -75,15 +71,6 @@ func (p *helperProcesses) launchWithEnv(ctx context.Context, root, socket, binar
 	}
 	defer log.Close()
 	command := exec.Command(binary, args...)
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if _, overridden := overrides[key]; !overridden {
-			command.Env = append(command.Env, entry)
-		}
-	}
-	for key, value := range overrides {
-		command.Env = append(command.Env, key+"="+value)
-	}
 	command.Stdout = log
 	command.Stderr = log
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -259,27 +246,26 @@ func privateFile(path string, limit int64) ([]byte, error) {
 	return data, nil
 }
 func validatePaths(resources sandbox.PreparedResources) error {
-	if resources.BundleID == "" || resources.ImageReference == "" || resources.BootReference == "" {
-		return errors.New("missing prepared resource identities")
+	if resources.BundleID == "" || resources.ImageReference == "" || resources.ManifestDigest == "" || resources.Architecture == "" {
+		return errors.New("missing prepared image identity")
 	}
-	for _, path := range []string{resources.Kernel, resources.Boot, resources.Image} {
-		if !filepath.IsAbs(path) {
-			return errors.New("prepared resources require absolute verified paths")
-		}
-		canonical, err := filepath.EvalSymlinks(path)
-		if err != nil || canonical != path {
-			return errors.New("prepared resources must not use symlinks")
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-		if path == resources.Kernel && !info.Mode().IsRegular() || path != resources.Kernel && !info.IsDir() {
-			return errors.New("prepared kernel must be a regular file and OCI resources must be directories")
-		}
+	if !filepath.IsAbs(resources.Image) {
+		return errors.New("prepared image requires an absolute verified path")
+	}
+	canonical, err := filepath.EvalSymlinks(resources.Image)
+	if err != nil || canonical != resources.Image {
+		return errors.New("prepared image must not use symlinks")
+	}
+	info, err := os.Stat(resources.Image)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return errors.New("prepared OCI image must be a directory")
 	}
 	return nil
 }
+
 func immutableResources(instance sandbox.Instance, resources sandbox.PreparedResources) error {
 	if err := validatePaths(resources); err != nil {
 		return err

@@ -14,13 +14,12 @@ import (
 )
 
 type Settings struct {
-	Listen       string `json:"listen"`
-	TLSCert      string `json:"tls_cert"`
-	TLSKey       string `json:"tls_key"`
-	Workspace    string `json:"workspace"`
-	Resources    string `json:"resources"`
-	Helpers      string `json:"helpers"`
-	SandboxImage string `json:"sandbox_image"`
+	Listen    string `json:"listen"`
+	TLSCert   string `json:"tls_cert"`
+	TLSKey    string `json:"tls_key"`
+	Workspace string `json:"workspace"`
+	Resources string `json:"resources"`
+	Helpers   string `json:"helpers"`
 }
 
 func (s Settings) Validate() error {
@@ -36,9 +35,6 @@ func (s Settings) Validate() error {
 		if strings.ContainsAny(path, "\x00\r\n") || path != "" && !filepath.IsAbs(path) {
 			return errors.New("server file/directory settings require absolute paths")
 		}
-	}
-	if strings.ContainsAny(s.SandboxImage, "\x00\r\n") {
-		return errors.New("invalid Sandbox image")
 	}
 	return nil
 }

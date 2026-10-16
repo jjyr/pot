@@ -36,7 +36,6 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 	key := flags.String("tls-key", "", "Control TLS private key PEM")
 	resources := flags.String("resources", "", "installed product resource directory")
 	helpers := flags.String("helpers", "", "installed Swift Helper directory")
-	image := flags.String("sandbox-image", "", "owner-installed immutable Podman image")
 	body := flags.String("body", "", "API JSON request body, or - for stdin")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
@@ -66,7 +65,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 				name   string
 				target *string
 				saved  string
-			}{{"listen", listen, settings.Listen}, {"tls-cert", cert, settings.TLSCert}, {"tls-key", key, settings.TLSKey}, {"workspace", workspace, settings.Workspace}, {"resources", resources, settings.Resources}, {"helpers", helpers, settings.Helpers}, {"sandbox-image", image, settings.SandboxImage}} {
+			}{{"listen", listen, settings.Listen}, {"tls-cert", cert, settings.TLSCert}, {"tls-key", key, settings.TLSKey}, {"workspace", workspace, settings.Workspace}, {"resources", resources, settings.Resources}, {"helpers", helpers, settings.Helpers}} {
 				if !explicit[value.name] {
 					*value.target = value.saved
 				}
@@ -75,7 +74,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 		if flags.NArg() != 0 {
 			return errors.New("unexpected positional arguments")
 		}
-		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, HelperDirectory: *helpers, SandboxImage: *image, Control: control.Options{Workspace: *workspace}})
+		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, HelperDirectory: *helpers, Control: control.Options{Workspace: *workspace}})
 		if err != nil {
 			return err
 		}

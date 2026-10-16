@@ -20,7 +20,7 @@ def package(app, output, version):
     if info.get("CFBundleShortVersionString") != version:
         raise SystemExit("Bundle version does not match release version")
     runtime = app / "Contents/Resources"
-    for name in ["vmlinux", "init-image", "sandbox-image", "sandbox-image.json"]:
+    for name in ["sandbox-image", "sandbox-image.json"]:
         if (runtime / name).exists():
             raise SystemExit("Release must not embed Sandbox resources: " + name)
     output.mkdir(parents=True, exist_ok=True)

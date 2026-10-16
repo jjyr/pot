@@ -25,7 +25,7 @@ func (m *Manager) referencesLocked(resourceID string) []string {
 	digest := m.options.Catalog.Resources[resourceID].SHA256
 	for _, e := range m.entries {
 		b := m.options.Catalog.Bundles[e.request.BundleID]
-		for _, id := range []string{b.Kernel, b.Boot, b.Image} {
+		for _, id := range []string{b.Image} {
 			if m.options.Catalog.Resources[id].SHA256 == digest {
 				refs[e.request.SandboxID] = true
 			}

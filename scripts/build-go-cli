@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix=".go-cli-", dir=BUILD) as temporary:
         go_build("./cmd/" + name, staged / "bin" / name, args.platform)
     if args.platform == "darwin-arm64":
         helpers = swift_helpers()
-        for name in ("PotHelper", "PotMacOSHelper"):
+        for name in ("PotMacOSHelper",):
             shutil.copy2(helpers / name, staged / "bin" / name)
         shutil.copy2(
             helpers / "SwiftDependencyLicenses.txt", resources / "SwiftDependencyLicenses.txt"

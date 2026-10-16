@@ -38,7 +38,7 @@ description = "Prepare retained Node, JS plugins, skills and viewer resources"
 run = "python scripts/prepare-go-resources"
 
 [tasks.build]
-description = "Build the isolated Go/Wails macOS app with signed Swift Helpers"
+description = "Build the isolated Go/Wails macOS app with its signed native VM helper"
 run = "python scripts/build-go-app"
 
 [tasks.bundle]
@@ -66,8 +66,8 @@ description = "Verify macOS release packaging without a build or VM"
 run = "python scripts/tests/release-packaging.py"
 
 [tasks."check:swift"]
-description = "Compile retained Swift Helpers without starting a VM"
-run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path helper --disable-sandbox --scratch-path .local/go/swift-build --force-resolved-versions -j 4"
+description = "Compile the native macOS VM Helper without starting a VM"
+run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path helper --disable-sandbox --scratch-path .local/go/swift-build --product PotMacOSHelper -j 4"
 env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/go/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/go/clang-modules" }
 
 [tasks."build:web"]
@@ -83,15 +83,15 @@ description = "Build a portable Go CLI archive with retained runtime assets"
 run = "python scripts/build-go-cli"
 
 [tasks."build:sandbox-image"]
-description = "Build the Go Linux guest image separately from client packaging"
+description = "Build a Debian OCI guest image with an explicit Podman builder"
 run = "python scripts/build-go-image"
 
 [tasks."build:container-image"]
-description = "Build a rootless Podman image containing the Go executor"
+description = "Build a Debian OCI guest image containing the Go executor"
 run = "python scripts/build-go-container-image"
 
 [tasks."export:sandbox-resources"]
-description = "Verify deterministic Go guest exports against the embedded catalog"
+description = "Verify exact reviewed OCI image exports against the embedded catalog"
 run = "python scripts/export-go-sandbox-resources"
 
 [tasks.licenses]
@@ -178,7 +178,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local
 '''
 
 [tasks."build:go-app"]
-description = "Build the complete independent macOS Go/Wails app and retained Swift Helpers"
+description = "Build the complete macOS Go/Wails app and native Swift VM helper"
 run = "python scripts/build-go-app"
 
 [tasks."prepare:go"]
@@ -190,15 +190,15 @@ description = "Build a portable native Go CLI archive with retained runtime asse
 run = "python scripts/build-go-cli"
 
 [tasks."build:go-image"]
-description = "Build the Go Linux guest image separately from App packaging"
+description = "Build a Debian OCI guest image with an explicit Podman builder"
 run = "python scripts/build-go-image"
 
 [tasks."build:go-container-image"]
-description = "Build a rootless Podman image containing the Go executor"
+description = "Build a Debian OCI guest image containing the Go executor"
 run = "python scripts/build-go-container-image"
 
 [tasks."export:go-sandbox-resources"]
-description = "Verify deterministic Go guest exports against the embedded catalog"
+description = "Verify exact reviewed OCI image exports against the embedded catalog"
 run = "python scripts/export-go-sandbox-resources"
 
 [tasks."test:go-packaging"]

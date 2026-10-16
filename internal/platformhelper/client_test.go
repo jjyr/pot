@@ -48,12 +48,12 @@ func socketServer(t *testing.T, respond func(net.Conn, map[string]any)) string {
 }
 func TestPrivateHelperExchangeAndIdentity(t *testing.T) {
 	path := socketServer(t, func(conn net.Conn, request map[string]any) {
-		if request["sandbox_id"] != "shared" {
-			t.Error("lost Sandbox identity")
+		if request["version"] != float64(1) {
+			t.Error("lost macOS Helper protocol version")
 		}
-		json.NewEncoder(conn).Encode(map[string]any{"id": request["id"], "result": map[string]any{"phase": "stopped", "generation": 0}})
+		json.NewEncoder(conn).Encode(map[string]any{"version": 1, "id": request["id"], "result": map[string]any{"phase": "stopped", "generation": 0}})
 	})
-	result, err := (Client{SocketPath: path}).Call(context.Background(), Request{Method: "status", SandboxID: "shared"})
+	result, err := (Client{SocketPath: path}).Call(context.Background(), Request{Method: "status"})
 	if err != nil || result["phase"] != "stopped" {
 		t.Fatalf("%v %v", result, err)
 	}
@@ -110,7 +110,7 @@ func TestSwiftMacOSStatusWithoutVM(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	result, err := (Client{SocketPath: path, Protocol: MacOSVirtualization}).Call(ctx, Request{Method: "status"})
+	result, err := (Client{SocketPath: path}).Call(ctx, Request{Method: "status"})
 	if err != nil {
 		t.Fatal(err)
 	}

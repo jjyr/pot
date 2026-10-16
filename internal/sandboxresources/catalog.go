@@ -10,24 +10,29 @@ import (
 	"github.com/jjyr/pot/internal/sandbox"
 	"github.com/jjyr/pot/resources"
 	"path/filepath"
+	"regexp"
+	"runtime"
 )
 
 type Bundle struct {
-	Kernel           string `json:"kernel"`
-	Boot             string `json:"boot"`
 	Image            string `json:"image"`
 	ImageReference   string `json:"image_reference"`
-	BootReference    string `json:"boot_reference"`
+	ManifestDigest   string `json:"manifest_digest"`
 	BootstrapVersion string `json:"bootstrap_version"`
 	OS               string `json:"os"`
 	Architecture     string `json:"architecture"`
 }
 type Catalog struct {
-	SchemaVersion      uint32                       `json:"schema_version"`
-	DefaultLinuxBundle string                       `json:"default_linux_bundle"`
-	Resources          map[string]resource.Resource `json:"resources"`
-	Bundles            map[string]Bundle            `json:"bundles"`
+	SchemaVersion       uint32                       `json:"schema_version"`
+	DefaultLinuxBundles map[string]string            `json:"default_linux_bundles"`
+	Resources           map[string]resource.Resource `json:"resources"`
+	Bundles             map[string]Bundle            `json:"bundles"`
 }
+
+var manifestDigest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+// DefaultBundle selects the immutable image for this Runtime's native CPU.
+func (c Catalog) DefaultBundle() string { return c.DefaultLinuxBundles[runtime.GOARCH] }
 
 func Embedded() (Catalog, error) {
 	var c Catalog
@@ -38,8 +43,8 @@ func Embedded() (Catalog, error) {
 	return c, c.Validate()
 }
 func (c Catalog) Validate() error {
-	if c.SchemaVersion != 1 || c.Bundles[c.DefaultLinuxBundle].Image == "" {
-		return errors.New("invalid resource catalog")
+	if c.SchemaVersion != 2 || len(c.DefaultLinuxBundles) == 0 {
+		return errors.New("invalid image resource catalog")
 	}
 	for _, r := range c.Resources {
 		if err := r.Validate(); err != nil {
@@ -47,13 +52,18 @@ func (c Catalog) Validate() error {
 		}
 	}
 	for _, b := range c.Bundles {
-		if b.OS != "linux" || b.Architecture != "arm64" || b.BootstrapVersion != "pot-executor-v2" || b.ImageReference == "" || b.BootReference == "" {
-			return errors.New("unsupported sandbox bundle")
+		if b.OS != "linux" || (b.Architecture != "arm64" && b.Architecture != "amd64") || b.BootstrapVersion != "pot-executor-v2" || b.ImageReference == "" || !manifestDigest.MatchString(b.ManifestDigest) {
+			return errors.New("unsupported sandbox image bundle")
 		}
-		for _, id := range []string{b.Kernel, b.Boot, b.Image} {
-			if _, ok := c.Resources[id]; !ok {
-				return errors.New("bundle references missing resource")
-			}
+		image, ok := c.Resources[b.Image]
+		if !ok || image.Format != resource.OCITarGzip {
+			return errors.New("bundle requires an OCI image resource")
+		}
+	}
+	for arch, id := range c.DefaultLinuxBundles {
+		b, ok := c.Bundles[id]
+		if !ok || b.Architecture != arch {
+			return errors.New("invalid architecture default")
 		}
 	}
 	return nil
@@ -90,17 +100,20 @@ func (c Catalog) prepare(ctx context.Context, store *resource.Store, id string, 
 		return sandbox.PreparedResources{}, err
 	}
 	if id == "" {
-		id = c.DefaultLinuxBundle
+		id = c.DefaultBundle()
 	}
 	bundle, ok := c.Bundles[id]
 	if !ok {
 		return sandbox.PreparedResources{}, errors.New("unknown resource bundle")
 	}
-	result := sandbox.PreparedResources{BundleID: id, ImageReference: bundle.ImageReference, BootReference: bundle.BootReference}
+	if bundle.Architecture != runtime.GOARCH {
+		return sandbox.PreparedResources{}, errors.New("Sandbox image does not match this Runtime architecture")
+	}
+	result := sandbox.PreparedResources{BundleID: id, ImageReference: bundle.ImageReference, ManifestDigest: bundle.ManifestDigest, Architecture: bundle.Architecture}
 	for _, item := range []struct {
 		id   string
 		dest *string
-	}{{bundle.Kernel, &result.Kernel}, {bundle.Boot, &result.Boot}, {bundle.Image, &result.Image}} {
+	}{{bundle.Image, &result.Image}} {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -109,9 +122,6 @@ func (c Catalog) prepare(ctx context.Context, store *resource.Store, id string, 
 			return result, err
 		}
 		*item.dest = v.Path()
-		if c.Resources[item.id].Format == resource.Raw {
-			*item.dest = filepath.Join(v.Path(), "payload")
-		}
 	}
 	return result, nil
 }

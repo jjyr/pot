@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
         env=environment,
     )
     go_build("./cmd/pot", contents / "MacOS/pot", "darwin-arm64")
-    for name in ("PotHelper", "PotMacOSHelper"):
+    for name in ("PotMacOSHelper",):
         shutil.copy2(helpers / name, contents / "MacOS" / name)
     shutil.copy2(helpers / "SwiftDependencyLicenses.txt", resources / "SwiftDependencyLicenses.txt")
     shutil.copy2(ROOT / "resources/app/assets/Pot.icns", resources / "Pot.icns")

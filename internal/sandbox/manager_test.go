@@ -31,12 +31,7 @@ type lifecycleDouble struct {
 	engines    map[string]*executor.Engine
 }
 
-func platformID() string {
-	if runtime.GOOS == "linux" {
-		return Podman
-	}
-	return AppleContainer
-}
+func platformID() string { return Podman }
 func (p *lifecycleDouble) Descriptor() Descriptor {
 	return Descriptor{ID: platformID(), OS: "linux", HostOS: runtime.GOOS, Engine: "test-lifecycle", Capabilities: Capabilities{Shell: true, Files: true, SharedExecution: p.shared}}
 }

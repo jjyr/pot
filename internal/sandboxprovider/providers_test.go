@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/jjyr/pot/internal/sandbox"
@@ -14,10 +13,8 @@ import (
 func TestUnavailableProviderInspectionHasNoSideEffects(t *testing.T) {
 	root := t.TempDir()
 	instance := sandbox.Instance{Root: root, ID: "probe"}
-	for _, provider := range []sandbox.Provider{NewAppleContainer(filepath.Join(root, "absent"), ""), NewAppleVM(AppleVMConfig{})} {
-		if runtime.GOOS != "darwin" && provider.Descriptor().ID == sandbox.AppleContainer {
-			continue
-		}
+	for _, provider := range []sandbox.Provider{NewAppleVM(AppleVMConfig{})} {
+
 		status, err := provider.Lifecycle(context.Background(), instance, "status")
 		if err != nil || status.Phase != "unavailable" {
 			t.Fatalf("%s: %+v %v", provider.Descriptor().ID, status, err)

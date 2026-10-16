@@ -178,7 +178,9 @@ class GoPackaging(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "pinned Debian"):
                             go_packaging.guest_image_config()
 
-    def minimal_oci(self, layout, label, *, nested=False):
+    def minimal_oci(
+        self, layout, label, *, nested=False, architecture="arm64", source_hash="fixture"
+    ):
         """Write real OCI descriptors, an image config and a gzip tar layer."""
         blobs = layout / "blobs/sha256"
         blobs.mkdir(parents=True)
@@ -197,10 +199,14 @@ class GoPackaging(unittest.TestCase):
 
         config = blob(
             {
-                "architecture": "arm64",
+                "architecture": architecture,
                 "os": "linux",
                 # This is image configuration, not another OCI descriptor.
-                "config": {"Cmd": ["/bin/sh"], "Env": ["FIXTURE=" + label]},
+                "config": {
+                    "Cmd": ["/bin/sh"],
+                    "Env": ["FIXTURE=" + label],
+                    "Labels": {"dev.pot.input.sha256": source_hash},
+                },
                 "rootfs": {
                     "type": "layers",
                     "diff_ids": ["sha256:" + hashlib.sha256(raw.getvalue()).hexdigest()],
@@ -221,23 +227,13 @@ class GoPackaging(unittest.TestCase):
                 {"schemaVersion": 2, "manifests": [manifest]},
                 "application/vnd.oci.image.index.v1+json",
             )
+        manifest["annotations"] = {
+            "org.opencontainers.image.ref.name": "localhost/pot-sandbox:test"
+        }
         index = {"schemaVersion": 2, "manifests": [manifest]}
         (layout / "index.json").write_text(json.dumps(index))
         (layout / "oci-layout").write_text('{"imageLayoutVersion":"1.0.0"}')
         return index, blobs / layer["digest"].split(":", 1)[1]
-
-    def published_fixture(self, root):
-        inputs, resources = root / "inputs", root / "resources"
-        for name in ("sandbox-image", "init-image"):
-            self.minimal_oci(resources / name, "old-" + name)
-            index, layer = self.minimal_oci(inputs / name, "new-" + name)
-            if name == "sandbox-image":
-                metadata = {"manifest_digest": index["manifests"][0]["digest"], "revision": "new"}
-            else:
-                init_layer = layer
-        (resources / "sandbox-image.json").write_bytes(b'{ "revision": "old" }\n')
-        (resources / "sandbox-image/old-extra").write_bytes(b"preserve all old contents")
-        return inputs, resources, metadata, init_layer
 
     def tree_bytes(self, root):
         return {
@@ -246,68 +242,138 @@ class GoPackaging(unittest.TestCase):
             if path.is_file()
         }
 
-    def test_nested_oci_config_is_not_recursed_as_an_image_descriptor(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            inputs, resources = root / "inputs", root / "published"
-            index, _ = self.minimal_oci(inputs / "sandbox-image", "nested-image", nested=True)
-            self.minimal_oci(inputs / "init-image", "init-image")
-            self.assertEqual(go_packaging.verify_oci_layout(inputs / "sandbox-image"), index)
-            metadata = {"manifest_digest": index["manifests"][0]["digest"]}
-            go_packaging.publish_guest_images(inputs, resources, metadata)
-            for name in ("sandbox-image", "init-image"):
-                self.assertEqual(self.tree_bytes(resources / name), self.tree_bytes(inputs / name))
-                go_packaging.verify_oci_layout(resources / name)
-            self.assertEqual(json.loads((resources / "sandbox-image.json").read_text()), metadata)
+    def metadata(self, layout, architecture="arm64"):
+        descriptor, _ = go_packaging.oci_image_descriptor(layout, architecture)
+        return {
+            "schema_version": 1,
+            "os": "linux",
+            "architecture": architecture,
+            "manifest_digest": descriptor["digest"],
+            "reference": "localhost/pot-sandbox:test",
+        }
 
-    def test_invalid_second_oci_or_metadata_preserves_all_published_outputs(self):
+    def test_nested_oci_selects_leaf_manifest_and_publishes_one_complete_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            inputs, resources, metadata, init_layer = self.published_fixture(root)
-            previous = self.tree_bytes(resources)
-            original_layer = init_layer.read_bytes()
-            damaged_layer = bytearray(original_layer)
-            damaged_layer[-1] ^= 1  # Same byte count: SHA verification must reject it.
-            init_layer.write_bytes(damaged_layer)
+            layout, output = root / "image", root / "published"
+            index, _ = self.minimal_oci(layout, "nested-image", nested=True)
+            metadata = self.metadata(layout)
+            self.assertNotEqual(metadata["manifest_digest"], index["manifests"][0]["digest"])
+            go_packaging.publish_guest_image(layout, output, metadata)
+            self.assertEqual(self.tree_bytes(output / "sandbox-image"), self.tree_bytes(layout))
+            self.assertEqual(json.loads((output / "sandbox-image.json").read_text()), metadata)
+            self.assertEqual(
+                sorted(path.name for path in output.iterdir()),
+                ["sandbox-image", "sandbox-image.json"],
+            )
+
+    def test_invalid_oci_architecture_digest_and_publish_failure_preserve_previous_image(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            layout, output = root / "image", root / "published"
+            _, layer = self.minimal_oci(layout, "new")
+            metadata = self.metadata(layout)
+            output.mkdir()
+            (output / "old").write_bytes(b"retain old output")
+            previous = self.tree_bytes(output)
+            for invalid in (
+                {**metadata, "architecture": "amd64"},
+                {**metadata, "manifest_digest": "sha256:" + "0" * 64},
+            ):
+                with self.assertRaises(ValueError):
+                    go_packaging.publish_guest_image(layout, output, invalid)
+                self.assertEqual(self.tree_bytes(output), previous)
+            original = layer.read_bytes()
+            layer.write_bytes(b"x" * len(original))
             with self.assertRaisesRegex(ValueError, "missing or corrupt"):
-                go_packaging.publish_guest_images(inputs, resources, metadata)
-            self.assertEqual(self.tree_bytes(resources), previous)
-            init_layer.write_bytes(original_layer)
-            with self.assertRaisesRegex(ValueError, "metadata does not match"):
-                go_packaging.publish_guest_images(
-                    inputs, resources, {**metadata, "manifest_digest": "sha256:" + "0" * 64}
-                )
-            self.assertEqual(self.tree_bytes(resources), previous)
-            self.assertEqual(sorted(path.name for path in root.iterdir()), ["inputs", "resources"])
-
-    def test_second_output_publish_failure_restores_both_images_and_metadata(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            inputs, resources, metadata, _ = self.published_fixture(root)
-            previous = self.tree_bytes(resources)
+                go_packaging.publish_guest_image(layout, output, metadata)
+            self.assertEqual(self.tree_bytes(output), previous)
+            layer.write_bytes(original)
             rename = Path.rename
-            failures = []
 
-            def fail_second_publish(source, target):
-                if source.name == "init-image" and source.parent.name == "new":
-                    self.assertEqual(Path(target), resources / "init-image")
-                    self.assertEqual(
-                        go_packaging.verify_oci_layout(resources / "sandbox-image")["manifests"][0][
-                            "digest"
-                        ],
-                        metadata["manifest_digest"],
-                    )
-                    self.assertFalse((resources / "init-image").exists())
-                    failures.append(source.name)
-                    raise OSError("injected second output rename failure")
+            def fail_publish(source, target):
+                if source.name == "new":
+                    raise OSError("injected publish failure")
                 return rename(source, target)
 
-            with mock.patch.object(Path, "rename", new=fail_second_publish):
-                with self.assertRaisesRegex(OSError, "second output rename failure"):
-                    go_packaging.publish_guest_images(inputs, resources, metadata)
-            self.assertEqual(failures, ["init-image"])
-            self.assertEqual(self.tree_bytes(resources), previous)
-            self.assertEqual(sorted(path.name for path in root.iterdir()), ["inputs", "resources"])
+            with mock.patch.object(Path, "rename", new=fail_publish):
+                with self.assertRaisesRegex(OSError, "injected publish"):
+                    go_packaging.publish_guest_image(layout, output, metadata)
+            self.assertEqual(self.tree_bytes(output), previous)
+            self.assertEqual(sorted(path.name for path in root.iterdir()), ["image", "published"])
+
+    def test_oci_rejects_linked_blobs_and_unsafe_archive_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            layout = root / "image"
+            _, layer = self.minimal_oci(layout, "new")
+            real = root / "real-layer"
+            layer.rename(real)
+            layer.symlink_to(real)
+            with self.assertRaisesRegex(ValueError, "Unsafe"):
+                go_packaging.verify_oci_layout(layout)
+            for name in ("../escaped", "/absolute", "same", "link"):
+                with self.subTest(name=name):
+                    archive, destination = root / "archive.tar", root / "unpacked"
+                    with tarfile.open(archive, "w") as target:
+                        item = tarfile.TarInfo(name)
+                        item.size = 1
+                        if name == "link":
+                            item.type, item.linkname = tarfile.SYMTYPE, "outside"
+                            target.addfile(item)
+                        else:
+                            target.addfile(item, io.BytesIO(b"x"))
+                            if name == "same":
+                                target.addfile(item, io.BytesIO(b"x"))
+                    with self.assertRaises(ValueError):
+                        go_packaging.unpack_oci_archive(archive, destination)
+                    self.assertFalse(destination.exists())
+
+    def test_podman_builder_requires_explicit_mac_connection_and_never_provisions(self):
+        self.assertEqual(go_packaging.podman_command(system="Linux"), ["podman", "--remote=false"])
+        self.assertEqual(
+            go_packaging.podman_command("pot-builder", system="Darwin"),
+            ["podman", "--connection", "pot-builder"],
+        )
+        with self.assertRaisesRegex(ValueError, "--connection"):
+            go_packaging.podman_command(system="Darwin")
+        for name in ("--default", "a b", "../builder"):
+            with self.assertRaises(ValueError):
+                go_packaging.podman_command(name)
+
+    def test_prepared_context_build_binds_target_inputs_and_saved_leaf_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.guest_environment(root):
+                context, output, layout = root / "context", root / "output", root / "image"
+                manifest = go_packaging.prepare_guest_context(context, "amd64")
+                self.minimal_oci(
+                    layout, "built", architecture="amd64", source_hash=manifest["source_hash"]
+                )
+                calls = []
+
+                def call(command):
+                    command = [str(item) for item in command]
+                    calls.append(command)
+                    if "save" in command:
+                        with tarfile.open(command[command.index("--output") + 1], "w") as target:
+                            for path in sorted(layout.rglob("*")):
+                                target.add(path, arcname=path.relative_to(layout), recursive=False)
+
+                with mock.patch.object(go_packaging, "call", side_effect=call):
+                    result = go_packaging.build_guest_image(context, output, "amd64", "pot-builder")
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(calls[0][:4], ["podman", "--connection", "pot-builder", "build"])
+                self.assertIn("--platform=linux/amd64", calls[0])
+                self.assertIn("BASE_IMAGE=" + manifest["base"]["base_image"], calls[0])
+                self.assertIn("--format=oci-archive", calls[1])
+                self.assertEqual(
+                    result["manifest_digest"], self.metadata(layout, "amd64")["manifest_digest"]
+                )
+                self.assertEqual(result["source_hash"], manifest["source_hash"])
+                (context / "assets/build-inputs.json").write_text("unreviewed nested input")
+                with self.assertRaisesRegex(ValueError, "checksum changed"):
+                    go_packaging.validate_guest_context(context, "amd64")
 
     def test_tray_patch_refuses_source_or_patch_drift(self):
         patch = (ROOT / "patches/wails-v3.0.0-beta.30-tray-aspect.patch").read_bytes()
@@ -325,34 +391,56 @@ class GoPackaging(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "patch changed"):
                 go_packaging.apply_tray_patch(source, patch + b"changed")
 
-    def test_resource_exports_are_deterministic_and_reject_catalog_drift(self):
+    def test_resource_exports_preserve_exact_reviewed_bytes_and_both_arch_defaults(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, catalog = root / "output", root / "catalog.json"
+            export = exporter().export
+            with contextlib.redirect_stdout(io.StringIO()):
+                for arch in ("arm64", "amd64"):
+                    source = root / arch
+                    self.minimal_oci(
+                        source / "sandbox-image", "reviewed-" + arch, architecture=arch
+                    )
+                    metadata = self.metadata(source / "sandbox-image", arch)
+                    (source / "sandbox-image.json").write_text(json.dumps(metadata))
+                    export(source, output, "sandbox-go-resources-v0.3.0", catalog, True, arch)
+                    first = self.tree_bytes(output)
+                    export(source, output, "sandbox-go-resources-v0.3.0", catalog, False, arch)
+                    self.assertEqual(first, self.tree_bytes(output))
+            trust = json.loads(catalog.read_text())
+            self.assertEqual(trust["schema_version"], 2)
+            self.assertEqual(set(trust["default_linux_bundles"]), {"arm64", "amd64"})
+            self.assertEqual(len(trust["resources"]), 2)
+            self.assertTrue(
+                all(entry["format"] == "oci-tar-gzip" for entry in trust["resources"].values())
+            )
+            source = root / "amd64"
+            (source / "sandbox-image/unreviewed-extra").write_bytes(b"changed reviewed bytes")
+            with self.assertRaisesRegex(ValueError, "differ from embedded"):
+                export(source, output, "sandbox-go-resources-v0.3.0", catalog, False, "amd64")
+            (source / "sandbox-image/unreviewed-extra").unlink()
+            (source / "sandbox-image/extra").symlink_to(catalog)
+            with self.assertRaisesRegex(ValueError, "Unsafe"):
+                export(source, output, "sandbox-go-resources-v0.3.0", catalog, True, "amd64")
+
+    def test_resource_export_rejects_reference_that_does_not_select_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, output, catalog = root / "source", root / "output", root / "catalog.json"
-            source.mkdir()
-            (source / "vmlinux").write_bytes(b"pinned-kernel")
-            (source / "sandbox-image.json").write_text(
-                json.dumps({"reference": "pot.local/sandbox:go-test"})
-            )
-            for name in ("init-image", "sandbox-image"):
-                (source / name).mkdir()
-                (source / name / "index.json").write_text('{"schemaVersion":2}')
-            export = exporter().export
+            self.minimal_oci(source / "sandbox-image", "reviewed", nested=True)
+            metadata = self.metadata(source / "sandbox-image")
+            metadata["reference"] = "localhost/pot-sandbox:unrelated"
+            (source / "sandbox-image.json").write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(ValueError, "reference does not select"):
+                exporter().export(source, output, "sandbox-go-resources-v0.3.0", catalog, True)
+            self.assertFalse(output.exists())
+            self.assertFalse(catalog.exists())
+            metadata["reference"] = "localhost/pot-sandbox:test"
+            (source / "sandbox-image.json").write_text(json.dumps(metadata))
             with contextlib.redirect_stdout(io.StringIO()):
-                export(source, output, "sandbox-go-test-v1", catalog, True)
-                first = {path.name: path.read_bytes() for path in output.iterdir()}
-                export(source, output, "sandbox-go-test-v1", catalog, False)
-                second = {path.name: path.read_bytes() for path in output.iterdir()}
-            self.assertEqual(first, second)
-            metadata = json.loads(catalog.read_text())
-            self.assertEqual(len(metadata["resources"]), 3)
-            for descriptor in metadata["resources"].values():
-                self.assertEqual(
-                    go_packaging.digest(output / descriptor["filename"]), descriptor["sha256"]
-                )
-            (source / "sandbox-image/index.json").write_text("changed")
-            with self.assertRaisesRegex(ValueError, "differ from embedded"):
-                export(source, output, "sandbox-go-test-v1", catalog, False)
+                exporter().export(source, output, "sandbox-go-resources-v0.3.0", catalog, True)
+            self.assertEqual(len(list(output.iterdir())), 1)
 
     def test_download_cache_and_tar_extraction_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary:

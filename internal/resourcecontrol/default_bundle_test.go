@@ -2,6 +2,7 @@ package resourcecontrol
 
 import (
 	"context"
+	"runtime"
 	"testing"
 )
 
@@ -23,7 +24,7 @@ func TestChangedCatalogDefaultKeepsExistingSandboxPinAfterRestart(t *testing.T) 
 	if err := m.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	options.Catalog.DefaultLinuxBundle = "other"
+	options.Catalog.DefaultLinuxBundles[runtime.GOARCH] = "other"
 	m, err = Open(options)
 	if err != nil {
 		t.Fatal(err)
