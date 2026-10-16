@@ -705,6 +705,41 @@ mod tests {
     }
     use super::*;
     #[test]
+    fn free_text_effort_is_encoded_per_protocol_and_blank_defaults_are_omitted() {
+        for (protocol, path, expected) in [
+            (Protocol::OpenaiChat, "/reasoning_effort", "vendor-mode"),
+            (
+                Protocol::OpenaiResponses,
+                "/reasoning/effort",
+                "vendor-mode",
+            ),
+            (
+                Protocol::AnthropicMessages,
+                "/output_config/effort",
+                "vendor-mode",
+            ),
+            (
+                Protocol::Gemini,
+                "/generationConfig/thinkingConfig/thinkingLevel",
+                "VENDOR-MODE",
+            ),
+        ] {
+            let body = request(
+                &protocol,
+                "model",
+                "system",
+                &[],
+                &[],
+                100,
+                Some("vendor-mode"),
+            )
+            .unwrap();
+            assert_eq!(body.pointer(path).unwrap(), expected);
+            let default = request(&protocol, "model", "system", &[], &[], 100, None).unwrap();
+            assert!(default.pointer(path).is_none());
+        }
+    }
+    #[test]
     fn sse_handles_split_unicode_crlf_and_multiline_data() {
         let bytes = "data: {\r\ndata: \"text\":\"中文\"}\r\n\r\ndata: [DONE]\n\n".as_bytes();
         let mut sse = Sse::default();

@@ -62,17 +62,15 @@ fn provider(s: &Service, spec: &agent::ResolvedSpec) -> Result<Provider> {
         );
     }
     let url = reqwest::Url::parse(&p.endpoint)?;
-    let secure =
-        url.scheme() == "https" || (url.scheme() == "http" && url.host_str() == Some("127.0.0.1"));
     anyhow::ensure!(
-        secure
+        matches!(url.scheme(), "http" | "https")
             && url
                 .host_str()
                 .is_some_and(|host| p.allowed_hosts.iter().any(|h| h == host))
             && url.username().is_empty()
             && url.password().is_none()
             && url.fragment().is_none(),
-        "Provider endpoint must use an allow-listed HTTPS host"
+        "Provider endpoint must use an allow-listed HTTP or HTTPS host"
     );
     Ok(p)
 }

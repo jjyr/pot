@@ -8,6 +8,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Parameters {
     pub max_output_tokens: u64,
+    /// Provider-defined reasoning effort. None uses the provider default.
     pub reasoning_effort: Option<String>,
     #[serde(default)]
     pub agent: crate::AgentSettings,
@@ -36,6 +37,8 @@ pub struct Profile {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ModelSettings {
+    /// Some selects an exact provider; None searches by model ID, preferring its
+    /// official provider before the first provider in catalog ID order.
     pub catalog_provider: Option<String>,
     pub context_window: Option<u64>,
     pub max_output_tokens: Option<u64>,
@@ -100,16 +103,6 @@ impl Profile {
     }
     pub fn resolve(&self) -> Result<ResolvedSpec> {
         self.validate()?;
-        ensure!(
-            self.params
-                .reasoning_effort
-                .as_deref()
-                .is_none_or(|v| matches!(
-                    v,
-                    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-                )),
-            "Invalid reasoning effort"
-        );
         ensure!(
             (self.provider == "deepseek" && self.auth_ref == "provider:deepseek")
                 || (self
@@ -231,6 +224,19 @@ mod checksum_tests {
     }
     fn spec() -> ResolvedSpec {
         Profile::api(&Config).resolve().unwrap()
+    }
+    #[test]
+    fn provider_defined_reasoning_effort_is_preserved_in_execution_snapshots() {
+        let mut profile = Profile::api(&Config);
+        profile.params.reasoning_effort = Some("provider-specific-mode".into());
+        let resolved = profile.resolve().unwrap();
+        resolved.validate().unwrap();
+        assert_eq!(
+            resolved.params.reasoning_effort.as_deref(),
+            Some("provider-specific-mode")
+        );
+        profile.params.reasoning_effort = None;
+        assert_ne!(resolved.spec_hash, profile.resolve().unwrap().spec_hash);
     }
 
     #[test]

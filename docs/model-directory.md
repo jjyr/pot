@@ -43,10 +43,17 @@ authentication or missing endpoints are not offered as ready connections.
 
 Per-model provider overrides take precedence over provider SDK/base URL fields.
 Pot supplies known first-party endpoints when the directory omits them. Model
-identity is exact within a provider; a same-named model from another provider is
-not a fallback. Custom endpoints can be recognized by parsed origin and endpoint
-path, never substring matches on a hostname. Explicitly selected providers retain
-their catalog identity independently of the generated credential-route ID.
+identity is exact within a selected provider; a same-named model from another
+provider is not a fallback. Custom API connections leave catalog provider identity
+empty and search the entire local directory by exact model ID. Known model-family
+prefixes identify official providers, which take precedence; otherwise the first
+matching provider in provider-ID order supplies metadata. Regional official
+providers follow the explicit family preference order. If no provider contains the
+model ID, Pot uses generic defaults. This lookup does not change the configured
+endpoint, request protocol or credentials. Explicitly selected providers
+retain their catalog identity independently of the generated credential-route ID.
+`GET /api/v1/providers` includes a `model_defaults` map selected by Control for
+Custom API placeholders, including models outside the ready-connection chooser.
 
 The assistant selector offers supported models with text input/output and tool
 calling, excluding known deprecated and specialized models. API Check supplements
@@ -54,20 +61,36 @@ directory options with IDs reported by the configured endpoint; metadata does no
 prove account access. Users can still enter a model ID manually. Check does not
 save configuration or perform inference.
 
+User-configured endpoints accept HTTP and HTTPS, including local gateways reached
+through hostnames, LAN addresses or IPv6. Check, save and inference share this
+scheme policy. URLs must have a host and cannot embed credentials or fragments;
+model-list checks also reject query parameters.
+
 ## Parameter overrides and execution
 
-Every connection can expand Advanced settings inline. Context and output fields
-are empty when inherited and show their effective defaults as muted placeholders.
+Every connection editor always shows its name, endpoint, request format, context
+and output limits, and reasoning effort without an Advanced settings toggle.
+Context and output fields are empty when inherited and show their effective
+defaults as muted placeholders.
 Entering a positive integer stores an override; clearing and saving restores
 inheritance. Changing models updates placeholders and preserves entered values.
 No automatic/custom mode selector or missing-metadata message is shown.
 
+The connection editor also provides an optional free-text reasoning effort. Saving
+trims surrounding whitespace; an empty value clears `Profile.params.reasoning_effort`
+and leaves the provider's default behavior. Pot does not restrict effort strings
+to a fixed set or infer them from models.dev. Protocol adapters encode the value
+in the existing request-format-specific field (including Gemini's uppercase
+thinking level). Providers decide which values they support. Effort participates
+in the same profile revision and immutable execution-snapshot lifecycle as other
+parameters.
+
 `Profile.model_settings` stores catalog provider identity and nullable context and
 output overrides. Control resolves a copy of the profile without overwriting its
 editable intent. Context uses the explicit override, otherwise the exact model's
-positive `limit.context`, otherwise 32,768 tokens. Default maximum output is 8,192,
-bounded by a known positive `limit.output` and the context window. Explicit output
-must be positive, below the chosen window and within a known model output limit.
+positive `limit.context`, otherwise 32,768 tokens. Default maximum output uses a
+positive `limit.output`, otherwise 8,192, bounded below the context window. Explicit
+output must be positive, below the chosen window and within a known model output limit.
 Missing or zero metadata is unknown rather than a zero-token budget.
 
 Resolved specs contain concrete limits. A separate positive `limit.input` bounds

@@ -177,6 +177,60 @@ fn usable(m: &Model) -> bool {
         && m.modalities.input.iter().any(|s| s == "text")
         && m.modalities.output.iter().any(|s| s == "text")
 }
+// The reduced upstream catalog has no model-owner field. Recognize official
+// model families without rewriting the exact model ID used for lookup.
+fn official_providers(model: &str) -> &'static [&'static str] {
+    const FAMILIES: &[(&[&str], &[&str])] = &[
+        (&["gpt-", "chatgpt-", "o1", "o3", "o4"], &["openai"]),
+        (&["claude-"], &["anthropic"]),
+        (&["gemini-", "gemma-"], &["google"]),
+        (&["deepseek-"], &["deepseek"]),
+        (&["qwen", "qwq-", "qvq-"], &["alibaba", "alibaba-cn"]),
+        (&["kimi-", "moonshot-"], &["moonshotai", "moonshotai-cn"]),
+        (&["glm-"], &["zhipuai", "zai"]),
+        (&["grok-"], &["xai"]),
+        (
+            &[
+                "mistral-",
+                "open-mistral-",
+                "magistral-",
+                "ministral-",
+                "codestral-",
+                "devstral-",
+                "pixtral-",
+                "voxtral-",
+            ],
+            &["mistral"],
+        ),
+        (&["command-", "north-", "aya-", "tiny-aya-"], &["cohere"]),
+        (&["minimax-"], &["minimax", "minimax-cn"]),
+        (&["mimo-"], &["xiaomi"]),
+        (&["mercury-"], &["inception"]),
+        (&["sonar"], &["perplexity"]),
+        (&["morph-"], &["morph"]),
+        (&["step-", "stepaudio-"], &["stepfun"]),
+        (&["muse-"], &["meta"]),
+    ];
+    let model = model.to_ascii_lowercase();
+    FAMILIES
+        .iter()
+        .find(|(prefixes, _)| prefixes.iter().any(|prefix| model.starts_with(prefix)))
+        .map_or(&[], |(_, providers)| *providers)
+}
+fn find_model<'a>(
+    providers: &'a Providers,
+    provider: Option<&str>,
+    model: &str,
+) -> Option<&'a Model> {
+    if let Some(provider) = provider {
+        return providers.get(provider)?.models.get(model);
+    }
+    official_providers(model)
+        .iter()
+        .filter_map(|id| providers.get(*id))
+        .find_map(|p| p.models.get(model))
+        .or_else(|| providers.values().find_map(|p| p.models.get(model)))
+}
 fn valid_logo(logo: &str) -> bool {
     let s = logo.to_ascii_lowercase();
     s.len() <= 128 * 1024
@@ -244,44 +298,36 @@ impl Directory {
     }
     fn model(&self, provider: Option<&str>, model: &str) -> Option<Model> {
         let snapshot = self.snapshot.read().unwrap();
-        provider
-            .and_then(|p| snapshot.providers.get(p))
-            .and_then(|p| p.models.get(model))
-            .cloned()
+        find_model(&snapshot.providers, provider, model).cloned()
     }
-    pub(crate) fn infer(&self, endpoint: &str) -> Option<String> {
-        let url = reqwest::Url::parse(endpoint).ok()?;
+    pub(crate) fn model_defaults(&self) -> Value {
         let snapshot = self.snapshot.read().unwrap();
-        snapshot
+        let defaults: BTreeMap<_, _> = snapshot
             .providers
-            .iter()
-            .filter_map(|(id, p)| {
-                let (base, _) = route(id, p, None)?;
-                let base = reqwest::Url::parse(&base).ok()?;
-                (url.scheme() == base.scheme()
-                    && url.host_str() == base.host_str()
-                    && url.port_or_known_default() == base.port_or_known_default()
-                    && (url.path() == base.path()
-                        || url.path().rsplit_once('/').map(|v| v.0)
-                            == base.path().rsplit_once('/').map(|v| v.0)))
-                .then_some(id.clone())
+            .values()
+            .flat_map(|p| p.models.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|id| {
+                let model = find_model(&snapshot.providers, None, id).unwrap();
+                (id, &model.limit)
             })
-            .next()
+            .collect();
+        json!(defaults)
     }
-    fn default_limits(limits: &Limits) -> (u64, u64) {
-        let context = if limits.context > 0 {
+    fn default_limits(limits: &Limits, context_override: Option<u64>) -> (u64, u64) {
+        let context = context_override.unwrap_or(if limits.context > 0 {
             limits.context
         } else {
             32768
-        };
-        let output = 8192
-            .min(if limits.output > 0 {
-                limits.output
-            } else {
-                u64::MAX
-            })
-            .min(context.saturating_sub(1))
-            .max(1);
+        });
+        let output = (if limits.output > 0 {
+            limits.output
+        } else {
+            8192
+        })
+        .min(context.saturating_sub(1))
+        .max(1);
         (context, output)
     }
     #[cfg(test)]
@@ -291,6 +337,7 @@ impl Directory {
                 .model(provider, model)
                 .map(|m| m.limit)
                 .unwrap_or_default(),
+            None,
         )
     }
     pub(crate) fn apply(&self, profile: &pot_core::Profile) -> Result<pot_core::Profile> {
@@ -298,13 +345,9 @@ impl Directory {
         if let Some(settings) = &profile.model_settings {
             let model = self.model(settings.catalog_provider.as_deref(), &profile.model);
             let limits = model.as_ref().map(|m| m.limit.clone()).unwrap_or_default();
-            let (context, output) = Self::default_limits(&limits);
-            profile.params.agent.context_window = settings.context_window.unwrap_or(context);
-            profile.params.max_output_tokens = settings.max_output_tokens.unwrap_or(
-                output
-                    .min(profile.params.agent.context_window.saturating_sub(1))
-                    .max(1),
-            );
+            let (context, output) = Self::default_limits(&limits, settings.context_window);
+            profile.params.agent.context_window = context;
+            profile.params.max_output_tokens = settings.max_output_tokens.unwrap_or(output);
             ensure!(
                 profile.params.max_output_tokens > 0
                     && profile.params.max_output_tokens < profile.params.agent.context_window,
@@ -548,18 +591,7 @@ mod tests {
         assert_eq!(d.defaults(Some("unknown"), "chat"), (32768, 8192));
         assert_eq!(d.defaults(Some("fixture"), "unlisted"), (32768, 8192));
         assert_eq!(d.defaults(Some("fixture"), "old"), (32768, 8192));
-        assert_eq!(
-            d.infer("https://fixture.invalid/v1/chat/completions"),
-            Some("fixture".into())
-        );
-        assert_eq!(
-            d.infer("https://fixture.invalid.attacker.test/v1/chat/completions"),
-            None
-        );
-        assert_eq!(
-            d.infer("https://fixture.invalid/other/v1/chat/completions"),
-            None
-        );
+        assert_eq!(d.defaults(Some("fixture"), "native"), (200000, 32000));
         let config = crate::execution::Config {
             model: "chat".into(),
             ..Default::default()
@@ -611,6 +643,87 @@ mod tests {
         assert_eq!(
             d.apply(&profile).unwrap().params.agent.context_window,
             64000
+        );
+    }
+    #[test]
+    fn custom_models_prefer_official_then_first_provider_and_share_public_defaults() {
+        let d = directory();
+        install(&d);
+        {
+            let mut snapshot = d.snapshot.write().unwrap();
+            let mut proxy = snapshot.providers["fixture"].clone();
+            let mut official = proxy.clone();
+            proxy
+                .models
+                .insert("claude-test".into(), proxy.models["chat"].clone());
+            official
+                .models
+                .insert("claude-test".into(), official.models["native"].clone());
+            official.models.remove("chat");
+            // Metadata remains available even without a supported ready-connection route.
+            official.npm = "unsupported-sdk".into();
+            snapshot.providers.insert("aaa-proxy".into(), proxy);
+            snapshot.providers.insert("anthropic".into(), official);
+            snapshot
+                .providers
+                .get_mut("fixture")
+                .unwrap()
+                .models
+                .get_mut("chat")
+                .unwrap()
+                .limit
+                .context = 80000;
+        }
+        assert_eq!(d.defaults(None, "claude-test"), (200000, 32000));
+        assert_eq!(d.defaults(None, "chat"), (64000, 4000));
+        assert_eq!(d.defaults(None, "unlisted"), (32768, 8192));
+        assert_eq!(d.defaults(None, "Claude-test"), (32768, 8192));
+        assert_eq!(d.defaults(Some("aaa-proxy"), "claude-test"), (64000, 4000));
+        assert_eq!(d.defaults(Some("anthropic"), "chat"), (32768, 8192));
+        let public = d.model_defaults();
+        assert_eq!(public["claude-test"]["context"], 200000);
+        assert_eq!(public["claude-test"]["output"], 32000);
+        assert_eq!(public["chat"]["context"], 64000);
+        let mut profile = pot_core::Profile::api(&crate::execution::Config {
+            model: "claude-test".into(),
+            ..Default::default()
+        });
+        profile.model_settings = Some(pot_core::ModelSettings::default());
+        let resolved = d.apply(&profile).unwrap();
+        assert_eq!(resolved.params.agent.context_window, 200000);
+        assert_eq!(resolved.params.max_output_tokens, 32000);
+        profile.model_settings.as_mut().unwrap().context_window = Some(16000);
+        assert_eq!(d.apply(&profile).unwrap().params.max_output_tokens, 15999);
+        // Missing the exact ID in the official provider still falls back to the proxy.
+        d.snapshot
+            .write()
+            .unwrap()
+            .providers
+            .get_mut("anthropic")
+            .unwrap()
+            .models
+            .remove("claude-test");
+        assert_eq!(d.defaults(None, "claude-test"), (64000, 4000));
+    }
+    #[test]
+    fn default_output_respects_the_selected_context_and_unknown_limits() {
+        let limits = Limits {
+            context: 16000,
+            input: 0,
+            output: 32000,
+        };
+        assert_eq!(Directory::default_limits(&limits, None), (16000, 15999));
+        assert_eq!(
+            Directory::default_limits(&limits, Some(64000)),
+            (64000, 32000)
+        );
+        assert_eq!(
+            Directory::default_limits(&Limits::default(), None),
+            (32768, 8192)
+        );
+        assert_eq!(
+            Directory::default_limits(&Limits::default(), Some(4000)),
+            (4000, 3999)
         );
     }
     #[tokio::test]

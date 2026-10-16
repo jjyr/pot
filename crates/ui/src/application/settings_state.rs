@@ -56,6 +56,7 @@ const DRAFT_KEYS: &[&str] = &[
     "connection_name",
     "connection_context",
     "connection_output",
+    "connection_effort",
     "connection_protocol_override",
     "api_endpoint",
     "api_protocol",
@@ -219,13 +220,18 @@ impl SettingsState {
     fn connection_defaults(&mut self) {
         let provider =
             self.directory_provider(self.state["connection_kind"].as_str().unwrap_or(""));
-        let model = provider["models"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|m| m["id"] == self.state["connection_model"])
-            .cloned()
-            .unwrap_or(Value::Null);
+        let model = if self.state["connection_kind"] == "custom" {
+            self.state["model_defaults"][self.state["connection_model"].as_str().unwrap_or("")]
+                .clone()
+        } else {
+            provider["models"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|m| m["id"] == self.state["connection_model"])
+                .cloned()
+                .unwrap_or(Value::Null)
+        };
         self.state["context_default"] = json!(
             model["context"]
                 .as_u64()
@@ -237,13 +243,10 @@ impl SettingsState {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(self.state["context_default"].as_u64().unwrap());
         self.state["output_default"] = json!(
-            8192u64
-                .min(
-                    model["output"]
-                        .as_u64()
-                        .filter(|n| *n > 0)
-                        .unwrap_or(u64::MAX)
-                )
+            model["output"]
+                .as_u64()
+                .filter(|n| *n > 0)
+                .unwrap_or(8192)
                 .min(context.saturating_sub(1))
                 .max(1)
         );
@@ -347,6 +350,7 @@ impl SettingsState {
                 self.state["connection_context"] = v["value"].clone();
                 self.connection_defaults();
             }
+            "ai-effort-input" => self.state["connection_effort"] = v["value"].clone(),
             "ai-model" => {
                 self.state["connection_model"] = v["model"].clone();
                 let provider =
@@ -390,6 +394,7 @@ impl SettingsState {
                 self.state["connection_model"] = "".into();
                 self.state["connection_context"] = "".into();
                 self.state["connection_output"] = "".into();
+                self.state["connection_effort"] = "".into();
                 self.state["api_endpoint"] = endpoint.into();
                 self.state["api_protocol"] = protocol.into();
                 self.state["has_api_key"] = false.into();
@@ -422,6 +427,8 @@ impl SettingsState {
                     .as_str()
                     .unwrap_or("custom")
                     .into();
+                self.state["connection_effort"] =
+                    connection["reasoning_effort"].as_str().unwrap_or("").into();
                 self.state["connection_context"] = connection["model_settings"]["context_window"]
                     .as_u64()
                     .map(|n| n.to_string())
@@ -499,7 +506,8 @@ impl SettingsState {
                 if first {
                     self.activation = Some(target.clone());
                 }
-                requests.push(self.request("saved","/api/v1/providers",Some(json!({"profile_id":target,"name":v["name"],"model":v["model"],"endpoint":url,"api_key":v["key"],"protocol":protocol,"catalog_provider":self.state["connection_kind"].as_str().filter(|s|*s!="custom"),"context_window":context,"max_output_tokens":output,"expected_revision":self.profile["revision"].as_u64().unwrap_or(0),"request_id":uuid::Uuid::new_v4().to_string(),"follow_main":first}))));
+                let effort = v["effort"].as_str().unwrap_or("").trim();
+                requests.push(self.request("saved","/api/v1/providers",Some(json!({"profile_id":target,"name":v["name"],"model":v["model"],"endpoint":url,"api_key":v["key"],"protocol":protocol,"catalog_provider":self.state["connection_kind"].as_str().filter(|s|*s!="custom"),"context_window":context,"max_output_tokens":output,"reasoning_effort":(!effort.is_empty()).then_some(effort),"expected_revision":self.profile["revision"].as_u64().unwrap_or(0),"request_id":uuid::Uuid::new_v4().to_string(),"follow_main":first}))));
             }
             "ai-save-main" | "profile-save" => {
                 let id = self.state[if action == "ai-save-main" {
@@ -699,6 +707,7 @@ impl SettingsState {
             "providers" => {
                 self.state["connections"] = body["connections"].clone();
                 self.state["directory"] = body["directory"].clone();
+                self.state["model_defaults"] = body["model_defaults"].clone();
                 self.connection_defaults();
             }
             "routing" | "routing-saved" => self.state["routing"] = body,
@@ -1035,6 +1044,87 @@ mod tests {
         assert_eq!(provider_choices(&m.state, "").len(), 2);
         m.command(&json!({"action":"ai-more-providers"}));
         assert_eq!(provider_choices(&m.state, "").len(), 1);
+    }
+    #[test]
+    fn custom_api_uses_control_defaults_and_preserves_connection_and_overrides() {
+        let mut m = model();
+        let requests = m.command(&json!({"action":"ai-open"}));
+        let providers = requests
+            .iter()
+            .find(|r| r.path == "/api/v1/providers")
+            .unwrap();
+        m.reply(providers.id, &providers.context, json!({"connections":[],"directory":[],"model_defaults":{"claude-test":{"context":200000,"output":64000},"zero":{"context":0,"output":0}}}), None, false);
+        // Complete other loading requests before editing.
+        for request in requests.iter().filter(|r| r.id != providers.id) {
+            m.reply(request.id, &request.context, json!({}), None, false);
+        }
+        m.command(&json!({"action":"ai-new","kind":"custom"}));
+        m.state["api_endpoint"] = json!("https://proxy.invalid/v1/responses");
+        m.state["api_protocol"] = json!("openai_responses");
+        m.command(&json!({"action":"ai-model-input","model":"claude-test"}));
+        assert_eq!(m.state["context_default"], 200000);
+        assert_eq!(m.state["output_default"], 64000);
+        assert_eq!(
+            m.state["api_endpoint"],
+            "https://proxy.invalid/v1/responses"
+        );
+        assert_eq!(m.state["api_protocol"], "openai_responses");
+        m.command(&json!({"action":"ai-context-input","value":"16000"}));
+        assert_eq!(m.state["output_default"], 15999);
+        m.command(&json!({"action":"ai-model-input","model":"missing"}));
+        assert_eq!(m.state["context_default"], 32768);
+        assert_eq!(m.state["output_default"], 8192);
+        assert_eq!(m.state["connection_context"], "16000");
+        m.command(&json!({"action":"ai-context-input","value":""}));
+        m.command(&json!({"action":"ai-model-input","model":"zero"}));
+        assert_eq!(m.state["context_default"], 32768);
+        assert_eq!(m.state["output_default"], 8192);
+        let request = m.command(&json!({"action":"ai-save-connection","name":"Custom","model":"claude-test","endpoint":m.state["api_endpoint"],"key":"fixture","context":"","output":""})).remove(0);
+        let body = request.body.unwrap();
+        assert_eq!(body["catalog_provider"], Value::Null);
+        assert_eq!(body["context_window"], Value::Null);
+        assert_eq!(body["max_output_tokens"], Value::Null);
+    }
+    #[test]
+    fn effort_draft_saves_arbitrary_strings_and_round_trips_or_clears() {
+        let mut m = model();
+        load(&mut m);
+        m.state["connections"] = json!([{"profile_id":"p","endpoint":"http://gateway.local/v1/responses","protocol":"openai_responses","has_key":true,"reasoning_effort":"provider-mode"}]);
+        m.command(&json!({"action":"ai-manage","id":"p"}));
+        assert_eq!(m.state["connection_effort"], "provider-mode");
+        m.command(&json!({"action":"ai-effort-input","value":"new-mode"}));
+        let draft = m.capture_editor();
+        m.command(&json!({"action":"ai-new","kind":"custom"}));
+        assert_eq!(m.state["connection_effort"], "");
+        m.restore_editor(draft);
+        assert_eq!(m.state["connection_effort"], "new-mode");
+        for (input, expected) in [(" new-mode ", json!("new-mode")), ("   ", Value::Null)] {
+            let request = m.command(&json!({"action":"ai-save-connection","name":"Gateway","model":"model","endpoint":"http://gateway.local/v1/responses","key":"fixture","effort":input})).remove(0);
+            assert_eq!(request.body.as_ref().unwrap()["reasoning_effort"], expected);
+            assert_eq!(
+                request.body.as_ref().unwrap()["endpoint"],
+                "http://gateway.local/v1/responses"
+            );
+            m.reply(
+                request.id,
+                &request.context,
+                Value::Null,
+                Some("fixture rejected"),
+                true,
+            );
+        }
+    }
+    #[test]
+    fn provider_default_output_uses_the_full_model_limit() {
+        let mut m = model();
+        load(&mut m);
+        directory(&mut m);
+        m.state["directory"][0]["models"][0]["output"] = json!(32000);
+        m.command(&json!({"action":"ai-new","kind":"first"}));
+        m.command(&json!({"action":"ai-model","model":"chat"}));
+        assert_eq!(m.state["output_default"], 32000);
+        m.command(&json!({"action":"ai-context-input","value":"16000"}));
+        assert_eq!(m.state["output_default"], 15999);
     }
     #[test]
     fn empty_limits_remain_inherited_and_model_changes_preserve_overrides() {

@@ -232,8 +232,9 @@ follow [Internationalization](internationalization.md), preserving drafts.
 
 AI Configuration shows the Main Agent/model summary and Integrated Agents. The
 provider chooser uses Control's model directory, common providers, Custom API,
-search and an inline More providers expansion. Editors support provider-specific
-fields, advanced overrides and browser authorization where available. Model
+search and an inline More providers expansion. Editors show all connection fields
+without a collapsed section and support provider-specific overrides and browser
+authorization where available. Model
 selection combines directory and discovered IDs with manual entry. Check uses
 supported model-list GETs without saving or inference; Save does not require Check.
 Blank credentials preserve an existing key; saved keys never return to public
