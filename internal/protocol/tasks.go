@@ -3,6 +3,7 @@ package protocol
 import (
 	"fmt"
 	"github.com/jjyr/pot/internal/core"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,7 @@ func (p TaskPhase) Scope() string {
 }
 
 type TaskInfo struct {
+	MachineID       string                `json:"machine_id"`
 	RemoteWaiting   bool                  `json:"remote_waiting"`
 	ExecutionTarget *core.ExecutionTarget `json:"execution_target"`
 	AssistantID     string                `json:"assistant_id"`
@@ -71,7 +73,7 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
-	if !core.Identifier(t.RequestID) || t.Text == "" || len(t.Text) > 65536 || t.MachineID != "" && !core.Identifier(t.MachineID) {
+	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > 65536 || t.MachineID != "" && !core.Identifier(t.MachineID) {
 		return fmt.Errorf("invalid task request")
 	}
 	return nil
@@ -134,7 +136,7 @@ type ScheduleSpec struct {
 
 func (s *ScheduleSpec) UnmarshalJSON(data []byte) error {
 	type plain ScheduleSpec
-	value := plain{Timezone: "Asia/Shanghai", Misfire: "coalesce", Notify: "changes", Enabled: true}
+	value := plain{Timezone: "Asia/Shanghai", Misfire: "coalesce", Notify: "changes", Enabled: true, Weekdays: []uint32{}}
 	if err := core.DecodeJSON(data, &value); err != nil {
 		return err
 	}
@@ -145,7 +147,8 @@ func (s ScheduleSpec) Validate() error {
 	if s.Title == "" || s.Goal == "" || s.MachineID != "" && !core.Identifier(s.MachineID) {
 		return fmt.Errorf("invalid schedule")
 	}
-	if _, err := time.LoadLocation(s.Timezone); err != nil {
+	zone, err := time.LoadLocation(s.Timezone)
+	if err != nil {
 		return err
 	}
 	if s.Misfire != "coalesce" && s.Misfire != "skip" {
@@ -153,11 +156,15 @@ func (s ScheduleSpec) Validate() error {
 	}
 	switch s.Kind {
 	case "once":
-		if _, err := time.Parse(time.RFC3339, s.At); err != nil {
+		instant, err := time.ParseInLocation("2006-01-02 15:04", s.At, zone)
+		if err != nil {
 			return err
 		}
+		if instant.Format("2006-01-02 15:04") != s.At {
+			return fmt.Errorf("one-off local time does not exist")
+		}
 	case "interval":
-		if s.EveryMinutes == 0 || s.EveryMinutes > core.MaxSafeInteger {
+		if s.EveryMinutes == 0 || s.EveryMinutes > 525600 {
 			return fmt.Errorf("invalid interval")
 		}
 	case "daily", "weekly":
@@ -168,7 +175,7 @@ func (s ScheduleSpec) Validate() error {
 			return fmt.Errorf("weekly schedule requires weekdays")
 		}
 		for _, day := range s.Weekdays {
-			if day > 6 {
+			if day < 1 || day > 7 {
 				return fmt.Errorf("invalid weekday")
 			}
 		}
