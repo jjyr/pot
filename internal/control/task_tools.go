@@ -30,10 +30,13 @@ func (s *Service) productTools(worker bool) []modelprotocol.ToolDefinition {
 	return append(out, instructionTools()...)
 }
 func (s *Service) productDispatch(owner, turn string, generation uint64, worker bool) map[string]agent.Dispatch {
+	return s.productDispatchBound(owner, owner, turn, generation, worker)
+}
+func (s *Service) productDispatchBound(owner, executionOwner, turn string, generation uint64, worker bool) map[string]agent.Dispatch {
 	out := map[string]agent.Dispatch{}
 	for _, d := range s.productTools(worker) {
 		out[d.Name] = func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
-			if e.Owner != owner || generation == 0 {
+			if e.Owner != executionOwner || generation == 0 {
 				return nil, errors.New("stale product tool binding")
 			}
 			if call.Name == "read_agent_instructions" || call.Name == "update_agent_instructions" {
@@ -192,22 +195,18 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if err := core.DecodeJSON(args, &send); err != nil {
 			return nil, err
 		}
-		result, err := s.Mailbox.Send(ctx, id, protocol.AssistantRef{ControlID: s.options.RuntimeID, AssistantID: owner}, send, nil)
+		result, err := s.sendAssistantMail(ctx, id, owner, send)
 		if err == nil {
 			s.wakeTasks()
 			s.Changes.Notify("assistant-mail")
 		}
 		return result, err
 	case "get_model_catalog":
-		snapshot := s.Profiles.Snapshot()
-		if profile := field("profile"); profile != "" {
-			spec, err := s.Profiles.Resolve(profile)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{"profile": spec.SourceProfileID, "provider": spec.Provider, "model": spec.Model, "catalog": spec.Params.Agent.ModelCatalog}, nil
+		var query ModelCatalogQuery
+		if err := core.DecodeJSON(args, &query); err != nil {
+			return nil, err
 		}
-		return snapshot, nil
+		return s.ModelCatalog(query)
 	}
 	return nil, fmt.Errorf("unknown product tool %s", name)
 }

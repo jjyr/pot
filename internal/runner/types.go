@@ -147,6 +147,7 @@ type Run struct {
 	Phase            Phase           `json:"phase"`
 	Result           *Terminal       `json:"result"`
 	Context          json.RawMessage `json:"context,omitempty"`
+	EventSequence    uint64          `json:"event_sequence"`
 	Sequence         uint64          `json:"sequence"`
 	CleanupConfirmed bool            `json:"cleanup_confirmed"`
 	WaitDetail       string          `json:"wait_detail"`

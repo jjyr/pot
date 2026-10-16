@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/storage"
 )
@@ -15,6 +16,7 @@ import (
 type Mailbox struct {
 	db        *sql.DB
 	controlID string
+	Changes   core.Changes
 }
 
 func OpenMailbox(path, controlID string) (*Mailbox, error) {
@@ -30,6 +32,9 @@ func OpenMailbox(path, controlID string) (*Mailbox, error) {
 CREATE TABLE IF NOT EXISTS assistant_mail(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,envelope TEXT NOT NULL,direction TEXT NOT NULL,state TEXT NOT NULL,conversation TEXT NOT NULL,recipient TEXT NOT NULL,detail TEXT);
 CREATE INDEX IF NOT EXISTS assistant_mail_recipient ON assistant_mail(recipient,direction,state,sequence);
 CREATE INDEX IF NOT EXISTS assistant_mail_conversation ON assistant_mail(conversation,recipient,state);
+CREATE TABLE IF NOT EXISTS assistant_mail_sessions(assistant TEXT NOT NULL,conversation TEXT NOT NULL,config TEXT NOT NULL,context TEXT,PRIMARY KEY(assistant,conversation));
+CREATE TABLE IF NOT EXISTS assistant_mail_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,message TEXT NOT NULL,event TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_mail_models(message TEXT NOT NULL,request TEXT NOT NULL,PRIMARY KEY(message,request));
 CREATE TABLE IF NOT EXISTS assistant_contacts(control TEXT PRIMARY KEY,directory TEXT NOT NULL);`); err != nil {
 			return err
 		}
@@ -50,7 +55,7 @@ CREATE TABLE IF NOT EXISTS assistant_contacts(control TEXT PRIMARY KEY,directory
 		db.Close()
 		return nil, err
 	}
-	return &Mailbox{db, controlID}, nil
+	return &Mailbox{db: db, controlID: controlID}, nil
 }
 func (m *Mailbox) Close() error      { return m.db.Close() }
 func (m *Mailbox) ControlID() string { return m.controlID }
@@ -200,6 +205,9 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AssistantRe
 		}
 		return insertMail(ctx, tx, message, direction)
 	})
+	if err == nil {
+		m.Changes.Notify("assistant-mail")
+	}
 	return message, err
 }
 func (m *Mailbox) Deliver(ctx context.Context, message protocol.Envelope) (protocol.Receipt, error) {
@@ -239,6 +247,9 @@ func (m *Mailbox) Deliver(ctx context.Context, message protocol.Envelope) (proto
 		}
 		return insertMail(ctx, tx, message, "in")
 	})
+	if err == nil {
+		m.Changes.Notify("assistant-mail")
+	}
 	return protocol.Receipt{Message: message}, err
 }
 func (m *Mailbox) Pending(ctx context.Context, target string) ([]protocol.Envelope, error) {
@@ -333,7 +344,13 @@ func (m *Mailbox) Finish(ctx context.Context, id string, success bool, detail st
 	if success {
 		state = "processed"
 	}
-	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+	return m.FinishAttempt(ctx, id, state, detail)
+}
+func (m *Mailbox) FinishAttempt(ctx context.Context, id, state, detail string) error {
+	if state != "processed" && state != "failed" && state != "interrupted" {
+		return errors.New("invalid mail terminal state")
+	}
+	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
 		var previous string
 		var oldDetail sql.NullString
 		if err := tx.QueryRowContext(ctx, "SELECT state,detail FROM assistant_mail WHERE id=?", id).Scan(&previous, &oldDetail); err != nil {
@@ -348,4 +365,8 @@ func (m *Mailbox) Finish(ctx context.Context, id string, success bool, detail st
 		_, err := tx.ExecContext(ctx, "UPDATE assistant_mail SET state=?,detail=? WHERE id=? AND state='processing'", state, detail, id)
 		return err
 	})
+	if err == nil {
+		m.Changes.Notify("assistant-mail")
+	}
+	return err
 }

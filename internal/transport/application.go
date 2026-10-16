@@ -71,6 +71,16 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		return result, err
 	}
 	conversation := func() (*assistant.Conversation, error) { return s.Conversation(ctx, owner) }
+	if path == "/api/v1/agent/routing" {
+		if method == "GET" {
+			return s.Routing(ctx)
+		}
+		var policy control.RoutingPolicy
+		if err := decode(r.Body, &policy); err != nil {
+			return nil, err
+		}
+		return s.SaveRouting(ctx, policy)
+	}
 	if method == "GET" {
 		switch path {
 		case "/api/v1/runtime":

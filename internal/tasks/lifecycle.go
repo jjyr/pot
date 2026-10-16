@@ -75,9 +75,27 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 				return s.markWaiting(ctx, assistant, id, err)
 			}
 		}
-		err = s.change(ctx, assistant, id, func(_ *sql.Tx, current *Record) error {
+		err = s.change(ctx, assistant, id, func(tx *sql.Tx, current *Record) error {
 			if current.Launch != nil || current.Info.Phase.Scope() != "active" || current.StopMode != "" {
 				return nil
+			}
+			if s.options.AdmitModel != nil {
+				admitted, err := s.options.AdmitModel(ctx, tx, current.Config)
+				if err != nil {
+					return err
+				}
+				if !admitted {
+					return nil
+				}
+			}
+			if current.Request.Resource == "shared" {
+				var busy bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id<>? AND phase IN ('queued','running','waiting') AND json_extract(body,'$.request.resource')='shared' AND json_extract(body,'$.request.machine_id')=? AND json_extract(body,'$.launch_sent')=1)`, id, current.Request.MachineID).Scan(&busy); err != nil {
+					return err
+				}
+				if busy {
+					return nil
+				}
 			}
 			launch := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, ResourceRevision: current.ResourceRevision, PluginDigests: current.PluginDigests, Text: current.Request.Text}
 			if err := launch.Validate(target.RuntimeID); err != nil {
@@ -199,7 +217,7 @@ func (s *Service) markWaiting(ctx context.Context, assistant, id string, cause e
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return s.change(ctx, assistant, id, func(_ *sql.Tx, r *Record) error {
+	return s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error {
 		if r.Info.Phase.Scope() == "active" {
 			r.Info.Phase = protocol.TaskWaiting
 			r.Info.RemoteWaiting = true
@@ -277,7 +295,7 @@ func (s *Service) ResumeWaiting(ctx context.Context, assistant, id string) error
 	if err := port.Resume(ctx, s.options.ControlID, id, record.RunID); err != nil {
 		return s.markWaiting(ctx, assistant, id, err)
 	}
-	return s.change(ctx, assistant, id, func(_ *sql.Tx, r *Record) error { r.Info.Phase = protocol.TaskQueued; r.Error = ""; return nil })
+	return s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error { r.Info.Phase = protocol.TaskQueued; r.Error = ""; return nil })
 }
 func (s *Service) Notifications(ctx context.Context, assistant string) ([]Notification, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT id,assistant_id,task_id,phase,text FROM task_notifications WHERE assistant_id=? ORDER BY rowid", assistant)

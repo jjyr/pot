@@ -92,3 +92,14 @@ but observes existing shared software and cache state.
 
 Task persistence uses schema version 4. Earlier per-task-container records are rejected without implicit migration; use an independent
 data directory for development builds of this schema. Existing files are not deleted.
+
+## Execution transcript
+
+`GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
+append-only page from the original Runner run. Each item carries a durable
+`sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
+and `has_more`; clients advance only through contiguous sequences. Control
+persists fetched remote pages, so an unavailable original Runner returns cached
+content with `unavailable: true`. A disconnected target never causes execution
+or transcript reads to move to a replacement machine. Terminal runs remain
+readable. Changes wake the existing `tasks` invalidation stream.

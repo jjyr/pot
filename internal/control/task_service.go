@@ -54,11 +54,11 @@ func (s *Service) openTasks() error {
 		return err
 	}
 	s.Runner = &runner.Executor{Journal: s.RunnerJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
-	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ValidateTarget: s.validateTaskTarget})
+	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ResolveMachine: s.selectTaskMachine, ValidateTarget: s.validateTaskTarget, AdmitModel: s.admitTaskModel})
 	if err != nil {
 		return err
 	}
-	if _, err = s.Tasks.DB().Exec(`CREATE TABLE IF NOT EXISTS task_resource_snapshots(revision TEXT PRIMARY KEY,body TEXT NOT NULL)`); err != nil {
+	if _, err = s.Tasks.DB().Exec(`CREATE TABLE IF NOT EXISTS task_resource_snapshots(revision TEXT PRIMARY KEY,body TEXT NOT NULL);CREATE TABLE IF NOT EXISTS task_event_cache(task_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(task_id,sequence));CREATE TABLE IF NOT EXISTS task_routing(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL)`); err != nil {
 		return err
 	}
 	s.Schedules, err = schedule.New(schedule.Options{Tasks: s.Tasks, Ready: s.taskReady, Results: taskFiles{s}})
@@ -184,9 +184,11 @@ func (s *Service) taskLoop() {
 	defer sub.Close()
 	runnerSub := s.RunnerJournal.Subscribe()
 	defer runnerSub.Close()
+	mailSub := s.Mailbox.Changes.Subscribe()
+	defer mailSub.Close()
 	policySub := s.Permissions.Changes.Subscribe()
 	defer policySub.Close()
-	for _, source := range []*core.Subscription{sub, runnerSub, policySub} {
+	for _, source := range []*core.Subscription{sub, runnerSub, policySub, mailSub} {
 		s.taskLife.wg.Add(1)
 		go func(source *core.Subscription) {
 			defer s.taskLife.wg.Done()
@@ -202,6 +204,7 @@ func (s *Service) taskLoop() {
 					}
 				}
 				s.Changes.Notify("tasks")
+				s.Changes.Notify("assistant-mail")
 				s.Changes.Notify("schedules")
 				s.wakeTasks()
 			}
@@ -237,6 +240,7 @@ func (s *Service) taskLoop() {
 			s.Changes.Notify("schedules")
 		}
 		s.deliverTaskNotices(s.ctx)
+		s.deliverAssistantMail(s.ctx)
 		at, err := s.Schedules.NextWake(s.ctx)
 		var timer *time.Timer
 		var due <-chan time.Time

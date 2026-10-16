@@ -237,6 +237,14 @@ Configured Provider identity/model/capabilities determine available candidates.
 An unavailable required target must produce clarification or a visible failure;
 no extra classifier model call or silent executor substitution is introduced.
 
+`GET`/`POST /api/v1/agent/routing` manages only execution admission capacity:
+`revision`, `profile_limits` and `provider_limits`. Saves compare the current
+revision; each limit is 1–1000 for a configured identity. A Task keeps its pinned
+model while queued. Running and uncertain original runs hold their route limits
+until their existing execution settles; capacity never selects a different model.
+Provider saves retain an explicit `models` list, exposed as `configured_models`
+in the Provider snapshot and through paginated `get_model_catalog` queries.
+
 Task-routing token accounting remains a subset of the invoking assistant's
 chat usage, never an additional allocation. The Runtime usage ledger is shared;
 Threads, routing defaults, task ownership and assistant rules are independent.

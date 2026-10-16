@@ -168,10 +168,15 @@ func (s *Service) Prepare(ctx context.Context, assistant string, request protoco
 	if s.options.ResolveModel == nil {
 		return Selection{}, fmt.Errorf("Control model selection unavailable")
 	}
+	machine, err := s.ResolveMachine(ctx, request.MachineID)
+	if err != nil {
+		return Selection{}, err
+	}
 	selection, err := s.options.ResolveModel(ctx, assistant, request)
 	if err != nil {
 		return Selection{}, err
 	}
+	selection.MachineID = machine
 	if err := selection.Config.Validate(); err != nil {
 		return Selection{}, err
 	}
@@ -187,9 +192,6 @@ func (s *Service) Prepare(ctx context.Context, assistant string, request protoco
 	return selection, nil
 }
 func (s *Service) Create(ctx context.Context, assistant string, request protocol.CreateTask) (Record, error) {
-	if request.MachineID == "" {
-		request.MachineID = s.options.RuntimeID
-	}
 	hash, err := core.HashJSON(request)
 	if err != nil {
 		return Record{}, err
@@ -237,12 +239,15 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if err := request.Validate(); err != nil {
 		return Record{}, err
 	}
-	if request.MachineID == "" {
-		request.MachineID = s.options.RuntimeID
-	}
 	hash, err := core.HashJSON(request)
 	if err != nil {
 		return Record{}, err
+	}
+	if request.MachineID == "" {
+		request.MachineID = selection.MachineID
+		if request.MachineID == "" {
+			request.MachineID = s.options.RuntimeID
+		}
 	}
 	var oldID, oldHash string
 	err = tx.QueryRowContext(ctx, "SELECT task_id,digest FROM task_writes WHERE assistant_id=? AND request_id=?", assistant, request.RequestID).Scan(&oldID, &oldHash)
@@ -336,4 +341,14 @@ func validateInput(requestID, text string) error {
 		return fmt.Errorf("invalid Task input")
 	}
 	return nil
+}
+
+func (s *Service) ResolveMachine(ctx context.Context, machine string) (string, error) {
+	if s.options.ResolveMachine != nil {
+		return s.options.ResolveMachine(ctx, machine)
+	}
+	if machine == "" {
+		machine = s.options.RuntimeID
+	}
+	return machine, nil
 }

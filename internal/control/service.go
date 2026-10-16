@@ -169,6 +169,7 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 		return nil, err
 	}
 	s.conversations[id] = conversation
+	s.watchTaskOwner(id, conversation)
 	return conversation, nil
 }
 func (s *Service) host(owner string, generation uint64) (*executor.Engine, error) {
@@ -196,6 +197,9 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 	return e, nil
 }
 func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
+	return s.prepareFor(ctx, c, thread, request, thread.Owner)
+}
+func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thread core.Thread, request core.TurnRequest, principal string) (assistant.RunOptions, error) {
 	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
 	if err != nil {
 		return assistant.RunOptions{}, err
@@ -218,12 +222,13 @@ func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
+	executionContext.ContextSections = append(executionContext.ContextSections, core.ContextSection{Key: "models", Text: s.modelContext()})
 	engine, err := s.host(thread.Owner, thread.Generation)
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: s.productDispatch(thread.Owner, request.RequestID, thread.Generation, false)}
-	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
+	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
 		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
 	}}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
@@ -246,7 +251,7 @@ func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread
 		} else if report.Action == "complete" {
 			event.TokensAfter = &tokens
 		}
-		return s.Usage.Compaction(ctx, thread.Owner, request.RequestID, event, storage.Now())
+		return s.Usage.Compaction(ctx, principal, request.RequestID, event, storage.Now())
 	}}
 	definitions := []modelprotocol.ToolDefinition{}
 	for _, raw := range core.ExecutionTools(thread.Config.Params.Agent.Shell) {
@@ -265,19 +270,19 @@ func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread
 	}
 	definitions = append(definitions, s.productTools(false)...)
 	return assistant.RunOptions{Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
-		s.Permissions.Expire(thread.Owner, request.RequestID, thread.Generation)
+		s.Permissions.Expire(principal, request.RequestID, thread.Generation)
 		err := engine.Drain()
 		if s.options.CleanupTarget != nil {
 			err = errors.Join(err, s.options.CleanupTarget(ctx, thread.Owner, abort))
 		}
 		return err
 	}, Ready: func(ctx context.Context) error {
-		waiting, err := s.Usage.Waiting(ctx, thread.Owner)
+		waiting, err := s.Usage.Waiting(ctx, principal)
 		if err != nil {
 			return err
 		}
 		if waiting != nil {
-			ready, err := s.Usage.Ready(ctx, thread.Owner, storage.Now())
+			ready, err := s.Usage.Ready(ctx, principal, storage.Now())
 			if err != nil {
 				return err
 			}

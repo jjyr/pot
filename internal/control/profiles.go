@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -28,6 +29,7 @@ type Connection struct {
 type ProfileSnapshot struct {
 	Profiles          []core.Profile                   `json:"profiles"`
 	Connections       []Connection                     `json:"connections"`
+	ConfiguredModels  map[string][]string              `json:"configured_models"`
 	DefaultProviderID string                           `json:"default_provider_id"`
 	Directory         []modeldirectory.ProviderOption  `json:"directory,omitempty"`
 	ModelDefaults     map[string]modeldirectory.Limits `json:"model_defaults,omitempty"`
@@ -50,7 +52,7 @@ type ProfileStore struct {
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
-	p := &ProfileStore{path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}}, Requests: map[string]profileReceipt{}}}
+	p := &ProfileStore{path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
 	directory, err := modeldirectory.Open(filepath.Join(filepath.Dir(path), "models-dev"))
 	if err != nil {
 		return nil, err
@@ -120,6 +122,7 @@ type SaveProfile struct {
 	ExpectedRevision uint64              `json:"expected_revision"`
 	Name             string              `json:"name"`
 	Model            string              `json:"model"`
+	Models           []string            `json:"models,omitempty"`
 	Endpoint         string              `json:"endpoint"`
 	Protocol         string              `json:"protocol"`
 	APIKey           string              `json:"api_key"`
@@ -258,6 +261,31 @@ func (p *ProfileStore) Save(ctx context.Context, r SaveProfile) (core.Profile, e
 	} else {
 		next.Profiles = append(next.Profiles, profile)
 	}
+	if next.ConfiguredModels == nil {
+		next.ConfiguredModels = map[string][]string{}
+	}
+	models := append([]string{}, r.Models...)
+	if r.Models == nil {
+		models = append(models, next.ConfiguredModels[profile.ID]...)
+	}
+	models = append(models, profile.Model)
+	if len(models) > 10000 {
+		return core.Profile{}, errors.New("saved model list exceeds limit")
+	}
+	seenModels := map[string]bool{}
+	normalizedModels := []string{}
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" || len(model) > 256 {
+			return core.Profile{}, errors.New("invalid saved model ID")
+		}
+		if !seenModels[model] {
+			seenModels[model] = true
+			normalizedModels = append(normalizedModels, model)
+		}
+	}
+	sort.Strings(normalizedModels)
+	next.ConfiguredModels[profile.ID] = normalizedModels
 	connection := Connection{profile.ID, routeID, r.Endpoint, r.Protocol, true}
 	found := false
 	for i, c := range next.Connections {

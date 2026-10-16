@@ -134,7 +134,10 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 		}
 		if spec.MachineID == "" {
 			if request.Action == "create" {
-				spec.MachineID = s.options.Tasks.RuntimeID()
+				spec.MachineID, err = s.options.Tasks.ResolveMachine(ctx, "")
+				if err != nil {
+					return nil, err
+				}
 			} else {
 				plan, err := s.Get(ctx, assistant, request.ScheduleID)
 				if err != nil {

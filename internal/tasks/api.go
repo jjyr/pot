@@ -15,6 +15,7 @@ import (
 var ErrResultPending = errors.New("original target result transport unavailable")
 
 type Selection struct {
+	MachineID        string
 	Config           core.ResolvedSpec
 	Plugins          []string
 	ResourceRevision string
@@ -27,7 +28,9 @@ type Options struct {
 	RuntimeID      string
 	Port           runner.Port
 	ResolveModel   ResolveModel
+	ResolveMachine func(context.Context, string) (string, error)
 	ResolveTarget  ResolveTarget
+	AdmitModel     func(context.Context, *sql.Tx, core.ResolvedSpec) (bool, error)
 	ValidateTarget func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
 	MaxTasks       int
 }

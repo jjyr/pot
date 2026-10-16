@@ -238,6 +238,10 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 			}
 		}
 		err = engine.Execute(ctx, prepared.Context, prepared.Thread, core.TurnRequest{RequestID: runID, Text: record.Launch.Text}, resuming, func(event core.AgentEvent) error {
+			if err := e.Journal.AppendEvent(context.WithoutCancel(ctx), control, task, runID, event); err != nil {
+				return err
+			}
+
 			if event.Update.Type == "message_finished" && event.Update.Text != "" {
 				if final.Text != "" {
 					final.Text += "\n"

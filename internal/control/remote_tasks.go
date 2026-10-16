@@ -533,7 +533,7 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 	if err != nil {
 		return nil, err
 	}
-	record, err := s.runnerBinding(ctx, p, r.Binding, request.Method == "task.checkpoint" || request.Method == "task.file" || request.Method == "task.file.chunk")
+	record, err := s.runnerBinding(ctx, p, r.Binding, request.Method == "task.checkpoint" || request.Method == "task.file" || request.Method == "task.file.chunk" || request.Method == "task.events")
 	if err != nil {
 		return nil, err
 	}
@@ -543,6 +543,19 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 			return nil, errors.New("Task checkpoint missing")
 		}
 		return record.Context, nil
+	case "task.events":
+		var q struct {
+			After uint64 `json:"after"`
+			Limit uint64 `json:"limit"`
+		}
+		if err = core.DecodeJSON(r.Data, &q); err != nil {
+			return nil, err
+		}
+		page, err := s.RunnerJournal.Events(ctx, record.Launch.ControlID, record.Launch.TaskID, record.Launch.RunID, q.After, q.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(page)
 	case "task.file.chunk":
 		var q protocol.FileQuery
 		if err = core.DecodeJSON(r.Data, &q); err != nil {

@@ -38,6 +38,9 @@ func (s *Service) ReadTaskFileChunk(ctx context.Context, owner, task, path strin
 		if err != nil {
 			return chunk, err
 		}
+		if len(chunk.Data) > int((TaskFileChunkSize+2)/3*4) {
+			return protocol.FileChunk{}, errors.New("original Runner file chunk exceeds limit")
+		}
 		data, decodeErr := base64.StdEncoding.DecodeString(chunk.Data)
 		if decodeErr != nil || chunk.Offset != offset || chunk.Size > TaskFileSizeLimit || offset > chunk.Size || uint64(len(data)) > TaskFileChunkSize || offset+uint64(len(data)) > chunk.Size || chunk.Revision == "" || (revision != "" && revision != chunk.Revision) || (offset < chunk.Size && len(data) == 0) {
 			return protocol.FileChunk{}, errors.New("invalid original Runner file chunk")

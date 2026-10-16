@@ -150,6 +150,19 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	if err != nil || string(remoteFile) != "remote-proof" {
 		t.Fatalf("fixed remote result reader: %s %v", remoteFile, err)
 	}
+	transcript, err := control.TaskEvents(ctx, "main", record.Info.ID, 0, 100)
+	if err != nil || len(transcript.Events) == 0 || transcript.Unavailable {
+		t.Fatalf("remote task transcript: %+v %v", transcript, err)
+	}
+	toolEvents := 0
+	for _, item := range transcript.Events {
+		if item.Event.Update.Type == "tool_started" {
+			toolEvents++
+		}
+	}
+	if toolEvents != 1 {
+		t.Fatalf("remote transcript missing original tool: %+v", transcript)
+	}
 	chunk, err := control.ReadTaskFileChunk(ctx, "main", record.Info.ID, "artifact.txt", 0, "")
 	if err != nil || chunk.Size != 12 || chunk.Data != "cmVtb3RlLXByb29m" {
 		t.Fatalf("fixed remote chunk: %+v %v", chunk, err)

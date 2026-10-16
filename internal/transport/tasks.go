@@ -129,6 +129,19 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 				result, err = s.ReadTaskFileChunk(ctx, owner, id, name, offset, u.Query().Get("revision"))
 			}
 
+		case "events":
+			if method != "GET" {
+				err = errors.New("GET required")
+				break
+			}
+			var after, limit uint64
+			after, err = integer("after")
+			if err == nil {
+				limit, err = integer("limit")
+			}
+			if err == nil {
+				result, err = s.TaskEvents(ctx, owner, id, after, limit)
+			}
 		case "messages":
 			if method == "GET" {
 				result, err = s.Tasks.Inputs(ctx, owner, id)

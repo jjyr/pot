@@ -8,12 +8,12 @@ of permissions, files, running processes or task ownership.
 
 ## Modules
 
-- `pot-protocol::message` defines addresses, envelopes, directories, receipts and
+- `internal/protocol` defines addresses, envelopes, directories, receipts and
   relay API DTOs. An address is `{control_id, assistant_id}`; display names never
   route messages.
-- `pot-assistant::message` owns SQLite Inbox/Outbox persistence, deduplication,
+- `internal/assistant` owns SQLite Inbox/Outbox persistence, deduplication,
   reply binding, processing state and history.
-- `pot-relay` is a transport-independent library with injected endpoint traits.
+- `internal/relay` is a transport-independent library with injected endpoint traits.
   It knows only protocol types; it has no UI, credential or database dependency.
 - Control binds sender identity to the current assistant, checks destinations and
   submits message conversations through the existing Runtime execution manager.
@@ -37,8 +37,8 @@ participants. The tool returns acceptance/queueing, never execution completion.
 The existing Task `send_message` tool retains its reference-only semantics.
 Workers and result-summary sessions cannot invoke Assistant messaging tools.
 
-Each communication conversation has separate model context and transcript from
-the assistant's user chat. It uses the receiving assistant's selected configuration
+Each communication conversation has separate durable model context and event transcript from
+the assistant's user chat. Incoming text is classified as untrusted reference data, with a fixed processing request; it never becomes user authorization. It uses the receiving assistant's selected configuration
 at conversation creation, current assistant instructions and existing task hub.
 Provider credentials stay at the receiving Control. Messages carry trusted sender
 metadata but their bodies are untrusted peer content, not user authorization.
@@ -89,7 +89,7 @@ no separate mailbox or handoff UI. See [Multi-Space UI](multi-space-ui.md).
 History selects an assistant and sequence cursor; batches are bounded to 32
 records. The endpoint requires existing native owner authority, not an execution
 lane token or browser session. Model calls cannot supply their sender identity.
-Protocol schemas and bounds live in `crates/protocol/src/message.rs`.
+Protocol schemas and bounds live in `internal/protocol/mail.go`.
 
 No aliases, legacy message imports or old/new protocol negotiation are provided.
 Existing unrelated conversations and tasks are not rewritten. UI changes are
