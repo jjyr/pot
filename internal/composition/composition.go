@@ -6,8 +6,8 @@
 //
 // goja does not have a hard per-runtime heap limit. These limits constrain inputs,
 // outputs, work and time, but do not make untrusted JavaScript memory-safe for its
-// hosting process. A deployment requiring hard memory isolation needs a separate
-// worker process and operating-system resource controls.
+// hosting process. Production adapters use ProcessRunner to isolate the VM from
+// the parent heap. Its sampled memory cancellation is not a hard heap/RSS cap.
 package composition
 
 import (

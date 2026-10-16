@@ -15,11 +15,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jjyr/pot/internal/composition"
 	"github.com/jjyr/pot/internal/preview"
 	webassets "github.com/jjyr/pot/web"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == composition.WorkerArgument {
+		if composition.ServeWorker(context.Background(), os.Stdin, os.Stdout) != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {

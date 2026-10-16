@@ -184,10 +184,14 @@ interruption handles JavaScript execution; Go tools require context cancellation
 and confirmed cleanup. Cancellation does not roll back completed effects.
 
 The existing QuickJS implementation has a 64 MiB per-runtime memory limit. goja
-does not provide an equivalent hard heap limit. Decide the resource policy in M1
-before broader integration. A Go process-wide soft memory target is not a
-per-VM limit. If hard limits remain required, evaluate separate Go workers and
-platform resource controls, and update affected tool descriptions/contracts.
+does not provide an equivalent hard heap limit. Production Go composition uses
+a disposable Go worker process, with capability-only JSON RPC back to the parent.
+Each worker has a 64 MiB Go soft memory target and cancels when a 10 ms sample
+observes live heap above 96 MiB. Allocation can overshoot between samples; neither
+value is a hard heap or RSS cap. A VM allocation failure is confined to its worker;
+the parent still cancels tools and requires confirmed cleanup. Tool descriptions
+must expose this distinction. Deployments requiring a hard RSS cap need a delegated
+OS resource limit; the portable implementation does not claim one.
 
 Keep Node plugin protocol, persistent state, typed text/image results, disposal,
 session identity and process cleanup. Keep Swift Helper and Python guest
