@@ -66,21 +66,25 @@ jobs:
           version: 2026.10.10
           install_args: rust mr-boxington python conda:brotli-bin
       - run: mise exec -- rustup component add clippy
-      - name: Identify Rust compiler
-        id: rust-version
-        run: echo "hash=$(mise exec -- rustc -vV | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Restore Rust build cache
-        id: rust-cache
+      # objects supports the explicit Cargo target directory in mise.toml.
+      - name: Restore mr-boxington build cache
+        uses: jdx/mr-boxington-action@47ce49b32025d93a7a2f4570815afaa2b7092240 # v1
+        with:
+          github-cache-mode: objects
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      # objects excludes Cargo downloads; rustup's WASM build bypasses mbx.
+      - name: Restore Cargo downloads and Web build cache
+        id: cargo-inputs-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            .local/poc/cargo-target
-          key: rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+            .local/poc/cargo-target/pot-web
+          key: cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
-            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
-            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-
+            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
+            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-
       - run: mise run test:web-assets
       - run: mise run clippy:backend
       - run: mise run test
@@ -88,16 +92,15 @@ jobs:
       - run: mise run test:executor
       - run: mise run test:skills
       - run: mise run test:eval
-      # Release tags restore main's cache without saving multi-GB snapshots.
-      - name: Save Rust build cache
-        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+      - name: Save Cargo downloads and Web build cache
+        if: github.ref == 'refs/heads/main' && steps.cargo-inputs-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            .local/poc/cargo-target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+            .local/poc/cargo-target/pot-web
+          key: ${{ steps.cargo-inputs-cache.outputs.cache-primary-key }}
 
   macos:
     name: macOS formatting, App and Swift Helper
@@ -117,21 +120,25 @@ jobs:
           xcodebuild -version
           swift --version
           mise exec -- rustup component add rustfmt clippy
-      - name: Identify Rust compiler
-        id: rust-version
-        run: echo "hash=$(mise exec -- rustc -vV | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Restore Rust build cache
-        id: rust-cache
+      # objects supports the explicit Cargo target directory in mise.toml.
+      - name: Restore mr-boxington build cache
+        uses: jdx/mr-boxington-action@47ce49b32025d93a7a2f4570815afaa2b7092240 # v1
+        with:
+          github-cache-mode: objects
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      # objects excludes Cargo downloads; rustup's WASM build bypasses mbx.
+      - name: Restore Cargo downloads and Web build cache
+        id: cargo-inputs-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            .local/poc/cargo-target
-          key: rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+            .local/poc/cargo-target/pot-web
+          key: cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
-            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
-            rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.hash }}-
+            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
+            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Identify Xcode toolchain
         id: xcode-version
         run: echo "hash=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -156,16 +163,15 @@ jobs:
       - run: mise run test:executor
       - run: mise run test:skills
       - run: mise run test:skill-authoring
-      # Release tags restore main's cache without saving multi-GB snapshots.
-      - name: Save Rust build cache
-        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+      - name: Save Cargo downloads and Web build cache
+        if: github.ref == 'refs/heads/main' && steps.cargo-inputs-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            .local/poc/cargo-target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+            .local/poc/cargo-target/pot-web
+          key: ${{ steps.cargo-inputs-cache.outputs.cache-primary-key }}
       - name: Save Swift build cache
         if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
