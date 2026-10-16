@@ -26,8 +26,7 @@ import (
 	"time"
 )
 
-// Copied unchanged from crates/tool-executor/src/plugin-host.mjs. The Go copy
-// owns this retained transport after Rust retirement; keep copies in sync until then.
+// Canonical retained Node transport, embedded by the Go plugin host.
 //
 //go:embed assets/plugin-host.mjs
 var hostSource string

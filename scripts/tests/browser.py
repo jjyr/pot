@@ -93,7 +93,7 @@ def run(executable, broker=False, runner=None, plugin_root=None):
                 None
                 if broker
                 else subprocess.Popen(
-                    [str(runner or ROOT / ".local/poc/cargo-target/debug/pot-tool-executor")],
+                    [str(runner or ROOT / ".local/go/bin/pot-tool-executor")],
                     env={**os.environ, "POT_BROWSER_EXECUTABLE": executable},
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,

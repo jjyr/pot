@@ -3,7 +3,6 @@
 package pluginhost
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -163,19 +162,6 @@ export function createPlugin(){return {async execute(){appendFileSync(`+string(m
 	data, err := os.ReadFile(marker)
 	if err != nil || string(data) != "effect\n" {
 		t.Fatalf("effect retried: %q %v", data, err)
-	}
-}
-
-func TestTransportSourceParity(t *testing.T) {
-	source, err := os.ReadFile("../../crates/tool-executor/src/plugin-host.mjs")
-	if os.IsNotExist(err) {
-		t.Skip("Rust reference retired; Go owns retained host source")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(source, []byte(hostSource)) {
-		t.Fatal("retained Node transport copies diverged")
 	}
 }
 

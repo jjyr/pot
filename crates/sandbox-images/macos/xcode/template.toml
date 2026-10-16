@@ -1,9 +1,0 @@
-schema_version = 1
-id = "macos.xcode"
-version = "source"
-os = "macos"
-architecture = "arm64"
-format = "macos-vm"
-providers = ["macos.apple-virtualization"]
-bootstrap = "pot-macos-executor-v3"
-recipe = "provision.sh"

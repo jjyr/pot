@@ -9,8 +9,7 @@ import (
 	"github.com/jjyr/pot/internal/protocol"
 )
 
-// Retained unchanged from crates/assistant/prompts/main_prompt.txt; Go owns the
-// orchestration instructions after retirement of the Rust assistant crate.
+// Canonical orchestration instructions shared by Main assistant sessions.
 //
 //go:embed assets/main_prompt.txt
 var MainPrompt string

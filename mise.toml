@@ -100,12 +100,12 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
-run = ["node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs"]
+run = ["node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/web-errors.js"]
 
 [tasks."test:executor"]
 description = "Verify Go executor through retained Linux/macOS Python callers"
 depends = ["build:go"]
-run = "python scripts/tests/go-executor-protocol.py .local/go/bin/pot-tool-executor"
+run = ["python scripts/tests/go-executor-protocol.py .local/go/bin/pot-tool-executor", "python scripts/tests/executor-lifecycle.py", "python scripts/tests/macos-provider.py"]
 
 [tasks."test:skills"]
 description = "Verify retained guest per-scope skills mount policy without a VM"
