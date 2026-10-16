@@ -56,5 +56,5 @@ A future task-secret delivery protocol must bind references to the selected
 run/execution target and inject values into tools rather than model context. The
 current secret store does not imply an export API or Runner access to all secrets.
 
-No plaintext `providers.json` reader, import or fallback exists. Old files are
-not modified or deleted. Historical configuration must be recreated explicitly.
+Provider credentials are configured through Control; there is no plaintext
+credential-file reader or import endpoint.

@@ -10,7 +10,8 @@ Podman machine described in [Sandbox providers](sandbox-providers.md).
 Registration does not boot or download anything. Missing optional files show an
 unavailable macOS definition while leaving chat and Linux available.
 
-The `pot-macos-executor-v3` bootstrap adds authenticated session inspection. Previously enrolled v2 guests must install the current bootstrap and update their manifest before use; the Provider rejects an older manifest before execution.
+The Provider requires the `pot-macos-executor-v3` bootstrap and validates the
+prepared manifest before execution.
 
 The first slice supports command/stdin/patch execution as a standard guest account, with one execution owner per VM. Managed sessions survive normal turns within the same Agent epoch and expire on inactivity or explicit cancellation/closure. The VM stays running after normal turn completion or cancellation; files, applications and background state remain persistent. Scope closure expires managed command sessions and terminates their runner/process group. It does not reset the sandbox or prove that detached/launchd work is gone. Manager accepts this explicit `session-closure` policy separately from Linux's `process-containment` policy. Unknown scope closure still quarantines ownership until recovery; no automatic VM-stop fallback is used.
 
@@ -75,8 +76,7 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    The Go host retains the Provider, prepared-bundle validation and Swift Helper,
    but currently exposes no owner CLI/API that imports and registers a new
-   prepared macOS instance. The former `sandbox enroll-macos` command is not
-   available. New enrollment tooling remains outside this migration; the bundle
+   prepared macOS instance. Enrollment tooling is not implemented; the bundle
    contract above must not be treated as a completed enrollment operation.
 
    For registered instances, raw whole-GiB disk size is fixed by the enrolled
@@ -111,6 +111,9 @@ The root-private broker config records the opt-in. Re-running provisioning witho
 
 Viewing starts without input authority; control is exclusive between gateway viewers. Closing/reconnecting a desktop preserves VM, application and filesystem state. The first implementation disables macOS clipboard and browser-launch controls. A desktop ticket expires after one hour; native reconnect creates a fresh ticket. This is viewer control arbitration, not containment of Guest-local automation or other Guest VNC clients.
 
-## Validation
+## Platform qualification
 
-See [macOS implementation acceptance](validation/macos-provider-20261007.md). Automated tests cover Manager exclusive ownership, helper protocol/process ownership, bundle validation, TLS identity/authentication, no-replay receipts and workspace checks. The real compiled Helper's private IPC is tested without media. Real macOS boot/stop, VirtioFS UID mapping, root/standard-user separation, Xcode build/test/artifacts, real VNC GUI session and crash/escape behavior remain unverified until a prepared instance is available. No source descriptor or passing mock test establishes those VM capabilities.
+A prepared instance must qualify real boot/stop, VirtioFS UID mapping,
+root/standard-user separation, its Xcode build/test toolchain and any configured
+VNC session. Source descriptors, bundle validation and mock tests alone do not
+establish these platform capabilities or crash/escape behavior.

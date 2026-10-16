@@ -113,8 +113,8 @@ Execution cleanup closes only that Task's processes and sessions; the environmen
 installed tools and files remain. A new Task receives a new workspace directory
 but observes existing shared software and cache state.
 
-Task persistence uses schema version 4. Earlier per-task-container records are rejected without implicit migration; use an independent
-data directory for development builds of this schema. Existing files are not deleted.
+Task persistence uses schema version 4. Development builds use an independent
+data root; unsupported storage formats are rejected without rewriting files.
 
 ## Execution transcript
 

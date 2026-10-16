@@ -1,7 +1,0 @@
-#!/usr/bin/env python3
-"""Build and export the canonical Podman Linux Sandbox OCI image."""
-
-from go_packaging import guest_image_main
-
-if __name__ == "__main__":
-    guest_image_main()

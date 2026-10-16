@@ -44,7 +44,7 @@ fixed Host/Sandbox target and call Control through run-bound signed ports.
 
 Native macOS VM support stays in `helper/` using Swift. JavaScript
 plugins, Node execution and Python guest services retain their existing roles.
-Go replaces Rust product logic; it does not translate these runtime assets.
+Go components compose these runtime assets through explicit interfaces.
 
 `mise run check:go` checks formatting, vet and architectural imports. Headless
 packages must not depend on Wails; execution components must not depend on product

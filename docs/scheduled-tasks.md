@@ -61,15 +61,4 @@ At most 100 undeleted definitions, with the latest 100 ended/skipped records per
 
 API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID for creation and management retries; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
 
-## Validation
-
-Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency,
-restart recovery, persistence failure rollback, baseline updates, machine
-selection and independent execution contexts. Historical pre-migration evidence
-is retained in [the earlier acceptance](validation/host-pot-agent-20261006.md);
-it establishes only that recorded scope.
-
-```sh
-mise run test
-mise run test:go
-```
+Tests and operating commands are documented in [Development](development.md#checks).

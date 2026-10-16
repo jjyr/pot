@@ -51,10 +51,10 @@ jobs:
       - run: mise run test:hooks
       - run: mise run licenses
       - run: mise run build:go
-      - run: mise run build:go-linux
+      - run: mise run build:linux
       - if: runner.os == 'macOS'
         run: mise run lint
       - if: runner.os == 'macOS'
         run: mise run test:release
       - if: runner.os == 'macOS'
-        run: mise run build:go-app
+        run: mise run build

@@ -32,8 +32,8 @@ workspace is not a Runtime data root.
 
 The default Go root is `~/.pot-go` on macOS and Linux. Use `-root /absolute/path`
 for an independent instance. New roots require empty directories and receive a
-stable Go identity. Previous Rust data/configuration and machine registration are
-not imported. App and standalone Runtime cannot open the same root concurrently.
+stable Runtime identity. App and standalone Runtime cannot open the same root
+concurrently.
 Keep each root private and preserve its identity and secret master key across
 restarts. See [Secrets](secrets.md).
 

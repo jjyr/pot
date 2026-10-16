@@ -22,9 +22,9 @@ Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages
 
 ## Context estimation
 
-The default estimator follows the Codex source baseline `822e58cc3d`, specifically
-`codex-rs/utils/string/src/truncate.rs` and
-`codex-rs/core/src/context_manager/history.rs`. It uses the same arithmetic and
+The default estimator in [`internal/agent/meter.go`](../internal/agent/meter.go)
+follows the [Codex content-cost baseline](https://github.com/openai/codex/tree/822e58cc3d).
+It uses the same arithmetic and
 rounding boundaries for the item types Pot supports. Protocol adapters map Chat
 Completions, Responses, Anthropic Messages and Gemini to those content rules;
 they do not select different token ratios. Callers may inject a tokenizer through
@@ -123,7 +123,7 @@ Usage query/policy/recovery APIs require the main Runtime token; workers cannot 
 ## Thread configuration attribution
 
 Gateway accepts only the current Thread's provider/model. `request_routes` links request IDs to
-Agent type, profile ID, provider, generation, and spec hash. Existing request tables retain executed configuration models/turns; no legacy ledger import or schema migration is provided.
+Agent type, profile ID, provider, generation, and spec hash. Existing request tables retain executed configuration models/turns.
 OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Requests after a configuration change use the new snapshot; previous request attribution remains unchanged. Global/session summaries group input/output/cache/records/unknown usage by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/generation in request details.
 
 `unknown` protocol neither parses response usage nor changes output caps or pretends usage is zero. Requests retain

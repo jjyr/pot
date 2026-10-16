@@ -229,7 +229,7 @@ input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px
 .assistant-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.badge-icon{flex-shrink:0;}
 .token-presets{margin:0;gap:6px;}.token-presets .control{font-size:12px;min-height:24px;padding:2px 8px;}
 .provider-logo{width:24px;height:24px;object-fit:contain;align-self:flex-start;}
-/* Shared page primitives preserve the old GPUI content box and quiet segments. */
+/* Shared page primitives use a consistent content box and quiet segments. */
 .page-card{padding:18px;border:1px solid var(--divider);border-radius:10px;background:var(--surface);margin:14px 0;display:flex;flex-direction:column;gap:14px;}
 .page-card>h2{font-size:16px;font-weight:400;margin:0;}.page-card>.hint{margin:0;}.page-card .form-row{margin:0;padding:10px 0;}.page-card .form-row+.form-row{border-top:1px solid var(--divider);}
 .segments{display:flex;flex-wrap:wrap;gap:3px;align-items:center;align-self:flex-start;width:fit-content;padding:3px;border:1px solid var(--divider);border-radius:7px;background:var(--navigation);margin-bottom:14px;}

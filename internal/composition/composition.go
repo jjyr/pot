@@ -51,8 +51,8 @@ func (e *UnconfirmedCleanupError) Error() string {
 func (e *UnconfirmedCleanupError) Unwrap() error            { return e.Cause }
 func (e *UnconfirmedCleanupError) CleanupUnconfirmed() bool { return true }
 
-// Limits uses the former Rust composition limits where equivalent controls exist.
-// StackDepth is a goja call-depth bound, not the former QuickJS byte stack size.
+// Limits bounds JavaScript execution and tool composition resources.
+// StackDepth is a goja call-depth bound measured in stack frames.
 // JSONBytes bounds both each tool argument and each result after serialization.
 // Zero fields select defaults; negative fields are invalid.
 type Limits struct {

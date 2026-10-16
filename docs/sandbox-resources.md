@@ -57,8 +57,8 @@ The image-only catalog has `schema_version: 2`, per-architecture defaults and
 independent resource tags `sandbox-go-resources-vMAJOR.MINOR.PATCH` (currently
 `v0.3.0`). Published descriptors/files are immutable. New images get new
 identities; client defaults affect newly pinned instances. Existing instances
-keep their bundle, including on rebuild. Earlier Apple Linux bundles/definitions
-are not imported; their stored data/resources remain physically untouched.
+keep their bundle, including on rebuild. Resource updates do not implicitly
+rewrite existing definitions or workspaces.
 
 ## Building and releasing
 

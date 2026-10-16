@@ -6,7 +6,7 @@
 output/
 *.local
 
-# Swift and build output (including legacy local caches)
+# Build output
 target/
 .build/
 .swiftpm/

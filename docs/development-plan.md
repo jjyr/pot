@@ -1,10 +1,8 @@
 # Product scope and deferred work
 
 [Architecture](architecture.md) defines the current implementation and ownership.
-Issue [#66](https://github.com/jjyr/pot/issues/66) records the Go/Wails transition;
-issue [#39](https://github.com/jjyr/pot/issues/39) records the earlier distributed
-runtime design. Implementation progress and qualification results belong in the
-owning issue, separate from these lasting product boundaries.
+Implementation progress and qualification results belong in the owning issue,
+separate from these lasting product boundaries.
 
 ## Current scope
 
@@ -35,9 +33,8 @@ resource preparation requires explicit owner consent. See
 [Backend components](backend-components.md), [Sandbox providers](sandbox-providers.md)
 and [Resource delivery](sandbox-resources.md).
 
-The Go release uses independent data roots and new machine registration. It does
-not import earlier Rust databases or provide mixed-version interoperability.
-Existing data, images and workspaces are not implicitly deleted or adopted.
+Each Runtime uses its own private data root and machine identity. Existing data,
+images and workspaces are not implicitly deleted or adopted.
 
 ## Deferred platform work
 

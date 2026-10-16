@@ -100,18 +100,6 @@ failure falls back to ordinary login startup and is cached until invalidation or
 eviction, avoiding repeated failed capture attempts. No snapshot is written to
 the workspace or product storage.
 
-## Verification
-
-`mise run test` includes real JSON-lines runner tests for cwd/export independence,
-login initialization, snapshot reuse/invalidation/fallback, PTY input/resize,
-interrupt, explicit timeout/termination and idle expiry. Runtime HTTP/Helper
-doubles exercise cross-turn routing, original-execution target binding, epoch and
-generation invalidation, parking/reactivation, restart quarantine and cleanup.
-`mise run test:executor` covers broker receipts, failed cleanup, idle expiry and
-orphan drainage using isolated SQLite/cgroup doubles. See the [dated acceptance
-report](validation/executor-sessions-20261007.md) for what was actually run; these are not substitutes for real Linux container
-cgroup/desktop acceptance.
-
 ## Shared machine execution environment
 
 Machine policy selects Host or the machine-owned `shared` Linux Sandbox at

@@ -155,8 +155,12 @@ with tempfile.TemporaryDirectory(prefix="pot-macos-test-") as temporary:
             while True:
                 conn, _ = listener.accept()
                 with conn:
-                    conn.sendall(b"RFB 003.008\n")
-                    data = conn.recv(64)
+                    try:
+                        conn.sendall(b"RFB 003.008\n")
+                        data = conn.recv(64)
+                    except (BrokenPipeError, ConnectionResetError):
+                        # Readiness probes connect and close without an RFB session.
+                        continue
                     if data:
                         conn.sendall(data)
                         return

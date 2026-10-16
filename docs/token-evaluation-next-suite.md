@@ -1,6 +1,11 @@
 # Small-budget Agent evaluation suite
 
-Status: scoped Pot implementation and one live sweep delivered on 2026-10-06. `pot-eval suite deterministic|live` and `tree deterministic|live` implement the small workload suite, shared limits, per-turn validation, cache identity checks, deterministic faults and directed serial child sessions. The optional Pi baseline is a direct CLI script, not an adapter. See [dated validation](validation/small-budget-evaluation.md) for results and a retained setup failure. The broader capability negotiation/matrix and schema proposals below are not all delivered. This document complements the [long-term framework](token-evaluation.md) and [CLI contract](../eval/README.md).
+`pot-eval suite deterministic|live` and `tree deterministic|live` implement a
+bounded workload suite with per-turn validation, cache identity checks,
+deterministic faults and directed serial child sessions. The optional Pi baseline
+is a direct CLI experiment. This document defines workload/measurement contracts
+and distinguishes proposed extensions from the [CLI contract](../eval/README.md).
+See the [measurement design](token-evaluation.md) for common usage semantics.
 
 ## Scope and execution policy
 
@@ -70,7 +75,7 @@ Validate child partition results and the final result, correct result routing, a
 
 ## Proposed records and implementation boundaries
 
-Delivered additions include optional per-turn text/JSON assertions, per-turn usage and answers, bounded fixed cache sequences, typed local fault fixtures, tree lifecycle/results and shared reservations. Scenario fields are additive and omitted when empty, preserving old scenario hashes; the ordinary same-policy comparator remains strict. The following remains the broader schema/contract target, rather than a claim that all controls are implemented:
+Delivered additions include optional per-turn text/JSON assertions, per-turn usage and answers, bounded fixed cache sequences, typed local fault fixtures, tree lifecycle/results and shared reservations. Optional scenario fields are omitted when empty; the same-policy comparator remains strict. The following remains the broader schema/contract target, rather than a claim that all controls are implemented:
 
 - Versioned workload identity separated from execution-configuration identity, so native-policy or single/split comparisons need not falsely claim equal scenario hashes. Preserve strict identical-policy comparison behavior.
 - Per-turn output assertions and per-turn usage views for the five-turn case.
@@ -81,13 +86,8 @@ Delivered additions include optional per-turn text/JSON assertions, per-turn usa
 
 Reuse native lifecycle and usage events wherever they already carry the required identity. Add only missing contracts to Core; experiment matrices, fault plans, workload assertions and aggregation views belong in `pot-eval`. Raw request/response capture remains optional and credential-free. Provider/native actual usage, estimates and reservations stay separate.
 
-## Initial budget and delivery order
+## Budget and execution gates
 
 The first live sweep is one five-turn run, one five-request cache sequence, one single-worker run and one two-child run: **at most 22 model attempts** (5 + 5 + 4 + 8). These are ceilings, not target counts. Set a conservative encoded-request-bytes-plus-output-cap reservation ceiling across the sweep, initially 50,000 units, using the same distinction from observed usage as the existing live runner. It is not a guaranteed billed-token or currency bound. Report and retain budget-stopped cases; do not automatically increase limits. Retries consume the same allowance. Explicit paid execution must name the suite, trial count and effective limits.
-
-1. Add per-turn assertions/reporting and the small five-turn case.
-2. Add cache experiment scheduling/reporting and request-identity checks.
-3. Add deterministic fault injection, retry/usage-coverage and side-effect receipt tests.
-4. Add the minimal eval task-management service, tree attribution and budget enforcement; then run the single/split pair.
 
 Before any paid sweep, validate all fixtures, caps, policy controls and aggregations with deterministic traces. Initial reports remain JSON/JSONL plus a concise Markdown comparison. Large-output tests, additional models, paid fault studies and autonomous delegation remain deferred.

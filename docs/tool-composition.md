@@ -56,7 +56,7 @@ work. Await completion before finishing the turn. Ending the turn stops pending
 calls; completed effects remain. Restart does not restore JavaScript memory or
 replay uncertain calls. Existing receipts prevent duplicate execution.
 
-## Boundaries and migration
+## Boundaries
 
 The isolate has no direct filesystem, network, Node or process APIs. Its tools are
 limited to the current role/profile, with recursive `exec`/`wait` excluded. Each
@@ -66,7 +66,6 @@ in `internal/composition`. Worker memory uses a 64 MiB Go runtime soft limit plu
 a sampled heap watchdog; this is not a hard per-isolate allocation cap. Crossing
 the watchdog threshold terminates the worker and retains ordinary child receipts.
 
-Old `pot_` names are not aliases. Update explicit tool filters and custom prompts.
 Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable composition.
 Expanded schemas count toward context limits. Validation and qualification limits:
 [permission contract](permissions.md).

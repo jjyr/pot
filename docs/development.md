@@ -23,7 +23,7 @@ bundle with ID `dev.pot.go-preview`. Release packaging uses the production bundl
 identity. Product App starts real Go services; disposable fixtures are separate:
 
 ```sh
-mise run preview:go
+mise run preview
 # macOS fixture UI without product data or model/tool calls:
 mise exec -- go run ./cmd/pot-app -preview
 ```
@@ -36,13 +36,12 @@ production browser authentication, provider transport or Sandbox isolation.
 | Command | Output / purpose |
 |---|---|
 | `mise run build:go` | Portable CLI and executor under `.local/go/bin` |
-| `mise run build:go-linux` | CGO-free Linux amd64/arm64 entry points |
+| `mise run build:linux` | CGO-free Linux amd64/arm64 entry points |
 | `mise run build:cli` | Target CLI/runtime archive with retained resources |
-| `mise run build:go-app` | Complete Wails macOS bundle and signed native macOS VM Swift Helper |
+| `mise run build` | Complete Wails macOS bundle and signed native macOS VM Swift Helper |
 | `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
 | `mise run build:web` | Localized retained viewer/Sandbox pages |
 | `mise run build:sandbox-image` | Podman Linux OCI image, independent of App packaging |
-| `mise run build:container-image` | Alias of the shared Podman OCI builder |
 | `mise run export:sandbox-resources` | Deterministic export validation against the embedded catalog |
 | `mise run release -- VERSION` | Local release archive/checksum/cask; publishing is separate |
 
@@ -56,8 +55,8 @@ commands are documented below in [Sandbox image resources](#sandbox-image-resour
 The native macOS VM Helper builds through `helper/Package.swift` and retains
 Virtualization.framework ownership. Linux containers use the Go Podman provider
 on both hosts. JavaScript plugins and Node remain their own runtime; Python guest broker,
-browser and desktop support remain Python. Go replaces product Rust logic and
-runs tool compositions through a process-isolated goja worker. Heap/process and
+browser and desktop support remain Python. Go hosts product logic; tool
+compositions run through a process-isolated goja worker. Heap/process and
 turn-lifecycle limits belong at that worker boundary; goja itself supplies no
 per-runtime hard heap limit.
 
@@ -67,8 +66,8 @@ temporary roots for integration checks; never run two hosts against one root.
 
 ## Sandbox image resources
 
-Install pinned tools and a working Podman builder. `build:sandbox-image` and
-`build:container-image` use the same script. macOS requires an explicitly prepared
+Install pinned tools and a working Podman builder. `build:sandbox-image` invokes
+`scripts/build-go-container-image`. macOS requires an explicitly prepared
 build connection; the script never starts/selects a default machine:
 
 ```sh
@@ -122,7 +121,7 @@ mise run check:go
 mise run test:go
 mise run test:ui
 mise run test:eval
-mise run test:go-packaging
+mise run test:packaging
 mise run check:swift
 mise run licenses
 ```
@@ -170,13 +169,11 @@ separate portable, macOS and resource/release responsibilities.
 
 Keep documentation focused on lasting contracts and operating instructions.
 Record implementation progress and qualification results in the owning issue.
-[Issue #66](https://github.com/jjyr/pot/issues/66) records the Go/Wails transition;
-the documentation describes the current implementation and operating contracts.
+The documentation describes the current implementation and operating contracts.
 
 ## UI and retained assets
 
-Preserve the established visual language while changing host technology. Main,
-tray and browser share DOM components, fonts/tokens, themes and localization;
+Main, tray and browser share DOM components, fonts/tokens, themes and localization;
 platform adapters supply native dialogs, window operations and browser sessions.
 See [shared UI](shared-ui.md) and [design language](design-language.md).
 

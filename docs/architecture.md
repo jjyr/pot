@@ -2,7 +2,7 @@
 
 Pot uses Go for product logic, Wails v3 with the system WebView for the macOS
 App, and a shared HTML/CSS/JS frontend. The main window, tray panel and browser
-use the same components, styles and state contracts. Swift retains the macOS
+use the same components, styles and state contracts. Swift provides the macOS
 VM implementation; Linux Sandboxes use the same Go Podman provider on macOS and
 Linux. Node/JavaScript plugins and Python guest services retain
 their existing responsibilities. See [component boundaries](backend-components.md).
@@ -150,8 +150,8 @@ Swift Helper owns native macOS VMs. See [Sandbox providers](sandbox-providers.md
 ## Persistence and updates
 
 A Go data root has a stable `identity.json`, exclusive process lock and private
-component stores. The release uses new data and machine registration; previous
-Rust databases/configuration are not imported. The same root cannot be opened by
+component stores. Initialize each root independently and retain its machine
+identity across restarts. The same root cannot be opened by
 App and standalone Runtime concurrently. Provider keys are encrypted using a
 separately retained master key; see [Secrets](secrets.md).
 

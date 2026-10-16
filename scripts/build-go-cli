@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build portable Go CLI/runtime archives without Rust or desktop dependencies."""
+"""Build portable Go CLI/runtime archives with retained runtime assets."""
 
 import argparse
 from pathlib import Path

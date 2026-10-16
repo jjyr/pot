@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   release:
-    # Wails and retained Swift Helpers require an Apple Silicon Mac.
+    # Wails and the native macOS VM Helper require an Apple Silicon Mac.
     runs-on: [self-hosted, macOS, ARM64, pot-release]
     timeout-minutes: 120
     env:

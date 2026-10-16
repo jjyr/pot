@@ -96,7 +96,3 @@ History selects an assistant and sequence cursor; batches are bounded to 32
 records. The endpoint requires existing native owner authority, not an execution
 lane token or browser session. Model calls cannot supply their sender identity.
 Protocol schemas and bounds live in `internal/protocol/mail.go`.
-
-No aliases, legacy message imports or old/new protocol negotiation are provided.
-Existing unrelated conversations and tasks are not rewritten. UI changes are
-outside this implementation.

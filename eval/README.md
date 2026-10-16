@@ -39,7 +39,7 @@ The fault cases inject typed pre-response HTTP/connection failures and an interr
 
 The Pi script uses isolated configuration and direct CLI RPC for five sequential memory turns, then five fresh cache sessions. It disables resources and automatic retries, uses native tools only in cache cases, keeps local Pi configuration unchanged and scans retained artifacts for the credential. It is an optional external experiment and is not part of `pot-eval` dependencies. The Go suite's limits do not cover Pi; its baseline consists of ten requested model responses, with a 64-token cap, per-turn deadline and termination on unexpected tool execution.
 
-See the [suite design](../docs/token-evaluation-next-suite.md) and [dated results](../docs/validation/small-budget-evaluation.md). Capability-generic experiment matrices, parallel scheduling, active-tree restart/cancellation studies, verified pricing and statistical comparisons remain future work.
+See the [suite design](../docs/token-evaluation-next-suite.md). Capability-generic experiment matrices, parallel scheduling, active-tree restart/cancellation studies, verified pricing and statistical comparisons remain future work.
 
 Only the DeepSeek provider and its configured `deepseek-v4-flash` (or `deepseek-flash`) model are selected. The default configuration source is `~/.pi/agent/models.json`; no Pi runtime/library is loaded and no source configuration is modified. Literal API keys or environment-variable references are read in memory. Command-based secrets and custom headers are unsupported. Credentials and authorization headers never enter manifests or captured requests.
 
@@ -64,7 +64,7 @@ The initial hash covers the entire scenario, including configuration and scripte
 
 ## Records
 
-Go records use schema 2. Rust schema-1 records are not imported.
+Records use schema 2.
 
 Each run contains:
 

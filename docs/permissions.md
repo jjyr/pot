@@ -56,8 +56,7 @@ Re-enrollment clears the old machine's policy and temporary decisions.
 `permissions.json` version 4 contains `policy.machines` and machine enrollment
 epochs. Sandbox resource settings live on their execution Runtime and are reported
 through machine inventory; they are not duplicated in authorization policy.
-Previous permission formats are rejected without migration.
-No assistant allowlists or capability grants are imported.
+Unsupported permission formats are rejected.
 
 `GET /api/v1/permissions` returns machine policies and pending requests for the
 selected conversation owner. `POST` accepts `{id, action}` with `allow_once` or

@@ -1,6 +1,10 @@
 # Long-term Agent token evaluation (design proposal)
 
-Status: architecture accepted; deterministic foundation and DeepSeek Flash live tests delivered, 2026-10-06. This document defines the long-term framework. The standalone `pot-eval` Go CLI implements the initial deterministic runner and usage validator; bounded DeepSeek Flash live execution is available; native baseline execution and broader comparisons remain planned. See the [CLI guide](../eval/README.md). It has no Pi-specific data model and does not change product execution or billing. The [runtime contract](architecture.md) describes current Pot behavior.
+This design defines measurement boundaries for reproducible Agent evaluation.
+The standalone `pot-eval` Go CLI implements deterministic runs, usage validation,
+comparison and bounded DeepSeek Flash execution; broader experiment matrices
+remain design scope. See the [CLI guide](../eval/README.md) for implemented
+commands and the [runtime contract](architecture.md) for product behavior.
 
 ## Objective
 
@@ -18,9 +22,9 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 | Normalizer/validator | Convert observations into a versioned schema, resolve cumulative snapshots and duplicate sources, preserve missing fields and raw provenance |
 | Evaluator/reporter | Evaluate artifacts/answers, compute comparable metrics, compare baselines and explain regressions by trace |
 
-The standalone Go runner lives in `internal/eval`, with `cmd/pot-eval` as its CLI and scenarios/experiments in `eval/`. It uses `internal/core`, `internal/agent`, `internal/modelprotocol` and the real executor, without depending on Runtime, Control, product Storage or App. It owns scenario execution, immutable run records, validation, comparison and bounded experiments. Go records use schema 2; legacy records are not imported.
+The standalone Go runner lives in `internal/eval`, with `cmd/pot-eval` as its CLI and scenarios/experiments in `eval/`. It uses `internal/core`, `internal/agent`, `internal/modelprotocol` and the real executor, without depending on Runtime, Control, product Storage or App. It owns scenario execution, immutable run records, validation, comparison and bounded experiments. Records use schema 2.
 
-Production invocations go through `internal/execution`; isolated engine evaluation fixtures call `agent.Agent.Execute` directly. Thread context belongs to the caller's Store, not to an external engine session. The Engine/Binding/NativeRef and DriverHost/SessionHandle abstractions have been removed. A future external baseline belongs in a separate evaluation command; it must not restore adapters to production execution.
+Production invocations go through `internal/execution`; isolated evaluation fixtures call `agent.Agent.Execute` directly. Thread context belongs to the caller's Store. External baselines belong in separate evaluation commands rather than production execution adapters.
 
 ## Standalone execution services
 
@@ -98,18 +102,14 @@ Pair candidate/baseline runs by scenario and trial, alternate or randomize execu
 
 CI can enforce contract tests without networking. Live regression rules require explicit limits and sufficient repeats: fail task-quality regressions, and flag sustained token/cost changes exceeding a configured absolute and relative threshold. No scheduled paid runs are implied by this design.
 
-## Delivery sequence and current status
+## Implemented scope and extensions
 
-The [small-budget suite](token-evaluation-next-suite.md) delivers at most five conversational turns, cache utilization, deterministic fault/retry contracts and directed serial two-child delegation, with [dated results](validation/small-budget-evaluation.md). Large-output and long/repeated-compaction tests are deferred for this increment. The broader sequence below remains long-term scope; generic experiment matrices, parallel scheduling and verified pricing are not delivered by this fixed suite.
+The [small-budget suite](token-evaluation-next-suite.md) covers five-turn context
+retention, fixed cache sequences, deterministic fault/receipt cases and directed
+serial two-child delegation. The CLI also supplies tool batches, shell-output
+limits and repeated compaction scenarios with continuation assertions.
 
-1. Create the separate `pot-eval` runner, stabilize manifests/events/usage validation and implement a scripted Agent execution plus fixtures for duplicate snapshots, partial usage, counter resets, interrupted tools and compaction retries.
-2. Define Core observations and inject standalone execution services; run `internal/agent` directly with a request collector. Deliver CLI commands to run cases, validate records and compare two run sets; JSONL/raw artifacts first, compact HTML report second.
-3. Add short-chat, single/multiple tool rounds, large output, forced/automatic repeated compaction and post-compaction continuation cases with machine-checkable outcomes.
-4. Add comparison baselines through the same execution contract. Baseline-specific tests do not change benchmark scenarios or scoring rules.
-5. Establish live baselines and regression budgets once comparable real-provider measurements exist. Keep baseline runtime revisions and case versions pinned; version report formulas separately from raw observations.
-
-The schema and aggregation validator should be the first concrete implementation. They are what make longitudinal results comparable; Agent implementations are replaceable inputs to that contract.
-
-Current delivery: steps 1 and the Pot standalone/CLI portion of step 2 are implemented. Step 3 has short-chat, tool batch, shell-output-limit and repeated automatic-compaction scenarios/tests, including continuation assertions. Other live transports, repeat statistics and HTML reporting remain future work. The initial Core change adds opt-in observation to existing feedback and standalone services to the Pot host; a full decomposition of product feedback responsibilities is not claimed.
-
-DeepSeek Flash live follow-up: the CLI reads the local Pi model configuration and runs only the selected Flash model through injected services. Native request/response streams are captured, and all three live task assertions and usage reconciliation passed. This is a single-runtime smoke baseline, not a multi-runtime efficiency comparison. See the [dated live acceptance](validation/token-evaluation.md#deepseek-flash-live-follow-up-2026-10-06).
+Broader live transports, generic experiment matrices, paired repeat statistics,
+verified pricing and HTML reporting remain future design scope. Comparison
+claims require equivalent accepted outcomes and recorded measurement coverage;
+a successful fixture or a single live run is not a statistical efficiency claim.

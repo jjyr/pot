@@ -31,7 +31,7 @@ depends = ["lint", "check:go"]
 
 [tasks.test]
 description = "Test product contracts without model calls or VMs"
-depends = ["test:go", "test:ui", "test:go-packaging", "test:eval"]
+depends = ["test:go", "test:ui", "test:packaging", "test:eval"]
 
 [tasks.prepare]
 description = "Prepare retained Node, JS plugins, skills and viewer resources"
@@ -84,10 +84,6 @@ run = "python scripts/build-go-cli"
 
 [tasks."build:sandbox-image"]
 description = "Build a Debian OCI guest image with an explicit Podman builder"
-run = "python scripts/build-go-image"
-
-[tasks."build:container-image"]
-description = "Build a Debian OCI guest image containing the Go executor"
 run = "python scripts/build-go-container-image"
 
 [tasks."export:sandbox-resources"]
@@ -135,10 +131,6 @@ python -m venv .local/skill-tests
 description = "Verify retained localized pages and catalog completeness"
 run = "python scripts/tests/localization.py"
 
-[tasks."test:architecture"]
-description = "Guard independently testable Go component boundaries"
-run = "go run ./scripts/check-go"
-
 [tasks."test:eval"]
 description = "Run deterministic CLI contracts without credentials or model calls"
 run = """
@@ -162,56 +154,28 @@ run = "go run ./scripts/check-go"
 description = "Test Go product components with the race detector"
 run = "go test -race ./..."
 
-[tasks."test:go-ui"]
-description = "Verify shared DOM composer and owner-scoped preview state"
-run = "node scripts/tests/go-ui-state.mjs"
-
 [tasks."build:go"]
 description = "Build Go CLI and executor independently of the desktop"
 run = "go build -mod=readonly -trimpath -o .local/go/bin/ ./cmd/pot ./cmd/pot-tool-executor"
 
-[tasks."build:go-linux"]
+[tasks."build:linux"]
 description = "Cross-build Go headless entry points without CGO or GUI dependencies"
 run = '''
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-arm64/ ./cmd/pot ./cmd/pot-tool-executor
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-amd64/ ./cmd/pot ./cmd/pot-tool-executor
 '''
 
-[tasks."build:go-app"]
-description = "Build the complete macOS Go/Wails app and native Swift VM helper"
-run = "python scripts/build-go-app"
-
-[tasks."prepare:go"]
-description = "Prepare pinned Node, JS plugins, skills, viewer and license resources"
-run = "python scripts/prepare-go-resources"
-
-[tasks."build:go-cli"]
-description = "Build a portable native Go CLI archive with retained runtime assets"
-run = "python scripts/build-go-cli"
-
-[tasks."build:go-image"]
-description = "Build a Debian OCI guest image with an explicit Podman builder"
-run = "python scripts/build-go-image"
-
-[tasks."build:go-container-image"]
-description = "Build a Debian OCI guest image containing the Go executor"
-run = "python scripts/build-go-container-image"
-
-[tasks."export:go-sandbox-resources"]
-description = "Verify exact reviewed OCI image exports against the embedded catalog"
-run = "python scripts/export-go-sandbox-resources"
-
-[tasks."test:go-packaging"]
-description = "Verify Go-only package layout, immutable export and service artifact generation"
+[tasks."test:packaging"]
+description = "Verify package layout, immutable export and service artifact generation"
 run = ["python scripts/tests/go-packaging.py", "python scripts/tests/verify-go-sandbox-resources.py"]
 
-[tasks."preview:go"]
+[tasks.preview]
 description = "Run the disposable loopback shared UI preview (no model or product data)"
 run = "go run ./cmd/pot preview"
 
-[tasks."preview:go-app"]
+[tasks."preview:app"]
 description = "Run the disposable Wails main-window and tray preview"
-depends = ["build:go-app"]
+depends = ["build"]
 run = "open .local/go/PotGoPreview.app"
 
 [tasks.icons]
