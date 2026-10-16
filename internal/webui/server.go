@@ -31,6 +31,7 @@ import (
 )
 
 type Config struct {
+	Disabled   bool             `json:"disabled"`
 	Token      string           `json:"token"`
 	SessionKey string           `json:"session_key"`
 	Generation uint64           `json:"generation"`
@@ -120,6 +121,9 @@ func (s *Server) cookie(c Config, expires int64, nonce string) string {
 	return text + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 func (s *Server) authenticated(r *http.Request, c Config) bool {
+	if c.Disabled {
+		return false
+	}
 	cookie, err := r.Cookie("pot_session")
 	if err != nil {
 		return false
@@ -175,6 +179,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"authenticated": auth, "scope": "control", "push_available": s.push != nil && s.push.Available(), "push_key": s.pushKey(), "desktop_available": !strings.Contains(s.upstream.URL, "/control/v1/owner")})
 		return
 	case "/access/token":
+		if c.Disabled {
+			failure(w, 403, "browser access disabled")
+			return
+		}
 		if r.Method != "POST" {
 			failure(w, 405, "method not allowed")
 			return
@@ -313,7 +321,7 @@ func Allowed(method, path string) bool {
 	}
 	if method == "GET" {
 		switch path {
-		case "/api/v1/runtime", "/api/v1/control", "/api/v1/spaces", "/api/v1/assistants", "/api/v1/providers", "/api/v1/agent", "/api/v1/config", "/api/v1/instructions", "/api/v1/snapshot", "/api/v1/events", "/api/v1/changes", "/api/v1/permissions", "/api/v1/usage/summary", "/api/v1/tasks", "/api/v1/tasks/query", "/api/v1/schedules", "/api/v1/machines":
+		case "/api/v1/about", "/api/v1/runtime", "/api/v1/control", "/api/v1/spaces", "/api/v1/assistants", "/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/snapshot", "/api/v1/events", "/api/v1/changes", "/api/v1/permissions", "/api/v1/usage/summary", "/api/v1/tasks", "/api/v1/tasks/query", "/api/v1/schedules", "/api/v1/machines":
 			return true
 		}
 	}
@@ -323,7 +331,7 @@ func Allowed(method, path string) bool {
 			return false
 		}
 		if method == "GET" {
-			return len(parts) == 1 || len(parts) == 2 && (parts[1] == "file" || parts[1] == "file-download" || parts[1] == "messages")
+			return len(parts) == 1 || len(parts) == 2 && (parts[1] == "file" || parts[1] == "file-download" || parts[1] == "messages" || parts[1] == "events")
 		}
 		if method == "POST" && len(parts) == 2 {
 			switch parts[1] {
@@ -335,7 +343,7 @@ func Allowed(method, path string) bool {
 	}
 	if method == "POST" {
 		switch path {
-		case "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/agent", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/resume", "/api/v1/schedules", "/api/v1/machines", protocol.AssistantMailAPI:
+		case "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/resume", "/api/v1/schedules", "/api/v1/machines", protocol.AssistantMailAPI:
 			return true
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {
@@ -373,7 +381,7 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 		return
 	}
 	defer response.Body.Close()
-	for _, key := range []string{"Content-Type", "Content-Disposition", "X-Accel-Buffering"} {
+	for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Content-Security-Policy", "X-Accel-Buffering"} {
 		if v := response.Header.Get(key); v != "" {
 			w.Header().Set(key, v)
 		}
@@ -399,7 +407,14 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 			}
 		}
 	}
-	_, _ = io.Copy(w, io.LimitReader(response.Body, 32*1024*1024))
+	limit := int64(32 * 1024 * 1024)
+	if strings.HasSuffix(r.URL.Path, "/file-download") {
+		limit = 1 << 30
+	}
+	n, err := io.Copy(w, io.LimitReader(response.Body, limit+1))
+	if err != nil || n > limit || (response.ContentLength >= 0 && n != response.ContentLength) {
+		panic(http.ErrAbortHandler)
+	}
 }
 func (s *Server) Close() {
 	s.mu.Lock()

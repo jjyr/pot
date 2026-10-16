@@ -17,8 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jjyr/pot/internal/browserpush"
+	"github.com/jjyr/pot/internal/access"
 	"github.com/jjyr/pot/internal/instance"
+	"github.com/jjyr/pot/internal/tailnet"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
 	assets "github.com/jjyr/pot/web"
@@ -89,29 +90,20 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 		return errors.New("browser data root already in use")
 	}
 	path := filepath.Join(directory, "browser-access.json")
-	config := webui.NewConfig()
-	data, err := os.ReadFile(path)
-	if err == nil {
-		if _, err = privateText(path); err != nil {
-			return err
-		}
-		if err = json.Unmarshal(data, &config); err != nil {
-			return err
-		}
-	} else if os.IsNotExist(err) {
-		entries, err := os.ReadDir(directory)
-		if err != nil {
-			return err
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		entries, e := os.ReadDir(directory)
+		if e != nil {
+			return e
 		}
 		for _, entry := range entries {
 			if entry.Name() != "web-ui-server.lock" {
 				return errors.New("refusing to initialize unrecognized nonempty browser data root")
 			}
 		}
-		if err = instance.WriteJSON(path, config); err != nil {
-			return err
-		}
-	} else {
+	}
+	store := webui.AccessStore{Path: path}
+	_, err = store.Load(true)
+	if err != nil {
 		return err
 	}
 	upstream := webui.Upstream{}
@@ -183,33 +175,29 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 		return errors.New("configured upstream is not the selected standalone Control")
 	}
 	upstream.ControlID = identity.ID
-	server, err := webui.New(webui.Options{Origin: *origin, Config: config, Upstream: upstream, Assets: assets.FS(), Persist: func(c webui.Config) error { return c.Save(path) }})
+	if err = pinBrowserControl(directory, identity.ID); err != nil {
+		return err
+	}
+	publication, err := access.Open(ctx, access.Options{Root: directory, Origin: *origin, Upstream: upstream, Assets: assets.FS(), Tailnet: tailnet.New(directory, "pot")})
 	if err != nil {
 		return err
 	}
-	defer server.Close()
-	sender, err := browserpush.FromEnvironment()
+	defer publication.Close()
+	operator, err := access.StartOperator(directory, publication)
 	if err != nil {
 		return err
 	}
-	var pushSender browserpush.Sender
-	if sender != nil {
-		pushSender = sender
-	}
-	if err = server.AttachPush(directory, webui.NotificationSource{ID: identity.ID, Upstream: upstream}, pushSender); err != nil {
-		return err
-	}
-	runctx, stop := context.WithCancel(ctx)
-	defer stop()
-	notificationsDone := make(chan struct{})
-	go func() { defer close(notificationsDone); _ = server.RunNotifications(runctx) }()
-	defer func() { stop(); <-notificationsDone }()
+	defer operator.Close()
+	watchctx, stopwatch := context.WithCancel(ctx)
+	defer stopwatch()
+	watchDone := make(chan error, 1)
+	go func() { watchDone <- publication.WatchAccess(watchctx) }()
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return err
 	}
 	defer listener.Close()
-	httpServer := &http.Server{Handler: server, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16384}
+	httpServer := &http.Server{Handler: publication, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16384}
 	done := make(chan error, 1)
 	go func() {
 		if *cert != "" {
@@ -219,7 +207,7 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 		}
 	}()
 	defer func() {
-		server.Close()
+		publication.Close()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdown)
@@ -228,10 +216,33 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 	select {
 	case <-ctx.Done():
 		return nil
+	case err := <-watchDone:
+		return err
 	case err := <-done:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	}
+}
+
+func pinBrowserControl(directory, id string) error {
+	path := filepath.Join(directory, "browser-control.json")
+	data, err := privateText(path)
+	if os.IsNotExist(err) {
+		return instance.WriteJSON(path, map[string]string{"control_id": id})
+	}
+	if err != nil {
+		return err
+	}
+	var saved struct {
+		ControlID string `json:"control_id"`
+	}
+	if err = json.Unmarshal([]byte(data), &saved); err != nil {
+		return err
+	}
+	if saved.ControlID != id {
+		return errors.New("browser service is bound to a different Control identity; choose a fresh browser data root")
+	}
+	return nil
 }

@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/internal/productinfo"
 	"github.com/jjyr/pot/internal/protocol"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/spaces"
@@ -92,6 +94,7 @@ func Run(root string) error {
 	}
 	defer runtime.Close()
 	api := &transport.Application{Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+	api.About = func(context.Context) (any, error) { return productinfo.Read(runtime.AssetDirectory) }
 	socket, err := transport.StartSocket(ctx, runtime.Root.Path, api)
 	if err != nil {
 		return err
@@ -132,7 +135,7 @@ func Run(root string) error {
 		files.ServeHTTP(w, r)
 	})
 
-	app := application.New(application.Options{Name: "Pot", Description: "Pot", Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: assetHandler}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
+	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: assetHandler}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
 		stop()
 		service.mu.Lock()
 		for _, cancel := range service.subscriptions {

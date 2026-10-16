@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/instance"
+	"github.com/jjyr/pot/internal/productinfo"
 	product "github.com/jjyr/pot/internal/runtime"
+	"github.com/jjyr/pot/internal/serverconfig"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
 	assets "github.com/jjyr/pot/web"
@@ -52,6 +55,23 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 	}
 	switch args[0] {
 	case "init", "serve":
+		if args[0] == "serve" {
+			settings, e := serverconfig.Load(*root)
+			if e != nil {
+				return e
+			}
+			explicit := map[string]bool{}
+			flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+			for _, value := range []struct {
+				name   string
+				target *string
+				saved  string
+			}{{"listen", listen, settings.Listen}, {"tls-cert", cert, settings.TLSCert}, {"tls-key", key, settings.TLSKey}, {"workspace", workspace, settings.Workspace}, {"resources", resources, settings.Resources}, {"helpers", helpers, settings.Helpers}, {"sandbox-image", image, settings.SandboxImage}} {
+				if !explicit[value.name] {
+					*value.target = value.saved
+				}
+			}
+		}
 		if flags.NArg() != 0 {
 			return errors.New("unexpected positional arguments")
 		}
@@ -64,6 +84,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			return json.NewEncoder(out).Encode(runtime.Root.Identity)
 		}
 		app := &transport.Application{Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+		app.About = func(context.Context) (any, error) { return productinfo.Read(runtime.AssetDirectory) }
 		viewer, err := transport.DesktopHandler(ctx, runtime.Sandboxes, os.DirFS(runtime.AssetDirectory))
 		if err != nil {
 			return err
@@ -79,7 +100,16 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			defer cancel()
 			_ = socket.Close(shutdown)
 		}()
+		failures := make(chan error, 1)
 		if *listen != "" {
+			if (*cert == "") != (*key == "") {
+				return errors.New("both Control TLS certificate and key required")
+			}
+			if *cert != "" {
+				if _, err = tls.LoadX509KeyPair(*cert, *key); err != nil {
+					return err
+				}
+			}
 			if err = runtime.Control.Machines.EnableControl(); err != nil {
 				return err
 			}
@@ -89,27 +119,17 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			}
 			defer listener.Close()
 			server := &http.Server{Handler: runtime.Control.ControlServer(transport.Handler(app, runtime.Control.Machines.OwnerCredential())), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16384}
-			remoteErrors := make(chan error, 1)
 			go func() {
 				if *cert != "" || *key != "" {
-					remoteErrors <- server.ServeTLS(listener, *cert, *key)
+					failures <- server.ServeTLS(listener, *cert, *key)
 				} else {
-					remoteErrors <- server.Serve(listener)
+					failures <- server.Serve(listener)
 				}
 			}()
 			defer func() {
 				shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_ = server.Shutdown(shutdown)
-			}()
-			go func() {
-				select {
-				case <-ctx.Done():
-				case err := <-remoteErrors:
-					if err != nil && !errors.Is(err, http.ErrServerClosed) {
-						fmt.Fprintln(out, "Control listener stopped:", err)
-					}
-				}
 			}()
 			fmt.Fprintf(out, "Control listener: %s\n", listener.Addr())
 		}
@@ -121,27 +141,23 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			}
 			defer listener.Close()
 			path := filepath.Join(runtime.Root.Path, "browser-access.json")
-			config := webui.NewConfig()
-			data, err := os.ReadFile(path)
-			if err == nil {
-				if err = json.Unmarshal(data, &config); err != nil {
-					return err
-				}
-			} else if os.IsNotExist(err) {
-				if err = config.Save(path); err != nil {
-					return err
-				}
-			} else {
+			store := webui.AccessStore{Path: path}
+			config, err := store.Load(true)
+			if err != nil {
 				return err
 			}
 			client := socket.Endpoint.Client()
 			client.Timeout = 0
 			origin := "http://" + listener.Addr().String()
-			browser, err := webui.New(webui.Options{Origin: origin, Config: config, Upstream: webui.Upstream{URL: "http://runtime", Credential: socket.Endpoint.Token, Client: client}, Assets: assets.FS(), Persist: func(c webui.Config) error { return c.Save(path) }})
+			browser, err := webui.New(webui.Options{Origin: origin, Config: config, Upstream: webui.Upstream{URL: "http://runtime", Credential: socket.Endpoint.Token, Client: client}, Assets: assets.FS(), Persist: store.SaveSessions})
 			if err != nil {
 				return err
 			}
 			defer browser.Close()
+			watchctx, stopwatch := context.WithCancel(ctx)
+			defer stopwatch()
+			watchDone := make(chan error, 1)
+			go func() { watchDone <- browser.WatchAccess(watchctx, store) }()
 			server := &http.Server{Handler: browser, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16384}
 			done := make(chan error, 1)
 			go func() { done <- server.Serve(listener) }()
@@ -155,6 +171,10 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			select {
 			case <-ctx.Done():
 				return nil
+			case err := <-failures:
+				return err
+			case err := <-watchDone:
+				return err
 			case err := <-done:
 				if errors.Is(err, http.ErrServerClosed) {
 					return nil
@@ -162,8 +182,12 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 				return err
 			}
 		}
-		<-ctx.Done()
-		return nil
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-failures:
+			return err
+		}
 	case "status", "api":
 		endpoint, err := transport.ReadEndpoint(*root)
 		if err != nil {

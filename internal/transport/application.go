@@ -20,6 +20,7 @@ import (
 )
 
 type Application struct {
+	About             func(context.Context) (any, error)
 	Control           *control.Service
 	Desktop           http.Handler
 	Resources         *resourcecontrol.Manager
@@ -58,6 +59,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	path := u.Path
 	s := a.Control
+	if path == "/api/v1/about" && method == "GET" {
+		if a.About == nil {
+			return nil, errors.New("product information unavailable")
+		}
+		return a.About(ctx)
+	}
 	if result, err, handled := a.resourceCall(ctx, method, u, r); handled {
 		return result, err
 	}

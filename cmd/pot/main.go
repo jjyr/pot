@@ -1,5 +1,4 @@
-// Command pot is the new Go entry point. Product serving remains on the Rust
-// entry point until its Go replacement reaches the migration acceptance gates.
+// Command pot runs the Go product CLI, Runtime and private UI preview.
 package main
 
 import (
@@ -15,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/composition"
 	"github.com/jjyr/pot/internal/preview"
 	webassets "github.com/jjyr/pot/web"
@@ -36,6 +36,20 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) > 0 && (args[0] == "--root" || args[0] == "-root") {
+		if len(args) < 3 {
+			return errors.New("root requires PATH and a command")
+		}
+		args = append([]string{args[2], "-root", args[1]}, args[3:]...)
+	}
+	if len(args) > 0 {
+		switch args[0] {
+		case "access":
+			return accessCommand(ctx, args[1:], output)
+		case "chat", "tasks", "config", "doctor", "open", "service":
+			return userCommand(ctx, args, output)
+		}
+	}
 	if len(args) > 0 && args[0] == "resources" {
 		return resourceCommand(ctx, args[1:], output)
 	}
@@ -49,7 +63,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		}
 	}
 	if len(args) == 1 && args[0] == "--version" {
-		_, err := fmt.Fprintln(output, "pot Go development")
+		_, err := fmt.Fprintln(output, buildinfo.String())
 		return err
 	}
 	if len(args) == 0 || args[0] != "preview" {
