@@ -121,7 +121,7 @@ run = "python scripts/tests/hook-timing.py"
 
 [tasks."test:browser"]
 description = "Qualify retained CUA plugin observations against a Chromium fixture"
-run = "python scripts/tests/browser.py"
+run = ["node scripts/tests/browser-close.mjs", "python scripts/tests/browser.py"]
 
 [tasks."test:skill-authoring"]
 description = "Verify builtin skill validation and installation helpers"

@@ -81,6 +81,12 @@ The API provides `cua.open`, `cua.getTab`, `cua.getState`, and tab methods `navi
 
 Closing the tab preserves JS state. End the REPL with `reset:true` and its existing `session_id`; reset without an ID is rejected. Each REPL supports one tab. Popups, frame targeting, uploads/downloads and unrestricted CDP/page evaluation are not exposed.
 
+Closing requests graceful Chromium shutdown before removing its temporary
+profile. Concurrent closes share one shutdown. A forced or unexpected browser
+exit retains the profile and reports unconfirmed cleanup; reset/disposal must
+confirm the enclosing process group or Guest cgroup has stopped before removing
+private files. Browser actions are never retried as part of shutdown.
+
 ## Plugin contract and lifecycle
 
 Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). Version 1 requires `runtime:"node"`, `execution:"host_or_sandbox"` (Host and Sandbox) or `"sandbox"` (Sandbox only), confined package paths, unique tool names, and flat scalar input schemas. Bundles are limited to 32 files / 512 KiB. Plugins export `createPlugin({mode,execution_target,emit})` with `execute({tool,input})` and `dispose()`.

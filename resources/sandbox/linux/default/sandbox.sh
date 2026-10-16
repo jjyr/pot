@@ -32,4 +32,6 @@ if [ ! -e /dev/ptmx ]; then
   ln -s /dev/pts/ptmx /dev/ptmx
 fi
 # The guest contains no product backend, provider configuration or Agent session.
-exec python3 /opt/pot/executor.py
+# Reap orphaned tool/browser descendants in this PID namespace. The outer VM
+# init cannot reap processes adopted by the container's PID 1.
+exec /usr/bin/tini -s -- python3 /opt/pot/executor.py

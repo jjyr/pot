@@ -14,6 +14,11 @@ The image builder uses a separate Apple VM with no user workspace or credentials
 
 Runtime starts independently of Sandbox preparation. Helper imports and boots each Linux image only when requested. `/opt/pot/sandbox.sh` mounts cgroup v2 and starts the authenticated executor on port 17701. Shell/file subprocesses run as `potdesktop` with a minimal environment. Each owner/Agent-epoch/Sandbox scope uses a root-owned cgroup and a credential-free Go tool runner. Live pipe sessions share that scope; cancellation, failure and shutdown drain it, including detached descendants. Live pipe/PTY sessions close when their execution ends and expire when idle; empty runners retain shell initialization caches without execution leases. See [command execution](executor.md). The executor token stays on Host outside the mount and is injected into the root executor at startup, then removed from child environments. The guest ledger/output live in root-private `/run/pot-executor`, outside virtiofs. Host receipts remain the durable authority across VM recreation. Desktop starts separately through the Sandbox desktop action.
 
+The bootstrap runs the broker under `tini -s` inside the Sandbox PID namespace.
+It reaps orphaned tool and browser descendants on both Apple VM and Podman
+providers. Browser profile removal and plugin reset still require confirmed
+process cleanup; an outer VM init cannot perform this inner-namespace duty.
+
 Each Sandbox mounts only `root/execution/sandboxes/ID/workspace` at `/data`; files live beneath `/data/workspace`. No Host product database, CLI sessions, provider secrets or Helper socket are mounted. Artifacts survive VM shutdown. The shared environment retains its writable rootfs across stop/start. Explicit
 rebuild resets installed software and shared toolchain directories while preserving
 Task work files. See [execution lifecycle](executor.md#shared-machine-execution-environment).
