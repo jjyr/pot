@@ -1,6 +1,6 @@
 # Small-budget Agent evaluation suite
 
-Status: scoped Pot implementation and one live sweep delivered on 2026-10-06. `pot-eval suite deterministic|live` and `tree deterministic|live` implement the small workload suite, shared limits, per-turn validation, cache identity checks, deterministic faults and directed serial child sessions. The optional Pi baseline is a direct CLI script, not an adapter. See [dated validation](validation/small-budget-evaluation.md) for results and a retained setup failure. The broader capability negotiation/matrix and schema proposals below are not all delivered. This document complements the [long-term framework](token-evaluation.md) and [CLI contract](../crates/eval/README.md).
+Status: scoped Pot implementation and one live sweep delivered on 2026-10-06. `pot-eval suite deterministic|live` and `tree deterministic|live` implement the small workload suite, shared limits, per-turn validation, cache identity checks, deterministic faults and directed serial child sessions. The optional Pi baseline is a direct CLI script, not an adapter. See [dated validation](validation/small-budget-evaluation.md) for results and a retained setup failure. The broader capability negotiation/matrix and schema proposals below are not all delivered. This document complements the [long-term framework](token-evaluation.md) and [CLI contract](../eval/README.md).
 
 ## Scope and execution policy
 

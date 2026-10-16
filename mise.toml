@@ -110,13 +110,13 @@ run = """
 set -eu
 eval_root=$(mktemp -d "${TMPDIR:-/tmp}/pot-eval-ci.XXXXXX")
 trap 'rm -rf "$eval_root"' EXIT
-cargo run --locked -p pot-eval -- suite deterministic "$eval_root/suite"
+go run ./cmd/pot-eval suite deterministic "$eval_root/suite"
 for scenario in short-chat tool-round compaction; do
-  cargo run --locked -p pot-eval -- run "crates/eval/scenarios/$scenario.json" "$eval_root/$scenario"
-  cargo run --locked -p pot-eval -- validate "$eval_root/$scenario"
+  go run ./cmd/pot-eval run "eval/scenarios/$scenario.json" "$eval_root/$scenario"
+  go run ./cmd/pot-eval validate "$eval_root/$scenario"
 done
-cargo run --locked -p pot-eval -- run crates/eval/scenarios/compaction.json "$eval_root/compaction-repeat"
-cargo run --locked -p pot-eval -- compare "$eval_root/compaction" "$eval_root/compaction-repeat"
+go run ./cmd/pot-eval run eval/scenarios/compaction.json "$eval_root/compaction-repeat"
+go run ./cmd/pot-eval compare "$eval_root/compaction" "$eval_root/compaction-repeat"
 """
 
 [tasks.licenses]
