@@ -3,10 +3,130 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"path"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 )
+
+// ValidateInput applies the deliberately small scalar-schema plugin contract.
+// It rejects undeclared fields before the retained Node host is invoked.
+func (b PluginBundle) ValidateInput(name string, input map[string]any) error {
+	if input == nil {
+		return fmt.Errorf("plugin input must be an object")
+	}
+	var schema map[string]any
+	for _, raw := range b.Manifest.Tools {
+		var tool map[string]any
+		if err := DecodeJSON(raw, &tool); err != nil {
+			return err
+		}
+		if tool["name"] == name {
+			schema, _ = tool["inputSchema"].(map[string]any)
+			break
+		}
+	}
+	if schema == nil {
+		return fmt.Errorf("unknown plugin tool")
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("invalid plugin schema")
+	}
+	for _, key := range asArray(schema["required"]) {
+		name, ok := key.(string)
+		if !ok {
+			return fmt.Errorf("invalid required plugin argument")
+		}
+		if _, present := input[name]; !present {
+			return fmt.Errorf("missing plugin argument %s", key)
+		}
+	}
+	for key, value := range input {
+		property, exists := properties[key].(map[string]any)
+		if !exists {
+			return fmt.Errorf("unknown plugin argument %s", key)
+		}
+		numeric, number := pluginNumber(value)
+		switch property["type"] {
+		case "string":
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("invalid plugin string %s", key)
+			}
+		case "boolean":
+			if _, ok := value.(bool); !ok {
+				return fmt.Errorf("invalid plugin boolean %s", key)
+			}
+		case "integer":
+			if !number || math.Trunc(numeric) != numeric || numeric < math.MinInt64 || numeric >= -float64(math.MinInt64) {
+				return fmt.Errorf("invalid plugin integer %s", key)
+			}
+		case "number":
+			if !number {
+				return fmt.Errorf("invalid plugin number %s", key)
+			}
+		default:
+			return fmt.Errorf("unsupported plugin argument type")
+		}
+		if bound, ok := pluginNumber(property["maxLength"]); ok {
+			text, isString := value.(string)
+			if !isString || float64(len(text)) > bound {
+				return fmt.Errorf("plugin string too long")
+			}
+		}
+		if bound, ok := pluginNumber(property["minimum"]); ok && (!number || numeric < bound) {
+			return fmt.Errorf("plugin argument below minimum")
+		}
+		if bound, ok := pluginNumber(property["maximum"]); ok && (!number || numeric > bound) {
+			return fmt.Errorf("plugin argument above maximum")
+		}
+		if choices, ok := property["enum"].([]any); ok {
+			found := false
+			for _, choice := range choices {
+				a, aok := pluginNumber(choice)
+				if aok && number && a == numeric || reflect.DeepEqual(choice, value) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("invalid plugin enum value")
+			}
+		}
+	}
+	return nil
+}
+func asArray(value any) []any { values, _ := value.([]any); return values }
+func pluginNumber(value any) (float64, bool) {
+	var n float64
+	switch v := value.(type) {
+	case json.Number:
+		var err error
+		n, err = strconv.ParseFloat(v.String(), 64)
+		if err != nil {
+			return 0, false
+		}
+	case float64:
+		n = v
+	case float32:
+		n = float64(v)
+	case int:
+		n = float64(v)
+	case int64:
+		n = float64(v)
+	case uint64:
+		n = float64(v)
+	case int32:
+		n = float64(v)
+	case uint32:
+		n = float64(v)
+	default:
+		return 0, false
+	}
+	return n, !math.IsNaN(n) && !math.IsInf(n, 0)
+}
 
 type PluginManifest struct {
 	SchemaVersion uint32            `json:"schema_version"`
