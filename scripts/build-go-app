@@ -9,7 +9,16 @@ import re
 import shutil
 import tempfile
 
-from go_packaging import BUILD, ROOT, call, go_build, prepare_resources, swift_helpers
+from go_packaging import (
+    BUILD,
+    ROOT,
+    call,
+    go_build,
+    prepare_resources,
+    swift_helpers,
+    linker_flags,
+    prepare_wails_module,
+)
 
 if platform.system() != "Darwin" or platform.machine() != "arm64":
     raise SystemExit("The Go desktop targets Apple Silicon macOS.")
@@ -18,8 +27,10 @@ if not re.fullmatch(r"\d+\.\d+\.\d+", version):
     raise SystemExit("POT_APP_VERSION must be major.minor.patch")
 BUILD.mkdir(parents=True, exist_ok=True)
 helpers = swift_helpers()
-bundle = BUILD / "PotGoPreview.app"
+release = os.environ.get("POT_APP_RELEASE") == "1"
+bundle = BUILD / ("Pot.app" if release else "PotGoPreview.app")
 with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
+    modfile = prepare_wails_module(Path(temporary))
     staged = Path(temporary) / bundle.name
     contents = staged / "Contents"
     binary = contents / "MacOS/pot-app"
@@ -31,14 +42,24 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
     for name in ("CGO_CFLAGS", "CGO_LDFLAGS"):
         environment[name] = environment.get(name, "-O2 -g") + " -mmacosx-version-min=26.0"
     call(
-        ["go", "build", "-mod=readonly", "-trimpath", "-o", binary, "./cmd/pot-app"],
+        [
+            "go",
+            "build",
+            "-mod=readonly",
+            "-modfile=" + str(modfile),
+            "-trimpath",
+            "-ldflags=" + linker_flags(False),
+            "-o",
+            binary,
+            "./cmd/pot-app",
+        ],
         env=environment,
     )
     go_build("./cmd/pot", contents / "MacOS/pot", "darwin-arm64")
     for name in ("PotHelper", "PotMacOSHelper"):
         shutil.copy2(helpers / name, contents / "MacOS" / name)
     shutil.copy2(helpers / "SwiftDependencyLicenses.txt", resources / "SwiftDependencyLicenses.txt")
-    shutil.copy2(ROOT / "crates/app/assets/Pot.icns", resources / "Pot.icns")
+    shutil.copy2(ROOT / "resources/app/assets/Pot.icns", resources / "Pot.icns")
     call(
         [
             "python3",
@@ -51,15 +72,18 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
         ],
         env=environment,
     )
+    with (resources / "GoDependencyLicenses.txt").open("a") as notices:
+        notices.write("\nLocal Wails tray sizing modification\n")
+        notices.write((ROOT / "patches/README.md").read_text())
     copyright_notice = next(
         line for line in (ROOT / "LICENSE").read_text().splitlines() if line.startswith("Copyright")
     ).replace("(c)", "©")
     (contents / "Info.plist").write_bytes(
         plistlib.dumps(
             {
-                "CFBundleIdentifier": "dev.pot.go-preview",
-                "CFBundleName": "Pot Go",
-                "CFBundleDisplayName": "Pot Go",
+                "CFBundleIdentifier": "dev.pot.app" if release else "dev.pot.go-preview",
+                "CFBundleName": "Pot" if release else "Pot Go",
+                "CFBundleDisplayName": "Pot" if release else "Pot Go",
                 "CFBundleExecutable": binary.name,
                 "CFBundlePackageType": "APPL",
                 "CFBundleShortVersionString": version,

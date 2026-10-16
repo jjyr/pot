@@ -4,7 +4,7 @@ import AppKit
 import Foundation
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-let assets = root.appendingPathComponent("crates/app/assets")
+let assets = root.appendingPathComponent("resources/app/assets")
 func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
     NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
             green: CGFloat((value >> 8) & 255) / 255,
@@ -52,10 +52,10 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
 
 @main struct IconGenerator {
     @MainActor static func main() throws {
-        let avatarAssets = root.appendingPathComponent("crates/avatar/assets")
+        let avatarAssets = root.appendingPathComponent("web/src/assets")
         try FileManager.default.createDirectory(at: avatarAssets, withIntermediateDirectories: true)
         try renderMark(size: 256).write(to: avatarAssets.appendingPathComponent("PotMask.png"))
-        let uiAssets = root.appendingPathComponent("crates/ui/assets")
+        let uiAssets = root.appendingPathComponent("web/src/assets")
         try FileManager.default.createDirectory(at: uiAssets, withIntermediateDirectories: true)
         for cooking in [false, true] {
             try renderCompanion(size: 112, cooking: cooking)
@@ -97,12 +97,12 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
         </svg>
         """
         try wallpaper.write(
-            to: root.appendingPathComponent("crates/sandbox-images/linux/default/pot-wallpaper.svg"),
+            to: root.appendingPathComponent("resources/sandbox/linux/default/pot-wallpaper.svg"),
             atomically: true,
             encoding: .utf8
         )
 
-        let iconset = root.appendingPathComponent(".local/d1/Pot.iconset")
+        let iconset = root.appendingPathComponent(".local/go/Pot.iconset")
         try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
         for size in [16, 32, 128, 256, 512] {
             try render(size: size).write(to: iconset.appendingPathComponent("icon_\(size)x\(size).png"))

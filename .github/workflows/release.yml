@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   release:
-    # Sandbox image construction boots an Apple VM and needs a native Mac.
+    # Wails and retained Swift Helpers require an Apple Silicon Mac.
     runs-on: [self-hosted, macOS, ARM64, pot-release]
     timeout-minutes: 120
     env:
@@ -39,11 +39,9 @@ jobs:
           version: 2026.10.10
       - name: Prepare build prerequisites
         run: |
-          mise exec -- rustup component add rustfmt clippy
-          mise exec -- rustup target add aarch64-unknown-linux-musl
           mise run doctor
       - name: Build release
-        # Check packaging before the full build and VM image construction.
+        # Packaging does not build or embed Sandbox VM images.
         run: |
           mise run test:release
           mise run release "$RELEASE_TAG" --output "$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"

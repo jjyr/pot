@@ -11,6 +11,8 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
+import hashlib
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -28,6 +30,22 @@ def exporter():
 
 
 class GoPackaging(unittest.TestCase):
+    def test_tray_patch_refuses_source_or_patch_drift(self):
+        patch = (ROOT / "patches/wails-v3.0.0-beta.30-tray-aspect.patch").read_bytes()
+        lines = patch.decode().splitlines(keepends=True)
+        start = next(i for i, line in enumerate(lines) if line.startswith("@@ ")) + 1
+        source = "".join(line[1:] for line in lines[start:] if line.startswith((" ", "-"))).encode()
+        with mock.patch.object(
+            go_packaging, "WAILS_TRAY_SOURCE_HASH", hashlib.sha256(source).hexdigest()
+        ):
+            patched = go_packaging.apply_tray_patch(source, patch)
+            self.assertIn(b"originalSize.width / originalSize.height", patched)
+            self.assertNotIn(b"NSMakeSize(thickness, thickness)", patched)
+            with self.assertRaisesRegex(ValueError, "source changed"):
+                go_packaging.apply_tray_patch(source + b"changed", patch)
+            with self.assertRaisesRegex(ValueError, "patch changed"):
+                go_packaging.apply_tray_patch(source, patch + b"changed")
+
     def test_resource_exports_are_deterministic_and_reject_catalog_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

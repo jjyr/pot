@@ -5,7 +5,7 @@ on:
       tag:
         description: Resource tag already committed in the embedded catalog
         required: true
-        default: sandbox-resources-v0.1.0
+        default: sandbox-go-resources-v0.1.0
         type: string
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
           mise run prepare
           mise run check:swift
           mise run build:sandbox-image
-          mise exec -- python scripts/export-sandbox-resources --tag "$RESOURCE_TAG" --output "$RUNNER_TEMP/pot-sandbox-resources"
+          mise exec -- python scripts/export-go-sandbox-resources --tag "$RESOURCE_TAG" --output "$RUNNER_TEMP/pot-sandbox-resources"
       - name: Publish immutable resources
         env:
           GH_TOKEN: ${{ github.token }}

@@ -12,14 +12,14 @@ import shutil
 import subprocess
 
 REPO = Path(__file__).resolve().parents[1]
-APP = REPO / ".local/d1/Pot.app"
+APP = REPO / ".local/go/Pot.app"
 
 
 def package(app, output, version):
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     if info.get("CFBundleShortVersionString") != version:
         raise SystemExit("Bundle version does not match release version")
-    runtime = app / "Contents/Resources/runtime"
+    runtime = app / "Contents/Resources"
     for name in ["vmlinux", "init-image", "sandbox-image", "sandbox-image.json"]:
         if (runtime / name).exists():
             raise SystemExit("Release must not embed Sandbox resources: " + name)
@@ -50,13 +50,8 @@ def main():
         parser.error("version must be a numeric major.minor.patch version")
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("release builds require Apple Silicon macOS")
-    env = dict(os.environ, POT_BUILD_PROFILE="release", POT_APP_VERSION=version)
-    for command in ["prepare", "build"]:
-        subprocess.run([str(REPO / "scripts/pot"), command], check=True, env=env)
-    # A fresh bundle prevents development-only or removed files entering a release.
-    if APP.exists():
-        shutil.rmtree(APP)
-    subprocess.run([str(REPO / "scripts/pot"), "bundle"], check=True, env=env)
+    env = dict(os.environ, POT_APP_RELEASE="1", POT_APP_VERSION=version)
+    subprocess.run(["python3", str(REPO / "scripts/build-go-app")], check=True, env=env)
     package(APP, args.output.resolve(), version)
 
 

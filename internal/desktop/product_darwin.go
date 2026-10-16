@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jjyr/pot/internal/attention"
 	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/core"
@@ -30,14 +31,17 @@ import (
 // Service is the desktop adapter to the same application contract used by CLI
 // and browser. Exported bindings contain no lifecycle or credential access.
 type Service struct {
-	ctx           context.Context
-	app           *application.App
-	api           *transport.Application
-	spaces        *spaces.Manager
-	native        *nativeDesktop
-	main, tray    *application.WebviewWindow
-	mu            sync.Mutex
-	subscriptions map[string]context.CancelFunc
+	ctx                       context.Context
+	app                       *application.App
+	api                       *transport.Application
+	spaces                    *spaces.Manager
+	native                    *nativeDesktop
+	main, tray                *application.WebviewWindow
+	mu                        sync.Mutex
+	subscriptions             map[string]context.CancelFunc
+	reads                     *attention.Store
+	attentionWake             chan struct{}
+	reduceMotion, motionKnown bool
 }
 
 func (s *Service) Call(ctx context.Context, method, path, body string) (string, error) {
@@ -93,7 +97,7 @@ func Run(root string) error {
 		return err
 	}
 	defer runtime.Close()
-	api := &transport.Application{Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+	api := &transport.Application{RuntimeResources: runtime.ResourceCall, Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
 	api.About = func(context.Context) (any, error) { return productinfo.Read(runtime.AssetDirectory) }
 	socket, err := transport.StartSocket(ctx, runtime.Root.Path, api)
 	if err != nil {
@@ -104,10 +108,15 @@ func Run(root string) error {
 		defer cancel()
 		socket.Close(ctx)
 	}()
-	service := &Service{ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}}
+	reads, err := attention.Open(filepath.Join(runtime.Root.Path, "assistant-reads.json"))
+	if err != nil {
+		return err
+	}
+	service := &Service{ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}, reads: reads, attentionWake: make(chan struct{}, 1)}
 	localClient := socket.Endpoint.Client()
 	localClient.Timeout = 0
 	manager, err := spaces.Open(ctx, spaces.Options{Path: filepath.Join(runtime.Root.Path, "app-spaces.json"), Local: spaces.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnChange: func(space string, topics json.RawMessage) {
+		service.wakeAttention()
 		if service.app != nil {
 			var value any
 			if json.Unmarshal(topics, &value) == nil {
@@ -151,8 +160,14 @@ func Run(root string) error {
 	tray := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "pot-tray", Title: "Pot", Width: 380, Height: 560, URL: "/?platform=desktop&surface=tray", Frameless: true, AlwaysOnTop: true, Hidden: true, DisableResize: true, HideOnEscape: true, HideOnFocusLost: true})
 	tray.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { tray.Hide(); e.Cancel() })
 	service.main, service.tray = main, tray
+	// A Dock reopen belongs to the main window; Wails' default handler reveals
+	// every hidden window, including the compact tray and isolated viewer.
+	app.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(e *application.ApplicationEvent) {
+		service.OpenMain()
+		e.Cancel()
+	})
 	status := app.SystemTray.New()
-	status.SetTemplateIcon(trayIcon)
+	status.SetIcon(trayIcon)
 	status.SetTooltip("Pot")
 	status.AttachWindow(tray).WindowOffset(5)
 	menu := app.NewMenu()
@@ -165,7 +180,9 @@ func Run(root string) error {
 	trayMenu.AddSeparator()
 	trayMenu.Add("Quit Pot").OnClick(func(*application.Context) { app.Quit() })
 	status.SetMenu(trayMenu)
+	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) { service.wakeAttention() })
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		go service.runAttention(ctx, status)
 		go func() {
 			sub := manager.Changes.Subscribe()
 			defer sub.Close()
@@ -174,6 +191,7 @@ func Run(root string) error {
 				if err != nil {
 					return
 				}
+				service.wakeAttention()
 				catalog := manager.Snapshot()
 				service.app.Event.Emit("pot:changed", map[string]any{"space_id": "", "topics": topics})
 				for _, space := range catalog.Items {

@@ -1,6 +1,6 @@
 amends "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Config.pkl"
 
-// Four independent CI groups; Cargo tasks share one sequential group.
+// Independent portable product, native Helper, script and notice checks.
 jobs = 4
 
 hooks {
@@ -8,7 +8,7 @@ hooks {
     fix = false
     steps {
       ["sources"] {
-        glob = List("**/*.rs", "**/*.go", "**/*.swift", "**/*.py", "**/*.sh", "scripts/*", "mise.toml", "ruff.toml", ".swiftformat", "hk.pkl")
+        glob = List("**/*.go", "**/*.swift", "**/*.py", "**/*.sh", "scripts/*", "mise.toml", "ruff.toml", ".swiftformat", "hk.pkl")
         check = "python scripts/timed-check pre-commit:sources mise exec -- python scripts/dev-check lint {{files}}"
       }
       ["whitespace"] {
@@ -19,22 +19,19 @@ hooks {
   ["pre-push"] {
     fix = false
     steps {
-      ["rust"] {
-        check = new Script {
-          macos = "python scripts/timed-check pre-push:rust sh -c 'mise run clippy && mise run test && mise run test:ui && mise run test:app && mise run test:eval'"
-          linux = "python scripts/timed-check pre-push:rust sh -c 'mise run clippy:backend && mise run test && mise run test:ui && mise run test:eval'"
-        }
+      ["go"] {
+        check = "python scripts/timed-check pre-push:go sh -c 'mise run check:go && mise run test'"
       }
       ["macos"] {
         check = new Script {
-          macos = "python scripts/timed-check pre-push:macos sh -c 'mise run lint && mise run check:swift'"
+          macos = "python scripts/timed-check pre-push:macos sh -c 'mise run lint && mise run check:swift && mise run test:release'"
         }
       }
       ["scripts"] {
-        check = "python scripts/timed-check pre-push:scripts sh -c 'mise run test:hooks && mise run test:release && mise run test:executor && mise run test:skills && mise run test:skill-authoring'"
+        check = "python scripts/timed-check pre-push:scripts sh -c 'mise run test:hooks && mise run test:executor && mise run test:skills && mise run test:operation-prepare'"
       }
       ["licenses"] {
-        check = "python scripts/timed-check pre-push:licenses sh -c 'mise run licenses && mise run test:licenses'"
+        check = "python scripts/timed-check pre-push:licenses sh -c 'mise run licenses'"
       }
     }
   }

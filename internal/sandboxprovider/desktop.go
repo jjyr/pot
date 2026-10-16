@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -136,7 +137,23 @@ func (p *AppleContainer) DesktopMetrics(ctx context.Context, i sandbox.Instance)
 	if err != nil {
 		return nil, err
 	}
-	return e.request(ctx, http.MethodGet, "/api/metrics", nil)
+	raw, err := e.request(ctx, http.MethodGet, "/api/metrics", nil)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if fields == nil {
+		return nil, errors.New("desktop metrics object required")
+	}
+	var prepared sandbox.PreparedResources
+	if err = loadJSON(filepath.Join(i.Directory(), "prepared-resources.json"), &prepared); err != nil {
+		return nil, err
+	}
+	fields["image"], _ = json.Marshal(prepared.ImageReference)
+	return json.Marshal(fields)
 }
 func (p *AppleContainer) DesktopBrowser(ctx context.Context, i sandbox.Instance) error {
 	e, err := p.desktopEndpoint(ctx, i)

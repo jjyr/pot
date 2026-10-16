@@ -71,7 +71,7 @@ func (m *displayDouble) OpenDesktop(context.Context, sandbox.DesktopBinding) (io
 	return a, nil
 }
 func (m *displayDouble) DesktopMetrics(context.Context, sandbox.DesktopBinding) (json.RawMessage, error) {
-	return json.RawMessage(`{"cpu_percent":2,"token":"must-not-leak","viewer":"http://guest","image":"test"}`), nil
+	return json.RawMessage(`{"os":"linux","cpu_percent":2,"token":"must-not-leak","viewer":"http://guest","image":"test"}`), nil
 }
 func (m *displayDouble) DesktopBrowser(context.Context, sandbox.DesktopBinding) error { return nil }
 func setupGateway(t *testing.T) (*Service, *httptest.Server, *displayDouble, *atomic.Bool) {
@@ -178,7 +178,7 @@ func TestTicketsRequireLoginAndBindOwnerAndRoutes(t *testing.T) {
 		}
 	}
 	status, data := request(t, server, "first", "GET", "/desktop/"+id+"/api/metrics", "")
-	if status != 200 || bytes.Contains(data, []byte("must-not-leak")) || bytes.Contains(data, []byte("guest")) {
+	if status != 200 || !bytes.Contains(data, []byte(`"os":"linux"`)) || bytes.Contains(data, []byte("must-not-leak")) || bytes.Contains(data, []byte("guest")) {
 		t.Fatalf("metrics %d %s", status, data)
 	}
 	req, _ := http.NewRequest("POST", server.URL+"/desktop/"+id+"/api/control", strings.NewReader(`{"action":"take"}`))

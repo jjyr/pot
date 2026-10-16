@@ -54,7 +54,7 @@ class ReleasePackaging(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="pot-release-test-") as directory:
             root = Path(directory)
             app = root / "Pot.app"
-            runtime = app / "Contents/Resources/runtime"
+            runtime = app / "Contents/Resources"
             runtime.mkdir(parents=True)
             (app / "Contents/Info.plist").write_bytes(
                 plistlib.dumps({"CFBundleShortVersionString": "0.1.0"})

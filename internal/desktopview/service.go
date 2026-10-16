@@ -358,13 +358,13 @@ func (s *Service) metrics(w http.ResponseWriter, r *http.Request, v *viewer) {
 		return
 	}
 	safe := map[string]any{"sandbox_id": v.binding.SandboxID}
-	for _, key := range []string{"image", "image_bytes", "cpu_percent", "cpus", "memory_used", "memory_total", "memory_gib", "disk_used", "disk_total", "workspace_bytes", "uptime_seconds"} {
+	for _, key := range []string{"os", "image", "image_bytes", "cpu_percent", "cpus", "memory_used", "memory_total", "memory_gib", "disk_used", "disk_total", "workspace_bytes", "uptime_seconds"} {
 		value := fields[key]
 		switch value := value.(type) {
 		case json.Number:
 			safe[key] = value
 		case string:
-			if key == "image" && len(value) <= 256 {
+			if key == "image" && len(value) <= 256 || key == "os" && (value == "linux" || value == "macos") {
 				safe[key] = value
 			}
 		}

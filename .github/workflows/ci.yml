@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
+    branches: [main]
     tags: ["v*.*.*"]
-  release:
-    types: [published]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -14,15 +14,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Install only each job's explicit tool subset; mise run/exec otherwise installs
-# every tool in mise.toml, including the unrelated cargo-zigbuild source build.
 env:
   MISE_AUTO_INSTALL: 'false'
-  CARGO_INCREMENTAL: '0'
 
 jobs:
-  go-migration:
-    name: Go migration (${{ matrix.os }})
+  product:
+    name: Go product (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -36,173 +33,28 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.10.10
-          install_args: go python node
+          install_args: go python node ruff shfmt shellcheck swiftformat
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: go-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum', 'mise.toml') }}
+          restore-keys: go-v1-${{ runner.os }}-${{ runner.arch }}-
       - run: mise run check:go
-      - run: mise run test:go
-      - run: mise run test:go-ui
-      - run: mise run test:go-packaging
+      - run: mise run test
+      - run: mise run test:executor
+      - run: mise run test:skills
+      - run: mise run test:operation-prepare
+      - run: mise run test:i18n
+      - run: mise run test:hooks
+      - run: mise run licenses
       - run: mise run build:go
       - run: mise run build:go-linux
       - if: runner.os == 'macOS'
+        run: mise run lint
+      - if: runner.os == 'macOS'
+        run: mise run test:release
+      - if: runner.os == 'macOS'
         run: mise run build:go-app
-
-  licenses:
-    name: Rust dependency licenses
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
-        with:
-          version: 2026.10.10
-          install_args: rust mr-boxington python github:EmbarkStudios/cargo-about
-      - name: Restore license sources
-        id: license-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: license-sources-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: license-sources-v1-${{ runner.os }}-
-      - run: mise run licenses
-      - run: mise run test:licenses
-      - name: Save license sources
-        if: github.ref == 'refs/heads/main' && steps.license-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ steps.license-cache.outputs.cache-primary-key }}
-
-  backend:
-    name: Linux backend and deterministic eval
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
-        with:
-          version: 2026.10.10
-          install_args: rust mr-boxington python conda:brotli-bin
-      - run: mise exec -- rustup component add clippy
-      # objects supports the explicit Cargo target directory in mise.toml.
-      - name: Restore mr-boxington build cache
-        uses: jdx/mr-boxington-action@47ce49b32025d93a7a2f4570815afaa2b7092240 # v1
-        with:
-          github-cache-mode: objects
-          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      # objects excludes Cargo downloads; rustup's WASM build bypasses mbx.
-      - name: Restore Cargo downloads and Web build cache
-        id: cargo-inputs-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .local/poc/cargo-target/pot-web
-          key: cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
-          restore-keys: |
-            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
-            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-
-      - run: mise run test:web-assets
-      - run: mise run clippy:backend
-      - run: mise run test
-      - run: mise run test:ui
-      - run: mise run test:executor
-      - run: mise run test:skills
-      - run: mise run test:eval
-      - name: Save Cargo downloads and Web build cache
-        if: github.ref == 'refs/heads/main' && steps.cargo-inputs-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .local/poc/cargo-target/pot-web
-          key: ${{ steps.cargo-inputs-cache.outputs.cache-primary-key }}
-
-  macos:
-    name: macOS formatting, App and Swift Helper
-    runs-on: macos-26
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
-        with:
-          version: 2026.10.10
-          install_args: rust mr-boxington python conda:brotli-bin ruff shfmt shellcheck swiftformat
-      - name: Check platform prerequisites
-        run: |
-          test "$(uname -m)" = arm64
-          xcodebuild -version
-          swift --version
-          mise exec -- rustup component add rustfmt clippy
-      # objects supports the explicit Cargo target directory in mise.toml.
-      - name: Restore mr-boxington build cache
-        uses: jdx/mr-boxington-action@47ce49b32025d93a7a2f4570815afaa2b7092240 # v1
-        with:
-          github-cache-mode: objects
-          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      # objects excludes Cargo downloads; rustup's WASM build bypasses mbx.
-      - name: Restore Cargo downloads and Web build cache
-        id: cargo-inputs-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .local/poc/cargo-target/pot-web
-          key: cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
-          restore-keys: |
-            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
-            cargo-inputs-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Identify Xcode toolchain
-        id: xcode-version
-        run: echo "hash=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Restore Swift build cache
-        id: swift-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            .local/d1/helper-build
-            .local/d1/swift-modules
-            .local/d1/clang-modules
-          key: swift-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode-version.outputs.hash }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift') }}-${{ github.sha }}
-          restore-keys: |
-            swift-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode-version.outputs.hash }}-${{ hashFiles('helper/Package.resolved', 'helper/Package.swift') }}-
-            swift-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode-version.outputs.hash }}-
-      - run: mise run check
-      - run: mise run clippy
-      - run: mise run test
-      - run: mise run test:ui
-      - run: mise run test:app
-      - run: mise run test:release
-      - run: mise run test:executor
-      - run: mise run test:skills
-      - run: mise run test:skill-authoring
-      - name: Save Cargo downloads and Web build cache
-        if: github.ref == 'refs/heads/main' && steps.cargo-inputs-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .local/poc/cargo-target/pot-web
-          key: ${{ steps.cargo-inputs-cache.outputs.cache-primary-key }}
-      - name: Save Swift build cache
-        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            .local/d1/helper-build
-            .local/d1/swift-modules
-            .local/d1/clang-modules
-          key: ${{ steps.swift-cache.outputs.cache-primary-key }}

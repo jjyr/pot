@@ -1,7 +1,9 @@
 """Shared deterministic inputs for Go-only product packaging."""
 
 import hashlib
+import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,6 +20,9 @@ NODE_HASHES = {
     "linux-amd64": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
 }
 NOVNC_HASH = "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6"
+WAILS_VERSION = "v3.0.0-beta.30"
+WAILS_TRAY_SOURCE_HASH = "eadc44b2c628ef6ec9c3c568792c945f14be2a412ab14174b642386e9d15809e"
+WAILS_TRAY_PATCH_HASH = "b658e13aea5f08e3a4b303c8a5b760928edaefa8f4ca6a9323766e8e8160a19c"
 
 
 def call(arguments, **options):
@@ -53,6 +58,85 @@ def extract(archive, destination):
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive) as source:
         source.extractall(destination, filter="data")
+
+
+def apply_pinned_patch(source, patch, source_hash, patch_hash):
+    if hashlib.sha256(source).hexdigest() != source_hash:
+        raise ValueError("Wails tray source changed; review the pinned patch")
+    if hashlib.sha256(patch).hexdigest() != patch_hash:
+        raise ValueError("Wails tray patch changed; review and update its pinned hash")
+    lines = patch.decode().splitlines(keepends=True)
+    starts = [i for i, line in enumerate(lines) if line.startswith("@@ ")]
+    if not starts:
+        raise ValueError("Wails tray patch hunk required")
+    for position, start in enumerate(starts):
+        end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        hunk = lines[start + 1 : end]
+        old = "".join(line[1:] for line in hunk if line.startswith((" ", "-"))).encode()
+        new = "".join(line[1:] for line in hunk if line.startswith((" ", "+"))).encode()
+        if not old or source.count(old) != 1:
+            raise ValueError("Wails tray patch context changed")
+        source = source.replace(old, new, 1)
+    return source
+
+
+def apply_tray_patch(source, patch):
+    return apply_pinned_patch(source, patch, WAILS_TRAY_SOURCE_HASH, WAILS_TRAY_PATCH_HASH)
+
+
+def prepare_wails_module(work):
+    """Patch only a disposable module copy; leave the source cache untouched."""
+    module = json.loads(
+        subprocess.check_output(
+            ["go", "list", "-mod=readonly", "-m", "-json", "github.com/wailsapp/wails/v3"],
+            cwd=ROOT,
+        )
+    )
+    if module.get("Version") != WAILS_VERSION or module.get("Replace"):
+        raise ValueError("Pinned Wails beta.30 without an existing replacement required")
+    original = Path(module["Dir"])
+    modifications = [
+        (
+            "pkg/application/systemtray_darwin.m",
+            "wails-v3.0.0-beta.30-tray-aspect.patch",
+            WAILS_TRAY_SOURCE_HASH,
+            WAILS_TRAY_PATCH_HASH,
+        ),
+        (
+            "pkg/application/systemtray_darwin.go",
+            "wails-v3.0.0-beta.30-tray-accessibility.patch",
+            "415547a6508f920432becbe69400fcc9f99e050dd81c6f86d5f4c611bd8f6c18",
+            "3e8b13f6e7c6a0fcf460b67c8ae4ca9fdb29aceeb58512f82e254934b369dc13",
+        ),
+    ]
+    sources = []
+    for relative, patch_name, source_hash, patch_hash in modifications:
+        source = (original / relative).read_bytes()
+        patched = apply_pinned_patch(
+            source, (ROOT / "patches" / patch_name).read_bytes(), source_hash, patch_hash
+        )
+        sources.append((relative, source, patched))
+    local = work / "wails"
+    shutil.copytree(original, local)
+    for relative, source, patched in sources:
+        destination = local / relative
+        destination.chmod(0o600)
+        destination.write_bytes(patched)
+        if (original / relative).read_bytes() != source:
+            raise ValueError("Upstream module cache changed during preparation")
+    modfile = work / "app.mod"
+    shutil.copy2(ROOT / "go.mod", modfile)
+    shutil.copy2(ROOT / "go.sum", work / "app.sum")
+    call(
+        [
+            "go",
+            "mod",
+            "edit",
+            "-modfile=" + str(modfile),
+            "-replace=github.com/wailsapp/wails/v3=" + str(local),
+        ]
+    )
+    return modfile
 
 
 def copy_tree(source, destination):
@@ -93,12 +177,36 @@ def novnc():
     return target
 
 
+def linker_flags(stripped=True):
+    version = os.environ.get("POT_APP_VERSION", "0.1.0")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError("POT_APP_VERSION must be major.minor.patch")
+    revision = os.environ.get("POT_BUILD_REVISION")
+    if revision is None:
+        environment = {
+            key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+        }
+        revision = subprocess.check_output(
+            ["git", "rev-parse", "--short=12", "HEAD"], cwd=ROOT, env=environment, text=True
+        ).strip()
+        if subprocess.run(["git", "diff", "--quiet"], cwd=ROOT, env=environment).returncode:
+            revision += "-dirty"
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", revision):
+        raise ValueError("Invalid POT_BUILD_REVISION")
+    values = ["-s", "-w"] if stripped else []
+    values += [
+        "-X=github.com/jjyr/pot/internal/buildinfo.Version=" + version,
+        "-X=github.com/jjyr/pot/internal/buildinfo.Revision=" + revision,
+        "-X=github.com/jjyr/pot/internal/eval.Revision=" + revision,
+    ]
+    return " ".join(values)
+
+
 def go_build(package, destination, platform, stripped=True):
     goos, goarch = platform.split("-")
     destination.parent.mkdir(parents=True, exist_ok=True)
     arguments = ["go", "build", "-mod=readonly", "-trimpath"]
-    if stripped:
-        arguments += ["-ldflags=-s -w"]
+    arguments += ["-ldflags=" + linker_flags(stripped)]
     arguments += ["-o", destination, package]
     call(arguments, env={**os.environ, "GOOS": goos, "GOARCH": goarch, "CGO_ENABLED": "0"})
 
@@ -179,6 +287,7 @@ def prepare_resources(destination, platform):
         copy_tree(source, destination / name)
     copy_tree(destination / "novnc", destination / "desktop-assets")
     shutil.copy2(ROOT / "LICENSE", destination / "LICENSE.txt")
+    shutil.copy2(ROOT / "resources/models-dev/LICENSE", destination / "ModelDirectoryLicense.txt")
     shutil.copy2(
         ROOT / "web/src/assets/IBMPlexSans-OFL.txt", destination / "FrontendFontLicense.txt"
     )

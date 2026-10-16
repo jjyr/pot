@@ -88,7 +88,24 @@ func (m *Manager) DesktopMetrics(ctx context.Context, binding DesktopBinding) (j
 	if err != nil {
 		return nil, err
 	}
-	return p.DesktopMetrics(ctx, i)
+	raw, err := p.DesktopMetrics(ctx, i)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if fields == nil {
+		return nil, errors.New("desktop metrics object required")
+	}
+	if provider, ok := p.(Provider); ok {
+		fields["os"], _ = json.Marshal(provider.Descriptor().OS)
+	}
+	if fields["cpus"] == nil {
+		fields["cpus"], _ = json.Marshal(i.Resources.CPUs)
+	}
+	return json.Marshal(fields)
 }
 func (m *Manager) DesktopBrowser(ctx context.Context, binding DesktopBinding) error {
 	p, i, err := m.desktop(ctx, binding)

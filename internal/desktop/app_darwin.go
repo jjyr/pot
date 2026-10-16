@@ -14,8 +14,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
-// These unchanged Pot assets come from crates/app/assets; they remain available
-// to this host independently of the Rust application during retirement.
+// Pot brand artwork is embedded independently of external runtime resources.
+// The canonical vector source is resources/app/PotIcon.swift.
 //
 //go:embed assets/Pot.png
 var appIcon []byte

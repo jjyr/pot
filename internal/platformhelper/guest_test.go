@@ -34,7 +34,7 @@ func TestRetainedPythonHealthAndPrepareProtocol(t *testing.T) {
 	if err != nil {
 		t.Skip("python3 unavailable")
 	}
-	source, err := filepath.Abs("../../crates/sandbox-images/macos/xcode")
+	source, err := filepath.Abs("../../resources/sandbox/macos/xcode")
 	if err != nil {
 		t.Fatal(err)
 	}
