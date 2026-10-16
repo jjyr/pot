@@ -54,12 +54,12 @@ class ReleasePackaging(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="pot-release-test-") as directory:
             root = Path(directory)
             app = root / "Pot.app"
-            runtime = app / "Contents/Resources/runtime"
+            runtime = app / "Contents/Resources"
             runtime.mkdir(parents=True)
             (app / "Contents/Info.plist").write_bytes(
                 plistlib.dumps({"CFBundleShortVersionString": "0.1.0"})
             )
-            (runtime / "vmlinux").write_bytes(b"kernel")
+            (runtime / "sandbox-image").mkdir()
             with self.assertRaisesRegex(SystemExit, "must not embed"):
                 package(app, root / "output", "0.1.0")
             self.assertFalse((root / "output").exists())

@@ -1,0 +1,50 @@
+# Direct Debian packages resolved only from base-image.json's frozen snapshot.
+# The signed snapshot fixes transitive versions for each target architecture;
+# /opt/pot/installed-packages.txt records the complete resolved dpkg inventory.
+# Node/npm and the original GTK theme/fonts are checksum-pinned prepared assets.
+adwaita-icon-theme
+bash
+build-essential
+ca-certificates
+chromium
+chromium-sandbox
+curl
+dbus-x11
+file
+fontconfig
+fonts-noto-core
+fonts-noto-cjk
+fonts-noto-color-emoji
+git
+libssl-dev
+passwd
+patch
+pkg-config
+procps
+python3
+python3-aiohttp
+python3-numpy
+python3-pip
+python3-requests
+python3-venv
+python3-websocket
+python3-yaml
+ripgrep
+thunar
+tigervnc-standalone-server
+tini
+util-linux
+websockify
+xauth
+xdg-utils
+xfce4-panel
+xfce4-settings
+xfce4-terminal
+xfconf
+xfdesktop4
+xfwm4
+xfonts-base
+xinit
+x11-xserver-utils
+xterm
+xz-utils

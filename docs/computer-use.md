@@ -62,7 +62,7 @@ Model code cannot change the mode. Canvas or inaccessible content may require vi
 
 ## CUA REPL
 
-`cua_repl` is exposed to pot-agent and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls during the active execution. Use `execution_target:"host"` or `"sandbox:ID"` to choose a target; Omitted targets follow the Agent default for new sessions and the original execution target for existing sessions. Sessions cannot switch execution targets. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
+`cua_repl` is exposed to `pkg/agent` and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls during the active execution. Use `execution_target:"host"` or `"sandbox:ID"` to choose a target; Omitted targets follow the Agent default for new sessions and the original execution target for existing sessions. Sessions cannot switch execution targets. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
 
 ```javascript
 let tab = await cua.open("https://example.com");
@@ -80,6 +80,12 @@ state = await tab.click({element: "9", sequence: state.sequence});
 The API provides `cua.open`, `cua.getTab`, `cua.getState`, and tab methods `navigate`, `observe`, `fill`, `click`, `press`, `scroll`, `close`. Each operation emits and returns a fresh observation. Actions require the current sequence and observed element ID. Await operations sequentially; concurrent actions are rejected. `nodeRepl.write` and `console.log` emit text.
 
 Closing the tab preserves JS state. End the REPL with `reset:true` and its existing `session_id`; reset without an ID is rejected. Each REPL supports one tab. Popups, frame targeting, uploads/downloads and unrestricted CDP/page evaluation are not exposed.
+
+Closing requests graceful Chromium shutdown before removing its temporary
+profile. Concurrent closes share one shutdown. A forced or unexpected browser
+exit retains the profile and reports unconfirmed cleanup; reset/disposal must
+confirm the enclosing process group or Guest cgroup has stopped before removing
+private files. Browser actions are never retried as part of shutdown.
 
 ## Plugin contract and lifecycle
 
@@ -104,7 +110,7 @@ Rebuild the Linux image with the current executor and broker; older published im
 ```sh
 mise run test
 mise run test:executor
-mise exec -- cargo build --locked -p pot-tool-executor --bin pot-tool-executor
+mise run build:go
 mise run test:browser -- --chromium /usr/bin/chromium
 ```
 

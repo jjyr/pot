@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Stage only reviewed resource bytes selected by the committed catalog tag."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def selected_assets(catalog, tag):
+    if not re.fullmatch(r"sandbox-go-resources-v\d+\.\d+\.\d+", tag):
+        raise ValueError("Invalid Sandbox resource release tag")
+    if catalog.get("schema_version") != 2 or not isinstance(catalog.get("resources"), dict):
+        raise ValueError("Unsupported Sandbox resource catalog")
+    assets = []
+    names = set()
+    for entry in catalog["resources"].values():
+        if not isinstance(entry, dict):
+            raise ValueError("Invalid catalog resource")
+        if entry.get("release_tag") != tag:
+            continue
+        name, checksum, size = (
+            entry.get("filename"),
+            entry.get("sha256"),
+            entry.get("size_bytes"),
+        )
+        if (
+            not isinstance(name, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}", name)
+            or name in names
+            or not isinstance(checksum, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", checksum)
+            or type(size) is not int
+            or size <= 0
+        ):
+            raise ValueError("Invalid or duplicate catalog asset")
+        names.add(name)
+        assets.append((name, checksum, size))
+    if not assets:
+        raise ValueError("No catalog resources belong to the requested release tag")
+    return sorted(assets)
+
+
+def stage_assets(source, output, tag, catalog_path):
+    source, output = Path(source), Path(output)
+    if not source.is_absolute() or not output.is_absolute():
+        raise ValueError("Prepared asset and output paths must be absolute")
+    if os.path.lexists(output):
+        raise ValueError("Output must not already exist")
+    assets = selected_assets(json.loads(Path(catalog_path).read_text()), tag)
+    # Open names relative to one pinned directory descriptor. O_NOFOLLOW rejects
+    # links even if a source is replaced between inspection and opening it.
+    directory = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with tempfile.TemporaryDirectory(prefix=".pot-resources-", dir=output.parent) as temporary:
+            staged = Path(temporary) / "assets"
+            staged.mkdir(mode=0o700)
+            for name, expected_hash, expected_size in assets:
+                descriptor = os.open(
+                    name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                )
+                with os.fdopen(descriptor, "rb") as incoming:
+                    info = os.fstat(incoming.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_size != expected_size:
+                        raise ValueError(f"Resource size/type mismatch: {name}")
+                    checksum, count = hashlib.sha256(), 0
+                    destination = staged / name
+                    with destination.open("xb") as outgoing:
+                        destination.chmod(0o600)
+                        while chunk := incoming.read(1024 * 1024):
+                            count += len(chunk)
+                            if count > expected_size:
+                                raise ValueError(f"Resource size mismatch: {name}")
+                            checksum.update(chunk)
+                            outgoing.write(chunk)
+                    if count != expected_size or checksum.hexdigest() != expected_hash:
+                        raise ValueError(f"Resource checksum/size mismatch: {name}")
+            if os.path.lexists(output):
+                raise ValueError("Output must not already exist")
+            staged.rename(output)
+    finally:
+        os.close(directory)
+    return {"tag": tag, "files": [str(output / name) for name, _, _ in assets]}
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--source", type=Path, required=True, help="Absolute reviewed export directory"
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Fresh absolute staging directory"
+    )
+    parser.add_argument("--tag", required=True)
+    parser.add_argument("--catalog", type=Path, default=ROOT / "resources/sandbox/catalog.json")
+    arguments = parser.parse_args()
+    print(
+        json.dumps(
+            stage_assets(arguments.source, arguments.output, arguments.tag, arguments.catalog)
+        )
+    )

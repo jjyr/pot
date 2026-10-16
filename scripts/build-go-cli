@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Build portable Go CLI/runtime archives with retained runtime assets."""
+
+import argparse
+from pathlib import Path
+import platform
+import shutil
+import tarfile
+import tempfile
+
+from go_packaging import (
+    BUILD,
+    NODE_HASHES,
+    ROOT,
+    call,
+    digest,
+    go_build,
+    prepare_resources,
+    swift_helpers,
+)
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--platform",
+    choices=NODE_HASHES,
+    default={
+        "Darwin": "darwin-arm64",
+        "Linux": "linux-"
+        + {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine(), "unsupported"),
+    }.get(platform.system()),
+)
+parser.add_argument("--output", type=Path, default=BUILD / "releases")
+args = parser.parse_args()
+if args.platform == "darwin-arm64" and platform.system() != "Darwin":
+    parser.error("macOS archives include signed Swift Helpers and must be built on macOS")
+BUILD.mkdir(parents=True, exist_ok=True)
+args.output.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(prefix=".go-cli-", dir=BUILD) as temporary:
+    staged = Path(temporary) / ("pot-go-" + args.platform)
+    resources = staged / "Resources"
+    prepare_resources(resources, args.platform)
+    for name in ("pot", "pot-tool-executor"):
+        go_build("./cmd/" + name, staged / "bin" / name, args.platform)
+    if args.platform == "darwin-arm64":
+        helpers = swift_helpers()
+        for name in ("PotMacOSHelper",):
+            shutil.copy2(helpers / name, staged / "bin" / name)
+        shutil.copy2(
+            helpers / "SwiftDependencyLicenses.txt", resources / "SwiftDependencyLicenses.txt"
+        )
+    call(
+        [
+            "python3",
+            ROOT / "scripts/render-go-service",
+            "--binary",
+            staged / "bin/pot",
+            "--output",
+            staged / "service/pot-go-runtime.service",
+            "--template",
+        ]
+    )
+    archive = args.output / (staged.name + ".tar.gz")
+    with tarfile.open(archive, "w:gz") as target:
+        target.add(staged, arcname=staged.name)
+    archive.with_suffix(archive.suffix + ".sha256").write_text(
+        f"{digest(archive)}  {archive.name}\n"
+    )
+print(archive.resolve())

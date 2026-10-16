@@ -1,13 +1,13 @@
 # Control secrets
 
-Control is the only configuration owner. Its `product/control.sqlite` stores
+Control is the only configuration owner. Its `control.sqlite` stores
 Provider metadata in `providers` and encrypted values in `secrets`. Provider
 metadata contains an immutable `secret_ref`; public API responses report whether
 a credential is configured, not its value. Assistant instructions remain scoped
 SQLite records in the owning assistant store. Project AGENTS.md and project
 Skills are still read from the actual execution workspace.
 
-`pot-secrets` encrypts each value with AES-256-GCM and a fresh 96-bit nonce. The
+`internal/secrets` encrypts each value with AES-256-GCM and a fresh 96-bit nonce. The
 secret reference is authenticated associated data. A reference is immutable:
 repeating the same save is accepted, replacing its value is rejected. Provider
 configuration changes create new references, so existing Task routes remain
@@ -16,7 +16,7 @@ fixed. SQLite pages and journals only receive ciphertext for secret values.
 ## Master key
 
 The master key is not stored in SQLite. On macOS, Control uses a Keychain item
-under service `pot.control.secrets` with the Control data path as its account.
+under service `pot.control.secrets` with account `go/<Control Runtime ID>`.
 The item is created on the first secret write. A locked or unavailable Keychain
 fails the operation; it never falls back to plaintext storage.
 
@@ -56,5 +56,5 @@ A future task-secret delivery protocol must bind references to the selected
 run/execution target and inject values into tools rather than model context. The
 current secret store does not imply an export API or Runner access to all secrets.
 
-No plaintext `providers.json` reader, import or fallback exists. Old files are
-not modified or deleted. Historical configuration must be recreated explicitly.
+Provider credentials are configured through Control; there is no plaintext
+credential-file reader or import endpoint.

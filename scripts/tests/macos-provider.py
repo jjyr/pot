@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "crates/sandbox-images/linux/default"))
+sys.path.insert(0, str(ROOT / "resources/sandbox/linux/default"))
 spec = importlib.util.spec_from_file_location(
-    "macos_executor", ROOT / "crates/sandbox-images/macos/xcode/executor.py"
+    "macos_executor", ROOT / "resources/sandbox/macos/xcode/executor.py"
 )
 broker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(broker)
@@ -155,8 +155,12 @@ with tempfile.TemporaryDirectory(prefix="pot-macos-test-") as temporary:
             while True:
                 conn, _ = listener.accept()
                 with conn:
-                    conn.sendall(b"RFB 003.008\n")
-                    data = conn.recv(64)
+                    try:
+                        conn.sendall(b"RFB 003.008\n")
+                        data = conn.recv(64)
+                    except (BrokenPipeError, ConnectionResetError):
+                        # Readiness probes connect and close without an RFB session.
+                        continue
                     if data:
                         conn.sendall(data)
                         return

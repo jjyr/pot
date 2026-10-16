@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-DESTINATION = ROOT / "crates/control/assets/model-directory.json"
+DESTINATION = ROOT / "resources/model-directory.json"
 FIELDS = ("name", "limit", "modalities", "tool_call", "provider", "status", "type")
 LOGOS = (
     "openai",

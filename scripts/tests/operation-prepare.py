@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 SOURCE = (
-    Path(__file__).resolve().parents[2] / "crates/sandbox-images/linux/default/operation_prepare.py"
+    Path(__file__).resolve().parents[2] / "resources/sandbox/linux/default/operation_prepare.py"
 )
 spec = importlib.util.spec_from_file_location("operation_prepare", SOURCE)
 module = importlib.util.module_from_spec(spec)

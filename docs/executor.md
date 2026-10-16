@@ -1,9 +1,9 @@
 # Sandbox command execution
 
-The Host Agent (pot-agent) calls the same role-scoped tools. Runtime validates
-arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. pot-agent also routes these same tool names to
+The Host Agent (`pkg/agent`) calls the same role-scoped tools. Runtime validates
+arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. `pkg/agent` also routes these same tool names to
 Host after its [permission gate](permissions.md).
-`execution_target` selects Host or a Sandbox for pot-agent. Main uses the machine execution policy and
+`execution_target` selects Host or a Sandbox for `pkg/agent`. Main uses the machine execution policy and
 tasks resolve policy at dispatch and retain that context only for their current execution. File tools share the same runner implementation.
 
 ## Commands and shells
@@ -17,8 +17,10 @@ and process-session behavior are shared. Host sessions are scoped by Agent/epoch
 and drained on cancellation/shutdown, using process groups rather than guest cgroups.
 
 Profiles default to `/bin/bash`, with login shells and snapshots enabled; the
-bundled image already includes Bash. Omitted settings use the same current
-defaults. Shell settings are serialized explicitly and participate in profile
+default Debian 13 Sandbox image already includes Bash and a glibc userland.
+The Go executor is still cross-compiled with CGO disabled; glibc compatibility
+serves ordinary GNU/Linux developer tools and user workloads. Omitted settings
+use the same current defaults. Shell settings are serialized explicitly and participate in profile
 checksums; profiles saved with the previous checksum format must be recreated.
 An explicit `shell` must be an absolute path with basename `sh`, `bash` or `zsh`.
 The shell must exist in the selected guest. `login` defaults to the profile's
@@ -30,7 +32,7 @@ execution home, independent of a command's `workdir`.
 writable stdin support. PTY mode attaches all three streams to a controlling
 terminal, returns merged output in stdout, and defaults to 24 rows by 80 columns.
 Terminal control bytes are returned as output; the protocol does not render a
-full terminal screen. This is shared by pot-agent through Pot tools.
+full terminal screen. This is shared by `pkg/agent` through Pot tools.
 
 `write_stdin` accepts `chars` or an empty poll, `close_stdin`, `interrupt`,
 `terminate`, and PTY-only `rows`/`cols` (1–1000). `interrupt` sends SIGINT to the
@@ -50,7 +52,7 @@ polling, resizing and stopping check current machine capability authorization as
 well as Agent/epoch/target ownership. Host policy is checked per operation; allow-once approvals identify the exact call and arguments.
 
 Normal turn completion closes sessions. Runtime binds them to owner, Agent
-binding epoch, Sandbox and VM generation. A main default selection change does
+binding epoch, Sandbox and environment boot generation. A main default selection change does
 not move existing sessions. Workers cannot retarget or access another owner's
 sessions; an old epoch cannot use a new Agent's execution scope. Completed output
 is retained until read, capacity reclamation or runner expiry. Session capacity
@@ -98,18 +100,6 @@ failure falls back to ordinary login startup and is cached until invalidation or
 eviction, avoiding repeated failed capture attempts. No snapshot is written to
 the workspace or product storage.
 
-## Verification
-
-`mise run test` includes real JSON-lines runner tests for cwd/export independence,
-login initialization, snapshot reuse/invalidation/fallback, PTY input/resize,
-interrupt, explicit timeout/termination and idle expiry. Runtime HTTP/Helper
-doubles exercise cross-turn routing, original-execution target binding, epoch and
-generation invalidation, parking/reactivation, restart quarantine and cleanup.
-`mise run test:executor` covers broker receipts, failed cleanup, idle expiry and
-orphan drainage using isolated SQLite/cgroup doubles. See the [dated acceptance
-report](validation/executor-sessions-20261007.md) for what was actually run; these are not substitutes for real Linux VM
-cgroup/desktop acceptance.
-
 ## Shared machine execution environment
 
 Machine policy selects Host or the machine-owned `shared` Linux Sandbox at
@@ -126,9 +116,8 @@ Unknown cleanup outcomes retain quarantine and prevent new uncertain effects.
 
 Explicit owner stop requires no active leases or unsettled operations. It stops
 the environment while preserving the writable filesystem and workspace. Podman
-restarts the retained container; Apple Containerization reuses the retained ext4
-rootfs with a new VM/network identity. Runtime shutdown stops environments but
-retains their disks. Rebuild explicitly destroys the writable environment and
+restarts the retained container on macOS and Linux. Runtime shutdown stops owned
+environments while retaining their stored files. Rebuild explicitly destroys the writable environment and
 shared development toolchain directories; Task files/transcripts remain. There
 is no idle container destruction or automatic rebuild.
 
@@ -143,7 +132,7 @@ Rustup files remain accessible. Role-specific read-only Skill mounts and separat
 process scopes remain in force. The guest receives no Control credentials.
 
 Owner-enrolled macOS VMs remain separate operator resources. The default shared
-Sandbox uses the installed Linux Provider; missing support fails without Host
+Sandbox uses Podman; missing support fails without Host
 fallback. Native desktop Task automation remains unsupported. `cua_repl` uses
 independent headless Chromium sessions in Host or Sandbox, so browser automation
 does not require desktop ownership.

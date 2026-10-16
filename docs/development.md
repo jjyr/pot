@@ -1,319 +1,191 @@
 # Development guide
 
-## Development and running
+## Toolchains and normal workflow
 
-Requires Apple Silicon, macOS 26+, Xcode/Swift 6.2+, and [mise](https://mise.jdx.dev/) 2026.9.2 or newer. `mise.toml` pins Rust/Cargo, mr-boxington, Python, Zig, cargo-zigbuild, and check tools; Swift uses the selected Xcode.
+`mise.toml` pins the stable Go toolchain (1.27.2), Node (24.21.0), Python and source
+check tools. macOS App/Helper development requires Apple Silicon, macOS 26+ and
+selected Xcode/Swift 6.2+. Headless Go packages build independently on Linux and
+must not import Wails or platform desktop libraries.
 
 ```sh
-mise trust
 mise install
-mise run setup        # Rust components, Linux target, repository hk hooks, environment checks
+mise run setup
 mise run prepare
+mise run check
+mise run test
 mise run build
-mise run bundle
 mise run open
 ```
 
-`build:sandbox-image` preinstalls guest dependencies in a separate VM and builds the Sandbox OCI image for resource publication. `bundle` packages Host binaries. End users authorize downloads of the pinned kernel, boot and OCI assets before the first Sandbox startup. See Sandbox image for caches, fonts, and sizes.
-
-The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
-
-Configure a Provider in Settings → AI Providers, then explicitly create a chat assistant with its own Provider and model. pot-agent uses saved API connections. pot-agent is built into Server; Node is bundled for JavaScript tools and plugins. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
-
-## Releases and Homebrew
-
-Public macOS releases contain the complete Apple Silicon app, Helper, Host runtime,
-and Sandbox image. Install through `brew install --cask jjyr/tap/pot`.
-
-Build a release locally on Apple Silicon macOS 26+:
+`prepare` supplies retained Node, plugin, Skill, viewer and license assets.
+`build`/`bundle` create `.local/go/PotGoPreview.app`, an independent development
+bundle with ID `dev.pot.go-preview`. Release packaging uses the production bundle
+identity. Product App starts real Go services; disposable fixtures are separate:
 
 ```sh
-mise run release 0.1.0
+mise run preview
+# macOS fixture UI without product data or model/tool calls:
+mise exec -- go run ./cmd/pot-app -preview
 ```
 
-This uses release-mode Rust binaries, creates a fresh `.local/d1/Pot.app` with the
-requested bundle version, and writes `Pot-0.1.0-arm64.zip`, its `.sha256` file, and
-`pot.rb` to `.local/releases/`. `--output PATH` selects a different output directory.
-The Helper retains its ad-hoc signature and virtualization entitlement. The Cask
-template lives in `packaging/homebrew/pot.rb.in`; packaging fills in the version
-and ZIP checksum. Its postflight hook removes only `com.apple.quarantine` from
-the installed app, respecting Homebrew's configured app directory.
+The browser fixture binds loopback on port 17702 by default. It does not test
+production browser authentication, provider transport or Sandbox isolation.
 
-The Release workflow runs for numeric `vMAJOR.MINOR.PATCH` tags. Manual dispatch
-can retry an existing tag. Before the first release, configure:
+## Builds and packaging
 
-- A native Apple Silicon macOS 26+ self-hosted runner with labels `macOS`, `ARM64`,
-  and `pot-release`, Xcode/Swift 6.2+, mise (including its pinned Brotli tool), and GitHub CLI. Sandbox image construction
-  requires Apple Virtualization support; use a dedicated runner checkout.
-- Repository secret `HOMEBREW_TAP_TOKEN` with contents read/write access to
-  `jjyr/homebrew-tap` to publish `Casks/pot.rb` automatically.
-
-The workflow publishes the ZIP, checksum, and generated Cask to GitHub Releases,
-then commits the Cask to the existing tap. If the tap token is absent, copy the
-release's `pot.rb` to `Casks/pot.rb` in `jjyr/homebrew-tap` and commit it manually.
-The installation command becomes available after the first release and tap update.
-Application user data is retained on uninstall.
-
-## Standalone Server (development entry point)
-
-For end-user installation with `cargo install --git` and the Control/Runner
-setup procedures, see [Server installation](deployment.md#install-server).
-
-Build and start the backend without App/Helper. Paths belong to the Server machine. Use a separate data directory rather than opening active App/VM data.
-
-```sh
-mise exec -- cargo build --locked -p pot-server
-POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
-```
-
-Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants, enable Host execution and define sandboxes through the resource API; enable Web UI explicitly with its fixed Control address. Enabling Control exposes AI Providers before registration. Fresh App registries
-are empty; configure AI, then explicitly create the first assistant in Chat. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
-
-App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](deployment.md) for CLI installation, local OS authority and packaging.
-
-The `pot-server` package enables the optional `web-ui` feature by default.
-Its build script generates and compresses the frontend before embedding it.
-`--no-default-features` skips Web tooling and resources completely. There is no
-separate compression feature. `POT_ACCESS_ASSETS` remains the external-directory
-fallback for builds without embedded assets.
-
-Development uses `"conda:brotli-bin" = "1.2.0"` in `mise.toml`; run `mise install`.
-This installs the actual Brotli CLI, not a Rust compression implementation, and
-requires no separately installed Conda. Standalone Cargo users must install the
-CLI themselves. Missing Brotli produces an actionable error.
-
-`mise run build:web-ui` and Cargo's build script use the same cache under
-`<Cargo target directory>/pot-web/`. Source/lockfile fingerprints validate the
-WASM/static asset cache; raw and compressed payload hashes detect missing or
-corrupt files. Brotli version and quality are part of the compression cache key.
-Unchanged assets are reused individually. Generated files stay in the ignored
-build directory and must not be committed. `mise run test:web-assets` checks
-reuse, invalidation, corruption recovery and missing-tool diagnostics.
-
-The first build uses rustup to prepare the pinned nightly WASM target and
-wasm-bindgen CLI, then obtains checksum-verified noVNC sources. Nested Cargo
-builds use a separate target directory and native compiler flags are removed to
-avoid lock contention and cross-target contamination. A cache lock serializes
-simultaneous frontend builds. CI installs Brotli through mise too.
-
-Brotli provides a larger size reduction than JS minification or `wasm-opt -Oz` on
-the measured client; those additional optimizers are not part of the build.
-The comparison and qualification are recorded in
-[Web assets validation](validation/embedded-web-assets-20261012.md).
-
-To build a CLI with embedded Web UI and the Tailscale library from this checkout:
-
-```sh
-mise exec -- python scripts/build-cli
-```
-
-The local archive under `.local/releases/` contains `bin/pot`, the Tailscale
-library and builtin skills. Extract it into a chosen prefix and add its `bin`
-directory to PATH. This is a developer build artifact, not a published Server
-download. Enable web-ui-server through the [explicit Web UI setup](deployment.md#explicit-web-ui).
-MacOS Sandbox helpers/resources require additional provider setup.
-
-## Browser UI
-
-App and browser mount the same `pot-ui` application; see [Shared UI](shared-ui.md)
-for the adapter boundary. See [Web UI deployment](deployment.md#explicit-web-ui)
-and [Tailscale HTTPS](deployment.md#tailscale-https) for the configurable
-web-ui-server listener, QR/Token administration and `mise run build:web-ui`.
-The App's embedded Runtime remains loopback-only. Desktop broker/control and
-physical-device qualification are separate gates.
-
-## Validation
-
-```sh
-mise run fmt           # Explicit formatting fixes
-mise run check         # Formatting, scripts, Rust workspace, Swift Helper build
-mise run test          # Backend / protocol, no real model calls
-mise run test:app
-mise run test:executor # Guest receipt, idle expiry and cleanup contracts without a VM
-mise run test:ui        # Portable shared state and localization (no GPUI feature)
-mise exec -- cargo test --locked -p pot-ui --features presentation -j 4 # Shared application state
-mise run licenses      # Enforce Rust license policy and generate dependency notices
-mise run test:licenses # Check approved, disallowed and unknown license cases
-mise run test:release   # ZIP metadata, permissions, symlinks and Cask checksum
-mise run test:i18n     # Catalogue parity, native switching and embedded web assets
-```
-
-Current real CLI/VM acceptance (build and bundle first; no paid model calls):
-
-```sh
-mise exec -- python scripts/tests/sandbox-runtime.py --helper .local/d1/Pot.app/Contents/Helpers/PotHelper --resources .local/d1/Pot.app/Contents/Resources/runtime --output /tmp/pot-sandbox-acceptance.json
-```
-
-Apple VM networking requires Virtualization privileges. This starts two isolated Linux VMs with pinned Host pot-agent and local mock models, validates lazy startup, worker scope, Sandbox independence, cancellation, desktop and native resume, then cleans up. Dated results and limits are in [decoupling acceptance](validation/host-pot-agent-20261006.md).
-
-### CI cache behavior
-
-CI runs on pushes to `main` and release tags matching `v*.*.*`. Opening or updating
-a pull request does not trigger CI.
-
-CI installs only each job's declared mise tools and disables implicit installation
-with `MISE_AUTO_INSTALL=false`. Rust caches are separated by OS, architecture and
-actual compiler identity, prefer the current lockfile, and fall back to the same
-compiler when dependencies change. Cargo still validates fingerprints and the
-locked dependency graph. Swift caches are independent and include Xcode identity;
-Rust dependency or task changes do not invalidate the Helper build cache.
-CI disables Rust incremental compilation to reduce snapshot size. Successful
-`main` jobs save build caches; release-tag jobs only restore them to avoid filling repository
-cache storage with branch-specific multi-gigabyte snapshots. The license job caches
-Cargo sources separately and always reruns the policy checks. Cache schema or
-compiler changes require an initial cold build. All existing checks remain enabled.
-
-### Git hooks
-
-`mise run setup` installs repository-local hk pre-commit/pre-push hooks without changing global hooks. Run it once per clone. Git hooks load tools through mise without shell activation; mise itself must be on PATH.
-
-- pre-commit: checks formatting/scripts for changed files; Rust formatting covers the workspace, and rule/check-entry changes trigger all lightweight checks. Also checks staged whitespace.
-- pre-push: every push runs checks in four parallel groups: Rust, macOS formatting/Swift, script tests, and licenses. macOS runs one full-workspace Clippy pass with all targets, followed by backend, UI, App and deterministic eval tests. Clippy covers compilation checking, so the hook does not repeat `check:rust` or the backend-only Clippy pass. Linux runs backend Clippy and portable tests, skipping macOS-only checks. Cargo tasks run sequentially.
-- Hooks only check; they neither fix nor stage. Source checks read the working tree, so partially staged content must also be formatted. Image/VM/paid model tests are excluded. A new machine may compile slowly; later runs reuse caches.
-- Each pre-commit step and pre-push group prints its elapsed seconds and exit code, including failures. `scripts/timed-check` also appends UTC start/end times, elapsed seconds and exit code to the ignored `.local/hooks/timings.jsonl` in the current checkout. Groups run concurrently, so their durations must not be added to infer total hook time. A timing-log write failure is reported without changing the check's result. `mise run test:hooks` verifies the wrapper.
-
-Manual hook checks: `mise exec -- hk run pre-commit --all` or `mise exec -- hk run pre-push --all`. Use `mise run check` for full local checks and `mise run fmt` for fixes. Base rules live in `ruff.toml`, `.swiftformat`, and `scripts/dev-check`; hooks select and invoke them.
-
-Cargo commands run through mr-boxington (`mbx`) via mise's native Rust integration.
-Use `mise run` tasks or `mise exec -- cargo ...`; calling `~/.cargo/bin/cargo`
-directly bypasses this integration. `mise exec -- mbx doctor --json` checks the
-active tools, and `mise exec -- mbx explain --last` explains the latest build's
-cache results. Remove other compiler-cache wrappers before using mbx: an existing
-`RUSTC_WRAPPER` or Cargo `build.rustc-wrapper` can bypass mbx's own compiler cache.
-Native mise integration does not require `mbx setup` or a standalone Cargo shim;
-inside `mise exec`, Cargo resolves to mise's command wrapper.
-
-The shared mbx compiler store is separate from this checkout's explicit
-`CARGO_TARGET_DIR` (`.local/poc/cargo-target`), which mbx leaves in place. Builds
-reuse matching compiler outputs across checkouts; tests still execute normally.
-The native toolchain is pinned to Rust 1.100 beta (`beta-2026-10-14`). This meets
-mbx's Cargo requirement for dependency build seeding in managed targets; the
-explicit target directory above continues to use compiler-action caching. Keep
-the pinned nightly used by `build:web-ui` separate from this native toolchain.
-Machine-wide wrapper configuration belongs in machine inventory.
-
-## Code entry points
-
-Rust workspace members and their bundled assets live under `crates/`. The browser client is `crates/web-ui/` (Cargo package `pot-web-ui`); build with `mise run build:web-ui`, producing `pot_web_ui.js` and `pot_web_ui_bg.wasm`. Shared localization build code lives in `crates/localization/`. Swift Helper, plugins, skills, scripts and release packaging remain outside the Cargo workspace.
-
-| Directory | Responsibility |
+| Command | Output / purpose |
 |---|---|
-| `crates/app/` | Native bootstrap, transport and platform adapter; Swift text input and system services |
-| `crates/ui/` | Complete shared GPUI application, navigation, pages, configuration, composer, tokens and localization |
-| `crates/web-ui/` | WASM bootstrap and browser adapter, authenticated transport, history, PWA and push |
-| `helper/` | Swift Containerization, VM lifecycle |
-| `crates/server/` | Standalone startup, HTTP/SSE/MCP/PTY routes, listener, shutdown |
-| `crates/assistant/` | Assistant identity, instructions, conversations and durable mailboxes |
-| `crates/relay/` | Cross-Control message forwarding through injected endpoints; currently App-only |
-| `crates/runtime/` | Runtime composition and execution management |
-| `crates/runtime-execution/` | Shared Agent invocation, concurrency and metadata tracing |
-| `crates/core/` | Immutable Agent models, execution contracts, shared tool schema |
-| `crates/storage/` | SQLite primitives, file-request ledger and transactions |
-| `crates/agent/` | In-process pot-agent |
-| `crates/tool-executor/` | Guest command sessions and patch implementation; explicit local fixtures for crates/eval/tests |
-| `crates/gateway/` | Provider metadata and HTTP transport; encrypted credential references |
-| `crates/protocol/` | Shared message and control types |
-| `crates/sandbox-images/linux/default/` | Guest desktop, browser, broker/viewer resources |
-| `scripts/` | Build, bundle, icon generation |
+| `mise run build:go` | Portable CLI and executor under `.local/go/bin` |
+| `mise run build:linux` | CGO-free Linux amd64/arm64 entry points |
+| `mise run build:cli` | Target CLI/runtime archive with retained resources |
+| `mise run build` | Complete Wails macOS bundle and signed native macOS VM Swift Helper |
+| `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
+| `mise run build:web` | Localized retained viewer/Sandbox pages |
+| `mise run build:sandbox-image` | Podman Linux OCI image, independent of App packaging |
+| `mise run export:sandbox-resources` | Deterministic export validation against the embedded catalog |
+| `mise run release -- VERSION` | Local release archive/checksum/cask; publishing is separate |
 
-`poc/` is removed; experiment code/evidence remain in Git history. `.local/poc/` is a retained local build/download cache path without dependencies on old experiment sources.
+`scripts/build-go-app`, `scripts/build-go-cli` and `scripts/go_packaging.py` own
+asset layout and pinned Node checksums. Packaging includes plugin/Skill sources,
+viewer resources, component notices and the correct target executor. It neither
+builds a Sandbox image implicitly nor replaces an existing running service.
+Image build architectures, explicit macOS connections and reviewed resource export
+commands are documented below in [Sandbox image resources](#sandbox-image-resources).
 
-Machine connection/deployment notes belong in `~/Workspace/Machines`. Do not commit credentials, user sessions, or build artifacts. Inspect live state through Runtime APIs.
+The native macOS VM Helper builds through `helper/Package.swift` and retains
+Virtualization.framework ownership. Linux containers use the Go Podman provider
+on both hosts. JavaScript plugins and Node remain their own runtime; Python guest broker,
+browser and desktop support remain Python. Go hosts product logic; tool
+compositions run through a process-isolated goja worker. Heap/process and
+turn-lifecycle limits belong at that worker boundary; goja itself supplies no
+per-runtime hard heap limit.
 
-### Supported integrations
+Reusable libraries live in `pkg/`; product entry points and private implementation
+live in `cmd/` and `internal/`. `mise run test:public-api` copies a consumer into an
+independent Go module outside the checkout, builds the standalone composition
+worker, and exercises only public imports. It is included in `mise run test`.
+See [Go libraries](go-libraries.md) for the supported embedding boundaries.
 
-Claude, Gemini, DeepSeek and OpenCode use API connections through pot-agent. pot-agent Host tools require the owner permission service; macOS/Windows provider qualification remain outside this increment. See [Agent permissions](permissions.md). Old guest deployment has no compatibility migration. Superseded configuration and engine formats are not imported.
+Standalone startup and browser serving use [Deployment](deployment.md). CLI and
+App default to the new Go root, not previous product data. Use explicit private
+temporary roots for integration checks; never run two hosts against one root.
 
-## About and dependency licenses
+## Sandbox image resources
 
-The native Pot menu includes About Pot with version, developer, MIT, project link,
-and Rust dependency notices. Bundling enforces the cargo-about policy and embeds
-its report. See [About and license policy](licenses-and-about.md) for scope,
-reviewed MPL dependencies, and CI checks.
-
-macOS prepared-instance setup and qualification limits: [macOS Sandbox](macos-sandbox.md). Non-VM checks: `mise exec -- python scripts/tests/macos-provider.py` and `mise exec -- python scripts/tests/macos-helper.py --helper .local/d1/helper-build/release/PotMacOSHelper`.
-
-## Separate Sandbox resources
-
-Client bundling does not build or embed Linux Sandbox resources. Use `mise run build:sandbox-image`, then `mise exec -- python scripts/export-sandbox-resources --update-catalog` before client compilation. `mise run export:sandbox-resources` checks an export against the embedded catalog. Offline VM fixtures also require `mise exec -- cargo build -p pot-sandbox-images` to provide the verified importer. See [resource delivery](sandbox-resources.md) for tag publication, cache/approval behavior and pinned-instance compatibility.
-
-### Multiple browser clients
-
-`mise run test:clients` runs real loopback HTTP listeners with production Runtime,
-Access, storage and SSE routes. Independent browser identities and shared Tokens exercise configuration,
-Token rotation/local clearing, simultaneous request-ID retries, conflicting reuse, busy-turn retry,
-owner/browser state consistency, streams/reconnects, global Token rotation and
-restart persistence/durable receipts. A local deterministic model fixture is used;
-no user keys, containers or paid model endpoints are required. The suite is included
-in `mise run test` and the Linux backend CI job. Rootless Podman qualification is
-manual on an explicitly selected Linux host; no Podman integration CI was added.
-
-
-### Desktop web assets
-
-Edit `desktop/index.template.html`, `crates/sandbox-images/linux/default/index.template.html`,
-and the shared `desktop/i18n.js`; translations belong in `crates/app/locales/*.json`.
-Run `mise run build:web` to inspect generated assets under `.local/web/`.
-Control Cargo builds generate and embed their own fresh assets automatically.
-Image/prepare entry points also run the generator and copy the Sandbox output.
-Use `mise run test:i18n` to verify catalog parity, template defaults, independent
-resources, asynchronous startup and automatic third-language discovery.
-
-### Brand assets
-
-Run `mise run icons` on macOS to regenerate the ICNS, application/README PNGs,
-opaque maskable Home Screen PNGs, monochrome menu-bar exports, the shared avatar
-mask (`crates/avatar/assets/PotMask.png`) and Sandbox wallpaper.
-The generator links `crates/app/swift/PotIcon.swift`, the same vector master used by
-native navigation and menu-bar rendering. See [brand design](design/pot-brand/README.md).
-
-## Responsive UI regression
-
-Use the isolated `scripts/tests/shared-ui-fixture.py --pages` with assets from
-`mise run build:web-ui`; never point synthetic UI checks at an active user root.
-The fixture supplies multiple assistants, messages, schedules, settings and usage
-without sending model requests. Shared state tests run with
-`mise exec -- cargo test --locked -p pot-ui --features presentation -j 4`.
-
-Start the fixture on port 17908 with `--root /tmp/pot-responsive-fixture`, `--pages`
-and `--mobile-assets .local/poc/cargo-target/pot-web/dist`, then open its URL in a
-headless Playwright CLI session. Run the browser checks in that same session:
+Install pinned tools and a working Podman builder. `build:sandbox-image` invokes
+`scripts/build-go-container-image`. macOS requires an explicitly prepared
+build connection; the script never starts/selects a default machine:
 
 ```sh
-playwright-cli run-code "$(cat scripts/tests/responsive-navigation.js)"
-playwright-cli run-code "$(cat scripts/tests/responsive-layout.js)"
-playwright-cli run-code "$(cat scripts/tests/assistant-provider.js)"
-playwright-cli run-code "$(cat scripts/tests/chat-composer.js)"
-playwright-cli run-code "$(cat scripts/tests/component-input.js)"
+mise exec -- python scripts/build-go-container-image --arch arm64 --connection BUILD_CONNECTION
 ```
 
-The scripts refuse a Runtime whose identity is not the synthetic fixture.
-The assistant/Provider flow writes only disposable fixture configurations and
-assistant definitions; it never sends a model request. The
-composer checks send only fixture messages and use its isolated chat-state
-endpoint for waiting, streaming, tool, cancellation and failure screenshots. They
-exercise browser IME composition, reference completion/undo, draft ownership,
-auto-growth and Reduced Motion, restoring the fixture transcript afterwards. The
-component input checks exercise the same IME boundary in search, assistant names,
-multiline instructions, machine tags and Token fields, without saving forms. The
-navigation checks exercise touch cancellation, menu destinations, cached assistant
-switches, per-assistant drafts, list/reading positions, editor guards and resizing.
-The layout checks capture Canvas screenshots under `output/playwright/devices/`
-and check visible bounds, saved theme and runtime errors. Review those screenshots
-for clipping and typography; the checks do not replace visual review.
+On native Linux, omit `--connection` and select `--arch amd64` or `arm64`.
+Output is `.local/go/images/linux-ARCH/{sandbox-image,sandbox-image.json}`.
+Transferable contexts use `--prepare-only --context FRESH_DIRECTORY`, followed
+by `--prepared-context DIRECTORY --arch ARCH --output DIRECTORY` on the builder.
 
-The supported viewport matrix includes phone widths 390, 393 and 430; iPad widths
-768, 820 and 1024 in both orientations; and computer widths 1280 and above. Include
-719/720 and 899/900 to exercise layout transitions, plus a short visible viewport
-for the phone keyboard. Verify touch density independently of width. Smaller
-320/360-pixel windows are not release targets.
+Export the reviewed OCI layout and update that architecture's catalog explicitly:
 
-In a real browser, check both languages and appearances, menu button and touch
-swipes (complete, short, reversed and cancelled), vertical scroll, assistant search,
-conversation Back, per-assistant drafts and reading position, editor dirty guards,
-return to the exact caller state, and resizing across layout thresholds while a
-draft is open. Inspect screenshots of Canvas content; DOM overflow measurements
-alone cannot detect clipped GPUI controls. Use headless Chromium for reproducible
-Canvas capture on Retina hosts; qualify Safari safe areas, keyboard and system
-edge gestures on physical iPhone/iPad before a release. Native compilation checks
-shared Rust integration; native visual checks remain a separate step.
+```sh
+mise exec -- python scripts/export-go-sandbox-resources \
+  --source .local/go/images/linux-arm64 --arch arm64 \
+  --tag sandbox-go-resources-v0.3.0 --update-catalog
+```
+
+Retain exact exports under `.local/go/releases/resources`, review/commit the
+catalog, then build clients. Keep image-only bundles needed by pinned instances;
+unchanged digests retain their release tag. Omit `--update-catalog` to verify.
+Archive export is deterministic for identical OCI inputs; a clean image rebuild
+can change installation metadata/timestamps. Do not reuse filenames for new bytes.
+
+Publication workflow `.github/workflows/sandbox-resources.yml` requires the
+absolute reviewed export directory as `prepared_assets` and its committed tag.
+It never rebuilds or changes the catalog. Local staging uses the same verifier:
+
+```sh
+mise exec -- python scripts/verify-go-sandbox-resources \
+  --source ABSOLUTE_EXPORT_DIRECTORY --output ABSOLUTE_FRESH_DIRECTORY \
+  --tag sandbox-go-resources-v0.3.0
+```
+
+The verifier copies/hashes only catalog files belonging to that tag, rejects
+unsafe names/symlinks/existing output and fails on missing/changed files. The
+workflow uploads that explicit list and never overwrites a release. Clients
+embed no OCI layers. Release accessibility must match the download audience;
+catalog publication does not make a private repository anonymously accessible.
+
+For offline provisioning, stop the Runtime and run
+`pot resources import -root ROOT -directory RELEASE_ASSETS_DIRECTORY`. Embedded
+size/hash/extraction checks still apply. It adds no model-controlled import port.
+
+## Checks
+
+```sh
+mise run lint
+mise run check:go
+mise run test:go
+mise run test:ui
+mise run test:eval
+mise run test:packaging
+mise run check:swift
+mise run licenses
+```
+
+`check:go` runs formatting, vet and architectural import checks. `test:go` uses
+the race detector. Browser/DOM tests cover shared state, real production adapters,
+owner boundaries, drafts, IME, navigation and streamed Task output. Deterministic
+Eval runs the production Agent with native fixtures and real local tool effects;
+see [Eval CLI](../eval/README.md). Paid DeepSeek calls occur only through explicit
+`live`/live-suite commands, never ordinary checks.
+
+Run `mise run test:ui-http-integration` explicitly for real browser HTTP/SSE,
+reconnect, session boundaries and binary download checks. It requires cached
+`@playwright/cli` and its installed browser. It uses isolated temporary roots and
+a deterministic loopback provider, installs nothing, makes no external model
+calls and cleans up its own processes. It is separate from ordinary tests.
+
+Sandbox Provider unit tests use lifecycle doubles and explicit local executors;
+these do not establish VM/container isolation. Actual Provider qualification needs
+the intended machine, installed image/resources and dedicated private workspace.
+Report execution evidence and limitations in the owning issue/task response,
+without repository validation reports or development checklists.
+
+`hk.pkl` defines repository hooks. Pre-commit checks changed sources and staged
+whitespace. Pre-push groups Go/product tests, macOS Helper checks, scripts and
+licenses. Use pinned tools through `mise run` or `mise exec -- …`; do not bypass a
+failed gate by skipping hooks. CI workflows live in `.github/workflows/` and use
+separate portable, macOS and resource/release responsibilities.
+
+## Source layout
+
+| Directory | Ownership |
+|---|---|
+| `cmd/pot`, `cmd/pot-app`, `cmd/pot-tool-executor`, `cmd/pot-eval` | Product entry points |
+| `internal/` | Independently testable Go components; see [boundaries](backend-components.md) |
+| `web/` | Shared product HTML/CSS/JS and embedded assets |
+| `helper/` | Retained Swift macOS virtualization Helpers |
+| `resources/app/` | Native brand assets, vector master and locales |
+| `resources/sandbox/` | Guest image recipes and retained Python/JS services |
+| `resources/models-dev/`, `resources/model-directory.json` | Public model metadata/notices |
+| `plugins/`, `skills/` | Existing JavaScript plugin and Skill bundles |
+| `desktop/` | Retained desktop viewer resources |
+| `eval/` | Scenarios, experiment scripts and Eval CLI documentation |
+| `scripts/` | Build, release, checks and operational tooling |
+
+Keep documentation focused on lasting contracts and operating instructions.
+Record implementation progress and qualification results in the owning issue.
+The documentation describes the current implementation and operating contracts.
+
+## UI and retained assets
+
+Main, tray and browser share DOM components, fonts/tokens, themes and localization;
+platform adapters supply native dialogs, window operations and browser sessions.
+See [shared UI](shared-ui.md) and [design language](design-language.md).
+
+`scripts/localize-web` builds retained desktop/Sandbox HTML. Update source
+templates under `desktop/` and `resources/sandbox/`, and translations under
+`resources/app/locales/`; generated viewer output is not the product UI source.
+`scripts/make-icons.swift` uses `resources/app/PotIcon.swift` as the vector master.
+Dependency notices are generated by `scripts/go-notices` and retained runtime
+notice preparation; see [licenses](licenses-and-about.md).

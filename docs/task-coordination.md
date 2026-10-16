@@ -32,12 +32,22 @@ model selection.
 
 Messages retain trusted sender identity, are consumed once and remain pending for
 ended Tasks as retained history. They do not grant owner authority. Delivery
-uses pot-agent.
+uses `pkg/agent`.
 
 `wait_task` returns Task metadata, not transcripts. Complete, failed, interrupted,
 cancelled and allowance-waiting states can end a wait; queued/running cannot.
 Approval requests are not separate Task states. `wait` collects JavaScript results;
 `write_stdin` manages commands. Completion notifications also operate without waits.
+
+## Pause at a model boundary
+
+`POST /api/v1/tasks/{id}/control` accepts `{run_id, action: "pause" | "resume"}`
+for the original accepted run. Task info exposes `paused`; the fixed destination,
+configuration and run identity are unchanged. In-flight model/tool operations
+settle normally, then the local or connected Worker waits before the next model
+request. Pending guidance remains accepted while paused. Cancellation wakes the
+wait and retains the usual cleanup and uncertainty rules. This control is
+separate from releasing an allowance-waiting run.
 
 ## Stop or abandon
 
@@ -52,15 +62,28 @@ ended Task --create_task--> new Task ID + current machine policy
 input, including suspended allowance-waiting input. Ended Tasks reject guidance;
 a rerun is a new Task. Control restart reconciles an accepted remote run by its
 original input identity, without relaunching it or changing its execution context.
-Execution Runtime restart settles known receipts and scopes; unknown outcomes
-block replacement. See [failure rules](architecture.md#failure-and-receipt-rules).
+Execution Runtime restart fences original runs. Explicit owner reconciliation
+settles known receipts and proven scope cleanup; unknown outcomes block replacement. See [persistence and updates](architecture.md#persistence-and-updates).
+
+Owner recovery uses `POST /api/v1/tasks/{id}/recovery` with the original
+`run_id` and `action: "inspect" | "reconcile"`. A Runtime owner can address the
+same original destination journal through `POST /api/v1/runtime/recovery` with
+`control_id`, `task_id`, `run_id` and the action. These private/native ports are
+excluded from browser publication. Inspection returns receipt states and unresolved
+reasons without starting a model, guest or tool. Reconciliation consults the
+original Control operations, signed destination command receipts and durable
+Sandbox request/result bindings. It accepts no client-supplied result or cleanup
+acknowledgment. Known results update the original checkpoint once; only proven
+cleanup releases held capacity and ends the run as interrupted. A previous-boot
+Host run with issued operations and no recorded cleanup proof remains fenced.
+Missing/unknown effects are never converted into failure or retried.
 
 `cancel_task` discards pending guidance and abandons the Task. History/files survive;
 completed results stay complete. No terminal phase can be reopened.
 
 Both operations reject guidance during cleanup. Running Tasks hold capacity and
 leases until shutdown is confirmed; unconfirmed shutdown fails visibly and retains
-active leases until Runtime restart. App/Web Stop interrupts. CLI `tasks interrupt`
+active leases until original receipts and cleanup are reconciled. App/Web Stop interrupts. CLI `tasks interrupt`
 and `tasks cancel` use the respective `/api/v1/tasks/{id}/interrupt` and `/cancel` APIs.
 
 ## Archive
@@ -75,7 +98,7 @@ Archive is currently a phase-derived list grouping. It does not delete data or
 reclaim storage. Long-inactive unfinished Tasks are not automatically archived.
 An independent archive flag and inactivity rules remain deferred.
 
-Schemas and lifecycle code: `crates/core/src/pot-tools.json`, `crates/control/src/control/tasks.rs`.
+Schemas and lifecycle code: `pkg/core/product-tools.json`, `internal/tasks` and `internal/control/task_service.go`.
 Checks and live qualification limits: [permission contract](permissions.md).
 
 ## Execution policy and reruns
@@ -90,5 +113,16 @@ Execution cleanup closes only that Task's processes and sessions; the environmen
 installed tools and files remain. A new Task receives a new workspace directory
 but observes existing shared software and cache state.
 
-Task persistence uses schema version 4. Earlier per-task-container records are rejected without implicit migration; use an independent
-data directory for development builds of this schema. Existing files are not deleted.
+Task persistence uses schema version 4. Development builds use an independent
+data root; unsupported storage formats are rejected without rewriting files.
+
+## Execution transcript
+
+`GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
+append-only page from the original Runner run. Each item carries a durable
+`sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
+and `has_more`; clients advance only through contiguous sequences. Control
+persists fetched remote pages, so an unavailable original Runner returns cached
+content with `unavailable: true`. A disconnected target never causes execution
+or transcript reads to move to a replacement machine. Terminal runs remain
+readable. Changes wake the existing `tasks` invalidation stream.

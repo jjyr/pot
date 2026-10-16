@@ -1,12 +1,7 @@
 [tools]
-"conda:brotli-bin" = "1.2.0"
-go = "1.25.5"
-rust = { version = "beta-2026-10-14", mr_boxington = true }
-mr-boxington = "1.24.0"
+go = "1.27.2"
+node = "24.21.0"
 python = "3.12.13"
-zig = "0.15.2"
-"cargo:cargo-zigbuild" = "0.23.4"
-"github:EmbarkStudios/cargo-about" = "0.9.2"
 hk = "2.4.0"
 pkl = "0.32.1"
 ruff = "0.16.10"
@@ -14,132 +9,52 @@ shfmt = "3.14.1"
 shellcheck = "0.11.0"
 swiftformat = "0.63.1"
 
-[env]
-CARGO_TARGET_DIR = "{{config_root}}/.local/poc/cargo-target"
-
 [tasks.doctor]
-description = "Check macOS, Xcode and cross-compilation prerequisites"
+description = "Check Apple Silicon macOS, Go, Node and Xcode prerequisites"
 run = "python scripts/dev-check doctor"
 
 [tasks.setup]
-description = "Prepare Rust components and install repository-local Git hooks"
-run = ["rustup component add rustfmt clippy", "rustup target add aarch64-unknown-linux-musl", "hk install --mise", "mise run doctor"]
+description = "Install repository-local Git hooks and check development prerequisites"
+run = ["hk install --mise", "mise run doctor"]
 
 [tasks.fmt]
-description = "Format Rust, Swift, Python and Shell sources"
+description = "Format Go, Swift, Python and Shell sources"
 run = "python scripts/dev-check fmt"
 
 [tasks.lint]
-description = "Check source formatting and basic script correctness"
+description = "Check source formatting, localization and scripts"
 run = "python scripts/dev-check lint"
 
-[tasks."check:rust"]
-run = "cargo check --workspace --locked -j 4"
-
-[tasks.clippy]
-description = "Lint every Rust workspace target, treating warnings as errors"
-run = "cargo clippy --workspace --all-targets --locked -j 4 -- -D warnings"
-
-[tasks."clippy:backend"]
-description = "Lint portable backend targets without the macOS App"
-run = "cargo clippy --workspace --exclude pot-app --all-targets --locked -j 4 -- -D warnings"
-
 [tasks.check]
-description = "Run formatting, script and Rust compilation checks"
-depends = ["lint", "check:rust", "check:swift"]
+description = "Check Go compilation, component boundaries and source formatting"
+depends = ["lint", "check:go"]
 
 [tasks.test]
-description = "Run backend crate tests without model calls"
-depends = ["test:architecture"]
-run = '''
-test_key_dir=$(mktemp -d)
-trap 'rm -rf "$test_key_dir"' EXIT
-export POT_SECRET_KEY_FILE="$test_key_dir/key"
-python -c 'import os, secrets; p = os.environ["POT_SECRET_KEY_FILE"]; fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(fd, secrets.token_bytes(32)); os.close(fd)'
-cargo test --locked -p pot-core -p pot-storage -p pot-usage -p pot-agent -p pot-tool-executor -p pot-gateway -p pot-model-protocol -p pot-assistant -p pot-relay -p pot-secrets -p pot-runner -p pot-control -p pot-runtime -p pot-runtime-execution -p pot-server -p pot-protocol -p pot-eval -p pot-sandbox -p pot-sandbox-macos-apple-container -p pot-sandbox-macos-apple-vm -p pot-sandbox-linux-podman -p pot-resource -p pot-sandbox-images -j 4
-'''
-
-[tasks."test:executor"]
-description = "Verify executor receipts, idle expiry and orphan cleanup without a VM"
-run = "python scripts/tests/executor-lifecycle.py"
-
-[tasks."test:hooks"]
-description = "Verify hook timing and failure propagation"
-run = "python scripts/tests/hook-timing.py"
-
-[tasks."test:operation-prepare"]
-description = "Verify guest argument preparation without authorization state"
-run = "python scripts/tests/operation-prepare.py"
-
-[tasks."test:browser"]
-description = "Qualify persistent CUA plugin text and mixed observations against a Chromium fixture"
-run = "python scripts/tests/browser.py"
-
-[tasks."test:skills"]
-description = "Verify guest per-scope skills mount policy without a VM"
-run = "python scripts/tests/skill-mounts.py"
-
-[tasks."test:skill-authoring"]
-description = "Verify builtin skill validation and installation helpers"
-run = """
-python -m venv .local/skill-tests
-.local/skill-tests/bin/python -m pip install --disable-pip-version-check -r skills/skill-creator/scripts/requirements.txt
-.local/skill-tests/bin/python scripts/tests/skill-authoring.py
-"""
-
-[tasks."test:app"]
-depends = ["test:app-safety"]
-run = "cargo test --locked -p pot-app -j 4"
-
-[tasks."test:app-safety"]
-description = "Verify native Helper failure and conversation draft receipt handling"
-run = """
-mkdir -p .local/client-safety
-xcrun swiftc -module-cache-path .local/client-safety/modules crates/app/swift/ClientSafety.swift crates/app/swift/tests/ClientSafetyTests.swift -o .local/client-safety/tests
-.local/client-safety/tests
-"""
-
-[tasks."test:i18n"]
-description = "Verify translation coverage, native language preferences and web localization"
-run = "python scripts/tests/localization.py"
-
-[tasks."test:eval"]
-description = "Run deterministic CLI contracts without credentials or model calls"
-run = """
-set -eu
-eval_root=$(mktemp -d "${TMPDIR:-/tmp}/pot-eval-ci.XXXXXX")
-trap 'rm -rf "$eval_root"' EXIT
-cargo run --locked -p pot-eval -- suite deterministic "$eval_root/suite"
-for scenario in short-chat tool-round compaction; do
-  cargo run --locked -p pot-eval -- run "crates/eval/scenarios/$scenario.json" "$eval_root/$scenario"
-  cargo run --locked -p pot-eval -- validate "$eval_root/$scenario"
-done
-cargo run --locked -p pot-eval -- run crates/eval/scenarios/compaction.json "$eval_root/compaction-repeat"
-cargo run --locked -p pot-eval -- compare "$eval_root/compaction" "$eval_root/compaction-repeat"
-"""
-
-[tasks.licenses]
-description = "Check Rust dependency licenses and generate bundled notices"
-run = """
-mkdir -p .local/licenses
-cargo about generate --locked --workspace --fail about.hbs --output-file .local/licenses/rust-dependencies.html
-"""
-
-[tasks."test:licenses"]
-description = "Verify disallowed and unknown license expressions fail"
-run = "python scripts/tests/licenses.py"
+description = "Test product contracts without model calls or VMs"
+depends = ["test:go", "test:ui", "test:packaging", "test:eval", "test:public-api"]
 
 [tasks.prepare]
-run = "scripts/pot prepare"
+description = "Prepare retained Node, JS plugins, skills and viewer resources"
+run = "python scripts/prepare-go-resources"
+
 [tasks.build]
-run = "scripts/pot build"
+description = "Build the isolated Go/Wails macOS app with its signed native VM helper"
+run = "python scripts/build-go-app"
+
 [tasks.bundle]
-run = "scripts/pot bundle"
+description = "Create a fresh complete macOS development bundle"
+run = "python scripts/build-go-app"
+
 [tasks.open]
-run = "scripts/pot open"
+description = "Open the isolated Go/Wails preview bundle"
+run = "python scripts/pot open"
+
+[tasks.server]
+description = "Run the Go Runtime service"
+run = "go run ./cmd/pot serve"
 
 [tasks.release]
-description = "Build the release ZIP, checksum and Homebrew cask (pass a version)"
+description = "Build local release ZIP, checksum and Homebrew cask without publishing"
 usage = '''
 arg "<version>" help="Release version, e.g. 0.1.0 or v0.1.0"
 flag "--output <path>" default=".local/releases" help="Release artifact directory"
@@ -151,65 +66,132 @@ description = "Verify macOS release packaging without a build or VM"
 run = "python scripts/tests/release-packaging.py"
 
 [tasks."check:swift"]
-description = "Compile Helper executables without starting a VM"
-run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path helper --disable-sandbox --scratch-path .local/d1/helper-build --force-resolved-versions -j 4"
-env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/d1/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/d1/clang-modules" }
-
-[tasks.server]
-description = "Run the standalone backend without App or Helper"
-run = "cargo run --locked -p pot-server --bin pot -- serve"
+description = "Compile the native macOS VM Helper without starting a VM"
+run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path helper --disable-sandbox --scratch-path .local/go/swift-build --product PotMacOSHelper -j 4"
+env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/go/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/go/clang-modules" }
 
 [tasks."build:web"]
-description = "Build desktop templates and page-specific translation resources"
+description = "Build localized retained desktop viewer and Sandbox pages"
 run = "python scripts/localize-web"
 
 [tasks."build:web-ui"]
-description = "Build the pinned nightly GPUI Web/WASM app and browser assets"
-run = "python scripts/build-web-ui"
-
-[tasks."test:web-assets"]
-description = "Test Web build and compression cache invalidation"
-run = "python scripts/tests/web-assets.py"
-
-[tasks."test:ui"]
-description = "Test portable shared UI state and locale contracts"
-run = "cargo test --locked -p pot-ui -p pot-avatar -j 4"
+description = "Verify and embed the shared HTML/CSS/JS product frontend"
+run = "go build -mod=readonly ./web"
 
 [tasks."build:cli"]
-description = "Build standalone CLI with embedded Web UI and a release archive"
-run = "python scripts/build-cli"
+description = "Build a portable Go CLI archive with retained runtime assets"
+run = "python scripts/build-go-cli"
 
 [tasks."build:sandbox-image"]
-description = "Build guest executor and OCI image separately from client packaging"
-run = """
-cargo zigbuild --locked --release --target aarch64-unknown-linux-musl -p pot-tool-executor -j 4
-cp .local/poc/cargo-target/aarch64-unknown-linux-musl/release/pot-tool-executor .local/d1/resources/pot-tool-executor
-scripts/build-image
-"""
+description = "Build a Debian OCI guest image with an explicit Podman builder"
+run = "python scripts/build-go-container-image"
+
 [tasks."export:sandbox-resources"]
-description = "Validate deterministic resource assets against the embedded catalog"
-run = "python scripts/export-sandbox-resources"
+description = "Verify exact reviewed OCI image exports against the embedded catalog"
+run = "python scripts/export-go-sandbox-resources"
 
-[tasks."build:container-image"]
-description = "Build the Linux Podman OCI image from the shared Dockerfile"
-run = "python scripts/build-container-image"
+[tasks.licenses]
+description = "Collect notices for actual linked Go dependencies and runtime"
+run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./cmd/pot ./cmd/pot-tool-executor"
 
-[tasks."test:clients"]
-description = "Verify independent browser clients, concurrency, streams and reconnects"
-run = "cargo test --locked -p pot-server --test multi_clients -j 4"
+[tasks."test:ui"]
+description = "Verify shared DOM composer and production owner-scoped state contracts"
+run = ["node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/web-errors.js"]
 
-[tasks."build:tailscale"]
-description = "Build embedded libtailscale and automatic tailnet HTTPS"
-run = "python scripts/build-tailscale"
+[tasks."test:executor"]
+description = "Verify Go executor through retained Linux/macOS Python callers"
+depends = ["build:go"]
+run = ["python scripts/tests/go-executor-protocol.py .local/go/bin/pot-tool-executor", "python scripts/tests/executor-lifecycle.py", "python scripts/tests/macos-provider.py"]
 
-[tasks."test:architecture"]
-description = "Guard independently testable component dependency boundaries"
-run = "python scripts/tests/architecture.py"
+[tasks."test:skills"]
+description = "Verify retained guest per-scope skills mount policy without a VM"
+run = "python scripts/tests/skill-mounts.py"
+
+[tasks."test:operation-prepare"]
+description = "Verify retained guest argument normalization without authorization state"
+run = "python scripts/tests/operation-prepare.py"
+
+[tasks."test:hooks"]
+description = "Verify hook timing and failure propagation"
+run = "python scripts/tests/hook-timing.py"
+
+[tasks."test:browser"]
+description = "Qualify retained CUA plugin observations against a Chromium fixture"
+run = ["node scripts/tests/browser-close.mjs", "python scripts/tests/browser.py"]
+
+[tasks."test:skill-authoring"]
+description = "Verify builtin skill validation and installation helpers"
+run = """
+python -m venv .local/skill-tests
+.local/skill-tests/bin/python -m pip install --disable-pip-version-check -r skills/skill-creator/scripts/requirements.txt
+.local/skill-tests/bin/python scripts/tests/skill-authoring.py
+"""
+
+[tasks."test:i18n"]
+description = "Verify retained localized pages and catalog completeness"
+run = "python scripts/tests/localization.py"
+
+[tasks."test:eval"]
+description = "Run deterministic CLI contracts without credentials or model calls"
+run = """
+set -eu
+eval_root=$(mktemp -d "${TMPDIR:-/tmp}/pot-eval-ci.XXXXXX")
+trap 'rm -rf "$eval_root"' EXIT
+go run ./cmd/pot-eval suite deterministic "$eval_root/suite"
+for scenario in short-chat tool-round compaction; do
+  go run ./cmd/pot-eval run "eval/scenarios/$scenario.json" "$eval_root/$scenario"
+  go run ./cmd/pot-eval validate "$eval_root/$scenario"
+done
+go run ./cmd/pot-eval run eval/scenarios/compaction.json "$eval_root/compaction-repeat"
+go run ./cmd/pot-eval compare "$eval_root/compaction" "$eval_root/compaction-repeat"
+"""
+
+[tasks."check:go"]
+description = "Check formatting, vet and package boundaries for Go packages"
+run = "go run ./scripts/check-go"
+
+[tasks."test:go"]
+description = "Test Go product components with the race detector"
+run = "go test -race ./..."
+
+[tasks."build:go"]
+description = "Build Go CLI and executor independently of the desktop"
+run = "go build -mod=readonly -trimpath -o .local/go/bin/ ./cmd/pot ./cmd/pot-tool-executor"
+
+[tasks."build:linux"]
+description = "Cross-build Go headless entry points without CGO or GUI dependencies"
+run = '''
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-arm64/ ./cmd/pot ./cmd/pot-tool-executor
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-amd64/ ./cmd/pot ./cmd/pot-tool-executor
+'''
+
+[tasks."test:packaging"]
+description = "Verify package layout, immutable export and service artifact generation"
+run = ["python scripts/tests/go-packaging.py", "python scripts/tests/verify-go-sandbox-resources.py"]
+
+[tasks.preview]
+description = "Run the disposable loopback shared UI preview (no model or product data)"
+run = "go run ./cmd/pot preview"
+
+[tasks."preview:app"]
+description = "Run the disposable Wails main-window and tray preview"
+depends = ["build"]
+run = "open .local/go/PotGoPreview.app"
 
 [tasks.icons]
-description = "Generate all brand assets from the canonical native vector master"
+description = "Generate brand assets from the retained native vector master"
 run = """
 mkdir -p .local/icons
-xcrun swiftc -module-cache-path .local/icons/modules crates/app/swift/PotIcon.swift scripts/make-icons.swift -o .local/icons/generate
+xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift scripts/make-icons.swift -o .local/icons/generate
 .local/icons/generate
+xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift scripts/make-tray-atlas.swift -o .local/icons/tray-atlas
+.local/icons/tray-atlas
 """
+
+[tasks."test:ui-http-integration"]
+description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
+run = "python scripts/tests/go-ui-http-integration.py"
+
+[tasks."test:public-api"]
+description = "Verify reusable Go libraries from an independent external module"
+run = "python scripts/tests/go-public-api.py"

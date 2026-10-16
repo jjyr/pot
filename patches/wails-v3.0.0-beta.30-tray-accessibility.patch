@@ -1,0 +1,37 @@
+--- a/pkg/application/systemtray_darwin.go
++++ b/pkg/application/systemtray_darwin.go
+@@ -26,6 +26,12 @@
+         NSStatusItem *statusItem = (NSStatusItem *)nsStatusItem;
+         [statusItem setVisible:NO];
+     });
++}
++
++// Set an accessibility label without introducing a hover tooltip.
++static void systemTraySetAccessibilityLabel(void* nsStatusItem, const char* label) {
++    NSStatusItem *statusItem = (NSStatusItem *)nsStatusItem;
++    [statusItem.button setAccessibilityLabel:[NSString stringWithUTF8String:label]];
+ }
+ 
+ */
+@@ -197,6 +203,7 @@
+ 			Fatal("System tray '%d' already running", s.id)
+ 		}
+ 		s.nsStatusItem = unsafe.Pointer(C.systemTrayNew(C.long(s.id)))
++		s.setTooltip(s.parent.tooltip)
+ 
+ 		if s.label != "" {
+ 			s.setLabel(s.label)
+@@ -237,7 +244,12 @@
+ }
+ 
+ func (s *macosSystemTray) setTooltip(tooltip string) {
+-	// Tooltips not supported on macOS
++	if s.nsStatusItem == nil {
++		return
++	}
++	label := C.CString(tooltip)
++	defer C.free(unsafe.Pointer(label))
++	C.systemTraySetAccessibilityLabel(s.nsStatusItem, label)
+ }
+ 
+ func newSystemTrayImpl(s *SystemTray) systemTrayImpl {

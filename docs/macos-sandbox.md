@@ -1,10 +1,17 @@
 # macOS Sandbox enrollment and execution
 
-Updated: 2026-10-07. Prepared-instance implementation, awaiting real macOS/Xcode VM qualification. Linux remains the default. Android/iOS are deferred.
+Native macOS VMs use a complete owner-prepared instance. Linux remains the default
+Sandbox; automatic OS installation is not provided.
 
-Server registers `pot-sandbox-macos-apple-vm` alongside Linux; Runtime calls `pot-sandbox` without production dependencies on either Provider. `PotMacOSHelper` is a separately signed Swift executable using public Virtualization.framework. Registration does not boot or download anything. Missing optional files show an unavailable macOS definition while leaving chat and Linux available.
+Runtime registers `macos.apple-virtualization` alongside the shared Podman
+provider. `PotMacOSHelper` is a separately signed Swift executable using public
+Virtualization.framework for native macOS VMs. Linux containers use the dedicated
+Podman machine described in [Sandbox providers](sandbox-providers.md).
+Registration does not boot or download anything. Missing optional files show an
+unavailable macOS definition while leaving chat and Linux available.
 
-The `pot-macos-executor-v3` bootstrap adds authenticated session inspection. Previously enrolled v2 guests must install the current bootstrap and update their manifest before use; the Provider rejects an older manifest before execution.
+The Provider requires the `pot-macos-executor-v3` bootstrap and validates the
+prepared manifest before execution.
 
 The first slice supports command/stdin/patch execution as a standard guest account, with one execution owner per VM. Managed sessions survive normal turns within the same Agent epoch and expire on inactivity or explicit cancellation/closure. The VM stays running after normal turn completion or cancellation; files, applications and background state remain persistent. Scope closure expires managed command sessions and terminates their runner/process group. It does not reset the sandbox or prove that detached/launchd work is gone. Manager accepts this explicit `session-closure` policy separately from Linux's `process-containment` policy. Unknown scope closure still quarantines ownership until recovery; no automatic VM-stop fallback is used.
 
@@ -47,7 +54,7 @@ No installer/first-run automation is delivered. Prepare the complete platform wi
 
 ## Bootstrap and enroll
 
-Build the Host components with `mise run check:swift` and the native runner with `mise exec -- cargo build --locked -p pot-tool-executor --release`. Sign Helper with `helper/virtualization.entitlements`. App bundling includes/signs the separate Helper and places the native runner/bootstrap assets in `runtime/macos-bootstrap/`; standalone installations must include `PotMacOSHelper` in runtime resources, or configure the trusted `POT_MACOS_HELPER` path. These paths are owner configuration, never Agent arguments.
+Build the Host components with `mise run check:swift` and the native runner with `mise run build:go`. Packaging signs the separate Helper with `helper/virtualization.entitlements`, places it beside the Host executable and includes native runner/bootstrap assets in `Resources/macos-bootstrap/`. Custom installations select the Helper directory through `serve -helpers` and runtime assets through `-resources`. These paths are owner configuration, never Agent arguments.
 
 1. Generate per-instance assets on Host:
 
@@ -57,23 +64,26 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    This generates a dedicated CA, guest certificate/key and token; it deletes the temporary CA signing key. It neither starts a VM nor accepts OS/Xcode terms.
 
-2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `crates/sandbox-images/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `operation_prepare.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
+2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `resources/sandbox/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `operation_prepare.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
 
    ```sh
    sudo ./provision.sh STANDARD_ACCOUNT /PRIVATE/GUEST_ENROLLMENT
    ```
 
-   The broker uses Xcode's available `/usr/bin/python3` (3.9+ required), launchd and the credential-free native Rust runner. It checks the account is standard and has no sudo grants. Control keys/config/SQLite stay under root-private `/var/db/pot-executor`; child environments carry no token. Remove Guest staging assets and shut the VM down before copying its complete platform bundle.
+   The broker uses Xcode's available `/usr/bin/python3` (3.9+ required), launchd and the credential-free native Go runner. It checks the account is standard and has no sudo grants. Control keys/config/SQLite stay under root-private `/var/db/pot-executor`; child environments carry no token. Remove Guest staging assets and shut the VM down before copying its complete platform bundle.
 
-3. Place only the CA certificate and matching token in the private Host prepared bundle above. Keep guest private keys on private guest disk, never workspace or Host skill shares. Record actual OS/Xcode versions in the manifest. Start the Pot Server/App, then enroll through the owner CLI:
+3. Place only the CA certificate and matching token in the private Host prepared bundle above. Keep guest private keys on private guest disk, never workspace or Host Skill shares. Record actual OS/Xcode versions in the manifest and keep the complete source instance stopped.
 
-   ```sh
-   pot --root INSTANCE_ROOT sandbox enroll-macos mac-dev /PRIVATE/PREPARED_INSTANCE
-   ```
+   The Go host retains the Provider, prepared-bundle validation and Swift Helper,
+   but currently exposes no owner CLI/API that imports and registers a new
+   prepared macOS instance. Enrollment tooling is not implemented; the bundle
+   contract above must not be treated as a completed enrollment operation.
 
-   Enrollment copies the complete fixed-file bundle, rejects symlinks/non-private files and existing instances, and creates a macOS definition through the local management API. It requires the source to be stopped; it cannot prove the state of a third-party VM engine. A failed final API registration retains the private copy for owner inspection. Do not simply retry over an existing copy. Raw whole-GiB disk size is recorded in the instance resource config; disk resizing is rejected. CPU/RAM changes apply after stopping, subject to VZ validation.
-
-4. The owner manages the prepared macOS VM through the machine management API. Models do not manage its lifecycle. Automatic task sandboxes use disposable Linux containers; enrolled macOS VMs are not selected or deleted by that automatic lifecycle. Session IDs and receipts use the common Manager contracts.
+   For registered instances, raw whole-GiB disk size is fixed by the enrolled
+   disk; resizing is rejected. CPU/RAM changes apply after stopping, subject to
+   VZ validation. Models do not manage VM lifecycle. Automatic Tasks use the
+   retained shared Linux container, independently of native macOS VM lifecycle.
+   Session IDs and receipts use the common Manager contracts.
 
 Control owns all machine grants. The guest broker exposes `/prepare` only for argument normalization and keeps no authorization file. Reprovision the broker after this incompatible protocol change.
 
@@ -101,6 +111,9 @@ The root-private broker config records the opt-in. Re-running provisioning witho
 
 Viewing starts without input authority; control is exclusive between gateway viewers. Closing/reconnecting a desktop preserves VM, application and filesystem state. The first implementation disables macOS clipboard and browser-launch controls. A desktop ticket expires after one hour; native reconnect creates a fresh ticket. This is viewer control arbitration, not containment of Guest-local automation or other Guest VNC clients.
 
-## Validation
+## Platform qualification
 
-See [macOS implementation acceptance](validation/macos-provider-20261007.md). Automated tests cover Manager exclusive ownership, helper protocol/process ownership, bundle validation, TLS identity/authentication, no-replay receipts and workspace checks. The real compiled Helper's private IPC is tested without media. Real macOS boot/stop, VirtioFS UID mapping, root/standard-user separation, Xcode build/test/artifacts, real VNC GUI session and crash/escape behavior remain unverified until a prepared instance is available. No source descriptor or passing mock test establishes those VM capabilities.
+A prepared instance must qualify real boot/stop, VirtioFS UID mapping,
+root/standard-user separation, its Xcode build/test toolchain and any configured
+VNC session. Source descriptors, bundle validation and mock tests alone do not
+establish these platform capabilities or crash/escape behavior.

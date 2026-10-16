@@ -8,7 +8,7 @@ separate from these public model facts.
 
 ## Sources and refresh
 
-`crates/control/assets/model-directory.json` is a reduced, bundled snapshot of
+`resources/model-directory.json` is a reduced, bundled snapshot of
 `https://models.dev/api.json?type=all`, with common provider SVG marks from
 `https://models.dev/logos/{provider}.svg`. Builds do not require these endpoints.
 The snapshot's source, update command and license are recorded alongside it.

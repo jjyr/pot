@@ -1,0 +1,70 @@
+{
+  "id": "short-chat-v1",
+  "profile": {
+    "id": "eval",
+    "revision": 1,
+    "name": "Evaluation fixture",
+    "provider": "mock",
+    "model": "fixture",
+    "auth_ref": "provider:mock",
+    "params": {
+      "max_output_tokens": 512,
+      "reasoning_effort": null,
+      "agent": {
+        "system_prompt": "Complete the task.",
+        "builtin_tools": [
+          "exec_command",
+          "write_stdin",
+          "apply_patch"
+        ],
+        "plugins": {}
+      }
+    },
+    "tool_policy": {
+      "worker_orchestration": false,
+      "summary_read_only": true,
+      "unattended": "guest_vm"
+    }
+  },
+  "protocol": "openai_chat",
+  "turns": [
+    "Complete the task."
+  ],
+  "responses": [
+    {
+      "stage": "agent",
+      "frames": [
+        {
+          "choices": [
+            {
+              "delta": {
+                "content": "done",
+                "tool_calls": []
+              },
+              "finish_reason": null
+            }
+          ]
+        },
+        {
+          "choices": [
+            {
+              "delta": {},
+              "finish_reason": "stop"
+            }
+          ]
+        },
+        {
+          "choices": [],
+          "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5
+          }
+        }
+      ]
+    }
+  ],
+  "fixtures": {},
+  "expected_files": {},
+  "expected_final_text": "done",
+  "deadline_ms": 10000
+}

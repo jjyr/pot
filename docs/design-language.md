@@ -3,7 +3,7 @@
 This is the shared App/Web reference for visual language, responsive navigation
 and page interactions. Code defines current behavior. Platform responsibilities
 belong in [Shared UI](shared-ui.md), ownership in [Multi-Space UI](multi-space-ui.md),
-and build and regression commands in [Development](development.md#responsive-ui-regression).
+and build and regression commands in [Development](development.md#checks).
 
 ## Visual language
 
@@ -14,7 +14,7 @@ cards for related controls or details, rather than wrapping every row.
 
 ### Color and surfaces
 
-[`design.rs`](../crates/ui/src/design.rs) installs the shared semantic tokens.
+[`styles.css`](../web/src/styles.css) installs the shared semantic tokens.
 System / Light / Dark appearance is available in General settings.
 
 | Token | Light | Dark |
@@ -41,22 +41,23 @@ keep their colors across themes; see [Assistants](#assistants).
 
 ### Typography and geometry
 
-Shared components use the system font, with `.AppleSystemUIFont` as the configured
-family. Use monospace for code and identifiers. [`pages.rs`](../crates/ui/src/pages.rs)
+The native App uses the system-font stack; browsers retain IBM Plex Sans with
+system-font fallbacks. Both use the same type hierarchy and geometry. Use
+monospace for code and identifiers. [`primitives.mjs`](../web/src/components/primitives.mjs)
 owns page, form, control and editor primitives:
 
 | Primitive | Current geometry |
 | --- | --- |
-| Content column | Up to 820 px; 32 px inset, reduced to 16 px below 900 px |
+| Content column | Up to 820 px including 28 px inset, reduced below 900 px |
 | Conversation / editor column | Up to 760 px |
 | Page / section title | 24 / 16 px, semibold |
 | Page body | 14 px; 16 px below 720 px |
 | Description | 13 px; 14 px below 720 px; regular, 1.5 line height |
-| Card | 20 px padding, 12 px below 720 px; 10 px radius |
+| Card | 18 px padding, 12 px below 720 px; 10 px radius |
 | Form | 184 px label column; stacked labels below 900 px |
-| Kit theme / composer radius | 6 / 16 px |
+| Control / composer radius | 6 / 16 px |
 
-Shared Button/Input controls using `pages::Control` adopt 44 px height and input
+Shared button/input controls adopt 44 px height and input
 text of 16 px on narrow windows or touch-capable browsers. Other custom controls
 own their geometry; this is not a global minimum applied to every element.
 Desktop mouse controls stay compact. Wide iPad windows retain touch density.
@@ -125,9 +126,8 @@ settings use editing pages on App and Web so phone forms can use the available
 viewport. Small menus and confirmation dialogs remain transient surfaces.
 
 Shell supplies one contextual titlebar with Back. AI, machine and schedule editors
-use `pages::editor_page`: a bounded, scrolling body and fixed action area. On narrow
-windows, `pages::editor_actions` wraps secondary actions above a full-width primary
-action. Assistant forms use inline actions within their scrolling body and share
+use the shared editor form and bounded scrolling body. On narrow
+windows, the action area wraps to the available width. Assistant forms share
 the same return and dirty-exit handling. Opening a phone editor does not force
 keyboard focus. Input entities retain drafts across resizing and preference changes.
 
@@ -195,7 +195,9 @@ models autonomously, guided by its instructions.
 ### Chat and task conversation
 
 The composer, send/stop control, draft ownership and reference completion are
-shared. AppKit supplies native text editing/IME; Web uses a browser-native textarea. `/`
+shared. During a running turn, a nonempty draft offers Send guidance; an empty
+draft offers Stop. The conversation menu exposes Pause/Resume, with pausing
+applied at a safe model boundary. All hosts use a browser/WebView-native textarea and IME. `/`
 completes machine, label and Skill references at the caret; arrows/Enter, Escape
 and click/tap operate the same menu. See [Agent context](agent-context.md).
 
@@ -272,8 +274,8 @@ see [Multi-Space UI](multi-space-ui.md) and [Sandbox resources](sandbox-resource
 ### Approvals and About
 
 Approval cards identify assistant, machine and Host/Sandbox capability, with
-Always allow / Allow this work / Deny actions. See [Permissions](permissions.md).
-About Pot uses the native Pot menu and standard AppKit panel; its content follows
+Allow this operation / Deny actions. See [Permissions](permissions.md).
+About Pot is available from General settings; its content follows
 [About and licenses](licenses-and-about.md).
 
 ### Menu-bar Pot activity and unread indicator

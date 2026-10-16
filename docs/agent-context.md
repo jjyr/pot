@@ -1,6 +1,6 @@
 # Agent context
 
-Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. pot-agent receives caller-provided text through `ExecutionContext.instructions` and `AgentExtensions::instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
+Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. `pkg/agent` receives caller-provided text through `core.ExecutionContext.Instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
 
 ## Sources and scope
 
@@ -18,17 +18,17 @@ recorded Host/Sandbox task workspace throughout an active execution.
 
 Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Sandbox discovery stops at its workspace mount boundary. Host discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 
-Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignored. Each chat assistant owns a versioned AGENTS.md text record in its own database. This record is independent of execution targets and travels with the assistant's state. There is no legacy assistant-file import or saved-preference conversion. Project AGENTS.md discovery remains filesystem-based. UI edits and assistant tools operate on the same DB record. Every successful save creates a new revision, including reverting to identical text.
+Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignored. Each chat assistant owns a versioned AGENTS.md text record in its own database. This record is independent of execution targets and travels with the assistant's state. Project AGENTS.md discovery remains filesystem-based. UI edits and assistant tools operate on the same DB record. Every successful save creates a new revision, including reverting to identical text.
 
 Main contexts load global instructions, assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor global Agent-home rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
 
-The Runtime instruction filesystem interface uses execution-visible paths. Its current implementation reads the Host-shared Sandbox workspace mount without starting a VM and resolves relative and absolute symlinks in guest path space. Links outside that mount are omitted with a diagnostic, so Host files cannot be pulled in through a project symlink. Other guest mounts and image files are not instruction sources.
+The Runtime instruction filesystem interface uses execution-visible paths. Its current implementation reads the Host-shared Sandbox workspace mount without starting the execution environment and resolves relative and absolute symlinks in guest path space. Links outside that mount are omitted with a diagnostic, so Host files cannot be pulled in through a project symlink. Other guest mounts and image files are not instruction sources.
 
 ## Refresh and injection
 
 Runtime reloads sources when preparing each execution context. The resulting snapshot is used for that execution's model requests. Global instruction caching is used by Main services in the current Runtime process. A global read failure retains the last successful text and emits a diagnostic; repeated identical failures are reported once until recovery. Confirmed absence or a successful empty read clears the cached value. The cache is not persisted across restarts. Unexpected project read errors fail context preparation rather than reusing stale project instructions.
 
-pot-agent records instructions as classified, append-only context sections for Main
+`pkg/agent` records instructions as classified, append-only context sections for Main
 and Worker, including custom system prompts and configurations with no execution
 reader tool. Summary contexts skip discovery and new injection; they preserve the latest retained sections instead of revoking unloaded resources. See the message
 and compaction contract below.
@@ -38,7 +38,7 @@ and compaction contract below.
 The base model instructions and tool schemas remain request inputs. Mutable
 instructions and reference data are separate from accepted user text. Control
 supplies `ExecutionContext.context_sections` (reference-data keys; `instructions`,
-`plugins` and `skills` are reserved for Agent instruction providers); pot-agent
+`plugins` and `skills` are reserved for Agent instruction providers); `pkg/agent`
 owns comparison, rendering and durable history. Neither the assistant driver nor the Agent appends catalogs
 or task state to a real user's text.
 
@@ -132,17 +132,37 @@ bind the owner, Thread generation, turn, tool call and exact new content. The
 Agent dispatcher executes these calls internally after authorization; they are
 not exposed as unaudited MCP writes.
 
+## Conversational control
+
+Each Host assistant prepares its workspace under `agent-workspace/assistants/ID`.
+Task workspaces remain under `agent-workspace/tasks/ID`. A Main tool explicitly
+selecting Host uses the assistant’s Host directory even when its default context
+was prepared in Sandbox. Correspondence execution retains the recipient’s Host
+directory and separate conversation history. These directories organize files;
+they do not add a security boundary inside authorized Host execution.
+
+`POST /api/v1/turn/steer` binds `request_id`, `user_message_id` and `text` to the
+original active turn. The pending input and visible user message commit together.
+A steering message has `steering: true`, `accepted` status while queued and
+`complete` status once its IDs are durably incorporated in the Agent checkpoint.
+An exact retry returns the original receipt and never retargets another turn.
+
+`POST /api/v1/turn/control` binds `user_message_id` to `pause` or `resume`.
+`turn.paused` is persisted and streamed in snapshots. Pausing waits at safe model
+boundaries; in-flight work settles normally. It neither recreates a turn nor
+relaxes tool or machine permissions.
+
 ## Reference and tests
 
-Assistant prompt text is kept in `crates/assistant/prompts/`.
+Assistant prompt text is kept in `internal/assistant/assets/`.
 Main's built-in delegation prompt lives in
-[`crates/assistant/prompts/main_prompt.txt`](../crates/assistant/prompts/main_prompt.txt).
-`MAIN_PROMPT` in `crates/assistant/src/orchestration.rs` embeds it at compile time
-with `include_str!`; Control supplies it when preparing Main execution context.
+[`main_prompt.txt`](../internal/assistant/assets/main_prompt.txt).
+The Go assistant package embeds it at compile time
+with `go:embed`; Control supplies it when preparing Main execution context.
 Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
-`system_prompt` replaces the default pot-agent prompt.
+`system_prompt` replaces the default `pkg/agent` prompt.
 
-Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; pot-agent request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run clippy:backend`.
+Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; `pkg/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
 
 
 ## Global ownership
@@ -177,9 +197,11 @@ Task Agent starts: ordinary cat / scripts / tool calls
 ```
 
 No Skill-loading tool, virtual filesystem or resource version parameter is
-introduced. Synchronization failure stops the run before model sampling. Runtime
-cache digests only check content integrity and bind one execution; they are not
-task resource selectors. Local tasks prepare the same resource layout without a
+introduced. Synchronization failure stops the run before model sampling. The destination Runner records the prepared content and digest once for the
+original run. Allowance resumes reuse that evidence; queued Tasks still read the
+current sources on first preparation. Control keeps no per-Task resource archive.
+Cache digests identify content integrity and bind one execution; they are not
+Task resource selectors. Local tasks prepare the same resource layout without a
 network hop. Global Skill metadata and paths are injected; full instructions
 remain lazy reads of ordinary files.
 
@@ -237,6 +259,14 @@ Configured Provider identity/model/capabilities determine available candidates.
 An unavailable required target must produce clarification or a visible failure;
 no extra classifier model call or silent executor substitution is introduced.
 
+`GET`/`POST /api/v1/agent/routing` manages only execution admission capacity:
+`revision`, `profile_limits` and `provider_limits`. Saves compare the current
+revision; each limit is 1–1000 for a configured identity. A Task keeps its pinned
+model while queued. Running and uncertain original runs hold their route limits
+until their existing execution settles; capacity never selects a different model.
+Provider saves retain an explicit `models` list, exposed as `configured_models`
+in the Provider snapshot and through paginated `get_model_catalog` queries.
+
 Task-routing token accounting remains a subset of the invoking assistant's
 chat usage, never an additional allocation. The Runtime usage ledger is shared;
 Threads, routing defaults, task ownership and assistant rules are independent.
@@ -280,17 +310,17 @@ Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and
 
 ## Injection and task selection
 
-ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved names and optional selections. pot-agent discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. AgentExtensions::skills(context) is the shared override for main/task callers.
+`core.ExecutionContext.SkillResources` carries ordered SkillRoot entries, reserved names and optional selections. `pkg/agent` discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. Callers provide `core.SkillResources` for Main and Task contexts.
 
 Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
-Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Summary executions add no catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
+Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Summary executions add no catalog, and `pkg/agent` does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
 
 ## Creation, installation and validation
 
 Builtin skill-creator describes format, concise instruction design, supporting resources and validation. Builtin skill-installer handles local/GitHub installation, updates, listing and removal. Their instructions expose only the unified skill path, project paths and usable commands; they do not describe source storage or mounts. Tasks can read these same instructions, but readonly global mounts prevent global mutations.
 
-The creator's scripts/quick_validate.py validates YAML metadata and scaffolds, and checks ordinary resource files and inline local Markdown links. Authored bundles require explicit names and matching directory names. Standard license/metadata/allowed-tools fields may be preserved but do not grant tool permissions. Shared format fixtures exercise Rust discovery and Python validation. Validation does not execute scripts or establish behavioral quality.
+The creator's scripts/quick_validate.py validates YAML metadata and scaffolds, and checks ordinary resource files and inline local Markdown links. Authored bundles require explicit names and matching directory names. Standard license/metadata/allowed-tools fields may be preserved but do not grant tool permissions. Shared format fixtures exercise Go discovery and Python validation. Validation does not execute scripts or establish behavioral quality.
 
 The installer uses the adjacent creator validator. It accepts a local bundle, GitHub repo/path/ref or tree URL. Downloads use only credentials available in the current execution target. Archive extraction rejects traversal and special files. Installation preserves resource contents and executable permissions, normalizes readable permissions, validates before publishing, and refuses replacement without --replace. Ordinary publication failures restore the previous directory; crash recovery and concurrent installers are not transactional.
 
@@ -318,3 +348,23 @@ Control initializes its labels to `task-runner`, `desktop` and its OS. Newly joi
 machines receive only their declared OS label. Control owns all label edits;
 heartbeats, repeated enrollment and restarts do not restore removed labels.
 Labels use lowercase ASCII letters, digits, hyphens and underscores.
+
+## Recovering a stopped Main turn
+
+After a crash or uncertain termination, Main retains the original stopped turn
+and blocks new input. The private/native owner endpoint
+`POST /api/v1/turn/recovery?assistant_id=ID` accepts `action: "inspect"` to expose
+the original `user_message_id`, receipt states and unresolved reasons. Reconcile
+requires `action: "reconcile"` and that exact `user_message_id`. Browser
+publication excludes this route, and clients cannot supply results or cleanup
+acknowledgments.
+
+Control reads original operation receipts and durable Sandbox request bindings.
+Actual original cleanup is recorded before terminal acknowledgment; otherwise
+cleanup must be independently proven. A safe stopped boundary with no uncertain
+effects can be closed, and proven tool results enter the original checkpoint
+once. Remaining never-started calls are closed as interrupted. Recovery does not
+replay accepted input, model samples or tools. Unknown model/tool outcomes and
+previous-boot Host effects without cleanup proof remain fenced. Successful
+reconciliation clears only the original execution and allowance wait; exact
+retries return its retained completion receipt without affecting a later turn.

@@ -6,7 +6,7 @@ Each task (including archived tasks) and main chat has a usage entry. Details sh
 
 ## Metering
 
-Rust Runtime captures provider usage through the generic model gateway. Shared SQLite `product/usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, execution generation, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
+Go Control captures provider usage through the generic model gateway. Shared SQLite `usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, execution generation, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
 
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
@@ -18,17 +18,17 @@ Rust Runtime captures provider usage through the generic model gateway. Shared S
 - Skills lack a reliable independent metering boundary, so no Skills statistics tab or estimated allocation. Skills loading remains unintegrated and unchanged here.
 - Pi development sessions and old usage databases are not imported; this revision starts a new usage database.
 
-Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages. App refreshes on demand every 3 seconds, rejects stale query responses, and does not present old disconnected data as new. Charts reuse gpui-kit `BarChart` hover/tooltips/ticks/themes; allowances use `Progress`, shared cards, and Kit forms.
+Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages. The shared HTML frontend refreshes from persisted usage updates and rejects stale query responses. Disconnected cached values are labelled with their availability. Shared CSS and components render the charts, allowance bars and editing controls.
 
 ## Context estimation
 
-The default estimator follows the Codex source baseline `822e58cc3d`, specifically
-`codex-rs/utils/string/src/truncate.rs` and
-`codex-rs/core/src/context_manager/history.rs`. It uses the same arithmetic and
+The default estimator in [`pkg/agent/meter.go`](../pkg/agent/meter.go)
+follows the [Codex content-cost baseline](https://github.com/openai/codex/tree/822e58cc3d).
+It uses the same arithmetic and
 rounding boundaries for the item types Pot supports. Protocol adapters map Chat
 Completions, Responses, Anthropic Messages and Gemini to those content rules;
 they do not select different token ratios. Callers may inject a tokenizer through
-`AgentExtensions::estimate_tokens`.
+the Agent estimator boundary.
 
 - Text costs `ceil(UTF-8 bytes / 4)`, rounded separately for base instructions and
   each model item. Message content parts are summed before that item's rounding.
@@ -81,7 +81,7 @@ The `routing_total` summary reports whole main-chat turns that attempt task dele
 
 ## Display and limits
 
-Pot Agent executes direct API connections; the model service determines billing. API connections default to no periodic limit, hiding allowance cards/reset times. Settings -> Agent or Usage configures **Pot usage limits**: unlimited/daily/weekly, positive integer tokens with K/M, and automatic continuation after recovery (on by default). Saving applies immediately without VM restart.
+Pot Agent executes direct API connections; the model service determines billing. API connections default to no periodic limit, hiding allowance cards/reset times. Settings -> Agent or Usage configures **Pot usage limits**: unlimited/daily/weekly, positive integer tokens with K/M, and automatic continuation after recovery (on by default). Saving applies immediately without restarting the execution environment.
 
 Daily reset is 00: 00 in the configured zone, weekly Monday 00: 00. The policy explicitly stores its zone and uses calendar DST rules. Chart ranges do not affect allowance windows; changing periods preserves history.
 
@@ -93,9 +93,17 @@ Lifetime request, per-turn request, and per-request output caps remain independe
 
 ## Waiting and recovery
 
-When allowance is insufficient, gateway rejects the unsent request without consuming a request count. The Control execution adapter saves `execution.paused` only after tools settle and Storage persists the execution context. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
+Task model, tool and compaction records use the Task ID as their ledger scope.
+Main requests and automatic result summaries use the owning assistant ID. Mail
+usage belongs to the recipient assistant, with a separate correspondence wait
+scope so it cannot overwrite Main or Task waits. The summary’s `mail_waits` list
+exposes the selected assistant’s resumable correspondence waits. Unknown model
+reservations remain conservative even when a completed wait record is cleared.
 
-When allowance is sufficient and automatic continuation enabled, the scheduler resumes. Otherwise click Continue in session usage. Cancel waiting discards pending work for that turn. After App/VM restart, only explicit persistent checkpoints can resume; unknown execution remains interrupted.
+
+When allowance is insufficient, gateway rejects the unsent request without consuming a request count. The Control execution adapter persists an allowance-waiting conversation or Runner state only after tools settle and the Agent checkpoint is saved. Tasks enter `waiting` (still ongoing) and release slots; main chat retains the pending turn. Follow-up task guidance queues after that turn. Schedule no-overlap rules still apply without duplicate waiting runs.
+
+When allowance is sufficient and automatic continuation enabled, the scheduler resumes. Otherwise click Continue in session usage. Cancel waiting discards pending work for that turn. After App or execution-environment restart, only explicit persistent checkpoints can resume; unknown execution remains interrupted.
 
 Resume reuses the saved Agent context, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed tool cleanup, or unknown crash side effects cannot retry automatically.
 
@@ -104,18 +112,18 @@ Resume reuses the saved Agent context, without replaying original prompts/tools.
 Usage query/policy/recovery APIs require the main Runtime token; workers cannot read the global ledger or change policies. Internal compaction endpoints validate session authority.
 
 - `GET /api/v1/usage/summary?days=7&timezone=Asia/Shanghai&scope=&offset=0`: empty scope = global; `main` or task ID = session. Task totals ignore days; requests and Agent/model categories paginate in 20-item offset pages. `agent_models` contains the current category page; `agent_model_next_offset` is the next offset.
-- `POST /api/agent/compactions`: internal Agent lifecycle events require the current session token and active turn. Workers write only their own records and cannot read global usage/change policies.
+- Compaction lifecycle enters Control through injected execution services or the original run-bound signed port; Workers cannot read global usage or change policies.
 - `POST /api/v1/usage/policy`: `{period: none|day|week, limit, timezone, auto_resume}`.
-- `POST /api/v1/usage/resume`: `{scope}` clears the manual-resume gate, still requiring allowance.
-- `POST /api/v1/usage/cancel`: cancels main chat waiting; tasks use the task interruption API.
+- `POST /api/v1/usage/resume?assistant_id=OWNER`: requires `{request_id, turn, since, scope?}`. The displayed original `turn`/`since` wait token and originating assistant must match the retained Main, Task or correspondence wait. Omitted `scope` selects Main. The exact wait-instance release and request receipt commit together; stale actions reject, and exact retries retain the original result without releasing a later wait. Available allowance is still required. `/api/v1/tasks/{id}/resume` requires the same `request_id`, `turn` and `since`; its path fixes the Task scope.
+- `POST /api/v1/turn/cancel` cancels the exact Main user-message turn, including allowance waiting; Tasks use their interrupt/cancel APIs.
 
-Legacy `/api/v1/usage` remains for request-count diagnostics; new UI uses summary.
+`GET /api/v1/agent/diagnostics` provides bounded execution metadata; diagnostic responses omit prompt text, tool arguments, output and error payloads.
 
 
 ## Thread configuration attribution
 
 Gateway accepts only the current Thread's provider/model. `request_routes` links request IDs to
-Agent type, profile ID, provider, generation, and spec hash. Existing request tables retain executed configuration models/turns; no legacy ledger import or schema migration is provided.
+Agent type, profile ID, provider, generation, and spec hash. Existing request tables retain executed configuration models/turns.
 OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Requests after a configuration change use the new snapshot; previous request attribution remains unchanged. Global/session summaries group input/output/cache/records/unknown usage by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/generation in request details.
 
 `unknown` protocol neither parses response usage nor changes output caps or pretends usage is zero. Requests retain

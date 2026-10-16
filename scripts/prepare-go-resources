@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Prepare retained JS/Node/Swift assets for the independent Go product."""
+
+import argparse
+from pathlib import Path
+import platform
+
+from go_packaging import BUILD, NODE_HASHES, prepare_resources, swift_helpers
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--platform",
+    choices=NODE_HASHES,
+    default={
+        "Darwin": "darwin-arm64",
+        "Linux": "linux-"
+        + {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine(), "unsupported"),
+    }.get(platform.system()),
+)
+parser.add_argument("--output", type=Path, default=BUILD / "runtime-resources")
+parser.add_argument(
+    "--helpers", action="store_true", help="Compile and sign retained macOS Helpers from source"
+)
+args = parser.parse_args()
+prepare_resources(args.output.resolve(), args.platform)
+if args.helpers:
+    if platform.system() != "Darwin":
+        parser.error("Swift virtualization Helpers require macOS")
+    swift_helpers()
+print(args.output.resolve())

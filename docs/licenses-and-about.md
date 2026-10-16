@@ -1,78 +1,90 @@
-# About and license policy
+# About and dependency notices
 
-Pot's own source is MIT licensed; `LICENSE` and the workspace Cargo metadata are
-the source of truth. Third-party dependencies retain their own terms.
+Pot's own source is MIT licensed. `LICENSE` is the source of truth for its
+copyright and terms. Third-party dependencies retain their own terms.
 
 ## Application information
 
-The first item in the macOS **Pot** menu is **About Pot** (Chinese: **关于 Pot**).
-It opens AppKit's standard About panel with the application version, developer
-name, copyright, GitHub project link, MIT license, and bundled Rust dependency
-license report. Displayed developer names omit email addresses.
+The macOS **Pot → About Pot** menu opens the standard AppKit panel. Its name,
+version and copyright come from the packaged `Info.plist` and `LICENSE`.
+**Settings → General → About** shows the product version, source revision, Go
+version and expandable plain-text dependency notices. Browser clients use the
+same read-only `/api/v1/about` projection for their connected Control.
 
-The build generates native metadata from Cargo's package version, authors, and
-repository, and the copyright line in `LICENSE`. Bundling writes
-`NSHumanReadableCopyright` to `Info.plist`, includes `LICENSE.txt`, and generates
-`RustDependencyLicenses.html`. Bundle identifiers are unchanged.
+`scripts/build-go-app` and `scripts/build-go-cli` set
+`internal/buildinfo.Version` and `Revision` through Go linker flags. The App
+version is `POT_APP_VERSION` (default `0.1.0`); its revision is the Git commit,
+with a dirty suffix when tracked source changes exist. `POT_BUILD_REVISION` can
+supply explicit build provenance. Unpackaged Go builds identify themselves as
+development builds. `pot --version` uses the same metadata.
 
-## Rust dependency checks
+The default macOS bundle is independently identified as
+`.local/go/PotGoPreview.app` / `dev.pot.go-preview`. A local release build uses
+`.local/go/Pot.app` / `dev.pot.app`. Building a bundle does not open or replace an
+installed App. The release task creates local ZIP/checksum/cask artifacts;
+publication is a separate workflow.
 
-`mise.toml` pins cargo-about 0.9.2. Install and run:
+## Packaged host notices
 
-```sh
-mise install github:EmbarkStudios/cargo-about
-mise run licenses
-mise run test:licenses
-```
+App resources and portable CLI archives include these original plain-text files:
 
-`about.toml` defines approved SPDX terms and targets: Apple Silicon macOS,
-ARM64 Linux musl (Sandbox executor), and x86_64 Linux GNU (backend CI).
-Build and transitive dependencies are included; development-only dependencies
-are excluded. The order prefers MIT when dependencies offer MIT or Apache-2.0.
-GPL/AGPL/LGPL-only and unknown licenses fail; dual licensing can satisfy the
-policy through an approved alternative. The fail flag also rejects unresolved
-license evidence. Do not lower the detection threshold or ignore errors to pass.
+| File | Coverage |
+|---|---|
+| `LICENSE.txt` | Pot's own source |
+| `GoDependencyLicenses.txt` | Go modules linked by the packaged entry points and the Go runtime |
+| `SwiftDependencyLicenses.txt` | Native macOS VM Swift Helper dependency notices; macOS packages only |
+| `FrontendFontLicense.txt` | IBM Plex Sans under the SIL Open Font License |
+| `FrontendIconLicense.txt` | Retained Lucide/Feather icons under ISC/MIT terms |
+| `ModelDirectoryLicense.txt` | The models.dev catalog seed and provider artwork |
+| `node/LICENSE` | The pinned Node.js distribution and its bundled dependencies |
+| `novnc/LICENSE.txt` | The pinned noVNC distribution |
 
-Three unchanged crates have explicit, narrowly scoped MPL-2.0 acceptance:
+`scripts/go-notices` walks the actual Go package dependency graph using
+`go list -mod=readonly -deps`, collects module-root license/notice files, and
+includes the Go runtime license. A dependency without a notice fails packaging.
+Cross-compiled archives collect this graph with their target GOOS/GOARCH and
+CGO settings, rather than inheriting the packaging host's dependency selection.
+The App inventory includes Wails; portable headless CLI inventories omit GUI
+packages. The linked `tailscale.com/tsnet` implementation and its dependencies
+are included in this Go inventory.
 
-- `cbindgen` 0.28.0: build-time binding generator.
-- `option-ext` 0.2.0: dependency of `dirs-sys`, used by directory discovery.
-- `ece` 2.4.2: runtime dependency of `web-push` 0.11.0 for RFC 8291 message
-  encryption. Reviewed during the mobile/standalone branch integration: the
-  locked registry crate declares MPL-2.0 and includes its license; Pot links it
-  without modifying its covered source. Preserve its MPL notice and the
-  versioned source download link in the generated dependency report. This is a
-  crate-specific exception, not approval of other MPL dependencies.
+Run `mise run licenses` to generate the CLI/runtime inventory locally. App
+packaging regenerates it for the native entry point as well. These are notice
+inventories; distributed non-Go files have separate notices and are not covered
+by the Go dependency graph.
 
-MPL imposes obligations on its covered files rather than requiring Pot's own
-source to switch to MPL. Preserve license notices and access to the corresponding
-source. The generated report includes license texts and links to versioned crate
-source downloads. If these crates are modified, ship the modified covered source
-under MPL. New MPL dependencies require a separate review; MPL is not globally
-accepted. These name-based exceptions must be reviewed when their versions change.
+The narrowly pinned Wails macOS tray adaptations in [patches](../patches/README.md)
+preserve the tray artwork's aspect ratio and expose the status accessibility
+label. Packaging applies them only to a disposable module copy using a temporary
+module file. Wails' original MIT notice and a description of the local changes
+are included in the App's Go dependency notices.
 
-## Enforcement and report
+## About API boundary
 
-The CI license job scans the locked dependency graph and tests positive MIT,
-negative GPL, and unknown-license fixtures. `scripts/pot bundle` runs the same
-check before packaging, so unresolved or disallowed terms stop bundle creation.
-The generated HTML is at `.local/licenses/rust-dependencies.html`; it is rebuilt
-from Cargo.lock rather than checked into Git. HTML escapes dependency metadata
-and license text, uses no remote scripts, and includes project/source links.
+The product information service reads only the fixed notice filenames above
+from the packaged resource directory. It rejects linked notice files, invalid
+UTF-8, files larger than 8 MiB and combined notice text larger than 16 MiB. The
+frontend renders notice text with text nodes, without executing HTML from a
+license file. `/api/v1/about` is read-only and available through the browser API
+allowlist; it does not provide arbitrary file access.
 
-Initial cargo-about testing rejected cbindgen and option-ext; the scoped policy then
-generated the report successfully without SPDX overrides or broad copyleft
-acceptance. This checks declared terms against an explicit policy; it does not
-prove legal compatibility of every combination or audit all distributed files.
-Swift packages, bundled Node/npm, Sandbox OS packages, fonts, icons, and other
-non-Cargo assets require separate inventories. The About link and report label
-explicitly identify the current coverage as Rust dependencies.
+Source-only previews can lack prepared notices. They report that the complete
+notice set is unavailable; they do not substitute the font license for the
+linked dependencies. Packaged builds include all cross-platform notice files,
+and macOS packages additionally include the Swift Helper notices.
 
-## Embedded Tailscale notices
+## Retained and guest assets
 
-`tailscale/` vendors libtailscale at a fixed commit (BSD-3-Clause), with a pinned
-Go version/module graph. `scripts/build-tailscale` collects license/notice files
-for the actual linked modules and the Go runtime, failing when a module has no
-notice. App and CLI archives include `TailscaleDependencyLicenses.txt`. This
-inventory is separate from the Cargo-only report. Pot's adapter does not modify
-the vendored upstream files; its source is in `tailscale/pot.go`.
+JS plugins, built-in Skills, Python guest brokers and the native macOS VM Swift Helper remain in
+their existing runtimes. Their own source headers and bundled license files
+remain with the distributed assets. Brand artwork is generated from the retained
+`resources/app/PotIcon.swift` master; the Wails tray atlases use the same drawing.
+`mise run icons` regenerates native, frontend and light/dark tray artwork.
+
+Linux Sandbox images are separate resources. Their pinned recipes and package
+versions live under `resources/sandbox/linux/default/`; the image's OS packages
+and corresponding source obligations are separate from the host Go inventory.
+A resource release must retain the upstream package notices and corresponding
+source required by its pinned packages. The host About list does not claim to
+inventory all software installed inside a guest image. macOS guest media and VM
+disks remain owner-supplied and are not distributed by Pot.

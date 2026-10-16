@@ -1,562 +1,314 @@
 # Deployment
 
-This page covers local App hosting, standalone Runtime resources, Control membership
-and explicit web-ui-server hosting. Browser access and Control client/member
-connections independently accept HTTP or HTTPS. Deployment owners choose the
-transport and network protection, including Tailscale. HTTP itself does not
-encrypt credentials or content.
+Pot has one Go backend with two hosts: `pot serve` runs standalone Runtime; the
+macOS Wails App composes its local Runtime in process. The App's main window and
+tray use direct bindings and the shared frontend. An independent
+`web-ui-server` process publishes browser access to one explicitly selected
+Control. See [Architecture](architecture.md) for ownership and failure rules.
 
-Pot has one backend with two hosts: `pot serve` runs it independently; the macOS
-App owns it inside its own process. App requests, including the native configuration
-adapter, dispatch in memory. App does not connect to a daemon or management
-socket. Closing App shuts down its local Control and Runner before the Sandbox Helper.
-Provider credentials are configured on Control and encrypted in SQLite; see
-[master key setup](secrets.md) for unattended deployments.
+## Install and data roots
 
-## Install Server
-
-Server is installed from Git with Cargo; no prebuilt Server download is provided.
-Control and execution-only (Runner) use the same `pot` binary on Linux or macOS.
-Install Rust/Cargo through rustup (the repository pins the Rust 1.100 beta toolchain
-`beta-2026-10-14` in `mise.toml`), Git, Python 3
-(available as `python3`), a native C/C++ build toolchain, CMake, pkg-config, Make
-and Perl for native dependencies including vendored OpenSSL. The default Web UI
-also requires Brotli CLI and curl. On macOS,
-install Xcode Command Line Tools. Ensure Cargo's binary directory (normally
-`~/.cargo/bin`) is on PATH.
+Use the Go CLI archive built for the target OS/architecture, or build from a
+pinned checkout using the toolchains in `mise.toml`:
 
 ```sh
-cargo install --git https://github.com/jjyr/pot.git --locked --bin pot pot-server
-pot --version
+mise install
+mise run build:cli
 ```
 
-This builds from the repository's default branch. For reproducible deployments,
-add `--rev COMMIT` using the same commit on Control and Runners. To upgrade,
-repeat the installation with `--force`, then restart the affected services.
+CLI archives include the Go executables and retained runtime assets. macOS
+archives include the signed native macOS VM Swift Helper. Linux Sandbox execution
+uses Podman on both hosts and separately prepared, verified OCI image resources. See
+[Development](development.md) for artifact layout and build options. Upgrade
+Control, Runners and App from the same revision.
 
-The default `web-ui` feature builds the frontend, compresses it with the external
-Brotli CLI and embeds it in the binary. Install `brotli` and `curl` before running
-the command above (for example, `brew install brotli` on macOS). Developers can
-use the repository's `mise install`, which provides Brotli 1.2.0 through the
-`conda:brotli-bin` backend without a separate Conda installation.
+Linux CLI archives bundle the official GNU/Linux Node runtime and require a
+glibc-based host for JavaScript plugins. The default managed Linux Sandbox uses
+Debian 13 (`trixie-slim`) and packages the same checksum-pinned official Node
+release for its guest architecture. See [Sandbox image](sandbox-image.md) for
+base-image and package-snapshot pins. Keep Runtime data roots on a local
+filesystem supporting private Unix sockets and file locks; a Sandbox's shared
+workspace is not a Runtime data root.
 
-The first Web build needs network access to prepare the pinned nightly WASM
-toolchain, wasm-bindgen CLI and verified noVNC sources. This takes longer than a
-backend-only build. Subsequent builds reuse valid generated assets and compress
-only changed or damaged files. No generated WASM, JS or `.br` files are committed
-to Git; no separate static directory is required at runtime.
+The default Go root is `~/.pot-go` on macOS and Linux. Use `-root /absolute/path`
+for an independent instance. New roots require empty directories and receive a
+stable Runtime identity. App and standalone Runtime cannot open the same root
+concurrently.
+Keep each root private and preserve its identity and secret master key across
+restarts. See [Secrets](secrets.md).
 
-For an execution-only binary, add `--no-default-features` to the install command.
-This skips all Web asset generation/compression and needs neither Brotli nor the
-WASM tools. To explicitly restore it, use `--features web-ui`. There is no separate
-compression feature. web-ui-server still requires [explicit Web configuration](#explicit-web-ui);
-plain `pot serve` does not expose a browser endpoint.
+## Linux Sandbox runtime
 
-Cargo does not install embedded Tailscale libraries, builtin skill directories
-or macOS Sandbox helpers. Execution dependencies such as Podman, Sandbox images
-and tools used by Host tasks must be installed separately.
+Install Podman for the account running Pot. On macOS, use `brew install podman`;
+on Linux, install the distribution's rootless Podman packages with cgroup v2 and
+systemd support. Host-only Runtime operation does not require a running Sandbox.
 
-Choose one role per data directory:
+Both hosts use the `podman` provider and the architecture-specific OCI bundle in
+the embedded catalog. Start/Rebuild prepares missing resources through the
+[owner download confirmation](sandbox-resources.md#consent-progress-and-cache); an arbitrary
+locally tagged image cannot replace that verified bundle. Offline provisioning
+uses `pot resources import` as documented in [resource delivery](sandbox-resources.md).
 
-| Role | Configuration | Client / connection |
-|---|---|---|
-| Control | Enable the Control listener; create assistants and configure models | macOS App or explicitly enabled Web UI |
-| Execution-only (Runner) | Create execution resources; join one Control; no assistants | Outward HTTP or HTTPS to Control |
+On macOS, Pot creates and selects a dedicated Podman machine for its Runtime
+execution root. Its initial capacity is 4 CPUs, 8 GiB memory and 50 GiB disk.
+These machine settings are distinct from per-container CPU/memory limits, and
+there is no public machine-sizing option. Each Sandbox uses `disk_gib: 0` for
+shared managed capacity. Pot neither adopts the user's default machine nor
+reconfigures an existing shared machine to satisfy one container request.
+The first explicit prepare/start can also download the digest-pinned official
+Podman machine OS using the `applehv` backend. This is a runtime prerequisite
+separate from Pot's Debian image catalog; its transfer is not included in the
+catalog's image consent byte count. Prepare it as well for offline operation.
 
-Plain `pot serve` starts neutral infrastructure; it does not select a role or
-create resources. A joined Runner cannot also enable Control or create assistants.
-A Runtime with assistants cannot join as a Runner. Use separate roots when both
-roles run on one machine, and give their listeners different ports.
+Machine state lives under the execution root's `podman-machine` directory.
+Workspace data lives under `podman-shared`, shared into the machine at
+`/mnt/pot/shared`; product databases and tokens stay outside it. Machine shares
+also include exact trusted Skill roots and any explicit mapping roots fixed at
+first initialization. A later Host mapping outside those pinned roots fails
+explicitly; Pot does not restart sibling containers to add it.
+Lifecycle and cleanup boundaries are defined in [Providers](sandbox-providers.md).
 
-### Control Server
+## Standalone Control
 
-Initialize a dedicated root and start the foreground process:
+Initialize a dedicated root, then start a foreground listener:
 
 ```sh
-pot --root "$HOME/.pot-control" init
-pot --root "$HOME/.pot-control" serve
+pot init -root "$HOME/.pot-control"
+pot serve -root "$HOME/.pot-control" -listen 127.0.0.1:19443
 ```
 
-Keep it running and use a second terminal for the following operator commands.
-Choose the Control listener's transport. For HTTP, save this as `enable-control.json`,
-using the intended LAN, VPN or Tailscale interface address (or a wildcard address):
+For HTTPS, supply both `-tls-cert /absolute/control.crt` and
+`-tls-key /absolute/control.key`. The listener address is explicit; choose the
+intended LAN/VPN/Tailscale interface when clients run elsewhere. HTTP does not
+encrypt credentials or content. Deployment network protection and TLS are
+operator choices.
 
-```json
-{"action":"enable_control","config":{"address":"0.0.0.0:19443"}}
-```
+A listener enables standalone Control but creates no assistant. Configure a
+Provider through App, then explicitly create an assistant. API callers may use
+`POST /api/v1/assistants`; it requires a stable `request_id` and a `name`, and
+optionally an explicit assistant model selection. Saving Providers alone never
+creates conversational identities.
 
-For HTTPS, provision a certificate and private key for the Control hostname,
-readable by the service account. See [Tailscale HTTPS](#tailscale-https) for
-certificate issuance. Include both absolute paths instead:
-
-```json
-{"action":"enable_control","config":{"address":"0.0.0.0:19443","certificate":"/absolute/control.crt","private_key":"/absolute/control.key"}}
-```
+The private CLI socket authenticates operator requests without exposing its
+internal token:
 
 ```sh
-pot --root "$HOME/.pot-control" api /api/v1/runtime/control "$PWD/enable-control.json"
+pot status -root "$HOME/.pot-control"
+pot api -root "$HOME/.pot-control" /api/v1/runtime/control
+pot api -root "$HOME/.pot-control" -method POST \
+  -body '{"action":"owner_credential"}' /api/v1/runtime/control
 ```
 
-Allow clients and Runners to reach the configured listener. Connection identity and
-membership details are in [Control listener and membership](#control-listener-and-membership).
-Enabling Control creates no assistants. Connect the App using this Control's URL
-and client credential, save AI configuration, then create the prefilled Pot
-assistant from Chat. The Web client offers the same separate setup and creation
-states. No local API configuration is required to open assistants already present
-on this Control.
-
-After AI setup, operators may alternatively create an assistant by saving this as
-`assistant.json`:
-
-```json
-{"request_id":"assistant-1","resource":{"kind":"assistant","name":"Pot"}}
-```
-
-```sh
-pot --root "$HOME/.pot-control" api /api/v1/runtime/resources "$PWD/assistant.json"
-pot --root "$HOME/.pot-control" api /api/v1/runtime/control
-```
-
-Connect the macOS App to this remote Control using its HTTP or HTTPS URL and the durable
-client credential in `.pot-control/product/control-client-credential.json` under
-your home directory. This is a client credential, not a machine invitation.
-Configure the model connection on Control through the App. For unattended
-operation, configure and retain the [master key](secrets.md#master-key).
-Control does not require a local execution resource when tasks run on Runners.
-
-To enroll a Runner, save `{"action":"create_invitation"}` as `invitation.json`
-and run:
-
-```sh
-pot --root "$HOME/.pot-control" api /api/v1/runtime/control "$PWD/invitation.json"
-```
-
-Use the returned invitation in the Runner procedure below.
-
-### Execution-only Server (Runner)
-
-On the execution machine, initialize its root and keep the foreground process running:
-
-```sh
-pot --root "$HOME/.pot-runner" init
-pot --root "$HOME/.pot-runner" serve
-```
-
-In another terminal, explicitly create the resources this machine will offer.
-For execution directly on the Host, save the following as `host.json`:
-
-```json
-{"request_id":"host-1","resource":{"kind":"host"}}
-```
-
-```sh
-pot --root "$HOME/.pot-runner" api /api/v1/runtime/resources "$PWD/host.json"
-```
-
-Host execution runs on this machine under the service account. For isolated
-execution, configure a [Sandbox resource](#runtime-resources) instead, with its
-[Provider dependencies](sandbox-providers.md) and image installed. Creating a
-Sandbox definition alone does not make it ready or start it.
-
-Save a Control identity preview request as `preview-control.json`:
-
-```json
-{"action":"preview","url":"http://100.64.0.10:19443","ca_pem":null}
-```
-
-```sh
-pot --root "$HOME/.pot-runner" api /api/v1/runtime/control "$PWD/preview-control.json"
-```
-
-Verify the returned identity and fingerprint against the intended Control.
-These examples use HTTP to a Control on Tailscale. The URL scheme selects the
-client transport; use the Control's HTTPS URL instead when its listener enables TLS.
-For HTTPS with a private CA, set `ca_pem` to the trusted CA's PEM contents in both preview
-and join requests. Save the join request as `join-control.json`, replacing all
-placeholders and using a fresh UUID for `request_id`:
-
-```json
-{"action":"join","request":{"request_id":"UUID","url":"http://100.64.0.10:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
-```
-
-```sh
-pot --root "$HOME/.pot-runner" api /api/v1/runtime/control "$PWD/join-control.json"
-pot --root "$HOME/.pot-runner" api /api/v1/runtime/control
-pot --root "$HOME/.pot-runner" api /api/v1/runtime/resources
-```
-
-Check that the machine appears connected in the Control client's Machines view
-and that its intended execution resources are present. Joining authorizes Control
-to use all configured resources on this Runtime, subject to Agent approvals.
-The Runner reconnects outward after restart; it needs no inbound execution port,
-assistant resource or model-provider key. Keep its data directory to retain membership.
-
-### Process and instance management
-
-Both examples run in the foreground. For unattended operation, arrange for your
-OS service manager to run the same command with the same service account, root
-and execution target. Shut down cleanly before upgrading and restarting the binary.
-
-`pot serve` runs in the foreground without Web UI, even when listener settings
-exist. Enable it with `pot serve --ui --control http://100.64.0.10:19443` and
-`POT_CONTROL_TOKEN`; optionally supply a private CA file through `POT_CONTROL_CA`.
-The destination must authenticate as a standalone Control. Web requests always
-use this Control and never fall back to the hosting Runtime. The separately
-configured `POT_ACCESS_ORIGIN` describes the browser-visible origin;
-`POT_ACCESS_BIND` selects the listening address and certificate/key settings
-select listener TLS. Once explicitly started, run `pot open` for automatic browser configuration,
-or `pot access token` to configure the browser manually. `pot access qr` prints
-a connection QR containing the Token; do not share it.
-Browser and Control connections have independent transport settings. HTTP Web
-listeners can bind loopback, LAN or VPN/Tailscale interfaces. Localhost HTTP is
-also a browser secure-context convenience; remote HTTP has browser feature limits.
-Configure TLS in Pot or an external proxy when the browser needs HTTPS.
-
-Use `pot --root /absolute/instance/path ...` for a separate instance. Defaults
-are `~/Library/Application Support/pot` on macOS and `$XDG_DATA_HOME/pot` (or
-`~/.local/share/pot`) on Linux. Data paths do not depend on the current directory.
-App and CLI cannot open the same product directory concurrently: an OS lock
-fails startup instead of silently sharing SQLite or attaching to another host.
-Different instances also need different listener ports.
-
-Standalone management uses `product/control.sock`, mode 0600 inside a private
-product directory. CLI injects no user-entered credentials and never prints the
-internal bearer. OS access to this socket is full owner authority. Requests
-carrying browser Origin headers are rejected. The App has no such socket.
-There is still an authenticated loopback integration listener for external
-tool/model clients. In App mode its routes are restricted to these
-integrations; the App UI cannot use it to access snapshots/settings.
-
-## Runtime resources
-
-`pot serve` starts Runtime infrastructure. Fresh roots have no assistant, Host
-execution resource or Sandbox definition. Startup accepts no `--composition`
-option and does not use `POT_RUNTIME_COMPOSITION` to select services. Services are assembled from the durable resource manifest.
-
-Native callers list/create resources at `/api/v1/runtime/resources`. CLI `api`
-uses the private management socket; callers do not need to handle its bearer.
-Create requests use a stable request ID and exactly one typed resource:
-
-```json
-{"request_id":"assistant-1","resource":{"kind":"assistant","name":"Research"}}
-```
-
-```json
-{"request_id":"host-1","resource":{"kind":"host"}}
-```
-
-```json
-{"request_id":"sandbox-1","resource":{"kind":"sandbox","sandbox_id":"build","name":"Build","provider":"linux.podman"}}
-```
-
-Use an installed Provider ID from the deployment's Provider documentation.
-Save a request to a JSON file and call:
-
-```sh
-pot api /api/v1/runtime/resources
-pot api /api/v1/runtime/resources /absolute/path/create-resource.json
-```
-
-Creating an assistant does not call a model or enable Host execution. Creating
-a Sandbox defines it without starting a VM and does not select it as the default.
-Existing Sandbox management APIs configure/select/start explicit instances.
-Resource creation is serialized and recorded durably before assembly. Identical
-request retries return the recorded result; conflicting retries fail. Restart
-restores definitions without replaying shell/model/VM-start effects. Current
-product definitions are adopted during versioned resource upgrade; this does
-not import assistant instruction files or saved routing preferences.
-
-App startup and standalone Control enablement expose AI configuration with an empty
-assistant registry. Saving a connection does not register an assistant. Chat offers
-a separate prefilled Pot creation action through `/api/v1/assistants`, also used by
-the assistant pane’s + action. Host/Sandbox resource creation UI remains deferred. Native management authority and
-Control membership remains separate; this endpoint is not a member execution
-authorization mechanism. Remote Task Agents start on the selected execution
-Runtime; Control retains model credentials, budgets and approvals. See
-[architecture](architecture.md) for launch, receipt and recovery rules.
-
-Web listener configuration remains separately explicit. Resource creation does
-not automatically start Web access. Lazy macOS Helper lifecycle and real VM
-qualification remain part of the outstanding execution target deployment work.
-
-## Control listener and membership
-
-Use native operator `pot api /api/v1/runtime/control` for Control identity and
-membership. POST exact JSON commands with `pot api PATH /absolute/path/request.json`.
-
-Enable Control on a standalone Runtime (never the embedded App Runtime).
-Omit both `certificate` and `private_key` for HTTP:
-
-```json
-{"action":"enable_control","config":{"address":"0.0.0.0:19443"}}
-```
-
-Include both absolute paths for HTTPS; configuring only one file is rejected:
-
-```json
-{"action":"enable_control","config":{"address":"0.0.0.0:19443","certificate":"/absolute/control.crt","private_key":"/absolute/control.key"}}
-```
-
-Control exposes `/control/v1/identity`, `/control/v1/join`, and
-`/control/v1/poll`, plus authenticated product APIs. There is no inbound execution
-RPC on members. Preview, join, App and web-ui-server connections accept HTTP or
-HTTPS origins with a hostname or IP address, without credentials, paths, queries
-or fragments. Listener transport is selected by its certificate/key pair;
-client transport is selected by its URL scheme. Authentication, signing identities,
-command signatures and receipts apply to both transports. Pot does not detect
-or require an external VPN. When using HTTPS, certificates must match the Control
-hostname or IP and permit server authentication.
-Private fixture certificates also require `extendedKeyUsage=serverAuth`; a bare
-self-signed certificate may be rejected by the TLS client.
-
-Create an invitation on Control with `{"action":"create_invitation"}`. Preview
-its identity from the joining machine with `{"action":"preview","url":"http://100.64.0.10:19443","ca_pem":null}`.
-Then submit the confirmed identity and invitation on the execution machine:
-
-```json
-{"action":"join","request":{"request_id":"UUID","url":"http://100.64.0.10:19443","invitation":"INVITATION","expected_runtime_id":"CONTROL-ID","expected_fingerprint":"CONFIRMED-FINGERPRINT","ca_pem":null}}
-```
-
-The machine opens an outward authenticated connection and restores it on restart.
-Use the original request for an uncertain join retry. A machine binds one Control.
-On Control, `{"action":"remove_member","runtime_id":"MEMBER-ID"}` invalidates
-membership; on a member, `{"action":"leave"}` fences leases and stops polling.
-Joining gives Control all configured resources, with no machine grants. Agent
-behavior approvals remain enforced. Do not distribute member tokens as UI tokens.
-
-`{"action":"disable_control"}` stops the listener; restart with its explicit
-configuration to reconnect members. Native diagnostic `action:call` uses `runtime_id`
-and a protocol `body`; it is excluded from browser-facing machine commands.
-
-Upgrade Control and execution binaries together. Protocol signatures and digests
-use canonical nested JSON ordering across App/macOS and standalone/Linux builds;
-there is no alternate legacy signature path. Persistent signing identities,
-membership credentials, local operation paths and user data are retained. Active
-execution-node runs follow the reboot interruption rule, not automatic replay.
-
-See [Control architecture](architecture.md) and #39 for App mode switching,
-explicit fixed-Control Web startup, and remaining remote transports.
-
-
-## Explicit Web UI
-
-The web-ui-server component serves Pot Web UI, authenticates browser clients and
-provides browser APIs by forwarding product requests to one standalone Control.
-It is hosted by `pot serve --ui`, not a separately installed binary. Explicitly
-configure that Control destination. Plain `pot serve` starts
-Runtime infrastructure without UI, regardless of saved listener settings. All
-product requests use the configured Control; failed connections never load local
-Runtime data. Browser access and the backend Control connection each use their
-own HTTP or HTTPS configuration.
-
-### Connection configuration
-
-| Connection | Configuration |
-|---|---|
-| Browser → web-ui-server | `POT_ACCESS_ORIGIN` is the public browser origin; `POT_ACCESS_BIND` is the listener address |
-| web-ui-server listener | `POT_ACCESS_CERT` and `POT_ACCESS_KEY` together enable TLS; omit or clear both for HTTP |
-| web-ui-server → Control | `--control URL` selects HTTP or HTTPS independently of browser access |
-| App / Runner → Control | Each client uses the configured Control URL's scheme |
-
-Origins accept domain names, IPv4 and IPv6 addresses. The public browser Origin
-and listener TLS are independent settings. Browser Cookie security follows the
-public Origin's scheme. Configuring only a certificate or only a private key is
-rejected. Authentication, Origin checks, member identities, command signatures
-and receipts apply regardless of transport. Remote HTTP does not provide the
-browser secure context required for Service Workers and push notifications.
-
-### Install
-
-The default [Cargo installation](#install-server) includes the Web UI. The frontend build and compression run automatically during Cargo installation.
-Linux Sandbox execution also requires rootless Podman and an installed image;
-see [Sandbox providers](sandbox-providers.md).
-
-Initialize a dedicated instance; replace example paths and addresses below:
-
-```sh
-pot --root /absolute/instance init
-```
-
-Expose only the Web UI listener. Keep native Runtime and guest service ports private.
-
-### HTTP
-
-Start an independently configured Control first (see [Control membership](deployment.md)). Obtain its durable client credential from `product/control-client-credential.json` using operator access after enabling the Control listener. The private file is mode 0600 and survives Control restarts. It is accepted only by the explicit Control listener; local Runtime process tokens still rotate on every boot. This is distinct from the browser login Token and machine invitations. Store it in the service environment as `POT_CONTROL_TOKEN`, never in a browser URL or command-line argument. A private Control CA can be supplied with `POT_CONTROL_CA=/absolute/control-ca.pem`.
-
-Start web-ui-server and open `http://localhost:17701`:
-
-```sh
-POT_ACCESS_ORIGIN=http://localhost:17701 pot --root /absolute/instance serve --ui --control http://100.64.0.10:19443
-```
-
-For direct LAN or Tailscale access, set the browser-visible address and bind the
-appropriate interface. For example, with a Control also using HTTP over Tailscale:
-
-```sh
-POT_ACCESS_ORIGIN=http://100.64.0.20:17701 POT_ACCESS_BIND=100.64.0.20:17701 pot --root /absolute/instance serve --ui --control http://100.64.0.10:19443
-```
-
-Omit `POT_ACCESS_CERT` and `POT_ACCESS_KEY` for an HTTP listener. The App is a
-native client and its embedded Runtime does not host Web UI.
-
-### Tailscale HTTPS
-
-Join the web-ui-server machine and browser devices to the same tailnet. Enable
-MagicDNS and HTTPS Certificates in
-[Tailscale DNS settings](https://login.tailscale.com/admin/dns). Get the server's
-actual DNS name and Tailscale IP from `tailscale status`.
-
-Create a private certificate directory, then issue the certificate on that machine:
-
-```sh
-tailscale cert --cert-file=/private/tls/server.crt --key-file=/private/tls/server.key HOST.TAILNET.ts.net
-```
-
-Use administrator authority if required and give the Pot service account ownership
-of both files. Make them readable by that account with mode `0600`. Save the
-following in `/private/listener-settings.json`, replacing the hostname, Tailscale
-IP and file paths with the machine's actual values:
+The last command exports the standalone Control's owner credential for a native
+remote Space or browser upstream. Store the credential string in an owner-only
+file when using `-control-token-file`; this credential is separate from Runner
+invitations and browser access tokens.
+
+Listener and resource paths can be persisted without changing the running process:
 
 ```json
 {
-  "POT_ACCESS_ORIGIN": "https://HOST.TAILNET.ts.net:17701",
-  "POT_ACCESS_BIND": "100.64.0.20:17701",
-  "POT_ACCESS_CERT": "/private/tls/server.crt",
-  "POT_ACCESS_KEY": "/private/tls/server.key"
+  "listen": "127.0.0.1:19443",
+  "tls_cert": "",
+  "tls_key": "",
+  "workspace": "/absolute/agent-workspace",
+  "resources": "/absolute/Resources",
+  "helpers": "/absolute/Helpers"
 }
 ```
 
 ```sh
-pot --root /absolute/instance config server /private/listener-settings.json
-pot --root /absolute/instance serve --ui --control http://100.64.0.10:19443
+pot config server /absolute/server-settings.json -root "$HOME/.pot-control"
 ```
 
-Open `https://HOST.TAILNET.ts.net:17701` from a device on the tailnet. No router
-port forwarding is required. This example uses HTTPS for browser access and HTTP
-over Tailscale for the independent Control connection. Use the Control's HTTPS
-URL instead if that listener enables TLS.
+Initialize the Go root first. Settings are private and typed; file/directory paths
+must be absolute, and TLS paths must be configured together. Explicit startup
+flags override saved values. Restart to apply changes.
 
-The certificate procedure also applies to a Control listener: issue for the
-Control machine's Tailscale hostname, set its `certificate` and `private_key` in
-`enable_control`, and use that hostname in App, web-ui-server and Runner HTTPS URLs.
+## Runner membership
 
-Environment overrides saved settings. Renew the certificate with `tailscale cert`,
-then restart Pot to load the renewed files. Pot automates neither certificate
-issuance nor reload.
-
-### Connect and verify
-
-While Server is running:
+Run the same CLI on the execution machine with a separate root:
 
 ```sh
-pot --root /absolute/instance open
-pot --root /absolute/instance access token
-pot --root /absolute/instance access qr
+pot init -root "$HOME/.pot-runner"
+pot serve -root "$HOME/.pot-runner"
 ```
 
-Connection QR codes contain credentials. Do not share them. Browsers save the
-Token locally and automatically connect later. Verify chat/reconnect and Sandbox
-desktop on intended devices. `pot access regenerate-token` invalidates all old
-browser connections.
+Create a one-use invitation on Control:
 
-### Embedded Tailscale
+```sh
+pot api -root "$HOME/.pot-control" -method POST \
+  -body '{"action":"create_invitation"}' /api/v1/runtime/control
+```
 
-A standalone web-ui-server may use embedded Tailscale with explicit listener settings.
-The native App hosts no Web endpoint. Browser configuration cannot change the
-fixed Control destination. The manual HTTP and Tailscale HTTPS procedures above
-remain available independently.
+On Runner, preview the destination:
 
-### Current limits
+```sh
+pot api -root "$HOME/.pot-runner" -method POST \
+  -body '{"action":"preview","url":"https://control.example:19443"}' \
+  /api/v1/runtime/control
+```
 
-web-ui-server keeps Control credentials on the server and streams SSE updates.
-Browser Tokens and cookies authenticate only web-ui-server and are not forwarded
-to Control. There is no local/remote switch. Native-only APIs remain excluded by
-the browser route allowlist. Remote desktop is deferred in #39.
-
-Push notifications use the web-ui-server's VAPID configuration and server-held Control
-credential. One subscription covers
-all assistants; per-owner cursors are durable and scoped to the Control identity.
-Only finalized assistant replies notify; Task results wait for the assistant's actual
-report. Clicking a notification opens its assistant. Control disconnects retain the
-cursors and do not fall back to local messages.
-
-
-## Browser authentication and Home Screen
-
-The browser Token authenticates web-ui-server, separately from Control credentials.
-It is saved in origin-scoped IndexedDB; URL fragments are removed after configuration.
-Signed HttpOnly cookies support navigation; Token rotation invalidates browser
-connections. Native APIs are excluded by a public allowlist. No offline transcript
-cache is provided.
-
-## Add Pot to the Home Screen
-
-After configuring the access Token, browser **Settings → General** provides **Add to Home Screen**.
-The Token configuration page has no installation action. Installation does not request notification permission.
-The manifest uses a stable origin-scoped app ID, standalone display and dedicated
-192/512 px icons. iOS also receives Apple Home Screen metadata and its touch icon.
-
-Home Screen, browser/notification and login branding use the selected ochre
-Pot Companion. `mise run icons` generates both the rounded Mac icon
-(`crates/app/assets/Pot.png` / `Pot.icns`) and an opaque, square cream-background master
-(`PotHomeScreen.png`) so mobile operating systems can apply their own masks.
-`scripts/build-web-ui` produces the touch icon and 192/512 px `any maskable` icons
-from that master. Versioned icon URLs distinguish this design from previously
-installed icons without changing the manifest's stable application ID. The shared
-GPUI rail uses transparent idle/cooking Companion assets from the same vector
-master in App and Web. README uses the application icon.
-
-On Android Chrome/Edge or another supporting browser, the button opens the
-browser's installation prompt when available. If it is unavailable or dismissed,
-use the browser menu's Install app / Add to Home Screen entry. Embedded QR
-scanner browsers may require opening the URL in the system browser first.
-
-On iPhone/iPad, the button explains Safari → Share → Add to Home Screen. Enable
-Open as Web App when that option is shown. Launch the Pot icon to use a standalone
-window. The app detects standalone mode and browser installation events rather
-than treating acceptance of a prompt as completed installation.
-
-A browser-trusted HTTPS certificate is required for remote Service Worker and push support. A Service Worker
-registers even when VAPID/push is not configured, but uses network-only fetches:
-there is no offline transcript or credential cache. Installation does not grant
-access, change authorization or request notification permission. A newly installed
-Home Screen app may use a separate storage context and require its own Token configuration. Notifications remain a separate explicit opt-in.
-
-
-Remote Control notification relay is implemented; see its [validation report](validation/control-notifications-20261011.md)
-for checked behavior and the untested external push-service delivery. Remote desktop
-streaming remains deferred pending a connection design.
-
-## Machine labels
-
-Control owns routing labels; joined Runtimes report their OS at enrollment.
-`GET /api/v1/machines` includes `tags` per machine. The authenticated
-`POST /api/v1/machine-connections` operator accepts
-`{"action":"set_tags","runtime_id":"ID","tags":["linux","task-runner"]}`.
-This replaces the complete label set, including allowing an empty set. It does
-not enable resources or verify capabilities. Runner-side edits are rejected.
-See [routing semantics](agent-context.md#message-references-and-machine-labels).
-
-## Runtime Agent execution
-
-Each Runtime has one execution manager shared by assistants and Tasks. Local
-memory calls and remote launches use the same destination-local admission path.
-To set machine concurrency, create `runtime-execution.json` in that Runtime's data
-directory before startup:
+Verify the returned Runtime ID and fingerprint. Submit a join request using those
+exact values and the invitation:
 
 ```json
-{"max_active_agents":8,"max_queued_agents":256}
+{
+  "action": "join",
+  "request": {
+    "request_id": "runner-join-1",
+    "url": "https://control.example:19443",
+    "invitation": "INVITATION",
+    "expected_runtime_id": "CONTROL-ID",
+    "expected_fingerprint": "CONFIRMED-FINGERPRINT"
+  }
+}
 ```
 
-These are the defaults when the file is absent; both values must be positive.
-The active limit must fit Tokio's semaphore limit. Unknown fields are rejected.
-Settings apply on restart. Queue overflow fails the invocation; it does not select
-another machine or model. Control's existing `execution-limits.json` governs
-business task admission and model budgets, not physical Agent slots on other machines.
+```sh
+pot api -root "$HOME/.pot-runner" -method POST -body - \
+  /api/v1/runtime/control < /absolute/join.json
+```
 
-`runtime-executions.jsonl` records execution ID, Runtime/boot, owner, request/run,
-generation, role and lifecycle/event metadata. It excludes prompts, response text,
-tool arguments/output and credentials. Files are created with mode 0600, rotate
-at 8 MiB and retain one previous file (`runtime-executions.jsonl.1`). They are local
-diagnostics; conversations and Task journals remain authoritative for recovery.
-No resource-management UI or new model-visible tool is introduced.
+For a private HTTPS CA, include its PEM contents as `ca_pem` in both preview and
+nested join requests. Ordinary certificate and hostname verification remain
+active. The CA persists with membership for reconnects. HTTP destinations are
+also supported when explicitly selected.
+
+Runner reconnects outward over signed WebSocket RPC and needs no inbound
+execution listener, assistant or provider key. A Runtime already owning
+assistants/AI configuration cannot join. Keep its root to retain identity and
+membership; re-enrollment creates a new epoch. `remove_member` on Control uses
+`runtime_id`; `leave` on Runner fences reconnect and confirms original cleanup
+before removing membership. Unknown execution outcomes are not replayed.
+
+Control routes unspecified Tasks only to machines labelled `task-runner`,
+preferring its own Runtime then stable Runtime ID order. Set labels explicitly:
+
+```sh
+pot api -root "$HOME/.pot-control" -method POST \
+  -body '{"action":"set_tags","runtime_id":"RUNNER-ID","tags":["task-runner","linux"]}' \
+  /api/v1/runtime/control
+```
+
+Labels never grant capability. Choose each machine's Host/Sandbox policy through
+Machines or `POST /api/v1/permissions`. Host operations request review under
+`host_access: "ask"`; `allow` is an explicit machine-wide operator policy.
+
+## Advanced local resources
+
+`GET /api/v1/runtime/resources` lists assistant definitions, Host policy,
+installed Sandbox Providers, definitions, selection and recent owner-command
+receipts. This is a native/private owner API; browser sessions cannot use it.
+
+Mutations use `POST` with a stable `request_id`, `action` and `kind`. Exact retries
+return the original response, even after intervening policy edits. A pending
+command after process failure blocks conflicting replacement and requires
+inspection rather than automatic replay.
+
+| Action | Kind | Additional fields |
+|---|---|---|
+| `create` | `assistant` | `name`, or a complete `assistant` creation request |
+| `create` | `host` | Optional `policy`; defaults to explicit Host mode with command review |
+| `create` | `sandbox` | Stable `sandbox_id`, `name`, installed `provider`, optional `resources` |
+| `select` | `sandbox` | `sandbox_id`; affects later policy-resolved executions |
+| `update` | `sandbox` | `sandbox_id`, `resources` |
+| `mappings` | `sandbox` | `sandbox_id`, explicit `mappings` list; empty clears it |
+| `start`, `stop`, `recover`, `rebuild`, `delete` | `sandbox` | `sandbox_id` |
+| `status` | `sandbox` | `sandbox_id`; read-only, no command receipt required |
+
+Creating/selecting a Sandbox does not boot it. Creation retries cannot overwrite
+another definition; retired IDs cannot be reused. Deletion checks retained Task
+artifacts, current schedule references, active leases and unresolved receipts.
+Resource and mapping updates require the Provider's stopped-state conditions.
+Remote Control commands cannot create/select a Runner's definitions; use that
+Runner's local owner socket for these operations.
+
+Example Linux definition:
+
+```json
+{
+  "request_id": "sandbox-create-1",
+  "action": "create",
+  "kind": "sandbox",
+  "sandbox_id": "development",
+  "name": "Development",
+  "provider": "podman",
+  "resources": {"cpus": 4, "memory_gib": 8, "disk_gib": 0}
+}
+```
+
+The `podman` provider is the same on macOS and Linux; prepared native macOS VMs
+use `macos.apple-virtualization`. See [Providers](sandbox-providers.md),
+[macOS Sandbox](macos-sandbox.md), [Host mappings](sandbox-image.md) and
+[resource delivery](sandbox-resources.md).
+
+## Independent browser service
+
+A browser service root is distinct from a Runtime root. Explicit local serving:
+
+```sh
+pot web-ui-server -root "$HOME/.pot-web" -control local \
+  -control-root "$HOME/.pot-control" -listen 127.0.0.1:17703 \
+  -origin http://127.0.0.1:17703
+```
+
+The local target must be a running standalone Control. Remote serving uses
+`-control https://control.example:19443 -control-token-file /absolute/owner-token`
+and optionally `-control-ca /absolute/ca.pem`. Upstream authentication and identity
+are checked before serving. The browser's public origin, listener TLS and upstream
+Control transport are independent. Browser TLS uses `-tls-cert` and `-tls-key`.
+
+Manage access through the browser service's private operator socket:
+
+```sh
+pot access -browser-root "$HOME/.pot-web" status
+pot access -browser-root "$HOME/.pot-web" enable
+pot access -browser-root "$HOME/.pot-web" token
+pot open -root "$HOME/.pot-web"
+```
+
+`regenerate-token`, `disable`, `connect`, `disconnect` and `qr` use the same
+operator scope. Embedded Tailscale belongs to this browser service. The browser
+uses its access token to establish server-managed sessions; upstream owner keys
+never reach browser JavaScript. Rotation/disabling invalidates existing sessions
+and streams. Logout removes the active session. Browser policy excludes native
+membership, advanced resource and owner credential interfaces.
+
+## Everyday CLI and services
+
+Private owner clients can create an interactive Host shell with
+`POST /api/v1/terminals?assistant_id=OWNER` and `{"cols":80,"rows":24}`.
+The response fixes an ephemeral terminal ID and Runtime `boot_id`; connect to
+`/api/v1/terminals/ID/socket?assistant_id=OWNER` with the owner bearer credential.
+Binary WebSocket frames carry PTY bytes; text frames resize with `cols` and
+`rows`. An exit sends `{"exit_code":CODE}`. Disconnecting detaches; reconnecting
+replays at most 64 KiB. Explicit `POST /api/v1/terminals/ID/close` ends the shell.
+The owning assistant's Host workspace is the starting directory. There are at
+most eight sessions per assistant. Runtime shutdown closes them; restart does
+not recover terminal IDs or bytes. Browser origins, published browser clients
+and execution-only Runners cannot use this interface. No model command is
+accepted at creation, and terminal bytes are never stored in product databases,
+transcripts or usage records.
+
+```sh
+pot chat -root "$HOME/.pot-control" -assistant main "Investigate the build"
+pot tasks list -root "$HOME/.pot-control" -assistant main
+pot tasks show TASK-ID -root "$HOME/.pot-control" -assistant main
+pot tasks interrupt TASK-ID -root "$HOME/.pot-control" -assistant main
+pot tasks cancel TASK-ID -root "$HOME/.pot-control" -assistant main
+pot doctor -root "$HOME/.pot-control"
+pot config get agent -root "$HOME/.pot-control" -assistant main
+```
+
+Configuration sections are `providers`, `agent`, `routing`, `usage-policy` and
+`instructions`. `config set SECTION JSON_FILE` uses the same revision checks as
+UI/API callers. Agent configuration accepts an editable `AssistantSelection` or
+the complete save request; it never writes a resolved Task snapshot back into a
+Provider. Routing stores only profile/provider concurrency limits.
+
+`pot service install|start|stop|uninstall -root PATH` manages a user service on
+macOS or Linux. Install writes a reviewable definition without overwriting an
+existing one. Start/stop act on that definition, and the recorded root must match.
+Use the same account/root when restarting after upgrades. Neither building nor
+installing an archive starts a VM or installs a user service.

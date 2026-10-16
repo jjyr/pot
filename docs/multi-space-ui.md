@@ -61,7 +61,11 @@ Machines groups by Control membership, local first and cloud second. A remote
 execution machine joined to the local Control appears in Local. The cloud section
 shows Connect cloud when unconfigured and retains cached inventory when offline.
 Machine actions and permission changes bind to their explicit Space/assistant,
-independently of the current Chat.
+independently of the current Chat. Resource and lifecycle writes also include
+the exact Sandbox ID. Host/Sandbox Task links filter by the full execution target.
+Native desktop viewing requires the local Space and exact local Runtime.
+Machine labels and membership use native operator controls; browser sessions
+cannot reach private enrollment/administration endpoints.
 
 ## Settings and Usage
 
@@ -89,9 +93,11 @@ create courtesy notifications. Background conversations keep independent context
 
 ## Implementation
 
-[`app/src/spaces.rs`](../crates/app/src/spaces.rs) refreshes native catalogues and
-retains caches on failure. [`application/spaces.rs`](../crates/ui/src/application/spaces.rs)
-projects owners and merges task pages/raw Usage buckets;
-[`spaces_ui.rs`](../crates/ui/src/application/spaces_ui.rs) renders combined views
-and binds actions to owners. Shared component changes retain Web's single-Control
-boundary. This UI adds no separate model-visible handoff protocol.
+[`internal/spaces`](../internal/spaces) maintains native local/remote catalogues,
+identity checks and last-known caches. The desktop service supplies those
+projections through Wails; [`web/src/state/aggregate.mjs`](../web/src/state/aggregate.mjs)
+merges owner-tagged Task/Schedule pages and raw Usage buckets.
+[`web/src/components/pages.mjs`](../web/src/components/pages.mjs) captures each
+object's Space/assistant for actions and fences late responses. The production
+browser adapter retains its single-Control boundary. This UI adds no separate
+model-visible handoff protocol.

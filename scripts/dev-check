@@ -32,10 +32,8 @@ def doctor():
         raise SystemExit("Select Xcode with Swift 6.2+ using xcode-select.")
     print(swift.strip())
     for binary in [
-        "cargo",
-        "mbx",
-        "cargo-zigbuild",
-        "zig",
+        "go",
+        "node",
         "python",
         "hk",
         "pkl",
@@ -46,10 +44,13 @@ def doctor():
     ]:
         if not shutil.which(binary):
             raise SystemExit(f"Missing {binary}; run mise install.")
-    targets = subprocess.check_output(["rustup", "target", "list", "--installed"], text=True)
-    if "aarch64-unknown-linux-musl" not in targets.splitlines():
-        raise SystemExit("Run mise run setup to install the Linux target.")
-    run("cargo", "fmt", "--version")
+    if not shutil.which("podman"):
+        raise SystemExit(
+            "Missing Podman; install it before Linux Sandbox development. No machine is created or started by doctor."
+        )
+    run("podman", "--version")
+    run("go", "version")
+    run("node", "--version")
     print("Development prerequisites OK. No downloads, VM or model calls performed.")
 
 
@@ -65,12 +66,12 @@ def sources(args):
             .decode()
             .split("\0")
         )
-    groups = {kind: [] for kind in ["rust", "swift", "python", "shell"]}
+    groups = {kind: [] for kind in ["go", "swift", "python", "shell"]}
     for name in sorted(set(candidates)):
         path = Path(name)
         if not path.is_file() or path.is_symlink():
             continue
-        kind = {".rs": "rust", ".swift": "swift", ".py": "python", ".sh": "shell"}.get(path.suffix)
+        kind = {".go": "go", ".swift": "swift", ".py": "python", ".sh": "shell"}.get(path.suffix)
         if not kind and path.parent == Path("scripts"):
             first = path.read_bytes().split(b"\n", 1)[0]
             if first.startswith(b"#!") and b"python" in first:
@@ -85,8 +86,13 @@ def check(mode, args):
     if mode == "lint":
         run("python", "scripts/localize-web", "--check")
     fix = mode == "fmt"
-    if files["rust"]:
-        run("cargo", "fmt", "--all", *([] if fix else ["--check"]))
+    if files["go"]:
+        if fix:
+            run("gofmt", "-w", *files["go"])
+        else:
+            unformatted = subprocess.check_output(["gofmt", "-l", *files["go"]], text=True)
+            if unformatted:
+                raise SystemExit("Run gofmt on:\n" + unformatted)
     if files["swift"]:
         run("swiftformat", *files["swift"], *([] if fix else ["--lint", "--strict"]))
     if files["python"]:

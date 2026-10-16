@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Build the shared Linux Sandbox OCI image using an explicit Podman builder."""
+
+from go_packaging import guest_image_main
+
+if __name__ == "__main__":
+    guest_image_main()

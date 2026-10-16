@@ -1,5 +1,4 @@
 # Markdown uses trailing spaces for intentional hard line breaks.
 *.md whitespace=-blank-at-eol
-# Preserve upstream unified-diff context and original captured transcripts.
+# Preserve unified-diff context.
 *.patch -whitespace
-poc/baseline/evidence/*.txt -whitespace

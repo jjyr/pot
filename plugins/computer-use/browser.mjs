@@ -6,32 +6,81 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-let chrome, profile, target, session, ownerSession, sequence = 0, nextId = 0;
+let chrome, profile, target, session, ownerSession, closing, cleanupError, gracefulExit = false, sequence = 0, nextId = 0;
 let pending = new Map(), nodes = new Map(), buffer = Buffer.alloc(0);
 const MAX_IMAGE = 1024 * 1024;
-function command(method, params = {}, page = true) {
+function rejectPending(error) {
+  for (const request of pending.values()) { clearTimeout(request.timer); request.reject(error); }
+  pending.clear();
+}
+function command(method, params = {}, page = true, timeout = 15000) {
+  const child = chrome;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.reject(new Error('Browser session ended; outcome unknown'));
   return new Promise((resolve, reject) => {
     const id = ++nextId;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}; outcome unknown`)); }, 15000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}; outcome unknown`)); }, timeout);
     pending.set(id, { resolve, reject, timer });
-    chrome.stdio[3].write(JSON.stringify({ id, method, params, ...(page ? { sessionId: session } : {}) }) + '\0');
+    child.stdio[3].write(JSON.stringify({ id, method, params, ...(page ? { sessionId: session } : {}) }) + '\0', error => {
+      if (error && pending.has(id)) { pending.delete(id); clearTimeout(timer); reject(error); }
+    });
   });
 }
-async function close() {
-  if (chrome) {
-    const child = chrome;
-    chrome = undefined;
-    if (child.exitCode === null && child.signalCode === null) {
-      const exited = new Promise(resolve => child.once('exit', resolve));
-      child.kill('SIGKILL');
-      await exited;
-    }
+function waitForExit(child, timeout) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const exited = () => { clearTimeout(timer); resolve(true); };
+    const timer = setTimeout(() => { child.removeListener('exit', exited); resolve(false); }, timeout);
+    child.once('exit', exited);
+  });
+}
+async function finishClose() {
+  if (cleanupError) throw cleanupError;
+  const child = chrome, directory = profile;
+  rejectPending(new Error('Browser session ended; outcome unknown'));
+  if (child?.pid && !gracefulExit && (child.exitCode !== null || child.signalCode !== null)) {
+    cleanupError = new Error('Browser exited unexpectedly; descendant cleanup unconfirmed; reset the session; profile retained');
+    throw cleanupError;
   }
-  for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('Browser session ended; outcome unknown')); }
-  pending.clear(); nodes.clear(); session = undefined; ownerSession = undefined;
-  if (profile) { await rm(profile, { recursive: true, force: true }); profile = undefined; }
+  if (child?.pid && child.exitCode === null && child.signalCode === null) {
+    // Browser.close lets Chrome stop/reap its own helpers before the profile is
+    // removed. Keep Chrome in the existing plugin process group/cgroup.
+    const exited = waitForExit(child, 2000);
+    const graceful = command('Browser.close', {}, false, 1500).catch(() => {});
+    if (!await exited) {
+      const killed = waitForExit(child, 1000);
+      child.kill('SIGKILL');
+      const confirmed = await killed;
+      await graceful;
+      // A main-PID exit cannot prove descendant cleanup after forced shutdown.
+      // Retain the profile inside the plugin's private TMPDIR; outer Go scope
+      // disposal removes it only after authoritative group/cgroup cleanup.
+      cleanupError = new Error(confirmed
+        ? 'Browser descendant cleanup unconfirmed after forced shutdown; reset the session; profile retained'
+        : 'Browser process cleanup unconfirmed after forced shutdown; reset the session; profile retained');
+      throw cleanupError;
+    }
+    await graceful;
+    if (child.exitCode !== 0 || child.signalCode !== null) {
+      cleanupError = new Error('Browser graceful exit unconfirmed; reset the session; profile retained');
+      throw cleanupError;
+    }
+    gracefulExit = true;
+  }
+  rejectPending(new Error('Browser session ended; outcome unknown'));
+  // Retry only filesystem cleanup, never a browser operation. rm rejects after
+  // this bounded retry budget, retaining the profile reference for inspection.
+  if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 });
+  chrome = undefined; profile = undefined; target = undefined;
+  nodes.clear(); session = undefined; ownerSession = undefined; buffer = Buffer.alloc(0); gracefulExit = false;
+}
+async function close() {
+  if (closing) return closing;
+  closing = finishClose();
+  try { await closing; } finally { closing = undefined; }
 }
 async function open(execution_target) {
+  if (closing) await closing;
+  if (chrome || profile) throw new Error('Browser cleanup must complete before opening another session');
   profile = await mkdtemp(join(tmpdir(), 'pot-browser-'));
   const executable = process.env.POT_BROWSER_EXECUTABLE || [
     '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
@@ -45,10 +94,16 @@ async function open(execution_target) {
     '--disable-background-networking', '--disable-sync', '--remote-debugging-pipe',
     `--user-data-dir=${profile}`, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
-  chrome.on('error', error => { for (const request of pending.values()) request.reject(error); });
-  chrome.stdio[4].on('data', chunk => {
+  const child = chrome;
+  const ended = error => { if (chrome === child) rejectPending(error); };
+  child.on('error', ended);
+  child.once('exit', () => ended(new Error('Browser session ended; outcome unknown')));
+  child.stdio[3].on('error', ended);
+  child.stdio[4].on('error', ended);
+  child.stdio[4].on('data', chunk => {
+    if (chrome !== child) return;
     buffer = Buffer.concat([buffer, chunk]);
-    if (buffer.length > 8 * 1024 * 1024) { chrome.kill('SIGKILL'); return; }
+    if (buffer.length > 8 * 1024 * 1024) { child.kill('SIGKILL'); return; }
     let end;
     while ((end = buffer.indexOf(0)) !== -1) {
       const message = JSON.parse(buffer.subarray(0, end).toString()); buffer = buffer.subarray(end + 1);

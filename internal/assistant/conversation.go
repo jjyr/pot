@@ -1,0 +1,760 @@
+package assistant
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/composition"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
+)
+
+type RunOptions struct {
+	Execution      core.ExecutionContext
+	Services       core.ExecutionServices
+	Dispatch       agent.Dispatch
+	Cleanup        agent.Cleanup
+	Composer       agent.Composer
+	Tools          []modelprotocol.ToolDefinition
+	PrepareContext agent.PrepareContext
+	Ready          func(context.Context) error
+	Observe        func(context.Context, agent.Observation) error
+	Settle         func(context.Context) error
+	MaxRounds      int
+}
+type ConversationOptions struct {
+	Context                                  context.Context
+	Owner, ConversationID, RuntimeID, BootID string
+	Manager                                  *execution.Manager
+	InitialSpec                              *core.ResolvedSpec
+	InitialRules                             string
+	InitialIntent                            json.RawMessage
+	RefreshConfiguration                     func(context.Context, core.Thread, json.RawMessage) (*core.ResolvedSpec, error)
+	MaxRequests, MaxTurnRequests             uint64 // zero is unlimited; independent of token allowances
+	Prepare                                  func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error)
+}
+type savedTurn struct {
+	Owner          string               `json:"owner"`
+	BootID         string               `json:"boot_id"`
+	Generation     uint64               `json:"generation"`
+	Request        protocol.SendMessage `json:"request"`
+	UserMessageID  string               `json:"user_message_id"`
+	State          string               `json:"state"`
+	Cancelling     bool                 `json:"cancelling"`
+	Paused         bool                 `json:"paused"`
+	Resuming       bool                 `json:"resuming"`
+	ReplyMessageID string               `json:"reply_message_id"`
+}
+type Conversation struct {
+	mu                          sync.Mutex
+	store                       *storage.Store
+	options                     ConversationOptions
+	ctx                         context.Context
+	stop                        context.CancelFunc
+	done                        chan struct{}
+	input                       chan protocol.SendMessage
+	thread                      *core.Thread
+	turn                        *savedTurn
+	recovery                    *savedTurn
+	runCancel                   context.CancelFunc
+	messages                    []protocol.Message
+	cursor                      int64
+	modelCount                  uint64
+	blocked, closed, finalizing bool
+	lastError                   error
+	subscribers                 map[chan protocol.Snapshot]struct{}
+	closeOnce                   sync.Once
+	closeErr                    error
+	controlChanged              chan struct{}
+}
+
+func OpenConversation(path string, options ConversationOptions) (*Conversation, error) {
+	if !core.Identifier(options.Owner) || options.Manager == nil || options.Prepare == nil || options.RuntimeID == "" || options.BootID == "" {
+		return nil, errors.New("conversation needs fixed owner, runtime/boot identity, manager and preparation port")
+	}
+	if options.MaxRequests > core.MaxSafeInteger || options.MaxTurnRequests > core.MaxSafeInteger {
+		return nil, errors.New("model request limits exceed supported integer range")
+	}
+	if options.ConversationID == "" {
+		options.ConversationID = options.Owner
+	}
+	if !core.Identifier(options.ConversationID) {
+		return nil, errors.New("invalid conversation identity")
+	}
+	if options.Context == nil {
+		options.Context = context.Background()
+	}
+	store, err := storage.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			store.Close()
+		}
+	}()
+	err = storage.Transaction(context.Background(), store.DB(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec("CREATE TABLE IF NOT EXISTS assistant_configuration_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL)"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_model_attempts(id TEXT PRIMARY KEY,owner TEXT NOT NULL,generation INTEGER NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS assistant_model_turn ON assistant_model_attempts(turn_id);
+CREATE TABLE IF NOT EXISTS assistant_steering(id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,text TEXT NOT NULL,at INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY AUTOINCREMENT,turn_id TEXT NOT NULL,generation INTEGER NOT NULL,body TEXT NOT NULL);`); err != nil {
+			return err
+		}
+		var initialized bool
+		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM metadata WHERE key='conversation.initialized')").Scan(&initialized); err != nil {
+			return err
+		}
+		if !initialized {
+			if len(options.InitialRules) > 262144 {
+				return errors.New("initial rules exceed limit")
+			}
+			rules, _ := json.Marshal(storage.Rules{SchemaVersion: 1, Text: options.InitialRules, Revision: storage.ID()})
+			if _, err := tx.Exec("INSERT INTO metadata VALUES('assistant.instructions.v1',?)", string(rules)); err != nil {
+				return err
+			}
+			if len(options.InitialIntent) > 0 && string(options.InitialIntent) != "null" {
+				if !json.Valid(options.InitialIntent) {
+					return errors.New("invalid initial configuration intent")
+				}
+				if err := writeConfiguration(context.Background(), tx, configurationState{Intent: options.InitialIntent}); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec("INSERT INTO metadata VALUES('conversation.initialized','true')"); err != nil {
+				return err
+			}
+		}
+		for key, value := range map[string]string{"conversation.owner": options.Owner, "conversation.id": options.ConversationID} {
+			var previous string
+			err := tx.QueryRow("SELECT value FROM metadata WHERE key=?", key).Scan(&previous)
+			if err == nil {
+				if previous != value {
+					return errors.New("conversation owner or identity mismatch")
+				}
+			} else if errors.Is(err, sql.ErrNoRows) {
+				if _, err := tx.Exec("INSERT INTO metadata VALUES (?,?)", key, value); err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if options.InitialSpec != nil {
+		if err := InitializeThread(context.Background(), store, options.Owner, *options.InitialSpec); err != nil {
+			return nil, err
+		}
+	}
+	thread, err := CurrentThread(context.Background(), store)
+	if err != nil {
+		return nil, err
+	}
+	if thread != nil && thread.Owner != options.Owner {
+		return nil, errors.New("thread belongs to another assistant")
+	}
+	ctx, stop := context.WithCancel(options.Context)
+	c := &Conversation{store: store, options: options, ctx: ctx, stop: stop, done: make(chan struct{}), input: make(chan protocol.SendMessage, 1), thread: thread, subscribers: map[chan protocol.Snapshot]struct{}{}, controlChanged: make(chan struct{})}
+	if c.messages, err = store.Messages(context.Background()); err != nil {
+		stop()
+		return nil, err
+	}
+	if c.cursor, err = store.Cursor(context.Background()); err != nil {
+		stop()
+		return nil, err
+	}
+	if err = store.DB().QueryRow("SELECT COUNT(*) FROM assistant_model_attempts").Scan(&c.modelCount); err != nil {
+		stop()
+		return nil, err
+	}
+	if value, exists, err := store.Get(context.Background(), "conversation.blocked"); err != nil {
+		stop()
+		return nil, err
+	} else if exists && value == "true" {
+		c.blocked = true
+	}
+	if raw, exists, err := store.Get(context.Background(), "conversation.recovery"); err != nil {
+		stop()
+		return nil, err
+	} else if exists && raw != "null" {
+		var recovered savedTurn
+		if err := core.DecodeJSON([]byte(raw), &recovered); err != nil {
+			stop()
+			return nil, err
+		}
+		if recovered.Owner != options.Owner || thread == nil || recovered.Generation != thread.Generation || recovered.UserMessageID == "" || recovered.Request.Validate() != nil || recovered.Request.ConversationID != options.ConversationID {
+			stop()
+			return nil, errors.New("persisted recovery turn binding mismatch")
+		}
+		c.recovery = &recovered
+	}
+	if raw, exists, err := store.Get(context.Background(), "conversation.turn"); err != nil {
+		stop()
+		return nil, err
+	} else if exists && raw != "null" {
+		var turn savedTurn
+		if err := core.DecodeJSON([]byte(raw), &turn); err != nil {
+			stop()
+			return nil, err
+		}
+		if turn.Owner != options.Owner || thread == nil || turn.Generation != thread.Generation || turn.UserMessageID == "" || turn.Request.Validate() != nil || turn.Request.ConversationID != options.ConversationID {
+			stop()
+			return nil, errors.New("persisted turn binding mismatch")
+		}
+		c.turn = &turn
+		if turn.State != "waiting" {
+			c.blocked = true
+			c.lastError = errors.New("previous execution was interrupted; inspect its receipts before continuing")
+			c.recovery = &turn
+			c.turn = nil
+			if err := c.appendTurnLocked(context.Background()); err != nil {
+				stop()
+				return nil, err
+			}
+		}
+	}
+	go func() { defer close(c.done); _ = (Driver{Manager: options.Manager, Services: c}).Serve(ctx, c.input) }()
+	ok = true
+	return c, nil
+}
+func (c *Conversation) snapshotLocked() protocol.Snapshot {
+	phase := protocol.Ready
+	var detail *string
+	if c.thread == nil {
+		phase = protocol.NeedsConfiguration
+	}
+	if c.blocked {
+		phase = protocol.AgentFailed
+	}
+	if c.lastError != nil {
+		message := c.lastError.Error()
+		detail = &message
+	}
+	var turn *protocol.TurnState
+	if c.turn != nil {
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
+		if c.turn.Paused {
+			message := "Paused before the next model request"
+			detail = &message
+		}
+		if c.turn.State == "waiting" {
+			message := "Waiting for Pot token allowance"
+			detail = &message
+		}
+	}
+	model := ""
+	output := uint64(0)
+	if c.thread != nil {
+		model = c.thread.Config.Model
+		output = c.thread.Config.Params.MaxOutputTokens
+	}
+	var budget *protocol.RequestBudget
+	if c.options.MaxRequests > 0 {
+		budget = &protocol.RequestBudget{Used: c.modelCount, Limit: c.options.MaxRequests, MaxOutputTokens: output}
+	}
+	messages := slices.Clone(c.messages)
+	for i := range messages {
+		if messages[i].RequestID != nil {
+			request := *messages[i].RequestID
+			messages[i].RequestID = &request
+		}
+	}
+	return protocol.Snapshot{Budget: budget, APIVersion: protocol.APIVersion, BootID: c.options.BootID, Cursor: c.cursor, Agent: protocol.AgentStatus{Model: model, Phase: phase, Detail: detail}, ConversationID: c.options.ConversationID, Messages: messages, Turn: turn}
+}
+func (c *Conversation) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return protocol.Snapshot{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.snapshotLocked(), nil
+}
+func (c *Conversation) changedLocked() {
+	for ch := range c.subscribers {
+		select {
+		case <-ch:
+		default:
+		}
+		ch <- c.snapshotLocked()
+	}
+}
+func (c *Conversation) Subscribe(ctx context.Context) (<-chan protocol.Snapshot, func(), error) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, nil, errors.New("conversation closed")
+	}
+	ch := make(chan protocol.Snapshot, 1)
+	ch <- c.snapshotLocked()
+	c.subscribers[ch] = struct{}{}
+	c.mu.Unlock()
+	var once sync.Once
+	removed := make(chan struct{})
+	remove := func() {
+		once.Do(func() { c.mu.Lock(); delete(c.subscribers, ch); close(ch); c.mu.Unlock(); close(removed) })
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			remove()
+		case <-c.done:
+			remove()
+		case <-removed:
+		}
+	}()
+	return ch, remove, nil
+}
+func (c *Conversation) Events(ctx context.Context, after int64) ([]protocol.Event, error) {
+	return c.store.Events(ctx, after)
+}
+func (c *Conversation) putMessageLocked(ctx context.Context, m protocol.Message, metadata map[string]string) error {
+	event, err := c.store.SaveWithMetadata(ctx, m, metadata)
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range c.messages {
+		if c.messages[i].ID == m.ID {
+			c.messages[i] = m
+			found = true
+			break
+		}
+	}
+	if !found {
+		c.messages = append(c.messages, m)
+	}
+	c.cursor = *event.Cursor
+	c.changedLocked()
+	return nil
+}
+func (c *Conversation) appendTurnLocked(ctx context.Context) error {
+	return c.appendTurnMetadataLocked(ctx, nil)
+}
+func (c *Conversation) appendTurnMetadataLocked(ctx context.Context, metadata map[string]string) error {
+	raw, err := json.Marshal(c.turn)
+	if err != nil {
+		return err
+	}
+	var turn *protocol.TurnState
+	if c.turn != nil {
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
+	}
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["conversation.turn"] = string(raw)
+	metadata["conversation.blocked"] = fmt.Sprint(c.blocked)
+	recoveryRaw, err := json.Marshal(c.recovery)
+	if err != nil {
+		return err
+	}
+	metadata["conversation.recovery"] = string(recoveryRaw)
+	event, err := c.store.AppendEvent(ctx, protocol.Event{Type: "turn", Turn: turn}, metadata)
+	if err != nil {
+		return err
+	}
+	c.cursor = *event.Cursor
+	c.changedLocked()
+	return nil
+}
+func (c *Conversation) Send(ctx context.Context, request protocol.SendMessage) (protocol.SendMessageAccepted, error) {
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		return protocol.SendMessageAccepted{}, errors.New("reserved notification identity")
+	}
+	return c.accept(ctx, request, protocol.User)
+}
+
+// Report atomically claims an automatic result summary using a stable ID. It is
+// system transcript data, enters the shared summary lane and has read-only tools.
+func (c *Conversation) Report(ctx context.Context, id, text string) (protocol.SendMessageAccepted, error) {
+	if !strings.HasPrefix(id, "pot-result-") {
+		return protocol.SendMessageAccepted{}, errors.New("invalid notification identity")
+	}
+	return c.accept(ctx, protocol.SendMessage{RequestID: id, ConversationID: c.options.ConversationID, Text: text}, protocol.System)
+}
+func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage, role protocol.Role) (protocol.SendMessageAccepted, error) {
+	if err := request.Validate(); err != nil {
+		return protocol.SendMessageAccepted{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.ctx.Err() != nil {
+		return protocol.SendMessageAccepted{}, errors.New("conversation closed")
+	}
+	if request.ConversationID != c.options.ConversationID {
+		return protocol.SendMessageAccepted{}, errors.New("wrong conversation")
+	}
+	old, err := c.store.Duplicate(ctx, request.RequestID)
+	if err != nil {
+		return protocol.SendMessageAccepted{}, err
+	}
+	if old != nil {
+		if old.Role != role || old.ConversationID != request.ConversationID || old.Text != request.Text {
+			return protocol.SendMessageAccepted{}, errors.New("request identity already has different content")
+		}
+		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
+	}
+	if c.blocked {
+		return protocol.SendMessageAccepted{}, agent.ErrUncertainEffects
+	}
+	if c.turn != nil {
+		return protocol.SendMessageAccepted{}, errors.New("a conversation turn is already active or waiting")
+	}
+	if err := c.applyConfigurationBoundaryLocked(ctx); err != nil {
+		return protocol.SendMessageAccepted{}, err
+	}
+	if c.thread == nil {
+		return protocol.SendMessageAccepted{}, errors.New("configure an assistant before sending messages")
+	}
+	message := protocol.Message{ID: storage.ID(), ConversationID: request.ConversationID, Role: role, Text: request.Text, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
+	c.turn = &savedTurn{Owner: c.options.Owner, BootID: c.options.BootID, Generation: c.thread.Generation, Request: request, UserMessageID: message.ID, State: "queued"}
+	raw, _ := json.Marshal(c.turn)
+	if err := c.putMessageLocked(ctx, message, map[string]string{"conversation.turn": string(raw)}); err != nil {
+		c.turn = nil
+		return protocol.SendMessageAccepted{}, err
+	}
+	c.lastError = nil
+	c.input <- request
+	return protocol.SendMessageAccepted{MessageID: message.ID}, nil
+}
+func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) error {
+	if !core.Identifier(request.RequestID) || !core.Identifier(request.UserMessageID) {
+		return errors.New("invalid cancellation identity")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := "conversation.cancel." + request.RequestID
+	old, exists, err := c.store.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	if exists {
+		if old != request.UserMessageID {
+			return errors.New("conflicting cancellation identity")
+		}
+		return nil
+	}
+	if c.turn == nil || c.turn.UserMessageID != request.UserMessageID {
+		return errors.New("turn is no longer active")
+	}
+	previous := *c.turn
+	c.turn.Cancelling = true
+	if c.turn.State == "waiting" {
+		c.turn = nil
+		if err := c.appendTurnMetadataLocked(ctx, map[string]string{key: request.UserMessageID}); err != nil {
+			c.turn = &previous
+			return err
+		}
+		for _, message := range slices.Clone(c.messages) {
+			if message.Status == protocol.Accepted || message.Status == protocol.Streaming {
+				message.Status = protocol.MessageCancelled
+				if err := c.putMessageLocked(ctx, message, nil); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := c.appendTurnMetadataLocked(ctx, map[string]string{key: request.UserMessageID}); err != nil {
+		c.turn = &previous
+		return err
+	}
+	if c.runCancel != nil {
+		c.runCancel()
+	}
+	return nil
+}
+func (c *Conversation) Resume(ctx context.Context) error { return c.resumeOriginal(ctx, "") }
+func (c *Conversation) ResumeOriginal(ctx context.Context, turn string) error {
+	if turn == "" {
+		return errors.New("original turn is required")
+	}
+	return c.resumeOriginal(ctx, turn)
+}
+func (c *Conversation) resumeOriginal(ctx context.Context, turn string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.ctx.Err() != nil {
+		return errors.New("conversation closed")
+	}
+	if turn != "" && (c.turn == nil || c.turn.Request.RequestID != turn) {
+		return errors.New("original allowance turn changed")
+	}
+	if turn != "" && c.turn != nil && c.turn.Resuming && (c.turn.State == "queued" || c.turn.State == "running") {
+		return nil
+	}
+	if c.turn == nil || c.turn.State != "waiting" || c.turn.Cancelling || c.blocked {
+		return errors.New("no safe waiting turn to resume")
+	}
+	raw, err := c.store.LoadContext(ctx)
+	if err != nil {
+		return err
+	}
+	var checkpoint agent.Checkpoint
+	if err := core.DecodeJSON(raw, &checkpoint); err != nil {
+		return err
+	}
+	if checkpoint.Started != nil || checkpoint.ModelRequestID != nil {
+		return agent.ErrUncertainEffects
+	}
+	c.turn.Resuming = true
+	c.turn.State = "queued"
+	c.turn.BootID = c.options.BootID
+	c.lastError = nil
+	if err := c.appendTurnLocked(ctx); err != nil {
+		return err
+	}
+	c.input <- c.turn.Request
+	return nil
+}
+func (c *Conversation) Configure(ctx context.Context, spec core.ResolvedSpec, expectedGeneration uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.turn != nil || c.blocked {
+		return errors.New("conversation is not ready for configuration changes")
+	}
+	if c.thread == nil {
+		if expectedGeneration != 0 {
+			return errors.New("thread generation changed")
+		}
+		if err := InitializeThread(ctx, c.store, c.options.Owner, spec); err != nil {
+			return err
+		}
+		thread, err := CurrentThread(ctx, c.store)
+		if err != nil {
+			return err
+		}
+		c.thread = thread
+	} else {
+		thread, err := ConfigureNextGeneration(ctx, c.store, expectedGeneration, spec)
+		if err != nil {
+			return err
+		}
+		c.thread = &thread
+	}
+	return c.appendTurnLocked(ctx)
+}
+func (c *Conversation) Instructions(ctx context.Context) (Rules, error) {
+	return c.store.Instructions(ctx)
+}
+
+// Thread returns an independent persisted configuration copy for owner editors.
+func (c *Conversation) Thread(ctx context.Context) (*core.Thread, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return CurrentThread(ctx, c.store)
+}
+func (c *Conversation) SaveInstructions(ctx context.Context, text, revision string) (Rules, error) {
+	return c.store.SaveInstructions(ctx, text, revision)
+}
+func (c *Conversation) Close() error {
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.closed = true
+		c.stop()
+		if c.runCancel != nil {
+			c.runCancel()
+		}
+		c.mu.Unlock()
+		<-c.done
+		c.mu.Lock()
+		if c.turn != nil && c.turn.State == "queued" {
+			c.turn = nil
+			c.closeErr = c.appendTurnLocked(context.Background())
+		}
+		c.mu.Unlock()
+		c.closeErr = errors.Join(c.closeErr, c.store.Close())
+	})
+	return c.closeErr
+}
+
+// ClaimModel is called by the owning Control under the fixed model route before
+// its network claim. Every count is durable and never reclaimed after uncertainty.
+func (c *Conversation) ClaimModel(ctx context.Context, turn string, generation uint64, id string) error {
+	if !core.Identifier(id) {
+		return errors.New("invalid model request identity")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.turn == nil || c.turn.Request.RequestID != turn || c.turn.Generation != generation || c.turn.Cancelling || c.turn.State != "running" || c.turn.BootID != c.options.BootID {
+		return errors.New("stale or cancelled model attempt")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	err := storage.Transaction(ctx, c.store.DB(), func(tx *sql.Tx) error {
+		var count int64
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_model_attempts").Scan(&count); err != nil {
+			return err
+		}
+		if c.options.MaxRequests > 0 && uint64(count) >= c.options.MaxRequests {
+			return errors.New("lifetime model request budget exhausted")
+		}
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_model_attempts WHERE turn_id=?", turn).Scan(&count); err != nil {
+			return err
+		}
+		if c.options.MaxTurnRequests > 0 && uint64(count) >= c.options.MaxTurnRequests {
+			return errors.New("per-turn model request budget exhausted")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO assistant_model_attempts VALUES (?,?,?,?,?)", id, c.options.Owner, generation, turn, storage.Now())
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	c.modelCount++
+	if c.options.MaxRequests > 0 {
+		budget := protocol.RequestBudget{Used: c.modelCount, Limit: c.options.MaxRequests, MaxOutputTokens: c.thread.Config.Params.MaxOutputTokens}
+		event, err := c.store.AppendEvent(ctx, protocol.Event{Type: "budget", Budget: &budget}, nil)
+		if err != nil {
+			return err
+		}
+		c.cursor = *event.Cursor
+		c.changedLocked()
+	}
+	return nil
+}
+func (c *Conversation) Configured() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.thread != nil }
+func (c *Conversation) Identity(request protocol.SendMessage) execution.Identity {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	generation := uint64(0)
+	if c.turn != nil && c.turn.Request.RequestID == request.RequestID {
+		generation = c.turn.Generation
+	}
+	role := "assistant"
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		role = "summary"
+	}
+	return execution.Identity{Owner: c.options.Owner, RequestID: request.RequestID, Generation: generation, Role: role}
+}
+func (c *Conversation) Failed(err error) { c.mu.Lock(); c.lastError = err; c.mu.Unlock() }
+func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage) execution.Result {
+	c.mu.Lock()
+	if c.turn == nil || c.turn.Request != request || c.turn.Cancelling || c.blocked {
+		c.mu.Unlock()
+		return execution.Result{Phase: execution.Cancelled, Err: context.Canceled}
+	}
+	threadPointer, loadErr := CurrentThread(ctx, c.store)
+	if loadErr != nil || threadPointer == nil {
+		c.mu.Unlock()
+		if loadErr == nil {
+			loadErr = errors.New("thread configuration missing")
+		}
+		return execution.Result{Phase: execution.Failed, Err: loadErr}
+	}
+	thread := *threadPointer
+	resuming := c.turn.Resuming
+	runCtx, cancel := context.WithCancel(ctx)
+	c.runCancel = cancel
+	c.finalizing = false
+	c.mu.Unlock()
+	defer cancel()
+	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: request.Text})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return execution.Result{Phase: execution.Cancelled, Err: err}
+		}
+		return execution.Result{Phase: execution.Failed, Err: err}
+	}
+	if options.Execution.Owner != thread.Owner || options.Services == nil || options.Cleanup == nil {
+		return execution.Result{Phase: execution.Failed, Err: errors.New("invalid fixed assistant execution ports")}
+	}
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		options.Execution.Role = core.Summary
+	}
+	binding := &turnFeedback{conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}
+	cleanup := func(ctx context.Context, execution core.ExecutionContext, abort bool) error {
+		if err := options.Cleanup(ctx, execution, abort); err != nil {
+			return err
+		}
+		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
+	}
+	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
+	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: request.Text}, resuming, binding.event)
+	phase := execution.Succeeded
+	if err != nil {
+		phase = execution.Failed
+		var uncertain *composition.UnconfirmedCleanupError
+		if errors.Is(err, agent.ErrUncertainEffects) || errors.As(err, &uncertain) || binding.gate.Finish().Kind == "unknown" {
+			phase = execution.Interrupted
+		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			phase = execution.Cancelled
+		}
+	}
+	return execution.Result{Phase: phase, Err: err}
+}
+func IsWaiting(err error) bool {
+	var value protocol.APIError
+	if errors.As(err, &value) {
+		return value.Code == "pot_token_limit"
+	}
+	var pointer *protocol.APIError
+	return errors.As(err, &pointer) && pointer != nil && pointer.Code == "pot_token_limit"
+}
+func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMessage, result execution.Result) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.turn == nil || c.turn.Request.RequestID != request.RequestID {
+		return errors.New("turn completion binding changed")
+	}
+	c.runCancel = nil
+	c.finalizing = false
+	if IsWaiting(result.Err) && !c.turn.Cancelling {
+		c.turn.State = "waiting"
+		return c.appendTurnLocked(ctx)
+	}
+	if result.Phase == execution.Interrupted {
+		c.blocked = true
+	}
+	if raw, err := c.store.LoadContext(ctx); err != nil {
+		return err
+	} else if len(raw) > 0 {
+		var checkpoint struct {
+			Started        *string `json:"started"`
+			ModelRequestID *string `json:"model_request_id"`
+		}
+		if err := json.Unmarshal(raw, &checkpoint); err != nil {
+			return err
+		}
+		if checkpoint.Started != nil || checkpoint.ModelRequestID != nil {
+			c.blocked = true
+		}
+	}
+	for _, m := range slices.Clone(c.messages) {
+		if m.Status == protocol.Accepted || m.Status == protocol.Streaming {
+			m.Status = protocol.Complete
+			if result.Phase == execution.Cancelled {
+				m.Status = protocol.MessageCancelled
+			} else if result.Phase != execution.Succeeded {
+				m.Status = protocol.Failed
+			}
+			if err := c.putMessageLocked(ctx, m, nil); err != nil {
+				return err
+			}
+		}
+	}
+	if c.blocked {
+		saved := *c.turn
+		c.recovery = &saved
+	}
+	c.turn = nil
+	return c.appendTurnLocked(ctx)
+}

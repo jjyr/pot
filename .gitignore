@@ -6,7 +6,7 @@
 output/
 *.local
 
-# Rust, Swift, and build output (keep dependency lockfiles)
+# Build output
 target/
 .build/
 .swiftpm/
