@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/jjyr/pot/internal/agent"
@@ -333,6 +334,21 @@ func (c *Conversation) appendTurnMetadataLocked(ctx context.Context, metadata ma
 	return nil
 }
 func (c *Conversation) Send(ctx context.Context, request protocol.SendMessage) (protocol.SendMessageAccepted, error) {
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		return protocol.SendMessageAccepted{}, errors.New("reserved notification identity")
+	}
+	return c.accept(ctx, request, protocol.User)
+}
+
+// Report atomically claims an automatic result summary using a stable ID. It is
+// system transcript data, enters the shared summary lane and has read-only tools.
+func (c *Conversation) Report(ctx context.Context, id, text string) (protocol.SendMessageAccepted, error) {
+	if !strings.HasPrefix(id, "pot-result-") {
+		return protocol.SendMessageAccepted{}, errors.New("invalid notification identity")
+	}
+	return c.accept(ctx, protocol.SendMessage{RequestID: id, ConversationID: c.options.ConversationID, Text: text}, protocol.System)
+}
+func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage, role protocol.Role) (protocol.SendMessageAccepted, error) {
 	if err := request.Validate(); err != nil {
 		return protocol.SendMessageAccepted{}, err
 	}
@@ -349,7 +365,7 @@ func (c *Conversation) Send(ctx context.Context, request protocol.SendMessage) (
 		return protocol.SendMessageAccepted{}, err
 	}
 	if old != nil {
-		if old.Role != protocol.User || old.ConversationID != request.ConversationID || old.Text != request.Text {
+		if old.Role != role || old.ConversationID != request.ConversationID || old.Text != request.Text {
 			return protocol.SendMessageAccepted{}, errors.New("request identity already has different content")
 		}
 		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
@@ -363,7 +379,7 @@ func (c *Conversation) Send(ctx context.Context, request protocol.SendMessage) (
 	if c.turn != nil {
 		return protocol.SendMessageAccepted{}, errors.New("a conversation turn is already active or waiting")
 	}
-	message := protocol.Message{ID: storage.ID(), ConversationID: request.ConversationID, Role: protocol.User, Text: request.Text, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
+	message := protocol.Message{ID: storage.ID(), ConversationID: request.ConversationID, Role: role, Text: request.Text, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
 	c.turn = &savedTurn{Owner: c.options.Owner, BootID: c.options.BootID, Generation: c.thread.Generation, Request: request, UserMessageID: message.ID, State: "queued"}
 	raw, _ := json.Marshal(c.turn)
 	if err := c.putMessageLocked(ctx, message, map[string]string{"conversation.turn": string(raw)}); err != nil {
@@ -566,7 +582,11 @@ func (c *Conversation) Identity(request protocol.SendMessage) execution.Identity
 	if c.turn != nil && c.turn.Request.RequestID == request.RequestID {
 		generation = c.turn.Generation
 	}
-	return execution.Identity{Owner: c.options.Owner, RequestID: request.RequestID, Generation: generation, Role: "assistant"}
+	role := "assistant"
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		role = "summary"
+	}
+	return execution.Identity{Owner: c.options.Owner, RequestID: request.RequestID, Generation: generation, Role: role}
 }
 func (c *Conversation) Failed(err error) { c.mu.Lock(); c.lastError = err; c.mu.Unlock() }
 func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage) execution.Result {
@@ -599,6 +619,9 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	}
 	if options.Execution.Owner != thread.Owner || options.Services == nil || options.Cleanup == nil {
 		return execution.Result{Phase: execution.Failed, Err: errors.New("invalid fixed assistant execution ports")}
+	}
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		options.Execution.Role = core.Summary
 	}
 	binding := &turnFeedback{conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}
 	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}

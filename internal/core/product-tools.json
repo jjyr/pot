@@ -1,0 +1,516 @@
+[
+  {
+    "name": "create_task",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks use the selected machine's Host or shared development Sandbox according to its current policy at dispatch. Task completion closes its own processes and sessions; installed tools and files remain. Shared environment changes affect other tasks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resource": {
+          "type": "string",
+          "enum": [
+            "",
+            "shared"
+          ]
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Configured Provider connection Profile ID chosen autonomously for this task. Omit to use the invoking assistant’s active configuration. No user allowlist or route confirmation is needed."
+        },
+        "requirements": {
+          "type": "object",
+          "properties": {
+            "tools": {
+              "type": "boolean"
+            },
+            "desktop": {
+              "type": "boolean",
+              "description": "Native desktop automation is currently unsupported. Independent headless browser automation does not require desktop=true."
+            },
+            "exact_budget": {
+              "type": "boolean"
+            },
+            "live_steering": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "selection_reason": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Concise creation-time reason for the chosen executor; do not claim certainty for ambiguous work."
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Global skill names to include in this task. Omitted or empty loads no global skills. Project skills are always discovered independently."
+        },
+        "machine_id": {
+          "type": "string",
+          "description": "Target machine ID. Omitted follows the current machine routing. Execution uses the machine policy at dispatch; no Sandbox selection is needed."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concrete model ID supported by the selected Provider. Omitted uses that Provider’s default model; with no Provider selection, uses the invoking assistant’s active model."
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_tasks",
+    "description": "Search task metadata by state and title/ID. Defaults to active tasks, 10 per page; archived tasks keep complete/cancelled status. Use attention for failed/interrupted, archived to find past results, all only with a relevant query. Follow next_offset only when needed; no polling.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "active",
+            "attention",
+            "archived",
+            "all"
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "description": "Exact execution status; overrides scope when provided",
+          "enum": [
+            "queued",
+            "running",
+            "waiting",
+            "complete",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "q": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Case-insensitive title or task ID substring"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_task",
+    "description": "Read recent results and execution state of a task.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "guide_task",
+    "description": "Queue a follow-up instruction in an existing task. Applied after the current turn; does not interrupt it. Only active tasks accept guidance. For finished or failed tasks, create a new task.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "task_id",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "send_message",
+    "description": "Send reference information from Main to a pot-agent task. Delivered at a safe model boundary if running, or retained as reference history if the task has ended. Does not create a work turn, interrupt current work, resume stopped tasks or authorize new permissions. Sender identity is trusted Runtime metadata, not caller supplied.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "required": [
+        "task_id",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "wait_task",
+    "description": "Wait for any of up to eight tasks to complete, fail, become interrupted, cancelled or allowance-waiting. Bounded wait; no busy polling. Returns metadata, per-task cursors and timed_out. Pass returned cursors as after to suppress unchanged settled states. Does not retrieve transcripts, resume tasks or wait for exec; use wait for JavaScript runs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "after": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        }
+      },
+      "required": [
+        "task_ids"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "interrupt",
+    "description": "Interrupt current work while retaining task/session/files and pending guidance. Does not replay interrupted input or automatically resume. Running work retains capacity until cleanup is confirmed; run again by creating a new task. Completed task results remain complete.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cancel_task",
+    "description": "Abandon a task: stop current execution, discard pending guidance and mark cancelled after confirmed cleanup. Retains history and files; cancelled tasks appear in Archived. Use interrupt to preserve guidance for later continuation. Completed results remain complete.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_schedules",
+    "description": "List scheduled plans (metadata only). Filter enabled/paused/all; use pagination.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "enabled",
+            "paused",
+            "all"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_schedule",
+    "description": "Read a schedule definition and paginated execution history.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "schedule_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "required": [
+        "schedule_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "manage_schedule",
+    "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. All times use the specified IANA timezone. Control triggers a new task on the saved machine; each dispatch reads that machine's current execution policy. Omit machine_id on update to preserve the selected machine. Creation/update requires spec. Deletion is soft and keeps execution history.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "update",
+            "pause",
+            "resume",
+            "delete",
+            "run"
+          ]
+        },
+        "schedule_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "goal": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timezone": {
+              "type": "string",
+              "description": "IANA name, e.g. Asia/Shanghai"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "once",
+                "interval",
+                "daily",
+                "weekly"
+              ]
+            },
+            "at": {
+              "type": "string",
+              "description": "once: local YYYY-MM-DD HH:MM"
+            },
+            "every_minutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 525600
+            },
+            "time": {
+              "type": "string",
+              "description": "daily/weekly: local HH:MM"
+            },
+            "weekdays": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 7
+              },
+              "description": "weekly: Monday=1 through Sunday=7"
+            },
+            "misfire": {
+              "type": "string",
+              "enum": [
+                "coalesce",
+                "skip"
+              ]
+            },
+            "notify": {
+              "type": "string",
+              "enum": [
+                "changes",
+                "all",
+                "failures"
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "profile": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Configured Provider Profile ID chosen autonomously. Omit to snapshot the owning assistant’s configuration at each trigger."
+            },
+            "requirements": {
+              "type": "object",
+              "properties": {
+                "tools": {
+                  "type": "boolean"
+                },
+                "desktop": {
+                  "type": "boolean",
+                  "description": "Native desktop automation is currently unsupported. Independent headless browser automation does not require desktop=true."
+                },
+                "exact_budget": {
+                  "type": "boolean"
+                },
+                "live_steering": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "machine_id": {
+              "type": "string",
+              "description": "Machine to run on. Each occurrence reads its current execution policy and creates a fresh Task. Omit on update to retain the machine."
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Concrete model supported by the selected configured Provider."
+            }
+          },
+          "required": [
+            "title",
+            "goal",
+            "timezone",
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_execution_targets",
+    "description": "Inspect authorized Host and Sandbox execution targets grouped by Runtime; does not start a Sandbox.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_assistants",
+    "description": "List addressable assistants in this Control and Spaces connected through the App relay. A listed remote assistant may be offline. Does not start work.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "send_assistant_message",
+    "description": "Send a durable message to another assistant and wake its separate message conversation. Returns acceptance, not completion. Cross-Space delivery waits for App relay connectivity. Use for coordination and replies; no task migration or permissions are implied. Replies to the current correspondent automatically retain the conversation; reply_to can explicitly reference a received message. Automatic exchanges are bounded; do not send unnecessary acknowledgements.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "object",
+          "properties": {
+            "control_id": {
+              "type": "string"
+            },
+            "assistant_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "control_id",
+            "assistant_id"
+          ],
+          "additionalProperties": false
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "reply_to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_model_catalog",
+    "description": "Discover configured Provider profiles with offset/limit, or supply profile for its model facts. models and configured_models are separately paginated with the same offset/limit and report their totals.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+]

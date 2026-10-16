@@ -9,6 +9,7 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,6 +25,10 @@ func Handler(app *Application, token string) http.Handler {
 		expected := "Bearer " + token
 		if token == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(expected)) != 1 {
 			writeError(w, http.StatusUnauthorized, protocol.APIError{Code: "unauthorized", Message: "Runtime authentication required"})
+			return
+		}
+		if expectedID := r.Header.Get("X-Pot-Control-ID"); expectedID != "" && expectedID != app.RuntimeID {
+			writeError(w, http.StatusConflict, protocol.APIError{Code: "identity_changed", Message: "Control identity changed"})
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/events" {
@@ -65,6 +70,14 @@ func Handler(app *Application, token string) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if file, ok := result.(Download); ok {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": file.Name}))
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+			w.Header().Set("Content-Length", strconv.Itoa(len(file.Data)))
+			_, _ = w.Write(file.Data)
+			return
+		}
 		if err = json.NewEncoder(w).Encode(result); err != nil {
 			return
 		}

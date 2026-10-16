@@ -6,19 +6,25 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/assistant"
+	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/executor"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/modelprotocol"
 	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/sandbox"
+	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/internal/usage"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +37,8 @@ type Options struct {
 	Target                                                                   TargetDispatch
 	CleanupTarget                                                            func(context.Context, string, bool) error
 	ResolveSandbox                                                           func(context.Context) (core.ExecutionTarget, error)
+	Sandboxes                                                                *sandbox.Manager
+	Embedded                                                                 bool
 }
 type Service struct {
 	mu              sync.Mutex
@@ -49,6 +57,13 @@ type Service struct {
 	hostGenerations map[string]uint64
 	instructions    InstructionSources
 	closed          bool
+	Machines        *controlplane.Directory
+	RunnerJournal   *runner.Journal
+	Runner          *runner.Executor
+	Tasks           *tasks.Service
+	Schedules       *schedule.Service
+	Mailbox         *assistant.Mailbox
+	taskLife        *taskLifecycle
 }
 
 func Open(options Options) (*Service, error) {
@@ -106,6 +121,9 @@ func Open(options Options) (*Service, error) {
 	}
 	s.Operations, err = OpenOperations(filepath.Join(options.Root, "operations.sqlite"))
 	if err != nil {
+		return nil, err
+	}
+	if err = s.openTasks(); err != nil {
 		return nil, err
 	}
 	success = true
@@ -189,19 +207,16 @@ func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	instructions, roots, err := s.instructions.Prepare(s.options.AgentHome, s.options.Workspace, rules.Text)
+	executionContext, err := s.prepareExecution(ctx, thread.Owner, target, false, rules.Text)
 	if err != nil {
 		return assistant.RunOptions{}, err
-	}
-	if s.options.BuiltinSkills != "" {
-		roots = append(roots, core.SkillRoot{Path: s.options.BuiltinSkills, Location: "builtin", Builtin: true})
 	}
 	engine, err := s.host(thread.Owner, thread.Generation)
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: map[string]agent.Dispatch{}}
-	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, Role: "pot", Claim: func(ctx context.Context, id string) error {
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: s.productDispatch(thread.Owner, request.RequestID, thread.Generation, false)}
+	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
 		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
 	}}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
@@ -241,7 +256,7 @@ func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread
 		definition.InputSchema, _ = json.Marshal(schema)
 		definitions = append(definitions, definition)
 	}
-	executionContext := core.ExecutionContext{Instructions: instructions, SkillResources: core.SkillResources{Roots: roots}, Data: s.options.Root, Workspace: s.options.Workspace, Owner: thread.Owner, Role: core.Main, MainPrompt: assistant.MainPrompt}
+	definitions = append(definitions, s.productTools(false)...)
 	return assistant.RunOptions{Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Permissions.Expire(thread.Owner, request.RequestID, thread.Generation)
 		err := engine.Drain()
@@ -299,11 +314,31 @@ func (s *Service) Close() error {
 	}
 	s.mu.Unlock()
 	var result error
+	if s.taskLife != nil {
+		s.taskLife.wg.Wait()
+	}
+	if s.Runner != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		result = errors.Join(result, s.Runner.Close(ctx))
+		cancel()
+	}
 	for _, c := range conversations {
 		result = errors.Join(result, c.Close())
 	}
 	for _, e := range engines {
 		result = errors.Join(result, e.Close())
+	}
+	if s.Machines != nil {
+		result = errors.Join(result, s.Machines.Close())
+	}
+	if s.RunnerJournal != nil {
+		result = errors.Join(result, s.RunnerJournal.Close())
+	}
+	if s.Tasks != nil {
+		result = errors.Join(result, s.Tasks.Close())
+	}
+	if s.Mailbox != nil {
+		result = errors.Join(result, s.Mailbox.Close())
 	}
 	if s.Operations != nil {
 		result = errors.Join(result, s.Operations.Close())
@@ -324,4 +359,11 @@ func (s *Service) Close() error {
 // signed nanoseconds while protocol request timeouts use safe JSON milliseconds.
 func validRequestTimeout(ms uint64) bool {
 	return ms > 0 && ms <= uint64((1<<63-1)/int64(time.Millisecond))
+}
+
+func modelRole(requestID string) string {
+	if strings.HasPrefix(requestID, "pot-result-") {
+		return "summary"
+	}
+	return "pot"
 }

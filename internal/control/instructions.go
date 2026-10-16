@@ -43,19 +43,7 @@ func (s *InstructionSources) Prepare(agentHome, workspace, assistantRules string
 		}
 	}
 	parts := []string{}
-	s.mu.Lock()
-	data, globalErr := os.ReadFile(filepath.Join(agentHome, "AGENTS.md"))
-	if globalErr == nil {
-		s.global = strings.ToValidUTF8(string(data), "�")
-		s.globalError = ""
-	} else if os.IsNotExist(globalErr) {
-		s.global = ""
-		s.globalError = ""
-	} else {
-		s.globalError = globalErr.Error()
-	}
-	global := s.global
-	s.mu.Unlock()
+	global := s.globalText(agentHome)
 	add := func(name, text string) {
 		if strings.TrimSpace(text) != "" {
 			parts = append(parts, fmt.Sprintf("<%s>\n%s\n</%s>", name, text, name))
@@ -63,7 +51,7 @@ func (s *InstructionSources) Prepare(agentHome, workspace, assistantRules string
 	}
 	add("global_instructions", global)
 	add("assistant_instructions", assistantRules)
-	roots := []core.SkillRoot{{Path: filepath.Join(agentHome, "skills"), Location: "global"}}
+	roots := []core.SkillRoot{{Path: filepath.Join(agentHome, "skills"), Location: filepath.Join(agentHome, "skills")}}
 	paths := []string{}
 	for current := cwd; ; current = filepath.Dir(current) {
 		paths = append(paths, current)
@@ -80,7 +68,7 @@ func (s *InstructionSources) Prepare(agentHome, workspace, assistantRules string
 		if err == nil {
 			add("project_instructions", fmt.Sprintf("Directory: %s\n%s", directory, strings.ToValidUTF8(string(data), "�")))
 		}
-		roots = append(roots, core.SkillRoot{Path: filepath.Join(directory, ".agents", "skills"), Location: "project"})
+		roots = append([]core.SkillRoot{{Path: filepath.Join(directory, ".agents", "skills"), Location: filepath.Join(directory, ".agents", "skills")}}, roots...)
 	}
 	add("instruction_discovery", "Project instructions apply from the nearest repository root through the execution directory. Before editing deeper paths, inspect applicable descendant AGENTS.md files. Explicit user instructions take precedence; project instructions do not grant tools or permissions.")
 	return strings.Join(parts, "\n\n"), roots, nil

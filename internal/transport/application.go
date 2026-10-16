@@ -54,6 +54,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	path := u.Path
 	s := a.Control
+	if result, err, handled := a.taskCall(ctx, method, u, owner, r); handled {
+		return result, err
+	}
 	conversation := func() (*assistant.Conversation, error) { return s.Conversation(ctx, owner) }
 	if method == "GET" {
 		switch path {

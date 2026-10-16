@@ -58,7 +58,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 	if err != nil {
 		return nil, err
 	}
-	operation := Operation{Owner: d.Owner, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, Target: target, Tool: call.Name, Args: prepared}
+	operation := Operation{Owner: d.Owner, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, Target: target, Tool: call.Name, Args: prepared, Worker: execution.Role == core.Worker}
 	key, err := operation.Key()
 	if err != nil {
 		return nil, err

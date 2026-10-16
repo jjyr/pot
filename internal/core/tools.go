@@ -1,6 +1,21 @@
 package core
 
-import "encoding/json"
+import (
+	_ "embed"
+	"encoding/json"
+)
+
+//go:embed product-tools.json
+var productToolsJSON []byte
+
+// ProductTools retains the original shared product tool contracts.
+func ProductTools() []json.RawMessage {
+	var tools []json.RawMessage
+	if err := DecodeJSON(productToolsJSON, &tools); err != nil {
+		panic(err)
+	}
+	return tools
+}
 
 func ExecutionReferenceSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"runtime_id":{"type":"string"},"target":{"oneOf":[{"type":"object","properties":{"kind":{"const":"host"}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"sandbox"},"sandbox_id":{"type":"string"}},"required":["kind","sandbox_id"],"additionalProperties":false}]}},"required":["runtime_id","target"],"additionalProperties":false}`)

@@ -19,6 +19,7 @@ type Operation struct {
 	Target     core.ExecutionTarget `json:"target"`
 	Tool       string               `json:"tool"`
 	Args       json.RawMessage      `json:"args"`
+	Worker     bool                 `json:"worker"`
 }
 
 func (o Operation) Key() (string, error) {

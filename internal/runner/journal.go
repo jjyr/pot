@@ -17,6 +17,7 @@ type Journal struct {
 	db        *sql.DB
 	RuntimeID string
 	BootID    string
+	changes   core.Changes
 }
 
 func Open(path, runtimeID, bootID string) (*Journal, error) {
@@ -27,7 +28,7 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 	if err != nil {
 		return nil, err
 	}
-	j := &Journal{db, runtimeID, bootID}
+	j := &Journal{db: db, RuntimeID: runtimeID, BootID: bootID}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS runner_schema(version INTEGER NOT NULL); INSERT INTO runner_schema SELECT 3 WHERE NOT EXISTS(SELECT 1 FROM runner_schema); CREATE TABLE IF NOT EXISTS task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS run_commands(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,reply TEXT,PRIMARY KEY(control_id,task_id,run_id,command_id));`); err != nil {
 		db.Close()
 		return nil, err
@@ -92,7 +93,8 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 	}
 	return j, nil
 }
-func (j *Journal) Close() error { return j.db.Close() }
+func (j *Journal) Close() error                  { return j.db.Close() }
+func (j *Journal) Subscribe() *core.Subscription { return j.changes.Subscribe() }
 func (j *Journal) validateRun(run Run) error {
 	if run.SchemaVersion != SchemaVersion || !core.Identifier(run.BootID) {
 		return fmt.Errorf("invalid run journal identity/schema")
@@ -222,7 +224,8 @@ func (j *Journal) change(ctx context.Context, control, task, run string, fn func
 	return j.changeTx(ctx, control, task, run, func(_ *sql.Tx, value *Run) error { return fn(value) })
 }
 func (j *Journal) changeTx(ctx context.Context, control, task, run string, fn func(*sql.Tx, *Run) error) error {
-	return storage.Transaction(ctx, j.db, func(tx *sql.Tx) error {
+	changed := false
+	err := storage.Transaction(ctx, j.db, func(tx *sql.Tx) error {
 		value, err := readRun(ctx, tx, control, task, run)
 		if err != nil {
 			return err
@@ -230,11 +233,21 @@ func (j *Journal) changeTx(ctx context.Context, control, task, run string, fn fu
 		if value == nil {
 			return fmt.Errorf("task run not accepted")
 		}
+		before, _ := json.Marshal(value)
 		if err := fn(tx, value); err != nil {
 			return err
 		}
+		after, _ := json.Marshal(value)
+		if string(before) == string(after) {
+			return nil
+		}
+		changed = true
 		return writeRun(ctx, tx, *value)
 	})
+	if err == nil && changed {
+		j.changes.Notify("runner")
+	}
+	return err
 }
 func (j *Journal) Claim(ctx context.Context, control, task, run string) (claimed bool, err error) {
 	err = j.change(ctx, control, task, run, func(value *Run) error {
@@ -263,6 +276,7 @@ func (j *Journal) SaveContext(ctx context.Context, control, task, run string, ra
 	})
 }
 func (j *Journal) Finish(ctx context.Context, control, task, run string, result Terminal) error {
+	defer j.changes.Notify("runner")
 	phase, err := result.phase()
 	if err != nil {
 		return err

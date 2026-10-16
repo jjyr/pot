@@ -31,6 +31,8 @@ type Executor struct {
 	Context    context.Context
 	mu         sync.Mutex
 	active     map[string]context.CancelFunc
+	stopped    bool
+	wg         sync.WaitGroup
 }
 
 func key(control, task, run string) string {
@@ -38,6 +40,12 @@ func key(control, task, run string) string {
 	return hash
 }
 func (e *Executor) Launch(ctx context.Context, launch Launch) (Run, error) {
+	e.mu.Lock()
+	stopped := e.stopped
+	e.mu.Unlock()
+	if stopped {
+		return Run{}, fmt.Errorf("Runner stopped")
+	}
 	if e.Journal == nil || e.Executions == nil || e.Prepare == nil || e.Context == nil {
 		return Run{}, fmt.Errorf("Runner requires explicit destination services")
 	}
@@ -108,6 +116,14 @@ func (e *Executor) Stop(ctx context.Context, control, task, run, mode string) er
 	return nil
 }
 func (e *Executor) Execute(ctx context.Context, control, task, runID string) (terminal *Terminal, result error) {
+	e.mu.Lock()
+	if e.stopped {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("Runner stopped")
+	}
+	e.wg.Add(1)
+	e.mu.Unlock()
+	defer e.wg.Done()
 	record, err := e.Journal.Inspect(ctx, control, task, runID)
 	if err != nil {
 		return nil, err
@@ -283,6 +299,25 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 		return nil, err
 	}
 	return &final, executionResult.Err
+}
+
+// Close fences new invocations and waits for all admitted Agent cleanup before
+// callers close the journal and injected model/approval services.
+func (e *Executor) Close(ctx context.Context) error {
+	e.mu.Lock()
+	e.stopped = true
+	for _, cancel := range e.active {
+		cancel()
+	}
+	e.mu.Unlock()
+	done := make(chan struct{})
+	go func() { e.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return core.ErrCleanupUnconfirmed
+	}
 }
 func (e *Executor) checkCurrent(ctx context.Context, control, task, run string) error {
 	record, err := e.Journal.Inspect(ctx, control, task, run)
