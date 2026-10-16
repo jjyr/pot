@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 type Query struct {

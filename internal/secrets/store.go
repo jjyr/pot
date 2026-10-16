@@ -12,7 +12,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 // KeySource must never regenerate a missing key when allowCreate is false.

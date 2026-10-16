@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/storage"
 	"strings"
 )
 

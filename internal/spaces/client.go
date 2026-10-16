@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 const responseLimit = 16 << 20

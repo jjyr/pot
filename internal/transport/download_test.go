@@ -3,11 +3,11 @@ package transport
 import (
 	"context"
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/webui"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 	"net/http"
 	"net/http/httptest"

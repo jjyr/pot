@@ -62,7 +62,7 @@ Model code cannot change the mode. Canvas or inaccessible content may require vi
 
 ## CUA REPL
 
-`cua_repl` is exposed to `internal/agent` and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls during the active execution. Use `execution_target:"host"` or `"sandbox:ID"` to choose a target; Omitted targets follow the Agent default for new sessions and the original execution target for existing sessions. Sessions cannot switch execution targets. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
+`cua_repl` is exposed to `pkg/agent` and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls during the active execution. Use `execution_target:"host"` or `"sandbox:ID"` to choose a target; Omitted targets follow the Agent default for new sessions and the original execution target for existing sessions. Sessions cannot switch execution targets. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
 
 ```javascript
 let tab = await cua.open("https://example.com");

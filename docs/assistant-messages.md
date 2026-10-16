@@ -8,7 +8,7 @@ of permissions, files, running processes or task ownership.
 
 ## Modules
 
-- `internal/protocol` defines addresses, envelopes, directories, receipts and
+- `pkg/protocol` defines addresses, envelopes, directories, receipts and
   relay API DTOs. An address is `{control_id, assistant_id}`; display names never
   route messages.
 - `internal/assistant` owns SQLite Inbox/Outbox persistence, deduplication,
@@ -95,4 +95,4 @@ no separate mailbox or handoff UI. See [Multi-Space UI](multi-space-ui.md).
 History selects an assistant and sequence cursor; batches are bounded to 32
 records. The endpoint requires existing native owner authority, not an execution
 lane token or browser session. Model calls cannot supply their sender identity.
-Protocol schemas and bounds live in `internal/protocol/mail.go`.
+Protocol schemas and bounds live in `pkg/protocol/mail.go`.

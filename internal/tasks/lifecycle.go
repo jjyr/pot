@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 // Tick reconciles original runs. It sends each launch once after committing its

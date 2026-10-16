@@ -1,7 +1,7 @@
 package serverconfig
 
 import (
-	"github.com/jjyr/pot/internal/instance"
+	"github.com/jjyr/pot/pkg/instance"
 	"os"
 	"path/filepath"
 	"testing"

@@ -3,8 +3,8 @@ package control
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/pkg/core"
 	"sync"
 	"time"
 )

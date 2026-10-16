@@ -7,9 +7,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 var ErrResultPending = errors.New("original target result transport unavailable")

@@ -31,7 +31,7 @@ depends = ["lint", "check:go"]
 
 [tasks.test]
 description = "Test product contracts without model calls or VMs"
-depends = ["test:go", "test:ui", "test:packaging", "test:eval"]
+depends = ["test:go", "test:ui", "test:packaging", "test:eval", "test:public-api"]
 
 [tasks.prepare]
 description = "Prepare retained Node, JS plugins, skills and viewer resources"
@@ -191,3 +191,7 @@ xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift
 [tasks."test:ui-http-integration"]
 description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
 run = "python scripts/tests/go-ui-http-integration.py"
+
+[tasks."test:public-api"]
+description = "Verify reusable Go libraries from an independent external module"
+run = "python scripts/tests/go-public-api.py"

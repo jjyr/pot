@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
-	"github.com/jjyr/pot/internal/instance"
-	"github.com/jjyr/pot/internal/modeldirectory"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/modeldirectory"
 )
 
 func fixtureDirectory(t *testing.T, window uint64) *modeldirectory.Directory {

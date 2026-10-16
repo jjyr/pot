@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/transport"
+	"github.com/jjyr/pot/pkg/execution"
 )
 
 func TestUserCLIUsesAuthenticatedLocalRuntimeAndAssistantScope(t *testing.T) {

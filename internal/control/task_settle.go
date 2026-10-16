@@ -2,7 +2,7 @@ package control
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 func (s *Service) settleTaskOperations(ctx context.Context, task string) error {

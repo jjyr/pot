@@ -3,7 +3,7 @@ package control
 import (
 	"context"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"net/http/httptest"
 	"testing"
 	"time"

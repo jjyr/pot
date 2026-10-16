@@ -22,7 +22,7 @@ Runtime uses indexed SQL aggregation, bounded time buckets, and 20-request pages
 
 ## Context estimation
 
-The default estimator in [`internal/agent/meter.go`](../internal/agent/meter.go)
+The default estimator in [`pkg/agent/meter.go`](../pkg/agent/meter.go)
 follows the [Codex content-cost baseline](https://github.com/openai/codex/tree/822e58cc3d).
 It uses the same arithmetic and
 rounding boundaries for the item types Pot supports. Protocol adapters map Chat

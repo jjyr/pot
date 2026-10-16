@@ -5,15 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/agent"
-	"github.com/jjyr/pot/internal/composition"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/executor"
-	"github.com/jjyr/pot/internal/modelprotocol"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/executor"
+	"github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
 	"io"
 	"net/http"
 	"strconv"
@@ -747,7 +746,7 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 		}
 		tools = append(tools, d)
 	}
-	loop := &agent.Agent{Services: services, Feedback: feedback, Tools: tools, Composer: composition.ProcessRunner{}, Dispatch: func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
+	loop := &agent.Agent{Services: services, Feedback: feedback, Tools: tools, Composer: s.options.Composer, Dispatch: func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
 		var result json.RawMessage
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

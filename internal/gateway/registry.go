@@ -7,7 +7,7 @@ import (
 	"errors"
 
 	"github.com/jjyr/pot/internal/secrets"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 type Registry struct {

@@ -3,7 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"io"
 	"path/filepath"
 	"strings"

@@ -13,6 +13,7 @@ implementation. Code defines actual behavior.
 | Native Space ownership, combined views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
 | Backend responsibilities and API contracts | [Backend components](backend-components.md) |
+| Reusable Go packages and embedding a host | [Go libraries](go-libraries.md) |
 | Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |

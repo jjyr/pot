@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/jjyr/pot/internal/composition"
-	"github.com/jjyr/pot/internal/eval"
+	"github.com/jjyr/pot/pkg/composition"
+	"github.com/jjyr/pot/pkg/eval"
 )
 
 func main() {
@@ -30,8 +30,12 @@ func main() {
 	}
 }
 func run(ctx context.Context, args []string, out io.Writer) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	composer := composition.ProcessRunner{Command: []string{executable, composition.WorkerArgument}}
 	var result any
-	var err error
 	success := true
 	if len(args) == 0 {
 		return errors.New("usage: pot-eval run SCENARIO NEW_DIR | live SCENARIO NEW_DIR [PI_MODELS] | validate RUN_DIR | compare BASE CANDIDATE | suite|tree deterministic|live NEW_DIR")
@@ -57,7 +61,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		var report eval.Report
 		if args[0] == "run" {
-			report, err = eval.Run(ctx, scenario, args[2], eval.RunOptions{})
+			report, err = eval.Run(ctx, scenario, args[2], eval.RunOptions{Composer: composer})
 		} else {
 			path := ""
 			if len(args) == 4 {
@@ -67,7 +71,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 			if e != nil {
 				return e
 			}
-			report, err = eval.RunLive(ctx, scenario, args[2], c, eval.DefaultLiveLimits())
+			report, err = eval.RunLive(ctx, scenario, args[2], c, eval.DefaultLiveLimits(), composer)
 		}
 		result = report
 		success = report.Success
@@ -102,12 +106,12 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		if args[0] == "suite" {
 			var report map[string]any
-			report, err = eval.RunSuite(ctx, args[2], c)
+			report, err = eval.RunSuite(ctx, args[2], c, composer)
 			result = report
 			success = report["success"] == true
 		} else {
 			var report eval.TreeReport
-			report, err = eval.RunTree(ctx, args[2], c)
+			report, err = eval.RunTree(ctx, args[2], c, composer)
 			result = report
 			success = report.Success
 		}

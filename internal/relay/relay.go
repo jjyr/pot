@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 type Endpoint interface {

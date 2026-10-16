@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 // PreparedResources returns the destination's immutable evidence for one original

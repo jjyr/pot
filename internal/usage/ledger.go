@@ -11,7 +11,7 @@ import (
 	"time"
 	_ "time/tzdata"
 
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 const MaxSafeInteger int64 = 9007199254740991

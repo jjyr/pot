@@ -11,7 +11,7 @@ mise exec -- go run ./cmd/pot-eval run eval/scenarios/tool-round.json /tmp/pot-e
 mise exec -- go run ./cmd/pot-eval run eval/scenarios/tool-round.json /tmp/pot-eval-candidate
 mise exec -- go run ./cmd/pot-eval validate /tmp/pot-eval-candidate
 mise exec -- go run ./cmd/pot-eval compare /tmp/pot-eval-baseline /tmp/pot-eval-candidate
-mise exec -- go test -race ./internal/eval ./cmd/pot-eval
+mise exec -- go test -race ./pkg/eval ./cmd/pot-eval
 ```
 
 Use a new directory for every run; existing runs are never overwritten. The parent directory must exist. Tools execute on the CLI host in the fresh run workspace; this runner does not create a VM sandbox. The supplied fixtures use only that workspace. A run deadline triggers cooperative cancellation and drains the real executor before writing a terminal report. The `run` command generates responses from native SSE fixtures without networking. The explicit `live` command calls the selected DeepSeek Flash API.
@@ -60,7 +60,7 @@ Live runs use `native_policy_live` mode and store streamed `requests.jsonl`/`res
 
 Scenarios contain an immutable identity, a Profile and native protocol, ordered user turns, workspace text fixtures, expected file contents/final text and a run deadline. Native model response frames are consumed per request; each scripted response declares `agent` or `compaction` and may assert fragments of the encoded request. Missing, extra or misordered responses fail the run. Tool names and effects use the production Agent implementation. Profile Agent settings configure prompt, tools, context/compaction thresholds and shell output limits.
 
-The initial hash covers the entire scenario, including configuration and scripted responses. It permits strict same-case comparisons across builds. Separate workload/policy identities and policy-changing comparisons are future work. Build with `-ldflags "-X github.com/jjyr/pot/internal/eval.Revision=REVISION"` to pin the runtime revision; absent revision provenance is recorded as null, never guessed from the checkout.
+The initial hash covers the entire scenario, including configuration and scripted responses. It permits strict same-case comparisons across builds. Separate workload/policy identities and policy-changing comparisons are future work. Build with `-ldflags "-X github.com/jjyr/pot/pkg/eval.Revision=REVISION"` to pin the runtime revision; absent revision provenance is recorded as null, never guessed from the checkout.
 
 ## Records
 

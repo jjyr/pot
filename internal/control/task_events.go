@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/runner"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, limit uint64) (runner.EventPage, error) {

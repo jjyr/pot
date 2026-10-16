@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/modelprotocol"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modelprotocol"
 )
 
 func instructionTools() []modelprotocol.ToolDefinition {

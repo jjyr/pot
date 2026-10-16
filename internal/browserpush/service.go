@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 type Keys struct {

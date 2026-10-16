@@ -7,14 +7,14 @@ their guest architecture. Podman installation/machine OS preparation is a
 
 ## Trust and ownership
 
-`internal/resource` downloads over HTTPS, checks exact bytes/SHA-256 and safely
+`pkg/resource` downloads over HTTPS, checks exact bytes/SHA-256 and safely
 extracts bounded OCI archives. It refuses links, special/duplicate files and
 unsafe paths; Unix free-space checks precede download. Completed cache entries
 publish atomically and are revalidated against the archive, not an editable
 marker. Transfers share by digest: waiters cancel independently, and the last
 cancellation stops the transfer.
 
-`internal/sandboxresources` consumes embedded `resources/sandbox/catalog.json`.
+`pkg/sandboxresources` consumes embedded `resources/sandbox/catalog.json`.
 It pins immutable filenames, sizes, hashes, architecture, OCI identity and
 executor bootstrap. Asset URLs derive from the release tag/filename under
 `https://github.com/jjyr/pot`. No mutable remote catalog/latest image is consulted.

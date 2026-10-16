@@ -7,9 +7,9 @@ import (
 	"fmt"
 
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
-	"github.com/jjyr/pot/internal/sandbox"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 // ResourceCommand is an advanced local-owner interface. Remote membership

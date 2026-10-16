@@ -5,18 +5,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/composition"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/modelprotocol"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
-	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
 	"io"
 	"os"
 	"path/filepath"
@@ -412,7 +411,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		}
 		definitions = append(definitions, d)
 	}
-	loop := &agent.Agent{Services: ports, Feedback: feedback, Dispatch: dispatch.Dispatch, Tools: definitions, Composer: composition.ProcessRunner{}, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
+	loop := &agent.Agent{Services: ports, Feedback: feedback, Dispatch: dispatch.Dispatch, Tools: definitions, Composer: s.options.Composer, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Permissions.Expire(l.AssistantID, l.RunID, l.Generation)
 		result := engine.Drain()
 		if s.options.CleanupTarget != nil {

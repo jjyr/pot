@@ -1,6 +1,6 @@
 # Agent context
 
-Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. `internal/agent` receives caller-provided text through `core.ExecutionContext.Instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
+Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. `pkg/agent` receives caller-provided text through `core.ExecutionContext.Instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
 
 ## Sources and scope
 
@@ -28,7 +28,7 @@ The Runtime instruction filesystem interface uses execution-visible paths. Its c
 
 Runtime reloads sources when preparing each execution context. The resulting snapshot is used for that execution's model requests. Global instruction caching is used by Main services in the current Runtime process. A global read failure retains the last successful text and emits a diagnostic; repeated identical failures are reported once until recovery. Confirmed absence or a successful empty read clears the cached value. The cache is not persisted across restarts. Unexpected project read errors fail context preparation rather than reusing stale project instructions.
 
-`internal/agent` records instructions as classified, append-only context sections for Main
+`pkg/agent` records instructions as classified, append-only context sections for Main
 and Worker, including custom system prompts and configurations with no execution
 reader tool. Summary contexts skip discovery and new injection; they preserve the latest retained sections instead of revoking unloaded resources. See the message
 and compaction contract below.
@@ -38,7 +38,7 @@ and compaction contract below.
 The base model instructions and tool schemas remain request inputs. Mutable
 instructions and reference data are separate from accepted user text. Control
 supplies `ExecutionContext.context_sections` (reference-data keys; `instructions`,
-`plugins` and `skills` are reserved for Agent instruction providers); `internal/agent`
+`plugins` and `skills` are reserved for Agent instruction providers); `pkg/agent`
 owns comparison, rendering and durable history. Neither the assistant driver nor the Agent appends catalogs
 or task state to a real user's text.
 
@@ -160,9 +160,9 @@ Main's built-in delegation prompt lives in
 The Go assistant package embeds it at compile time
 with `go:embed`; Control supplies it when preparing Main execution context.
 Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
-`system_prompt` replaces the default `internal/agent` prompt.
+`system_prompt` replaces the default `pkg/agent` prompt.
 
-Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; `internal/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
+Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; `pkg/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
 
 
 ## Global ownership
@@ -310,11 +310,11 @@ Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and
 
 ## Injection and task selection
 
-`core.ExecutionContext.SkillResources` carries ordered SkillRoot entries, reserved names and optional selections. `internal/agent` discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. Callers provide `core.SkillResources` for Main and Task contexts.
+`core.ExecutionContext.SkillResources` carries ordered SkillRoot entries, reserved names and optional selections. `pkg/agent` discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. Callers provide `core.SkillResources` for Main and Task contexts.
 
 Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
-Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Summary executions add no catalog, and `internal/agent` does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
+Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Summary executions add no catalog, and `pkg/agent` does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
 
 ## Creation, installation and validation
 

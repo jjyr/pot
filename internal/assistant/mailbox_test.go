@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func address(control, assistant string) protocol.AssistantRef {

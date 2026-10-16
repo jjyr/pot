@@ -19,7 +19,7 @@ func main() {
 }
 
 func check() error {
-	format := exec.Command("gofmt", "-l", "cmd", "internal", "web", "scripts/check-go")
+	format := exec.Command("gofmt", "-l", "cmd", "pkg", "internal", "web", "scripts/check-go", "scripts/tests/testdata/go-public-api")
 	output, err := format.Output()
 	if err != nil {
 		return err
@@ -27,7 +27,7 @@ func check() error {
 	if len(output) != 0 {
 		return fmt.Errorf("run gofmt on:\n%s", output)
 	}
-	list := exec.Command("go", "list", "-mod=readonly", "-json", "./cmd/...", "./internal/...", "./resources/...", "./web")
+	list := exec.Command("go", "list", "-mod=readonly", "-json", "./cmd/...", "./pkg/...", "./internal/...", "./resources/...", "./web")
 	output, err = list.Output()
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
@@ -52,8 +52,17 @@ func check() error {
 				}
 			}
 		}
+		// Reusable components must be usable without the product implementation.
+		// The complete-host facade is the sole explicit exception.
+		if strings.HasPrefix(pkg.ImportPath, "github.com/jjyr/pot/pkg/") && pkg.ImportPath != "github.com/jjyr/pot/pkg/runtime" {
+			for _, dep := range pkg.Deps {
+				if strings.HasPrefix(dep, "github.com/jjyr/pot/internal/") {
+					return fmt.Errorf("public component %s depends on product implementation %s", pkg.ImportPath, dep)
+				}
+			}
+		}
 		base := strings.TrimPrefix(pkg.ImportPath, "github.com/jjyr/pot/internal/")
-		if base == "agent" || base == "runner" || base == "execution" || base == "composition" || base == "modelprotocol" || base == "sandbox" || base == "sandboxprovider" || base == "platformhelper" || base == "resource" || base == "sandboxresources" || base == "resourcecontrol" || base == "browserpush" || base == "desktopview" || base == "terminal" {
+		if base == "runner" || base == "browserpush" || base == "desktopview" {
 			for _, dep := range pkg.Deps {
 				for _, forbidden := range []string{"control", "runtime", "transport", "gateway", "secrets", "desktop"} {
 					prefix := "github.com/jjyr/pot/internal/" + forbidden

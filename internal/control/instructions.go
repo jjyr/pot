@@ -3,7 +3,7 @@ package control
 import (
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"os"
 	"path/filepath"
 	"strings"

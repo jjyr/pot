@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jjyr/pot/internal/agent"
-	"github.com/jjyr/pot/internal/core"
-	m "github.com/jjyr/pot/internal/modelprotocol"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	m "github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func stoppedMainFixture(t *testing.T, checkpoint agent.Checkpoint, cleanupProofKnown bool) (*Conversation, *atomic.Int64) {

@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/internal/webui"
+	"github.com/jjyr/pot/pkg/execution"
 )
 
 func TestRecoveryOwnerAcceptsOnlyIdentityAndIntent(t *testing.T) {

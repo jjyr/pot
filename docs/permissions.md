@@ -84,4 +84,4 @@ quota. Its storage uses the Linux host filesystem or the shared Podman machine
 disk on macOS. Native macOS VM disk size is fixed by the enrolled raw disk;
 resizing is rejected. These settings do not constrain Host processes.
 
-Sources: `internal/control/permissions.go`, `internal/agent` and `internal/sandbox`.
+Sources: `internal/control/permissions.go`, `pkg/agent` and `pkg/sandbox`.

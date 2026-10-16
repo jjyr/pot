@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
-	"github.com/jjyr/pot/internal/terminal"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/terminal"
 )
 
 func terminalPath(path string) bool {

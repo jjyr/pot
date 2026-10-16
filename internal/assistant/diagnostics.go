@@ -3,7 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"github.com/jjyr/pot/internal/agent"
+	"github.com/jjyr/pot/pkg/agent"
 )
 
 // Diagnostics exposes bounded execution metadata; model/tool payloads and error

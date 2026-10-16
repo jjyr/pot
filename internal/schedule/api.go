@@ -3,8 +3,8 @@ package schedule
 import (
 	"context"
 	"database/sql"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 type Request struct {

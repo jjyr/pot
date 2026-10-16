@@ -7,9 +7,9 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/modeldirectory"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modeldirectory"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 // RoutingPolicy contains only runtime admission limits, never model selection

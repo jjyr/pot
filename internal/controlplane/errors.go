@@ -2,8 +2,8 @@ package controlplane
 
 import (
 	"errors"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 type Fault struct {

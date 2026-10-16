@@ -7,12 +7,13 @@ import (
 	"crypto/rand"
 	"errors"
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
-	"github.com/jjyr/pot/internal/instance"
-	"github.com/jjyr/pot/internal/resource"
-	"github.com/jjyr/pot/internal/resourcecontrol"
-	"github.com/jjyr/pot/internal/sandbox"
+	"github.com/jjyr/pot/pkg/composition"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/resource"
+	"github.com/jjyr/pot/pkg/resourcecontrol"
+	"github.com/jjyr/pot/pkg/sandbox"
 	"os"
 	"path/filepath"
 	"sync"
@@ -78,6 +79,14 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 		return nil, err
 	}
 	config := options.Control
+	if config.Composer == nil {
+		// Product executables explicitly host this hidden worker entry point.
+		executable, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		config.Composer = composition.ProcessRunner{Command: []string{executable, composition.WorkerArgument}}
+	}
 	config.Context = runctx
 	config.Root = root.Path
 	config.RuntimeID = root.Identity.RuntimeID

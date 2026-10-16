@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/jjyr/pot/internal/sandbox"
+	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 type Manager interface {

@@ -6,6 +6,9 @@ use the same components, styles and state contracts. Swift provides the macOS
 VM implementation; Linux Sandboxes use the same Go Podman provider on macOS and
 Linux. Node/JavaScript plugins and Python guest services retain
 their existing responsibilities. See [component boundaries](backend-components.md).
+Reusable Go libraries live in `pkg/`, command entry points in `cmd/`, and product
+implementation in `internal/`. [Go libraries](go-libraries.md) describes the
+independent Agent loop and complete-host embedding APIs.
 
 ```text
 macOS App: Wails windows/tray + embedded Runtime + shared frontend

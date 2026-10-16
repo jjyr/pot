@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/sandbox"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/storage"
 	"runtime"
 	"time"
 )

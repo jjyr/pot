@@ -328,7 +328,7 @@ def linker_flags(stripped=True):
     values += [
         "-X=github.com/jjyr/pot/internal/buildinfo.Version=" + version,
         "-X=github.com/jjyr/pot/internal/buildinfo.Revision=" + revision,
-        "-X=github.com/jjyr/pot/internal/eval.Revision=" + revision,
+        "-X=github.com/jjyr/pot/pkg/eval.Revision=" + revision,
     ]
     return " ".join(values)
 

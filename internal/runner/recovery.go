@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 type CommandRecord struct {

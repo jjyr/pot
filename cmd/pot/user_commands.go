@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/instance"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/serverconfig"
-	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/transport"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 // userCommand keeps every effect in the authenticated Runtime APIs. A CLI

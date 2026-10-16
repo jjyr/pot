@@ -8,12 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/composition"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 type mailParentKey struct{}
@@ -134,7 +133,7 @@ func (s *Service) runAssistantMail(main *assistant.Conversation, message protoco
 			return s.taskCompaction(ctx, message.To.AssistantID, message.ID, raw)
 		}
 		feedback.ready = options.Ready
-		loop := agent.Agent{Services: options.Services, Feedback: feedback, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: composition.ProcessRunner{}, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
+		loop := agent.Agent{Services: options.Services, Feedback: feedback, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: s.options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
 		var checkpoint agent.Checkpoint
 		resuming := len(state) > 0 && json.Unmarshal(state, &checkpoint) == nil && checkpoint.LastRequest == message.ID
 		err = loop.Execute(runCtx, options.Execution, thread, request, resuming, func(event core.AgentEvent) error {

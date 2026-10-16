@@ -2,7 +2,7 @@ package control
 
 import (
 	"errors"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"os"
 	"syscall"
 )

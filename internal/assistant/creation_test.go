@@ -2,7 +2,7 @@ package assistant
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"path/filepath"
 	"testing"
 )

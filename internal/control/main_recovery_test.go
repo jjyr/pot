@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
-	m "github.com/jjyr/pot/internal/modelprotocol"
-	"github.com/jjyr/pot/internal/protocol"
-	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	m "github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string) (*Service, *assistant.Conversation) {

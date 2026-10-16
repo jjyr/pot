@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {

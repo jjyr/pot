@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/agent"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/url"
 
-	"github.com/jjyr/pot/internal/resourcecontrol"
+	"github.com/jjyr/pot/pkg/resourcecontrol"
 )
 
 // resourceCall is native/private owner-only. The browser proxy intentionally

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 	"strings"
 	"testing"
 )

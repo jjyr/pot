@@ -3,8 +3,8 @@ package assistant
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 func (c *Conversation) Notifications(ctx context.Context, after int64, initialize bool) (int64, []storage.Notification, error) {

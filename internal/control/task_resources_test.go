@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func taskResourceService(t *testing.T) *Service {

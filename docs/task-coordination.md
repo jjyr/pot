@@ -32,7 +32,7 @@ model selection.
 
 Messages retain trusted sender identity, are consumed once and remain pending for
 ended Tasks as retained history. They do not grant owner authority. Delivery
-uses `internal/agent`.
+uses `pkg/agent`.
 
 `wait_task` returns Task metadata, not transcripts. Complete, failed, interrupted,
 cancelled and allowance-waiting states can end a wait; queued/running cannot.
@@ -98,7 +98,7 @@ Archive is currently a phase-derived list grouping. It does not delete data or
 reclaim storage. Long-inactive unfinished Tasks are not automatically archived.
 An independent archive flag and inactivity rules remain deferred.
 
-Schemas and lifecycle code: `internal/core/product-tools.json`, `internal/tasks` and `internal/control/task_service.go`.
+Schemas and lifecycle code: `pkg/core/product-tools.json`, `internal/tasks` and `internal/control/task_service.go`.
 Checks and live qualification limits: [permission contract](permissions.md).
 
 ## Execution policy and reruns

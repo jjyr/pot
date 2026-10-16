@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/browserpush"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 	"net/http"
 )

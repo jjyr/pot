@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jjyr/pot/internal/agent"
+	"github.com/jjyr/pot/pkg/agent"
 )
 
 type runFeedback struct {

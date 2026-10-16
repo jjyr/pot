@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/buildinfo"
-	"github.com/jjyr/pot/internal/composition"
 	"github.com/jjyr/pot/internal/preview"
+	"github.com/jjyr/pot/pkg/composition"
 	webassets "github.com/jjyr/pot/web"
 )
 

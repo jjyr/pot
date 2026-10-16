@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/sandbox"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 func (s *InstructionSources) globalText(agentHome string) string {

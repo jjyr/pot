@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 var ErrOperationUnknown = errors.New("operation outcome is unknown; reconcile the original receipt before new effects")

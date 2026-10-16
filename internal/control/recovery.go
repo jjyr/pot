@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/runner"
-	"github.com/jjyr/pot/internal/sandbox"
-	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 // RecoveryCommand contains identity and intent only. Clients cannot supply a

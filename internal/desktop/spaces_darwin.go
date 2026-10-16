@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/spaces"
+	"github.com/jjyr/pot/pkg/protocol"
 	"net/url"
 	"time"
 )

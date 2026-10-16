@@ -4,23 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
-	"github.com/jjyr/pot/internal/executor"
 	"github.com/jjyr/pot/internal/gateway"
-	"github.com/jjyr/pot/internal/modelprotocol"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
-	"github.com/jjyr/pot/internal/sandbox"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/secrets"
-	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/tasks"
-	"github.com/jjyr/pot/internal/terminal"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/executor"
+	"github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/storage"
+	"github.com/jjyr/pot/pkg/terminal"
 	"io"
 	"net/http"
 	"os"
@@ -32,6 +32,7 @@ import (
 )
 
 type Options struct {
+	Composer                                                                 agent.Composer
 	Context                                                                  context.Context
 	Root, RuntimeID, BootID, Workspace, AgentHome, BuiltinSkills, PluginRoot string
 	Manager                                                                  *execution.Manager
@@ -282,7 +283,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		definitions = append(definitions, definition)
 	}
 	definitions = append(definitions, s.productTools(false)...)
-	return assistant.RunOptions{Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
+	return assistant.RunOptions{Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Permissions.Expire(principal, request.RequestID, thread.Generation)
 		err := engine.Drain()
 		if s.options.CleanupTarget != nil {

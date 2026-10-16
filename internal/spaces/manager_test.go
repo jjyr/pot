@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 type testControl struct {

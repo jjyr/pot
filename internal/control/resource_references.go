@@ -2,9 +2,9 @@ package control
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 // SandboxReferences protects retained Task artifacts as well as active work.

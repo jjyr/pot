@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/sandbox"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 func TestAdvancedOwnerResourcesCreateHostWithoutReplayOrImplicitAssistant(t *testing.T) {

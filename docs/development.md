@@ -60,6 +60,12 @@ compositions run through a process-isolated goja worker. Heap/process and
 turn-lifecycle limits belong at that worker boundary; goja itself supplies no
 per-runtime hard heap limit.
 
+Reusable libraries live in `pkg/`; product entry points and private implementation
+live in `cmd/` and `internal/`. `mise run test:public-api` copies a consumer into an
+independent Go module outside the checkout, builds the standalone composition
+worker, and exercises only public imports. It is included in `mise run test`.
+See [Go libraries](go-libraries.md) for the supported embedding boundaries.
+
 Standalone startup and browser serving use [Deployment](deployment.md). CLI and
 App default to the new Go root, not previous product data. Use explicit private
 temporary roots for integration checks; never run two hosts against one root.

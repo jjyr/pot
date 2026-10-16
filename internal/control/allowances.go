@@ -3,8 +3,8 @@ package control
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/pkg/storage"
 	"sort"
 )
 

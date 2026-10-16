@@ -2,7 +2,7 @@ package runner
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 // SandboxTaskReferences includes ended original runs because their fixed

@@ -3,7 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
-	"github.com/jjyr/pot/internal/modelprotocol"
+	"github.com/jjyr/pot/pkg/modelprotocol"
 	"testing"
 	"time"
 )

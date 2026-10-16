@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 // RemotePort is bound to one original Runtime. Parent routers must retain this

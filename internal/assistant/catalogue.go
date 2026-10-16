@@ -3,7 +3,7 @@ package assistant
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"strings"
 )
 

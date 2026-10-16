@@ -4,7 +4,7 @@ package schedule
 
 import (
 	"fmt"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 	"strings"
 	"time"
 	"unicode/utf8"

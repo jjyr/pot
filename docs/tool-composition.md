@@ -1,6 +1,6 @@
 # Agent tools and composition
 
-`internal/agent` keeps tools focused on individual operations. `exec` combines calls
+`pkg/agent` keeps tools focused on individual operations. `exec` combines calls
 without merging their interfaces. Model-visible interface changes require explicit
 user agreement; see the repository `AGENTS.md`.
 
@@ -62,7 +62,7 @@ The isolate has no direct filesystem, network, Node or process APIs. Its tools a
 limited to the current role/profile, with recursive `exec`/`wait` excluded. Each
 child call uses the ordinary dispatcher and checks the assistant’s current machine capability. Composition
 cannot broaden authority. Code, output, concurrency and execution time are bounded; limits and schemas live
-in `internal/composition`. Worker memory uses a 64 MiB Go runtime soft limit plus
+in `pkg/composition`. Worker memory uses a 64 MiB Go runtime soft limit plus
 a sampled heap watchdog; this is not a hard per-isolate allocation cap. Crossing
 the watchdog threshold terminates the worker and retains ordinary child receipts.
 

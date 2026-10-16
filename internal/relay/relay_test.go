@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 type testNode struct {

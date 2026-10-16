@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/instance"
 	"github.com/jjyr/pot/internal/relay"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/instance"
 )
 
 var ErrIdentityChanged = errors.New("Space Control identity changed")

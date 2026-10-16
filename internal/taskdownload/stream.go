@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 )
 

@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/resource"
-	"github.com/jjyr/pot/internal/resourcecontrol"
-	"github.com/jjyr/pot/internal/sandbox"
-	"github.com/jjyr/pot/internal/sandboxresources"
+	"github.com/jjyr/pot/pkg/resource"
+	"github.com/jjyr/pot/pkg/resourcecontrol"
+	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/sandboxresources"
 )
 
 func TestResourceOwnerAPIRequiresAuthenticationAndExplicitAction(t *testing.T) {

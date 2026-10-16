@@ -2,7 +2,7 @@ package tasks
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 	"testing"
 	"time"
 )

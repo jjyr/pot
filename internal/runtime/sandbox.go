@@ -9,13 +9,13 @@ import (
 	"runtime"
 
 	"github.com/jjyr/pot/internal/control"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/executor"
-	"github.com/jjyr/pot/internal/resource"
-	"github.com/jjyr/pot/internal/resourcecontrol"
-	"github.com/jjyr/pot/internal/sandbox"
-	"github.com/jjyr/pot/internal/sandboxprovider"
-	"github.com/jjyr/pot/internal/sandboxresources"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/executor"
+	"github.com/jjyr/pot/pkg/resource"
+	"github.com/jjyr/pot/pkg/resourcecontrol"
+	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/sandboxprovider"
+	"github.com/jjyr/pot/pkg/sandboxresources"
 )
 
 func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *control.Options) error {

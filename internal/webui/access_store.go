@@ -3,7 +3,7 @@ package webui
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"io"
 	"os"
 	"path/filepath"

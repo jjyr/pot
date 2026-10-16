@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/jjyr/pot/internal/agent"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 func (s *Service) Guide(ctx context.Context, assistant, task, requestID, text string) error {

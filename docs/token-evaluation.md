@@ -16,15 +16,15 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 |---|---|
 | Scenario catalog | Versioned user turns, workspace fixtures, execution target, task assertions, resource limits and optional controlled response trace |
 | Runner | Run matrix, isolated fresh sessions/workspaces, repeats, ordering, deadlines, lifecycle and artifact collection |
-| Agent executor | Directly invoke `internal/agent` with Thread configuration, injected services, controls and ordered observations |
+| Agent executor | Directly invoke `pkg/agent` with Thread configuration, injected services, controls and ordered observations |
 | Execution target/tool service | Prepare identical fixtures and, where supported, common tool semantics/results for controlled comparisons |
 | Usage collector | Capture provider usage or native counters and declare what scope/stages are observable |
 | Normalizer/validator | Convert observations into a versioned schema, resolve cumulative snapshots and duplicate sources, preserve missing fields and raw provenance |
 | Evaluator/reporter | Evaluate artifacts/answers, compute comparable metrics, compare baselines and explain regressions by trace |
 
-The standalone Go runner lives in `internal/eval`, with `cmd/pot-eval` as its CLI and scenarios/experiments in `eval/`. It uses `internal/core`, `internal/agent`, `internal/modelprotocol` and the real executor, without depending on Runtime, Control, product Storage or App. It owns scenario execution, immutable run records, validation, comparison and bounded experiments. Records use schema 2.
+The standalone Go runner lives in `pkg/eval`, with `cmd/pot-eval` as its CLI and scenarios/experiments in `eval/`. It uses `pkg/core`, `pkg/agent`, `pkg/modelprotocol` and the real executor, without depending on Runtime, Control, product Storage or App. It owns scenario execution, immutable run records, validation, comparison and bounded experiments. Records use schema 2.
 
-Production invocations go through `internal/execution`; isolated evaluation fixtures call `agent.Agent.Execute` directly. Thread context belongs to the caller's Store. External baselines belong in separate evaluation commands rather than production execution adapters.
+Production invocations go through `pkg/execution`; isolated evaluation fixtures call `agent.Agent.Execute` directly. Thread context belongs to the caller's Store. External baselines belong in separate evaluation commands rather than production execution adapters.
 
 ## Standalone execution services
 

@@ -25,9 +25,9 @@ import (
 
 	"bytes"
 	"github.com/jjyr/pot/internal/browserpush"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/instance"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 type Config struct {

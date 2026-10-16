@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/gateway"
-	"github.com/jjyr/pot/internal/modelprotocol"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 const MaxModelBody = 16 * 1024 * 1024

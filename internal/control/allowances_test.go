@@ -2,8 +2,8 @@ package control
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/pkg/core"
 	"testing"
 )
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 // AssistantSelection is editable intent belonging to one assistant. It never

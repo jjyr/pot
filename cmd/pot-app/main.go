@@ -8,8 +8,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/jjyr/pot/internal/composition"
 	"github.com/jjyr/pot/internal/desktop"
+	"github.com/jjyr/pot/pkg/composition"
 )
 
 func main() {

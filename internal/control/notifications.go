@@ -2,7 +2,7 @@ package control
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func (s *Service) Notifications(ctx context.Context, after map[string]int64, initialize bool) (protocol.AssistantNotifications, error) {

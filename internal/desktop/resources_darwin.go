@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 

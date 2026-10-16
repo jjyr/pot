@@ -4,19 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/pkg/protocol"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/agent"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/execution"
-	"github.com/jjyr/pot/internal/executor"
-	m "github.com/jjyr/pot/internal/modelprotocol"
 	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/executor"
+	m "github.com/jjyr/pot/pkg/modelprotocol"
 )
 
 func recoveryFixture(t *testing.T) (*Service, runner.Launch, Operation) {

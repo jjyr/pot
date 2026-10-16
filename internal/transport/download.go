@@ -2,9 +2,9 @@ package transport
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/taskdownload"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"mime"
 	"net/http"
 	"path/filepath"

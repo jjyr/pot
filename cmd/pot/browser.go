@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/access"
-	"github.com/jjyr/pot/internal/instance"
 	"github.com/jjyr/pot/internal/tailnet"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
+	"github.com/jjyr/pot/pkg/instance"
 	assets "github.com/jjyr/pot/web"
 )
 

@@ -14,8 +14,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jjyr/pot/internal/core"
-	"github.com/jjyr/pot/internal/executor"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/executor"
 )
 
 func main() {
