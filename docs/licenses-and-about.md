@@ -42,6 +42,8 @@ App resources and portable CLI archives include these original plain-text files:
 `scripts/go-notices` walks the actual Go package dependency graph using
 `go list -mod=readonly -deps`, collects module-root license/notice files, and
 includes the Go runtime license. A dependency without a notice fails packaging.
+Cross-compiled archives collect this graph with their target GOOS/GOARCH and
+CGO settings, rather than inheriting the packaging host's dependency selection.
 The App inventory includes Wails; portable headless CLI inventories omit GUI
 packages. The linked `tailscale.com/tsnet` implementation and its dependencies
 are included in this Go inventory; there is no separately built libtailscale

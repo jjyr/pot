@@ -274,6 +274,7 @@ def swift_helpers():
 
 
 def prepare_resources(destination, platform):
+    goos, goarch = platform.split("-")
     destination.mkdir(parents=True, exist_ok=True)
     call(["python3", ROOT / "scripts/localize-web"])
     for source, name in (
@@ -307,7 +308,8 @@ def prepare_resources(destination, platform):
             destination / "GoDependencyLicenses.txt",
             "./cmd/pot",
             "./cmd/pot-tool-executor",
-        ]
+        ],
+        env={**os.environ, "GOOS": goos, "GOARCH": goarch, "CGO_ENABLED": "0"},
     )
 
 
