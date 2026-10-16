@@ -22,6 +22,12 @@ requires rootless Podman and an owner-installed immutable image. See
 [Development](development.md) for artifact layout and build options. Upgrade
 Control, Runners and App from the same revision.
 
+Linux CLI archives bundle the official GNU/Linux Node runtime and require a
+glibc-based host for JavaScript plugins. These archives do not provide a musl
+Node build for Alpine; the managed Alpine Sandbox image supplies its own Node
+runtime. Keep Runtime data roots on a local filesystem supporting private Unix
+sockets and file locks; a Sandbox's shared workspace is not a Runtime data root.
+
 The default Go root is `~/.pot-go` on macOS and Linux. Use `-root /absolute/path`
 for an independent instance. New roots require empty directories and receive a
 stable Go identity. Previous Rust data/configuration and machine registration are
