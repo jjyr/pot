@@ -1,6 +1,7 @@
 use super::*;
 use crate::pages::{Control, FieldHelp};
 use gpui_kit::component::IconName;
+use gpui_kit::component::form::Field;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
 fn directory_provider<'a>(state: &'a Value, id: &str) -> Option<&'a Value> {
@@ -90,6 +91,50 @@ fn connection_summary(
 }
 
 impl Settings {
+    fn token_limit_field(
+        &self,
+        index: usize,
+        label: &'static str,
+        presets: &[(&'static str, u64)],
+        busy: bool,
+        cx: &App,
+    ) -> Field {
+        let mut buttons = div().w_full().min_w_0().flex().flex_wrap().gap_2();
+        for &(name, value) in presets {
+            let input = self.fields[index].clone();
+            buttons = buttons.child(
+                Button::new(SharedString::from(format!(
+                    "ai-token-preset-{index}-{value}"
+                )))
+                .control(cx)
+                .rounded_full()
+                .label(name)
+                .disabled(busy)
+                .on_click(move |_, window, cx| {
+                    let value = value.to_string();
+                    input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+                    command(json!({
+                        "action": if index == 24 { "ai-context-input" } else { "ai-output-input" },
+                        "value": value
+                    }));
+                }),
+            );
+        }
+        field(label).child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .min_w_0()
+                .gap_2()
+                .child(
+                    Input::new(&self.fields[index])
+                        .control(cx)
+                        .aria_label(label),
+                )
+                .child(buttons),
+        )
+    }
     pub(super) fn render_ai(
         &self,
         state: &Value,
@@ -375,20 +420,33 @@ impl Settings {
                 );
             }
             form = form
-                .child(
-                    field(crate::application::i18n::text("ai.context-window")).child(
-                        Input::new(&self.fields[24])
-                            .control(cx)
-                            .aria_label(crate::application::i18n::text("ai.context-window")),
-                    ),
-                )
-                .child(
-                    field(crate::application::i18n::text("ai.max-output-tokens")).child(
-                        Input::new(&self.fields[25])
-                            .control(cx)
-                            .aria_label(crate::application::i18n::text("ai.max-output-tokens")),
-                    ),
-                )
+                .child(self.token_limit_field(
+                    24,
+                    crate::application::i18n::text("ai.context-window"),
+                    &[
+                        ("128K", 128_000),
+                        ("200K", 200_000),
+                        ("256K", 256_000),
+                        ("400K", 400_000),
+                        ("512K", 512_000),
+                        ("1M", 1_000_000),
+                    ],
+                    busy,
+                    cx,
+                ))
+                .child(self.token_limit_field(
+                    25,
+                    crate::application::i18n::text("ai.max-output-tokens"),
+                    &[
+                        ("8K", 8_000),
+                        ("16K", 16_000),
+                        ("32K", 32_000),
+                        ("64K", 64_000),
+                        ("128K", 128_000),
+                    ],
+                    busy,
+                    cx,
+                ))
                 .child(
                     field(crate::application::i18n::text("ai.reasoning-effort")).child(
                         Input::new(&self.fields[27])

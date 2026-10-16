@@ -350,6 +350,7 @@ impl SettingsState {
                 self.state["connection_context"] = v["value"].clone();
                 self.connection_defaults();
             }
+            "ai-output-input" => self.state["connection_output"] = v["value"].clone(),
             "ai-effort-input" => self.state["connection_effort"] = v["value"].clone(),
             "ai-model" => {
                 self.state["connection_model"] = v["model"].clone();
