@@ -75,6 +75,10 @@ defaults as muted placeholders.
 Entering a positive integer stores an override; clearing and saving restores
 inheritance. Changing models updates placeholders and preserves entered values.
 No automatic/custom mode selector or missing-metadata message is shown.
+Context and output fields offer common-value preset buttons below their inputs.
+Selecting a preset writes an editable integer override without saving or making
+an API request. Preset labels use decimal K/M units (128K is 128,000 tokens).
+Users can still enter any valid token count or clear the field to inherit defaults.
 
 The connection editor also provides an optional free-text reasoning effort. Saving
 trims surrounding whitespace; an empty value clears `Profile.params.reasoning_effort`
