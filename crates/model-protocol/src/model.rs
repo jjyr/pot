@@ -12,6 +12,9 @@ pub struct ToolCall {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
+    /// Logical history category. Never encoded as provider content or metadata.
+    #[serde(default)]
+    pub kind: MessageKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ModelImage>,
     pub role: String,
@@ -27,6 +30,20 @@ pub struct Message {
     /// Complete provider-reported usage for context calibration, never sent upstream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessageKind {
+    #[default]
+    Conversation,
+    Context {
+        key: String,
+        fingerprint: String,
+        active: bool,
+    },
+    Summary,
+    Notification,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelImage {
@@ -69,6 +86,7 @@ pub struct TokenUsage {
 impl Message {
     pub fn text(role: &str, text: String) -> Self {
         Self {
+            kind: MessageKind::Conversation,
             images: vec![],
             role: role.into(),
             text,
@@ -597,6 +615,7 @@ impl Decoder {
         }
         ensure!(calls.len() <= 128, "Too many tool calls in one response");
         Ok(Message {
+            kind: MessageKind::Conversation,
             images: vec![],
             role: "assistant".into(),
             text: self.text,

@@ -135,6 +135,7 @@ pub async fn invoke(
         None
     };
     let result = match call.name.as_str() {
+        "get_model_catalog" => Ok(agent::catalog::query(&s, call.args.clone()).map_err(internal)?),
         "list_assistants" => {
             let contacts = assistant_message::hub(&s)
                 .and_then(|h| h.message_contacts())

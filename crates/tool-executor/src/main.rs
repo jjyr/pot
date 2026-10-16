@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
         .validate()?;
         let context = ExecutionContext {
             instructions: String::new(),
+            context_sections: vec![],
             skill_resources: Default::default(),
             data: PathBuf::new(),
             workspace: PathBuf::from(request["cwd"].as_str().unwrap()),

@@ -363,11 +363,16 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
 
     let request = control.requests.lock().unwrap()[0].clone();
     let system = request["messages"][0]["content"].as_str().unwrap();
-    assert!(system.contains("ACTUAL_PROJECT_RULE"));
-    assert!(system.contains("project-skill"));
-    assert!(system.contains("control-skill"));
-    assert!(!system.contains("NODE_GLOBAL_RULE_MUST_NOT_APPEAR"));
-    assert!(!system.contains("node-skill"));
+    let body = request.to_string();
+    assert!(!system.contains("ACTUAL_PROJECT_RULE"));
+    assert!(!system.contains("project-skill"));
+    assert!(!system.contains("control-skill"));
+    assert!(body.contains("ACTUAL_PROJECT_RULE"));
+    assert!(body.contains("project-skill"));
+    assert!(body.contains("control-skill"));
+    assert!(body.contains("pot_context"));
+    assert!(!body.contains("NODE_GLOBAL_RULE_MUST_NOT_APPEAR"));
+    assert!(!body.contains("node-skill"));
     assert!(!request.to_string().contains("update_agent_instructions"));
     assert!(!data.join("control.sqlite").exists());
     assert!(!data.join("pot-v2.sqlite").exists());
@@ -424,8 +429,9 @@ async fn neutral_runtime_runs_fresh_worker_with_control_services_and_project_rul
     {
         let requests = control.requests.lock().unwrap();
         assert_eq!(requests.len(), 3);
+        assert!(requests[1].to_string().contains("UPDATED_CONTROL_SKILL"));
         assert!(
-            requests[1]["messages"][0]["content"]
+            !requests[1]["messages"][0]["content"]
                 .as_str()
                 .unwrap()
                 .contains("UPDATED_CONTROL_SKILL")

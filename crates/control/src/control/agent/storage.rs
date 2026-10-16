@@ -17,7 +17,7 @@ mod tests {
             },
         )
         .unwrap();
-        let value = json!({"type":"context","version":1,"messages":[]});
+        let value = json!({"type":"context","version":2,"messages":[]});
         assert_eq!(load_context(&store).unwrap(), Some(value.clone()));
         save_context(&store, &value).unwrap();
         drop(store);

@@ -231,15 +231,6 @@ impl pot_assistant::driver::ChatServices for ChatPort {
     fn configured(&self) -> bool {
         agent::configured(&self.0)
     }
-    fn paused(&self) -> bool {
-        usage::paused(&self.0).ok().flatten().is_some()
-    }
-    fn task_context(&self) -> String {
-        tasks::context(&self.0)
-    }
-    fn resource_context(&self) -> Result<String> {
-        agent::catalog::context(&self.0)
-    }
     fn execute(&self, input: SendMessage) -> futures::future::BoxFuture<'_, Result<()>> {
         Box::pin(agent::run(&self.0, input))
     }

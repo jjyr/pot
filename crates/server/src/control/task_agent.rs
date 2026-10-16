@@ -467,7 +467,7 @@ mod tests {
             &launch.task_id,
             &launch.run_id,
             json!({
-                "type":"context", "version":1,
+                "type":"context", "version":2,
                 "messages":[{"role":"assistant","text":"","calls":calls}],
                 "pending":calls, "started":"known", "last_request":"original"
             }),

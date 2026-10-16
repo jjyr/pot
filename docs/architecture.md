@@ -140,6 +140,12 @@ receipts are retained.
 
 ## Execution targets and instructions
 
+Model history uses classified, append-only context sections. State updates never
+rewrite previous messages or accepted user text. Compaction installs current
+injections, a continuation summary and the last real user message; retained
+sections establish the new comparison baseline independently of provider caches.
+See [Agent context](agent-context.md#classified-messages-and-append-only-context).
+
 `ExecutionTarget` identifies the execution Runtime and its Host or Sandbox.
 The `execution_target` field records this value in Task execution information,
 assignments and remote launches. Task and schedule creation select `machine_id`:
