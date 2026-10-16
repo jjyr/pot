@@ -1,0 +1,50 @@
+#!/bin/sh
+set -eu
+umask 077
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
+export CARGO_HOME=/data/development/.cargo RUSTUP_HOME=/data/development/.rustup
+export PATH="$CARGO_HOME/bin:$PATH"
+exec >/data/desktop.log 2>&1
+# Immutable software comes from the bundled OCI image; /data holds user state.
+for name in desktop-config.sh desktop-session.sh pot-wallpaper.svg packages.lock test.html driver.py broker.py index.html i18n.js locales.json close-browser.py open-browser.sh; do
+  ln -sf "/opt/pot/$name" "/data/$name"
+done
+# Remove only the obsolete image-managed homepage link, preserving user files.
+if [ -L /data/home.html ] && [ "$(readlink /data/home.html)" = /opt/pot/home.html ]; then
+  rm /data/home.html
+fi
+# Older versions unpacked noVNC into /data; preserve it, but serve image assets.
+mkdir -p /data/engine-home /data/workspace
+chown potdesktop /data/engine-home /data/workspace
+mkdir -p /data/profile /data/logs
+chown potdesktop /data/profile /data/logs
+sh /data/desktop-config.sh
+su potdesktop -c "fc-cache -f"
+rm -f /data/profile/browser.pid
+su potdesktop -c 'Xvnc :99 -geometry 1280x800 -depth 24 -localhost -SecurityTypes None -rfbport 5900 > /data/logs/vnc.log 2>&1 &'
+sleep 2
+su potdesktop -c 'dbus-run-session -- sh /data/desktop-session.sh > /data/logs/wm.log 2>&1 &'
+su potdesktop -c 'exec python3 -m http.server 8081 --bind 127.0.0.1 --directory /opt/pot' >/data/logs/page.log 2>&1 &
+websockify --web=/opt/pot/novnc 127.0.0.1:6080 127.0.0.1:5900 >/data/logs/websockify.log 2>&1 &
+POT_BACKEND=local POT_INTEGRATED_ROOT=/data POT_BROKER_BIND=0.0.0.0 POT_UPSTREAM_WS=http://127.0.0.1:6080/websockify POT_VIEWER_HTML=/data/index.html python3 /data/broker.py >/data/logs/broker.log 2>&1 &
+# Wait for an actual browser process exit before acknowledging clean shutdown.
+shutdown() {
+  trap '' TERM INT
+  current_browser_pid=$(cat /data/profile/browser.pid 2>/dev/null || true)
+  if [ -n "$current_browser_pid" ] && kill -0 "$current_browser_pid" 2>/dev/null; then
+    python3 /data/close-browser.py || true
+  fi
+  for _ in $(seq 1 80); do
+    if [ -z "$current_browser_pid" ] || ! kill -0 "$current_browser_pid" 2>/dev/null; then
+      touch /data/browser-stopped
+      exit 0
+    fi
+    sleep 0.1
+  done
+  echo 'Chromium close timed out' >&2
+  exit 1
+}
+trap shutdown TERM INT
+rm -f /data/browser-stopped
+# Show the desktop immediately. Browser/Files/Terminal launch on demand from the panel.
+while :; do sleep 1; done

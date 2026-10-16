@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "default_linux_bundle": "linux-arm64-cf60a4144d497e5e",
+  "resources": {
+    "kernel-fb2cfb79eb1ae194": {
+      "release_tag": "sandbox-go-resources-v0.1.0",
+      "filename": "linux-arm64-kernel-fb2cfb79eb1ae194",
+      "sha256": "fb2cfb79eb1ae19447a85d75682d7fa5cfec97e24beb2609a492b806e8072c8d",
+      "size_bytes": 30423552,
+      "unpacked_bytes": 30423552,
+      "format": "raw"
+    },
+    "boot-17ba31ff7cc3bde2": {
+      "release_tag": "sandbox-go-resources-v0.1.0",
+      "filename": "linux-arm64-boot-17ba31ff7cc3bde2.tar.gz",
+      "sha256": "17ba31ff7cc3bde201085f2281dab5de215ca5adde67a99387d9d9a0340a9cda",
+      "size_bytes": 68582375,
+      "unpacked_bytes": 69255307,
+      "format": "oci-tar-gzip"
+    },
+    "image-707c6070d625c96d": {
+      "release_tag": "sandbox-go-resources-v0.1.0",
+      "filename": "linux-arm64-image-707c6070d625c96d.tar.gz",
+      "sha256": "707c6070d625c96d2944b2d1eb6fe0e0266ff8513de5c8d2aa842811d2394f8b",
+      "size_bytes": 540166421,
+      "unpacked_bytes": 543532584,
+      "format": "oci-tar-gzip"
+    }
+  },
+  "bundles": {
+    "linux-arm64-cf60a4144d497e5e": {
+      "kernel": "kernel-fb2cfb79eb1ae194",
+      "boot": "boot-17ba31ff7cc3bde2",
+      "image": "image-707c6070d625c96d",
+      "image_reference": "pot.local/sandbox:d7f180af7d9f3f091bff",
+      "boot_reference": "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",
+      "bootstrap_version": "pot-executor-v2",
+      "os": "linux",
+      "architecture": "arm64"
+    }
+  }
+}

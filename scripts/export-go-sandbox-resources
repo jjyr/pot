@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Export deterministic release assets; explicitly update embedded catalog before builds."""
+
+import argparse
+import gzip
+import hashlib
+import json
+import pathlib
+import tarfile
+
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+
+def export(source, output, tag, update):
+    output.mkdir(parents=True, exist_ok=True)
+    metadata = json.loads((source / "sandbox-image.json").read_text())
+    entries = {}
+    for key, path in [
+        ("kernel", source / "vmlinux"),
+        ("boot", source / "init-image"),
+        ("image", source / "sandbox-image"),
+    ]:
+        filename = f"linux-arm64-{key}.tar.gz" if path.is_dir() else "linux-arm64-kernel"
+        dest = output / filename
+        total = 0
+        if path.is_dir():
+            with (
+                dest.open("wb") as raw,
+                gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as zipped,
+                tarfile.open(fileobj=zipped, mode="w", format=tarfile.USTAR_FORMAT) as archive,
+            ):
+                for item in sorted(path.rglob("*")):
+                    if item.is_symlink() or not (item.is_file() or item.is_dir()):
+                        raise ValueError(f"Unsafe source {item}")
+                    if item.is_file():
+                        info = tarfile.TarInfo(item.relative_to(path).as_posix())
+                        info.size = item.stat().st_size
+                        info.mode = 0o644
+                        total += info.size
+                        with item.open("rb") as data:
+                            archive.addfile(info, data)
+        else:
+            dest.write_bytes(path.read_bytes())
+            total = dest.stat().st_size
+        digest = hashlib.file_digest(dest.open("rb"), "sha256").hexdigest()
+        filename = f"linux-arm64-{key}-{digest[:16]}" + (".tar.gz" if path.is_dir() else "")
+        named = output / filename
+        if dest != named:
+            dest.replace(named)
+        dest = named
+        rid = f"{key}-{digest[:16]}"
+        entries[rid] = dict(
+            release_tag=tag,
+            filename=filename,
+            sha256=digest,
+            size_bytes=dest.stat().st_size,
+            unpacked_bytes=total,
+            format="oci-tar-gzip" if path.is_dir() else "raw",
+        )
+    catalog_path = REPO / "resources/sandbox/catalog.json"
+    if update:
+        old = {"resources": {}, "bundles": {}}
+        for rid, value in entries.items():
+            if rid in old["resources"] and any(
+                old["resources"][rid][k] != v for k, v in value.items() if k != "release_tag"
+            ):
+                raise ValueError("Resource identity collision or incompatible metadata")
+            old["resources"].setdefault(rid, value)
+        ids = list(entries)
+        descriptor = dict(
+            kernel=ids[0],
+            boot=ids[1],
+            image=ids[2],
+            image_reference=metadata["reference"],
+            boot_reference="ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df",
+            bootstrap_version="pot-executor-v2",
+            os="linux",
+            architecture="arm64",
+        )
+        identity = hashlib.sha256(
+            json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:16]
+        bundle = next(
+            (key for key, value in old["bundles"].items() if value == descriptor),
+            "linux-arm64-" + identity,
+        )
+        old["bundles"].setdefault(bundle, descriptor)
+        old["schema_version"] = 1
+        old["default_linux_bundle"] = bundle
+        catalog_path.write_text(json.dumps(old, indent=2) + "\n")
+
+    else:
+        catalog = json.loads(catalog_path.read_text())
+        for rid, r in entries.items():
+            expected = catalog["resources"].get(rid)
+            if expected is None or any(
+                expected[k] != v for k, v in r.items() if k != "release_tag"
+            ):
+                raise ValueError(
+                    "Assets differ from embedded catalog; explicitly export --update-catalog then rebuild clients"
+                )
+            if expected["release_tag"] != tag:
+                (output / r["filename"]).unlink()
+    print(json.dumps({"output": str(output), "resources": entries}, indent=2))
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--source", type=pathlib.Path, default=REPO / ".local/go/resources")
+    p.add_argument("--output", type=pathlib.Path, default=REPO / ".local/go/releases/resources")
+    p.add_argument("--tag", default="sandbox-resources-v0.1.0")
+    p.add_argument("--update-catalog", action="store_true")
+    args = p.parse_args()
+    export(args.source, args.output, args.tag, args.update_catalog)

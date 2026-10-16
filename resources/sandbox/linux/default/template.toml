@@ -1,0 +1,9 @@
+schema_version = 1
+id = "linux.default"
+version = "source"
+os = "linux"
+architecture = "arm64"
+format = "oci"
+providers = ["macos.apple-containerization", "linux.podman"]
+bootstrap = "pot-executor-v2"
+recipe = "build.sh"

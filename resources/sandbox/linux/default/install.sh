@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
+mkdir -p /cache/apk /cache/npm
+if [ "${POT_IMAGE_PACKAGES_INSTALLED:-}" != 1 ]; then
+  # Each lockfile entry is intentionally passed as a separate package argument.
+  # shellcheck disable=SC2046
+  apk --cache-dir /cache/apk add $(cat "${POT_IMAGE_ASSETS:-/build/assets}/packages.lock")
+fi
+adduser -D -H -h /data/engine-home potdesktop
+mkdir -p /opt/pot /opt/pi /opt/pot/novnc /data
+cp "${POT_IMAGE_ASSETS:-/build/assets}"/* /opt/pot/
+tar xzf /opt/pot/novnc.tar.gz -C /opt/pot/novnc --strip-components=1
+rm /opt/pot/novnc.tar.gz
+chmod -R a+rX /opt/pot
+chmod +x /opt/pot/open-browser.sh /opt/pot/pot-tool-executor
+ln -sf /opt/pot/open-browser.sh /usr/local/bin/pot-browser
+fc-cache -f
+
+# Shared toolchain entrypoints remain discoverable through login-shell PATH resets.
+for tool in rustup cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do
+  ln -sf "/data/development/.cargo/bin/$tool" "/usr/local/bin/$tool"
+done
+mkdir -p /etc/profile.d
+cat >/etc/profile.d/pot-development.sh <<'PROFILE'
+export CARGO_HOME=/data/development/.cargo
+export RUSTUP_HOME=/data/development/.rustup
+export PATH="$CARGO_HOME/bin:$PATH"
+PROFILE
