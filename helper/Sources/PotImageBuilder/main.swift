@@ -12,7 +12,22 @@ let resources = URL(fileURLWithPath: args[2])
 let input = URL(fileURLWithPath: args[3])
 let cache = root.deletingLastPathComponent().appendingPathComponent("downloads")
 try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-let base = "docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+struct BuildConfig: Decodable {
+    let schema_version: Int
+    let base_image: String
+}
+
+let buildConfig = try JSONDecoder().decode(
+    BuildConfig.self,
+    from: Data(contentsOf: input.appendingPathComponent("build-config.json"))
+)
+guard buildConfig.schema_version == 1,
+      buildConfig.base_image.range(
+          of: "^docker\\.io/library/debian@sha256:[a-f0-9]{64}$",
+          options: .regularExpression
+      ) != nil
+else { fatalError("A pinned Debian base image is required") }
+let base = buildConfig.base_image
 let initRef = "ghcr.io/apple/containerization/vminit@sha256:4c1836052eafcbc944c403fb23ded06562962d2402c9dcc651495a32300614df"
 var manager = try await ContainerManager(
     kernel: Kernel(path: resources.appendingPathComponent("vmlinux"), platform: .linuxArm),

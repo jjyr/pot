@@ -1,61 +1,29 @@
 #!/usr/bin/env python3
 """Build a versioned linux/arm64 OCI desktop image in an isolated Apple VM."""
 
-import gzip, hashlib, json, os, pathlib, shutil, subprocess, tomllib
+import gzip, hashlib, json, pathlib, shutil, subprocess, tomllib
 
-from go_packaging import prepare_image_inputs
+from go_packaging import ROOT as R, guest_image_config, prepare_image_inputs, publish_guest_images
 
-R = pathlib.Path(__file__).resolve().parents[1]
-prepare_image_inputs()
-subprocess.run(["python3", R / "scripts/localize-web"], check=True)
+assets_directory = prepare_image_inputs()
 resources = R / ".local/go/resources"
+base_config = guest_image_config()
 template_path = R / "resources/sandbox/linux/default/template.toml"
 template = tomllib.loads(template_path.read_text())
 assert template["schema_version"] == 1 and template["format"] == "oci"
-assets = [
-    "sandbox.sh",
-    "install.sh",
-    "executor.py",
-    "skill_mounts.py",
-    "operation_prepare.py",
-    "pot-tool-executor",
-    "desktop.sh",
-    "desktop-config.sh",
-    "desktop-session.sh",
-    "pot-wallpaper.svg",
-    "packages.lock",
-    "test.html",
-    "driver.py",
-    "broker.py",
-    "index.html",
-    "i18n.js",
-    "locales.json",
-    "close-browser.py",
-    "open-browser.sh",
-    "novnc.tar.gz",
-]
-# Read source assets directly so bundle cannot accidentally reuse stale prepare output.
-for n in assets:
-    source = (
-        R / ".local/web/sandbox"
-        if n in {"index.html", "i18n.js", "locales.json"}
-        else R / "resources/sandbox/linux/default"
-    ) / n
-    if n == "pot-tool-executor":
-        source = resources / n
-    if source.is_file() and source != resources / n:
-        shutil.copy2(source, resources / n)
+assets = sorted(path.name for path in assets_directory.iterdir())
 fingerprint = hashlib.sha256()
 for source in [
     template_path,
     R / "resources/sandbox/linux/default/build.sh",
     R / "helper/Sources/PotImageBuilder/main.swift",
     pathlib.Path(__file__),
+    R / "scripts/go_packaging.py",
 ]:
     fingerprint.update(source.read_bytes())
 for n in assets:
     fingerprint.update(n.encode())
-    fingerprint.update((resources / n).read_bytes())
+    fingerprint.update((assets_directory / n).read_bytes())
 version = fingerprint.hexdigest()[:20]
 reference = "pot.local/sandbox:" + version
 meta = resources / "sandbox-image.json"
@@ -71,9 +39,10 @@ build = R / ".local/go/image-build"
 build.mkdir(exist_ok=True)
 inputs = build / version
 inputs.mkdir(exist_ok=True)
-(inputs / "assets").mkdir(exist_ok=True)
-for n in assets:
-    shutil.copy2(resources / n, inputs / "assets" / n)
+if (inputs / "assets").exists():
+    shutil.rmtree(inputs / "assets")
+shutil.copytree(assets_directory, inputs / "assets")
+(inputs / "build-config.json").write_text(json.dumps(base_config, indent=2) + "\n")
 shutil.copy2(R / "resources/sandbox/linux/default/build.sh", inputs / "build.sh")
 helper = R / ".local/go/helper-build/release/PotImageBuilder"
 subprocess.run(
@@ -163,10 +132,7 @@ metadata = {
     "source_hash": version,
     "manifest_digest": manifest["digest"],
 }
-for name in ["sandbox-image", "init-image"]:
-    target = resources / name
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(inputs / name, target)
-meta.write_text(json.dumps(metadata, indent=2) + "\n")
+metadata["base"] = base_config
+(inputs / "sandbox-image.json").write_text(json.dumps(metadata, indent=2) + "\n")
+publish_guest_images(inputs, resources, metadata)
 print(json.dumps(metadata))

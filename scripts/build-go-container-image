@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Build a rootless Podman guest containing only the Go Pot executor."""
+"""Build a Debian/glibc Podman guest with the pinned Go and Node executors."""
 
 import argparse
-import hashlib
 import os
 from pathlib import Path
 import platform
 import shutil
 import subprocess
-import urllib.request
+import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
+from go_packaging import ROOT, prepare_guest_assets
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
     "--arch",
@@ -18,53 +18,30 @@ parser.add_argument(
     default={"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine()),
 )
 parser.add_argument("--tag", default="localhost/pot-go-sandbox:development")
+parser.add_argument("--context", type=Path, help="Explicit disposable build-context directory")
 parser.add_argument("--prepare-only", action="store_true")
 args = parser.parse_args()
 if not args.arch:
     parser.error("Specify --arch for this host")
-context = ROOT / ".local/go/container-image" / args.arch
-assets = context / "assets"
-assets.mkdir(parents=True, exist_ok=True)
-recipe = ROOT / "resources/sandbox/linux/default"
-subprocess.run(["python", ROOT / "scripts/localize-web"], cwd=ROOT, check=True)
-for source in recipe.iterdir():
-    if source.suffix in {".sh", ".py", ".html", ".svg", ".lock"} and not source.name.endswith(
-        ".template.html"
-    ):
-        shutil.copy2(source, assets / source.name)
-for source in (ROOT / ".local/web/sandbox").iterdir():
-    shutil.copy2(source, assets / source.name)
-shutil.copy2(recipe / "Dockerfile", context / "Dockerfile")
-subprocess.run(
-    [
-        "go",
-        "build",
-        "-trimpath",
-        "-ldflags=-s -w",
-        "-o",
-        assets / "pot-tool-executor",
-        "./cmd/pot-tool-executor",
-    ],
-    cwd=ROOT,
-    env={**os.environ, "GOOS": "linux", "GOARCH": args.arch, "CGO_ENABLED": "0"},
-    check=True,
-)
-archive = ROOT / ".local/go/resources/novnc.tar.gz"
-archive.parent.mkdir(parents=True, exist_ok=True)
-if not archive.exists():
-    with (
-        urllib.request.urlopen(
-            "https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz", timeout=120
-        ) as source,
-        archive.open("wb") as target,
-    ):
-        shutil.copyfileobj(source, target)
-if (
-    hashlib.sha256(archive.read_bytes()).hexdigest()
-    != "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6"
-):
-    raise SystemExit("noVNC checksum mismatch")
-shutil.copy2(archive, assets / "novnc.tar.gz")
+context = (args.context or ROOT / ".local/go/container-image" / args.arch).resolve()
+if args.context and context.exists() and any(context.iterdir()):
+    parser.error("An explicit build context must be absent or empty")
+context.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(dir=context.parent) as temporary:
+    staged = Path(temporary) / "context"
+    staged.mkdir()
+    manifest = prepare_guest_assets(staged / "assets", args.arch)
+    shutil.copy2(ROOT / "resources/sandbox/linux/default/Dockerfile", staged / "Dockerfile")
+    # Complete preparation before replacing an older disposable build context.
+    backup = Path(temporary) / "previous"
+    if context.exists():
+        context.rename(backup)
+    try:
+        staged.rename(context)
+    except BaseException:
+        if backup.exists():
+            backup.rename(context)
+        raise
 if not args.prepare_only:
     subprocess.run(
         [
@@ -76,6 +53,8 @@ if not args.prepare_only:
             "--platform=linux/" + args.arch,
             "--file",
             context / "Dockerfile",
+            "--build-arg",
+            "BASE_IMAGE=" + manifest["base"]["base_image"],
             "--tag",
             args.tag,
             context,

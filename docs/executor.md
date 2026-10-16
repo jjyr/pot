@@ -17,8 +17,10 @@ and process-session behavior are shared. Host sessions are scoped by Agent/epoch
 and drained on cancellation/shutdown, using process groups rather than guest cgroups.
 
 Profiles default to `/bin/bash`, with login shells and snapshots enabled; the
-bundled image already includes Bash. Omitted settings use the same current
-defaults. Shell settings are serialized explicitly and participate in profile
+default Debian 13 Sandbox image already includes Bash and a glibc userland.
+The Go executor is still cross-compiled with CGO disabled; glibc compatibility
+serves ordinary GNU/Linux developer tools and user workloads. Omitted settings
+use the same current defaults. Shell settings are serialized explicitly and participate in profile
 checksums; profiles saved with the previous checksum format must be recreated.
 An explicit `shell` must be an absolute path with basename `sh`, `bash` or `zsh`.
 The shell must exist in the selected guest. `login` defaults to the profile's

@@ -1,12 +1,16 @@
 # Sandbox image
 
-Updated: 2026-10-06. The separately distributed Linux ARM64 OCI image contains the execution service, system dependencies and optional desktop/browser. Agent CLIs, product Server/Runtime and provider configuration live on Host.
+The default Linux Sandbox uses Debian 13 stable (`trixie-slim`) with glibc. Its
+separately distributed OCI image contains the execution service, development
+dependencies and optional desktop/browser. The Apple image builder produces
+Linux ARM64 resources; the rootless Podman builder targets ARM64 or AMD64.
+Product Runtime, model credentials and provider configuration live on Host.
 
 ## Build and startup
 
 `mise run prepare` prepares checksum-verified noVNC and Host Node runtime assets. `mise run build:go-app` compiles the Wails App, Go CLI/executor and Swift helpers, then packages the Host binaries and Node runtime for JavaScript tools/plugins. Kernel and OCI resources are prepared separately.
 
-The image builder uses a separate Apple VM with no user workspace or credentials, pinned Alpine/system packages, and `/opt/pot` executor/desktop resources. The guest Go binary is cross-compiled for Linux ARM64 with CGO disabled. Build hashes include guest sources and that binary; identical inputs reuse the immutable image. The image builder is invoked separately with `mise run build:sandbox-image`. Client bundles contain Host binaries; kernel/vminit/image are separate checksum-pinned Release assets. See [Sandbox resource delivery](sandbox-resources.md). VM networking requires Apple Virtualization permissions.
+The image builder uses a separate Apple VM with no user workspace or credentials, a digest-pinned Debian base, snapshot-pinned Debian packages, and `/opt/pot` executor/desktop resources. The guest Go binary is cross-compiled for Linux ARM64 with CGO disabled. Build hashes include guest sources and that binary; identical inputs reuse the immutable image. The image builder is invoked separately with `mise run build:sandbox-image`. Client bundles contain Host binaries; kernel/vminit/image are separate checksum-pinned Release assets. See [Sandbox resource delivery](sandbox-resources.md). VM networking requires Apple Virtualization permissions.
 
 Runtime starts independently of Sandbox preparation. Helper imports and boots each Linux image only when requested. `/opt/pot/sandbox.sh` mounts cgroup v2 and starts the authenticated executor on port 17701. Shell/file subprocesses run as `potdesktop` with a minimal environment. Each owner/Agent-epoch/Sandbox scope uses a root-owned cgroup and a credential-free Go tool runner. Live pipe sessions share that scope; cancellation, failure and shutdown drain it, including detached descendants. Live pipe/PTY sessions close when their execution ends and expire when idle; empty runners retain shell initialization caches without execution leases. See [command execution](executor.md). The executor token stays on Host outside the mount and is injected into the root executor at startup, then removed from child environments. The guest ledger/output live in root-private `/run/pot-executor`, outside virtiofs. Host receipts remain the durable authority across VM recreation. Desktop starts separately through the Sandbox desktop action.
 
@@ -15,6 +19,12 @@ rebuild resets installed software and shared toolchain directories while preserv
 Task work files. See [execution lifecycle](executor.md#shared-machine-execution-environment).
 
 Resources and build caches are under `.local/go/`; rebuild/export the image and embedded catalog before building clients after guest source changes. Build and operating commands are documented in [Development](development.md). Historical platform evidence remains under `docs/validation/`.
+
+The distribution and its pinned package snapshot are image inputs. Updating a
+client does not convert an existing Sandbox's retained writable filesystem to a
+new distribution. Build and export new immutable resources, update the embedded
+catalog, and explicitly rebuild the Sandbox to use them. Rebuild retains Task
+work files while resetting the installed environment and shared toolchains.
 
 ## Desktop and fonts
 
@@ -38,13 +48,31 @@ Linux recipes have moved from `image/` to `resources/sandbox/linux/default/`. `s
 noVNC assets, then invokes `podman build` with
 `resources/sandbox/linux/default/Dockerfile`. `install.sh` is the shared package/user/
 asset installation recipe also used by the Apple image builder's `build.sh`.
-The Dockerfile uses the same pinned Alpine base and emits an OCI image with the
-executor bootstrap label. It builds ARM64 or AMD64; package availability for each
-architecture is validated by a real build, not assumed from the ARM64 lockfile.
+The Dockerfile and Apple builder read the same
+`resources/sandbox/linux/default/base-image.json` descriptor. It fixes the Debian
+base digest and package snapshot; `packages.lock` selects the required top-level
+Debian packages. The snapshot fixes their dependency versions, while the installed
+image records the resolved package/version inventory in
+`/opt/pot/installed-packages.txt`. Snapshot packages retain Debian archive
+signature verification. The shared `desktop-assets.json` descriptor pins the
+additional desktop theme and font archives by URL and SHA-256; both image build
+paths consume these same inputs. The OCI image carries the executor bootstrap
+label. Each architecture requires its own real build; source preparation alone
+does not establish package availability or a bootable image.
 The Apple export/kernel/vminit pipeline is retained; it has not been replaced by
 an unqualified OCI import path. Images contain no Server, model keys or Host Agent.
 
-The default GUI image also includes pinned C/C++ build tools and Git, so user-level
-Rust installations have a linker and common native build dependencies. Rustup
-versions themselves remain installed in the shared development directory; a Task
-can install a required version once and subsequent Tasks reuse it.
+The default image includes Bash, Git, C/C++ build tools and common native build
+dependencies. Debian's glibc userland supports conventional GNU/Linux tool
+distributions, including user-installed Rustup toolchains and Node native
+extensions. This does not guarantee that every third-party binary or npm module
+will run without additional dependencies. The image also includes the same
+checksum-pinned official Node runtime used by packaging, selected for the guest
+architecture; the executor and JavaScript capability checks use its stable
+`node` entrypoint. Node and noVNC inputs participate in the image fingerprint.
+
+Rustup versions themselves remain installed in the shared development directory; a
+Task can install a required version once and subsequent Tasks reuse it. Debian
+changes neither execution ownership nor process isolation: tools still run as
+`potdesktop`, while the broker owns credentials and cgroup cleanup. The Go
+executor remains cross-compiled with CGO disabled.

@@ -145,14 +145,20 @@ def copy_tree(source, destination):
     shutil.copytree(source, destination, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
 
-def node(platform):
-    archive_platform = platform.replace("amd64", "x64")
-    name = f"node-v{NODE_VERSION}-{archive_platform}"
-    archive = download(
+def node_archive(platform):
+    if platform not in NODE_HASHES:
+        raise ValueError(f"Unsupported Node platform: {platform}")
+    name = f"node-v{NODE_VERSION}-{platform.replace('amd64', 'x64')}"
+    return download(
         f"https://nodejs.org/dist/v{NODE_VERSION}/{name}.tar.gz",
         BUILD / "downloads" / f"{name}.tar.gz",
         NODE_HASHES[platform],
     )
+
+
+def node(platform):
+    name = f"node-v{NODE_VERSION}-{platform.replace('amd64', 'x64')}"
+    archive = node_archive(platform)
     target = BUILD / "node" / platform
     stamp = target / ".pot-archive-sha256"
     if not stamp.exists() or stamp.read_text() != NODE_HASHES[platform]:
@@ -161,6 +167,131 @@ def node(platform):
             copy_tree(Path(temporary) / name, target)
         stamp.write_text(NODE_HASHES[platform])
     return target
+
+
+GUEST_RECIPE_ASSETS = (
+    "sandbox.sh",
+    "install.sh",
+    "executor.py",
+    "skill_mounts.py",
+    "operation_prepare.py",
+    "desktop.sh",
+    "desktop-config.sh",
+    "desktop-session.sh",
+    "pot-wallpaper.svg",
+    "packages.lock",
+    "test.html",
+    "driver.py",
+    "broker.py",
+    "close-browser.py",
+    "open-browser.sh",
+    "base-image.json",
+    "desktop-assets.json",
+)
+GUEST_WEB_ASSETS = ("index.html", "i18n.js", "locales.json")
+
+
+def guest_image_config():
+    path = ROOT / "resources/sandbox/linux/default/base-image.json"
+    config = json.loads(path.read_text())
+    expected = {"schema_version", "distribution", "suite", "base_image", "snapshot"}
+    if (
+        set(config) != expected
+        or config["schema_version"] != 1
+        or config["distribution"] != "debian"
+        or config["suite"] != "trixie"
+        or not re.fullmatch(r"docker\.io/library/debian@sha256:[a-f0-9]{64}", config["base_image"])
+        or not re.fullmatch(r"\d{8}T\d{6}Z", config["snapshot"])
+    ):
+        raise ValueError("A pinned Debian trixie base and snapshot are required")
+    return config
+
+
+def guest_desktop_assets():
+    manifest = json.loads(
+        (ROOT / "resources/sandbox/linux/default/desktop-assets.json").read_text()
+    )
+    if set(manifest) != {"schema_version", "assets"} or manifest["schema_version"] != 1:
+        raise ValueError("Pinned desktop asset manifest required")
+    names = set()
+    for asset in manifest["assets"]:
+        if (
+            set(asset) - {"filename", "checksum_file", "url", "sha256"}
+            or not {"filename", "url", "sha256"} <= set(asset)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", asset["filename"])
+            or not asset["url"].startswith("https://")
+            or not re.fullmatch(r"[a-f0-9]{64}", asset["sha256"])
+        ):
+            raise ValueError("Invalid pinned desktop asset")
+        for name in [
+            asset["filename"],
+            *([asset["checksum_file"]] if "checksum_file" in asset else []),
+        ]:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) or name in names:
+                raise ValueError("Invalid or duplicate desktop asset filename")
+            names.add(name)
+    return manifest["assets"]
+
+
+def prepare_guest_desktop_assets(assets):
+    for asset in guest_desktop_assets():
+        archive = download(asset["url"], BUILD / "downloads" / asset["filename"], asset["sha256"])
+        shutil.copy2(archive, assets / asset["filename"])
+        if digest(assets / asset["filename"]) != asset["sha256"]:
+            raise ValueError("Guest desktop asset checksum mismatch")
+        if "checksum_file" in asset:
+            (assets / asset["checksum_file"]).write_text(
+                asset["sha256"] + "  " + asset["filename"] + "\n"
+            )
+
+
+def prepare_guest_assets(assets, arch):
+    """Prepare one complete, verified guest build input in a fresh directory."""
+    if arch not in {"amd64", "arm64"}:
+        raise ValueError("Guest architecture must be amd64 or arm64")
+    assets = Path(assets)
+    if assets.exists() and (not assets.is_dir() or any(assets.iterdir())):
+        raise ValueError("Guest assets directory must be fresh or empty")
+    config = guest_image_config()
+    recipe = ROOT / "resources/sandbox/linux/default"
+    for name in GUEST_RECIPE_ASSETS:
+        if not (recipe / name).is_file():
+            raise ValueError(f"Missing guest asset: {name}")
+    call(["python3", ROOT / "scripts/localize-web"])
+    for name in GUEST_WEB_ASSETS:
+        if not (ROOT / ".local/web/sandbox" / name).is_file():
+            raise ValueError(f"Missing localized guest asset: {name}")
+    assets.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=assets.parent) as temporary:
+        staged = Path(temporary) / "assets"
+        staged.mkdir()
+        for name in GUEST_RECIPE_ASSETS:
+            shutil.copy2(recipe / name, staged / name)
+        for name in GUEST_WEB_ASSETS:
+            shutil.copy2(ROOT / ".local/web/sandbox" / name, staged / name)
+        go_build("./cmd/pot-tool-executor", staged / "pot-tool-executor", "linux-" + arch)
+        archive = node_archive("linux-" + arch)
+        shutil.copy2(archive, staged / "node.tar.gz")
+        expected = NODE_HASHES["linux-" + arch]
+        if digest(staged / "node.tar.gz") != expected:
+            raise ValueError("Guest Node archive checksum mismatch")
+        (staged / "node.sha256").write_text(expected + "  node.tar.gz\n")
+        archive = download(
+            "https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz",
+            BUILD / "resources/novnc.tar.gz",
+            NOVNC_HASH,
+        )
+        shutil.copy2(archive, staged / "novnc.tar.gz")
+        prepare_guest_desktop_assets(staged)
+        manifest = {
+            "architecture": arch,
+            "base": config,
+            "assets": sorted(p.name for p in staged.iterdir()),
+        }
+        if assets.exists():
+            assets.rmdir()
+        staged.rename(assets)
+    return manifest
 
 
 def novnc():
@@ -313,6 +444,89 @@ def prepare_resources(destination, platform):
     )
 
 
+def verify_oci_layout(layout):
+    layout = Path(layout)
+    if json.loads((layout / "oci-layout").read_text()) != {"imageLayoutVersion": "1.0.0"}:
+        raise ValueError("OCI image layout version is invalid")
+    seen = set()
+
+    def descriptor(value):
+        digest_value = value.get("digest", "")
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest_value):
+            raise ValueError("OCI descriptor requires SHA-256")
+        if digest_value in seen:
+            return
+        seen.add(digest_value)
+        blob = layout / "blobs/sha256" / digest_value.split(":", 1)[1]
+        if (
+            not blob.is_file()
+            or blob.stat().st_size != value["size"]
+            or digest(blob) != digest_value.split(":", 1)[1]
+        ):
+            raise ValueError("OCI image blob is missing or corrupt")
+        if value.get("mediaType") in {
+            "application/vnd.oci.image.index.v1+json",
+            "application/vnd.oci.image.manifest.v1+json",
+            "application/vnd.docker.distribution.manifest.list.v2+json",
+            "application/vnd.docker.distribution.manifest.v2+json",
+        }:
+            index(json.loads(blob.read_bytes()))
+
+    def index(value):
+        for entry in value.get("manifests", []):
+            descriptor(entry)
+        if "config" in value:
+            descriptor(value["config"])
+        for entry in value.get("layers", []):
+            descriptor(entry)
+
+    value = json.loads((layout / "index.json").read_text())
+    if value.get("schemaVersion") != 2 or not value.get("manifests"):
+        raise ValueError("OCI image index is empty or invalid")
+    index(value)
+    return value
+
+
+def publish_guest_images(inputs, resources, metadata):
+    """Validate both layouts completely, then replace outputs with rollback."""
+    inputs, resources = Path(inputs), Path(resources)
+    for name in ("sandbox-image", "init-image"):
+        value = verify_oci_layout(inputs / name)
+        if (
+            name == "sandbox-image"
+            and value["manifests"][0]["digest"] != metadata["manifest_digest"]
+        ):
+            raise ValueError("Guest metadata does not match the built image")
+    resources.mkdir(parents=True, exist_ok=True)
+    names = ("sandbox-image", "init-image", "sandbox-image.json")
+    with tempfile.TemporaryDirectory(prefix=".image-publish-", dir=resources.parent) as temporary:
+        staging, backups = Path(temporary) / "new", Path(temporary) / "old"
+        staging.mkdir()
+        backups.mkdir()
+        for name in names[:-1]:
+            shutil.copytree(inputs / name, staging / name)
+        (staging / names[-1]).write_text(json.dumps(metadata, indent=2) + "\n")
+        published = []
+        try:
+            for name in names:
+                target = resources / name
+                if target.exists():
+                    target.rename(backups / name)
+                (staging / name).rename(target)
+                published.append(name)
+        except BaseException:
+            for name in reversed(names):
+                target = resources / name
+                if name in published:
+                    if target.is_dir():
+                        shutil.rmtree(target)
+                    else:
+                        target.unlink()
+                if (backups / name).exists():
+                    (backups / name).rename(target)
+            raise
+
+
 def prepare_image_inputs():
     resources = BUILD / "resources"
     resources.mkdir(parents=True, exist_ok=True)
@@ -331,7 +545,12 @@ def prepare_image_inputs():
             )
     if digest(kernel) != kernel_hash:
         raise ValueError("Pinned guest kernel checksum mismatch")
-    novnc()
-    go_build("./cmd/pot-tool-executor", resources / "pot-tool-executor", "linux-arm64")
-    if not (BUILD / "helper-build/release/PotImageBuilder").exists():
-        swift_helpers()
+    with tempfile.TemporaryDirectory(dir=BUILD) as temporary:
+        prepared = Path(temporary) / "assets"
+        prepare_guest_assets(prepared, "arm64")
+        destination = BUILD / "image-inputs/arm64"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        copy_tree(prepared, destination)
+    # Always let SwiftPM check sources; a cached builder may target another base.
+    swift_helpers()
+    return destination

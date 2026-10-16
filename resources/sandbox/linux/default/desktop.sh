@@ -21,7 +21,7 @@ chown potdesktop /data/profile /data/logs
 sh /data/desktop-config.sh
 su potdesktop -c "fc-cache -f"
 rm -f /data/profile/browser.pid
-su potdesktop -c 'Xvnc :99 -geometry 1280x800 -depth 24 -localhost -SecurityTypes None -rfbport 5900 > /data/logs/vnc.log 2>&1 &'
+su potdesktop -c 'Xtigervnc :99 -geometry 1280x800 -depth 24 -localhost -SecurityTypes None -rfbport 5900 > /data/logs/vnc.log 2>&1 &'
 sleep 2
 su potdesktop -c 'dbus-run-session -- sh /data/desktop-session.sh > /data/logs/wm.log 2>&1 &'
 su potdesktop -c 'exec python3 -m http.server 8081 --bind 127.0.0.1 --directory /opt/pot' >/data/logs/page.log 2>&1 &
