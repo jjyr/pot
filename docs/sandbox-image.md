@@ -22,9 +22,12 @@ Resources and build caches are under `.local/go/`; rebuild/export the image and 
 
 The distribution and its pinned package snapshot are image inputs. Updating a
 client does not convert an existing Sandbox's retained writable filesystem to a
-new distribution. Build and export new immutable resources, update the embedded
-catalog, and explicitly rebuild the Sandbox to use them. Rebuild retains Task
-work files while resetting the installed environment and shared toolchains.
+new distribution. Build and export new immutable resources and update the
+embedded catalog to select the default for newly pinned Sandboxes. Create and
+select a new Sandbox to adopt a different bundle; existing instances retain
+their original bundle. Rebuilding an existing instance reinstalls that same
+bundle, retaining Task work files while resetting its installed environment and
+shared toolchains.
 
 ## Desktop and fonts
 

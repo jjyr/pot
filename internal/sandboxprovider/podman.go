@@ -329,7 +329,7 @@ func (p *Podman) start(ctx context.Context, instance sandbox.Instance) (sandbox.
 		}
 		args = append(args, "--volume", mapping.Source+":"+mapping.Destination+":"+mode)
 	}
-	args = append(args, saved.Image, "/sbin/tini", "--", "/bin/sh", "/opt/pot/sandbox.sh")
+	args = append(args, saved.Image, "/usr/bin/tini", "--", "/bin/sh", "/opt/pot/sandbox.sh")
 	if _, code, err := p.command(ctx, args...); err != nil || code != 0 {
 		return sandbox.Status{}, errors.Join(errors.New("Podman run failed; inspect before retrying"), err)
 	}

@@ -220,16 +220,27 @@ func (m *Manager) requestFor(ctx context.Context, sandboxID, bundleID, owner, tu
 	if (owner != "" && !core.Identifier(owner)) || (turn != "" && !core.Identifier(turn)) {
 		return Request{}, errors.New("invalid resource execution identity")
 	}
-	if bundleID == "" {
-		bundleID = m.options.Catalog.DefaultLinuxBundle
-	}
-	if _, ok := m.options.Catalog.Bundles[bundleID]; !ok {
-		return Request{}, errors.New("unknown resource bundle")
-	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
 		return Request{}, errors.New("resource manager closed")
+	}
+	if bundleID == "" {
+		// An omitted bundle means the instance's original pin. A changed
+		// client default applies only when this Sandbox has never been pinned.
+		for _, e := range m.entries {
+			if e.request.SandboxID == sandboxID {
+				bundleID = e.request.BundleID
+				break
+			}
+		}
+		if bundleID == "" {
+			bundleID = m.options.Catalog.DefaultLinuxBundle
+		}
+	}
+	if _, ok := m.options.Catalog.Bundles[bundleID]; !ok {
+		m.mu.Unlock()
+		return Request{}, errors.New("unknown resource bundle")
 	}
 	if m.options.ValidateSandbox != nil {
 		if err := m.options.ValidateSandbox(ctx, sandboxID); err != nil {
