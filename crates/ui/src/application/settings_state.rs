@@ -89,7 +89,6 @@ pub struct SettingsState {
     allowances: Vec<Value>,
     draft_id: String,
     after_save: Option<String>,
-    activation: Option<String>,
     retry: Option<(&'static str, Request)>,
 }
 impl SettingsState {
@@ -177,6 +176,9 @@ impl SettingsState {
     }
     pub fn invalidate(&mut self) {
         self.loaded = false;
+        for cached in self.cached.values_mut() {
+            cached.loaded = false;
+        }
     }
     pub fn ensure_loaded(&mut self) -> Vec<Request> {
         if self.loaded || !self.pending.is_empty() || self.context.is_empty() {
@@ -189,15 +191,7 @@ impl SettingsState {
         action.starts_with("ai-")
             || action.starts_with("routing-")
             || action.starts_with("provider-")
-            || matches!(
-                action,
-                "section"
-                    | "history-section"
-                    | "api-protocol"
-                    | "profile-save"
-                    | "profile-main"
-                    | "task-profile"
-            )
+            || matches!(action, "section" | "history-section" | "api-protocol")
     }
     fn profile(&self, id: &str) -> Value {
         self.state["profiles"]
@@ -291,11 +285,7 @@ impl SettingsState {
     }
     pub fn command(&mut self, v: &Value) -> Vec<Request> {
         let action = v["action"].as_str().unwrap_or("");
-        if !self.pending.is_empty()
-            && !matches!(
-                action,
-                "section" | "history-section" | "ai-open" | "task-profile"
-            )
+        if !self.pending.is_empty() && !matches!(action, "section" | "history-section" | "ai-open")
         {
             return vec![];
         }
@@ -312,12 +302,7 @@ impl SettingsState {
         if self.retry.is_some()
             && matches!(
                 action,
-                "ai-save-connection"
-                    | "ai-save-main"
-                    | "routing-save"
-                    | "profile-save"
-                    | "profile-main"
-                    | "provider-save"
+                "ai-save-connection" | "routing-save" | "provider-save"
             )
         {
             return vec![];
@@ -335,7 +320,7 @@ impl SettingsState {
             "ai-open" => {
                 self.state["section"] = json!(1);
                 self.state["return_to_chat"] = json!(true);
-                self.state["ai_screen"] = "main".into();
+                self.state["ai_screen"] = "add".into();
                 requests = self.ensure_loaded();
             }
             "ai-screen" => self.state["ai_screen"] = v["screen"].clone(),
@@ -371,11 +356,12 @@ impl SettingsState {
                 self.state["ai_screen"] = "main".into();
                 self.state["return_to_chat"] = false.into();
             }
-            "ai-choose" => {
-                let selected = self.profile(v["id"].as_str().unwrap_or(""));
-                self.state["draft_profile"] = selected["id"].clone();
-                self.state["draft_model"] = selected["model"].clone();
-                self.state["draft_revision"] = json!(self.sequence + 1);
+            "ai-default-provider" => {
+                requests.push(self.request(
+                    "saved",
+                    "/api/v1/providers/default",
+                    Some(json!({"provider_id":v["id"]})),
+                ));
             }
             "ai-new" => {
                 self.state["result"] = "".into();
@@ -442,7 +428,10 @@ impl SettingsState {
                     .into();
                 self.state["ai_screen"] = "manage".into();
                 self.state["secret_revision"] = json!(self.sequence + 1);
-                self.state["model_options"] = json!([]);
+                self.state["model_options"] = connection["models"]
+                    .as_array()
+                    .map(|v| json!(v))
+                    .unwrap_or_else(|| json!([]));
                 self.state["check_message"] = "".into();
                 self.connection_defaults();
             }
@@ -468,9 +457,6 @@ impl SettingsState {
                         super::i18n::text("aiconfiguration.choose-or-enter-a-model").into();
                     return vec![];
                 }
-                let first = self.state["active_spec"]
-                    .as_object()
-                    .is_none_or(|s| s.is_empty());
                 let protocol = self.state["api_protocol"].as_str().unwrap_or("openai_chat");
                 let mut url = endpoint(v["endpoint"].as_str().unwrap_or(""), protocol);
                 let mut protocol = protocol.to_owned();
@@ -504,77 +490,11 @@ impl SettingsState {
                     return vec![];
                 };
                 self.after_save = Some(target.clone());
-                if first {
-                    self.activation = Some(target.clone());
-                }
                 let effort = v["effort"].as_str().unwrap_or("").trim();
-                requests.push(self.request("saved","/api/v1/providers",Some(json!({"profile_id":target,"name":v["name"],"model":v["model"],"endpoint":url,"api_key":v["key"],"protocol":protocol,"catalog_provider":self.state["connection_kind"].as_str().filter(|s|*s!="custom"),"context_window":context,"max_output_tokens":output,"reasoning_effort":(!effort.is_empty()).then_some(effort),"expected_revision":self.profile["revision"].as_u64().unwrap_or(0),"request_id":uuid::Uuid::new_v4().to_string(),"follow_main":first}))));
-            }
-            "ai-save-main" | "profile-save" => {
-                let id = self.state[if action == "ai-save-main" {
-                    "draft_profile"
-                } else {
-                    "routing_profile"
-                }]
-                .as_str()
-                .unwrap_or("");
-                let mut selected = self.profile(id);
-                if selected.is_null() {
-                    self.state["result"] =
-                        super::i18n::text("aiconfiguration.add-and-choose-an-agent-first").into();
-                    return vec![];
-                }
-                let copy = v["copy"] == true;
-                let expected = if copy {
-                    0
-                } else {
-                    selected["revision"].as_u64().unwrap_or(0)
-                };
-                if copy {
-                    selected["id"] = format!("profile-{}", uuid::Uuid::new_v4()).into();
-                }
-                selected["revision"] = json!(expected + 1);
-                selected["model"] = v["model"].clone();
-                if action == "profile-save" {
-                    selected["name"] = v["name"].clone();
-                }
-                self.after_save = selected["id"].as_str().map(str::to_owned);
-                if action == "ai-save-main" {
-                    self.activation = self.after_save.clone();
-                }
-                requests.push(self.request("saved","/api/v1/agent",Some(json!({"profile":selected,"expected_revision":expected,"request_id":uuid::Uuid::new_v4().to_string(),"follow_main":action=="ai-save-main","follow_worker":false}))));
-            }
-            "task-profile" => {
-                self.state["routing_owner"] = v["owner"].clone();
-                self.state["routing_owner_name"] = v["title"].clone();
-                self.state["section"] = json!(4);
-                requests = self.ensure_loaded();
+                requests.push(self.request("saved","/api/v1/providers",Some(json!({"profile_id":target,"models":self.state["model_options"],"name":v["name"],"model":v["model"],"endpoint":url,"api_key":v["key"],"protocol":protocol,"catalog_provider":self.state["connection_kind"].as_str().filter(|s|*s!="custom"),"context_window":context,"max_output_tokens":output,"reasoning_effort":(!effort.is_empty()).then_some(effort),"expected_revision":self.profile["revision"].as_u64().unwrap_or(0),"request_id":uuid::Uuid::new_v4().to_string()}))));
             }
             "routing-refresh" => requests = self.load(),
             "routing-edit" => self.routing_profile(v["id"].as_str().unwrap_or("")),
-            "routing-choice" => {
-                if v["kind"] == "worker" {
-                    let id = v["id"].as_str().unwrap_or("");
-                    self.state["routing"]["worker_profile"] = if id.is_empty() {
-                        Value::Null
-                    } else {
-                        id.into()
-                    };
-                    self.state["routing"]["follow_chat"] = json!(id.is_empty());
-                } else {
-                    let id = v["id"].clone();
-                    let mut list = self.state["routing"]["allowed_tool_profiles"]
-                        .as_array()
-                        .cloned()
-                        .unwrap_or_default();
-                    if list.contains(&id) {
-                        list.retain(|a| a != &id);
-                    } else {
-                        list.push(id);
-                    }
-                    self.state["routing"]["allowed_tool_profiles"] = list.into();
-                }
-            }
             "routing-save" => {
                 let mut policy = self.state["routing"].clone();
                 let id = self.state["routing_profile"]
@@ -612,9 +532,6 @@ impl SettingsState {
                     }
                 }
                 requests.push(self.request("routing-saved", "/api/v1/agent/routing", Some(policy)));
-            }
-            "profile-main" => {
-                requests.push(self.request("saved","/api/v1/agent/config",Some(json!({"request_id":uuid::Uuid::new_v4().to_string(),"profile":self.state["routing_profile"],"owner":self.state["routing_owner"]}))));
             }
             "provider-period" => self.state["provider_period"] = v["period"].clone(),
             "provider-auto" => {
@@ -681,6 +598,10 @@ impl SettingsState {
         match purpose {
             "agent" => {
                 self.state["profiles"] = body["profiles"].clone();
+                self.state["selection"] = body["selection"].clone();
+                if self.state["default_provider_id"].is_null() {
+                    self.state["default_provider_id"] = body["default_provider_id"].clone();
+                }
                 self.state["active_spec"] = body["thread"]["config"]
                     .as_object()
                     .map(|s| json!(s))
@@ -707,6 +628,7 @@ impl SettingsState {
             }
             "providers" => {
                 self.state["connections"] = body["connections"].clone();
+                self.state["default_provider_id"] = body["default_provider_id"].clone();
                 self.state["directory"] = body["directory"].clone();
                 self.state["model_defaults"] = body["model_defaults"].clone();
                 self.connection_defaults();
@@ -755,17 +677,6 @@ impl SettingsState {
                 self.state["draft_profile"] = id.into();
                 self.state["draft_model"] = self.profile["model"].clone();
                 self.state["draft_revision"] = json!(self.sequence + 1);
-            }
-            if self
-                .activation
-                .as_ref()
-                .is_some_and(|id| self.state["active_spec"]["source_profile_id"] == *id)
-            {
-                self.activation = None;
-                if self.state["return_to_chat"] == true {
-                    self.state["navigate_page"] = json!(0);
-                    self.state["return_to_chat"] = false.into();
-                }
             }
             self.state["result"] = "".into();
         }
@@ -835,6 +746,18 @@ pub fn endpoint(value: &str, protocol: &str) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn shared_provider_changes_invalidate_cached_assistants_without_dropping_drafts() {
+        let mut m = model();
+        load(&mut m);
+        m.state["connection_model"] = json!("retained draft");
+        m.bind("local", "control-a", "other");
+        load(&mut m);
+        m.invalidate();
+        m.bind("local", "control-a", "main");
+        assert_eq!(m.state["connection_model"], "retained draft");
+        assert!(!m.ensure_loaded().is_empty());
+    }
+    #[test]
     fn editor_return_restores_the_parent_draft_without_rolling_back_live_data_or_requests() {
         let mut m = model();
         load(&mut m);
@@ -895,7 +818,7 @@ mod tests {
                 }
                 "/api/v1/providers" => json!({"connections":[]}),
                 "/api/v1/agent/routing" => {
-                    json!({"revision":2,"follow_chat":true,"profile_limits":{"p":4},"provider_limits":{"api":5}})
+                    json!({"revision":2,"profile_limits":{"p":4},"provider_limits":{"api":5}})
                 }
                 _ => {
                     json!({"providers":[{"provider":"api","revision":2,"policy":{"period":"week","limit":1234,"auto_resume":false}}]})
@@ -933,10 +856,10 @@ mod tests {
         assert_eq!(m.state["routing_provider_limit"], "5");
         assert_eq!(m.state["provider_tokens"], "1234");
         assert_eq!(m.state["provider_auto_resume"], false);
-        m.command(&json!({"action":"ai-choose","id":"p"}));
+        m.command(&json!({"action":"ai-manage","id":"p"}));
         let revision = m.state["draft_revision"].clone();
         load(&mut m);
-        assert_eq!(m.state["draft_profile"], "p");
+        assert_eq!(m.state["connection_profile_id"], "p");
         assert_eq!(m.state["draft_revision"], revision);
     }
     #[test]
@@ -1003,14 +926,13 @@ mod tests {
             None,
             false,
         );
-        m.command(&json!({"action":"routing-choice","kind":"worker","id":"p"}));
         let req = m
             .command(&json!({"action":"routing-save","profile_limit":"7","provider_limit":""}))
             .remove(0);
         assert_eq!(req.path, "/api/v1/agent/routing");
         assert_eq!(req.body.as_ref().unwrap()["profile_limits"]["p"], 7);
-        assert_eq!(req.body.as_ref().unwrap()["follow_chat"], false);
-        assert_eq!(req.body.as_ref().unwrap()["worker_profile"], "p");
+        assert!(req.body.as_ref().unwrap().get("follow_chat").is_none());
+        assert!(req.body.as_ref().unwrap().get("worker_profile").is_none());
         assert!(
             req.body.as_ref().unwrap()["provider_limits"]
                 .get("api")

@@ -281,6 +281,12 @@ async fn qualify_transport(
         axum::serve(model_listener, router).await.unwrap();
     });
     caller.api("/api/v1/providers",Some(json!({"request_id":uuid::Uuid::new_v4(),"expected_revision":0,"endpoint":format!("http://{model_address}/model"),"model":"fixture","protocol":"openai_chat","api_key":"fixture","max_output_tokens":1024}))).await;
+    caller
+        .api(
+            "/api/v1/agent/config",
+            Some(json!({"request_id":"select-remote-fixture","profile":"apot-default"})),
+        )
+        .await;
     if before_start {
         caller
             .api(

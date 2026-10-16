@@ -66,6 +66,10 @@ pub fn router(s: Service) -> Router {
         )
         .route("/api/v1/providers/check", post(gateway::setup::check))
         .route(
+            "/api/v1/providers/default",
+            post(gateway::setup::set_default),
+        )
+        .route(
             "/gw/{provider}/{*path}",
             post(gateway::routed_protocol).layer(axum::extract::DefaultBodyLimit::max(
                 execution::MAX_MODEL_BODY,
@@ -227,16 +231,21 @@ async fn assistant_create(
             "Owner authority required",
         );
     }
-    match hub.create_from(
+    let configuration = match serde_json::from_value(args["configuration"].clone()) {
+        Ok(configuration) => configuration,
+        Err(e) => return rejected(axum::http::StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+    match hub.create_configured(
         args["request_id"].as_str().unwrap_or(""),
         args["name"].as_str().unwrap_or("Pot"),
-        args["source_assistant"].as_str().unwrap_or("main"),
-        args["profile_id"].as_str(),
+        &configuration,
+        args["text"].as_str().unwrap_or(""),
     ) {
         Ok(d) => axum::Json(d).into_response(),
         Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),
     }
 }
+
 async fn assistant_rename(
     axum::extract::State(hub): AssistantState,
     axum::extract::Path(owner): axum::extract::Path<String>,
@@ -250,14 +259,8 @@ async fn assistant_rename(
             "Owner authority required",
         );
     }
-    if let Some(text) = args["text"].as_str() {
-        return match hub.edit(
-            &owner,
-            args["name"].as_str().unwrap_or_default(),
-            args["expected_revision"].as_u64().unwrap_or(0),
-            text,
-            args["rules_revision"].as_str().unwrap_or_default(),
-        ) {
+    if args.get("configuration").is_some() {
+        return match hub.edit_configured(&owner, &args) {
             Ok(v) => axum::Json(v).into_response(),
             Err(e) => rejected(axum::http::StatusCode::CONFLICT, &e.to_string()),
         };

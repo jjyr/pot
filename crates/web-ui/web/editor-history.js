@@ -1,9 +1,12 @@
 // Browser entries contain route metadata only. Drafts and credentials stay in WASM.
 (() => {
   let session = `${Date.now()}-${Math.random()}`;
-  let depth = 0, restoring = false, afterRestore;
+  let depth = 0, restoring = false, afterRestore, pendingNavigation;
   window.potEditorHistory = {
     get active() { return depth > 0 || restoring; },
+    afterRestore(callback) {
+      if (restoring) pendingNavigation = callback; else callback();
+    },
     setDepth(next) {
       const previous = depth;
       depth = next;
@@ -25,6 +28,9 @@
       const callback = afterRestore;
       afterRestore = undefined;
       callback?.();
+      const navigation = pendingNavigation;
+      pendingNavigation = undefined;
+      navigation?.();
       return;
     }
     if (!depth) return;

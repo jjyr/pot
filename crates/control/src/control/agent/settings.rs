@@ -14,7 +14,7 @@ pub fn pending(store: &Store) -> Result<Option<PendingConfig>> {
         .map(|v| Ok(serde_json::from_str(&v)?))
         .transpose()
 }
-fn queue(store: &mut Store, request_id: &str, config: ResolvedSpec) -> Result<()> {
+pub(crate) fn queue(store: &mut Store, request_id: &str, config: ResolvedSpec) -> Result<()> {
     if let Some(old) = pending(store)? {
         anyhow::ensure!(
             old.request_id == request_id && old.config == config,
@@ -64,6 +64,7 @@ pub(crate) fn refresh_model_defaults(s: &Service) -> Result<()> {
     if s.is_worker || crate::usage::paused(s)?.is_some() {
         return Ok(());
     }
+    let shared = configured_profiles(s)?;
     let (mut thread, profile) = {
         let inner = s.conversation.inner.lock().unwrap();
         if pending(&inner.store)?.is_some() {
@@ -72,7 +73,12 @@ pub(crate) fn refresh_model_defaults(s: &Service) -> Result<()> {
         let Some(thread) = current(&inner.store)? else {
             return Ok(());
         };
-        let profile = profiles(&inner.store)?.into_iter().find(|p| {
+        let selected: Option<Profile> = inner
+            .store
+            .get("assistant.model_profile")?
+            .map(|v| serde_json::from_str(&v))
+            .transpose()?;
+        let profile = selected.into_iter().chain(shared).find(|p| {
             p.id == thread.config.source_profile_id
                 && p.revision == thread.config.source_profile_revision
                 && p.model_settings.is_some()
@@ -126,7 +132,7 @@ pub async fn select(
         ));
     }
     initialize(&root).map_err(internal)?;
-    let profile = profiles(&root.conversation.inner.lock().unwrap().store)
+    let profile = configured_profiles(&root)
         .map_err(internal)?
         .into_iter()
         .find(|p| p.id == request.profile)
@@ -163,26 +169,39 @@ pub async fn select(
                     "Another configuration update is pending",
                 ));
             }
-            let tx = inner
+            inner
                 .store
                 .0
-                .transaction()
+                .execute_batch("SAVEPOINT configuration_selection")
                 .map_err(|e| internal(e.into()))?;
-            let update = PendingConfig {
-                request_id: request.request_id,
-                config,
-            };
-            storage::set(
-                &tx,
-                PENDING,
-                &serde_json::to_string(&update).map_err(|e| internal(e.into()))?,
-            )
-            .map_err(internal)?;
-            storage::set(&tx, &key, &fingerprint).map_err(internal)?;
-            tx.commit().map_err(|e| internal(e.into()))?;
+            let result = (|| -> Result<()> {
+                if current(&inner.store)?.is_none() {
+                    select_initial(&mut inner.store, &owner.usage_scope, config)?;
+                } else {
+                    queue(&mut inner.store, &request.request_id, config)?;
+                }
+                inner.store.set(&key, &fingerprint)?;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => inner
+                    .store
+                    .0
+                    .execute_batch("RELEASE configuration_selection")
+                    .map_err(|e| internal(e.into()))?,
+                Err(e) => {
+                    let _ = inner.store.0.execute_batch(
+                        "ROLLBACK TO configuration_selection; RELEASE configuration_selection",
+                    );
+                    return Err(internal(e));
+                }
+            }
         }
     }
     apply_pending(&owner, false).map_err(internal)?;
+    if owner.conversation.inner.lock().unwrap().agent.phase == AgentPhase::NeedsConfiguration {
+        owner.phase(AgentPhase::Ready, None);
+    }
     owner.invalidate("settings");
     Ok(Json(
         json!({"saved":true,"pending":pending(&owner.conversation.inner.lock().unwrap().store).map_err(internal)?.is_some()}),
@@ -197,8 +216,6 @@ pub struct Settings {
     request_id: String,
     #[serde(default = "follow")]
     follow_main: bool,
-    #[serde(default = "follow")]
-    follow_worker: bool,
 }
 fn follow() -> bool {
     true
@@ -255,10 +272,7 @@ pub async fn settings(
         }
     }
     let mut inner = s.conversation.inner.lock().unwrap();
-    let mut fingerprint = json!({"profile":settings.profile,"expected_revision":settings.expected_revision,"follow_main":settings.follow_main});
-    if !settings.follow_worker {
-        fingerprint["follow_worker"] = json!(false);
-    }
+    let fingerprint = json!({"profile":settings.profile,"expected_revision":settings.expected_revision,"follow_main":settings.follow_main});
     let fingerprint = fingerprint.to_string();
     if let Some(old) = inner.store.get(&key).map_err(internal)? {
         if old != fingerprint {
@@ -310,23 +324,6 @@ pub async fn settings(
         inner
             .store
             .set(storage::PROFILES, &serde_json::to_string(&profiles)?)?;
-        if settings.follow_worker {
-            let mut policy: routing::Policy = inner
-                .store
-                .get("agent.routing.v1")?
-                .map(|s| serde_json::from_str(&s))
-                .transpose()?
-                .unwrap_or_default();
-            policy.worker_profile = Some(settings.profile.id.clone());
-            policy.follow_chat = false;
-            policy.revision = policy
-                .revision
-                .checked_add(1)
-                .ok_or_else(|| anyhow!("Routing revision overflow"))?;
-            inner
-                .store
-                .set("agent.routing.v1", &serde_json::to_string(&policy)?)?;
-        }
         inner.store.set(&key, &fingerprint)?;
         Ok(())
     })();
@@ -398,15 +395,9 @@ mod tests {
                 &serde_json::to_string(&vec![edited]).unwrap(),
             )
             .unwrap();
-        s.conversation
-            .inner
-            .lock()
-            .unwrap()
-            .store
-            .set("agent.routing.v1", &json!({"follow_chat":true}).to_string())
-            .unwrap();
         let (spec, _) = routing::resolve(
             &s,
+            None,
             None,
             routing::Source::User,
             &TaskRequirements::default(),
@@ -416,20 +407,19 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[tokio::test]
-    async fn profile_library_edits_preserve_defaults_and_explicit_worker_routing() {
+    async fn configured_connections_are_available_for_autonomous_routing() {
         let (dir, store, _, _) = fixture();
         let mut s = crate::tests::service();
         s.data = dir.clone();
-        s.control_config = Arc::new(crate::model_config::ControlConfig::new(s.data.clone()));
         s.workspace = dir.clone();
         s.execution = Some(config());
         s.conversation.inner.lock().unwrap().store = store;
         let original = thread(&s).unwrap();
         let mut profile = Profile::api(&config());
-        profile.id = "separate-worker".into();
+        profile.id = "other-provider".into();
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let request = json!({"profile":profile,"expected_revision":0,"request_id":"library-copy","follow_main":false,"follow_worker":false});
+        let request = json!({"profile":profile,"expected_revision":0,"request_id":"library-copy","follow_main":false});
         for _ in 0..2 {
             let _ = settings(
                 State(s.clone()),
@@ -444,91 +434,35 @@ mod tests {
             routing::resolve(
                 &s,
                 None,
-                routing::Source::User,
-                &TaskRequirements::default()
-            )
-            .unwrap()
-            .0
-            .source_profile_id,
-            "pot-default"
-        );
-        let p = routing::Policy {
-            worker_profile: Some(profile.id.clone()),
-            ..Default::default()
-        };
-        assert!(
-            routing::configure(State(s.clone()), HeaderMap::new(), Json(p.clone()))
-                .await
-                .is_err()
-        );
-        let saved = routing::configure(State(s.clone()), h.clone(), Json(p.clone()))
-            .await
-            .unwrap()
-            .0;
-        assert!(
-            routing::configure(State(s.clone()), h.clone(), Json(p))
-                .await
-                .is_err()
-        );
-        let mut invalid = saved.clone();
-        invalid.worker_profile = Some("missing".into());
-        assert!(
-            routing::configure(State(s.clone()), h.clone(), Json(invalid))
-                .await
-                .is_err()
-        );
-        let (spec, _) = routing::resolve(
-            &s,
-            None,
-            routing::Source::User,
-            &TaskRequirements::default(),
-        )
-        .unwrap();
-        assert_eq!(spec.source_profile_id, profile.id);
-        assert_eq!(
-            routing::resolve(
-                &s,
                 None,
-                routing::Source::User,
+                routing::Source::Tool,
                 &TaskRequirements::default()
             )
             .unwrap()
             .0,
-            spec
+            original.config
         );
-        assert_eq!(
+        let (chosen, route) = routing::resolve(
+            &s,
+            Some("other-provider"),
+            Some("task-model"),
+            routing::Source::Tool,
+            &TaskRequirements::default(),
+        )
+        .unwrap();
+        assert_eq!(chosen.model, "task-model");
+        assert_eq!(route.profile, "other-provider");
+        assert!(
             routing::resolve(
                 &s,
-                Some("pot-default"),
-                routing::Source::User,
-                &TaskRequirements::default()
-            )
-            .unwrap()
-            .0
-            .source_profile_id,
-            "pot-default"
-        );
-        let restored: routing::Policy =
-            serde_json::from_str(&serde_json::to_string(&routing::policy(&s).unwrap()).unwrap())
-                .unwrap();
-        assert_eq!(restored.worker_profile, Some(profile.id));
-        let mut follow = saved;
-        follow.worker_profile = None;
-        let _ = routing::configure(State(s.clone()), h, Json(follow))
-            .await
-            .unwrap();
-        assert_eq!(
-            routing::resolve(
-                &s,
+                Some("missing"),
                 None,
-                routing::Source::User,
+                routing::Source::Tool,
                 &TaskRequirements::default()
             )
-            .unwrap()
-            .0
-            .source_profile_id,
-            "pot-default"
+            .is_err()
         );
+        assert_eq!(thread(&s).unwrap(), original);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -599,7 +533,8 @@ mod tests {
         let mut p = Profile::api(&config());
         p.revision = 2;
         p.model = "next-model".into();
-        let body = json!({"profile":p,"expected_revision":1,"request_id":"save","follow_main":false,"follow_worker":false});
+        let body =
+            json!({"profile":p,"expected_revision":1,"request_id":"save","follow_main":false});
         for _ in 0..2 {
             let _ = settings(
                 State(s.clone()),

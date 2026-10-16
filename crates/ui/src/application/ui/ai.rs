@@ -375,8 +375,9 @@ impl Settings {
                             }),
                     );
                 }
-                form = form
-                    .child(field(crate::application::i18n::text("ai.model")).child(model_field));
+                form = form.child(
+                    field(crate::application::i18n::text("ai.default-model")).child(model_field),
+                );
             }
             if matches!(
                 state["api_protocol"].as_str(),
@@ -463,213 +464,61 @@ impl Settings {
             primary = Some(Button::new("ai-save-connection").primary().control(cx).label(crate::application::i18n::text("editor.save")).disabled(busy)
                 .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"context":fields[24].read(cx).value(),"output":fields[25].read(cx).value(),"effort":fields[27].read(cx).value()}))));
             let mut details = div().flex().flex_col().gap_4();
-            details = details.child(form).when(
-                state["active_spec"]["model"].as_str().is_none()
-                    && state["routing_owner"] == "main",
-                |el| {
-                    el.child(hint(
-                        crate::application::i18n::text(if state["return_to_chat"] == true {
-                            "editor.save-returns-chat"
-                        } else {
-                            "editor.save-sets-main"
-                        }),
-                        cx,
-                    ))
-                },
-            );
+            details = details.child(form);
             if let Some(message) = state["check_message"].as_str().filter(|s| !s.is_empty()) {
                 details = details.child(hint(message.to_owned(), cx));
             }
             body = body.child(details.flex_shrink_0().min_w_0());
         } else {
             let profiles = state["profiles"].as_array().cloned().unwrap_or_default();
-            let draft = state["draft_profile"].as_str().unwrap_or("").to_owned();
-            let selected = profiles.iter().find(|p| p["id"] == draft);
-            let label = selected
-                .and_then(|p| p["name"].as_str())
-                .unwrap_or(crate::application::i18n::text("ai.choose-an-agent"))
+            let selected = state["default_provider_id"]
+                .as_str()
+                .unwrap_or("")
                 .to_owned();
-            let options = profiles.clone();
-            let model_input = self.fields[22].clone();
-            let form = super::form(cx)
-                .child(
-                    field("Agent").child(
-                        Button::new("ai-main-picker")
-                            .control(cx)
-                            .label(label)
-                            .dropdown_caret(true)
-                            .disabled(busy)
-                            .dropdown_menu(move |menu, _, _| {
-                                options.iter().fold(menu, |menu, p| {
-                                    let id = p["id"].as_str().unwrap_or("").to_owned();
-                                    menu.item(
-                                        PopupMenuItem::new(
-                                            p["name"].as_str().unwrap_or("Agent").to_owned(),
-                                        )
-                                        .checked(id == draft)
-                                        .on_click(
-                                            move |_, _, _| {
-                                                command(json!({"action":"ai-choose","id":id}))
-                                            },
-                                        ),
-                                    )
-                                })
-                            }),
-                    ),
-                )
-                .child(
-                    field(crate::application::i18n::text("ai.model"))
-                        .help(crate::application::i18n::text(
-                            "ai.enter-a-model-supported-by-this-agent",
-                        ))
-                        .child(
-                            Input::new(&model_input)
-                                .control(cx)
-                                .aria_label(crate::application::i18n::text("ai.chat-model"))
-                                .disabled(busy),
-                        ),
-                );
-            let no_profiles = profiles.is_empty();
-            let active = &state["active_spec"];
-            if screen == "main" {
-                let active_profile = profiles
-                    .iter()
-                    .find(|p| p["id"] == active["source_profile_id"]);
-                body = body.child(
-                    card(cx)
-                        .child(section(crate::application::i18n::text("ai.main-agent")))
-                        .child(hint(
-                            crate::application::i18n::text("ai.pot-will-use-this-agent-for-the"),
-                            cx,
-                        ))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_wrap()
-                                .items_center()
-                                .gap_3()
-                                .child(connection_summary(
-                                    provider_icon(state, active_profile.map(|p| profile_brand(state, p)).unwrap_or("custom")),
-                                    state["active_name"].as_str()
-                                        .filter(|_| active["model"].as_str().is_some())
-                                        .unwrap_or(crate::application::i18n::text("ai.not-configured")).to_owned(),
-                                    active["model"].as_str().unwrap_or(crate::application::i18n::text("ai.connect-an-agent-then-choose-a-model")).to_owned(), cx))
-                                .child(
-                                    Button::new("ai-edit-main")
-                                        .control(cx)
-                                        .label(if active["model"].as_str().is_some() {
-                                            crate::application::i18n::text("ai.change")
-                                        } else {
-                                            crate::application::i18n::text("ai.connect-agent")
-                                        })
-                                        .when(active["model"].as_str().is_none(), |b| {
-                                            b.icon(IconName::Plus)
-                                        })
-                                        .when(no_profiles, |b| b.primary())
-                                        .disabled(busy)
-                                        .on_click(move |_, _, _| {
-                                            command(
-                                                json!({"action":"ai-screen","screen":if no_profiles { "add" } else { "main-edit" }}),
-                                            )
-                                        }),
-                                ),
-                        ),
-                );
-            } else {
-                body = body.child(form).child(hint(
-                    crate::application::i18n::text("ai.save-to-apply-existing-tasks-keep-their"),
+            let label = profiles
+                .iter()
+                .find(|p| p["id"] == selected)
+                .and_then(|p| p["name"].as_str())
+                .unwrap_or(crate::application::i18n::text("ai.not-configured"))
+                .to_owned();
+            let choices = profiles.clone();
+            body=body.child(super::form(cx).child(field(crate::application::i18n::text("ai.default-provider")).child(
+                Button::new("ai-default-provider").control(cx).label(label).dropdown_caret(true).disabled(busy || profiles.is_empty())
+                    .dropdown_menu(move|menu,_,_|choices.iter().fold(menu,|menu,p| {
+                        let id=p["id"].as_str().unwrap_or("").to_owned();
+                        menu.item(PopupMenuItem::new(p["name"].as_str().unwrap_or("").to_owned()).checked(id==selected)
+                            .on_click(move|_,_,_|command(json!({"action":"ai-default-provider","id":id}))))
+                    }))
+            ))).child(div().flex().items_center().justify_between().gap_3()
+                .child(section(crate::application::i18n::text("ai.integrated-agents")))
+                .child(Button::new("ai-add").control(cx).icon(IconName::Plus).label(crate::application::i18n::text("ai.connect-agent")).disabled(busy)
+                    .on_click(|_,_,_|command(json!({"action":"ai-screen","screen":"add"})))));
+            if profiles.is_empty() {
+                body = body.child(hint(
+                    crate::application::i18n::text("ai.no-agents-connected-yet-choose-an-ai"),
                     cx,
                 ));
-                primary = Some(
-                        Button::new("ai-save-main")
-                            .primary()
-                            .control(cx).label(crate::application::i18n::text("editor.save"))
-                            .disabled(busy || profiles.is_empty())
-                            .on_click(move |_, _, cx| {
-                                command(
-                                    json!({"action":"ai-save-main","model":model_input.read(cx).value()}),
-                                )
-                            }),
-                    );
             }
-            if screen == "main" {
-                body = body.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .flex_wrap()
-                        .gap_3()
-                        .justify_between()
-                        .child(section(crate::application::i18n::text(
-                            "ai.integrated-agents",
-                        )))
-                        .child(
-                            div().flex().gap_2().child(
-                                Button::new("ai-add")
-                                    .control(cx)
-                                    .icon(IconName::Plus)
-                                    .label(crate::application::i18n::text("ai.connect-agent"))
-                                    .disabled(busy)
-                                    .on_click(|_, _, _| {
-                                        command(json!({"action":"ai-screen","screen":"add"}))
-                                    }),
-                            ),
-                        ),
-                );
-                if profiles.is_empty() {
-                    body = body.child(hint(
-                        crate::application::i18n::text("ai.no-agents-connected-yet-choose-an-ai"),
-                        cx,
-                    ));
-                }
-            }
-            let mut integrated = card(cx).p_0();
-            for (i, p) in profiles.iter().enumerate() {
+            for (index, p) in profiles.iter().enumerate() {
                 let id = p["id"].as_str().unwrap_or("").to_owned();
-                let status = crate::application::i18n::text("ai.configured");
-                integrated = integrated.child(
-                    div()
-                        .px_4()
-                        .py_3()
+                body = body.child(
+                    card(cx)
                         .flex()
+                        .flex_row()
                         .flex_wrap()
                         .items_center()
-                        .justify_between()
-                        .gap_4()
-                        .when(i > 0, |row| {
-                            row.border_t_1().border_color(cx.theme().border)
-                        })
+                        .gap_3()
                         .child(connection_summary(
                             provider_icon(state, profile_brand(state, p)),
-                            p["name"].as_str().unwrap_or("Agent").to_owned(),
+                            p["name"].as_str().unwrap_or("").to_owned(),
                             p["model"].as_str().unwrap_or("").to_owned(),
                             cx,
                         ))
-                        .child(hint(status, cx))
-                        .when(active["source_profile_id"] == id, |row| {
-                            row.child(
-                                div()
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_md()
-                                    .bg(cx.theme().secondary)
-                                    .text_sm()
-                                    .child(crate::application::i18n::text("ai.main-agent")),
-                            )
-                        })
                         .child(
-                            Button::new(("ai-manage", i))
+                            Button::new(("ai-manage", index))
                                 .ghost()
                                 .control(cx)
-                                .label(
-                                    if status
-                                        == crate::application::i18n::text("ai.sign-in-required")
-                                    {
-                                        crate::application::i18n::text("ai.sign-in-56")
-                                    } else {
-                                        crate::application::i18n::text("ai.configure")
-                                    },
-                                )
+                                .label(crate::application::i18n::text("ai.configure"))
                                 .disabled(busy)
                                 .on_click(move |_, _, _| {
                                     command(json!({"action":"ai-manage","id":id}))
@@ -677,10 +526,8 @@ impl Settings {
                         ),
                 );
             }
-            if screen == "main" && !profiles.is_empty() {
-                body = body.child(integrated);
-            }
         }
+
         if screen != "main" {
             if screen != "add" && !state["result"].as_str().unwrap_or("").is_empty() {
                 body = body.child(hint(

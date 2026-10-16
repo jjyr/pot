@@ -299,6 +299,12 @@ Secrets owns encrypted values. These are libraries in the same process, not extr
 services to deploy. Local Agent service calls stay in memory; network adapters
 are only required across machines.
 
+Provider definitions and creation defaults are shared per Control; each assistant
+owns its concrete model selection. Assistants route Tasks autonomously using
+their instructions and available models, without routing approval or model
+allowlists. [Model configuration](model-directory.md) defines ownership and
+defaults; [Task coordination](task-coordination.md) defines task selection.
+
 Control also owns the shared offline [model directory](model-directory.md): a
 bundled seed, persistent cache and independent 24-hour refresh task. App and Web
 consume the same provider/model/logo projection and nullable parameter overrides.

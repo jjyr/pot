@@ -7,6 +7,21 @@ Task migration operation.
 Main manages Tasks; Workers cannot create, message, wait for, interrupt or cancel
 other Tasks. Summary sessions only inspect Tasks.
 
+## Autonomous model routing
+
+The invoking assistant selects a configured Provider and model using the task,
+explicit user instructions, its AGENTS.md and current model capabilities. Routing
+requires no user confirmation, Profile allowlist, worker default or Follow Chat
+setting. Omitted selection snapshots the invoking assistant's active model
+configuration. Explicit unavailable selections fail visibly. Capacity and token
+allowances still apply, and choosing a model grants no machine/tool authority.
+`create_task` accepts an optional configured connection `profile` ID and concrete
+`model` ID. A selected connection without a model uses its default model. When
+both are omitted, the invoking assistant's active configuration is copied.
+Existing Tasks retain their model snapshots; each schedule occurrence creates a
+new Task and resolves its selection then. Machine placement is independent of
+model selection.
+
 ## Guidance, messages and waiting
 
 | Tool | Purpose |

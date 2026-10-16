@@ -229,7 +229,8 @@ fn allowed(method: &Method, path: &str) -> bool {
     }
     if matches!(
         path,
-        "/api/v1/providers/check"
+        "/api/v1/providers/default"
+            | "/api/v1/providers/check"
             | "/api/v1/agent/config"
             | "/api/v1/usage/policy"
             | "/api/v1/usage/resume"
@@ -625,6 +626,7 @@ mod tests {
             ));
         }
         for path in [
+            "providers/default",
             "providers/check",
             "agent/config",
             "usage/policy",

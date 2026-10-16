@@ -38,7 +38,8 @@ Initial history is not unread. Row content and avatar reactions follow
 Fresh configuration has no registered assistants. AI setup and registration are
 separate; startup never provisions an assistant implicitly. Creation destinations
 load their own configuration and credentials stay with the owning Control.
-Creating from an existing assistant uses its selected resolved model configuration;
+Creating an assistant uses its destination Space's default Provider and that
+Provider's concrete default model, independently of the current assistant;
 existing assistant location is read-only. See
 [creation behavior](design-language.md#assistants) and
 [first connection](design-language.md#settings-and-first-connection).

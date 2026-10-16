@@ -934,7 +934,7 @@ impl Client {
                 if owner == "new" {
                     return requests
                         .post("/api/v1/assistants")
-                        .send_json(json!({"request_id":value["request_id"],"name":value["name"],"profile_id":value["profile_id"],"source_assistant":value["source_assistant"]}))?
+                        .send_json(value.clone())?
                         .body_mut()
                         .read_json()
                         .map_err(|e| e.to_string());

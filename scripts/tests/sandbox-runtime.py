@@ -389,9 +389,9 @@ async def run(args):
                     "model": "pot-mock",
                     "protocol": "openai_chat",
                     "api_key": "fixture",
-                    "follow_main": True,
                 },
             )
+            await api("agent/config", {"request_id": str(uuid.uuid4()), "profile": "pot-test"})
             await turn([])
             assert (await api("sandboxes"))["items"][0]["state"]["phase"] == "stopped"
             await api(
@@ -577,10 +577,10 @@ SKILLS""",
                     "api_key": "test-only",
                     "protocol": "openai_chat",
                     "expected_revision": 0,
-                    "request_id": "api-fixture-setup",
-                    "follow_main": True,
+                    "request_id": str(uuid.uuid4()),
                 },
             )
+            await api("agent/config", {"request_id": str(uuid.uuid4()), "profile": "api-fixture"})
             await turn([])
             assert all(
                 item["state"]["phase"] == "stopped" for item in (await api("sandboxes"))["items"]

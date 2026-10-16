@@ -153,7 +153,7 @@ impl Host {
         // This transport fixture has no real model window; do not let the installed
         // skill catalog turn a cancellation test into a context-budget test.
         profile["params"]["agent"]["context_window"] = json!(1_000_000);
-        host.admin("/api/v1/agent",Some(json!({"profile":profile,"expected_revision":revision,"request_id":uuid::Uuid::new_v4().to_string(),"follow_main":true,"follow_worker":false}))).await.error_for_status().unwrap();
+        host.admin("/api/v1/agent",Some(json!({"profile":profile,"expected_revision":revision,"request_id":uuid::Uuid::new_v4().to_string(),"follow_main":true}))).await.error_for_status().unwrap();
         host
     }
 

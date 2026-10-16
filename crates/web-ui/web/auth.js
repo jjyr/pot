@@ -24,9 +24,11 @@ task=initialRoute.get('task')||'';page=(['assistants','chat','task','tasks','mac
 function apiExecutionTarget(value){try{const v=JSON.parse(value);return v.execution_target?JSON.stringify(v.execution_target):value;}catch{return value;}}
 scheduleSelected=initialRoute.get('schedule')||'';
 function navigate(){
+  window.potEditorHistory.afterRestore(()=>{
   const state={page,task,scope,query,offset,assistantId,execution_target,scheduleSelected,scheduleOffset,runsOffset};
   const url='/?page='+page+(task?'&task='+encodeURIComponent(task):'')+(page==='schedules'&&scheduleSelected?'&schedule='+encodeURIComponent(scheduleSelected):'')+'&assistant='+encodeURIComponent(assistantId);
   if(window.potEditorHistory.active||location.pathname+location.search===url)history.replaceState({...history.state,...state},'',url);else history.pushState(state,'',url);
+  });
 }
 history.replaceState({page,task,scope,query,offset,assistantId,execution_target,scheduleSelected,scheduleOffset,runsOffset},'',location.pathname+location.search);
 
@@ -81,7 +83,7 @@ function domain(path){
   if(path.includes('/permissions'))return 'permissions';
   if(path.includes('/schedules'))return 'schedules';
   if(path.includes('/usage'))return 'usage';
-  if(path.includes('/agent')||path.includes('/instructions')||path.includes('/providers')||path.includes('/completions'))return 'settings';
+  if(path.endsWith('/definition')||path.includes('/agent')||path.includes('/instructions')||path.includes('/providers')||path.includes('/completions'))return 'settings';
   if(path.endsWith('/assistants'))return 'assistants';return 'machines';
 }
 function invalidate(topics){
@@ -232,11 +234,11 @@ window.potAction=async(action,value)=>{
     }
     if(action==='selection'){
       if(sending||JSON.parse(module.pending_send()))throw Error(t('mobile.shell.resolve-the-previous-send-using-retry-first'));
-      const selected=JSON.parse(value);if(assistantId!==selected.assistant)pageData={};assistantId=selected.assistant;task=selected.task||'';snapshot=undefined;
+      const selected=JSON.parse(value);if(assistantId!==selected.assistant)pageData={};assistantId=selected.assistant;task=selected.task||'';snapshot=undefined;navigate();
     }
     if(action==='assistant-save'){
       const draft=JSON.parse(value), owner=draft.owner;
-      if(owner==='new'){const created=await api('/api/v1/assistants',{request_id:draft.request_id,name:draft.name,profile_id:draft.profile_id,source_assistant:draft.source_assistant});assistantCreatedOwner=created.id;}
+      if(owner==='new'){const created=await api('/api/v1/assistants',draft);assistantCreatedOwner=created.id;}
       else {
         await api(`/api/v1/assistants/${encodeURIComponent(owner)}/definition`,draft);
       }

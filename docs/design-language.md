@@ -176,13 +176,21 @@ and titles share the image. A new completed live reply triggers one 650 ms whole
 image scale-and-tilt rebound. Initial history, duplicate updates and reconnect
 catch-up do not replay it; hidden pages do not queue reactions.
 
-The + action opens creation; selecting an existing row opens Chat. Creation is
-prefilled with Pot and the current model, with optional settings collapsed.
-Destination changes load that Space's configuration. Saving AI setup alone
-creates no assistant; registration is explicit and retries reuse its request
-identity. Creation in Chat opens the new conversation. Creation entered through
-an editor returns to its captured caller after acknowledgment. Existing assistant
-editing exposes name, AGENTS.md and model configuration; its location is read-only.
+The + action opens creation with name, destination Space, Provider and model
+visible. The destination Space's default Provider is preselected, and the model
+field contains that Provider's concrete default model ID, never a synthetic
+"Default model" choice. Changing Provider selects its default model. Changing
+Space loads that Space's Providers and defaults. Saving a Provider creates or
+selects no assistant; assistant registration is explicit and retries reuse its
+request identity.
+
+Creation and assistant editing share the same configuration controls. Existing
+assistant location is read-only. Provider/model changes are saved on the assistant
+without changing the shared Provider or other assistants. Model parameters and
+assistant instructions start collapsed; expanding instructions reveals AGENTS.md.
+Nested Provider setup preserves the assistant draft and returns to its caller.
+Assistant settings contain no task routing controls: the assistant chooses task
+models autonomously, guided by its instructions.
 
 ### Chat and task conversation
 
@@ -225,28 +233,17 @@ than manual creation forms. See [Task coordination](task-coordination.md) and
 
 ### Settings and first connection
 
-Settings has General / AI Configuration / Task Configuration tabs and an explicit
+Settings has General / AI Providers / Task Configuration tabs and an explicit
 configuration location. General exposes Language, Appearance and keyboard shortcuts;
 shortcuts start collapsed on narrow windows. Locale/theme startup and live changes
 follow [Internationalization](internationalization.md), preserving drafts.
 
-AI Configuration shows the Main Agent/model summary and Integrated Agents. The
-provider chooser uses Control's model directory, common providers, Custom API,
-search and an inline More providers expansion. Editors show all connection fields
-without a collapsed section and support provider-specific overrides and browser
-authorization where available. Model
-selection combines directory and discovered IDs with manual entry. Check uses
-supported model-list GETs without saving or inference; Save does not require Check.
-Blank credentials preserve an existing key; saved keys never return to public
-state. See [Model directory](model-directory.md).
-
-An unconfigured Chat offers Set up AI; native App also offers connection to an
-existing Pot server when none is configured. Narrow Assistants can enter creation
-through +. An empty main configuration labels Save's additional effect: set the
-Main Agent, or return to Chat when entered there. Ordinary additions retain the
-existing Main Agent. Applied Thread configuration determines the effective model;
-existing tasks retain their own model/plugin snapshot. Task Configuration groups
-routing/defaults, concurrency and allowances, including Follow Chat.
+AI Providers manages named connections, credentials, endpoints, protocols and
+concrete default models. One Provider is the Space's new-assistant default.
+Changing these defaults affects new form selections, not existing assistants or
+Task snapshots. There is no global Main Agent selection. Task Configuration
+contains execution capacity and Provider allowances, not model-routing defaults,
+Follow Chat switches, independent worker profiles or model-selection allowlists.
 
 ### Usage and Machines
 

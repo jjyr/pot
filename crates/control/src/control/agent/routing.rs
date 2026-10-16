@@ -1,20 +1,14 @@
 //! Routing policy is user-owned; engine tool hints cannot change it.
 use super::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-const POLICY: &str = "agent.routing.v1";
+const POLICY: &str = "task.capacity.v1";
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     #[serde(default)]
-    pub worker_profile: Option<String>,
-    #[serde(default)]
-    pub follow_chat: bool,
-    #[serde(default)]
     pub revision: u64,
-    #[serde(default)]
-    pub allowed_tool_profiles: BTreeSet<String>,
     #[serde(default)]
     pub profile_limits: BTreeMap<String, usize>,
     #[serde(default)]
@@ -29,7 +23,8 @@ pub enum Source {
     Tool,
 }
 pub fn policy(root: &Service) -> Result<Policy> {
-    root.conversation
+    configuration_owner(root)
+        .conversation
         .inner
         .lock()
         .unwrap()
@@ -49,6 +44,7 @@ pub async fn configure(
 ) -> ApiResult<Json<Policy>> {
     root.authorized(&h)?;
     initialize(&root).map_err(internal)?;
+    let root = configuration_owner(&root);
     let inner = root.conversation.inner.lock().unwrap();
     let old: Policy = inner
         .store
@@ -66,19 +62,8 @@ pub async fn configure(
         ));
     }
     let profiles = profiles(&inner.store).map_err(internal)?;
-    if p.worker_profile
-        .iter()
-        .any(|id| !profiles.iter().any(|v| &v.id == id))
-    {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            "invalid_worker_profile",
-            "Use a known worker profile",
-        ));
-    }
-    if p.allowed_tool_profiles
-        .iter()
-        .chain(p.profile_limits.keys())
+    if p.profile_limits
+        .keys()
         .any(|id| !profiles.iter().any(|v| &v.id == id))
         || p.provider_limits
             .keys()
@@ -108,81 +93,55 @@ pub async fn configure(
     root.invalidate("settings");
     Ok(Json(p))
 }
-pub fn allow_hint(root: &Service, hint: Option<&str>) -> Result<()> {
-    if let Some(hint) = hint {
-        anyhow::ensure!(
-            policy(root)?.allowed_tool_profiles.contains(hint),
-            "Profile hint is not allow-listed by the user"
-        );
-    }
-    Ok(())
-}
 pub fn resolve(
     root: &Service,
     profile: Option<&str>,
+    model: Option<&str>,
     source: Source,
     requirements: &TaskRequirements,
 ) -> Result<(ResolvedSpec, TaskRouting)> {
     initialize(root)?;
-    if source == Source::Tool {
-        allow_hint(root, profile)?;
+    if profile.is_none() && model.is_none() {
+        let spec = thread(root)?.config;
+        check_requirements(&spec, requirements)?;
+        let routing = TaskRouting {
+            profile: spec.source_profile_id.clone(),
+            revision: spec.source_profile_revision,
+            provider: spec.provider.clone(),
+            reason: "chat_default".into(),
+            selection_reason: None,
+        };
+        return Ok((spec, routing));
     }
-    if profile.is_none() {
-        let policy = policy(root)?;
-        let inner = root.conversation.inner.lock().unwrap();
-        if (policy.follow_chat || (policy.worker_profile.is_none()))
-            && let Some(thread) = current(&inner.store)?
-        {
-            let spec = thread.config;
-            check_requirements(&spec, requirements)?;
-            let routing = TaskRouting {
-                profile: spec.source_profile_id.clone(),
-                revision: spec.source_profile_revision,
-                provider: spec.provider.clone(),
-                reason: "chat_default".into(),
-                selection_reason: None,
-            };
-            return Ok((spec, routing));
-        }
-    }
-    let (selected, reason) = match profile {
-        Some(id) => (
-            id.to_owned(),
-            match source {
-                Source::User => "user_requested",
-                Source::Schedule => "schedule",
-                Source::Tool => "tool_hint",
-            },
-        ),
-        None => (
-            if policy(root)?.follow_chat {
-                current(&root.conversation.inner.lock().unwrap().store)?
-                    .ok_or_else(|| anyhow!("Chat Agent is not configured"))?
-                    .config
-                    .source_profile_id
-            } else {
-                policy(root)?.worker_profile.unwrap_or_else(|| {
-                    current(&root.conversation.inner.lock().unwrap().store)
-                        .ok()
-                        .flatten()
-                        .map(|b| b.config.source_profile_id)
-                        .unwrap_or_else(|| "pot-default".into())
-                })
-            },
-            "worker_default",
-        ),
+    let selected = match profile {
+        Some(id) => id.to_owned(),
+        None => thread(root)?.config.source_profile_id,
     };
-    let profile = profiles(&root.conversation.inner.lock().unwrap().store)?
+    let mut profile = configured_profiles(root)?
         .into_iter()
         .find(|p| p.id == selected)
-        .ok_or_else(|| anyhow!("Selected worker profile is missing"))?;
+        .ok_or_else(|| anyhow!("Selected Provider is unavailable"))?;
+    if let Some(model) = model {
+        if model.trim() != profile.model
+            && let Some(settings) = profile.model_settings.as_mut()
+        {
+            settings.context_window = None;
+            settings.max_output_tokens = None;
+        }
+        profile.model = model.trim().to_owned();
+    }
     let spec = crate::gateway::resolve(root, &profile)?;
     check_requirements(&spec, requirements)?;
     let routing = TaskRouting {
         profile: selected,
         revision: profile.revision,
         provider: spec.provider.clone(),
-        reason: reason.into(),
+        reason: match source {
+            Source::User => "user_requested",
+            Source::Schedule => "schedule",
+            Source::Tool => "tool_selection",
+        }
+        .into(),
         selection_reason: None,
     };
     Ok((spec, routing))
@@ -226,37 +185,9 @@ impl Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn inspection_uses_only_routing_policy() {
-        let s = crate::tests::service();
-        s.conversation
-            .inner
-            .lock()
-            .unwrap()
-            .store
-            .set(
-                POLICY,
-                &json!({"worker_profile":"chosen-worker"}).to_string(),
-            )
-            .unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert("authorization", "Bearer test-token".parse().unwrap());
-        let Json(visible) = inspect(State(s.clone()), headers.clone()).await.unwrap();
-        assert_eq!(visible.worker_profile.as_deref(), Some("chosen-worker"));
-        assert_eq!(
-            policy(&s).unwrap().worker_profile.as_deref(),
-            Some("chosen-worker")
-        );
-        s.conversation
-            .inner
-            .lock()
-            .unwrap()
-            .store
-            .set(POLICY, &json!({"follow_chat": true}).to_string())
-            .unwrap();
-        let Json(visible) = inspect(State(s), headers).await.unwrap();
-        assert!(visible.follow_chat);
-        assert!(visible.worker_profile.is_none());
+    #[test]
+    fn routing_schema_has_no_user_model_selection_policy() {
+        assert!(serde_json::from_value::<Policy>(json!({"follow_chat":true})).is_err());
+        assert!(serde_json::from_value::<Policy>(json!({"allowed_tool_profiles":[]})).is_err());
     }
 }

@@ -83,7 +83,7 @@ pub(crate) fn refresh_plugins(s: &Service) -> Result<()> {
         .map(|hub| hub.service(&s.assistant_id))
         .transpose()?;
     let mut settings = if let Some(owner) = owner {
-        let profiles = agent::profiles(&owner.conversation.inner.lock().unwrap().store)?;
+        let profiles = agent::configured_profiles(&owner)?;
         profiles
             .into_iter()
             .find(|profile| profile.id == thread.config.source_profile_id)

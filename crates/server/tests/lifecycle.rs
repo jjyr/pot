@@ -285,6 +285,15 @@ async fn shutdown_settles_active_main_and_worker_model_requests_without_host_exe
     let client = reqwest::Client::new();
     client.post(format!("{base}/api/v1/providers")).bearer_auth(&endpoint.token).json(&json!({"request_id":uuid::Uuid::new_v4().to_string(),"expected_revision":0,"endpoint":format!("http://{address}/model"),"model":"fixture","protocol":"openai_chat","api_key":"fixture","max_output_tokens":1024})).send().await.unwrap().error_for_status().unwrap();
     client
+        .post(format!("{base}/api/v1/agent/config"))
+        .bearer_auth(&endpoint.token)
+        .json(&json!({"request_id":"select-shutdown-fixture","profile":"apot-default"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    client
         .post(format!("{base}/api/v1/messages"))
         .bearer_auth(&endpoint.token)
         .json(&json!({"request_id":"main","conversation_id":"main","text":"wait"}))
@@ -436,10 +445,16 @@ async fn assistant_clients_select_owners_and_edit_rules_without_model_calls() {
     let fixture = Fixture::new();
     let server = fixture.start().await;
     let client = server.local_client();
+    let saved=client.request("/api/v1/providers",Some(json!({"request_id":uuid::Uuid::new_v4().to_string(),"expected_revision":0,"profile_id":"fixture","name":"Fixture","endpoint":"http://localhost:9999/v1/responses","protocol":"openai_responses","model":"fixture-model","api_key":"test-only"}))).await.unwrap();
+    assert!(
+        saved.status.is_success(),
+        "{}",
+        String::from_utf8_lossy(&saved.body)
+    );
     let reply = client
         .request(
             "/api/v1/assistants",
-            Some(json!({"request_id":"assistant-a","name":"A"})),
+            Some(json!({"request_id":"assistant-a","name":"A","configuration":{"provider_id":"fixture","model":"fixture-model"}})),
         )
         .await
         .unwrap();
@@ -448,7 +463,7 @@ async fn assistant_clients_select_owners_and_edit_rules_without_model_calls() {
     let reply = client
         .request(
             "/api/v1/assistants",
-            Some(json!({"request_id":"assistant-b","name":"B"})),
+            Some(json!({"request_id":"assistant-b","name":"B","configuration":{"provider_id":"fixture","model":"fixture-model"}})),
         )
         .await
         .unwrap();

@@ -103,7 +103,7 @@ opaque revision that changes on every save. It is part of the assistant's state,
 independent of execution target. Main contexts receive their own rules;
 workers receive task briefs and applicable project directory instructions, not
 assistant or global Agent-home rules. 
-The built-in dispatch instructions and fresh eligible Profile catalog remain
+The built-in dispatch instructions and fresh configured Provider/model catalog remain
 injected independently. A custom system prompt still receives file instructions.
 
 Explicit task choices take precedence over saved rules. Without an explicit target,
@@ -113,18 +113,30 @@ At dispatch, the selected machine's current policy determines direct Host or
 shared Sandbox execution. The actual context is recorded for this execution;
 reruns create new Tasks. Same-machine Host exceptions require machine policy
 approval and do not change the Task's normal context. Labels describe routing intent, not a capability guarantee;
-execution fails normally if the selected target cannot do the work. Rules cannot enable a
-service, allow a Profile or grant execution authority. `create_task` retains
+execution fails normally if the selected target cannot do the work. Rules guide autonomous model selection from configured Providers; they cannot
+enable an unconfigured service or grant execution authority. `create_task` retains
 `selection_reason`; dedicated preference tools and `preference_revision` have
 been removed with user agreement. Existing tasks retain configuration snapshots.
 
 Use the persistent Chat assistant pane to select assistants and its + action to
-create one. The Chat edit action changes the current assistant’s name and AGENTS.md. Edits remain drafts until Save. Each assistant retains its draft
-when switching; saving compares the definition revision and the rules revision. A conflict preserves the draft and reports that the saved version changed.
-Agent edits use `read_agent_instructions` and `update_agent_instructions`.
-Updates require fresh owner approval; the server captures the review baseline, and existing grants
-cannot skip review. UI and model edits share the DB record and conflict checks.
-Host file tools no longer edit the assistant's live rule record.
+create one. Creation selects the owning Space's default Provider and that
+Provider's concrete default model. The assistant editor changes name, Provider,
+model, parameters and its own instructions without opening global settings.
+Instructions and model parameters start collapsed. Edits remain drafts until
+Save; conflicts preserve the draft. UI and agent edits share the DB instruction
+record and revision checks. `read_agent_instructions` and
+`update_agent_instructions` remain owner-scoped; instruction updates retain their
+owner-approval contract. Host file tools do not edit the live rule record.
+
+Task model routing is autonomous and requires no routing confirmation or user
+allowlist. The invoking assistant uses explicit task instructions, its AGENTS.md,
+the available configured Provider/model catalog and task requirements to select a
+route. With no explicit route, Control snapshots that assistant's active model
+configuration. No separate user-managed task default, Follow Chat toggle or
+worker-model configuration is required. Model selection and execution-machine
+placement remain independent. Unavailable explicit routes fail visibly rather
+than silently changing models. Provider/model definitions are shared within a
+Space; chat choices and instructions belong to each assistant.
 
 A fresh registry has no assistants. AI settings can be saved before explicitly
 creating the first assistant; configuration saves and restarts never register one.
@@ -134,7 +146,7 @@ saved preference metadata are not imported or converted. Existing DB rules are
 preserved. Project AGENTS.md files continue to be discovered independently for
 both assistants and workers.
 
-Configured Profile identity/model/capabilities determine eligible candidates.
+Configured Provider identity/model/capabilities determine available candidates.
 An unavailable required target must produce clarification or a visible failure;
 no extra classifier model call or silent executor substitution is introduced.
 

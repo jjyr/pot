@@ -206,6 +206,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/v1/providers":
             self.data(
                 dict(
+                    default_provider_id="fixture",
                     connections=[
                         dict(
                             profile_id="fixture",
@@ -213,16 +214,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             protocol="openai_chat",
                             has_key=True,
                         )
-                    ]
+                    ],
                 )
             )
         elif path == "/api/v1/agent/routing":
             self.data(
                 dict(
                     revision=1,
-                    follow_chat=True,
-                    worker_profile=None,
-                    allowed_tool_profiles=[],
                     profile_limits={},
                     provider_limits={},
                 )

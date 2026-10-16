@@ -31,6 +31,24 @@ sent to models.dev. Shutdown cancels the refresh task.
 The cache is an internal detail and has no product status, refresh button or
 failure notification.
 
+## Ownership and defaults
+
+Providers are Space-owned named connections with credentials, protocol, endpoint,
+available models and a concrete default model. Saving a Provider never configures
+or registers an assistant. The Space's default Provider initializes new assistant
+forms; its concrete default model ID is visibly selected. Changing Provider
+selects its default model. There is no synthetic "Default model" option and no
+separate Space-level default model overriding the Provider default.
+
+Assistants save their own Provider/model/parameter selection. Empty assistant
+parameter fields inherit the selected Provider default model parameters; a
+different model derives its context/output limits from that model's metadata.
+Explicit assistant overrides take precedence. Changing one
+assistant does not mutate the Provider or another assistant. Updating a Provider's
+default model affects future selections only. Tasks snapshot their chosen
+configuration. Providers and their current models are visible to all assistants
+within the owning Space, while credentials stay at Control.
+
 ## Provider and model selection
 
 The default chooser shows common providers and Custom API. More providers expands

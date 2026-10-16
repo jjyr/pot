@@ -589,8 +589,9 @@ mod tests {
             resources.host().await.instance_lock(),
         );
         let state = read(client.request("/api/v1/agent", None).await.unwrap());
-        assert_eq!(state["thread"]["config"]["model"], "fixture-model");
-        let request = json!({"request_id":uuid::Uuid::new_v4().to_string(),"name":"Pot"});
+        assert!(state["thread"].is_null());
+        assert_eq!(state["profiles"][0]["model"], "fixture-model");
+        let request = json!({"request_id":uuid::Uuid::new_v4().to_string(),"name":"Pot","configuration":{"provider_id":"configured-api","model":"fixture-model"}});
         let created = client
             .request("/api/v1/assistants", Some(request.clone()))
             .await
