@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=BUILD / "resources")
     parser.add_argument("--output", type=Path, default=BUILD / "releases/resources")
-    parser.add_argument("--tag", default="sandbox-go-resources-v0.1.0")
+    parser.add_argument("--tag", default="sandbox-go-resources-v0.2.0")
     parser.add_argument("--catalog", type=Path, default=ROOT / "resources/sandbox/catalog.json")
     parser.add_argument("--update-catalog", action="store_true")
     args = parser.parse_args()

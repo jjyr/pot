@@ -203,7 +203,7 @@ run = "python scripts/export-go-sandbox-resources"
 
 [tasks."test:go-packaging"]
 description = "Verify Go-only package layout, immutable export and service artifact generation"
-run = "python scripts/tests/go-packaging.py"
+run = ["python scripts/tests/go-packaging.py", "python scripts/tests/verify-go-sandbox-resources.py"]
 
 [tasks."preview:go"]
 description = "Run the disposable loopback shared UI preview (no model or product data)"

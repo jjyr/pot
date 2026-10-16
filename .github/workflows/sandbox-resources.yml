@@ -5,7 +5,11 @@ on:
       tag:
         description: Resource tag already committed in the embedded catalog
         required: true
-        default: sandbox-go-resources-v0.1.0
+        default: sandbox-go-resources-v0.2.0
+        type: string
+      prepared_assets:
+        description: Absolute directory of reviewed exported assets on the release runner
+        required: true
         type: string
 permissions:
   contents: write
@@ -18,6 +22,7 @@ jobs:
     timeout-minutes: 120
     env:
       RESOURCE_TAG: ${{ inputs.tag }}
+      PREPARED_ASSETS: ${{ inputs.prepared_assets }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -25,18 +30,33 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
         with:
           version: 2026.10.10
-      - name: Build and verify separate resource assets
+      - name: Verify and stage reviewed resource assets
         run: |
-          mise run prepare
-          mise run check:swift
-          mise run build:sandbox-image
-          mise exec -- python scripts/export-go-sandbox-resources --tag "$RESOURCE_TAG" --output "$RUNNER_TEMP/pot-sandbox-resources"
+          staged=$(mktemp -d "$RUNNER_TEMP/pot-sandbox-resources.XXXXXX")
+          rmdir "$staged"
+          manifest=$(mktemp "$RUNNER_TEMP/pot-sandbox-resources-manifest.XXXXXX")
+          mise exec -- python scripts/verify-go-sandbox-resources \
+            --source "$PREPARED_ASSETS" --tag "$RESOURCE_TAG" --output "$staged" >"$manifest"
+          echo "RESOURCE_MANIFEST=$manifest" >>"$GITHUB_ENV"
       - name: Publish immutable resources
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Never replace an existing resource release or silently change client hashes.
-          gh release create "$RESOURCE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --draft --latest=false --title "$RESOURCE_TAG" --notes "SHA-256 pinned Linux Sandbox resources." \
-            "$RUNNER_TEMP/pot-sandbox-resources"/*
-          gh release edit "$RESOURCE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          mise exec -- python - <<'PYTHON'
+          import json, os, pathlib, subprocess
+          manifest = json.loads(pathlib.Path(os.environ["RESOURCE_MANIFEST"]).read_text())
+          tag = os.environ["RESOURCE_TAG"]
+          if manifest["tag"] != tag or not manifest["files"]:
+              raise ValueError("Verified resource manifest does not match this release")
+          # Upload only the exact verified files, never other source/staging files.
+          subprocess.run([
+              "gh", "release", "create", tag, "--repo", os.environ["GITHUB_REPOSITORY"],
+              "--target", os.environ["GITHUB_SHA"], "--draft", "--latest=false",
+              "--title", tag, "--notes", "SHA-256 pinned Linux Sandbox resources.",
+              *manifest["files"],
+          ], check=True)
+          subprocess.run([
+              "gh", "release", "edit", tag, "--repo", os.environ["GITHUB_REPOSITORY"],
+              "--draft=false", "--latest=false",
+          ], check=True)
+          PYTHON
