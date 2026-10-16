@@ -48,17 +48,23 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   }
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
-  const client = {production: true, desktop, runtime, request,
+  const readBaselines=desktop?await invoke('AssistantReads'):[];
+  const client = {production: true, desktop, runtime, request,readBaselines,
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
     snapshot: async options => {
       const scope = {...context};
       const value = await request('/api/v1/snapshot', {...scope, ...options});
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
-    send: ({boot_id, ...body}) => request('/api/v1/messages', {method: 'POST', body}),
+    send: ({boot_id,user_message_id,...body}) => request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text}:body}),
+    controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,method:'POST',body}),
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
     openMain: desktop ? () => invoke('OpenMain') : undefined,
     openDesktop: desktop ? sandboxID => invoke('OpenDesktop',sandboxID) : undefined,
+    confirmSandboxResources:desktop?(requestID,locale)=>invoke('ConfirmSandboxResources',requestID,locale):undefined,
+    markRead:desktop?value=>invoke('ReadAssistant',value.space_id,value.owner,value.reply_id,value.reply_count):undefined,
+    onRead:desktop?handler=>runtimeAPI.Events.On('pot:read',event=>handler(event.data)):undefined,
+    setReducedMotion:desktop?value=>invoke('SetReducedMotion',value):undefined,
     async downloadFile(task,path,options={}) {
       const scope={...context,...options};
       if(desktop)return invoke('DownloadFile',task,path,scope.owner,scope.space);

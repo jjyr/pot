@@ -1,9 +1,9 @@
-// Deterministic crash reporting contracts; browser/WASM smoke tests verify rendering.
+// Deterministic crash reporting contracts; browser smoke tests verify rendering.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../../crates/web-ui/web/errors.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../web/src/errors.js'), 'utf8');
 
 class Element {
   constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.hidden = false; this.textContent = ''; }

@@ -3,6 +3,9 @@ import {acceptSnapshot, beginSend, beginSubscription, createConversationState, d
 import {bindComposer} from './composer.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {createPages} from './pages.mjs';
+import {createLiveResourceRequests} from './resources.mjs';
+import {createReplies,replyKey} from '../state/replies.mjs';
+import {bindCompletions} from './completions.mjs';
 
 const paths = {
   menu: 'M4 6h16M4 12h16M4 18h16', back: 'm14 5-7 7 7 7', plus: 'M12 5v14M5 12h14',
@@ -60,6 +63,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let theme = params.get('theme') || stored('pot-go-preview-theme', 'system');
   if (!['system', 'light', 'dark'].includes(theme)) theme = 'system';
   const state = createConversationState();
+  let initialReads=[];try{initialReads=client.desktop?client.readBaselines||[]:JSON.parse(stored('pot-ui-read-v1','[]'));}catch{}
+  const replies=createReplies(Array.isArray(initialReads)?initialReads:[]),reactions=new Map(),readAttempts=new Set();
   let epoch = beginSubscription(state);
   let disconnected = false;
   let disposed = false;
@@ -70,7 +75,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let cancelPending = false;
   let editorOwner = null;
   let menuOpen = false;
-  let preferencesOpen = false;
+  let preferencesOpen = false,restoringHistory=false;
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
@@ -84,6 +89,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const workspace = el('main', 'workspace');
   const notice = el('p', 'preview-notice');
   const approvals = el('div', 'approval-host');
+  const resourceNotices=el('div','resource-notices');resourceNotices.hidden=true;resourceNotices.dataset.empty='true';let liveResources=null;
   const history = el('div', 'history');
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
@@ -103,13 +109,37 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   form.append(input, send);
   composerArea.append(latest, form, status);
   const unavailable = el('div', client.production ? 'page-host' : 'unavailable');
-  workspace.append(notice, approvals, history, composerArea, unavailable);
+  workspace.append(notice, approvals, resourceNotices, history, composerArea, unavailable);
   const menu = el('nav', 'mobile-menu');
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
   root.append(rail, titlebar, directory, workspace, menu, preferences);
-  const pages = client.production ? createPages({client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(), openChat: () => navigate('chat')}) : null;
+  const pages = client.production ? createPages({client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();},withResourceConsent:options=>liveResources?liveResources.run(options):options.work(), openChat:()=>{route='chat';directoryOpen=false;renderShell();}}) : null;
+  if(client.production&&client.desktop)liveResources=createLiveResourceRequests({client,host:resourceNotices,locale:()=>locale,notify:value=>{error=value;updateControls();},scope:()=>{const space=(client.spaces||[]).find(value=>value.kind==='local');return {space:space?.id,name:space?.name};},onChanged:()=>renderShell()});
   const media = matchMedia('(max-width: 719px)');
+  const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
+  const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
+  const controlOf=item=>item?.control_id||item?.space_id||client.runtime?.runtime_id||'';
+  function markVisibleRead(){
+    const item=selectedAssistant;if(restoringHistory||!client.production||!item||item.offline||route!=='chat'||menuOpen||document.visibilityState==='hidden'||!document.hasFocus()||(media.matches&&directoryOpen))return;
+    const count=item.reply_count||0,id=item.reply_id||'';
+    if(id&&!state.snapshot?.messages.some(message=>message.id===id&&message.role==='assistant'&&message.status==='complete'))return;
+    const control=controlOf(item),key=JSON.stringify([control,item.id,id,count]);if(readAttempts.has(key))return;
+    readAttempts.add(key);
+    if(client.markRead)client.markRead({space_id:item.space_id,owner:item.id,reply_id:id,reply_count:count}).then(receipt=>{if(disposed)return;replies.adopt(receipt);directorySignature='';renderShell();}).catch(()=>{readAttempts.delete(key);});
+    else{const unread=replies.unread(control,item.id,count);replies.mark(control,item.id,id,count);saveReads();return unread>0;}
+  }
+  function assistantAvatar(item,size){
+    const value=avatar(size,item?.request_id||item?.id||'main'),started=reactions.get(replyKey(controlOf(item),item?.id||''));
+    if(started&&!reducedMotion.matches&&performance.now()-started<650){value.classList.add('is-arriving');value.style.animationDelay=`-${performance.now()-started}ms`;}
+    return value;
+  }
+  const focusRead=()=>{markVisibleRead();if(!disposed)renderShell();};
+  const readStorage=event=>{if(event.key!=='pot-ui-read-v1'||client.desktop)return;try{for(const record of JSON.parse(event.newValue||'[]'))replies.adopt(record);directorySignature='';renderShell();}catch{}};
+  const stopRead=client.onRead?.(receipt=>{replies.adopt(receipt);directorySignature='';if(!disposed)renderShell();})||(()=>{});
+  const reducedChanged=()=>{client.setReducedMotion?.(reducedMotion.matches).catch(()=>{});if(reducedMotion.matches)reactions.clear();if(!disposed)renderShell();};
+  client.setReducedMotion?.(reducedMotion.matches).catch(()=>{});
+  reducedMotion.addEventListener('change',reducedChanged);window.addEventListener('focus',focusRead);document.addEventListener('visibilitychange',focusRead);window.addEventListener('storage',readStorage);
   const viewport = window.visualViewport;
   const viewportChanged = () => {
     root.style.height = `${viewport ? viewport.height : innerHeight}px`;
@@ -120,6 +150,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     onSend: submit,
     onCompositionEnd: () => { syncEditor(); updateControls(); },
   });
+  const completions=client.production?bindCompletions(input,{client,host:composerArea,locale:()=>locale}):null;
   function syncEditor() {
     if (!state.snapshot) return;
     const nextOwner = ownerKey(state.snapshot);
@@ -131,14 +162,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function requestID() { return crypto.randomUUID(); }
   async function submit() {
-    if (state.snapshot?.running || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
-    const receipt = beginSend(state, requestID());
+    if ((!client.production&&state.snapshot?.running) || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
+    const receipt = beginSend(state, requestID(),{allowRunning:client.production});
     if (!receipt) return;
     error = '';
     updateControls();
     try {
       const result = await client.send(receipt.request);
-      if (typeof result.message_id !== 'string' || typeof result.duplicate !== 'boolean') throw Error('Invalid preview receipt');
+      if (typeof result.message_id !== 'string' || typeof result.duplicate !== 'boolean') throw Error('Invalid message receipt');
       settleSend(state, receipt, true);
     } catch (reason) {
       if (settleSend(state, receipt, false)) error = reason.message || String(reason);
@@ -156,35 +187,39 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     finally { cancelPending = false; if (!disposed) updateControls(); }
   }
   form.addEventListener('submit', event => { event.preventDefault(); submit(); });
-  send.addEventListener('click', () => state.snapshot?.running ? cancel() : submit());
+  send.addEventListener('click', () => state.snapshot?.running&&!draft(state).trim() ? cancel() : submit());
   function updateControls() {
     const snapshot = state.snapshot;
     const pending = snapshot && state.pending.has(ownerKey(snapshot));
     const running = snapshot?.running;
-    const label = running ? (cancelPending ? t('stopping') : t('stop')) : t('send');
-    send.replaceChildren(icon(running ? 'stop' : 'send'));
+    const stopping=running&&(!client.production||!draft(state).trim());
+    const label = stopping ? (cancelPending ? t('stopping') : t('stop')) : running?(locale==='zh-CN'?'发送指导':'Send guidance'):t('send');
+    send.replaceChildren(icon(stopping ? 'stop' : 'send'));
     send.title = label;
     send.setAttribute('aria-label', label);
-    send.disabled = running ? cancelPending || connection !== 'connected' : !snapshot || editorOwner !== ownerKey(snapshot) || pending || !draft(state).trim() || connection !== 'connected';
+    send.disabled = stopping ? selectedAssistant?.offline||cancelPending || connection !== 'connected' : selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || !draft(state).trim() || connection !== 'connected';
     input.disabled = !snapshot && !editorOwner;
+    const visibleConnection=selectedAssistant?.offline?'offline':connection;
     status.replaceChildren();
-    status.classList.toggle('has-error', Boolean(error) || connection === 'offline');
-    status.classList.toggle('is-connected',!error&&connection==='connected');
-    status.append(el('span', '', error || (connection === 'connected' ? t(client.production?'connected':'preview') : t(connection))));
-    if (connection === 'offline') {
+    status.classList.toggle('has-error', Boolean(error) || visibleConnection === 'offline');
+    status.classList.toggle('is-connected',!error&&visibleConnection==='connected');
+    status.append(el('span', '', error || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if (visibleConnection === 'offline') {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
       retry.onclick = () => loadSnapshot(true);
       status.append(retry);
     }
   }
-  async function navigate(next) {
+  function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
+  async function navigate(next,{replace=false,record=true}={}) {
     if (pages && !await pages.leave()) return;
     route = next;
     menuOpen = false;
     if (next === 'chat') directoryOpen = true;
+    if(client.production&&record)saveNavigation(next,replace);
     renderShell();
-    if (pages && next !== 'chat') pages.show(next);
+    if(pages&&next==='chat')pages.permissions();if (pages && next !== 'chat') pages.show(next);
   }
   function navigation(inMenu) {
     const fragment = document.createDocumentFragment();
@@ -201,6 +236,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   let preferenceControls;
   function renderPreferences() {
+    if(client.production){preferences.classList.add('product-actions');preferences.replaceChildren();const close=button('close',t('close'));close.onclick=()=>preferences.close();preferences.append(close);const action=(label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.onclick=()=>{preferences.close();run();};preferences.append(choice);};if(selectedAssistant){action(t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});action(t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});}if(state.snapshot?.running){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action(paused?(locale==='zh-CN'?'恢复回复':'Resume turn'):(locale==='zh-CN'?'暂停回复':'Pause turn'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}action(t('settings'),()=>navigate('settings'));return;}
     if (!preferenceControls) {
       const heading = el('div', 'preferences-heading');
       const title = el('h2');
@@ -247,6 +283,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   preferences.addEventListener('close', () => { preferencesOpen = false; });
   function renderShell() {
+    markVisibleRead();
+    if(route!=='chat')completions?.reset();
+    window.potErrors?.setTranslator(key=>messages[locale][key]||messages.en[key]||key);
     document.documentElement.dataset.theme = theme;
     document.documentElement.lang = locale;
     const narrow = media.matches && surface !== 'tray';
@@ -255,19 +294,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     rail.replaceChildren(navigation(false));
     rail.setAttribute('aria-label', t('menu'));
     titlebar.replaceChildren();
-    if (pages?.editing) { const back = button('back', t('back')); back.onclick = () => pages.back(); titlebar.append(back); }
-    if (surface !== 'tray') {
+    if (pages?.hasParent) { const back = button('back', t('parentBack')); back.onclick = () => pages.back(); titlebar.append(back); }
+    if (surface !== 'tray'&&!pages?.hasParent) {
       const back = route === 'chat' && narrow && !directoryOpen;
       const leading = button(back ? 'back' : 'menu', t(back ? 'back' : 'menu'), 'icon-button narrow-navigation');
       leading.onclick = () => {
-        if (back) { directoryOpen = true; renderShell(); }
+        if (back) { directoryOpen = true;if(client.production)saveNavigation('chat',true);renderShell(); }
         else { menuOpen = true; renderShell(); }
       };
       titlebar.append(leading);
       if(!narrow&&route==='chat'&&!client.production){const back=button('back',t('back'));back.onclick=()=>{directoryOpen=true;renderShell()};titlebar.append(back);}
     }
     const title = el('div', 'window-title');
-    if (route === 'chat' && !(narrow && directoryOpen)) title.append(avatar(24,selectedAssistant?.request_id||selectedAssistant?.id||'main'));
+    if (route === 'chat' && !(narrow && directoryOpen)) title.append(assistantAvatar(selectedAssistant,24));
     title.append(el('span', '', route === 'chat' ? (narrow && directoryOpen ? t('assistants') : selectedAssistant?.name || 'Pot') : pages?.title || t(route)));
     titlebar.append(title);
     if (surface === 'tray' && client.openMain) {
@@ -290,11 +329,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     history.setAttribute('aria-label', t('chat'));
     latest.title = t('latest');
     latest.setAttribute('aria-label', t('latest'));
-    approvals.hidden = history.hidden = composerArea.hidden = route !== 'chat';
+    resourceNotices.hidden=resourceNotices.dataset.empty==='true'||!['chat','tasks','machines'].includes(route);history.hidden = composerArea.hidden = route !== 'chat';approvals.hidden=route!=='chat'&&!(route==='tasks'&&pages?.taskOwner);
     unavailable.hidden = route === 'chat';
     if (!client.production) unavailable.textContent = t('unavailable');
     // Search is window state and survives narrow conversation navigation/resizes.
-    const nextDirectorySignature = JSON.stringify([locale,selectedAssistant?.space_id,selectedAssistant?.id,assistants,state.snapshot?.assistants]);
+    const nextDirectorySignature = JSON.stringify([locale,selectedAssistant?.space_id,selectedAssistant?.id,assistants,state.snapshot?.assistants,replies.records()]);
     if (nextDirectorySignature !== directorySignature || !directory.childElementCount) {
     directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
@@ -314,8 +353,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     for (const item of items) {
       const selected = (!client.production&&item.id==='main') || selectedAssistant?.id === item.id && selectedAssistant?.space_id === item.space_id;
       const row = el('button', `assistant-row${selected ? ' is-selected' : ''}`); row.type = 'button';
-      row.append(avatar(32,item.request_id||item.id)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');name.append(el('span','assistant-title',item.name));
+      row.append(assistantAvatar(item,32)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');name.append(el('span','assistant-title',item.name));
       const badge=el('span','owner-badge badge-icon');badge.title=item.space_name||t(item.space_kind==='remote'?'remote':'local');badge.append(icon(item.space_kind==='remote'?'cloud':'machines'));name.append(badge);
+      const unread=replies.unread(controlOf(item),item.id,item.reply_count||0);if(unread){const badge=el('span','unread-badge',unread>9?'9+':String(unread));badge.title=String(unread);badge.setAttribute('aria-label',`${unread} ${locale==='zh-CN'?'条未读回复':'unread replies'}`);name.append(badge);row.classList.add('has-unread');}
       labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || item.phase || ''));
       row.append(labels); row.onclick = () => client.production ? selectAssistant(item) : (directoryOpen = false, renderShell());
       list.append(row); rows.push({row, name:item.name.toLowerCase()});
@@ -344,6 +384,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   history.addEventListener('scroll', () => { latest.hidden = nearBottom(); }, {passive: true});
   latest.onclick = scrollBottom;
   const messageNodes = new Map();
+  const taskCache=new Map();let taskRefresh=0;
+  async function refreshBackgroundTasks(){
+    if(!client.production||!selectedAssistant)return;
+    const scope=client.scope(),key=JSON.stringify([scope.space,scope.owner]),ticket=++taskRefresh;
+    try{const value=await client.request('/api/v1/tasks/query?scope=active&limit=50',{...scope});if(disposed||ticket!==taskRefresh||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;taskCache.set(key,(value.items||[]).filter(task=>task.phase==='running').map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));if(route==='chat')renderMessages();}catch{/* Keep owner-scoped cached rows until an authoritative refresh succeeds. */}
+  }
   let activityNode;
   function renderMessages() {
     const follow = nearBottom();
@@ -351,10 +397,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     activityNode?.remove();
     activityNode = null;
     const snapshot = state.snapshot;
-    const ids = new Set((snapshot?.messages || []).map(message => message.id));
+    const visibleMessages=(snapshot?.messages||[]).filter(message=>!(message.role==='system'&&message.request_id?.startsWith('pot-result-')));
+    const ids = new Set(visibleMessages.map(message => message.id));
     for (const [id, record] of messageNodes) if (!ids.has(id)) { record.row.remove(); messageNodes.delete(id); }
     let position = 0;
-    for (const message of snapshot?.messages || []) {
+    for (const message of visibleMessages) {
       let record = messageNodes.get(message.id);
       if (!record) {
         const row = el('article', `message role-${message.role}`);
@@ -386,18 +433,25 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         record.dot = el('span', 'activity-dot'); row.append(record.dot);
       } else if (message.status !== 'streaming' && record.dot) { record.dot.remove(); record.dot = null; }
       record.dot?.setAttribute('aria-label', t('working'));
+      if(message.role==='user'&&message.steering&&message.status==='accepted'){
+        if(!record.received){record.received=el('span','guidance-received');record.received.append(icon('clock'));row.append(record.received);}record.received.title=locale==='zh-CN'?'已接收':'Received';record.received.setAttribute('aria-label',record.received.title);
+      }else if(record.received){record.received.remove();record.received=null;}
+
       if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);
       position++;
     }
-    if (snapshot && !snapshot.messages.length) {
+    const lastAssistant=(snapshot?.messages||[]).findLast(message=>message.role==='assistant');
+    for(const [id,record]of messageNodes){if(id!==lastAssistant?.id){record.tasks?.remove();record.tasks=null;}}
+    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.id),tasks=taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[];record.tasks?.remove();record.tasks=null;if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task');open.type='button';open.title=task.title;open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));open.onclick=()=>{route='tasks';pages.openTask(task);renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}record.row.append(strip);record.tasks=strip;}}
+    if (snapshot && !visibleMessages.length) {
       activityNode = el('p', 'empty-chat', t('first')); messageColumn.append(activityNode);
     }
     if (snapshot?.running && !snapshot.messages.some(message => message.role === 'assistant' && message.status === 'streaming')) {
-      activityNode = el('div', 'activity', t('working'));
+      activityNode = el('div', 'activity', snapshot.turn?.paused?(locale==='zh-CN'?'已暂停':'Paused'):t('working'));
       const dots = el('span', 'waiting-dots');
       dots.setAttribute('aria-hidden', 'true');
       dots.append(el('i'), el('i'), el('i'));
-      activityNode.append(dots); messageColumn.append(activityNode);
+      if(!snapshot.turn?.paused)activityNode.append(dots); messageColumn.append(activityNode);
     }
     if (follow) requestAnimationFrame(() => { if (!disposed) scrollBottom(); });
     else { history.scrollTop = previousTop; latest.hidden = false; }
@@ -409,11 +463,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       connection = 'offline'; error = t('identityChanged'); updateControls(); return;
     }
     const initialSnapshot = !state.snapshot;
-    if (!acceptSnapshot(state, snapshot, receivedEpoch)) return;
+    if (!acceptSnapshot(state, snapshot, receivedEpoch)){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){connection='connected';updateControls();}return;}
     connection = 'connected';
     if(client.production)cachedSnapshots.set(JSON.stringify([client.scope().space,client.scope().owner]),snapshot);
     const restorePosition = editorOwner !== ownerKey(snapshot) ? positions.get(ownerKey(snapshot)) : undefined;
     syncEditor();
+    if(markVisibleRead())renderShell();
     renderMessages(); if (restorePosition !== undefined) requestAnimationFrame(() => {history.scrollTop=restorePosition; latest.hidden=nearBottom();}); updateControls();
     if (client.production) { pages.permissions(); if(initialSnapshot)renderShell(); } else if(initialSnapshot)renderShell();
   }
@@ -443,16 +498,18 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     });
     loadSnapshot();
   }
-  async function selectAssistant(item, initial = false) {
+  async function selectAssistant(item, initial = false,record=true) {
+    completions?.reset();
     if (editor.composing) { input.blur(); if (editor.composing) return; }
     if (pages && !await pages.leave()) return;
     if (state.snapshot) positions.set(ownerKey(state.snapshot), history.scrollTop);
-    selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
+    pages?.clearApprovals();selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
     messageColumn.replaceChildren(); messageNodes.clear(); error = '';
     const cached=cachedSnapshots.get(JSON.stringify([item.space_id||'',item.id]));
     if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();}
-    renderShell();attach();
+    if(client.production&&record)saveNavigation('chat',initial);
+    renderShell();attach();pages?.permissions();refreshBackgroundTasks();
   }
   async function loadDirectory(autoSelect = true) {
     if (!client.production) return;
@@ -460,20 +517,22 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     try {
       const catalog = await client.request('/api/v1/spaces', {owner:'', space:''});
       if (ticket !== directoryEpoch || disposed) return;
-      spaces = catalog.items || [];client.spaces=spaces;
+      spaces = catalog.items || [];client.spaces=spaces;liveResources?.refresh();
       if (!spaces.length) throw Error('No serving Space');
       if(!selectedAssistant)client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});
+      const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
       const results = await Promise.allSettled(spaces.map(async space => {
         const items = await client.request('/api/v1/assistants', {owner:'', space:space.id});
-        return (items.items || items || []).map(item => ({...item, space_id:space.id, space_name:space.name, space_kind:space.kind, offline:false}));
+        return projectAssistants(items,space,space.connected===false);
       }));
       if (ticket !== directoryEpoch || disposed) return;
-      assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : assistants.filter(item => item.space_id === spaces[index].id).map(item => ({...item,offline:true})));
+      assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : (()=>{const space=spaces[index],previous=assistants.filter(item=>item.space_id===space.id);return previous.length?previous.map(item=>({...item,offline:true})):projectAssistants(space.assistants||[],space,true);})());
       client.assistants=assistants;
-      if (results.some(result => result.status === 'rejected')) error = t('partialOffline');
-      if (selectedAssistant) selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;
+      for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
+      if (results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
+      if (selectedAssistant){selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';}
       renderShell();
-      if(!assistants.length){const empty=el('div','empty-chat',t('noAssistants'));const setup=el('button','control',t('setupAI'));setup.onclick=()=>navigate('settings');empty.append(document.createElement('br'),setup);messageColumn.replaceChildren(empty);}
+      if(!assistants.length){const empty=el('div','empty-chat',t('noAssistants'));const setup=el('button','control',t('setupAI'));setup.onclick=async()=>{await navigate('settings');pages.showProviders();};empty.append(document.createElement('br'),setup);messageColumn.replaceChildren(empty);}
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);return;}}
       if (!selectedAssistant && assistants.length) {
         const requested=params.get('assistant_id');const requestedSpace=params.get('space_id');
@@ -486,12 +545,28 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const preferencesChanged = event => {
     if(event.detail.key==='pot-go-preview-locale') locale=event.detail.value;
     if(event.detail.key==='pot-go-preview-theme') theme=event.detail.value;
-    renderShell();renderMessages();window.dispatchEvent(new Event('pot:locale'));
+    renderShell();renderMessages();liveResources?.repaint();window.dispatchEvent(new Event('pot:locale'));
   };
   window.addEventListener('pot:preference',preferencesChanged);
+  const popNavigation=async event=>{
+    if(await pages?.handleHistory(event))return;
+    if(!client.production)return;restoringHistory=true;
+    try{
+      const value=event.state||{},scope=value.potScope||{};
+      if(((value.potRoute||'chat')==='chat'||value.potUsage&&!value.potUsage.returnTask)&&scope.owner&&(!selectedAssistant||selectedAssistant.id!==scope.owner||selectedAssistant.space_id!==scope.space)){const item=assistants.find(item=>item.id===scope.owner&&item.space_id===scope.space);if(!item){error=t('missingAssistant');updateControls();return;}await selectAssistant(item,false,false);}
+      if(value.potResource){route='settings';await pages.openResources(false);return;}
+      if(value.potSchedule){route='tasks';await pages.openSchedule(value.potSchedule,false);return;}
+      if(value.potTask){route='tasks';await pages.openTask(value.potTask,false);return;}
+      if(value.potUsage){route='usage';await pages.openUsage(value.potUsage,false);return;}
+      await navigate(value.potRoute||'chat',{record:false});if((value.potRoute||'chat')==='chat')directoryOpen=!!value.potDirectory;
+    }finally{restoringHistory=false;if(!disposed)renderShell();}
+  };
+  window.addEventListener('popstate',popNavigation);
   const keydown = event => {
+    if((event.metaKey||event.ctrlKey)&&event.key===','){event.preventDefault();navigate('settings');return;}
+    if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='d'){event.preventDefault();navigate('machines');return;}
     if (event.key === 'Escape' && menuOpen) { menuOpen = false; renderShell(); }
-    if (event.metaKey && event.key === '[' && pages?.editing) {event.preventDefault(); pages.back(); return;}
+    if (event.metaKey && event.key === '[' && pages?.hasParent) {event.preventDefault(); pages.back(); return;}
     if (event.metaKey && event.key === '[' && media.matches && !directoryOpen) { event.preventDefault(); directoryOpen = true; renderShell(); }
   };
   let swipe = null;
@@ -514,7 +589,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!gesture.active||Math.abs(event.clientY-gesture.y)>Math.abs(event.clientX-gesture.x))return;
     const dx=event.clientX-gesture.x,threshold=Math.min(innerWidth/4,100);
     if(gesture.menu&&dx < -threshold){menuOpen=false;renderShell();}
-    else if(!gesture.menu&&dx>threshold){if(pages?.editing)pages.back();else if(route==='chat'&&!directoryOpen){directoryOpen=true;renderShell();}else{menuOpen=true;renderShell();}}
+    else if(!gesture.menu&&dx>threshold){if(pages?.hasParent)pages.back();else if(route==='chat'&&!directoryOpen){directoryOpen=true;renderShell();}else{menuOpen=true;renderShell();}}
   };
   const pointerCancel = () => {swipe=null;menu.style.transform='';};
   root.addEventListener('pointerdown',pointerDown,{passive:true});root.addEventListener('pointermove',pointerMove,{passive:false});root.addEventListener('pointerup',pointerUp);root.addEventListener('pointercancel',pointerCancel);
@@ -524,12 +599,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
   renderShell();viewportChanged();
-  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
+  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();if(keys.some(key=>/^(sandbox_resources|resources|machines)/.test(key)))liveResources?.refresh();pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
   return () => {
     disposed = true; directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    completions?.dispose();liveResources?.dispose();
+    stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
     window.removeEventListener('pot:preference',preferencesChanged);
-    document.removeEventListener('keydown', keydown);
+    document.removeEventListener('keydown', keydown);window.removeEventListener('popstate',popNavigation);
     media.removeEventListener('change', mediaChanged);
     viewport?.removeEventListener('resize', viewportChanged);
     window.removeEventListener('resize', viewportChanged);

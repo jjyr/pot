@@ -46,14 +46,14 @@ export function setDraft(state, text, key = state.snapshot && ownerKey(state.sna
   if (key) state.drafts.set(key, text);
 }
 
-export function beginSend(state, requestID) {
-  if (!state.snapshot || state.snapshot.running) return null;
+export function beginSend(state, requestID, {allowRunning=false}={}) {
+  if (!state.snapshot || (state.snapshot.running&&!allowRunning)) return null;
   const key = ownerKey(state.snapshot);
   const text = draft(state, key);
   if (!text.trim() || state.pending.has(key)) return null;
   const retry = state.retries.get(key);
   const request = retry?.text === text && retry.boot_id === state.snapshot.boot_id ? retry
-    : {request_id: requestID, boot_id: state.snapshot.boot_id, conversation_id: state.snapshot.conversation_id, text};
+    : {request_id: requestID, boot_id: state.snapshot.boot_id, conversation_id: state.snapshot.conversation_id, text,...(state.snapshot.running?{user_message_id:state.snapshot.turn_id}:{})};
   const receipt = {request, key, epoch: state.epoch};
   state.pending.set(key, receipt);
   return receipt;

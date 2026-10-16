@@ -51,3 +51,30 @@ assert.equal(modelDefaults(directory,'b','same').context,2000,'provider-specific
 assert.equal(modelDefaults(directory,'custom','unknown').output,600,'manual IDs inherit offline known facts');
 assert.equal(modelDefaults(directory,'custom','missing').context,32768);
 assert.ok(providerChoices(directory).some(([id])=>id==='__more'));assert.ok(!providerChoices(directory,{all:true}).some(([id])=>id==='__more'));
+const {createTaskTranscript,appendTaskEvents}=await import('../../web/src/state/task-transcript.mjs');
+const transcript=createTaskTranscript(),event=(sequence,type,value={})=>({sequence,event:{update:{type,...value}}});
+appendTaskEvents(transcript,[event(1,'message_started'),event(2,'text_delta',{text:'First'}),event(3,'tool_started',{id:'t',name:'read',args:{path:'a'}}),event(4,'tool_output',{id:'t',text:'result'})]);
+appendTaskEvents(transcript,[event(2,'text_delta',{text:'duplicate'}),event(5,'text_delta',{text:' reply'}),event(6,'message_finished')]);
+assert.equal(transcript.messages[0].text,'First reply');assert.ok(transcript.messages[1].text.includes('result'));assert.equal(transcript.cursor,6);
+appendTaskEvents(transcript,[event(7,'turn_finished',{outcome:{kind:'unknown',error:'Execution result is uncertain'}})]);assert.equal(transcript.messages.at(-1).role,'system');
+const {createReplies}=await import('../../web/src/state/replies.mjs');
+const replies=createReplies();assert.deepEqual(replies.observe('control','a','old',5,true),{unread:0,arrived:false});
+assert.deepEqual(replies.observe('control','a','new',6,true),{unread:1,arrived:true});
+assert.equal(replies.observe('control','a','new',6,true).arrived,false);replies.mark('control','a','new',6);assert.equal(replies.unread('control','a',6),0);
+replies.observe('control','a','new',6,false);assert.deepEqual(replies.observe('control','a','catch-up',9,true),{unread:3,arrived:false});
+assert.equal(replies.observe('other','a','same-id',9,true).unread,0,'Controls have independent read baselines');
+assert.equal(createReplies(replies.records()).observe('control','a','catch-up',9,true).unread,3,'Persisted read baseline survives a reload');
+const {completionQuery}=await import('../../web/src/components/completions.mjs');
+assert.deepEqual(completionQuery('Review /skill:cre',17),{start:7,end:17,query:'/skill:cre'});
+assert.equal(completionQuery('https://example.com/path',24),null);assert.equal(completionQuery('/skill:a',2,4),null);assert.equal(completionQuery('/skill:a ',9),null);
+
+const {createConversationState,beginSubscription,acceptSnapshot,setDraft,beginSend,settleSend}=await import('../../web/src/state/conversation.mjs');
+const steeringState=createConversationState(),steeringEpoch=beginSubscription(steeringState);
+acceptSnapshot(steeringState,{runtime_id:'runtime',boot_id:'boot',owner_id:'owner',conversation_id:'chat',cursor:'1',running:true,turn_id:'original-turn',messages:[]},steeringEpoch);setDraft(steeringState,'live guidance');
+assert.equal(beginSend(steeringState,'ignored'),null,'Preview cannot steer a running turn');
+const steeringReceipt=beginSend(steeringState,'steering-request',{allowRunning:true});assert.equal(steeringReceipt.request.user_message_id,'original-turn');settleSend(steeringState,steeringReceipt,false);
+steeringState.snapshot={...steeringState.snapshot,cursor:'2',running:false,turn_id:null};const steeringRetry=beginSend(steeringState,'different-request',{allowRunning:true});assert.equal(steeringRetry.request.request_id,'steering-request');assert.equal(steeringRetry.request.user_message_id,'original-turn','Uncertain steering receipt never retargets another turn');settleSend(steeringState,steeringRetry,true);
+await client.send({boot_id:'boot',request_id:'s',conversation_id:'c',user_message_id:'original-turn',text:'guidance'});assert.equal(calls.at(-1).url,'/api/v1/turn/steer?assistant_id=b&space_id=local');assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'s',user_message_id:'original-turn',text:'guidance'});
+await client.controlTurn({user_message_id:'original-turn',action:'pause'},{owner:'a',space:'remote'});assert.equal(calls.at(-1).url,'/api/v1/turn/control?assistant_id=a&space_id=remote');
+
+assert.equal(combineUsage([{space:{id:'a'},value:{agent_models:[{agent:'pot',model:'shared',input:3,output:2}]}},{space:{id:'b'},stale:true,value:{agent_models:[{agent:'pot',model:'shared',input:7,output:1}]}}]).agent_models[0].input,10,'Global Agent/model categories combine identical models across Spaces');

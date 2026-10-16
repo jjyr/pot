@@ -1,6 +1,8 @@
 // The installation token is origin-scoped in IndexedDB. API calls use the
 // server's HttpOnly session cookie; credentials never enter routes or logs.
 const database = 'pot-browser-access';
+let installationPrompt;
+if(typeof window!=='undefined')window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installationPrompt=event;});
 async function tokenStore(mode, value) {
   return new Promise((resolve,reject)=>{
     const open=indexedDB.open(database,1);open.onupgradeneeded=()=>open.result.createObjectStore('installation');
@@ -40,6 +42,11 @@ export async function ensureBrowserAccess(root) {
   });
 }
 export async function forgetBrowserAccess() {try{await tokenStore('remove');}catch{}await fetch('/access/logout',{method:'POST',credentials:'same-origin'});location.reload();}
+export async function configureBrowserAccess(token) {await exchange(token.trim());try{await tokenStore('put',token.trim());}catch{}}
+export async function requestPWAInstall() {
+  if(!installationPrompt)return false;
+  const prompt=installationPrompt;installationPrompt=null;await prompt.prompt();await prompt.userChoice;return true;
+}
 export async function installPWA() {
   if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/'});
   return null;

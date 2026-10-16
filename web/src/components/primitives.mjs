@@ -21,7 +21,7 @@ export function section(title, description) {
 }
 export function table(headers, rows) {
   const wrap = node('div', 'table-scroll'), result = node('table', 'data-table'), head = node('thead'), tr = node('tr');
-  for (const label of headers) tr.append(node('th', '', label)); head.append(tr); result.append(head);
+  wrap.dataset.scrollKey=headers.join('|');for (const label of headers) tr.append(node('th', '', label)); head.append(tr); result.append(head);
   const body = node('tbody'); for (const values of rows) { const row = node('tr'); for (const value of values) { const cell = node('td'); cell.append(value instanceof Node ? value : node('span', '', value ?? '—')); row.append(cell); } body.append(row); }
   result.append(body); wrap.append(result); return wrap;
 }

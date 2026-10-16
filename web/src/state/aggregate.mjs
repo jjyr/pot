@@ -10,14 +10,15 @@ export function combineTasks(pages,{offset=0,limit=20}={}) {
 function sumRows(rows,keys) {const result={};for(const key of keys)result[key]=rows.reduce((sum,row)=>sum+Number(row?.[key]||0),0);return result;}
 export function combineUsage(pages) {
   const numeric=['input','output','cache','requests','unknown'];
-  const result={total:sumRows(pages.map(page=>page.value.total),numeric),buckets:[],requests:[],tools:[],compactions:[],spaces:pages};
-  const buckets=new Map(),tools=new Map();
+  const result={total:sumRows(pages.map(page=>page.value.total),numeric),routing_total:sumRows(pages.map(page=>page.value.routing_total),numeric),agent_models:[],buckets:[],requests:[],tools:[],compactions:[],spaces:pages};
+  const buckets=new Map(),tools=new Map(),models=new Map();
   for(const {value,space,stale,owner=''}of pages) {
+    for(const item of value.agent_models||[]){const key=JSON.stringify([item.agent,item.model]),old=models.get(key);models.set(key,{...item,...sumRows([old,item],numeric),_stale:stale||old?._stale||false});}
     for(const bucket of value.buckets||[]){const old=buckets.get(bucket.label);buckets.set(bucket.label,{...bucket,...sumRows([old,bucket],numeric)});}
     for(const tool of value.tools||[]){const old=tools.get(tool.name);tools.set(tool.name,{...tool,...sumRows([old,tool],['calls','failed','bytes','duration_ms','unfinished'])});}
     result.requests.push(...(value.requests||[]).map(item=>({...item,_assistant_id:item.assistant_id||owner,_space_id:space.id,_space_name:space.name,_stale:stale})));
     result.compactions.push(...(value.compactions||[]).map(item=>({...item,_assistant_id:item.assistant_id||owner,_space_id:space.id,_space_name:space.name,_stale:stale})));
   }
-  result.buckets=[...buckets.values()];result.tools=[...tools.values()];result.requests.sort((a,b)=>b.at-a.at);result.next_offset=null;
+  result.agent_models=[...models.values()].sort((a,b)=>(b.input+b.output)-(a.input+a.output)||a.model.localeCompare(b.model));result.buckets=[...buckets.values()];result.tools=[...tools.values()];result.requests.sort((a,b)=>b.at-a.at);result.next_offset=null;
   return result;
 }
