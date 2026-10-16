@@ -17,6 +17,7 @@ async page => {
   const input = page.locator('#pot-composer');
   const layouts = [];
   try {
+    await cdp.send('Emulation.clearDeviceMetricsOverride');
     await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: false});
     for (const [width, theme, locale, surface] of [
       [1440, 'light', 'en', 'main'], [900, 'dark', 'zh-CN', 'main'],
@@ -25,9 +26,10 @@ async page => {
       [390, 'light', 'en', 'tray'],
     ]) {
       await page.setViewportSize({width, height: 852});
+      await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:852,deviceScaleFactor:2,mobile:false});
       await page.goto(`${base}/?theme=${theme}&locale=${locale}&surface=${surface}&conversation=preview-conversation`);
       await input.waitFor({state: 'visible'});
-      await page.waitForFunction(() => !document.querySelector('#pot-composer').disabled);
+      await page.waitForFunction(() => document.querySelector('#pot-composer') && !document.querySelector('#pot-composer').disabled);
       const geometry = await page.evaluate(() => {
         const bounds = selector => {
           const element = document.querySelector(selector);
@@ -60,8 +62,9 @@ async page => {
     assert(await input.inputValue() === 'draft survives narrow navigation', 'Conversation draft survives Back');
 
     await page.setViewportSize({width: 1440, height: 900});
+    await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:2,mobile:false});
     await page.goto(`${base}/?theme=light&locale=en&conversation=preview-conversation`);
-    await page.waitForFunction(() => !document.querySelector('#pot-composer').disabled);
+    await page.waitForFunction(() => document.querySelector('#pot-composer') && !document.querySelector('#pot-composer').disabled);
     await input.focus();
     await cdp.send('Input.dispatchKeyEvent', {type: 'keyDown', key: 'n', code: 'KeyN', windowsVirtualKeyCode: 229});
     await cdp.send('Input.imeSetComposition', {text: 'ni', selectionStart: 2, selectionEnd: 2});
@@ -80,7 +83,7 @@ async page => {
     await input.fill(longDraft);
     assert((await input.boundingBox()).height === 150, 'Long drafts cap at 150px');
     await input.fill('');
-    assert((await input.boundingBox()).height === 48, 'Deleting text shrinks desktop editor');
+    assert((await input.boundingBox()).height === 44, 'Deleting text shrinks desktop editor');
 
     // Delay only the acknowledgement to observe typing after submission. A late
     // accepted receipt must not erase text entered during the running preview.

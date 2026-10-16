@@ -1,0 +1,90 @@
+// Shared product transport. Every operation captures its Space/owner before IO.
+export class APIError extends Error {
+  constructor(status, value) { super(value?.message || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
+}
+export function scopedPath(path, {owner = '', space = ''} = {}) {
+  const [base, query = ''] = path.split('?');
+  const params = new URLSearchParams(query);
+  if (owner) params.set('assistant_id', owner);
+  if (space) params.set('space_id', space);
+  return `${base}${params.size ? `?${params}` : ''}`;
+}
+export function normalizeSnapshot(value, runtime, owner, space = '') {
+  if (value?.runtime_id && typeof value.cursor === 'string' && typeof value.running === 'boolean') return value;
+  if (!value || !Number.isSafeInteger(value.cursor) || value.cursor < 0) throw Error('Invalid conversation cursor');
+  return {...value, raw: value, runtime_id: runtime.runtime_id || runtime.id, owner_id: space ? JSON.stringify([space, owner]) : owner,
+    cursor: String(value.cursor), running: !!value.turn, turn_id: value.turn?.user_message_id || null};
+}
+export async function createProductionClient({desktop = false, base = ''} = {}) {
+  let runtimeAPI;
+  if (desktop) runtimeAPI = await import('/wails/runtime.js');
+  const service = 'github.com/jjyr/pot/internal/desktop.Service';
+  const invoke = (method, ...args) => runtimeAPI.Call.ByName(`${service}.${method}`, ...args);
+  const context = {owner: '', space: ''};
+  async function request(path, options = {}) {
+    const {method = 'GET', body, signal} = options;
+    const fullPath = scopedPath(path, {...context, ...options});
+    if (signal?.aborted) throw signal.reason;
+    if (desktop) {
+      const pending = invoke('Call', method, fullPath, body === undefined ? '' : JSON.stringify(body));
+      const abort = () => pending.cancel?.();
+      signal?.addEventListener('abort', abort, {once: true});
+      try {
+        const raw = await pending;
+        if (signal?.aborted) throw signal.reason;
+        const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        // Wails carries the same JSON envelope/errors as the HTTP handler.
+        if (result?.error) throw new APIError(result.status || 400, result.error);
+        return result;
+      } finally { signal?.removeEventListener('abort', abort); }
+    }
+    const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
+      headers: body === undefined ? {} : {'Content-Type': 'application/json'},
+      body: body === undefined ? undefined : JSON.stringify(body)});
+    const value = response.status === 204 ? null : await response.json().catch(() => null);
+    if (!response.ok) throw new APIError(response.status, value);
+    return value;
+  }
+  const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
+  if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
+  const client = {production: true, desktop, runtime, request,
+    scope: () => ({...context}), setScope: value => Object.assign(context, value),
+    snapshot: async options => {
+      const scope = {...context};
+      const value = await request('/api/v1/snapshot', {...scope, ...options});
+      return normalizeSnapshot(value, runtime, scope.owner, scope.space);
+    },
+    send: ({boot_id, ...body}) => request('/api/v1/messages', {method: 'POST', body}),
+    cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
+    openMain: desktop ? () => invoke('OpenMain') : undefined,
+    subscribe(onSnapshot, onStatus = () => {}) {
+      const scope = {...context};
+      let active = true, token;
+      const deliver = value => { if (active) { try { onSnapshot(normalizeSnapshot(value, runtime, scope.owner, scope.space)); } catch { onStatus('offline'); } } };
+      if (desktop) {
+        const stop = runtimeAPI.Events.On('pot:snapshot', event => {
+          const value = event.data;
+          if (value.space_id === scope.space && value.owner === scope.owner) deliver(value.snapshot);
+        });
+        invoke('Subscribe', scope.space, scope.owner).then(value => {
+          token = value; if (!active) invoke('Unsubscribe', value).catch(() => {}); else onStatus('connected');
+        }).catch(() => { if (active) onStatus('offline'); });
+        return () => { active = false; stop(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
+      }
+      const source = new EventSource(`${base}${scopedPath('/api/v1/events', scope)}`);
+      source.addEventListener('snapshot', event => { try { deliver(JSON.parse(event.data)); } catch { onStatus('offline'); } });
+      source.onopen = () => { if (active) onStatus('connected'); };
+      source.onerror = () => { if (active) onStatus('offline'); };
+      return () => { active = false; source.close(); };
+    },
+    changes(onChange) {
+      const scope = {...context};
+      if (desktop) return runtimeAPI.Events.On('pot:changed', event => { if (event.data.space_id === scope.space) onChange(event.data.topics); });
+      const source = new EventSource(`${base}${scopedPath('/api/v1/changes', scope)}`);
+      const deliver = event => { try { const value = JSON.parse(event.data); onChange(value.topics || value); } catch { /* next version event reconciles */ } };
+      source.addEventListener('changed', deliver); source.addEventListener('changes', deliver); source.onmessage = deliver;
+      return () => source.close();
+    },
+  };
+  return client;
+}

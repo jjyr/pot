@@ -2,6 +2,7 @@ import {messages} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, ownerKey, setDraft, settleSend, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
 import {renderMarkdown} from './markdown.mjs';
+import {createPages} from './pages.mjs';
 
 const paths = {
   menu: 'M4 6h16M4 12h16M4 18h16', back: 'm14 5-7 7 7 7', plus: 'M12 5v14M5 12h14',
@@ -11,6 +12,9 @@ const paths = {
   more: 'M5 12h.01M12 12h.01M19 12h.01', send: 'm6 10 6-6 6 6M12 4v16',
   open: 'M14 3h7v7M21 3l-9 9M10 3H3v18h18v-7',
   stop: 'M6 6h12v12H6z', down: 'm6 9 6 6 6-6', close: 'm6 6 12 12M6 18 18 6',
+  cloud:'M6 18h12a4 4 0 0 0 0-8h-1a6 6 0 0 0-11 1 3.5 3.5 0 0 0 0 7',
+  clock:'M12 8v5h4M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
+  copy: 'M9 9h11v11H9zM15 5V3H3v12h2',
 };
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -34,11 +38,12 @@ function button(name, label, className = 'icon-button') {
   item.append(icon(name));
   return item;
 }
-function avatar(size = 32) {
+function avatar(size = 32, key = '') {
   const result = el('span', 'avatar');
   result.style.width = result.style.height = `${size}px`;
   result.setAttribute('aria-hidden', 'true');
-  result.append(el('span', 'avatar-mark'));
+  const mark=el('span','avatar-mark');result.append(mark);
+  if(key&&crypto.subtle)crypto.subtle.digest('SHA-256',new TextEncoder().encode(key)).then(value=>{const hash=new Uint8Array(value),foreground=['#276451','#904e39','#685083','#3a6590','#8a6928','#8b4a68','#40546c','#5a6f3c'],background=['#dce9e2','#f5ddd2','#e5ddf1','#dce8f4','#f4e8c8','#f1dce6','#dde4ec','#e3e8d9'];mark.style.background=foreground[hash[0]%8];result.style.background=background[hash[1]%8];});
   return result;
 }
 function stored(key, fallback) {
@@ -66,6 +71,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let editorOwner = null;
   let menuOpen = false;
   let preferencesOpen = false;
+  let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
+  let unsubscribe = () => {}, stopChanges = () => {};
+  let directoryEpoch = 0, directorySignature = '';
+  const positions = new Map(), cachedSnapshots = new Map();
   const t = key => messages[locale][key] || key;
   root.replaceChildren();
   root.className = `pot-app surface-${surface === 'tray' ? 'tray' : 'main'}`;
@@ -74,6 +83,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const directory = el('aside', 'assistant-directory');
   const workspace = el('main', 'workspace');
   const notice = el('p', 'preview-notice');
+  const approvals = el('div', 'approval-host');
   const history = el('div', 'history');
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
@@ -92,12 +102,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const send = button('send', t('send'), 'send-button');
   form.append(input, send);
   composerArea.append(latest, form, status);
-  const unavailable = el('div', 'unavailable');
-  workspace.append(notice, history, composerArea, unavailable);
+  const unavailable = el('div', client.production ? 'page-host' : 'unavailable');
+  workspace.append(notice, approvals, history, composerArea, unavailable);
   const menu = el('nav', 'mobile-menu');
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
   root.append(rail, titlebar, directory, workspace, menu, preferences);
+  const pages = client.production ? createPages({client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(), openChat: () => navigate('chat')}) : null;
   const media = matchMedia('(max-width: 719px)');
   const viewport = window.visualViewport;
   const viewportChanged = () => {
@@ -158,7 +169,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     input.disabled = !snapshot && !editorOwner;
     status.replaceChildren();
     status.classList.toggle('has-error', Boolean(error) || connection === 'offline');
-    status.append(el('span', '', error || (connection === 'connected' ? t('preview') : t(connection))));
+    status.classList.toggle('is-connected',!error&&connection==='connected');
+    status.append(el('span', '', error || (connection === 'connected' ? t(client.production?'connected':'preview') : t(connection))));
     if (connection === 'offline') {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
@@ -166,11 +178,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       status.append(retry);
     }
   }
-  function navigate(next) {
+  async function navigate(next) {
+    if (pages && !await pages.leave()) return;
     route = next;
     menuOpen = false;
     if (next === 'chat') directoryOpen = true;
     renderShell();
+    if (pages && next !== 'chat') pages.show(next);
   }
   function navigation(inMenu) {
     const fragment = document.createDocumentFragment();
@@ -205,7 +219,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         select.onchange = () => {
           if (key === 'language') { locale = select.value; persist('pot-go-preview-locale', locale); }
           else { theme = select.value; persist('pot-go-preview-theme', theme); }
-          renderShell(); renderMessages();
+          renderShell(); renderMessages(); if(client.production) window.dispatchEvent(new Event('pot:locale'));
         };
         label.append(text, select);
         preferences.append(label);
@@ -213,7 +227,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       }
     }
     const {title, close, hint, fields} = preferenceControls;
-    title.textContent = t('more'); hint.textContent = t('notice');
+    title.textContent = t(client.production?'preferences':'more'); hint.textContent = client.production?'':t('notice');
     close.title = t('close'); close.setAttribute('aria-label', t('close'));
     for (const [key, choices, current] of [
       ['language', [['en', 'English'], ['zh-CN', '简体中文']], locale],
@@ -241,6 +255,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     rail.replaceChildren(navigation(false));
     rail.setAttribute('aria-label', t('menu'));
     titlebar.replaceChildren();
+    if (pages?.editing) { const back = button('back', t('back')); back.onclick = () => pages.back(); titlebar.append(back); }
     if (surface !== 'tray') {
       const back = route === 'chat' && narrow && !directoryOpen;
       const leading = button(back ? 'back' : 'menu', t(back ? 'back' : 'menu'), 'icon-button narrow-navigation');
@@ -249,55 +264,67 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         else { menuOpen = true; renderShell(); }
       };
       titlebar.append(leading);
+      if(!narrow&&route==='chat'&&!client.production){const back=button('back',t('back'));back.onclick=()=>{directoryOpen=true;renderShell()};titlebar.append(back);}
     }
     const title = el('div', 'window-title');
-    if (route === 'chat' && !(narrow && directoryOpen)) title.append(avatar(24));
-    title.append(el('span', '', route === 'chat' ? (narrow && directoryOpen ? t('assistants') : 'Pot') : t(route)));
+    if (route === 'chat' && !(narrow && directoryOpen)) title.append(avatar(24,selectedAssistant?.request_id||selectedAssistant?.id||'main'));
+    title.append(el('span', '', route === 'chat' ? (narrow && directoryOpen ? t('assistants') : selectedAssistant?.name || 'Pot') : pages?.title || t(route)));
     titlebar.append(title);
     if (surface === 'tray' && client.openMain) {
       const open = button('open', t('openMain'));
       open.onclick = async () => { try { await client.openMain(); } catch (reason) { error = reason.message; updateControls(); } };
       titlebar.append(open);
     }
-    const more = button('more', t('more'));
+    if (client.production && route === 'chat' && selectedAssistant) { const settings = button('settings', t('assistantSettings')); settings.onclick = () => {route = 'settings'; pages.assistant(selectedAssistant); renderShell();}; titlebar.append(settings); }
+    if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
+    if (state.snapshot?.configuration) titlebar.append(el('span', 'title-meta', `${state.snapshot.configuration.name || ''} · ${state.snapshot.configuration.model || ''}`));
+    if (state.snapshot?.usage) {const usage=el('span','title-meta token-meta');usage.append(icon('clock'),el('span','',`${new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(state.snapshot.usage.input+state.snapshot.usage.output)} tokens`));titlebar.append(usage);}
+    const more = button(client.production?'more':'settings', t(client.production ? 'preferences' : 'more'));
     more.setAttribute('aria-haspopup', 'dialog');
     more.onclick = () => { preferencesOpen = true; renderPreferences(); preferences.showModal(); };
     titlebar.append(more);
-    notice.textContent = t('notice');
+    if(!client.production&&titlebar.querySelector('.title-meta'))titlebar.insertBefore(more,titlebar.querySelector('.title-meta'));
+    notice.textContent = client.production ? '' : t('notice');
     input.placeholder = t('composer');
     input.setAttribute('aria-label', t('composer'));
     history.setAttribute('aria-label', t('chat'));
     latest.title = t('latest');
     latest.setAttribute('aria-label', t('latest'));
-    history.hidden = composerArea.hidden = route !== 'chat';
+    approvals.hidden = history.hidden = composerArea.hidden = route !== 'chat';
     unavailable.hidden = route === 'chat';
-    unavailable.textContent = t('unavailable');
+    if (!client.production) unavailable.textContent = t('unavailable');
     // Search is window state and survives narrow conversation navigation/resizes.
+    const nextDirectorySignature = JSON.stringify([locale,selectedAssistant?.space_id,selectedAssistant?.id,assistants,state.snapshot?.assistants]);
+    if (nextDirectorySignature !== directorySignature || !directory.childElementCount) {
+    directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
     const scrollTop = directory.querySelector('.assistant-list')?.scrollTop || 0;
     directory.replaceChildren();
     const heading = el('div', 'directory-heading');
     heading.append(el('span', '', t('assistants')));
-    const add = button('plus', t('preview'));
-    add.disabled = true; // creation is intentionally outside this first preview.
+    const add = button('plus', t(client.production ? 'newAssistant' : 'preview'));
+    add.disabled = !client.production;
+    add.onclick = () => { route = 'settings'; pages.assistant(null); renderShell(); };
     heading.append(add);
     const search = el('input', 'assistant-search');
     search.type = 'search'; search.placeholder = t('search'); search.setAttribute('aria-label', t('search')); search.value = searchValue;
     const list = el('div', 'assistant-list');
-    const row = el('button', 'assistant-row is-selected');
-    row.type = 'button';
-    row.append(avatar());
-    const labels = el('span', 'assistant-labels');
-    const name = el('span', 'assistant-name', 'Pot');
-    name.append(el('span', 'owner-badge', t('local')));
-    labels.append(name, el('span', 'assistant-preview', t('preview')));
-    row.append(labels);
-    row.onclick = () => { directoryOpen = false; renderShell(); };
-    const empty = el('p', 'hint', t('searchEmpty'));
-    const filter = () => { row.hidden = !'pot'.includes(search.value.toLowerCase()); empty.hidden = !row.hidden; };
-    search.oninput = filter;
-    list.append(row, empty);
+    const items = client.production ? assistants : state.snapshot?.assistants || [{id:'main', name:'Pot', preview:t('preview')}];
+    const rows = [];
+    for (const item of items) {
+      const selected = (!client.production&&item.id==='main') || selectedAssistant?.id === item.id && selectedAssistant?.space_id === item.space_id;
+      const row = el('button', `assistant-row${selected ? ' is-selected' : ''}`); row.type = 'button';
+      row.append(avatar(32,item.request_id||item.id)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name', item.name);
+      const badge=el('span','owner-badge badge-icon');badge.title=item.space_name||t(item.space_kind==='remote'?'remote':'local');badge.append(icon(item.space_kind==='remote'?'cloud':'machines'));name.append(badge);
+      labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || item.phase || ''));
+      row.append(labels); row.onclick = () => client.production ? selectAssistant(item) : (directoryOpen = false, renderShell());
+      list.append(row); rows.push({row, name:item.name.toLowerCase()});
+    }
+    const empty = el('p', 'hint', t(items.length ? 'searchEmpty' : 'noAssistants'));
+    const filter = () => { let count = 0; for (const item of rows) {item.row.hidden = !item.name.includes(search.value.toLowerCase()); if(!item.row.hidden) count++;} empty.hidden = count > 0; };
+    search.oninput = filter; list.append(empty);
     directory.append(heading, search, list); filter(); list.scrollTop = scrollTop;
+    }
     menu.replaceChildren();
     const menuHeading = el('div', 'mobile-menu-heading', 'Pot');
     const closeMenu = button('close', t('close'));
@@ -339,21 +366,22 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const {row, bubble} = record;
       if (record.text !== message.text || record.role !== message.role) {
         bubble.replaceChildren();
-        if (message.role === 'tool' || message.role === 'system') bubble.textContent = message.text;
+        if (message.role === 'tool') {const detail=el('details','tool-details');detail.append(el('summary','',message.text.split('\n')[0].slice(0,100)),el('pre','',message.text));bubble.append(detail);}
+        else if (message.role === 'system') bubble.textContent = message.text;
         else bubble.append(renderMarkdown(message.text));
         record.text = message.text; record.role = message.role;
         row.className = `message role-${message.role}`;
       }
-      if (message.role === 'assistant' && message.text && !record.copy) {
-        const copy = el('button', 'copy-message', t('copy'));
+      if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
+        const copy = button('copy',t('copy'),'copy-message');
         copy.type = 'button';
         copy.onclick = async () => {
-          try { await navigator.clipboard.writeText(record.text); copy.textContent = t('copied'); }
+          try { await navigator.clipboard.writeText(record.text); copy.title = t('copied'); }
           catch (reason) { error = reason.message; updateControls(); }
         };
         row.append(copy); record.copy = copy;
       }
-      if (record.copy) record.copy.textContent = t('copy');
+      if (record.copy) {record.copy.title=t('copy');record.copy.setAttribute('aria-label',t('copy'));}
       if (message.status === 'streaming' && !record.dot) {
         record.dot = el('span', 'activity-dot'); row.append(record.dot);
       } else if (message.status !== 'streaming' && record.dot) { record.dot.remove(); record.dot = null; }
@@ -380,15 +408,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         && (snapshot.boot_id !== state.snapshot.boot_id || ownerKey(snapshot) !== ownerKey(state.snapshot))) {
       connection = 'offline'; error = t('identityChanged'); updateControls(); return;
     }
+    const initialSnapshot = !state.snapshot;
     if (!acceptSnapshot(state, snapshot, receivedEpoch)) return;
     connection = 'connected';
+    if(client.production)cachedSnapshots.set(JSON.stringify([client.scope().space,client.scope().owner]),snapshot);
+    const restorePosition = editorOwner !== ownerKey(snapshot) ? positions.get(ownerKey(snapshot)) : undefined;
     syncEditor();
-    renderMessages(); updateControls();
+    renderMessages(); if (restorePosition !== undefined) requestAnimationFrame(() => {history.scrollTop=restorePosition; latest.hidden=nearBottom();}); updateControls();
+    if (client.production) { pages.permissions(); if(initialSnapshot)renderShell(); } else if(initialSnapshot)renderShell();
   }
   const abort = new AbortController();
   async function loadSnapshot(reattach = false) {
     if (disposed) return;
-    if (reattach) epoch = beginSubscription(state);
+    if (reattach) {epoch = beginSubscription(state);attach();return;}
     const receivedEpoch = epoch;
     connection = 'connecting'; error = ''; updateControls();
     try {
@@ -400,29 +432,102 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (!disposed && receivedEpoch === state.epoch) { connection = 'offline'; error = reason.message; updateControls(); }
     }
   }
-  // Subscribe first: a newer event wins over an older in-flight initial GET.
-  const unsubscribe = client.subscribe(onSnapshot, value => {
-    if (disposed) return;
-    if (value === 'offline') disconnected = true;
-    if (value === 'connected' && disconnected) {
-      disconnected = false;
-      // A transport reconnect establishes a fresh identity. In-flight GETs from
-      // the previous attachment retain their captured epoch and cannot win.
-      loadSnapshot(true);
-    } else { connection = value; updateControls(); }
-  });
+  function attach() {
+    unsubscribe(); stopChanges();
+    const receivedEpoch = epoch;
+    unsubscribe = client.subscribe(value => onSnapshot(value, receivedEpoch), value => {
+      if (disposed || receivedEpoch !== state.epoch) return;
+      if (value === 'offline') disconnected = true;
+      if (value === 'connected' && disconnected) { disconnected = false; loadSnapshot(true); }
+      else { connection = value; updateControls(); }
+    });
+    if (client.production) stopChanges = client.changes(() => {loadDirectory(false); pages.refresh(); pages.permissions();});
+    loadSnapshot();
+  }
+  async function selectAssistant(item, initial = false) {
+    if (editor.composing) { input.blur(); if (editor.composing) return; }
+    if (pages && !await pages.leave()) return;
+    if (state.snapshot) positions.set(ownerKey(state.snapshot), history.scrollTop);
+    selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
+    epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
+    messageColumn.replaceChildren(); messageNodes.clear(); error = '';
+    const cached=cachedSnapshots.get(JSON.stringify([item.space_id||'',item.id]));
+    if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();}
+    renderShell();attach();
+  }
+  async function loadDirectory(autoSelect = true) {
+    if (!client.production) return;
+    const ticket = ++directoryEpoch;
+    try {
+      const catalog = await client.request('/api/v1/spaces', {owner:'', space:''});
+      if (ticket !== directoryEpoch || disposed) return;
+      spaces = catalog.items || [];client.spaces=spaces;
+      if (!spaces.length) throw Error('No serving Space');
+      if(!selectedAssistant)client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});
+      const results = await Promise.allSettled(spaces.map(async space => {
+        const items = await client.request('/api/v1/assistants', {owner:'', space:space.id});
+        return (items.items || items || []).map(item => ({...item, space_id:space.id, space_name:space.name, space_kind:space.kind, offline:false}));
+      }));
+      if (ticket !== directoryEpoch || disposed) return;
+      assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : assistants.filter(item => item.space_id === spaces[index].id).map(item => ({...item,offline:true})));
+      if (results.some(result => result.status === 'rejected')) error = t('partialOffline');
+      if (selectedAssistant) selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;
+      renderShell();
+      if(!assistants.length){const empty=el('div','empty-chat',t('noAssistants'));const setup=el('button','control',t('setupAI'));setup.onclick=()=>navigate('settings');empty.append(document.createElement('br'),setup);messageColumn.replaceChildren(empty);}
+      if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);return;}}
+      if (autoSelect && !selectedAssistant && assistants.length) {
+        const requested=params.get('assistant_id');const requestedSpace=params.get('space_id');
+        const selected=requested?assistants.find(item=>item.id===requested&&(!requestedSpace||item.space_id===requestedSpace)):assistants[0];
+        if(!selected){error=t('missingAssistant');connection='offline';updateControls();return;}
+        await selectAssistant(selected,!requested);
+      }
+    } catch (reason) { if (ticket===directoryEpoch&&!disposed) {error = reason.message; connection='offline'; updateControls();} }
+  }
+  const preferencesChanged = event => {
+    if(event.detail.key==='pot-go-preview-locale') locale=event.detail.value;
+    if(event.detail.key==='pot-go-preview-theme') theme=event.detail.value;
+    renderShell();renderMessages();window.dispatchEvent(new Event('pot:locale'));
+  };
+  window.addEventListener('pot:preference',preferencesChanged);
   const keydown = event => {
     if (event.key === 'Escape' && menuOpen) { menuOpen = false; renderShell(); }
+    if (event.metaKey && event.key === '[' && pages?.editing) {event.preventDefault(); pages.back(); return;}
     if (event.metaKey && event.key === '[' && media.matches && !directoryOpen) { event.preventDefault(); directoryOpen = true; renderShell(); }
   };
+  let swipe = null;
+  const pointerDown = event => {
+    if(!media.matches || surface==='tray' || event.pointerType==='mouse')return;
+    if(!menuOpen&&event.clientX>24)return;
+    swipe={id:event.pointerId,x:event.clientX,y:event.clientY,menu:menuOpen,active:false};
+  };
+  const pointerMove = event => {
+    if(!swipe||swipe.id!==event.pointerId)return;
+    const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;
+    if(!swipe.active&&Math.abs(dy)>Math.abs(dx)&&Math.abs(dy)>10){swipe=null;return;}
+    if(Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy))swipe.active=true;
+    if(!swipe.active)return;
+    if(swipe.menu&&dx<0){menu.style.transform=`translateX(${dx}px)`;event.preventDefault();}
+  };
+  const pointerUp = event => {
+    if(!swipe||swipe.id!==event.pointerId)return;
+    const gesture=swipe;swipe=null;menu.style.transform='';
+    if(!gesture.active||Math.abs(event.clientY-gesture.y)>Math.abs(event.clientX-gesture.x))return;
+    const dx=event.clientX-gesture.x,threshold=Math.min(innerWidth/4,100);
+    if(gesture.menu&&dx < -threshold){menuOpen=false;renderShell();}
+    else if(!gesture.menu&&dx>threshold){if(pages?.editing)pages.back();else if(route==='chat'&&!directoryOpen){directoryOpen=true;renderShell();}else{menuOpen=true;renderShell();}}
+  };
+  const pointerCancel = () => {swipe=null;menu.style.transform='';};
+  root.addEventListener('pointerdown',pointerDown,{passive:true});root.addEventListener('pointermove',pointerMove,{passive:false});root.addEventListener('pointerup',pointerUp);root.addEventListener('pointercancel',pointerCancel);
   const mediaChanged = () => { menuOpen = false; renderShell(); };
   document.addEventListener('keydown', keydown);
   media.addEventListener('change', mediaChanged);
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
-  renderShell(); viewportChanged(); loadSnapshot();
+  renderShell(); viewportChanged(); if (client.production) loadDirectory(); else attach();
   return () => {
-    disposed = true; abort.abort(); unsubscribe(); editor.destroy();
+    disposed = true; directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
+    window.removeEventListener('pot:preference',preferencesChanged);
     document.removeEventListener('keydown', keydown);
     media.removeEventListener('change', mediaChanged);
     viewport?.removeEventListener('resize', viewportChanged);

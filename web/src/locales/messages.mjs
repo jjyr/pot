@@ -9,6 +9,7 @@ export const messages = {
     language: 'Language', appearance: 'Appearance', system: 'System', light: 'Light', dark: 'Dark',
     openMain: 'Open main window', identityChanged: 'Preview identity changed. Retry to reconnect.',
     latest: 'Latest message', copy: 'Copy message', copied: 'Copied', unavailable: 'This page has not been migrated yet.',
+    remote:'Cloud', setupAI:'Set up AI', missingAssistant:'The requested assistant is unavailable in this Space.', preferences:'Preferences', assistantSettings:'Assistant settings', newAssistant:'New assistant', noAssistants:'Create your first assistant', partialOffline:'Some Spaces are offline. Cached assistants are shown.',
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the preview. Please retry.',
   },
   'zh-CN': {
@@ -21,6 +22,7 @@ export const messages = {
     language: '语言', appearance: '外观', system: '跟随系统', light: '浅色', dark: '深色',
     openMain: '打开主窗口', identityChanged: '预览身份已变更，请重试以重新连接。',
     latest: '最新消息', copy: '复制消息', copied: '已复制', unavailable: '此页面尚未迁移。',
+    remote:'云端', setupAI:'配置 AI', missingAssistant:'此 Space 中找不到请求的助手。', preferences:'偏好设置', assistantSettings:'助手设置', newAssistant:'新建助手', noAssistants:'创建第一个助手', partialOffline:'部分 Space 离线，显示缓存的助手。',
     searchEmpty: '没有匹配的助手', cancelError: '无法停止预览，请重试。',
   },
 };

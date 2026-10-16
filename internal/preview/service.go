@@ -24,15 +24,25 @@ type Message struct {
 }
 
 // Cursor is a decimal string so no frontend loses precision as event counts grow.
+type Assistant struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Preview   string `json:"preview"`
+	SpaceKind string `json:"space_kind"`
+}
+
 type Snapshot struct {
-	RuntimeID      string    `json:"runtime_id"`
-	BootID         string    `json:"boot_id"`
-	OwnerID        string    `json:"owner_id"`
-	ConversationID string    `json:"conversation_id"`
-	Cursor         string    `json:"cursor"`
-	Messages       []Message `json:"messages"`
-	Running        bool      `json:"running"`
-	TurnID         *string   `json:"turn_id"`
+	Assistants     []Assistant       `json:"assistants,omitempty"`
+	RuntimeID      string            `json:"runtime_id"`
+	BootID         string            `json:"boot_id"`
+	OwnerID        string            `json:"owner_id"`
+	ConversationID string            `json:"conversation_id"`
+	Cursor         string            `json:"cursor"`
+	Messages       []Message         `json:"messages"`
+	Running        bool              `json:"running"`
+	TurnID         *string           `json:"turn_id"`
+	Configuration  map[string]string `json:"configuration,omitempty"`
+	Usage          map[string]uint64 `json:"usage,omitempty"`
 }
 
 type SendRequest struct {
@@ -107,10 +117,20 @@ func (s *Service) snapshotLocked() Snapshot {
 		id := s.activeID
 		turn = &id
 	}
+	catalogue := []Assistant{}
+	for index, name := range []string{"Pot", "Research", "Code", "旅行计划", "Design", "Writing", "Reading", "Analytics", "Long assistant name for layout", "Assistant 10", "Assistant 11", "Assistant 12"} {
+		id := "main"
+		if index > 0 {
+			id = "assistant-" + strconv.Itoa(index+1)
+		}
+		catalogue = append(catalogue, Assistant{ID: id, Name: name, Preview: "Continue our conversation · 继续对话", SpaceKind: "remote"})
+	}
 	return Snapshot{
-		RuntimeID: "go-ui-preview", BootID: s.boot, OwnerID: "preview-assistant",
+		Assistants: catalogue,
+		RuntimeID:  "go-ui-preview", BootID: s.boot, OwnerID: "preview-assistant",
 		ConversationID: ConversationID, Cursor: strconv.FormatUint(s.cursor, 10),
 		Messages: slices.Clone(s.messages), Running: s.active != nil, TurnID: turn,
+		Configuration: map[string]string{"name": "Fixture connection", "model": "fixture-model"}, Usage: map[string]uint64{"input": 12000, "output": 3500},
 	}
 }
 
