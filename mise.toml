@@ -223,3 +223,7 @@ xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift
 xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift scripts/make-tray-atlas.swift -o .local/icons/tray-atlas
 .local/icons/tray-atlas
 """
+
+[tasks."test:ui-http-integration"]
+description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
+run = "python scripts/tests/go-ui-http-integration.py"

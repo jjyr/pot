@@ -82,6 +82,12 @@ Eval runs the production Agent with native fixtures and real local tool effects;
 see [Eval CLI](../eval/README.md). Paid DeepSeek calls occur only through explicit
 `live`/live-suite commands, never ordinary checks.
 
+Run `mise run test:ui-http-integration` explicitly for real browser HTTP/SSE,
+reconnect, session boundaries and binary download checks. It requires cached
+`@playwright/cli` and its installed browser. It uses isolated temporary roots and
+a deterministic loopback provider, installs nothing, makes no external model
+calls and cleans up its own processes. It is separate from ordinary tests.
+
 Sandbox Provider unit tests use lifecycle doubles and explicit local executors;
 these do not establish VM/container isolation. Actual Provider qualification needs
 the intended machine, installed image/resources and dedicated private workspace.
