@@ -110,6 +110,13 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 	if err != nil {
 		return err
 	}
+	// The summary request completed with a confirmed result. If later validation
+	// rejects the summary, preserve the original history without an unknown-model
+	// fence; no tool effects were permitted in this request.
+	state.ModelRequestID = nil
+	if err := a.save(ctx, state); err != nil {
+		return err
+	}
 	if len(summary.Calls) > 0 || strings.TrimSpace(summary.Text) == "" {
 		return fmt.Errorf("compaction returned tools or empty summary")
 	}

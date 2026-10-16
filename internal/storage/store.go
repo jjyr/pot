@@ -165,6 +165,41 @@ func (s *Store) SaveWithMetadata(ctx context.Context, m Message, metadata map[st
 func (s *Store) SaveNonNotifying(ctx context.Context, m Message) (Event, error) {
 	return s.save(ctx, m, nil, false)
 }
+
+// AppendEvent atomically persists a non-message state transition and its owner
+// metadata. Message projections must use Save so projection/outbox/event agree.
+func (s *Store) AppendEvent(ctx context.Context, event Event, metadata map[string]string) (Event, error) {
+	if event.Type == "message" {
+		return Event{}, errors.New("message events require Save")
+	}
+	event.EventID = ID()
+	event.Cursor = nil
+	if err := event.Validate(); err != nil {
+		return Event{}, err
+	}
+	body, err := json.Marshal(event)
+	if err != nil {
+		return Event{}, err
+	}
+	err = Transaction(ctx, s.db, func(tx *sql.Tx) error {
+		for key, value := range metadata {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); err != nil {
+				return err
+			}
+		}
+		result, err := tx.ExecContext(ctx, "INSERT INTO events(body) VALUES (?)", string(body))
+		if err != nil {
+			return err
+		}
+		cursor, err := result.LastInsertId()
+		event.Cursor = &cursor
+		return err
+	})
+	if err != nil {
+		return Event{}, err
+	}
+	return event, nil
+}
 func (s *Store) save(ctx context.Context, m Message, metadata map[string]string, notify bool) (Event, error) {
 	if err := m.Validate(); err != nil {
 		return Event{}, err

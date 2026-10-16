@@ -518,7 +518,7 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 	defer cancel()
 	stream, err := a.Services.Model(requestCtx, core.ModelRequest{ID: requestID, Protocol: string(input.Protocol), Provider: thread.Config.Provider, Model: input.Model, Body: body, CompactionID: compactionID})
 	if err != nil {
-		if allowanceError(err) {
+		if allowanceError(err) || modelRequestUnsent(err) {
 			state.ModelRequestID = nil
 			if saveErr := a.save(ctx, state); saveErr != nil {
 				return response, saveErr
@@ -592,4 +592,9 @@ func allowanceError(err error) bool {
 	var value protocol.APIError
 	var pointer *protocol.APIError
 	return errors.As(err, &value) && value.Code == "pot_token_limit" || errors.As(err, &pointer) && pointer.Code == "pot_token_limit"
+}
+
+func modelRequestUnsent(err error) bool {
+	var marker interface{ ModelRequestUnsent() bool }
+	return errors.As(err, &marker) && marker.ModelRequestUnsent()
 }

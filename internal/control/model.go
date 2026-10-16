@@ -36,7 +36,13 @@ type ModelSession struct {
 	requestTimes map[string]int64
 }
 
-func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (io.ReadCloser, error) {
+func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream io.ReadCloser, modelErr error) {
+	knownUnsent := true
+	defer func() {
+		if modelErr != nil && knownUnsent {
+			modelErr = &core.ModelRequestError{Cause: modelErr, Disposition: "unsent"}
+		}
+	}()
 	if s.Registry == nil || s.Usage == nil || s.Claim == nil || s.Scope == "" || s.Turn == "" || s.Generation == 0 || s.Generation > core.MaxSafeInteger {
 		return nil, errors.New("incomplete Control model session")
 	}
@@ -102,6 +108,7 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (io.ReadC
 	request := usage.ReserveRequest{ID: r.ID, Scope: s.Scope, Turn: s.Turn, AtMS: atMS, Model: s.Spec.Model, InputEstimate: int64(len(body)) + 1024, MaxOutput: int64(cap), Route: &usage.Route{Provider: provider.ID, Generation: int64(s.Generation), SpecHash: s.Spec.SpecHash, Agent: s.Role, ProfileID: s.Spec.SourceProfileID}}
 	reservation, err := s.Usage.ReserveRouted(ctx, request)
 	if err != nil {
+		knownUnsent = false
 		return nil, err
 	}
 	if reservation == nil {
@@ -111,6 +118,7 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (io.ReadC
 		return nil, protocol.APIError{Code: "pot_token_limit", Message: "Pot token allowance is unavailable; this turn is paused before sending the model request"}
 	}
 	if reservation.Duplicate {
+		knownUnsent = false
 		return nil, protocol.APIError{Code: "unknown_model_request", Message: "Model request already reserved; inspect its original receipt instead of resending"}
 	}
 	body, _, err = p.Clamp(body, uint64(reservation.OutputCap))
@@ -138,11 +146,14 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (io.ReadC
 	}
 	claimed, err := s.Usage.Claim(ctx, r.ID)
 	if err != nil {
+		knownUnsent = false
 		return nil, err
 	}
 	if !claimed {
+		knownUnsent = false
 		return nil, errors.New("model request already claimed or uncertain")
 	}
+	knownUnsent = false
 	response, err := gateway.Forward(ctx, provider, key, body, "", time.Duration(s.Spec.Params.Agent.RequestTimeoutMS)*time.Millisecond)
 	if err != nil {
 		return nil, err
@@ -152,7 +163,7 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (io.ReadC
 		if err = s.Usage.Rejected(ctx, r.ID); err != nil {
 			return nil, err
 		}
-		return nil, gateway.StatusError(response.StatusCode)
+		return nil, &core.ModelRequestError{Cause: gateway.StatusError(response.StatusCode), Disposition: "rejected"}
 	}
 	return &meteredStream{body: response.Body, ledger: s.Usage, id: r.ID, protocol: p}, nil
 }
