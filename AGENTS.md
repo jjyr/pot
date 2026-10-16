@@ -7,6 +7,11 @@ Do not add validation reports, test-run reports or development checklists to the
 repository, including under `docs/`. Report checks, results and limitations in the
 task response instead.
 
+The user explicitly allows the temporary Go/Wails migration plan and rules in
+`docs/migrations/go-wails.md`. Keep migration progress and validation results in
+issue #66. When migration is complete, move lasting contracts into the regular
+documentation and delete the temporary document, its links and this exception.
+
 # Tool interfaces
 
 Keep each tool focused on its responsibility. Update affected callers, tests and documentation when tool interfaces change.

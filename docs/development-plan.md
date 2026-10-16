@@ -1,5 +1,10 @@
 # Development plan
 
+The Go/Wails migration has a user-authorized temporary
+[plan and rules](migrations/go-wails.md). Issue
+[#66](https://github.com/jjyr/pot/issues/66) owns its progress and validation
+results. The following describes the earlier distributed-runtime delivery.
+
 [Issue #39](https://github.com/jjyr/pot/issues/39) owns the single phase TODO table,
 commits and acceptance gates. [Architecture](architecture.md) is the design source.
 On 2026-10-11 the user accepted the delivered scope as complete. The untested

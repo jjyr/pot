@@ -2,13 +2,15 @@
 
 [Architecture](architecture.md) defines the current design and distinguishes pending
 implementation. Code defines actual behavior. Issue [#39](https://github.com/jjyr/pot/issues/39)
-is the single phase progress table.
+records the earlier distributed-runtime delivery. Issue
+[#66](https://github.com/jjyr/pot/issues/66) tracks the Go/Wails migration.
 
 | Topic | Read |
 |---|---|
 | Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
 | Build, test and release | [Development](development.md) |
 | Delivered scope and remaining work | [Development plan](development-plan.md) |
+| Temporary Go/Wails migration plan, sequencing and rules | [Go/Wails migration](migrations/go-wails.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
 | Native Space ownership, combined views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
@@ -67,5 +69,9 @@ retained in Git history.
 
 Write documentation in English. Keep one architecture overview and one source per
 contract; link rather than repeat. Commands belong in deployment/development.
-Remove contradictions and superseded recommendations. Progress belongs in #39;
-do not create a second TODO table or claim pending features from fixture results.
+Remove contradictions and superseded recommendations. Keep phase progress and
+validation results in the owning issue (#66 for the migration), not in a second
+repository TODO table. Do not claim pending features from fixture results.
+The user-authorized temporary migration plan may describe phases and rules;
+delete it and its links once migration is complete, after transferring lasting
+contracts into the regular documentation.
