@@ -20,6 +20,14 @@ Validate result -> compare fingerprint -> save history
 
 Describe goal, time, time zone, and frequency in main chat; main Agent creates the schedule. Tasks -> Schedules only views/manages existing definitions without manual creation. Tools: `list_schedules`, `get_schedule`, `manage_schedule`. Lists return summaries; details/history are loaded on demand.
 
+The shared UI shows a bounded, independently scrolling schedule list with a
+visible count and page controls. Cards retain the owning assistant and Space
+badge. Opening a card loads the full definition and paginated history; editing
+returns to that detail through the normal dirty-exit guard. Removal requires
+explicit confirmation. A failed action retains its captured owner and write
+request ID, including Run now, so a lost response cannot create another Task on
+retry.
+
 - Once: local date/time `YYYY-MM-DD HH:MM`.
 - Interval: positive integer minutes, measured from creation/resume.
 - Daily: local time `HH:MM`.
@@ -51,11 +59,15 @@ Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, none
 
 At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.sqlite`. Old task metadata is not imported.
 
-API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID to prevent duplicate creation; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
+API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID for creation and management retries; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
 
 ## Validation
 
-Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency, restart recovery, persistence failure rollback, baseline updates and machine selection and independent execution contexts. The current Host pot-agent and Sandbox test validates scheduled/worker routing without paid services; see [acceptance](validation/host-pot-agent-20261006.md).
+Explicit-clock tests cover zones/DST, missed triggers, overlap, pause, idempotency,
+restart recovery, persistence failure rollback, baseline updates, machine
+selection and independent execution contexts. Historical pre-migration evidence
+is retained in [the earlier acceptance](validation/host-pot-agent-20261006.md);
+it establishes only that recorded scope.
 
 ```sh
 mise run test

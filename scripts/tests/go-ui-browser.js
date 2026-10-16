@@ -53,12 +53,12 @@ async page => {
     // Fresh phone visits select the directory. Navigation preserves its search.
     await page.goto(`${base}/?theme=light&locale=en`);
     await page.getByRole('searchbox', {name: 'Search assistants'}).fill('pot');
-    await page.locator('.assistant-row').click();
+    await page.locator('.assistant-row:visible').click();
     await input.waitFor({state: 'visible'});
     await input.fill('draft survives narrow navigation');
     await page.getByRole('button', {name: 'Back to Assistants', exact: true}).click();
     assert(await page.getByRole('searchbox', {name: 'Search assistants'}).inputValue() === 'pot', 'Directory search survives Back');
-    await page.locator('.assistant-row').click();
+    await page.locator('.assistant-row:visible').click();
     assert(await input.inputValue() === 'draft survives narrow navigation', 'Conversation draft survives Back');
 
     await page.setViewportSize({width: 1440, height: 900});
