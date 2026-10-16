@@ -27,7 +27,7 @@ func (s *Service) productTools(worker bool) []modelprotocol.ToolDefinition {
 			out = append(out, d)
 		}
 	}
-	return out
+	return append(out, instructionTools()...)
 }
 func (s *Service) productDispatch(owner, turn string, generation uint64, worker bool) map[string]agent.Dispatch {
 	out := map[string]agent.Dispatch{}
@@ -35,6 +35,9 @@ func (s *Service) productDispatch(owner, turn string, generation uint64, worker 
 		out[d.Name] = func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
 			if e.Owner != owner || generation == 0 {
 				return nil, errors.New("stale product tool binding")
+			}
+			if call.Name == "read_agent_instructions" || call.Name == "update_agent_instructions" {
+				return s.instructionCall(ctx, owner, turn, generation, call)
 			}
 			id, _ := core.HashJSON([]any{owner, turn, generation, call.ID})
 			result, err := s.productCall(ctx, owner, id, call.Name, call.Arguments)
