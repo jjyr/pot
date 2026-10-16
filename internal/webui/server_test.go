@@ -63,6 +63,11 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 	if w = invoke("GET", "/api/v1/operator/private", "", cookie.String(), ""); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
+	for _, method := range []string{"GET", "POST"} {
+		if w = invoke(method, "/api/v1/sandbox-resources", "", cookie.String(), "http://localhost"); w.Code != 404 {
+			t.Fatalf("browser resource provisioning allowed: %s %d", method, w.Code)
+		}
+	}
 	if w = invoke("POST", "/api/v1/messages", "", cookie.String(), "https://attacker.example"); w.Code != 403 {
 		t.Fatal(w.Code)
 	}

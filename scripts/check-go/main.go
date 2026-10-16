@@ -53,7 +53,7 @@ func check() error {
 			}
 		}
 		base := strings.TrimPrefix(pkg.ImportPath, "github.com/jjyr/pot/internal/")
-		if base == "agent" || base == "runner" || base == "execution" || base == "composition" || base == "modelprotocol" || base == "sandbox" || base == "sandboxprovider" || base == "platformhelper" || base == "resource" || base == "sandboxresources" || base == "browserpush" || base == "desktopview" {
+		if base == "agent" || base == "runner" || base == "execution" || base == "composition" || base == "modelprotocol" || base == "sandbox" || base == "sandboxprovider" || base == "platformhelper" || base == "resource" || base == "sandboxresources" || base == "resourcecontrol" || base == "browserpush" || base == "desktopview" {
 			for _, dep := range pkg.Deps {
 				for _, forbidden := range []string{"control", "runtime", "transport", "gateway", "secrets", "desktop"} {
 					prefix := "github.com/jjyr/pot/internal/" + forbidden

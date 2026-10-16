@@ -10,6 +10,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/internal/resourcecontrol"
 	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/usage"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 type Application struct {
 	Control           *control.Service
 	Desktop           http.Handler
+	Resources         *resourcecontrol.Manager
 	RuntimeID, BootID string
 	Name              string
 }
@@ -56,6 +58,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	path := u.Path
 	s := a.Control
+	if result, err, handled := a.resourceCall(ctx, method, u, r); handled {
+		return result, err
+	}
 	if result, err, handled := a.machineCall(ctx, method, u, r); handled {
 		return result, err
 	}

@@ -91,7 +91,7 @@ func Run(root string) error {
 		return err
 	}
 	defer runtime.Close()
-	api := &transport.Application{Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+	api := &transport.Application{Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
 	socket, err := transport.StartSocket(ctx, runtime.Root.Path, api)
 	if err != nil {
 		return err
@@ -132,7 +132,7 @@ func Run(root string) error {
 		files.ServeHTTP(w, r)
 	})
 
-	app := application.New(application.Options{Name: "Pot Go", Description: "Pot", Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: assetHandler}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
+	app := application.New(application.Options{Name: "Pot", Description: "Pot", Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: assetHandler}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
 		stop()
 		service.mu.Lock()
 		for _, cancel := range service.subscriptions {

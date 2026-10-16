@@ -12,6 +12,7 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/executor"
 	"github.com/jjyr/pot/internal/resource"
+	"github.com/jjyr/pot/internal/resourcecontrol"
 	"github.com/jjyr/pot/internal/sandbox"
 	"github.com/jjyr/pot/internal/sandboxprovider"
 	"github.com/jjyr/pot/internal/sandboxresources"
@@ -72,6 +73,29 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 	if err != nil {
 		return err
 	}
+	catalog, err := sandboxresources.Embedded()
+	if err != nil {
+		return err
+	}
+	r.Provisioning, err = resourcecontrol.Open(resourcecontrol.Options{Root: r.Root.Path, Catalog: catalog, Store: r.Resources, Bind: func(ctx context.Context, id string, prepared sandbox.PreparedResources) error {
+		if id == "shared" {
+			definition, err := r.Sandboxes.EnsureShared(ctx)
+			if err != nil {
+				return err
+			}
+			if definition.Provider != sandbox.AppleContainer {
+				return errors.New("this Sandbox uses an owner-installed image or prepared macOS VM")
+			}
+		}
+		return r.Sandboxes.BindResources(ctx, id, prepared)
+	}, Notify: func() {
+		if r.Control != nil {
+			r.Control.Changes.Notify("sandbox_resources")
+		}
+	}})
+	if err != nil {
+		return err
+	}
 	config.Sandboxes = r.Sandboxes
 	config.ResolveSandbox = func(ctx context.Context) (core.ExecutionTarget, error) {
 		definition, err := r.Sandboxes.EnsureShared(ctx)
@@ -83,6 +107,18 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 	previous := config.Target
 	config.Target = func(ctx context.Context, op control.Operation, request executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
 		if op.Target.IsLocalTo(r.Root.Identity.RuntimeID) && op.Target.Target.Kind == "sandbox" {
+			definitions, err := r.Sandboxes.Inventory(ctx)
+			if err != nil {
+				return nil, err
+			}
+			for _, definition := range definitions {
+				if definition.ID == op.Target.Target.SandboxID && definition.Provider == sandbox.AppleContainer {
+					if err = r.Provisioning.Wait(ctx, definition.ID, ""); err != nil {
+						return nil, err
+					}
+					break
+				}
+			}
 			grant := sandbox.AccessGrant{Target: op.Target, Owner: op.Owner, Turn: op.Turn, ThreadGeneration: op.Generation, Policy: request.Policy, Worker: op.Worker, WorkspaceOwner: op.Owner}
 
 			args, err := json.Marshal(request.Args)
@@ -116,14 +152,6 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 	return nil
 }
 func (r *Runtime) ImportSandboxResources(ctx context.Context, directory string) error {
-	catalog, err := sandboxresources.Embedded()
-	if err != nil {
-		return err
-	}
-	prepared, err := catalog.Import(ctx, r.Resources, "", directory)
-	if err != nil {
-		return err
-	}
 	definition, err := r.Sandboxes.EnsureShared(ctx)
 	if err != nil {
 		return err
@@ -131,5 +159,15 @@ func (r *Runtime) ImportSandboxResources(ctx context.Context, directory string) 
 	if definition.Provider != sandbox.AppleContainer {
 		return errors.New("this Provider uses an owner-installed OCI image instead of Apple resource bundles")
 	}
-	return r.Sandboxes.BindResources(ctx, definition.ID, prepared)
+	request, err := r.Provisioning.Request(ctx, definition.ID, "")
+	if err != nil {
+		return err
+	}
+	if request.State == "ready" {
+		return nil
+	}
+	if _, err = r.Provisioning.Import(request.ID, directory); err != nil {
+		return err
+	}
+	return r.Provisioning.Wait(ctx, definition.ID, request.BundleID)
 }

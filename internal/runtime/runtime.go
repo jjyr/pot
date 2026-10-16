@@ -11,6 +11,7 @@ import (
 	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/instance"
 	"github.com/jjyr/pot/internal/resource"
+	"github.com/jjyr/pot/internal/resourcecontrol"
 	"github.com/jjyr/pot/internal/sandbox"
 	"os"
 	"path/filepath"
@@ -34,6 +35,7 @@ type Runtime struct {
 	Control        *control.Service
 	Sandboxes      *sandbox.Manager
 	Resources      *resource.Store
+	Provisioning   *resourcecontrol.Manager
 	cancel         context.CancelFunc
 	once           sync.Once
 	closeErr       error
@@ -103,6 +105,11 @@ func (r *Runtime) Close() error {
 		r.background.Wait()
 		if r.Control != nil {
 			r.closeErr = errors.Join(r.closeErr, r.Control.Close())
+		}
+		if r.Provisioning != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			r.closeErr = errors.Join(r.closeErr, r.Provisioning.Close(ctx))
+			cancel()
 		}
 		if r.Executions != nil {
 			r.closeErr = errors.Join(r.closeErr, r.Executions.Drain(context.Background()))
