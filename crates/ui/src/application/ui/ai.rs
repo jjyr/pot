@@ -262,7 +262,21 @@ impl Settings {
             }
         } else if screen == "manage" {
             let kind = state["connection_kind"].as_str().unwrap_or("").to_owned();
-            let mut form = super::form(cx);
+            let mut form = super::form(cx)
+                .child(
+                    field(crate::application::i18n::text("schedules-ui.name")).child(
+                        Input::new(&self.fields[23])
+                            .control(cx)
+                            .aria_label(crate::application::i18n::text("ai.agent-name")),
+                    ),
+                )
+                .child(
+                    field(crate::application::i18n::text("ai.api-url")).child(
+                        Input::new(&self.fields[14])
+                            .control(cx)
+                            .aria_label(crate::application::i18n::text("ai.api-url")),
+                    ),
+                );
             {
                 form = form.child(
                     field("API key")
@@ -364,21 +378,6 @@ impl Settings {
                 form = form
                     .child(field(crate::application::i18n::text("ai.model")).child(model_field));
             }
-            form = form
-                .child(
-                    field(crate::application::i18n::text("schedules-ui.name")).child(
-                        Input::new(&self.fields[23])
-                            .control(cx)
-                            .aria_label(crate::application::i18n::text("ai.agent-name")),
-                    ),
-                )
-                .child(
-                    field(crate::application::i18n::text("ai.api-url")).child(
-                        Input::new(&self.fields[14])
-                            .control(cx)
-                            .aria_label(crate::application::i18n::text("ai.api-url")),
-                    ),
-                );
             if matches!(
                 state["api_protocol"].as_str(),
                 Some("openai_chat" | "openai_responses" | "anthropic_messages" | "gemini")
