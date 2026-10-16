@@ -22,6 +22,8 @@ pub struct Setup {
     context_window: Option<u64>,
     #[serde(default)]
     catalog_provider: Option<String>,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
 }
 fn default_profile() -> String {
     "apot-default".into()
@@ -46,7 +48,7 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
             && let Ok(p) = stored_provider(&s, &spec)
         {
             connections.push(json!({"profile_id": profile.id, "endpoint":p.endpoint,
-                    "model":spec.model,"protocol":p.protocol,"has_key":!p.secret_ref.is_empty(),"model_settings":profile.model_settings}));
+                    "model":spec.model,"protocol":p.protocol,"has_key":!p.secret_ref.is_empty(),"model_settings":profile.model_settings,"reasoning_effort":profile.params.reasoning_effort}));
         }
     }
     let thread = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
@@ -57,7 +59,7 @@ pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value
             .cloned()
     });
     Ok(Json(
-        json!({"connection":connection,"connections":connections,"directory":s.control_config.models.options()}),
+        json!({"connection":connection,"connections":connections,"directory":s.control_config.models.options(),"model_defaults":s.control_config.models.model_defaults()}),
     ))
 }
 
@@ -87,10 +89,10 @@ pub async fn save(
         error(
             StatusCode::BAD_REQUEST,
             "endpoint",
-            "Enter a full HTTPS model endpoint",
+            "Enter a full HTTP or HTTPS model endpoint",
         )
     })?;
-    if !(url.scheme() == "https" || (url.scheme() == "http" && url.host_str() == Some("127.0.0.1")))
+    if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -99,7 +101,7 @@ pub async fn save(
         return Err(error(
             StatusCode::BAD_REQUEST,
             "endpoint",
-            "Endpoint must use HTTPS without embedded credentials or a fragment",
+            "Endpoint must use HTTP or HTTPS without embedded credentials or a fragment",
         ));
     }
     if input.endpoint.len() > 4096 || input.api_key.len() > 16384 {
@@ -146,11 +148,12 @@ pub async fn save(
         .find(|p| p.id == input.profile_id);
     let mut profile = previous.unwrap_or_else(|| agent::Profile::api(&config));
     profile.model = input.model;
+    profile.params.reasoning_effort = input
+        .reasoning_effort
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
     profile.model_settings = Some(pot_core::ModelSettings {
-        catalog_provider: input
-            .catalog_provider
-            .filter(|id| !id.is_empty())
-            .or_else(|| s.control_config.models.infer(&input.endpoint)),
+        catalog_provider: input.catalog_provider.filter(|id| !id.is_empty()),
         context_window: input.context_window,
         max_output_tokens: input.max_output_tokens,
     });
@@ -180,6 +183,87 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     #[tokio::test]
+    async fn http_gateway_and_free_text_effort_round_trip_and_clear() {
+        let s = crate::tests::service();
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer test-token".parse().unwrap());
+        for endpoint in [
+            "http://localhost:8080/v1/responses",
+            "http://192.168.1.20:8080/v1/responses",
+            "http://[::1]:8080/v1/responses",
+        ] {
+            let profile_id = id();
+            for (revision, effort, expected) in [
+                (
+                    0,
+                    " provider-specific-mode ",
+                    Some("provider-specific-mode"),
+                ),
+                (1, "   ", None),
+            ] {
+                let input = json!({"request_id":id(),"expected_revision":revision,"profile_id":profile_id,"name":"HTTP gateway","endpoint":endpoint,"protocol":"openai_responses","model":"custom-model","api_key":"fixture-secret","reasoning_effort":effort});
+                let _ = save(
+                    State(s.clone()),
+                    h.clone(),
+                    Json(serde_json::from_value(input).unwrap()),
+                )
+                .await
+                .unwrap();
+                let public = get(State(s.clone()), h.clone()).await.unwrap().0;
+                let connection = public["connections"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["profile_id"] == profile_id)
+                    .unwrap();
+                assert_eq!(connection["reasoning_effort"], json!(expected));
+                let spec = agent::thread(&s).unwrap().config;
+                assert_eq!(spec.params.reasoning_effort.as_deref(), expected);
+                assert_eq!(provider(&s, &spec).unwrap().endpoint, endpoint);
+            }
+        }
+    }
+    #[tokio::test]
+    async fn custom_api_keeps_its_identity_and_uses_model_defaults() {
+        let s = crate::tests::service();
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer test-token".parse().unwrap());
+        let request = json!({"request_id":id(),"expected_revision":0,"profile_id":"custom","name":"Custom API","endpoint":"https://api.anthropic.com/v1/messages","protocol":"anthropic_messages","model":"claude-sonnet-4-5","api_key":"fixture-secret","catalog_provider":null});
+        let _ = save(
+            State(s.clone()),
+            h.clone(),
+            Json(serde_json::from_value(request).unwrap()),
+        )
+        .await
+        .unwrap();
+        let public = get(State(s.clone()), h).await.unwrap().0;
+        let connection = public["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["profile_id"] == "custom")
+            .unwrap();
+        assert_eq!(
+            connection["model_settings"]["catalog_provider"],
+            Value::Null
+        );
+        assert_eq!(
+            connection["endpoint"],
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            connection["model_settings"]["max_output_tokens"],
+            Value::Null
+        );
+        assert_eq!(
+            public["model_defaults"]["claude-sonnet-4-5"]["output"],
+            64000
+        );
+        let config = agent::thread(&s).unwrap().config;
+        assert_eq!(config.context_window, 200000);
+        assert_eq!(config.params.max_output_tokens, 64000);
+    }
+    #[tokio::test]
     async fn model_limits_inherit_override_clear_and_pin_execution_snapshots() {
         let mut s = crate::tests::service();
         let root = std::env::temp_dir().join(format!("pot-model-settings-{}", id()));
@@ -196,7 +280,7 @@ mod tests {
         .unwrap();
         let initial = agent::thread(&s).unwrap();
         assert_eq!(initial.config.context_window, 200000);
-        assert_eq!(initial.config.params.max_output_tokens, 8192);
+        assert_eq!(initial.config.params.max_output_tokens, 64000);
         let _ = save(
             State(s.clone()),
             h.clone(),
@@ -276,7 +360,7 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
         let before = agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap();
-        let response=check(State(s.clone()),h,Json(serde_json::from_value(json!({"endpoint":format!("http://{address}/v1/responses"),"api_key":"check-only","protocol":"openai_responses"})).unwrap())).await.unwrap().0;
+        let response=check(State(s.clone()),h,Json(serde_json::from_value(json!({"endpoint":format!("http://localhost:{}/v1/responses", address.port()),"api_key":"check-only","protocol":"openai_responses"})).unwrap())).await.unwrap().0;
         assert_eq!(response["models"], json!(["available-model"]));
         assert_eq!(
             agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap(),
@@ -358,7 +442,9 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
         for endpoint in [
-            "http://example.com/v1/responses",
+            "ftp://example.com/v1/responses",
+            "not a URL",
+            "https://example.com/v1/responses#fragment",
             "https://user:secret@example.com/v1/responses",
             "https://example.com/v1/responses?key=secret",
         ] {
@@ -501,9 +587,14 @@ pub async fn check(
     Json(input): Json<Check>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    let mut url = reqwest::Url::parse(&input.endpoint)
-        .map_err(|_| error(StatusCode::BAD_REQUEST, "endpoint", "请输入完整 HTTPS 地址"))?;
-    if !(url.scheme() == "https" || (url.scheme() == "http" && url.host_str() == Some("127.0.0.1")))
+    let mut url = reqwest::Url::parse(&input.endpoint).map_err(|_| {
+        error(
+            StatusCode::BAD_REQUEST,
+            "endpoint",
+            "请输入完整 HTTP 或 HTTPS 地址",
+        )
+    })?;
+    if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -514,7 +605,7 @@ pub async fn check(
         return Err(error(
             StatusCode::BAD_REQUEST,
             "endpoint",
-            "连接检查需要不含凭据或查询参数的 HTTPS 地址",
+            "连接检查需要不含凭据或查询参数的 HTTP 或 HTTPS 地址",
         ));
     }
     let mut key = input.api_key;

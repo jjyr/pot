@@ -113,7 +113,6 @@ pub struct Settings {
     secret_revision: Option<i64>,
     draft_revision: Option<i64>,
     pub advanced: bool,
-    api_advanced: bool,
     shortcuts_open: bool,
 }
 impl Settings {
@@ -124,7 +123,7 @@ impl Settings {
     }
     pub(super) fn editor_values(&self, state: &Value, cx: &App) -> Value {
         let fields: &[usize] = match state["ai_screen"].as_str() {
-            Some("manage") => &[14, 15, 16, 23, 24, 25],
+            Some("manage") => &[14, 15, 16, 23, 24, 25, 27],
             Some("main-edit") => &[22],
             _ => return Value::Null,
         };
@@ -156,9 +155,6 @@ impl Settings {
         };
         if let Some(index) = invalid {
             self.reveal.reset();
-            if index >= 23 {
-                self.api_advanced = true;
-            }
             self.fields[index]
                 .read(cx)
                 .focus_handle(cx)
@@ -166,7 +162,7 @@ impl Settings {
         }
     }
     pub fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let fields: Vec<Entity<InputState>> = (0..27)
+        let fields: Vec<Entity<InputState>> = (0..28)
             .map(|i| {
                 cx.new(|cx| {
                     InputState::new(window, cx)
@@ -179,7 +175,7 @@ impl Settings {
                 })
             })
             .collect();
-        for i in [16, 24, 26] {
+        for i in [16, 24, 26, 27] {
             cx.subscribe(&fields[i], move |_, field, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     let value = field.read(cx).value().to_string();
@@ -188,6 +184,9 @@ impl Settings {
                     }
                     if i == 24 {
                         command(json!({"action":"ai-context-input","value":value}));
+                    }
+                    if i == 27 {
+                        command(json!({"action":"ai-effort-input","value":value}));
                     }
                     cx.notify();
                 }
@@ -200,11 +199,10 @@ impl Settings {
             locale: String::new(),
             fields,
             revision: None,
-            synced_values: vec![String::new(); 27],
+            synced_values: vec![String::new(); 28],
             secret_revision: None,
             draft_revision: None,
             advanced: false,
-            api_advanced: false,
             shortcuts_open: false,
         }
     }
@@ -225,6 +223,8 @@ impl Settings {
                         "ui.leave-blank-to-keep-the-saved-key"
                     } else if i == 26 {
                         "ai.search-providers"
+                    } else if i == 27 {
+                        "ai.effort-placeholder"
                     } else {
                         "ui.enter-a-value"
                     }),
@@ -245,12 +245,9 @@ impl Settings {
         let secret_revision = state["secret_revision"].as_i64();
         let clear_secrets = self.secret_revision != secret_revision;
         self.secret_revision = secret_revision;
-        if clear_secrets {
-            self.api_advanced = false;
-        }
         let reset_model = self.draft_revision != state["draft_revision"].as_i64();
         self.draft_revision = state["draft_revision"].as_i64();
-        let field_keys: [&str; 27] = [
+        let field_keys: [&str; 28] = [
             "key",
             "limit",
             "tokens",
@@ -278,6 +275,7 @@ impl Settings {
             "connection_context",
             "connection_output",
             "",
+            "connection_effort",
         ];
         for (i, key) in field_keys.iter().enumerate() {
             if i == 26 {
@@ -288,7 +286,7 @@ impl Settings {
             if first
                 || self.synced_values[i] != value
                 || (i == 22 && reset_model)
-                || (clear_secrets && matches!(i, 0 | 8 | 9 | 14 | 15 | 16 | 23 | 24 | 25))
+                || (clear_secrets && matches!(i, 0 | 8 | 9 | 14 | 15 | 16 | 23 | 24 | 25 | 27))
             {
                 self.synced_values[i] = value.clone();
                 self.fields[i].update(cx, |field, cx| field.set_value(value, window, cx));

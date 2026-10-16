@@ -218,46 +218,6 @@ impl Settings {
         } else if screen == "manage" {
             let kind = state["connection_kind"].as_str().unwrap_or("").to_owned();
             let mut form = super::form(cx);
-            if kind == "custom" && !self.api_advanced {
-                form = form.child(
-                    field(crate::application::i18n::text("ai.api-url")).child(
-                        Input::new(&self.fields[14])
-                            .control(cx)
-                            .aria_label(crate::application::i18n::text("ai.api-url")),
-                    ),
-                );
-                let mut formats = div()
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .when(pot_ui::design::mobile(cx), |el| el.flex_col());
-                for (i, (protocol, label)) in [
-                    ("openai_chat", "OpenAI Chat Completions"),
-                    ("openai_responses", "OpenAI Responses"),
-                    ("anthropic_messages", "Claude Messages"),
-                    ("gemini", "Gemini"),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    formats = formats.child(
-                        Button::new(("ai-custom-protocol", i))
-                            .when(pot_ui::design::mobile(cx), |b| b.w_full())
-                            .ghost()
-                            .control(cx)
-                            .label(label)
-                            .toggled(state["api_protocol"] == protocol)
-                            .on_click(move |_, _, _| {
-                                command(json!({"action":"api-protocol","protocol":protocol}))
-                            }),
-                    );
-                }
-                form = form.child(
-                    field(crate::application::i18n::text("ai.request-format")).child(formats),
-                );
-            }
             {
                 form = form.child(
                     field("API key")
@@ -359,42 +319,25 @@ impl Settings {
                 form = form
                     .child(field(crate::application::i18n::text("ai.model")).child(model_field));
             }
-            form = form.child(
-                field("").child(
-                    Button::new("ai-advanced")
-                        .ghost()
-                        .control(cx)
-                        .label(crate::application::i18n::text("ai.advanced-settings"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.settings.api_advanced = !this.settings.api_advanced;
-                            cx.notify();
-                        })),
-                ),
-            );
-            if self.api_advanced {
-                form = form.child(
+            form = form
+                .child(
                     field(crate::application::i18n::text("schedules-ui.name")).child(
                         Input::new(&self.fields[23])
                             .control(cx)
                             .aria_label(crate::application::i18n::text("ai.agent-name")),
                     ),
-                );
-            }
-            if self.api_advanced {
-                form = form.child(
+                )
+                .child(
                     field(crate::application::i18n::text("ai.api-url")).child(
                         Input::new(&self.fields[14])
                             .control(cx)
                             .aria_label(crate::application::i18n::text("ai.api-url")),
                     ),
                 );
-            }
-            if self.api_advanced
-                && matches!(
-                    state["api_protocol"].as_str(),
-                    Some("openai_chat" | "openai_responses" | "anthropic_messages" | "gemini")
-                )
-            {
+            if matches!(
+                state["api_protocol"].as_str(),
+                Some("openai_chat" | "openai_responses" | "anthropic_messages" | "gemini")
+            ) {
                 let mut formats = div()
                     .w_full()
                     .min_w_0()
@@ -431,23 +374,28 @@ impl Settings {
                     field(crate::application::i18n::text("ai.request-format")).child(formats),
                 );
             }
-            if self.api_advanced {
-                form = form
-                    .child(
-                        field(crate::application::i18n::text("ai.context-window")).child(
-                            Input::new(&self.fields[24])
-                                .control(cx)
-                                .aria_label(crate::application::i18n::text("ai.context-window")),
-                        ),
-                    )
-                    .child(
-                        field(crate::application::i18n::text("ai.max-output-tokens")).child(
-                            Input::new(&self.fields[25])
-                                .control(cx)
-                                .aria_label(crate::application::i18n::text("ai.max-output-tokens")),
-                        ),
-                    );
-            }
+            form = form
+                .child(
+                    field(crate::application::i18n::text("ai.context-window")).child(
+                        Input::new(&self.fields[24])
+                            .control(cx)
+                            .aria_label(crate::application::i18n::text("ai.context-window")),
+                    ),
+                )
+                .child(
+                    field(crate::application::i18n::text("ai.max-output-tokens")).child(
+                        Input::new(&self.fields[25])
+                            .control(cx)
+                            .aria_label(crate::application::i18n::text("ai.max-output-tokens")),
+                    ),
+                )
+                .child(
+                    field(crate::application::i18n::text("ai.reasoning-effort")).child(
+                        Input::new(&self.fields[27])
+                            .control(cx)
+                            .aria_label(crate::application::i18n::text("ai.reasoning-effort")),
+                    ),
+                );
             let fields = self.fields.clone();
             let check_fields = self.fields.clone();
 
@@ -456,7 +404,7 @@ impl Settings {
                     .disabled(busy).on_click(move |_, _, cx| command(json!({"action":"ai-api-check","endpoint":check_fields[14].read(cx).value(),"key":check_fields[15].read(cx).value()}))));
             }
             primary = Some(Button::new("ai-save-connection").primary().control(cx).label(crate::application::i18n::text("editor.save")).disabled(busy)
-                .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"context":fields[24].read(cx).value(),"output":fields[25].read(cx).value()}))));
+                .on_click(move |_, _, cx| command(json!({"action":"ai-save-connection","name":fields[23].read(cx).value(),"model":fields[16].read(cx).value(),"endpoint":fields[14].read(cx).value(),"key":fields[15].read(cx).value(),"context":fields[24].read(cx).value(),"output":fields[25].read(cx).value(),"effort":fields[27].read(cx).value()}))));
             let mut details = div().flex().flex_col().gap_4();
             details = details.child(form).when(
                 state["active_spec"]["model"].as_str().is_none()
