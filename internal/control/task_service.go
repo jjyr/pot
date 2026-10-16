@@ -384,19 +384,8 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		return runner.Prepared{}, err
 	}
 	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
-	execution.SkillResources.Selection = l.Skills
-	execution.SkillResources.ReservedNames = []string{}
-	for _, root := range roots {
-		if root.Builtin {
-			catalog, err := agent.DiscoverSkills(core.SkillResources{Roots: []core.SkillRoot{root}})
-			if err != nil {
-				return runner.Prepared{}, err
-			}
-			for _, skill := range catalog.Skills {
-				execution.SkillResources.ReservedNames = append(execution.SkillResources.ReservedNames, skill.Name)
-			}
-		}
-	}
+	execution.SkillResources.Selection = nil
+	execution.SkillResources.ReservedNames = resources.ReservedNames
 	execution.Role = core.Worker
 	engine, err := s.host(l.TaskID, l.Generation)
 	if err != nil {

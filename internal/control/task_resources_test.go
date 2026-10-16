@@ -59,7 +59,21 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	writeTaskFixture(t, filepath.Join(s.options.AgentHome, "AGENTS.md"), "MAIN_GLOBAL_PRIVATE")
 	writeTaskFixture(t, filepath.Join(s.options.AgentHome, "skills", "global", "SKILL.md"), "---\nname: global\ndescription: Global skill\n---\nGlobal instructions")
 	writeTaskFixture(t, filepath.Join(s.options.Workspace, ".agents", "skills", "source", "SKILL.md"), "SOURCE_PROJECT_SKILL")
-	selected, err := s.selectTask(ctx, "main", protocol.CreateTask{})
+	omitted, err := s.selectTask(ctx, "main", protocol.CreateTask{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := s.taskResource(ctx, omitted.ResourceRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty.Roots) != 0 {
+		t.Fatal("omitted selection inherited global skills")
+	}
+	if _, err = s.selectTask(ctx, "main", protocol.CreateTask{Skills: &[]string{"source"}}); err == nil {
+		t.Fatal("source project skill satisfied selected global bundle")
+	}
+	selected, err := s.selectTask(ctx, "main", protocol.CreateTask{Skills: &[]string{"global"}})
 	if err != nil {
 		t.Fatal(err)
 	}

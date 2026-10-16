@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/tasks"
@@ -17,8 +18,9 @@ import (
 )
 
 type taskResource struct {
-	Config core.ResolvedSpec `json:"config"`
-	Roots  []taskSkillRoot   `json:"roots"`
+	Config        core.ResolvedSpec `json:"config"`
+	ReservedNames []string          `json:"reserved_names"`
+	Roots         []taskSkillRoot   `json:"roots"`
 }
 type taskSkillRoot struct {
 	Builtin bool              `json:"builtin"`
@@ -69,6 +71,31 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 	if s.options.BuiltinSkills != "" {
 		roots = append(roots, core.SkillRoot{Path: s.options.BuiltinSkills, Builtin: true})
 	}
+	reserved := []string{}
+	for i := range roots {
+		roots[i].Location = roots[i].Path
+		if roots[i].Builtin {
+			catalog, err := agent.DiscoverSkills(core.SkillResources{Roots: []core.SkillRoot{roots[i]}})
+			if err != nil {
+				return tasks.Selection{}, err
+			}
+			for _, skill := range catalog.Skills {
+				reserved = append(reserved, skill.Name)
+			}
+		}
+	}
+	selection := []string{}
+	if r.Skills != nil {
+		selection = append(selection, (*r.Skills)...)
+	}
+	catalog, err := agent.DiscoverSkills(core.SkillResources{Roots: roots, ReservedNames: reserved, Selection: &selection})
+	if err != nil {
+		return tasks.Selection{}, err
+	}
+	selectedPaths := map[string]bool{}
+	for _, skill := range catalog.Skills {
+		selectedPaths[filepath.Dir(skill.Location)] = true
+	}
 	enabled := map[string]core.PluginConfig{}
 	for name, p := range spec.Params.Agent.Plugins {
 		if p.Enabled {
@@ -79,7 +106,7 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 	if err = spec.Rehash(); err != nil {
 		return tasks.Selection{}, err
 	}
-	resources := taskResource{Config: spec, Roots: []taskSkillRoot{}}
+	resources := taskResource{Config: spec, ReservedNames: reserved, Roots: []taskSkillRoot{}}
 	total := 0
 	for _, root := range roots {
 		tree := taskSkillRoot{Builtin: root.Builtin, Files: map[string]string{}}
@@ -115,6 +142,17 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 				return err
 			}
 			for _, child := range children {
+				candidate := filepath.Join(root.Path, dir, child.Name())
+				included := false
+				for selected := range selectedPaths {
+					if candidate == selected || strings.HasPrefix(selected, candidate+string(filepath.Separator)) || strings.HasPrefix(candidate, selected+string(filepath.Separator)) {
+						included = true
+						break
+					}
+				}
+				if !included {
+					continue
+				}
 				if strings.HasPrefix(child.Name(), ".") {
 					continue
 				}
@@ -153,7 +191,9 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 		if err != nil {
 			return tasks.Selection{}, err
 		}
-		resources.Roots = append(resources.Roots, tree)
+		if len(tree.Files) > 0 {
+			resources.Roots = append(resources.Roots, tree)
+		}
 	}
 	revision, err := core.HashJSON(resources)
 	if err != nil {

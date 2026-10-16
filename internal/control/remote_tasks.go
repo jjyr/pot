@@ -695,18 +695,8 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	}
 	execution.Role = core.Worker
 	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
-	execution.SkillResources.Selection = l.Skills
-	for _, root := range roots {
-		if root.Builtin {
-			catalog, discoverErr := agent.DiscoverSkills(core.SkillResources{Roots: []core.SkillRoot{root}})
-			if discoverErr != nil {
-				return runner.Prepared{}, discoverErr
-			}
-			for _, skill := range catalog.Skills {
-				execution.SkillResources.ReservedNames = append(execution.SkillResources.ReservedNames, skill.Name)
-			}
-		}
-	}
+	execution.SkillResources.Selection = nil
+	execution.SkillResources.ReservedNames = resources.ReservedNames
 	engine, err := s.host(l.TaskID, l.Generation)
 	if err != nil {
 		return runner.Prepared{}, err
