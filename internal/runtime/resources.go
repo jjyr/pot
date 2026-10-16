@@ -67,7 +67,7 @@ func (r *Runtime) applyResource(ctx context.Context, request ResourceCommand) (a
 			}
 			return r.Control.CreateAssistant(ctx, control.CreateAssistant{RequestID: request.RequestID, Name: request.Name})
 		case "host":
-			policy := control.MachinePolicy{"host", "ask"}
+			policy := control.MachinePolicy{ExecutionMode: "host", HostAccess: "ask"}
 			if request.Policy != nil {
 				policy = *request.Policy
 			}
@@ -130,8 +130,24 @@ func (r *Runtime) applyResource(ctx context.Context, request ResourceCommand) (a
 		if len(refs) > 0 {
 			return nil, fmt.Errorf("Sandbox is retained by %v", refs)
 		}
-		return r.Sandboxes.Lifecycle(ctx, request.SandboxID, "delete")
+		var result any
+		remove := func() error {
+			var err error
+			result, err = r.Sandboxes.Lifecycle(ctx, request.SandboxID, "delete")
+			return err
+		}
+		if r.Provisioning != nil {
+			err = r.Provisioning.ForgetAfter(ctx, request.SandboxID, remove)
+		} else {
+			err = remove()
+		}
+		return result, err
 	case "start", "stop", "status", "rebuild":
+		if request.Action == "start" {
+			if err := r.Control.PrepareSandboxResources(ctx, request.SandboxID); err != nil {
+				return nil, err
+			}
+		}
 		return r.Sandboxes.Lifecycle(ctx, request.SandboxID, request.Action)
 	default:
 		return nil, errors.New("unknown local resource action")

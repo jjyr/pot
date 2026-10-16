@@ -242,3 +242,29 @@ func (m *Manager) Drain(ctx context.Context) error {
 		}
 	}
 }
+
+// ReconcileInterrupted releases capacity only after the owning service has
+// reconciled original receipts and cleanup. It never invokes or resumes an Agent.
+func (m *Manager) ReconcileInterrupted(id Identity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, e := range m.active {
+		if e.execution.Identity == id {
+			if e.execution.Phase != Interrupted {
+				return errors.New("original execution is still active")
+			}
+			delete(m.active, key)
+			if e.held {
+				m.held--
+			}
+			m.recent = append(m.recent, e.execution)
+			if len(m.recent) > 256 {
+				m.recent = m.recent[len(m.recent)-256:]
+			}
+			m.pumpLocked()
+			m.notifyLocked()
+			return nil
+		}
+	}
+	return nil
+}

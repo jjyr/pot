@@ -79,6 +79,7 @@ func Open(ctx context.Context, config Config) (*Manager, error) {
 		_, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS sandbox_definitions(id TEXT PRIMARY KEY,body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sandbox_scopes(id TEXT PRIMARY KEY,owner TEXT NOT NULL,target TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sandbox_receipts(key TEXT PRIMARY KEY,target TEXT NOT NULL,owner TEXT NOT NULL,digest TEXT NOT NULL,operation_id TEXT NOT NULL,state TEXT NOT NULL,result BLOB);
+CREATE TABLE IF NOT EXISTS sandbox_prepared_receipts(key TEXT PRIMARY KEY,input_hash TEXT NOT NULL,prepared_hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sandbox_sessions(id TEXT PRIMARY KEY,scope_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sandbox_leases(id TEXT PRIMARY KEY,target TEXT NOT NULL,owner TEXT NOT NULL,kind TEXT NOT NULL);`)
 		if err != nil {

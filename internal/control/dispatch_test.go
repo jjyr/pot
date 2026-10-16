@@ -79,3 +79,18 @@ func TestUncertainHostCleanupFencesNewCall(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMainExplicitHostUsesAssistantDirectoryFromSandboxDefault(t *testing.T) {
+	d, e, _ := localDispatcher(t)
+	d.DefaultTarget = core.SandboxTarget("local", "shared")
+	d.HostWorkspace = e.Workspace
+	e.Workspace = "/data/workspace"
+	call := modelprotocol.ToolCall{ID: "explicit-host", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf explicit-host > destination","login":false,"execution_target":"host"}`)}
+	if _, err := d.Dispatch(context.Background(), e, call, nil); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(d.HostWorkspace, "destination"))
+	if err != nil || string(body) != "explicit-host" {
+		t.Fatal(string(body), err)
+	}
+}

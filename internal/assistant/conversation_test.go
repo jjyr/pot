@@ -382,3 +382,74 @@ func TestConversationPersistsToolStreamAndFinalReceipt(t *testing.T) {
 		t.Fatal(checkpoint)
 	}
 }
+
+func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T) {
+	ctx := context.Background()
+	var cleanup, calls atomic.Int64
+	started := make(chan struct{})
+	release := make(chan struct{})
+	second := make(chan struct{})
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "conversation.sqlite"), "boot", func(_ context.Context, r core.ModelRequest) (io.ReadCloser, error) {
+		switch calls.Add(1) {
+		case 1:
+			close(started)
+			<-release
+			return replySSE("first"), nil
+		case 2:
+			close(second)
+			if !strings.Contains(string(r.Body), "visible guidance") {
+				t.Error("guidance absent from continued model request")
+			}
+			return replySSE("after guidance"), nil
+		}
+		return replySSE("later"), nil
+	}, &cleanup)
+	receipt, err := c.Send(ctx, protocol.SendMessage{RequestID: "turn", ConversationID: "main", Text: "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err = c.Control(ctx, TurnControl{receipt.MessageID, "pause"}); err != nil {
+		t.Fatal(err)
+	}
+	guidance, err := c.Steer(ctx, SteerRequest{"guide", receipt.MessageID, "visible guidance"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := c.Snapshot(ctx)
+	if snapshot.Turn == nil || !snapshot.Turn.Paused {
+		t.Fatal(snapshot)
+	}
+	found := false
+	for _, m := range snapshot.Messages {
+		if m.ID == guidance.MessageID && m.Text == "visible guidance" && m.Role == protocol.User && m.Status == protocol.Accepted {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("accepted steering absent from visible transcript")
+	}
+	close(release)
+	select {
+	case <-second:
+		t.Fatal("paused turn sampled the next model")
+	case <-time.After(60 * time.Millisecond):
+	}
+	if err = c.Control(ctx, TurnControl{receipt.MessageID, "resume"}); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
+	again, err := c.Steer(ctx, SteerRequest{"guide", receipt.MessageID, "visible guidance"})
+	if err != nil || !again.Duplicate || again.MessageID != guidance.MessageID {
+		t.Fatal(again, err)
+	}
+	if _, err = c.Steer(ctx, SteerRequest{"guide", "another-user", "visible guidance"}); err == nil {
+		t.Fatal("steering receipt retargeted")
+	}
+	if err = c.Control(ctx, TurnControl{receipt.MessageID, "pause"}); err == nil {
+		t.Fatal("ended turn paused")
+	}
+	if calls.Load() != 2 {
+		t.Fatal(calls.Load())
+	}
+}

@@ -45,6 +45,22 @@ func instructionSection(name, text string) string {
 // prepareExecution discovers instructions in the execution namespace. Sandbox
 // absolute symlinks are never interpreted against the Control Host filesystem.
 func (s *Service) prepareExecution(ctx context.Context, owner string, target core.ExecutionTarget, worker bool, rules string) (core.ExecutionContext, error) {
+	return s.prepareExecutionFor(ctx, owner, owner, target, worker, rules)
+}
+
+// ExecutionWorkspace is the conversational assistant's persistent Host directory.
+// It creates no executor and never selects a Host/Sandbox execution policy.
+func (s *Service) ExecutionWorkspace(owner string) (string, error) {
+	if !core.Identifier(owner) {
+		return "", errors.New("invalid assistant workspace identity")
+	}
+	directory := filepath.Join(s.options.Workspace, "assistants", owner)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return "", err
+	}
+	return directory, nil
+}
+func (s *Service) prepareExecutionFor(ctx context.Context, owner, workspaceOwner string, target core.ExecutionTarget, worker bool, rules string) (core.ExecutionContext, error) {
 	result := core.ExecutionContext{Owner: owner, Data: s.options.Root, Role: core.Main, MainPrompt: assistant.MainPrompt}
 	if worker {
 		result.Role = core.Worker
@@ -56,6 +72,13 @@ func (s *Service) prepareExecution(ctx context.Context, owner string, target cor
 			return result, errors.New("remote instructions require destination preparation")
 		}
 		cwd := s.options.Workspace
+		if !worker {
+			var err error
+			cwd, err = s.ExecutionWorkspace(workspaceOwner)
+			if err != nil {
+				return result, err
+			}
+		}
 		if worker {
 			cwd = filepath.Join(cwd, "tasks", owner)
 			if err := os.MkdirAll(cwd, 0700); err != nil {

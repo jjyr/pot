@@ -22,11 +22,12 @@ func (a *Application) resourceCall(ctx context.Context, method string, u *url.UR
 		return v, err, true
 	}
 	var command struct {
-		Action    string `json:"action"`
-		SandboxID string `json:"sandbox_id,omitempty"`
-		BundleID  string `json:"bundle_id,omitempty"`
-		RequestID string `json:"request_id,omitempty"`
-		Directory string `json:"directory,omitempty"`
+		Action     string `json:"action"`
+		SandboxID  string `json:"sandbox_id,omitempty"`
+		BundleID   string `json:"bundle_id,omitempty"`
+		RequestID  string `json:"request_id,omitempty"`
+		Directory  string `json:"directory,omitempty"`
+		ResourceID string `json:"resource_id,omitempty"`
 	}
 	if err := decode(r.Body, &command); err != nil {
 		return nil, err, true
@@ -34,6 +35,9 @@ func (a *Application) resourceCall(ctx context.Context, method string, u *url.UR
 	var result resourcecontrol.Request
 	var err error
 	switch command.Action {
+	case "prune":
+		err = a.Resources.Prune(ctx, command.ResourceID)
+		return map[string]bool{"pruned": err == nil}, err, true
 	case "request":
 		result, err = a.Resources.Request(ctx, command.SandboxID, command.BundleID)
 	case "download":

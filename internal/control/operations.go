@@ -46,7 +46,7 @@ func OpenOperations(path string) (*Operations, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err = db.Exec("CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,state TEXT NOT NULL,result BLOB,error TEXT NOT NULL); CREATE TABLE IF NOT EXISTS operation_scopes(id TEXT PRIMARY KEY REFERENCES operations(id),scope TEXT NOT NULL); UPDATE operations SET state='unknown' WHERE state='started'"); err != nil {
+	if _, err = db.Exec("CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,state TEXT NOT NULL,result BLOB,error TEXT NOT NULL); CREATE TABLE IF NOT EXISTS operation_scopes(id TEXT PRIMARY KEY REFERENCES operations(id),scope TEXT NOT NULL); CREATE TABLE IF NOT EXISTS operation_inputs(id TEXT PRIMARY KEY REFERENCES operations(id),owner TEXT NOT NULL,turn_id TEXT NOT NULL,body TEXT NOT NULL); CREATE INDEX IF NOT EXISTS operation_input_run ON operation_inputs(owner,turn_id); UPDATE operations SET state='unknown' WHERE state='started'"); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -99,6 +99,13 @@ func (o *Operations) Begin(ctx context.Context, op Operation) (receipt Receipt, 
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO operation_scopes VALUES (?,?)", id, scope); err != nil {
+			return err
+		}
+		body, err := json.Marshal(op)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO operation_inputs VALUES(?,?,?,?)", id, op.Owner, op.Turn, string(body)); err != nil {
 			return err
 		}
 		receipt = Receipt{ID: id, InputHash: hash, State: "started"}

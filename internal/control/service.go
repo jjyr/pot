@@ -19,6 +19,7 @@ import (
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/internal/terminal"
 	"github.com/jjyr/pot/internal/usage"
 	"io"
 	"net/http"
@@ -38,6 +39,7 @@ type Options struct {
 	Target                                                                   TargetDispatch
 	CleanupTarget                                                            func(context.Context, string, bool) error
 	ResolveSandbox                                                           func(context.Context) (core.ExecutionTarget, error)
+	PrepareSandboxResources                                                  func(context.Context, string) error
 	Sandboxes                                                                *sandbox.Manager
 	Embedded                                                                 bool
 	Node                                                                     string
@@ -67,6 +69,7 @@ type Service struct {
 	Tasks             *tasks.Service
 	Schedules         *schedule.Service
 	Mailbox           *assistant.Mailbox
+	Terminals         *terminal.Hub
 	taskLife          *taskLifecycle
 }
 
@@ -91,6 +94,7 @@ func Open(options Options) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(options.Context)
 	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}}
+	s.Terminals = terminal.New()
 	success := false
 	defer func() {
 		if !success {
@@ -219,7 +223,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	executionContext, err := s.prepareExecution(ctx, thread.Owner, target, false, rules.Text)
+	executionContext, err := s.prepareExecutionFor(ctx, thread.Owner, principal, target, false, rules.Text)
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
@@ -228,8 +232,16 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
-	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
+	hostWorkspace, err := s.ExecutionWorkspace(principal)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, HostWorkspace: hostWorkspace, Usage: s.Usage, UsageScope: principal, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
+	waitScope := principal
+	if thread.Owner != principal {
+		waitScope = thread.Owner
+	}
+	model := &ModelSession{WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
 		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
 	}}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
@@ -278,12 +290,12 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		}
 		return err
 	}, Ready: func(ctx context.Context) error {
-		waiting, err := s.Usage.Waiting(ctx, principal)
+		waiting, err := s.Usage.Waiting(ctx, waitScope)
 		if err != nil {
 			return err
 		}
 		if waiting != nil {
-			ready, err := s.Usage.Ready(ctx, principal, storage.Now())
+			ready, err := s.Usage.Ready(ctx, waitScope, storage.Now())
 			if err != nil {
 				return err
 			}
@@ -327,6 +339,11 @@ func (s *Service) Close() error {
 	}
 	s.mu.Unlock()
 	var result error
+	if s.Terminals != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		result = errors.Join(result, s.Terminals.Close(ctx))
+		cancel()
+	}
 	if s.taskLife != nil {
 		s.taskLife.wg.Wait()
 	}

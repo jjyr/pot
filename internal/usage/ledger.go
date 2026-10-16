@@ -463,3 +463,9 @@ func (l *Ledger) ClearWait(ctx context.Context, scope string) error {
 	_, err := l.db.ExecContext(ctx, "DELETE FROM waits WHERE scope=?", scope)
 	return err
 }
+
+// ClearWaitForTurn cannot erase a different execution's newer wait.
+func (l *Ledger) ClearWaitForTurn(ctx context.Context, scope, turn string) error {
+	_, err := l.db.ExecContext(ctx, "DELETE FROM waits WHERE scope=? AND turn_id=?", scope, turn)
+	return err
+}

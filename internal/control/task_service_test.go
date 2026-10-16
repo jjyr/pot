@@ -7,6 +7,7 @@ import (
 	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/usage"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,6 +122,14 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 		if m.RequestID != nil && strings.HasPrefix(*m.RequestID, "pot-result-") && m.Role != protocol.System {
 			t.Fatal("result became user authority")
 		}
+	}
+	workerUsage, err := s.Usage.Summary(ctx, usage.Query{Scope: accepted.Info.ID, Days: 7, Timezone: "UTC"}, time.Now().UnixMilli())
+	if err != nil || workerUsage.Total.Requests != 2 || workerUsage.Total.Input != 40 || workerUsage.Total.Output != 10 || len(workerUsage.Tools) != 1 || workerUsage.Tools[0].Name != "exec_command" || workerUsage.Tools[0].Calls != 1 {
+		t.Fatal("Task usage attribution", workerUsage, err)
+	}
+	mainUsage, err := s.Usage.Summary(ctx, usage.Query{Scope: "main", Days: 7, Timezone: "UTC"}, time.Now().UnixMilli())
+	if err != nil || mainUsage.Total.Requests != 1 || len(mainUsage.Tools) != 0 {
+		t.Fatal("Task usage contaminated Main", mainUsage, err)
 	}
 	notices, _ := s.Tasks.Notifications(ctx, "main")
 	if len(notices) != 0 {

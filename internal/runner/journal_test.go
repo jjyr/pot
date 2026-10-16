@@ -129,16 +129,16 @@ func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 	if _, err := j.Accept(ctx, next); err == nil {
 		t.Fatal("unsettled Task replaced")
 	}
-	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, false); !errors.Is(err, core.ErrCleanupUnconfirmed) {
+	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, nil, false); !errors.Is(err, core.ErrCleanupUnconfirmed) {
 		t.Fatal(err)
 	}
-	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, true); !errors.Is(err, core.ErrCleanupUnconfirmed) {
+	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, nil, true); !errors.Is(err, core.ErrCleanupUnconfirmed) {
 		t.Fatal("missing original command receipt ignored", err)
 	}
 	if err := j.CompleteCommand(ctx, "control", "task", "run", "effect", json.RawMessage(`{"known":true}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, true); err != nil {
+	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	record, _ = j.Inspect(ctx, "control", "task", "run")
@@ -164,5 +164,50 @@ func TestTargetBindingRejectsMachineHostAndSandboxSubstitution(t *testing.T) {
 		if err := core.DecodeJSON(value["execution_target"], &restored); err != nil || restored != target {
 			t.Fatal(restored, err)
 		}
+	}
+}
+
+func TestRestartRetainsOriginalCleanupProofAndCommandInput(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "runner.sqlite")
+	j, err := Open(path, "runtime", "original-boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := launchFixture(t)
+	if _, err = j.Accept(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = j.Claim(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{"original":"immutable"}`)
+	if _, _, err = j.BeginCommand(ctx, l.ControlID, l.TaskID, l.RunID, "call", input); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.CompleteCommand(ctx, l.ControlID, l.TaskID, l.RunID, "call", json.RawMessage(`{"known":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.RecordCleanup(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j, err = Open(path, "runtime", "next-boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	run, err := j.Inspect(ctx, l.ControlID, l.TaskID, l.RunID)
+	if err != nil || run.Phase != RecoveryRequired || !run.CleanupConfirmed {
+		t.Fatal(run, err)
+	}
+	commands, err := j.Commands(ctx, l.ControlID, l.TaskID, l.RunID)
+	if err != nil || len(commands) != 1 || string(commands[0].Input) != string(input) || commands[0].Phase != "complete" {
+		t.Fatal(commands, err)
+	}
+	if err = j.ReconcileRecovered(ctx, l.ControlID, l.TaskID, l.RunID, nil, nil, true); err != nil {
+		t.Fatal(err)
 	}
 }

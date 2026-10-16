@@ -28,6 +28,7 @@ type ModelSession struct {
 	Usage        *usage.Ledger
 	Spec         core.ResolvedSpec
 	Scope, Turn  string
+	WaitScope    string
 	Generation   uint64
 	Role         string
 	Claim        func(context.Context, string) error
@@ -108,6 +109,10 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 			return nil, err
 		}
 	}
+	waitScope := s.WaitScope
+	if waitScope == "" {
+		waitScope = s.Scope
+	}
 	request := usage.ReserveRequest{ID: r.ID, Scope: s.Scope, Turn: s.Turn, AtMS: atMS, Model: s.Spec.Model, InputEstimate: int64(len(body)) + 1024, MaxOutput: int64(cap), Route: &usage.Route{Provider: provider.ID, Generation: int64(s.Generation), SpecHash: s.Spec.SpecHash, Agent: s.Role, ProfileID: s.Spec.SourceProfileID}}
 	reservation, err := s.Usage.ReserveRouted(ctx, request)
 	if err != nil {
@@ -115,7 +120,7 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 		return nil, err
 	}
 	if reservation == nil {
-		if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: s.Scope, Turn: s.Turn, Provider: provider.ID, AtMS: atMS, Required: request.InputEstimate + 1}); err != nil {
+		if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: waitScope, Turn: s.Turn, Provider: provider.ID, AtMS: atMS, Required: request.InputEstimate + 1}); err != nil {
 			return nil, err
 		}
 		return nil, protocol.APIError{Code: "pot_token_limit", Message: "Pot token allowance is unavailable; this turn is paused before sending the model request"}
@@ -123,6 +128,10 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 	if reservation.Duplicate {
 		knownUnsent = false
 		return nil, protocol.APIError{Code: "unknown_model_request", Message: "Model request already reserved; inspect its original receipt instead of resending"}
+	}
+	if err = s.Usage.ClearWaitForTurn(ctx, waitScope, s.Turn); err != nil {
+		s.Usage.Rejected(ctx, r.ID)
+		return nil, err
 	}
 	body, _, err = p.Clamp(body, uint64(reservation.OutputCap))
 	if err != nil {

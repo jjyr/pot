@@ -41,14 +41,17 @@ func (s *Service) openTasks() error {
 		if err != nil {
 			return err
 		}
-		if len(definitions) != 0 {
-			return errors.New("Runtime owning assistants cannot join Control")
+		if len(definitions) != 0 || len(s.Profiles.Snapshot().Profiles) != 0 {
+			return errors.New("Runtime with AI configuration cannot join as Runner; use a separate data directory")
 		}
 		return nil
 	}})
 	if err != nil {
 		return err
 	}
+	// Directory serializes this gate with enrollment admission and its CanJoin
+	// configuration check, so a concurrent Provider save cannot hide AI state.
+	s.Profiles.ownerAction = s.Machines.OwnerAction
 	s.RunnerJournal, err = runner.Open(filepath.Join(s.options.Root, "runner.sqlite"), s.options.RuntimeID, s.options.BootID)
 	if err != nil {
 		return err
@@ -395,11 +398,11 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: map[string]agent.Dispatch{}}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: map[string]agent.Dispatch{}}
 	feedback := &taskFeedback{s: s, launch: l}
-	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.AssistantID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
+	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.TaskID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
-		return s.taskCompaction(ctx, l.AssistantID, l.RunID, raw)
+		return s.taskCompaction(ctx, l.TaskID, l.RunID, raw)
 	}}
 	definitions := []modelprotocol.ToolDefinition{}
 	for _, raw := range core.ExecutionTools(config.Params.Agent.Shell) {
@@ -466,7 +469,12 @@ func (f *taskFeedback) RecordTurn(ctx context.Context, id string) error {
 func (f *taskFeedback) InputStreaming(ctx context.Context, id string) error {
 	return f.RecordTurn(ctx, id)
 }
-func (f *taskFeedback) Ready(ctx context.Context) error { return f.current(ctx) }
+func (f *taskFeedback) Ready(ctx context.Context) error {
+	if err := f.current(ctx); err != nil {
+		return err
+	}
+	return f.s.Tasks.ReadyGate(ctx, f.launch.AssistantID, f.launch.TaskID, f.launch.RunID)
+}
 func (f *taskFeedback) Steering(ctx context.Context, finalizing bool) ([]agent.SteeringInput, error) {
 	return f.s.Tasks.Steering(ctx, f.launch.AssistantID, f.launch.TaskID, f.launch.RunID, finalizing)
 }
@@ -515,11 +523,11 @@ func (s *Service) resumeTaskAllowance(ctx context.Context) {
 	}
 	rows.Close()
 	for _, pair := range pairs {
-		waiting, err := s.Usage.Waiting(ctx, pair[0])
+		waiting, err := s.Usage.Waiting(ctx, pair[1])
 		if err != nil || waiting == nil {
 			continue
 		}
-		ready, err := s.Usage.Ready(ctx, pair[0], storage.Now())
+		ready, err := s.Usage.Ready(ctx, pair[1], storage.Now())
 		if err == nil && ready {
 			s.Tasks.ResumeWaiting(ctx, pair[0], pair[1])
 		}

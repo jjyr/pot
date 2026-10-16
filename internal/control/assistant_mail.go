@@ -58,8 +58,28 @@ func (s *Service) deliverAssistantMail(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		message, err := s.Mailbox.Next(ctx, definition.ID)
-		if err != nil || message == nil {
+		candidates, err := s.Mailbox.Candidates(ctx, definition.ID)
+		if err != nil {
+			continue
+		}
+		var message *protocol.Envelope
+		for _, candidate := range candidates {
+			waitScope := mailExecutionOwner(candidate)
+			waiting, err := s.Usage.Waiting(ctx, waitScope)
+			if err != nil {
+				continue
+			}
+			if waiting != nil {
+				ready, err := s.Usage.Ready(ctx, waitScope, time.Now().UnixMilli())
+				if err != nil || !ready {
+					continue
+				}
+			}
+			copy := candidate
+			message = &copy
+			break
+		}
+		if message == nil {
 			continue
 		}
 		main, err := s.Conversation(ctx, definition.ID)
@@ -69,16 +89,6 @@ func (s *Service) deliverAssistantMail(ctx context.Context) {
 		thread, err := main.Thread(ctx)
 		if err != nil || thread == nil {
 			continue
-		}
-		waiting, err := s.Usage.Waiting(ctx, definition.ID)
-		if err != nil {
-			continue
-		}
-		if waiting != nil {
-			ready, err := s.Usage.Ready(ctx, definition.ID, time.Now().UnixMilli())
-			if err != nil || !ready {
-				continue
-			}
 		}
 		if err = s.Mailbox.Claim(ctx, message.ID); err != nil {
 			continue
@@ -97,8 +107,7 @@ func (s *Service) deliverAssistantMail(ctx context.Context) {
 }
 func (s *Service) runAssistantMail(main *assistant.Conversation, message protocol.Envelope, initial core.ResolvedSpec) {
 	ctx := context.WithValue(s.ctx, mailParentKey{}, message)
-	ownerHash, _ := core.HashJSON([]string{message.To.AssistantID, message.ConversationID})
-	owner := "mail-" + ownerHash
+	owner := mailExecutionOwner(message)
 	spec, state, err := s.Mailbox.Session(ctx, message, initial)
 	if err != nil {
 		s.finishAssistantMail(message.ID, false, err.Error())
@@ -126,7 +135,9 @@ func (s *Service) runAssistantMail(main *assistant.Conversation, message protoco
 		}
 		feedback.ready = options.Ready
 		loop := agent.Agent{Services: options.Services, Feedback: feedback, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: composition.ProcessRunner{}, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
-		err = loop.Execute(runCtx, options.Execution, thread, request, false, func(event core.AgentEvent) error {
+		var checkpoint agent.Checkpoint
+		resuming := len(state) > 0 && json.Unmarshal(state, &checkpoint) == nil && checkpoint.LastRequest == message.ID
+		err = loop.Execute(runCtx, options.Execution, thread, request, resuming, func(event core.AgentEvent) error {
 			if !gate.Accept(event) {
 				return errors.New("stale mail Agent event")
 			}
@@ -146,6 +157,14 @@ func (s *Service) runAssistantMail(main *assistant.Conversation, message protoco
 	detail := ""
 	if result.Err != nil {
 		detail = result.Err.Error()
+	}
+	if assistant.IsWaiting(result.Err) && result.Phase != execution.Interrupted && !core.IsCleanupUnconfirmed(result.Err) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.Mailbox.Wait(ctx, message, detail); err != nil {
+			s.finishAssistantMail(message.ID, false, err.Error())
+		}
+		return
 	}
 	if result.Phase == execution.Interrupted {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -220,4 +239,9 @@ func (f *mailFeedback) Observe(context.Context, agent.Observation) error {
 }
 func (f *mailFeedback) Settle(ctx context.Context) error {
 	return f.s.settleTaskOperations(ctx, f.owner)
+}
+
+func mailExecutionOwner(message protocol.Envelope) string {
+	hash, _ := core.HashJSON([]string{message.To.AssistantID, message.ConversationID})
+	return "mail-" + hash
 }

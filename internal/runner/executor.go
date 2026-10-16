@@ -227,7 +227,18 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 		if len(prepared.Thread.Config.Params.Agent.Plugins) != len(record.Launch.Plugins) {
 			return rejectPrepared(fmt.Errorf("prepared plugin set differs from launch"))
 		}
-		engine := *prepared.Agent
+		originalCleanup := prepared.Agent.Cleanup
+		wrapped := *prepared.Agent
+		wrapped.Cleanup = func(ctx context.Context, executionContext core.ExecutionContext, abort bool) error {
+			if originalCleanup == nil {
+				return core.ErrCleanupUnconfirmed
+			}
+			if err := originalCleanup(ctx, executionContext, abort); err != nil {
+				return err
+			}
+			return e.Journal.RecordCleanup(ctx, control, task, runID)
+		}
+		engine := wrapped
 		engine.Feedback = &runFeedback{journal: e.Journal, control: control, task: task, run: runID, upstream: engine.Feedback}
 		dispatch := engine.Dispatch
 		engine.Dispatch = func(ctx context.Context, execution core.ExecutionContext, call m.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {

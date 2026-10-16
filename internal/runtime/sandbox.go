@@ -77,7 +77,31 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 	if err != nil {
 		return err
 	}
-	r.Provisioning, err = resourcecontrol.Open(resourcecontrol.Options{Root: r.Root.Path, Catalog: catalog, Store: r.Resources, Bind: func(ctx context.Context, id string, prepared sandbox.PreparedResources) error {
+	r.Provisioning, err = resourcecontrol.Open(resourcecontrol.Options{Root: r.Root.Path, Catalog: catalog, Store: r.Resources, ValidateSandbox: func(ctx context.Context, id string) error {
+		if id == sandbox.SharedID {
+			d, err := r.Sandboxes.EnsureShared(ctx)
+			if err != nil {
+				return err
+			}
+			if d.Retired || d.Provider != sandbox.AppleContainer {
+				return errors.New("Sandbox does not accept Linux VM resource bundles")
+			}
+			return nil
+		}
+		definitions, err := r.Sandboxes.Inventory(ctx)
+		if err != nil {
+			return err
+		}
+		for _, d := range definitions {
+			if d.ID == id && !d.Retired {
+				if d.Provider != sandbox.AppleContainer {
+					return errors.New("Sandbox uses an owner-installed image or prepared macOS VM")
+				}
+				return nil
+			}
+		}
+		return errors.New("Sandbox definition not found")
+	}, Bind: func(ctx context.Context, id string, prepared sandbox.PreparedResources) error {
 		if id == "shared" {
 			definition, err := r.Sandboxes.EnsureShared(ctx)
 			if err != nil {
@@ -97,6 +121,21 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 		return err
 	}
 	config.Sandboxes = r.Sandboxes
+	config.PrepareSandboxResources = func(ctx context.Context, id string) error {
+		definitions, err := r.Sandboxes.Inventory(ctx)
+		if err != nil {
+			return err
+		}
+		for _, d := range definitions {
+			if d.ID == id {
+				if d.Provider == sandbox.AppleContainer {
+					return r.Provisioning.Wait(ctx, id, "")
+				}
+				return nil
+			}
+		}
+		return errors.New("Sandbox definition not found")
+	}
 	config.ResolveSandbox = func(ctx context.Context) (core.ExecutionTarget, error) {
 		definition, err := r.Sandboxes.ResolveSelected(ctx)
 		if err != nil {
@@ -113,7 +152,7 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 			}
 			for _, definition := range definitions {
 				if definition.ID == op.Target.Target.SandboxID && definition.Provider == sandbox.AppleContainer {
-					if err = r.Provisioning.Wait(ctx, definition.ID, ""); err != nil {
+					if err = r.Provisioning.WaitFor(ctx, definition.ID, "", op.Owner, op.Turn); err != nil {
 						return nil, err
 					}
 					break
@@ -127,6 +166,9 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 			}
 			prepared, err := r.Sandboxes.PrepareOperation(ctx, grant, request.Operation, args)
 			if err != nil {
+				return nil, err
+			}
+			if err = r.Sandboxes.RememberPrepared(ctx, grant, request.ID, request.Operation, args, prepared); err != nil {
 				return nil, err
 			}
 			return r.Sandboxes.Execute(ctx, grant, request.ID, request.Operation, prepared, emit)

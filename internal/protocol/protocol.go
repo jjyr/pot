@@ -76,6 +76,7 @@ type Message struct {
 	Status         MessageStatus `json:"status" required:"true"`
 	CreatedAtMS    int64         `json:"created_at_ms" required:"true"`
 	RequestID      *string       `json:"request_id"`
+	Steering       bool          `json:"steering,omitempty"`
 }
 
 func (m Message) Validate() error {
@@ -101,6 +102,7 @@ func (m Message) Validate() error {
 type TurnState struct {
 	UserMessageID string `json:"user_message_id" required:"true"`
 	Cancelling    bool   `json:"cancelling" required:"true"`
+	Paused        bool   `json:"paused"`
 }
 type RequestBudget struct {
 	Used            uint64 `json:"used" required:"true"`

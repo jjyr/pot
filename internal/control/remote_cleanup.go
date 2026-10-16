@@ -58,6 +58,7 @@ func (s *Service) closeRemoteRun(run string) {
 	state := s.remote()
 	state.mu.Lock()
 	a := state.runs[run]
+	delete(state.runs, run)
 	state.mu.Unlock()
 	if a == nil {
 		return

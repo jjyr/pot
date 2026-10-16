@@ -206,7 +206,7 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 	if err != nil {
 		return nil, err
 	}
-	allowStopped := request.Method == "task.model.close" || request.Method == "task.settle"
+	allowStopped := request.Method == "task.model.close" || request.Method == "task.settle" || request.Method == "task.recovery.operations" || request.Method == "task.recovery.settle"
 	launch, err := s.controlBinding(ctx, p, r.Binding, allowStopped)
 	if err != nil {
 		return nil, err
@@ -220,10 +220,19 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 	defer func() { stop(); cancel() }()
 	var result any
 	switch request.Method {
+	case "task.recovery.operations":
+		result, err = s.Operations.RecoveryRecords(ctx, launch.TaskID, launch.RunID)
+	case "task.recovery.settle":
+		var records []OperationRecord
+		if err = core.DecodeJSON(r.Data, &records); err == nil {
+			err = s.settleRecoveryOperations(ctx, launch, records)
+		}
+		result = map[string]bool{"settled": err == nil}
 	case "task.resources":
 		result, err = s.currentTaskResource(ctx, launch)
 	case "task.ready":
-		result = map[string]bool{"ready": true}
+		err = s.Tasks.ReadyGate(ctx, launch.AssistantID, launch.TaskID, launch.RunID)
+		result = map[string]bool{"ready": err == nil}
 	case "task.steering":
 		var q struct {
 			Finalizing bool `json:"finalizing"`
@@ -262,7 +271,7 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		}
 		result = map[string]bool{"accepted": err == nil}
 	case "task.compaction":
-		err = s.taskCompaction(ctx, launch.AssistantID, launch.RunID, r.Data)
+		err = s.taskCompaction(ctx, launch.TaskID, launch.RunID, r.Data)
 		result = map[string]bool{"accepted": err == nil}
 	case "task.model.open":
 		var modelRequest core.ModelRequest
@@ -365,7 +374,7 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		}
 		stopDispatch := context.AfterFunc(authority.ctx, cancel)
 		defer stopDispatch()
-		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
+		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
 			var response executeReply
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -424,7 +433,7 @@ func (s *Service) authority(ctx context.Context, peer *controlplane.Peer, l runn
 		case <-runctx.Done():
 		}
 	}()
-	a.model = &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: resources.Config, Scope: l.AssistantID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: func(ctx context.Context, id string) error {
+	a.model = &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: resources.Config, Scope: l.TaskID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: func(ctx context.Context, id string) error {
 		if _, err := s.controlBinding(ctx, controlplane.Principal{RuntimeID: l.RuntimeID}, binding(l), false); err != nil {
 			return err
 		}
@@ -532,11 +541,26 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 	if err != nil {
 		return nil, err
 	}
-	record, err := s.runnerBinding(ctx, p, r.Binding, request.Method == "task.checkpoint" || request.Method == "task.file" || request.Method == "task.file.chunk" || request.Method == "task.events")
+	record, err := s.runnerBinding(ctx, p, r.Binding, request.Method == "task.recovery" || request.Method == "task.checkpoint" || request.Method == "task.file" || request.Method == "task.file.chunk" || request.Method == "task.events")
 	if err != nil {
 		return nil, err
 	}
 	switch request.Method {
+	case "task.recovery":
+		var q struct {
+			Action string `json:"action"`
+		}
+		if err = core.DecodeJSON(r.Data, &q); err != nil {
+			return nil, err
+		}
+		if err = recoveryAction(q.Action); err != nil {
+			return nil, err
+		}
+		snapshot, recoveryErr := s.recoverRun(ctx, record, q.Action)
+		if recoveryErr != nil {
+			return nil, recoveryErr
+		}
+		return json.Marshal(snapshot)
 	case "task.prepared.resources":
 		resources, _, err := s.readPreparedTaskResources(ctx, record.Launch)
 		if err != nil {

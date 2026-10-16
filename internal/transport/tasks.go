@@ -7,6 +7,7 @@ import (
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/internal/usage"
 	"net/url"
 	"strconv"
 	"strings"
@@ -164,12 +165,54 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 				err = s.Tasks.Stop(ctx, owner, id, parts[1])
 			}
 			result = map[string]bool{"accepted": err == nil}
+		case "control":
+			if method != "POST" {
+				err = errors.New("POST required")
+				break
+			}
+			var request struct {
+				RunID  string `json:"run_id" required:"true"`
+				Action string `json:"action" required:"true"`
+			}
+			if err = decode(r.Body, &request); err == nil {
+				err = s.Tasks.Control(ctx, owner, id, request.RunID, request.Action)
+			}
+			result = map[string]bool{"accepted": err == nil}
+		case "recovery":
+			if method != "POST" {
+				err = errors.New("POST required")
+				break
+			}
+			var request struct {
+				RunID  string `json:"run_id" required:"true"`
+				Action string `json:"action" required:"true"`
+			}
+			if err = decode(r.Body, &request); err == nil {
+				result, err = s.TaskRecovery(ctx, owner, id, request.RunID, request.Action)
+			}
 		case "resume":
 			if method != "POST" {
 				err = errors.New("POST required")
 				break
 			}
-			err = s.Tasks.ResumeWaiting(ctx, owner, id)
+			record, e := s.Tasks.Get(ctx, owner, id)
+			err = e
+			if err == nil && (record == nil || record.Launch == nil || record.Info.Phase != protocol.TaskWaiting || record.Info.RemoteWaiting) {
+				err = errors.New("Task is not safely allowance-waiting")
+			}
+			if err == nil {
+				var waiting *usage.Waiting
+				waiting, err = s.Usage.Waiting(ctx, id)
+				if err == nil && (waiting == nil || waiting.Turn != record.RunID) {
+					err = errors.New("Task allowance wait does not match original run")
+				}
+			}
+			if err == nil {
+				err = s.Usage.ReleaseWait(ctx, id)
+			}
+			if err == nil {
+				err = s.Tasks.ResumeWaiting(ctx, owner, id)
+			}
 			result = map[string]bool{"accepted": err == nil}
 		default:
 			err = errors.New("Task route unavailable")

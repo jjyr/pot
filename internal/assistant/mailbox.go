@@ -272,7 +272,7 @@ func (m *Mailbox) Acknowledge(ctx context.Context, receipt protocol.Receipt) err
 	})
 }
 func (m *Mailbox) Next(ctx context.Context, recipient string) (*protocol.Envelope, error) {
-	values, err := m.envelopes(ctx, `SELECT envelope FROM assistant_mail m WHERE direction='in' AND state='queued' AND recipient=? AND NOT EXISTS(SELECT 1 FROM assistant_mail b WHERE b.conversation=m.conversation AND b.recipient=m.recipient AND b.state IN ('processing','interrupted','failed')) ORDER BY sequence LIMIT 1`, recipient)
+	values, err := m.envelopes(ctx, `SELECT envelope FROM assistant_mail m WHERE direction='in' AND state IN ('queued','waiting') AND recipient=? AND NOT EXISTS(SELECT 1 FROM assistant_mail b WHERE b.conversation=m.conversation AND b.recipient=m.recipient AND (b.state IN ('processing','interrupted','failed') OR b.state='waiting' AND b.id!=m.id)) ORDER BY sequence LIMIT 1`, recipient)
 	if err != nil || len(values) == 0 {
 		return nil, err
 	}
@@ -326,7 +326,7 @@ func (m *Mailbox) History(ctx context.Context, assistant string, after int64) ([
 	return out, rows.Err()
 }
 func (m *Mailbox) Claim(ctx context.Context, id string) error {
-	result, err := m.db.ExecContext(ctx, `UPDATE assistant_mail AS m SET state='processing' WHERE id=? AND direction='in' AND state='queued' AND NOT EXISTS(SELECT 1 FROM assistant_mail b WHERE b.conversation=m.conversation AND b.recipient=m.recipient AND b.state IN ('processing','interrupted','failed'))`, id)
+	result, err := m.db.ExecContext(ctx, `UPDATE assistant_mail AS m SET state='processing' WHERE id=? AND direction='in' AND state IN ('queued','waiting') AND NOT EXISTS(SELECT 1 FROM assistant_mail b WHERE b.conversation=m.conversation AND b.recipient=m.recipient AND (b.state IN ('processing','interrupted','failed') OR b.state='waiting' AND b.id!=m.id))`, id)
 	if err != nil {
 		return err
 	}

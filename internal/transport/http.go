@@ -42,6 +42,9 @@ func Handler(app *Application, token string) http.Handler {
 			app.Desktop.ServeHTTP(w, r)
 			return
 		}
+		if app.terminalSocket(w, r) {
+			return
+		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/events" {
 			streamSnapshots(w, r, app)
 			return

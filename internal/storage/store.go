@@ -158,12 +158,21 @@ func (s *Store) Events(ctx context.Context, after int64) ([]Event, error) {
 	}
 	return out, rows.Err()
 }
-func (s *Store) Save(ctx context.Context, m Message) (Event, error) { return s.save(ctx, m, nil, true) }
+func (s *Store) Save(ctx context.Context, m Message) (Event, error) {
+	return s.save(ctx, m, nil, true, nil)
+}
 func (s *Store) SaveWithMetadata(ctx context.Context, m Message, metadata map[string]string) (Event, error) {
-	return s.save(ctx, m, metadata, true)
+	return s.save(ctx, m, metadata, true, nil)
 }
 func (s *Store) SaveNonNotifying(ctx context.Context, m Message) (Event, error) {
-	return s.save(ctx, m, nil, false)
+	return s.save(ctx, m, nil, false, nil)
+}
+
+// SaveWithMutation commits the message projection/event with owner-local journal
+// state in the same database transaction. The mutation must not open another
+// transaction or perform external effects.
+func (s *Store) SaveWithMutation(ctx context.Context, m Message, mutation func(*sql.Tx) error) (Event, error) {
+	return s.save(ctx, m, nil, true, mutation)
 }
 
 // AppendEvent atomically persists a non-message state transition and its owner
@@ -200,7 +209,7 @@ func (s *Store) AppendEvent(ctx context.Context, event Event, metadata map[strin
 	}
 	return event, nil
 }
-func (s *Store) save(ctx context.Context, m Message, metadata map[string]string, notify bool) (Event, error) {
+func (s *Store) save(ctx context.Context, m Message, metadata map[string]string, notify bool, mutation func(*sql.Tx) error) (Event, error) {
 	if err := m.Validate(); err != nil {
 		return Event{}, err
 	}
@@ -210,6 +219,11 @@ func (s *Store) save(ctx context.Context, m Message, metadata map[string]string,
 	}
 	e := Event{EventID: ID(), Type: "message", Message: &m}
 	err = Transaction(ctx, s.db, func(tx *sql.Tx) error {
+		if mutation != nil {
+			if err := mutation(tx); err != nil {
+				return err
+			}
+		}
 		var old []byte
 		err := tx.QueryRowContext(ctx, "SELECT body FROM messages WHERE id=?", m.ID).Scan(&old)
 		if err == nil {

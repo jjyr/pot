@@ -30,6 +30,9 @@ type MembershipCommand struct {
 }
 
 func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (any, error) {
+	if s.options.Embedded && r.Action != "set_tags" {
+		return nil, errors.New("embedded Control does not join or administer remote Runtime membership; connect a remote Space instead")
+	}
 	switch r.Action {
 	case "preview":
 		ca := ""
@@ -259,6 +262,11 @@ func (s *Service) manageLocalMachine(ctx context.Context, r MachineCommand) (any
 	defer s.Changes.Notify("machines")
 	switch r.Action {
 	case "start", "stop", "rebuild":
+		if r.Action == "start" {
+			if err := s.PrepareSandboxResources(ctx, id); err != nil {
+				return nil, err
+			}
+		}
 		return m.Lifecycle(ctx, id, r.Action)
 	case "recover":
 		err := m.Recover(ctx, id)
@@ -271,4 +279,11 @@ func (s *Service) manageLocalMachine(ctx context.Context, r MachineCommand) (any
 		return map[string]bool{"configured": err == nil}, err
 	}
 	return nil, errors.New("unknown Sandbox management action")
+}
+
+func (s *Service) PrepareSandboxResources(ctx context.Context, id string) error {
+	if s.options.PrepareSandboxResources != nil {
+		return s.options.PrepareSandboxResources(ctx, id)
+	}
+	return nil
 }

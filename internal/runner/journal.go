@@ -29,7 +29,7 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 		return nil, err
 	}
 	j := &Journal{db: db, RuntimeID: runtimeID, BootID: bootID}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS runner_schema(version INTEGER NOT NULL); INSERT INTO runner_schema SELECT 4 WHERE NOT EXISTS(SELECT 1 FROM runner_schema); CREATE TABLE IF NOT EXISTS task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_events(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,sequence)); CREATE TABLE IF NOT EXISTS run_resources(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS run_commands(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,reply TEXT,PRIMARY KEY(control_id,task_id,run_id,command_id));`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS runner_schema(version INTEGER NOT NULL); INSERT INTO runner_schema SELECT 4 WHERE NOT EXISTS(SELECT 1 FROM runner_schema); CREATE TABLE IF NOT EXISTS task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_events(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,sequence)); CREATE TABLE IF NOT EXISTS run_command_inputs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,command_id)); CREATE TABLE IF NOT EXISTS run_resources(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS run_commands(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,reply TEXT,PRIMARY KEY(control_id,task_id,run_id,command_id));`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -76,7 +76,6 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 		for _, run := range runs {
 			if !run.Phase.Ended() && run.BootID != bootID {
 				run.Phase = RecoveryRequired
-				run.CleanupConfirmed = false
 				if err := writeRun(context.Background(), tx, run); err != nil {
 					return err
 				}
@@ -356,11 +355,10 @@ func (j *Journal) Fence(ctx context.Context, control, task, run string) error {
 			return fmt.Errorf("terminal run cannot be fenced")
 		}
 		value.Phase = RecoveryRequired
-		value.CleanupConfirmed = false
 		return nil
 	})
 }
-func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run string, receipts map[string]json.RawMessage, cleanupConfirmed bool) error {
+func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run string, commandReplies, receipts map[string]json.RawMessage, cleanupConfirmed bool) error {
 	if !cleanupConfirmed {
 		return core.ErrCleanupUnconfirmed
 	}
@@ -368,7 +366,7 @@ func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run str
 		if value.Phase != RecoveryRequired {
 			return fmt.Errorf("run does not require recovery")
 		}
-		for id, reply := range receipts {
+		for id, reply := range commandReplies {
 			command, err := readCommand(ctx, tx, control, task, run, id)
 			if err != nil {
 				return err

@@ -51,6 +51,7 @@ type savedTurn struct {
 	UserMessageID  string               `json:"user_message_id"`
 	State          string               `json:"state"`
 	Cancelling     bool                 `json:"cancelling"`
+	Paused         bool                 `json:"paused"`
 	Resuming       bool                 `json:"resuming"`
 	ReplyMessageID string               `json:"reply_message_id"`
 }
@@ -73,6 +74,7 @@ type Conversation struct {
 	subscribers                 map[chan protocol.Snapshot]struct{}
 	closeOnce                   sync.Once
 	closeErr                    error
+	controlChanged              chan struct{}
 }
 
 func OpenConversation(path string, options ConversationOptions) (*Conversation, error) {
@@ -168,7 +170,7 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 		return nil, errors.New("thread belongs to another assistant")
 	}
 	ctx, stop := context.WithCancel(options.Context)
-	c := &Conversation{store: store, options: options, ctx: ctx, stop: stop, done: make(chan struct{}), input: make(chan protocol.SendMessage, 1), thread: thread, subscribers: map[chan protocol.Snapshot]struct{}{}}
+	c := &Conversation{store: store, options: options, ctx: ctx, stop: stop, done: make(chan struct{}), input: make(chan protocol.SendMessage, 1), thread: thread, subscribers: map[chan protocol.Snapshot]struct{}{}, controlChanged: make(chan struct{})}
 	if c.messages, err = store.Messages(context.Background()); err != nil {
 		stop()
 		return nil, err
@@ -230,7 +232,11 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	}
 	var turn *protocol.TurnState
 	if c.turn != nil {
-		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling}
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
+		if c.turn.Paused {
+			message := "Paused before the next model request"
+			detail = &message
+		}
 		if c.turn.State == "waiting" {
 			message := "Waiting for Pot token allowance"
 			detail = &message
@@ -331,7 +337,7 @@ func (c *Conversation) appendTurnMetadataLocked(ctx context.Context, metadata ma
 	}
 	var turn *protocol.TurnState
 	if c.turn != nil {
-		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling}
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
 	}
 	if metadata == nil {
 		metadata = map[string]string{}

@@ -121,7 +121,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = os.Stat(filepath.Join(workspace, "proof")); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(workspace, "assistants", "main", "proof")); !os.IsNotExist(err) {
 		t.Fatal("command ran before approval")
 	}
 	if err = service.Permissions.Decide("main", pending[0].ID, "allow_once"); err != nil {
@@ -134,7 +134,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 	if snapshot.Messages[len(snapshot.Messages)-1].Text != "Finished 世界" || modelCalls.Load() != 2 {
 		t.Fatal(snapshot, modelCalls.Load())
 	}
-	body, err := os.ReadFile(filepath.Join(workspace, "proof"))
+	body, err := os.ReadFile(filepath.Join(workspace, "assistants", "main", "proof"))
 	if err != nil || string(body) != "x" {
 		t.Fatal(string(body), err)
 	}

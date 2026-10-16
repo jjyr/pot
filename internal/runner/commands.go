@@ -68,8 +68,14 @@ func (j *Journal) BeginCommand(ctx context.Context, control, task, run, id strin
 		}
 		command = Command{ID: id, Digest: hash, Phase: "pending"}
 		_, err = tx.ExecContext(ctx, "INSERT INTO run_commands(control_id,task_id,run_id,command_id,digest,phase) VALUES(?,?,?,?,?,'pending')", control, task, run, id, hash)
-		claim = err == nil
-		return err
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO run_command_inputs VALUES(?,?,?,?,?)", control, task, run, id, string(body)); err != nil {
+			return err
+		}
+		claim = true
+		return nil
 	})
 	return command, claim, err
 }

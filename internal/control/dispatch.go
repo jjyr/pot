@@ -14,6 +14,8 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/executor"
 	"github.com/jjyr/pot/internal/modelprotocol"
+	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/internal/usage"
 )
 
 type ToolEngine interface {
@@ -28,6 +30,9 @@ type Dispatcher struct {
 	ApprovalOwner, Task    string
 	Generation             uint64
 	DefaultTarget          core.ExecutionTarget
+	HostWorkspace          string
+	Usage                  *usage.Ledger
+	UsageScope             string
 	Spec                   core.ResolvedSpec
 	Permissions            *PermissionStore
 	Operations             *Operations
@@ -36,9 +41,26 @@ type Dispatcher struct {
 	Product                map[string]agent.Dispatch
 }
 
-func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
+func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (output json.RawMessage, resultErr error) {
 	if execution.Owner != d.Owner || d.Owner == "" || d.Turn == "" || d.Generation == 0 || d.Permissions == nil || d.Operations == nil {
 		return nil, errors.New("execution dispatch owner is unavailable")
+	}
+	if d.Usage != nil {
+		scope := d.UsageScope
+		if scope == "" {
+			scope = d.Owner
+		}
+		if err := d.Usage.Tool(ctx, scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "start"}, storage.Now()); err != nil {
+			return nil, err
+		}
+		defer func() {
+			data := output
+			if len(data) == 0 {
+				data = json.RawMessage("null")
+			}
+			err := d.Usage.Tool(context.WithoutCancel(ctx), scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "end", Content: data, IsError: resultErr != nil}, storage.Now())
+			resultErr = errors.Join(resultErr, err)
+		}()
 	}
 	if handler := d.Product[call.Name]; handler != nil {
 		return handler(ctx, execution, call, emit)
@@ -114,7 +136,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		}
 		return receipt.Result, nil
 	}
-	request := executor.Request{ID: call.ID, Operation: name, CWD: execution.Workspace, Policy: d.Spec.Params.Agent.Shell, Args: engineArgs}
+	cwd := execution.Workspace
+	if target.IsLocalTo(d.RuntimeID) && target.Target.Kind == "host" && d.HostWorkspace != "" {
+		cwd = d.HostWorkspace
+	}
+	request := executor.Request{ID: call.ID, Operation: name, CWD: cwd, Policy: d.Spec.Params.Agent.Shell, Args: engineArgs}
 	var value json.RawMessage
 	if target.RuntimeID == d.RuntimeID && target.Target.Kind == "host" {
 		if d.Host == nil {

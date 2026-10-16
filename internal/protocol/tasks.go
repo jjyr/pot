@@ -40,6 +40,7 @@ type TaskInfo struct {
 	ID              string                `json:"id"`
 	Title           string                `json:"title"`
 	Phase           TaskPhase             `json:"phase"`
+	Paused          bool                  `json:"paused,omitempty"`
 	Pending         uint64                `json:"pending"`
 	CreatedAtMS     int64                 `json:"created_at_ms"`
 	UpdatedAtMS     int64                 `json:"updated_at_ms"`

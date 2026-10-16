@@ -39,7 +39,7 @@ func TestAdvancedOwnerResourcesCreateHostWithoutReplayOrImplicitAssistant(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = r.Control.Permissions.Configure(r.Root.Identity.RuntimeID, control.MachinePolicy{"host", "allow"}); err != nil {
+	if err = r.Control.Permissions.Configure(r.Root.Identity.RuntimeID, control.MachinePolicy{ExecutionMode: "host", HostAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
 	again, err := r.ResourceCall(ctx, "POST", request)

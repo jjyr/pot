@@ -85,17 +85,29 @@ func (f *turnFeedback) InputStreaming(ctx context.Context, id string) error {
 }
 func (f *turnFeedback) Ready(ctx context.Context) error {
 	c := f.conversation
-	c.mu.Lock()
-	err := f.checkLocked()
-	if err == nil && c.turn.Cancelling {
-		err = context.Canceled
-	}
-	c.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
+	for {
+		c.mu.Lock()
+		err := f.checkLocked()
+		if err == nil && c.turn.Cancelling {
+			err = context.Canceled
+		}
+		paused := err == nil && c.turn.Paused
+		changed := c.controlChanged
+		c.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		if !paused {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
 	}
 	if f.options.Ready != nil {
 		return f.options.Ready(ctx)
@@ -109,7 +121,6 @@ func (f *turnFeedback) Steering(ctx context.Context, finalizing bool) ([]agent.S
 	if err := f.checkLocked(); err != nil {
 		return nil, err
 	}
-	c.finalizing = finalizing
 	rows, err := c.store.DB().QueryContext(ctx, "SELECT id,text FROM assistant_steering WHERE turn_id=? AND acknowledged=0 ORDER BY at,rowid LIMIT 100", f.request.RequestID)
 	if err != nil {
 		return nil, err
@@ -123,6 +134,7 @@ func (f *turnFeedback) Steering(ctx context.Context, finalizing bool) ([]agent.S
 		}
 		out = append(out, input)
 	}
+	c.finalizing = finalizing && len(out) == 0
 	return out, rows.Err()
 }
 func (f *turnFeedback) AcknowledgeSteering(ctx context.Context, ids []string) error {
@@ -147,14 +159,37 @@ func (f *turnFeedback) AcknowledgeSteering(ctx context.Context, ids []string) er
 			return errors.New("steering was not durably saved before acknowledgement")
 		}
 	}
-	return storage.Transaction(ctx, c.store.DB(), func(tx *sql.Tx) error {
-		for _, id := range ids {
-			if _, err := tx.ExecContext(ctx, "UPDATE assistant_steering SET acknowledged=1 WHERE id=? AND turn_id=?", id, f.request.RequestID); err != nil {
-				return err
+	for _, id := range ids {
+		acknowledge := func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, "UPDATE assistant_steering SET acknowledged=1 WHERE id=? AND turn_id=?", id, f.request.RequestID)
+			return err
+		}
+		digest, _ := core.HashJSON([]string{"steering", id, c.turn.UserMessageID})
+		messageID := "steer-" + digest
+		index := -1
+		for i, m := range c.messages {
+			if m.ID == messageID {
+				index = i
+				break
 			}
 		}
-		return nil
-	})
+		if index < 0 || c.messages[index].Status == protocol.Complete {
+			if err := storage.Transaction(ctx, c.store.DB(), acknowledge); err != nil {
+				return err
+			}
+			continue
+		}
+		message := c.messages[index]
+		message.Status = protocol.Complete
+		event, err := c.store.SaveWithMutation(ctx, message, acknowledge)
+		if err != nil {
+			return err
+		}
+		c.messages[index] = message
+		c.cursor = *event.Cursor
+		c.changedLocked()
+	}
+	return nil
 }
 func (f *turnFeedback) Observe(ctx context.Context, observation agent.Observation) error {
 	c := f.conversation

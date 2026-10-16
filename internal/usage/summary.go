@@ -140,7 +140,7 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 		return Summary{}, err
 	}
 	stop := min(end.UnixMilli(), atMS+1)
-	s := Summary{Days: q.Days, Timezone: q.Timezone, Scope: q.Scope, Offset: q.Offset, BucketDays: 1, Buckets: []Bucket{}, AgentModels: []AgentModel{}, Requests: []RequestRecord{}, Tools: []ToolTotal{}, Compactions: []CompactionRecord{}, Capabilities: map[string]bool{"compaction": true, "provider_quota": false}}
+	s := Summary{Days: q.Days, Timezone: q.Timezone, Scope: q.Scope, Offset: q.Offset, BucketDays: 1, Buckets: []Bucket{}, AgentModels: []AgentModel{}, Requests: []RequestRecord{}, Tools: []ToolTotal{}, Compactions: []CompactionRecord{}, Capabilities: map[string]bool{"compaction": true, "provider_quota": true}}
 	if q.Days == 365 {
 		s.BucketDays = 7
 	}

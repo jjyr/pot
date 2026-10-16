@@ -21,17 +21,20 @@ import (
 )
 
 type Options struct {
-	Root       string
-	Catalog    sandboxresources.Catalog
-	Store      *resource.Store
-	Repository string
-	Bind       func(context.Context, string, sandbox.PreparedResources) error
-	Notify     func()
+	Root            string
+	Catalog         sandboxresources.Catalog
+	Store           *resource.Store
+	Repository      string
+	Bind            func(context.Context, string, sandbox.PreparedResources) error
+	ValidateSandbox func(context.Context, string) error
+	Notify          func()
 }
 type Request struct {
 	ID         string            `json:"id"`
 	SandboxID  string            `json:"sandbox_id"`
 	BundleID   string            `json:"bundle_id"`
+	Owner      string            `json:"owner,omitempty"`
+	Turn       string            `json:"turn,omitempty"`
 	State      string            `json:"state"`
 	Error      string            `json:"error,omitempty"`
 	ResourceID string            `json:"resource_id,omitempty"`
@@ -40,7 +43,8 @@ type Request struct {
 type ResourceStatus struct {
 	ID string `json:"id"`
 	resource.Resource
-	Cached bool `json:"cached"`
+	Cached bool   `json:"cached"`
+	Error  string `json:"error,omitempty"`
 }
 type BundleStatus struct {
 	ID           string           `json:"id"`
@@ -52,6 +56,7 @@ type Status struct {
 	DefaultBundle string         `json:"default_bundle"`
 	Bundles       []BundleStatus `json:"bundles"`
 	Requests      []Request      `json:"requests"`
+	Cache         CacheStatus    `json:"cache"`
 }
 type entry struct {
 	request Request
@@ -88,7 +93,25 @@ func Open(options Options) (*Manager, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{options: options, db: db, ctx: ctx, cancel: cancel, entries: map[string]*entry{}, changed: make(chan struct{})}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS resource_requests (sandbox_id TEXT PRIMARY KEY, body TEXT NOT NULL)`); err == nil {
+	var version int
+	if err = db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		cancel()
+		db.Close()
+		return nil, err
+	}
+	if version == 0 {
+		var legacy int
+		if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='resource_requests'`).Scan(&legacy); err != nil || legacy != 0 {
+			cancel()
+			db.Close()
+			return nil, errors.New("resource request schema requires a fresh Go root")
+		}
+	} else if version != 2 {
+		cancel()
+		db.Close()
+		return nil, errors.New("unsupported resource request schema")
+	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS resource_requests (id TEXT PRIMARY KEY,sandbox_id TEXT NOT NULL,body TEXT NOT NULL); PRAGMA user_version=2`); err == nil {
 		var rows *sql.Rows
 		rows, err = db.Query(`SELECT body FROM resource_requests`)
 		if err == nil {
@@ -101,7 +124,7 @@ func Open(options Options) (*Manager, error) {
 				if err = core.DecodeJSON([]byte(body), &r); err != nil {
 					break
 				}
-				if !core.Identifier(r.ID) || !core.Identifier(r.SandboxID) || options.Catalog.Bundles[r.BundleID].Image == "" {
+				if !core.Identifier(r.ID) || !core.Identifier(r.SandboxID) || (r.Owner != "" && !core.Identifier(r.Owner)) || (r.Turn != "" && !core.Identifier(r.Turn)) || options.Catalog.Bundles[r.BundleID].Image == "" {
 					err = errors.New("invalid persisted resource request")
 					break
 				}
@@ -139,7 +162,7 @@ func (m *Manager) saveLocked(e *entry) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.db.Exec(`INSERT INTO resource_requests VALUES (?,?) ON CONFLICT(sandbox_id) DO UPDATE SET body=excluded.body`, r.SandboxID, string(body))
+	_, err = m.db.Exec(`INSERT INTO resource_requests VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body`, r.ID, r.SandboxID, string(body))
 	return err
 }
 func (m *Manager) changedLocked() { close(m.changed); m.changed = make(chan struct{}) }
@@ -157,10 +180,15 @@ func (m *Manager) Snapshot(ctx context.Context) (Status, error) {
 		for _, rid := range []string{b.Kernel, b.Boot, b.Image} {
 			r := m.options.Catalog.Resources[rid]
 			_, cached, err := m.options.Store.Cached(ctx, r)
+			diagnostic := ""
 			if err != nil {
-				return out, err
+				cached = false
+				if ctx.Err() != nil {
+					return out, ctx.Err()
+				}
+				diagnostic = err.Error()
 			}
-			item.Resources = append(item.Resources, ResourceStatus{ID: rid, Resource: r, Cached: cached})
+			item.Resources = append(item.Resources, ResourceStatus{ID: rid, Resource: r, Cached: cached, Error: diagnostic})
 			if !cached {
 				item.Ready = false
 				item.MissingBytes += r.SizeBytes
@@ -175,14 +203,22 @@ func (m *Manager) Snapshot(ctx context.Context) (Status, error) {
 	m.mu.Unlock()
 	sort.Slice(out.Bundles, func(i, j int) bool { return out.Bundles[i].ID < out.Bundles[j].ID })
 	sort.Slice(out.Requests, func(i, j int) bool { return out.Requests[i].ID < out.Requests[j].ID })
-	return out, nil
+	var err error
+	out.Cache, err = m.cache(ctx)
+	return out, err
 }
 
 // Request persists an immutable instance pin. Verified cached resources may be
 // bound immediately; missing resources only create an awaiting-consent request.
 func (m *Manager) Request(ctx context.Context, sandboxID, bundleID string) (Request, error) {
+	return m.requestFor(ctx, sandboxID, bundleID, "", "")
+}
+func (m *Manager) requestFor(ctx context.Context, sandboxID, bundleID, owner, turn string) (Request, error) {
 	if !core.Identifier(sandboxID) {
 		return Request{}, errors.New("invalid Sandbox identity")
+	}
+	if (owner != "" && !core.Identifier(owner)) || (turn != "" && !core.Identifier(turn)) {
+		return Request{}, errors.New("invalid resource execution identity")
 	}
 	if bundleID == "" {
 		bundleID = m.options.Catalog.DefaultLinuxBundle
@@ -195,18 +231,39 @@ func (m *Manager) Request(ctx context.Context, sandboxID, bundleID string) (Requ
 		m.mu.Unlock()
 		return Request{}, errors.New("resource manager closed")
 	}
+	if m.options.ValidateSandbox != nil {
+		if err := m.options.ValidateSandbox(ctx, sandboxID); err != nil {
+			m.mu.Unlock()
+			return Request{}, err
+		}
+	}
+	bound := false
+	var ready *Request
 	for _, e := range m.entries {
 		if e.request.SandboxID == sandboxID {
 			if e.request.BundleID != bundleID {
 				m.mu.Unlock()
 				return Request{}, errors.New("Sandbox resource bundle is pinned; create another Sandbox to change it")
 			}
-			r := e.request
-			m.mu.Unlock()
-			return r, nil
+			bound = bound || e.request.State == "ready"
+			if e.request.State == "ready" {
+				value := e.request
+				ready = &value
+			}
+			if e.request.Owner == owner && e.request.Turn == turn && e.request.State != "cancelled" {
+				r := e.request
+				m.mu.Unlock()
+				return r, nil
+			}
 		}
 	}
-	e := &entry{request: Request{ID: rand.Text(), SandboxID: sandboxID, BundleID: bundleID, State: "awaiting_consent"}}
+	// Once a Sandbox is bound, later execution scopes need no new consent row.
+	if ready != nil && owner != "" {
+		r := *ready
+		m.mu.Unlock()
+		return r, nil
+	}
+	e := &entry{request: Request{ID: rand.Text(), SandboxID: sandboxID, BundleID: bundleID, Owner: owner, Turn: turn, State: "awaiting_consent"}}
 	if err := m.saveLocked(e); err != nil {
 		m.mu.Unlock()
 		return Request{}, err
@@ -216,7 +273,9 @@ func (m *Manager) Request(ctx context.Context, sandboxID, bundleID string) (Requ
 	p, cacheErr := m.options.Catalog.Cached(ctx, m.options.Store, bundleID)
 	var bindErr error
 	if cacheErr == nil {
-		bindErr = m.options.Bind(ctx, sandboxID, p)
+		if !bound {
+			bindErr = m.options.Bind(ctx, sandboxID, p)
+		}
 		if bindErr == nil {
 			e.request.State = "ready"
 		} else {
@@ -241,13 +300,20 @@ func (m *Manager) Request(ctx context.Context, sandboxID, bundleID string) (Requ
 
 // Wait keeps the original live operation pending; cancellation never replays it.
 func (m *Manager) Wait(ctx context.Context, sandboxID, bundleID string) error {
-	r, err := m.Request(ctx, sandboxID, bundleID)
+	return m.WaitFor(ctx, sandboxID, bundleID, "", "")
+}
+func (m *Manager) WaitFor(ctx context.Context, sandboxID, bundleID, owner, turn string) error {
+	r, err := m.requestFor(ctx, sandboxID, bundleID, owner, turn)
 	if err != nil {
 		return err
 	}
 	for {
 		m.mu.Lock()
 		e := m.entries[r.ID]
+		if e == nil {
+			m.mu.Unlock()
+			return errors.New("Sandbox resource request was removed")
+		}
 		r = e.request
 		changed := m.changed
 		closed := m.closed
@@ -263,6 +329,7 @@ func (m *Manager) Wait(ctx context.Context, sandboxID, bundleID string) error {
 		}
 		select {
 		case <-ctx.Done():
+			m.Cancel(r.ID)
 			return ctx.Err()
 		case <-changed:
 		}
@@ -345,6 +412,8 @@ func (m *Manager) run(ctx context.Context, e *entry, request Request, directory 
 	e.cancel()
 	e.cancel = nil
 	if e.request.State == "cancelled" {
+		m.changedLocked()
+		go m.notify()
 		return
 	}
 	e.request.State = "ready"

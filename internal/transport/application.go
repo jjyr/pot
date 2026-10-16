@@ -75,6 +75,16 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		}
 		return a.RuntimeResources(ctx, method, r.Body)
 	}
+	if path == "/api/v1/runtime/recovery" {
+		if method != "POST" {
+			return nil, errors.New("POST required")
+		}
+		var command control.RecoveryCommand
+		if err := decode(r.Body, &command); err != nil {
+			return nil, err
+		}
+		return s.RecoverRuntimeRun(ctx, command)
+	}
 	if result, err, handled := a.machineCall(ctx, method, u, r); handled {
 		return result, err
 	}
@@ -82,6 +92,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		return nil, protocol.APIError{Code: "runner_role", Message: "execution Runtime cannot own assistants or provider credentials"}
 	}
 	if result, err, handled := a.taskCall(ctx, method, u, owner, r); handled {
+		return result, err
+	}
+	if result, err, handled := a.terminalCall(ctx, method, u, owner, r); handled {
+		return result, err
+	}
+	if result, err, handled := a.turnControlCall(ctx, method, path, owner, r); handled {
 		return result, err
 	}
 	conversation := func() (*assistant.Conversation, error) { return s.Conversation(ctx, owner) }
@@ -97,6 +113,23 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	if method == "GET" {
 		switch path {
+		case "/api/v1/agent/diagnostics":
+			if task := u.Query().Get("task_id"); task != "" {
+				after, err := strconv.ParseUint(u.Query().Get("after"), 10, 64)
+				if u.Query().Get("after") == "" {
+					after = 0
+					err = nil
+				}
+				if err != nil {
+					return nil, err
+				}
+				return s.TaskDiagnostics(ctx, owner, task, after)
+			}
+			c, err := conversation()
+			if err != nil {
+				return nil, err
+			}
+			return c.Diagnostics(ctx)
 		case "/api/v1/completions":
 			return s.Completions(ctx, owner, u.Query().Get("q"))
 		case "/api/v1/runtime":
@@ -177,7 +210,18 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			if zone == "" {
 				zone = "Asia/Shanghai"
 			}
-			return s.Usage.Summary(ctx, usage.Query{Days: days, Timezone: zone, Scope: u.Query().Get("scope"), Offset: offset}, storage.Now())
+			summary, err := s.Usage.Summary(ctx, usage.Query{Days: days, Timezone: zone, Scope: u.Query().Get("scope"), Offset: offset}, storage.Now())
+			if err != nil {
+				return nil, err
+			}
+			mailWaits, err := s.MailAllowanceWaits(ctx, owner)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				usage.Summary
+				MailWaits []usage.Waiting `json:"mail_waits"`
+			}{summary, mailWaits}, nil
 		case "/api/v1/spaces":
 			return map[string]any{"active_space_id": "local", "items": []any{map[string]any{"id": "local", "kind": "local", "name": a.Name, "control_id": a.RuntimeID, "runtime_id": a.RuntimeID, "connected": true}}}, nil
 		}
@@ -265,7 +309,14 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			if err != nil {
 				return nil, err
 			}
+			waiting, waitErr := s.Usage.Waiting(ctx, owner)
+			if waitErr != nil {
+				return nil, waitErr
+			}
 			err = c.Cancel(ctx, body)
+			if err == nil && waiting != nil {
+				err = s.Usage.ClearWaitForTurn(ctx, owner, waiting.Turn)
+			}
 			return map[string]bool{"accepted": err == nil}, err
 		case "/api/v1/permissions":
 			var body struct {
@@ -295,14 +346,13 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			s.Changes.Notify("usage")
 			return map[string]bool{"saved": err == nil}, err
 		case "/api/v1/usage/resume":
-			c, err := conversation()
-			if err != nil {
+			var body struct {
+				Scope string `json:"scope"`
+			}
+			if err = decode(r.Body, &body); err != nil {
 				return nil, err
 			}
-			if err = s.Usage.ReleaseWait(ctx, owner); err != nil {
-				return nil, err
-			}
-			err = c.Resume(ctx)
+			err = s.ResumeAllowance(ctx, owner, body.Scope)
 			return map[string]bool{"accepted": err == nil}, err
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {

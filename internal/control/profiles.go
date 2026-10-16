@@ -49,6 +49,7 @@ type ProfileStore struct {
 	registry         *gateway.Registry
 	directory        *modeldirectory.Directory
 	state            profileFile
+	ownerAction      func(func() error) error
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
@@ -133,6 +134,14 @@ type SaveProfile struct {
 }
 
 func (p *ProfileStore) Save(ctx context.Context, r SaveProfile) (core.Profile, error) {
+	if p.ownerAction != nil {
+		var profile core.Profile
+		err := p.ownerAction(func() error { var err error; profile, err = p.save(ctx, r); return err })
+		return profile, err
+	}
+	return p.save(ctx, r)
+}
+func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, error) {
 	if !core.Identifier(r.RequestID) || r.Name == "" || r.Model == "" {
 		return core.Profile{}, errors.New("profile request, name and model are required")
 	}

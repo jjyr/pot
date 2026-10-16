@@ -173,6 +173,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			if run.Result == nil || !run.CleanupConfirmed {
 				return core.ErrCleanupUnconfirmed
 			}
+			current.Info.Paused = false
 			current.Result = run.Result
 			switch run.Phase {
 			case runner.Complete:
@@ -239,12 +240,16 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 		if r.Info.Phase.Scope() != "active" {
 			if mode == "cancel" && r.Info.Phase == protocol.TaskInterrupted {
 				r.Info.Phase = protocol.TaskCancelled
+				r.Info.Pending = 0
+				_, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='cancelled' WHERE assistant_id=? AND task_id=? AND state IN ('pending','active','retained')", assistant, id)
+				return err
 			}
 			return nil
 		}
 		if r.StopMode != "" {
 			return nil
 		}
+		r.Info.Paused = false
 		r.StopMode = mode
 		r.Finalizing = true
 		launch = r.Launch
