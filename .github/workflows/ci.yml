@@ -28,7 +28,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-26]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -36,10 +36,11 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.10.10
-          install_args: go python
+          install_args: go python node
       - run: mise run check:go
       - run: mise run test:go
       - run: mise run test:go-ui
+      - run: mise run test:go-packaging
       - run: mise run build:go
       - run: mise run build:go-linux
       - if: runner.os == 'macOS'

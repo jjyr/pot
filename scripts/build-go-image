@@ -3,7 +3,10 @@
 
 import gzip, hashlib, json, os, pathlib, shutil, subprocess, tomllib
 
+from go_packaging import prepare_image_inputs
+
 R = pathlib.Path(__file__).resolve().parents[1]
+prepare_image_inputs()
 subprocess.run(["python3", R / "scripts/localize-web"], check=True)
 resources = R / ".local/go/resources"
 template_path = R / "resources/sandbox/linux/default/template.toml"

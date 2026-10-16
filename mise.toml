@@ -1,6 +1,7 @@
 [tools]
 "conda:brotli-bin" = "1.2.0"
 go = "1.27.2"
+node = "24.21.0"
 rust = { version = "beta-2026-10-14", mr_boxington = true }
 mr-boxington = "1.24.0"
 python = "3.12.13"
@@ -219,17 +220,43 @@ description = "Verify shared DOM composer and owner-scoped preview state"
 run = "node scripts/tests/go-ui-state.mjs"
 
 [tasks."build:go"]
-description = "Build Go CLI and executor skeletons independently of the desktop"
-run = "go build -o .local/go/bin/ ./cmd/pot ./cmd/pot-tool-executor"
+description = "Build Go CLI and executor independently of the desktop"
+run = "go build -mod=readonly -trimpath -o .local/go/bin/ ./cmd/pot ./cmd/pot-tool-executor"
 
 [tasks."build:go-linux"]
 description = "Cross-build Go headless entry points without CGO or GUI dependencies"
-run = "go build -o .local/go/linux-arm64/ ./cmd/pot ./cmd/pot-tool-executor"
-env = { GOOS = "linux", GOARCH = "arm64", CGO_ENABLED = "0" }
+run = '''
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-arm64/ ./cmd/pot ./cmd/pot-tool-executor
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-amd64/ ./cmd/pot ./cmd/pot-tool-executor
+'''
 
 [tasks."build:go-app"]
-description = "Build the macOS Wails migration preview"
+description = "Build the complete independent macOS Go/Wails app and retained Swift Helpers"
 run = "python scripts/build-go-app"
+
+[tasks."prepare:go"]
+description = "Prepare pinned Node, JS plugins, skills, viewer and license resources"
+run = "python scripts/prepare-go-resources"
+
+[tasks."build:go-cli"]
+description = "Build a portable native Go CLI archive with retained runtime assets"
+run = "python scripts/build-go-cli"
+
+[tasks."build:go-image"]
+description = "Build the Go Linux guest image separately from App packaging"
+run = "python scripts/build-go-image"
+
+[tasks."build:go-container-image"]
+description = "Build a rootless Podman image containing the Go executor"
+run = "python scripts/build-go-container-image"
+
+[tasks."export:go-sandbox-resources"]
+description = "Verify deterministic Go guest exports against the embedded catalog"
+run = "python scripts/export-go-sandbox-resources"
+
+[tasks."test:go-packaging"]
+description = "Verify Go-only package layout, immutable export and service artifact generation"
+run = "python scripts/tests/go-packaging.py"
 
 [tasks."preview:go"]
 description = "Run the disposable loopback shared UI preview (no model or product data)"

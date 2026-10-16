@@ -27,7 +27,7 @@ func check() error {
 	if len(output) != 0 {
 		return fmt.Errorf("run gofmt on:\n%s", output)
 	}
-	list := exec.Command("go", "list", "-json", "./cmd/...", "./internal/...", "./web")
+	list := exec.Command("go", "list", "-mod=readonly", "-json", "./cmd/...", "./internal/...", "./resources/...", "./web")
 	output, err = list.Output()
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
@@ -44,7 +44,7 @@ func check() error {
 		} else if err != nil {
 			return err
 		}
-		isDesktop := strings.HasPrefix(pkg.ImportPath, "github.com/jjyr/pot/internal/desktop") || pkg.ImportPath == "github.com/jjyr/pot/cmd/pot-app"
+		isDesktop := pkg.ImportPath == "github.com/jjyr/pot/internal/desktop" || strings.HasPrefix(pkg.ImportPath, "github.com/jjyr/pot/internal/desktop/") || pkg.ImportPath == "github.com/jjyr/pot/cmd/pot-app"
 		if !isDesktop {
 			for _, dep := range pkg.Deps {
 				if strings.HasPrefix(dep, "github.com/wailsapp/") {
@@ -53,7 +53,7 @@ func check() error {
 			}
 		}
 		base := strings.TrimPrefix(pkg.ImportPath, "github.com/jjyr/pot/internal/")
-		if base == "agent" || base == "runner" || base == "execution" || base == "composition" || base == "modelprotocol" {
+		if base == "agent" || base == "runner" || base == "execution" || base == "composition" || base == "modelprotocol" || base == "sandbox" || base == "sandboxprovider" || base == "platformhelper" || base == "resource" || base == "sandboxresources" || base == "browserpush" || base == "desktopview" {
 			for _, dep := range pkg.Deps {
 				for _, forbidden := range []string{"control", "runtime", "transport", "gateway", "secrets", "desktop"} {
 					prefix := "github.com/jjyr/pot/internal/" + forbidden
