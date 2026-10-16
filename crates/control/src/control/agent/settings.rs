@@ -475,7 +475,7 @@ mod tests {
         s.execution = Some(config());
         s.conversation.inner.lock().unwrap().store = store;
         let before = thread(&s).unwrap();
-        let context = json!({"type":"context","version":1,"messages":[{"role":"user","text":"original goal"},{"role":"assistant","text":"working","calls":[{"id":"effect","name":"exec_command","arguments":{"cmd":"touch file"}}]},{"role":"tool","call_id":"effect","text":"done"}],"pending":[],"last_request":"first","receipts":[{"id":"effect","result":"done"}],"usage_anchor":{"tokens":123},"steering_ids":["guidance"]});
+        let context = json!({"type":"context","version":2,"messages":[{"role":"user","text":"original goal"},{"role":"assistant","text":"working","calls":[{"id":"effect","name":"exec_command","arguments":{"cmd":"touch file"}}]},{"role":"tool","call_id":"effect","text":"done"}],"pending":[],"last_request":"first","receipts":[{"id":"effect","result":"done"}],"usage_anchor":{"tokens":123},"steering_ids":["guidance"]});
         {
             let inner = s.conversation.inner.lock().unwrap();
             save_context(&inner.store, &context).unwrap();

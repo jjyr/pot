@@ -489,5 +489,28 @@
       ],
       "additionalProperties": false
     }
+  },
+  {
+    "name": "get_model_catalog",
+    "description": "Discover configured Provider profiles with offset/limit, or supply profile for its model facts. models and configured_models are separately paginated with the same offset/limit and report their totals.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "additionalProperties": false
+    }
   }
 ]

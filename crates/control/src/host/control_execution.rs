@@ -171,6 +171,7 @@ impl Host {
                 let executor = execution_target.host_executor(&request.scope, request.generation);
                 let context = ExecutionContext {
                     instructions: String::new(),
+                    context_sections: vec![],
                     skill_resources: Default::default(),
                     data: workspace.clone(),
                     workspace,

@@ -285,6 +285,7 @@ pub(crate) async fn run_agent_configured(
     };
     let context = ExecutionContext {
         instructions: String::new(),
+        context_sections: vec![],
         skill_resources: Default::default(),
         tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
         data: directory.to_path_buf(),

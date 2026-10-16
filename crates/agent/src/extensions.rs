@@ -7,7 +7,7 @@ use serde_json::Value;
 
 pub trait AgentExtensions: Send + Sync {
     /// Caller-owned instruction injection for Main and Worker. No discovery or I/O.
-    /// Summary turns do not invoke this provider; history is not mutated.
+    /// Summary turns do not invoke this provider; changes append classified history sections.
     fn instructions(&self, context: &ExecutionContext) -> Result<String> {
         Ok(context.instructions.clone())
     }

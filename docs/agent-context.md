@@ -28,7 +28,94 @@ The Runtime instruction filesystem interface uses execution-visible paths. Its c
 
 Runtime reloads sources when preparing each execution context. The resulting snapshot is used for that execution's model requests. Global instruction caching is used by Main services in the current Runtime process. A global read failure retains the last successful text and emits a diagnostic; repeated identical failures are reported once until recovery. Confirmed absence or a successful empty read clears the cached value. The cache is not persisted across restarts. Unexpected project read errors fail context preparation rather than reusing stale project instructions.
 
-pot-agent appends the injected text for Main and Worker, including custom system prompts and configurations with no execution reader tool. Summary contexts skip loading and injection. Instruction injection does not copy the text into pot-agent's persistent conversation history.
+pot-agent records instructions as classified, append-only context sections for Main
+and Worker, including custom system prompts and configurations with no execution
+reader tool. Summary contexts skip discovery and new injection; they preserve the latest retained sections instead of revoking unloaded resources. See the message
+and compaction contract below.
+
+## Classified messages and append-only context
+
+The base model instructions and tool schemas remain request inputs. Mutable
+instructions and reference data are separate from accepted user text. Control
+supplies `ExecutionContext.context_sections` (reference-data keys; `instructions`,
+`plugins` and `skills` are reserved for Agent instruction providers); pot-agent
+owns comparison, rendering and durable history. Neither the assistant driver nor the Agent appends catalogs
+or task state to a real user's text.
+
+History schema 2 distinguishes conversation items (user/assistant/tool), context
+sections, continuation summaries and runtime result notifications. There is no
+schema-1 import. Logical kinds and section fingerprints are internal and are never sent as provider fields.
+Context and summary items use tagged/text user messages on all four protocols;
+provider adapters may merge adjacent user messages without changing their order
+or logical identity. Only conversation user items are real user boundaries;
+runtime result notifications are reference data and cannot become the retained
+last user message.
+
+Sections have stable keys and deterministic lexical ordering:
+
+| Key | Source and update behavior |
+|---|---|
+| `environment` | Caller-provided Runtime clock and execution workspace; refreshed for each execution, independently of task state |
+| `instructions` | Applicable global, assistant and project instructions; append a complete replacement on change |
+| `models` | Main-only configured routing summary; append a complete bounded replacement on change |
+| `plugins` | Enabled plugin instructions; append a complete replacement on change |
+| `skills` | Lazy-load metadata only, with authorized reader; append a complete replacement on change |
+| `tasks` | Main-only compact active/attention metadata; append a complete replacement on change |
+
+Every section message explicitly replaces all earlier contents of its key. A
+removed or newly empty section emits one revocation; repeated absence emits
+nothing. Unchanged normalized text (CRLF to LF and trimmed outer whitespace)
+emits nothing. Earlier messages, user text,
+tool results and base instructions are not rewritten to refresh a section.
+Instruction sections remain subject to explicit user requests; reference sections
+and summaries are data and never grant execution authority. Resources and
+instructions are snapshotted for the execution, not refreshed mid-request.
+
+The authoritative comparison baseline is reconstructed from the latest retained
+classified message for each key, including revocations. Restart, provider cache
+expiry, or loss of the optional token-usage calibration does not discard this
+baseline or append duplicate context. No client TTL claims to expire server KV
+state. A cold provider request replays the same prefix; only new input or real
+state changes append content. Provider/model/tool changes can independently
+prevent cache reuse.
+
+The routing summary is capped at 3,500 serialized profile-list bytes plus its
+fixed explanatory wrapper. Each profile advertises its default and at most five
+saved models, never the complete provider-wide model directory. `get_model_catalog`
+lists configured profiles when `profile` is omitted, or queries complete facts
+for one profile on demand; `models` and
+`configured_models` use offset/limit pagination and report their totals.
+
+### Compaction and continuation
+
+Compaction runs only with settled tool calls. It summarizes conversation items,
+including the latest completed tool effects and any earlier continuation summary;
+runtime context sections are excluded and regenerated from current sources.
+The summary must preserve goals, user constraints, confirmed effects, artifact
+paths, failures and unfinished work. Tool schemas are not offered to the summary
+request. Empty summaries and summaries containing tool calls are rejected.
+
+The next request has this exact logical layout:
+
+```text
+base instructions + current tool schemas
+current nonempty context sections (one full injection in stable key order)
+continuation summary
+last real user message, including its original attachments
+```
+
+Old assistant/tool messages and obsolete section versions are replaced by the
+summary. The last real user message is retained exactly; a context update or old
+summary cannot be mistaken for it. This also permits compacting a long single
+user turn after its tools settle. Later requests append replies, actual section
+changes and new real input, without adding a second full injection.
+
+The replacement history is durably saved before becoming the live history. It
+establishes its own section baseline and clears the old usage anchor. Failed
+sampling or checkpoint persistence leaves the previous history intact. The
+ordinary input/output-window guard applies before continuation sampling; a
+summary is not assumed to fit merely because its byte size decreased. The UI
+transcript remains separate from the replaced model history.
 
 ## Assistant tools
 
@@ -55,7 +142,7 @@ with `include_str!`; Control supplies it when preparing Main execution context.
 Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default pot-agent prompt.
 
-Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; pot-agent request tests cover all three supported model protocols, custom prompts and history separation. Run `mise run test` and `mise run clippy:backend`.
+Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; pot-agent request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run clippy:backend`.
 
 
 ## Global ownership
@@ -197,7 +284,7 @@ ExecutionContext.skill_resources carries ordered SkillRoot entries, reserved nam
 
 Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
-Catalogs reload each turn and append to the system prompt without entering persistent history. Summary turns omit the catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
+Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Summary executions add no catalog, and pot-agent does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
 
 ## Creation, installation and validation
 

@@ -59,3 +59,12 @@ start and exit together. Embedded Control never opens the remote enrollment list
 
 See [components](../../docs/backend-crates.md), [Control APIs](../control/README.md)
 and [architecture](../../docs/architecture.md).
+
+## Model history checkpoints
+
+Adapters supply accepted user input separately from keyed execution context. The
+Agent persists classified append-only history (schema 2), reconstructs section
+baselines from retained messages and preserves prefixes across provider cache
+expiry. Compaction atomically replaces model history with current injections,
+a continuation summary and the last real user message. Runtime does not import
+schema-1 history. See [Agent context](../../docs/agent-context.md#classified-messages-and-append-only-context).

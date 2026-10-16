@@ -219,8 +219,66 @@ fn make_context(
         }
         catalog.text
     };
+    let workspace = if crate::remote_execution::is_remote(s) {
+        let contexts = s.remote_context.lock().unwrap();
+        let context = contexts
+            .get(s.execution_target.as_ref().unwrap())
+            .ok_or_else(|| anyhow!("Remote context missing"))?;
+        PathBuf::from(
+            context.context["workspace"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Destination workspace missing"))?,
+        )
+    } else {
+        #[cfg(test)]
+        let path = if s.test_tool_executor.is_some() {
+            s.workspace.clone()
+        } else {
+            if s.is_worker || s.execution_service.sandboxes.assignment("").is_err() {
+                s.workspace.clone()
+            } else {
+                s.data.join("agent-workspace")
+            }
+        };
+        #[cfg(not(test))]
+        let path = if s.is_worker || s.execution_service.sandboxes.assignment("").is_err() {
+            s.workspace.clone()
+        } else {
+            s.data.join("agent-workspace")
+        };
+        std::fs::create_dir_all(&path)?;
+        path
+    };
     Ok(ExecutionContext {
         instructions,
+        context_sections: if role == ExecutionRole::Summary {
+            vec![]
+        } else {
+            let visible_workspace = if crate::remote_execution::is_remote(s) {
+                workspace.clone()
+            } else {
+                crate::execution_target::workspace_view(s)?.3
+            };
+            let mut sections = vec![pot_core::ContextSection {
+                key: "environment".into(),
+                text: format!(
+                    "Runtime clock (UTC): {}. Execution workspace: {}",
+                    chrono::Utc::now().to_rfc3339(),
+                    visible_workspace.display()
+                ),
+            }];
+            if role == ExecutionRole::Main {
+                sections.push(pot_core::ContextSection {
+                    key: "models".into(),
+                    text: super::super::catalog::context(s)?,
+                });
+                sections.push(pot_core::ContextSection {
+                    key: "tasks".into(),
+                    text: crate::tasks::context(s),
+                });
+            }
+            sections
+        },
         skill_resources,
         tool_executor: {
             #[cfg(test)]
@@ -243,36 +301,7 @@ fn make_context(
             }
         },
         data: s.data.clone(),
-        workspace: if crate::remote_execution::is_remote(s) {
-            let contexts = s.remote_context.lock().unwrap();
-            let context = contexts
-                .get(s.execution_target.as_ref().unwrap())
-                .ok_or_else(|| anyhow!("Remote context missing"))?;
-            PathBuf::from(
-                context.context["workspace"]
-                    .as_str()
-                    .ok_or_else(|| anyhow!("Destination workspace missing"))?,
-            )
-        } else {
-            #[cfg(test)]
-            let path = if s.test_tool_executor.is_some() {
-                s.workspace.clone()
-            } else {
-                if s.is_worker || s.execution_service.sandboxes.assignment("").is_err() {
-                    s.workspace.clone()
-                } else {
-                    s.data.join("agent-workspace")
-                }
-            };
-            #[cfg(not(test))]
-            let path = if s.is_worker || s.execution_service.sandboxes.assignment("").is_err() {
-                s.workspace.clone()
-            } else {
-                s.data.join("agent-workspace")
-            };
-            std::fs::create_dir_all(&path)?;
-            path
-        },
+        workspace,
         owner: s.usage_scope.clone(),
         role,
 

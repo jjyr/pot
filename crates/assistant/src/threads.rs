@@ -6,7 +6,7 @@ use rusqlite::params;
 pub const PROFILES: &str = "agent.profiles.v1";
 pub const THREAD: &str = "thread";
 pub const CONTEXT: &str = "thread.context";
-const EMPTY_CONTEXT: &str = r#"{"type":"context","version":1,"messages":[]}"#;
+const EMPTY_CONTEXT: &str = r#"{"type":"context","version":2,"messages":[]}"#;
 
 pub fn set(db: &rusqlite::Connection, key: &str, value: &str) -> Result<()> {
     db.execute(
@@ -104,7 +104,7 @@ pub fn load_context(store: &Store) -> Result<Option<serde_json::Value>> {
 }
 fn validate_context(value: &serde_json::Value) -> Result<()> {
     ensure!(
-        value["type"] == "context" && value["version"] == 1 && value["messages"].is_array(),
+        value["type"] == "context" && value["version"] == 2 && value["messages"].is_array(),
         "Invalid thread context"
     );
     Ok(())

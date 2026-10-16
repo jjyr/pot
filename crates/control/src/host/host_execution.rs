@@ -125,6 +125,7 @@ pub(super) async fn execute(host: &Host, request: Operation) -> Result<Value> {
     let executor = execution_target.host_executor(&owner, 1);
     let context = ExecutionContext {
         instructions: String::new(),
+        context_sections: vec![],
         skill_resources: Default::default(),
         data: workspace.clone(),
         workspace,

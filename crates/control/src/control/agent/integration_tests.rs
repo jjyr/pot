@@ -485,9 +485,10 @@ async fn native_agent_compaction_is_persisted_and_metered() {
         .unwrap()
         .last_mut()
         .unwrap();
-    // 144,000 UTF-8 bytes = 36,000 estimated tokens under the Codex rule,
-    // large enough to trigger the unchanged default compaction threshold.
-    last["text"] = json!("old context ".repeat(12000));
+    // 102,000 UTF-8 bytes = 25,500 estimated tokens. Normal base instructions,
+    // tools and injected sections push this past the compaction threshold,
+    // while the tool-free summary request still fits the actual input window.
+    last["text"] = json!("old context ".repeat(8500));
     last["replay"]["content"] = last["text"].clone();
     pot_assistant::threads::save_context(&s.conversation.inner.lock().unwrap().store, &value)
         .unwrap();
@@ -715,8 +716,10 @@ async fn native_agent_profile_limits_prompt_and_tool_filter_are_effective() {
     assert_eq!(bodies[0]["max_tokens"], 128);
     let system = bodies[0]["messages"][0]["content"].as_str().unwrap();
     assert!(system.starts_with("A configurable system prompt."));
-    assert!(system.contains("AGENTS.md belongs to this assistant"));
-    assert!(system.contains("Updates require owner approval"));
+    assert!(!system.contains("AGENTS.md belongs to this assistant"));
+    let body = bodies[0].to_string();
+    assert!(body.contains("AGENTS.md belongs to this assistant"));
+    assert!(body.contains("Updates require owner approval"));
     assert_eq!(bodies[0]["tools"].as_array().unwrap().len(), 1);
     assert_eq!(bodies[0]["tools"][0]["function"]["name"], "apply_patch");
     assert!(bodies[1].to_string().contains("Tool unavailable"));

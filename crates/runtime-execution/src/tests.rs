@@ -173,6 +173,7 @@ impl Fixture {
             let config = profile.resolve()?;
             let context = ExecutionContext {
                 instructions: String::new(),
+                context_sections: vec![],
                 skill_resources: Default::default(),
                 data: data.clone(),
                 workspace: data,

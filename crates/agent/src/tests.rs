@@ -299,6 +299,7 @@ impl Fixture {
         let feedback = Arc::new(Feedback::default());
         let context = ExecutionContext {
             instructions: String::new(),
+            context_sections: vec![],
             skill_resources: Default::default(),
             tool_executor: Some(Arc::new(pot_tool_executor::LocalTools::default())),
             data: dir.clone(),
@@ -368,7 +369,7 @@ impl Drop for Fixture {
 fn context(messages: Vec<Message>) -> Context {
     Context {
         kind: "context".into(),
-        version: 1,
+        version: 2,
         messages,
         pending: vec![],
         started: None,
@@ -472,6 +473,7 @@ async fn compaction_threshold_exact_boundary_minimum_history_and_disabled_policy
             &Estimate(estimate),
             "system",
             &[],
+            &[],
         )
         .await
         .unwrap();
@@ -482,7 +484,8 @@ async fn compaction_threshold_exact_boundary_minimum_history_and_disabled_policy
         );
         if trigger {
             assert_eq!(state.messages[1].text, "current constraint");
-            assert_eq!(state.messages[2].text, "current reply");
+            assert_eq!(state.messages.len(), 2);
+            assert_eq!(state.messages[0].kind, model::MessageKind::Summary);
             assert_eq!(
                 f.services.lifecycle.lock().unwrap()[1]["action"],
                 "complete"
@@ -508,6 +511,7 @@ async fn compaction_derived_threshold_accounts_for_output_and_context_reservatio
             &Estimate(expected - 1),
             "system",
             &[],
+            &[],
         )
         .await
         .unwrap();
@@ -516,12 +520,12 @@ async fn compaction_derived_threshold_accounts_for_output_and_context_reservatio
     }
 }
 #[tokio::test]
-async fn compaction_without_a_recent_user_boundary_preserves_history() {
+async fn compaction_without_a_real_user_preserves_history() {
     let mut f = Fixture::new("openai_chat");
     f.thread.config.params.agent.auto_compact = true;
     f.thread.config.params.agent.compact_at = Some(1);
     let mut state = context(vec![
-        Message::text("user", "only user".into()),
+        Message::text("assistant", "no user".into()),
         Message::text("assistant", "a".into()),
         Message::text("tool", "b".into()),
         Message::text("assistant", "c".into()),
@@ -535,6 +539,7 @@ async fn compaction_without_a_recent_user_boundary_preserves_history() {
         &mut |_| Ok(()),
         &Estimate(100),
         "system",
+        &[],
         &[],
     )
     .await
@@ -572,6 +577,7 @@ async fn provider_calibration_switch_changes_compaction_decision_without_changin
             &Defaults,
             "system",
             &[],
+            &[],
         )
         .await
         .unwrap();
@@ -595,7 +601,7 @@ async fn provider_calibration_switch_changes_compaction_decision_without_changin
 }
 #[tokio::test]
 async fn unsuccessful_compaction_keeps_original_history_and_closes_lifecycle() {
-    for failure in ["stream", "tools", "no-reduction", "persistence"] {
+    for failure in ["stream", "tools", "empty", "no-reduction", "persistence"] {
         let mut f = Fixture::new("openai_chat");
         f.thread.config.params.agent.auto_compact = true;
         f.thread.config.params.agent.compact_at = Some(1);
@@ -614,6 +620,7 @@ async fn unsuccessful_compaction_keeps_original_history_and_closes_lifecycle() {
         .unwrap();
         let original = serde_json::to_value(&state).unwrap();
         match failure {
+            "empty" => f.services.queue(wire("openai_chat", "", &[])),
             "stream" => f.services.broken(vec![]),
             "tools" => f
                 .services
@@ -637,6 +644,7 @@ async fn unsuccessful_compaction_keeps_original_history_and_closes_lifecycle() {
                 &mut |_| Ok(()),
                 &Estimate(100),
                 "system",
+                &[],
                 &[]
             )
             .await
@@ -680,6 +688,7 @@ async fn successful_compaction_clears_anchor_and_excludes_tools_from_summary_req
         &Estimate(100),
         "system",
         &tools::schemas(&ShellSettings::default()),
+        &[],
     )
     .await
     .unwrap();
@@ -689,7 +698,7 @@ async fn successful_compaction_clears_anchor_and_excludes_tools_from_summary_req
             .as_array()
             .unwrap()
             .len(),
-        3
+        2
     );
     let requests = f.services.requests.lock().unwrap();
     assert!(
@@ -720,6 +729,7 @@ async fn rejected_completion_ack_and_failed_display_sink_do_not_publish_two_term
             &Estimate(100),
             "system",
             &[],
+            &[],
         )
         .await;
         assert!(result.is_err());
@@ -743,7 +753,7 @@ async fn rejected_completion_ack_and_failed_display_sink_do_not_publish_two_term
                 .as_array()
                 .unwrap()
                 .len(),
-            3
+            2
         );
     }
 }
@@ -862,7 +872,15 @@ async fn interrupted_stream_matrix_never_executes_or_persists_incomplete_calls()
             assert!(!f.dir.join("effects.txt").exists());
             let saved = f.feedback.saved.lock().unwrap().clone().unwrap();
             assert!(saved["pending"].as_array().unwrap().is_empty());
-            assert_eq!(saved["messages"].as_array().unwrap().len(), 1);
+            let state: Context = serde_json::from_value(saved.clone()).unwrap();
+            assert_eq!(
+                state
+                    .messages
+                    .iter()
+                    .filter(|m| m.kind == model::MessageKind::Conversation)
+                    .count(),
+                1
+            );
             let events = f.feedback.observations.lock().unwrap();
             assert!(events.iter().any(|e| matches!(
                 e,
@@ -1021,7 +1039,13 @@ async fn interrupted_started_and_unstarted_tool_calls_are_not_replayed_after_reo
             .unwrap()
             .contains("Not executed")
     );
-    assert_eq!(messages.iter().filter(|m| m["role"] == "user").count(), 1);
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m["role"] == "user" && m["kind"]["type"] == "conversation")
+            .count(),
+        1
+    );
 }
 #[tokio::test]
 async fn failed_persistence_before_tool_start_prevents_the_side_effect() {
@@ -1559,7 +1583,7 @@ async fn main_and_task_agents_share_skill_injection_across_model_protocols() {
                 vec![json!({"role":role_name(role),"owner":"unit"})]
             );
             assert!(
-                !f.feedback
+                f.feedback
                     .saved
                     .lock()
                     .unwrap()
@@ -1567,7 +1591,7 @@ async fn main_and_task_agents_share_skill_injection_across_model_protocols() {
                     .unwrap()
                     .to_string()
                     .contains("available_skills"),
-                "catalog polluted persistent history"
+                "catalog missing from classified history"
             );
             let tools = model_tools(&captured[0], protocol);
             assert!(
@@ -1599,7 +1623,7 @@ async fn skills_are_not_requested_for_summary_or_without_authorized_reader() {
 }
 
 #[tokio::test]
-async fn filesystem_skills_refresh_in_model_requests_without_persisting_catalogs() {
+async fn filesystem_skills_append_replacements_and_removal_to_history() {
     for role in [ExecutionRole::Main, ExecutionRole::Worker] {
         let mut f = Fixture::new("openai_chat");
         f.context.role = role;
@@ -1622,14 +1646,18 @@ async fn filesystem_skills_refresh_in_model_requests_without_persisting_catalogs
             let requests = f.services.requests.lock().unwrap();
             let body = requests.last().unwrap()["body"].to_string();
             assert!(body.contains(description));
-            assert_eq!(body.matches("<available_skills>").count(), 1);
+            assert_eq!(
+                body.matches("<available_skills>").count(),
+                if description == "first-version" { 1 } else { 2 }
+            );
             assert!(body.contains("/mapped/skills/example/SKILL.md"));
             assert!(!body.contains("PRIVATE FULL INSTRUCTIONS"));
             if description == "second-version" {
-                assert!(!body.contains("first-version"));
+                assert!(body.contains("first-version"));
+                assert!(body.contains("replaces all earlier contents"));
             }
             assert!(
-                !f.feedback
+                f.feedback
                     .saved
                     .lock()
                     .unwrap()
@@ -1643,9 +1671,9 @@ async fn filesystem_skills_refresh_in_model_requests_without_persisting_catalogs
         f.services.queue(wire("openai_chat", "done", &[]));
         f.turn(false).await.unwrap();
         assert!(
-            !f.services.requests.lock().unwrap().last().unwrap()["body"]
+            f.services.requests.lock().unwrap().last().unwrap()["body"]
                 .to_string()
-                .contains("available_skills")
+                .contains("previous contents no longer apply")
         );
     }
 }
@@ -1675,7 +1703,7 @@ async fn allowed_tools_excluding_reader_skips_skill_provider() {
 }
 
 #[tokio::test]
-async fn injected_instructions_refresh_for_main_and_worker_without_history_copies() {
+async fn injected_instructions_append_replacements_for_main_and_worker() {
     for protocol in ["openai_chat", "openai_responses", "anthropic_messages"] {
         for role in [ExecutionRole::Main, ExecutionRole::Worker] {
             let mut f = Fixture::new(protocol);
@@ -1692,12 +1720,15 @@ async fn injected_instructions_refresh_for_main_and_worker_without_history_copie
                 let body = requests.last().unwrap()["body"].to_string();
                 assert!(body.contains(text));
                 assert!(body.contains("Complete the task."));
-                assert_eq!(body.matches("# AGENTS.md instructions for").count(), 1);
+                assert_eq!(
+                    body.matches("# AGENTS.md instructions for").count(),
+                    if text == "FIRST_INSTRUCTIONS" { 1 } else { 2 }
+                );
                 if text == "UPDATED_INSTRUCTIONS" {
-                    assert!(!body.contains("FIRST_INSTRUCTIONS"));
+                    assert!(body.contains("FIRST_INSTRUCTIONS"));
                 }
                 assert!(
-                    !f.feedback
+                    f.feedback
                         .saved
                         .lock()
                         .unwrap()
@@ -2229,7 +2260,7 @@ fn stopped_context_reconciliation_pairs_known_results_without_replaying_unknown_
     assistant.calls = vec![known.clone(), unknown.clone()];
     let context = Context {
         kind: "context".into(),
-        version: 1,
+        version: 2,
         messages: vec![assistant],
         pending: vec![known, unknown],
         started: Some("known".into()),
@@ -2305,3 +2336,6 @@ async fn execution_checks_current_authority_and_keeps_role_boundaries() {
         .is_err()
     );
 }
+
+#[path = "context_tests.rs"]
+mod context_tests;

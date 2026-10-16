@@ -113,11 +113,21 @@ pub struct SkillResources {
     pub selection: Option<Vec<String>>,
 }
 
+/// A caller-owned, keyed model-context section, independent of accepted input.
+#[derive(Clone, Debug)]
+pub struct ContextSection {
+    /// Stable category identity; content changes never change this key.
+    pub key: String,
+    pub text: String,
+}
+
 /// Fixed per-execution capabilities; never exposes the Runtime or database.
 #[derive(Clone)]
 pub struct ExecutionContext {
     /// Caller-provided instructions, refreshed for this execution. No filesystem discovery.
     pub instructions: String,
+    /// Caller-owned reference data, separate from accepted user input.
+    pub context_sections: Vec<ContextSection>,
     pub skill_resources: SkillResources,
     pub data: PathBuf,
     pub workspace: PathBuf,

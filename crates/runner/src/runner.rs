@@ -296,6 +296,7 @@ pub async fn execute(
             std::fs::create_dir_all(&data)?;
             let context = ExecutionContext {
                 instructions: context["instructions"].as_str().ok_or_else(|| anyhow!("Project instructions missing"))?.into(),
+                context_sections: vec![pot_core::ContextSection { key: "environment".into(), text: format!("Execution workspace: {}", context["workspace"].as_str().ok_or_else(|| anyhow!("Task Agent workspace missing"))?) }],
                 skill_resources: SkillResources::default(),
                 data,
                 workspace: PathBuf::from(context["workspace"].as_str().ok_or_else(|| anyhow!("Task Agent workspace missing"))?),
