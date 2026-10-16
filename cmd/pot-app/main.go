@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 
@@ -18,7 +19,16 @@ func main() {
 		}
 		return
 	}
-	if err := desktop.Run(); err != nil {
+	root := flag.String("root", "", "private Go data root")
+	preview := flag.Bool("preview", false, "disposable fixture UI")
+	flag.Parse()
+	var err error
+	if *preview {
+		err = desktop.RunPreview()
+	} else {
+		err = desktop.Run(*root)
+	}
+	if err != nil {
 		log.Fatal(err)
 	}
 }

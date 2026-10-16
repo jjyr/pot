@@ -47,7 +47,7 @@ func (s *PreviewService) OpenMain() {
 	s.main.Focus()
 }
 
-func Run() error {
+func RunPreview() error {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	source := preview.New(ctx)
@@ -65,7 +65,7 @@ func Run() error {
 	})
 	main := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name: "pot-main", Title: "Pot", Width: 1100, Height: 760, MinWidth: 390, MinHeight: 480,
-		URL: "/?platform=desktop",
+		URL: "/?platform=desktop&mode=preview",
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarHiddenInsetUnified, InvisibleTitleBarHeight: 44,
 		},
@@ -76,7 +76,7 @@ func Run() error {
 	})
 	tray := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name: "pot-tray", Title: "Pot", Width: 380, Height: 560,
-		URL: "/?platform=desktop&surface=tray", Frameless: true,
+		URL: "/?platform=desktop&surface=tray&mode=preview", Frameless: true,
 		AlwaysOnTop: true, Hidden: true, DisableResize: true, HideOnEscape: true, HideOnFocusLost: true,
 	})
 	tray.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
