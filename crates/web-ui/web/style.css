@@ -1,5 +1,12 @@
 html,body{margin:0;height:100%;background:#fdfdfd;color:#202020;font:16px system-ui}body{box-sizing:border-box}#auth{max-width:480px;padding:calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));margin:auto}button{min-height:44px;margin:8px 0;padding:10px 16px;border-radius:10px;border:1px solid #ddd;background:#e8f1fc;display:block;font:inherit}canvas{touch-action:none}
 button[hidden]{display:none}
+#pot-composer{position:fixed;z-index:2;box-sizing:border-box;display:block;margin:0;padding:0;border:0;border-radius:0;outline:none;resize:none;overflow-x:hidden;overflow-y:auto;background:transparent;color:#262626;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-weight:400;letter-spacing:normal;touch-action:auto;scrollbar-width:thin}
+#pot-composer::placeholder{color:#646464;opacity:1}
+#pot-composer-measure{position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;white-space:pre-wrap;overflow-wrap:break-word;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-weight:400;letter-spacing:normal}
+#pot-composer[hidden]{display:none}
+body:has(#auth:not([hidden])) #pot-composer{display:none}
+html[data-theme=dark] #pot-composer{color:#f2f2f2;color-scheme:dark}
+html[data-theme=dark] #pot-composer::placeholder{color:#b7b7b7}
 html[data-theme=dark],html[data-theme=dark] body{background:#202020;color:#f2f2f2}html[data-theme=dark] button{background:#243a52;color:#f2f2f2;border-color:#414141}
 
 dialog{max-width:min(420px,calc(100vw - 64px));border:1px solid #ddd;border-radius:16px;padding:24px;color:inherit;background:inherit}dialog::backdrop{background:#0008}dialog p{line-height:1.6}

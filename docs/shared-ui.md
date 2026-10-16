@@ -12,7 +12,7 @@ pot-ui: Shell, pages, composer, drafts, configuration, navigation
             +------------+-------------+
             |                          |
        Native App                    Web
- AppKit text editing/IME      GPUI textarea/browser IME
+ AppKit text editing/IME      Browser textarea/IME
  in-process + remote IO       same-origin fetch + SSE
  native window/downloads      browser history/downloads
  local + remote Spaces        one serving Control
@@ -34,10 +34,23 @@ touch density is independent of layout. The active window publishes width and
 touch capability to the shared design context.
 
 AppKit supplies text, byte-based caret/selection, composition status and editing
-operations within the shared composer. Browser input uses the GPUI textarea.
+operations within the shared composer. Web uses a visible browser-native textarea;
+the browser owns text shaping, caret, placeholder, selection, undo and IME. Both
+hosts expose editor snapshots and replacement commands through `Platform` while
+the shared shell owns the frame, send/stop controls, drafts and reference menu.
+The browser reports its measured text height for wrapping and auto-growth, and
+positions the editor against the canvas viewport without rewriting live text on
+ordinary renders. Only explicit draft restoration, receipts and completion edit it.
 Draft keys include client mode, Control and conversation; matching authoritative
 receipts clear only the submitted draft. Reference completion is shared, leaving
 marked text to the input method.
+
+Other form/search fields retain GPUI input components. At the Web boundary,
+composition keystrokes are stopped before GPUI key/action dispatch, including the
+first IME key identified by key code 229 before `compositionstart`. Browser
+default behavior and composition/input events remain available to the IME, so
+candidate confirmation cannot insert a stray Latin character, select a tag or
+submit a form through a keyboard action.
 
 `Platform` supplies projections, capabilities, preferences and host services;
 `Driver` dispatches intents through existing transports. Native adapters own window

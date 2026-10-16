@@ -5,9 +5,17 @@ async (page) => {
   if (runtime.runtime_id !== 'fixture') throw Error('Expected isolated UI fixture on port 17908');
   const expectInput = async (expected, reason) => {
     try {
-      await page.waitForFunction(value => document.querySelector('textarea')?.value === value, expected, {timeout:3000});
+      await page.waitForFunction(value => {
+        const composer = document.querySelector('#pot-composer');
+        const editor = composer && !composer.hidden ? composer : document.querySelector('textarea:not(#pot-composer)');
+        return editor?.value === value;
+      }, expected, {timeout:3000});
     } catch {
-      throw Error(reason + ': ' + await page.locator('textarea').inputValue());
+      const value = await page.evaluate(() => {
+        const composer = document.querySelector('#pot-composer');
+        return (composer && !composer.hidden ? composer : document.querySelector('textarea:not(#pot-composer)'))?.value;
+      });
+      throw Error(reason + ': ' + value);
     }
   };
   const navigation = async (page) => {
@@ -96,13 +104,13 @@ async (page) => {
  await page.mouse.click(34,22);await page.waitForURL(/page=assistants/);await wait();await page.mouse.click(120,205);await page.waitForURL(/page=chat.*assistant=main/);await wait();await page.mouse.click(140,22);await wait();
  assert(reading.equals(await page.screenshot({clip:{x:0,y:44,width:393,height:300},path:'output/playwright/devices/reading-return.png'})),'reading position survives assistant switch');
  await page.setViewportSize({width:393,height:852});await wait();await page.mouse.click(355,22);await wait();await page.mouse.click(250,74);await wait();
- await page.mouse.click(130,148);await page.keyboard.press('Meta+A');await page.keyboard.type('Dirty assistant name');await page.mouse.click(34,22);await wait();
+ await page.mouse.click(130,118);await page.keyboard.press('Meta+A');await page.keyboard.type('Dirty assistant name');await page.mouse.click(34,22);await wait();
  await page.screenshot({path:'output/playwright/devices/final-assistant-dirty-guard.png'});
- await page.keyboard.press('Escape');await wait();await page.mouse.click(130,148);await expectInput('Dirty assistant name','Stay retains assistant draft');
+ await page.keyboard.press('Escape');await wait();await page.mouse.click(130,118);await expectInput('Dirty assistant name','Stay retains assistant draft');
  await page.mouse.click(34,22);await wait();await page.mouse.click(290,448);await wait();await page.mouse.click(110,798);
  await expectInput('draft A retained','editor return restores conversation draft');
  await page.screenshot({path:'output/playwright/devices/final-editor-chat-return.png'});
- await page.mouse.click(355,22);await wait();await page.mouse.click(250,74);await wait();await page.mouse.click(130,148);await expectInput('Pot','Discard resets assistant draft');await page.mouse.click(34,22);await wait();
+ await page.mouse.click(355,22);await wait();await page.mouse.click(250,74);await wait();await page.mouse.click(130,118);await expectInput('Pot','Discard resets assistant draft');await page.mouse.click(34,22);await wait();
  await page.mouse.click(34,22);await page.waitForURL(/page=assistants/);await wait();await page.setViewportSize({width:393,height:460});await wait();await page.mouse.move(200,300);await page.mouse.wheel(0,280);await wait();await page.mouse.move(140,22);await wait();
  const list=await page.screenshot({clip:{x:0,y:170,width:393,height:290},path:'output/playwright/devices/list-scroll-before.png'});
  await page.mouse.click(120,205);await page.waitForURL(/page=chat/);await wait();await page.mouse.click(34,22);await page.waitForURL(/page=assistants/);await wait();

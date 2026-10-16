@@ -16,6 +16,8 @@ pub struct EditorSnapshot {
     pub caret: usize,
     pub selection: bool,
     pub composing: bool,
+    /// Measured text height when the platform owns font shaping and wrapping.
+    pub content_height: Option<f32>,
 }
 #[derive(Clone, Copy, Default)]
 pub struct Capabilities {
