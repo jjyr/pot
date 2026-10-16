@@ -32,15 +32,16 @@ type invitation struct {
 	Enrollment *Enrollment  `json:"enrollment,omitempty"`
 }
 type book struct {
-	Version    uint32                `json:"version"`
-	RuntimeID  string                `json:"runtime_id"`
-	Key        string                `json:"key"`
-	Owner      string                `json:"owner"`
-	Role       string                `json:"role"`
-	Members    map[string]member     `json:"members"`
-	Invites    map[string]invitation `json:"invites"`
-	Membership *Membership           `json:"membership,omitempty"`
-	Pending    *pendingJoin          `json:"pending,omitempty"`
+	Version     uint32                `json:"version"`
+	RuntimeID   string                `json:"runtime_id"`
+	Key         string                `json:"key"`
+	Owner       string                `json:"owner"`
+	Role        string                `json:"role"`
+	LocalLabels []string              `json:"local_labels"`
+	Members     map[string]member     `json:"members"`
+	Invites     map[string]invitation `json:"invites"`
+	Membership  *Membership           `json:"membership,omitempty"`
+	Pending     *pendingJoin          `json:"pending,omitempty"`
 }
 type pendingJoin struct {
 	Origin  string      `json:"origin"`
@@ -78,7 +79,7 @@ func Open(path string, options Options) (*Directory, error) {
 			if e != nil {
 				return e
 			}
-			d.state = book{Version: 1, RuntimeID: options.RuntimeID, Key: base64.RawURLEncoding.EncodeToString(key), Owner: secret(), Role: "neutral", Members: map[string]member{}, Invites: map[string]invitation{}}
+			d.state = book{Version: 1, RuntimeID: options.RuntimeID, Key: base64.RawURLEncoding.EncodeToString(key), Owner: secret(), Role: "neutral", Members: map[string]member{}, Invites: map[string]invitation{}, LocalLabels: []string{"local", runtime.GOOS}}
 			raw, err = json.Marshal(d.state)
 			if err != nil {
 				return err
@@ -245,7 +246,7 @@ func (d *Directory) Join(ctx context.Context, s Signed) (Signed, error) {
 		if tags == nil {
 			tags = []string{"runner", r.OS}
 		}
-		b.Members[r.Caller.RuntimeID] = member{Machine: Machine{Identity: r.Caller, Epoch: epoch, Labels: tags, Enabled: true}, Token: result.Token}
+		b.Members[r.Caller.RuntimeID] = member{Machine: Machine{Identity: r.Caller, Epoch: epoch, Labels: tags, Enabled: true, OS: r.OS}, Token: result.Token}
 		i.Request = &r
 		i.Enrollment = &result
 		b.Invites[tokenHash(r.Invitation)] = i
@@ -279,6 +280,10 @@ func (d *Directory) SetLabels(ctx context.Context, id string, tags []string) err
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.update(func(b *book) error {
+		if id == d.identity.RuntimeID && b.Role != "runner" {
+			b.LocalLabels = tags
+			return nil
+		}
 		m, ok := b.Members[id]
 		if b.Role != "control" || !ok || !m.Machine.Enabled {
 			return fmt.Errorf("unknown machine")
@@ -287,6 +292,11 @@ func (d *Directory) SetLabels(ctx context.Context, id string, tags []string) err
 		b.Members[id] = m
 		return nil
 	})
+}
+func (d *Directory) LocalLabels() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string{}, d.state.LocalLabels...)
 }
 func (d *Directory) Remove(ctx context.Context, id string) error {
 	d.mu.Lock()
@@ -310,6 +320,9 @@ func (d *Directory) Remove(ctx context.Context, id string) error {
 	return err
 }
 func validateMembership(m Membership, runtimeID string) error {
+	if _, err := ClientForCA(nil, m.CAPEM); err != nil {
+		return err
+	}
 	if err := ValidOrigin(m.Origin); err != nil {
 		return err
 	}

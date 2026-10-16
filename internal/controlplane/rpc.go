@@ -12,6 +12,7 @@ import (
 )
 
 const MaxMessage = 2 * 1024 * 1024
+const MaxPayload = 24 * 1024 * 1024
 const maxPending = 64
 
 type wire struct {
@@ -24,35 +25,44 @@ type wire struct {
 	Method   string          `json:"method" required:"true"`
 	Params   json.RawMessage `json:"params" required:"true"`
 	Error    string          `json:"error" required:"true"`
+	Fault    *Fault          `json:"fault,omitempty"`
 }
 type response struct {
 	data json.RawMessage
 	err  error
 }
 type Peer struct {
-	conn      *websocket.Conn
-	directory *Directory
-	remote    Identity
-	principal Principal
-	handler   Handler
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	pending   map[string]chan response
-	seen      map[string]bool
-	handlers  chan struct{}
-	done      chan struct{}
-	close     sync.Once
+	conn          *websocket.Conn
+	directory     *Directory
+	remote        Identity
+	principal     Principal
+	handler       Handler
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mu            sync.Mutex
+	pending       map[string]chan response
+	seen          map[string]bool
+	handlers      chan struct{}
+	done          chan struct{}
+	close         sync.Once
+	fragments     map[string]*assembly
+	fragmentBytes int
 }
 
 func newPeer(ctx context.Context, c *websocket.Conn, d *Directory, remote Identity, p Principal, h Handler) *Peer {
 	ctx, cancel := context.WithCancel(ctx)
 	c.SetReadLimit(MaxMessage)
-	return &Peer{conn: c, directory: d, remote: remote, principal: p, handler: h, ctx: ctx, cancel: cancel, pending: map[string]chan response{}, seen: map[string]bool{}, handlers: make(chan struct{}, maxPending), done: make(chan struct{})}
+	return &Peer{conn: c, directory: d, remote: remote, principal: p, handler: h, ctx: ctx, cancel: cancel, pending: map[string]chan response{}, seen: map[string]bool{}, handlers: make(chan struct{}, maxPending), done: make(chan struct{}), fragments: map[string]*assembly{}}
 }
 func (p *Peer) Done() <-chan struct{} { return p.done }
 func (p *Peer) Close()                { p.close.Do(func() { p.cancel(); p.conn.CloseNow(); close(p.done) }) }
 func (p *Peer) send(ctx context.Context, w wire) error {
+	if len(w.Params) > 128*1024 {
+		return p.sendFragments(ctx, w)
+	}
+	return p.sendFrame(ctx, w)
+}
+func (p *Peer) sendFrame(ctx context.Context, w wire) error {
 	w.Version = 1
 	w.Sender = p.directory.identity.RuntimeID
 	w.Audience = p.remote.RuntimeID
@@ -118,7 +128,16 @@ func (p *Peer) Notify(ctx context.Context, r Request) error {
 func (p *Peer) run() {
 	defer p.Close()
 	for {
-		kind, raw, err := p.conn.Read(p.ctx)
+		readCtx := p.ctx
+		cancel := func() {}
+		for _, item := range p.fragments {
+			if deadline, ok := readCtx.Deadline(); !ok || item.deadline.Before(deadline) {
+				cancel()
+				readCtx, cancel = context.WithDeadline(p.ctx, item.deadline)
+			}
+		}
+		kind, raw, err := p.conn.Read(readCtx)
+		cancel()
 		if err != nil {
 			return
 		}
@@ -133,6 +152,14 @@ func (p *Peer) run() {
 		if verify(p.remote, signed, &w) != nil || w.Version != 1 || w.Audience != p.directory.identity.RuntimeID || w.Sender != p.remote.RuntimeID || w.Epoch != p.principal.Epoch {
 			return
 		}
+		complete, err := p.receiveFragment(w)
+		if err != nil {
+			return
+		}
+		if complete == nil {
+			continue
+		}
+		w = *complete
 		if w.Kind == "response" {
 			p.mu.Lock()
 			ch := p.pending[w.ID]
@@ -140,7 +167,11 @@ func (p *Peer) run() {
 			if ch != nil {
 				r := response{data: w.Params}
 				if w.Error != "" {
-					r.err = fmt.Errorf("remote: %s", w.Error)
+					if w.Fault != nil {
+						r.err = &RemoteError{Message: w.Error, Fault: *w.Fault}
+					} else {
+						r.err = fmt.Errorf("remote: %s", w.Error)
+					}
 				}
 				select {
 				case ch <- r:
@@ -189,7 +220,7 @@ func (p *Peer) run() {
 			if len(result) == 0 {
 				result = json.RawMessage("null")
 			}
-			if len(result) > MaxMessage/2 {
+			if len(result) > MaxPayload {
 				result = json.RawMessage("null")
 				err = fmt.Errorf("RPC result exceeds limit")
 			}
@@ -202,7 +233,7 @@ func (p *Peer) run() {
 			}
 			ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
 			defer cancel()
-			if p.send(ctx, wire{Kind: "response", ID: w.ID, Method: w.Method, Params: result, Error: message}) != nil {
+			if p.send(ctx, wire{Kind: "response", ID: w.ID, Method: w.Method, Params: result, Error: message, Fault: fault(err)}) != nil {
 				p.Close()
 			}
 		}(w)

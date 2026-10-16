@@ -15,6 +15,19 @@ type RemotePort struct {
 	RuntimeID string
 }
 
+func (d *Directory) ControlPeer() (*Peer, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.state.Role != "runner" || d.state.Membership == nil {
+		return nil, ErrUnauthorized
+	}
+	p := d.peers[d.state.Membership.Enrollment.Control.RuntimeID]
+	if p == nil {
+		return nil, ErrDisconnected
+	}
+	return p, nil
+}
+
 func (d *Directory) Peer(runtimeID string) (*Peer, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

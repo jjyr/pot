@@ -158,7 +158,7 @@ func TestInvitationRetryAndDurableIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := d.Identity()
-	if err = d.SaveMembership(ctx, Membership{"http://localhost:12345", e}); err != nil {
+	if err = d.SaveMembership(ctx, Membership{Origin: "http://localhost:12345", Enrollment: e}); err != nil {
 		t.Fatal(err)
 	}
 	d.Close()

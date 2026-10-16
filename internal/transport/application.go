@@ -56,6 +56,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	path := u.Path
 	s := a.Control
+	if result, err, handled := a.machineCall(ctx, method, u, r); handled {
+		return result, err
+	}
+	if s.Machines.Role() == "runner" && path != "/api/v1/runtime" && path != "/api/v1/control" {
+		return nil, protocol.APIError{Code: "runner_role", Message: "execution Runtime cannot own assistants or provider credentials"}
+	}
 	if result, err, handled := a.taskCall(ctx, method, u, owner, r); handled {
 		return result, err
 	}

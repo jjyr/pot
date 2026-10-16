@@ -19,6 +19,8 @@ type Server struct {
 	Directory    *Directory
 	Handler      Handler
 	OwnerHandler http.Handler
+	OnEnroll     func(context.Context, Machine) error
+	OnPresence   func(string, bool)
 }
 
 func bearer(r *http.Request) string {
@@ -69,12 +71,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 403)
 			return
 		}
+		if s.OnEnroll != nil {
+			var enrollment Enrollment
+			if err := core.DecodeJSON(result.Payload, &enrollment); err != nil {
+				http.Error(w, "invalid enrollment receipt", 500)
+				return
+			}
+			s.Directory.mu.Lock()
+			m := s.Directory.state.Members[enrollment.RuntimeID]
+			s.Directory.mu.Unlock()
+			if err := s.OnEnroll(r.Context(), m.Machine); err != nil {
+				http.Error(w, "machine policy enrollment failed", 500)
+				return
+			}
+		}
 		writeJSON(w, result)
 	case "/control/v1/connect":
 		s.connect(w, r)
 	default:
 		if s.OwnerHandler != nil && strings.HasPrefix(r.URL.Path, "/control/v1/owner/") && s.Directory.AuthenticateOwner(bearer(r)) {
-			s.OwnerHandler.ServeHTTP(w, r)
+			http.StripPrefix("/control/v1/owner", s.OwnerHandler).ServeHTTP(w, r)
 			return
 		}
 		http.Error(w, "Control authentication rejected", 403)
@@ -118,6 +134,10 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 	if old != nil {
 		old.Close()
 	}
+	if s.OnPresence != nil {
+		s.OnPresence(runtimeID, true)
+		defer s.OnPresence(runtimeID, false)
+	}
 	p.run()
 	d.mu.Lock()
 	if d.peers[runtimeID] == p {
@@ -130,11 +150,23 @@ type Connector struct {
 	Directory  *Directory
 	HTTPClient *http.Client
 	Handler    Handler
+	CAPEM      string
 }
 
 func (c *Connector) client() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
+	}
+	ca := c.CAPEM
+	if ca == "" && c.Directory != nil {
+		if m := c.Directory.Membership(); m != nil {
+			ca = m.CAPEM
+		}
+	}
+	if ca != "" {
+		if client, err := ClientForCA(nil, ca); err == nil {
+			return client
+		}
 	}
 	return http.DefaultClient
 }
@@ -143,6 +175,9 @@ func (c *Connector) client() *http.Client {
 // fingerprint before Enroll; custom roots belong on HTTPClient's TLS config.
 func (c *Connector) Preview(ctx context.Context, origin string) (Identity, error) {
 	var i Identity
+	if _, err := ClientForCA(c.HTTPClient, c.CAPEM); err != nil {
+		return i, err
+	}
 	if err := ValidOrigin(origin); err != nil {
 		return i, err
 	}
@@ -180,6 +215,9 @@ func (c *Connector) do(request *http.Request, result any) error {
 // Enroll durably saves the original join request before networking, so uncertain
 // retries redeem the same invitation/request rather than create another member.
 func (c *Connector) Enroll(ctx context.Context, origin string, pinned Identity, invitation string, requestID ...string) (Membership, error) {
+	if _, err := ClientForCA(c.HTTPClient, c.CAPEM); err != nil {
+		return Membership{}, err
+	}
 	if c.Directory == nil {
 		return Membership{}, fmt.Errorf("Directory required")
 	}
@@ -211,7 +249,7 @@ func (c *Connector) Enroll(ctx context.Context, origin string, pinned Identity, 
 	if enrollment.RequestID != original.RequestID || enrollment.Control != pinned {
 		return Membership{}, ErrUnauthorized
 	}
-	membership := Membership{origin, enrollment}
+	membership := Membership{Origin: origin, Enrollment: enrollment, CAPEM: c.CAPEM}
 	if err = c.Directory.SaveMembership(ctx, membership); err != nil {
 		return Membership{}, err
 	}

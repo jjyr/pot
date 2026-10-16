@@ -25,6 +25,7 @@ type TargetDispatch func(context.Context, Operation, executor.Request, func(core
 // reaches this same target, approval and receipt boundary.
 type Dispatcher struct {
 	RuntimeID, Owner, Turn string
+	ApprovalOwner, Task    string
 	Generation             uint64
 	DefaultTarget          core.ExecutionTarget
 	Spec                   core.ResolvedSpec
@@ -88,7 +89,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		if err != nil {
 			return nil, err
 		}
-		if _, err = d.Permissions.Authorize(ctx, HostRequest{Owner: d.Owner, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared}); err != nil {
+		approvalOwner := d.ApprovalOwner
+		if approvalOwner == "" {
+			approvalOwner = d.Owner
+		}
+		if _, err = d.Permissions.Authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared}); err != nil {
 			return nil, err
 		}
 	}

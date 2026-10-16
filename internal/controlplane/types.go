@@ -118,6 +118,7 @@ func labels(input []string) ([]string, error) {
 }
 
 type Machine struct {
+	OS       string   `json:"os"`
 	Identity Identity `json:"identity"`
 	Epoch    uint64   `json:"epoch"`
 	Labels   []string `json:"labels"`
@@ -148,6 +149,7 @@ type Enrollment struct {
 type Membership struct {
 	Origin     string     `json:"origin"`
 	Enrollment Enrollment `json:"enrollment"`
+	CAPEM      string     `json:"ca_pem,omitempty"`
 }
 type Principal struct {
 	RuntimeID string
@@ -162,7 +164,7 @@ type Request struct {
 type Handler func(context.Context, Principal, Request) (json.RawMessage, error)
 
 func validRequest(r Request) error {
-	if len(r.ID) < 1 || len(r.ID) > 256 || strings.ContainsRune(r.ID, 0) || len(r.Method) < 1 || len(r.Method) > 128 || len(r.Params) > MaxMessage/2 || !json.Valid(r.Params) {
+	if len(r.ID) < 1 || len(r.ID) > 256 || strings.ContainsRune(r.ID, 0) || len(r.Method) < 1 || len(r.Method) > 128 || len(r.Params) > MaxPayload || !json.Valid(r.Params) {
 		return fmt.Errorf("invalid RPC request")
 	}
 	return nil

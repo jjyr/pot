@@ -21,6 +21,7 @@ import (
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/internal/usage"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,6 +40,8 @@ type Options struct {
 	ResolveSandbox                                                           func(context.Context) (core.ExecutionTarget, error)
 	Sandboxes                                                                *sandbox.Manager
 	Embedded                                                                 bool
+	Node                                                                     string
+	ControlHTTPClient                                                        *http.Client
 }
 type Service struct {
 	mu              sync.Mutex
@@ -179,7 +182,7 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 		e = nil
 	}
 	if e == nil {
-		e = executor.New(executor.Options{})
+		e = executor.New(executor.Options{Node: s.options.Node, Home: s.options.AgentHome, ExecutionTarget: "host"})
 		s.hosts[owner] = e
 		if s.hostGenerations == nil {
 			s.hostGenerations = map[string]uint64{}

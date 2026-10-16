@@ -29,6 +29,7 @@ type taskLifecycle struct {
 	wg       sync.WaitGroup
 	watching map[string]bool
 	mu       sync.Mutex
+	remote   *remoteState
 }
 
 func (s *Service) openTasks() error {
@@ -69,6 +70,9 @@ func (s *Service) openTasks() error {
 	}
 	s.taskLife.wg.Add(1)
 	go s.taskLoop()
+	if s.Machines.Role() == "runner" {
+		s.StartRunner()
+	}
 	return nil
 }
 func (s *Service) wakeTasks() {
@@ -145,7 +149,25 @@ func (s *Service) taskTarget(ctx context.Context, machine string) (core.Executio
 		return core.ExecutionTarget{}, err
 	}
 	if machine != s.options.RuntimeID {
-		return core.ExecutionTarget{}, errors.New("remote machine target policy resolver unavailable")
+		peer, err := s.Machines.Peer(machine)
+		if err != nil {
+			return core.ExecutionTarget{}, err
+		}
+		raw, _ := json.Marshal(struct {
+			Mode string `json:"mode"`
+		}{policy.ExecutionMode})
+		reply, err := peer.Call(ctx, controlplane.Request{ID: "target:" + storage.ID(), Method: "machine.target", Params: raw})
+		if err != nil {
+			return core.ExecutionTarget{}, err
+		}
+		var target core.ExecutionTarget
+		if err = core.DecodeJSON(reply, &target); err != nil {
+			return target, err
+		}
+		if target.RuntimeID != machine || target.Target.Kind != policy.ExecutionMode {
+			return target, errors.New("remote policy target differs from selected machine/mode")
+		}
+		return target, target.Validate()
 	}
 	if policy.ExecutionMode == "host" {
 		return core.HostTarget(machine), nil
@@ -170,6 +192,13 @@ func (s *Service) taskLoop() {
 			for {
 				if _, err := source.Next(s.ctx); err != nil {
 					return
+				}
+				if source == runnerSub && s.Machines.Role() == "runner" {
+					if peer, err := s.Machines.ControlPeer(); err == nil {
+						ctx, cancel := context.WithTimeout(s.ctx, time.Second)
+						_ = peer.Notify(ctx, controlplane.Request{ID: storage.ID(), Method: "event.runner.changed", Params: json.RawMessage(`{}`)})
+						cancel()
+					}
 				}
 				s.Changes.Notify("tasks")
 				s.Changes.Notify("schedules")
@@ -202,6 +231,7 @@ func (s *Service) taskLoop() {
 			s.Changes.Notify("tasks")
 		}
 		s.resumeTaskAllowance(s.ctx)
+		s.reconcileRemoteResources(s.ctx)
 		if err := s.Schedules.Tick(s.ctx, storage.Now()); err != nil && s.ctx.Err() == nil {
 			s.Changes.Notify("schedules")
 		}
@@ -314,6 +344,7 @@ func (p taskRouter) Inspect(ctx context.Context, c, t, r string) (*runner.Run, e
 	return port.Inspect(ctx, c, t, r)
 }
 func (p taskRouter) Stop(ctx context.Context, c, t, r, m string) error {
+	p.s.closeRemoteRun(r)
 	port, err := p.original(ctx, c, t, r)
 	if err != nil {
 		return err
@@ -335,7 +366,7 @@ func (p taskRouter) Resume(ctx context.Context, c, t, r string) error {
 func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepared, error) {
 	l := r.Launch
 	if l.ControlID != s.options.RuntimeID {
-		return runner.Prepared{}, errors.New("remote run-bound Control services unavailable")
+		return s.prepareRemoteTask(ctx, r)
 	}
 	resources, err := s.taskResource(ctx, l.ResourceRevision)
 	if err != nil {
@@ -371,7 +402,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, Spec: config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: map[string]agent.Dispatch{}}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: map[string]agent.Dispatch{}}
 	feedback := &taskFeedback{s: s, launch: l}
 	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.AssistantID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
@@ -386,7 +417,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		definitions = append(definitions, d)
 	}
 	loop := &agent.Agent{Services: ports, Feedback: feedback, Dispatch: dispatch.Dispatch, Tools: definitions, Composer: composition.ProcessRunner{}, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
-		s.Permissions.Expire(l.TaskID, l.RunID, l.Generation)
+		s.Permissions.Expire(l.AssistantID, l.RunID, l.Generation)
 		result := engine.Drain()
 		if s.options.CleanupTarget != nil {
 			result = errors.Join(result, s.options.CleanupTarget(ctx, l.TaskID, abort))
@@ -501,7 +532,9 @@ func (s *Service) resumeTaskAllowance(ctx context.Context) {
 		}
 	}
 }
-func (f *taskFeedback) Settle(context.Context) error { return nil }
+func (f *taskFeedback) Settle(ctx context.Context) error {
+	return f.s.settleTaskOperations(ctx, f.launch.TaskID)
+}
 
 type taskFiles struct{ s *Service }
 
