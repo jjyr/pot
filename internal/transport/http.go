@@ -97,10 +97,19 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
+	if controller.Flush() != nil {
+		return
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-heartbeat.C:
+			if writeHeartbeat(controller, w) != nil {
+				return
+			}
 		case snapshot, ok := <-updates:
 			if !ok {
 				return
@@ -115,6 +124,13 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 			}
 		}
 	}
+}
+func writeHeartbeat(controller *http.ResponseController, w http.ResponseWriter) error {
+	_ = controller.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+		return err
+	}
+	return controller.Flush()
 }
 func writeSSE(controller *http.ResponseController, w http.ResponseWriter, event, id string, data []byte) error {
 	if strings.ContainsAny(event+id, "\r\n") {
@@ -152,11 +168,20 @@ func streamChanges(w http.ResponseWriter, r *http.Request, app *Application) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
+	if controller.Flush() != nil {
+		return
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
 	seq := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			if writeHeartbeat(controller, w) != nil {
+				return
+			}
 		case topics := <-merged:
 			seq++
 			body, _ := json.Marshal(topics)

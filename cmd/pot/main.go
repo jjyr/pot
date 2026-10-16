@@ -36,12 +36,18 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "init", "serve", "status", "api":
+			return productCommand(ctx, args, output)
+		}
+	}
 	if len(args) == 1 && args[0] == "--version" {
-		_, err := fmt.Fprintln(output, "pot Go migration preview")
+		_, err := fmt.Fprintln(output, "pot Go development")
 		return err
 	}
 	if len(args) == 0 || args[0] != "preview" {
-		return errors.New("usage: pot preview [-port 17702]; product serve is not migrated yet")
+		return errors.New("usage: pot init|serve|status|api [-root PATH]; pot preview [-port 17702]")
 	}
 	flags := flag.NewFlagSet("preview", flag.ContinueOnError)
 	flags.SetOutput(output)
