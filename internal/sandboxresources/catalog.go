@@ -109,6 +109,9 @@ func (c Catalog) prepare(ctx context.Context, store *resource.Store, id string, 
 			return result, err
 		}
 		*item.dest = v.Path()
+		if c.Resources[item.id].Format == resource.Raw {
+			*item.dest = filepath.Join(v.Path(), "payload")
+		}
 	}
 	return result, nil
 }

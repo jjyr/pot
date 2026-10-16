@@ -270,8 +270,12 @@ func validatePaths(resources sandbox.PreparedResources) error {
 		if err != nil || canonical != path {
 			return errors.New("prepared resources must not use symlinks")
 		}
-		if _, err := os.Stat(path); err != nil {
+		info, err := os.Stat(path)
+		if err != nil {
 			return err
+		}
+		if path == resources.Kernel && !info.Mode().IsRegular() || path != resources.Kernel && !info.IsDir() {
+			return errors.New("prepared kernel must be a regular file and OCI resources must be directories")
 		}
 	}
 	return nil

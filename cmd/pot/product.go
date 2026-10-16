@@ -28,6 +28,12 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 	workspace := flags.String("workspace", "", "Host Agent workspace")
 	ui := flags.String("ui", "", "explicit loopback browser address, for example 127.0.0.1:17703")
 	method := flags.String("method", "GET", "API method")
+	listen := flags.String("listen", "", "explicit standalone Control listener")
+	cert := flags.String("tls-cert", "", "Control TLS certificate PEM")
+	key := flags.String("tls-key", "", "Control TLS private key PEM")
+	resources := flags.String("resources", "", "installed product resource directory")
+	helpers := flags.String("helpers", "", "installed Swift Helper directory")
+	image := flags.String("sandbox-image", "", "owner-installed immutable Podman image")
 	body := flags.String("body", "", "API JSON request body, or - for stdin")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
@@ -49,7 +55,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 		if flags.NArg() != 0 {
 			return errors.New("unexpected positional arguments")
 		}
-		runtime, err := product.Open(ctx, product.Options{Root: *root, Control: control.Options{Workspace: *workspace}})
+		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, HelperDirectory: *helpers, SandboxImage: *image, Control: control.Options{Workspace: *workspace}})
 		if err != nil {
 			return err
 		}
@@ -58,6 +64,12 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			return json.NewEncoder(out).Encode(runtime.Root.Identity)
 		}
 		app := &transport.Application{Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+		viewer, err := transport.DesktopHandler(ctx, runtime.Sandboxes, os.DirFS(runtime.AssetDirectory))
+		if err != nil {
+			return err
+		}
+		defer viewer.Close()
+		app.Desktop = viewer
 		socket, err := transport.StartSocket(ctx, runtime.Root.Path, app)
 		if err != nil {
 			return err
@@ -67,6 +79,40 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			defer cancel()
 			_ = socket.Close(shutdown)
 		}()
+		if *listen != "" {
+			if err = runtime.Control.Machines.EnableControl(); err != nil {
+				return err
+			}
+			listener, err := net.Listen("tcp", *listen)
+			if err != nil {
+				return err
+			}
+			defer listener.Close()
+			server := &http.Server{Handler: runtime.Control.ControlServer(transport.Handler(app, runtime.Control.Machines.OwnerCredential())), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16384}
+			remoteErrors := make(chan error, 1)
+			go func() {
+				if *cert != "" || *key != "" {
+					remoteErrors <- server.ServeTLS(listener, *cert, *key)
+				} else {
+					remoteErrors <- server.Serve(listener)
+				}
+			}()
+			defer func() {
+				shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = server.Shutdown(shutdown)
+			}()
+			go func() {
+				select {
+				case <-ctx.Done():
+				case err := <-remoteErrors:
+					if err != nil && !errors.Is(err, http.ErrServerClosed) {
+						fmt.Fprintln(out, "Control listener stopped:", err)
+					}
+				}
+			}()
+			fmt.Fprintf(out, "Control listener: %s\n", listener.Addr())
+		}
 		fmt.Fprintf(out, "Runtime %s ready (%s)\n", app.RuntimeID, runtime.Root.Path)
 		if *ui != "" {
 			listener, err := net.Listen("tcp", *ui)
@@ -91,7 +137,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			client := socket.Endpoint.Client()
 			client.Timeout = 0
 			origin := "http://" + listener.Addr().String()
-			browser, err := webui.New(webui.Options{Origin: origin, Config: config, Upstream: webui.Upstream{URL: "http://runtime", Credential: socket.Endpoint.Token, Client: client}, Assets: assets.FS()})
+			browser, err := webui.New(webui.Options{Origin: origin, Config: config, Upstream: webui.Upstream{URL: "http://runtime", Credential: socket.Endpoint.Token, Client: client}, Assets: assets.FS(), Persist: func(c webui.Config) error { return c.Save(path) }})
 			if err != nil {
 				return err
 			}

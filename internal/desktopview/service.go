@@ -208,6 +208,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		switch suffix {
+		case "api/close":
+			s.mu.Lock()
+			if s.tickets[v.id] == v {
+				s.revokeLocked(v)
+			}
+			s.mu.Unlock()
+			reply(w, 200, map[string]bool{"closed": true})
 		case "api/control":
 			s.control(w, r, v)
 		case "api/browser":

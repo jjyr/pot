@@ -26,7 +26,7 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 	}))
 	defer upstream.Close()
 	config := NewConfig()
-	server, err := New(Options{Origin: "http://localhost", Config: config, Upstream: Upstream{upstream.URL, "control-secret", upstream.Client()}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}})
+	server, err := New(Options{Origin: "http://localhost", Config: config, Upstream: Upstream{URL: upstream.URL, Credential: "control-secret", Client: upstream.Client()}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 }
 func TestBrowserRateLimitAndOrigin(t *testing.T) {
 	config := NewConfig()
-	s, err := New(Options{Origin: "http://localhost", Config: config, Upstream: Upstream{"http://runtime", "control", &http.Client{}}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}})
+	s, err := New(Options{Origin: "http://localhost", Config: config, Upstream: Upstream{URL: "http://runtime", Credential: "control", Client: &http.Client{}}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}})
 	if err != nil {
 		t.Fatal(err)
 	}

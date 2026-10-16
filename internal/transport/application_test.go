@@ -24,7 +24,7 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	defer os.RemoveAll(temporary)
 	root := filepath.Join(temporary, "go")
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
-	options := product.Options{Root: root, Control: control.Options{Keys: keys}}
+	options := product.Options{Root: root, DisableMetadataRefresh: true, Control: control.Options{Keys: keys}}
 	runtime, err := product.Open(ctx, options)
 	if err != nil {
 		t.Fatal(err)

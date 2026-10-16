@@ -10,24 +10,34 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/execution"
 	"github.com/jjyr/pot/internal/instance"
+	"github.com/jjyr/pot/internal/resource"
+	"github.com/jjyr/pot/internal/sandbox"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Options struct {
-	Root    string
-	Control control.Options
-	Limits  *execution.Limits
+	Root                                             string
+	ResourceDirectory, HelperDirectory, SandboxImage string
+	SandboxProviders                                 []sandbox.Provider
+	Control                                          control.Options
+	Limits                                           *execution.Limits
+	DisableMetadataRefresh                           bool
 }
 type Runtime struct {
-	Root       *instance.Root
-	BootID     string
-	Executions *execution.Manager
-	Control    *control.Service
-	cancel     context.CancelFunc
-	once       sync.Once
-	closeErr   error
+	Root           *instance.Root
+	AssetDirectory string
+	BootID         string
+	Executions     *execution.Manager
+	Control        *control.Service
+	Sandboxes      *sandbox.Manager
+	Resources      *resource.Store
+	cancel         context.CancelFunc
+	once           sync.Once
+	closeErr       error
+	background     sync.WaitGroup
 }
 
 func Open(ctx context.Context, options Options) (*Runtime, error) {
@@ -71,9 +81,15 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 	config.RuntimeID = root.Identity.RuntimeID
 	config.BootID = r.BootID
 	config.Manager = r.Executions
+	if err = r.openSandboxes(runctx, options, &config); err != nil {
+		return nil, err
+	}
 	r.Control, err = control.Open(config)
 	if err != nil {
 		return nil, err
+	}
+	if !options.DisableMetadataRefresh {
+		r.background.Go(func() { r.Control.Profiles.RunMetadata(runctx) })
 	}
 	success = true
 	return r, nil
@@ -84,11 +100,22 @@ func (r *Runtime) Close() error {
 			r.Executions.Stop()
 		}
 		r.cancel()
+		r.background.Wait()
 		if r.Control != nil {
 			r.closeErr = errors.Join(r.closeErr, r.Control.Close())
 		}
 		if r.Executions != nil {
 			r.closeErr = errors.Join(r.closeErr, r.Executions.Drain(context.Background()))
+		}
+		if r.Sandboxes != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			r.closeErr = errors.Join(r.closeErr, r.Sandboxes.Shutdown(ctx), r.Sandboxes.Close())
+			cancel()
+		}
+		if r.Resources != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			r.closeErr = errors.Join(r.closeErr, r.Resources.Close(ctx))
+			cancel()
 		}
 		if r.Root != nil {
 			r.closeErr = errors.Join(r.closeErr, r.Root.Close())

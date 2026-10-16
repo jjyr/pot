@@ -36,6 +36,12 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) > 0 && args[0] == "resources" {
+		return resourceCommand(ctx, args[1:], output)
+	}
+	if len(args) > 0 && args[0] == "web-ui-server" {
+		return browserCommand(ctx, args[1:], output)
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "init", "serve", "status", "api":
