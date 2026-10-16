@@ -1,0 +1,327 @@
+package control
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"github.com/jjyr/pot/internal/agent"
+	"github.com/jjyr/pot/internal/assistant"
+	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/internal/execution"
+	"github.com/jjyr/pot/internal/executor"
+	"github.com/jjyr/pot/internal/gateway"
+	"github.com/jjyr/pot/internal/modelprotocol"
+	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/internal/usage"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"time"
+)
+
+type Options struct {
+	Context                                                                  context.Context
+	Root, RuntimeID, BootID, Workspace, AgentHome, BuiltinSkills, PluginRoot string
+	Manager                                                                  *execution.Manager
+	Keys                                                                     secrets.KeySource
+	Target                                                                   TargetDispatch
+	CleanupTarget                                                            func(context.Context, string, bool) error
+	ResolveSandbox                                                           func(context.Context) (core.ExecutionTarget, error)
+}
+type Service struct {
+	mu              sync.Mutex
+	options         Options
+	ctx             context.Context
+	cancel          context.CancelFunc
+	Registry        *assistant.Registry
+	Providers       *gateway.Registry
+	Profiles        *ProfileStore
+	Usage           *usage.Ledger
+	Permissions     *PermissionStore
+	Operations      *Operations
+	Changes         core.Changes
+	conversations   map[string]*assistant.Conversation
+	hosts           map[string]*executor.Engine
+	hostGenerations map[string]uint64
+	instructions    InstructionSources
+	closed          bool
+}
+
+func Open(options Options) (*Service, error) {
+	if options.Root == "" || !core.Identifier(options.RuntimeID) || options.BootID == "" || options.Manager == nil {
+		return nil, errors.New("Control requires private data root and shared Runtime execution manager")
+	}
+	if options.Context == nil {
+		options.Context = context.Background()
+	}
+	if options.Keys == nil {
+		options.Keys = secrets.SystemKey{Account: "go/" + options.RuntimeID}
+	}
+	if options.AgentHome == "" {
+		options.AgentHome = filepath.Join(options.Root, "agent")
+	}
+	if options.Workspace == "" {
+		options.Workspace = filepath.Join(options.Root, "agent-workspace")
+	}
+	if err := os.MkdirAll(options.Workspace, 0700); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(options.Context)
+	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}}
+	success := false
+	defer func() {
+		if !success {
+			s.Close()
+		}
+	}()
+	var err error
+	s.Permissions, err = OpenPermissions(filepath.Join(options.Root, "permissions.json"))
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err = s.Permissions.Policy(options.RuntimeID); err != nil {
+		if err = s.Permissions.Enroll(options.RuntimeID, "local-"+options.RuntimeID); err != nil {
+			return nil, err
+		}
+	}
+	s.Registry, err = assistant.OpenRegistry(filepath.Join(options.Root, "control.sqlite"), "main")
+	if err != nil {
+		return nil, err
+	}
+	s.Providers, err = gateway.Open(filepath.Join(options.Root, "control.sqlite"), options.Keys)
+	if err != nil {
+		return nil, err
+	}
+	s.Profiles, err = OpenProfiles(filepath.Join(options.Root, "profiles.json"), options.PluginRoot, s.Providers)
+	if err != nil {
+		return nil, err
+	}
+	s.Usage, err = usage.Open(filepath.Join(options.Root, "usage.sqlite"))
+	if err != nil {
+		return nil, err
+	}
+	s.Operations, err = OpenOperations(filepath.Join(options.Root, "operations.sqlite"))
+	if err != nil {
+		return nil, err
+	}
+	success = true
+	return s, nil
+}
+func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conversation, error) {
+	if !core.Identifier(id) {
+		return nil, errors.New("invalid assistant identity")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errors.New("Control stopped")
+	}
+	if c := s.conversations[id]; c != nil {
+		return c, nil
+	}
+	definitions, err := s.Registry.Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(definitions, func(d assistant.Definition) bool { return d.ID == id }) {
+		return nil, errors.New("assistant unavailable")
+	}
+	initial, rules, err := s.Registry.Initial(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var conversation *assistant.Conversation
+	options := assistant.ConversationOptions{Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, MaxTurnRequests: 128}
+	options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
+		return s.prepare(ctx, conversation, thread, request)
+	}
+	conversation, err = assistant.OpenConversation(filepath.Join(s.options.Root, "assistants", id, "conversation.sqlite"), options)
+	if err != nil {
+		return nil, err
+	}
+	s.conversations[id] = conversation
+	return conversation, nil
+}
+func (s *Service) host(owner string, generation uint64) (*executor.Engine, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errors.New("Control stopped")
+	}
+	e := s.hosts[owner]
+	if e != nil && s.hostGenerations[owner] != generation {
+		if err := e.Close(); err != nil {
+			return nil, err
+		}
+		delete(s.hosts, owner)
+		e = nil
+	}
+	if e == nil {
+		e = executor.New(executor.Options{})
+		s.hosts[owner] = e
+		if s.hostGenerations == nil {
+			s.hostGenerations = map[string]uint64{}
+		}
+		s.hostGenerations[owner] = generation
+	}
+	return e, nil
+}
+func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
+	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	target := core.HostTarget(s.options.RuntimeID)
+	if policy.ExecutionMode == "sandbox" {
+		if s.options.ResolveSandbox == nil {
+			return assistant.RunOptions{}, errors.New("Sandbox execution unavailable; no Host fallback")
+		}
+		target, err = s.options.ResolveSandbox(ctx)
+		if err != nil {
+			return assistant.RunOptions{}, err
+		}
+	}
+	rules, err := c.Instructions(ctx)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	instructions, roots, err := s.instructions.Prepare(s.options.AgentHome, s.options.Workspace, rules.Text)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	if s.options.BuiltinSkills != "" {
+		roots = append(roots, core.SkillRoot{Path: s.options.BuiltinSkills, Location: "builtin", Builtin: true})
+	}
+	engine, err := s.host(thread.Owner, thread.Generation)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Product: map[string]agent.Dispatch{}}
+	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, Role: "pot", Claim: func(ctx context.Context, id string) error {
+		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
+	}}
+	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
+		var report struct {
+			ID     string `json:"id"`
+			Action string `json:"action"`
+			Tokens uint64 `json:"tokens"`
+		}
+		if err := core.DecodeJSON(raw, &report); err != nil {
+			return err
+		}
+		if report.Tokens > core.MaxSafeInteger {
+			return errors.New("compaction token count exceeds supported precision")
+		}
+		event := usage.CompactionEvent{ID: report.ID, Action: report.Action}
+		tokens := int64(report.Tokens)
+		if report.Action == "start" {
+			event.Reason = "threshold"
+			event.TokensBefore = &tokens
+		} else if report.Action == "complete" {
+			event.TokensAfter = &tokens
+		}
+		return s.Usage.Compaction(ctx, thread.Owner, request.RequestID, event, storage.Now())
+	}}
+	definitions := []modelprotocol.ToolDefinition{}
+	for _, raw := range core.ExecutionTools(thread.Config.Params.Agent.Shell) {
+		var definition modelprotocol.ToolDefinition
+		if err = core.DecodeJSON(raw, &definition); err != nil {
+			return assistant.RunOptions{}, err
+		}
+		var schema map[string]any
+		if err = core.DecodeJSON(definition.InputSchema, &schema); err != nil {
+			return assistant.RunOptions{}, err
+		}
+		properties := schema["properties"].(map[string]any)
+		properties["execution_target"] = core.ExecutionSelectorSchema()
+		definition.InputSchema, _ = json.Marshal(schema)
+		definitions = append(definitions, definition)
+	}
+	executionContext := core.ExecutionContext{Instructions: instructions, SkillResources: core.SkillResources{Roots: roots}, Data: s.options.Root, Workspace: s.options.Workspace, Owner: thread.Owner, Role: core.Main, MainPrompt: assistant.MainPrompt}
+	return assistant.RunOptions{Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
+		s.Permissions.Expire(thread.Owner, request.RequestID, thread.Generation)
+		err := engine.Drain()
+		if s.options.CleanupTarget != nil {
+			err = errors.Join(err, s.options.CleanupTarget(ctx, thread.Owner, abort))
+		}
+		return err
+	}, Ready: func(ctx context.Context) error {
+		waiting, err := s.Usage.Waiting(ctx, thread.Owner)
+		if err != nil {
+			return err
+		}
+		if waiting != nil {
+			ready, err := s.Usage.Ready(ctx, thread.Owner, storage.Now())
+			if err != nil {
+				return err
+			}
+			if !ready {
+				return protocol.APIError{Code: "pot_token_limit", Message: "Pot token allowance is unavailable"}
+			}
+		}
+		return nil
+	}, Observe: func(ctx context.Context, o agent.Observation) error { s.Changes.Notify("usage"); return nil }}, nil
+}
+
+type executionPorts struct {
+	model      *ModelSession
+	compaction func(context.Context, json.RawMessage) error
+}
+
+func (p *executionPorts) Model(ctx context.Context, r core.ModelRequest) (io.ReadCloser, error) {
+	return p.model.Model(ctx, r)
+}
+func (p *executionPorts) RPC(context.Context, *string, string, string, json.RawMessage) (json.RawMessage, *string, error) {
+	return nil, nil, errors.New("RPC operation unavailable")
+}
+func (p *executionPorts) Compaction(ctx context.Context, r json.RawMessage) error {
+	return p.compaction(ctx, r)
+}
+func (s *Service) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	s.cancel()
+	conversations := []*assistant.Conversation{}
+	for _, c := range s.conversations {
+		conversations = append(conversations, c)
+	}
+	engines := []*executor.Engine{}
+	for _, e := range s.hosts {
+		engines = append(engines, e)
+	}
+	s.mu.Unlock()
+	var result error
+	for _, c := range conversations {
+		result = errors.Join(result, c.Close())
+	}
+	for _, e := range engines {
+		result = errors.Join(result, e.Close())
+	}
+	if s.Operations != nil {
+		result = errors.Join(result, s.Operations.Close())
+	}
+	if s.Usage != nil {
+		result = errors.Join(result, s.Usage.Close())
+	}
+	if s.Providers != nil {
+		result = errors.Join(result, s.Providers.Close())
+	}
+	if s.Registry != nil {
+		result = errors.Join(result, s.Registry.Close())
+	}
+	return result
+}
+
+// Keep timeout conversion explicit before a provider attempt; Go durations are
+// signed nanoseconds while protocol request timeouts use safe JSON milliseconds.
+func validRequestTimeout(ms uint64) bool {
+	return ms > 0 && ms <= uint64((1<<63-1)/int64(time.Millisecond))
+}

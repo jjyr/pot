@@ -36,6 +36,7 @@ type ConversationOptions struct {
 	Owner, ConversationID, RuntimeID, BootID string
 	Manager                                  *execution.Manager
 	InitialSpec                              *core.ResolvedSpec
+	InitialRules                             string
 	MaxRequests, MaxTurnRequests             uint64 // zero is unlimited; independent of token allowances
 	Prepare                                  func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error)
 }
@@ -103,6 +104,22 @@ CREATE INDEX IF NOT EXISTS assistant_model_turn ON assistant_model_attempts(turn
 CREATE TABLE IF NOT EXISTS assistant_steering(id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,text TEXT NOT NULL,at INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY AUTOINCREMENT,turn_id TEXT NOT NULL,generation INTEGER NOT NULL,body TEXT NOT NULL);`); err != nil {
 			return err
+		}
+		var initialized bool
+		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM metadata WHERE key='conversation.initialized')").Scan(&initialized); err != nil {
+			return err
+		}
+		if !initialized {
+			if len(options.InitialRules) > 262144 {
+				return errors.New("initial rules exceed limit")
+			}
+			rules, _ := json.Marshal(storage.Rules{SchemaVersion: 1, Text: options.InitialRules, Revision: storage.ID()})
+			if _, err := tx.Exec("INSERT INTO metadata VALUES('assistant.instructions.v1',?)", string(rules)); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("INSERT INTO metadata VALUES('conversation.initialized','true')"); err != nil {
+				return err
+			}
 		}
 		for key, value := range map[string]string{"conversation.owner": options.Owner, "conversation.id": options.ConversationID} {
 			var previous string

@@ -58,6 +58,11 @@ func (r *Registry) Save(ctx context.Context, p Provider, key []byte) error {
 	if len(key) == 0 {
 		return errors.New("provider credential missing")
 	}
+	for _, b := range key {
+		if b < 32 || b == 127 {
+			return errors.New("provider credential contains invalid header characters")
+		}
+	}
 	// Canonical JSON of a struct is deterministic; slices retain explicit order.
 	data, err := json.Marshal(p)
 	if err != nil {

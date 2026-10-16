@@ -46,6 +46,9 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 	if s.Registry == nil || s.Usage == nil || s.Claim == nil || s.Scope == "" || s.Turn == "" || s.Generation == 0 || s.Generation > core.MaxSafeInteger {
 		return nil, errors.New("incomplete Control model session")
 	}
+	if !validRequestTimeout(s.Spec.Params.Agent.RequestTimeoutMS) {
+		return nil, errors.New("model request timeout exceeds supported duration")
+	}
 	if err := s.Spec.Validate(); err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"unicode"
@@ -35,7 +36,8 @@ func OpenRegistry(path, root string) (*Registry, error) {
 	}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_registry_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),root TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_definitions(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,revision INTEGER NOT NULL,request_id TEXT NOT NULL UNIQUE,created_name TEXT NOT NULL);`); err != nil {
+CREATE TABLE IF NOT EXISTS assistant_definitions(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,revision INTEGER NOT NULL,request_id TEXT NOT NULL UNIQUE,created_name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_initial(id TEXT PRIMARY KEY, binding TEXT NOT NULL, spec TEXT NOT NULL,rules TEXT NOT NULL);`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_registry_identity VALUES (1,?)", root); err != nil {
@@ -94,6 +96,20 @@ func validateDefinition(d Definition) error {
 	return ValidateName(d.Name)
 }
 func (r *Registry) Create(ctx context.Context, request, name string) (Definition, error) {
+	return r.CreateConfigured(ctx, request, name, "", "", nil)
+}
+
+// CreateConfigured binds the entire creation input before publishing identity.
+// Initial configuration is immutable and only applied to a new conversation.
+func (r *Registry) CreateConfigured(ctx context.Context, request, name, profile, rules string, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
+	binding, err := core.HashJSON([]string{name, profile, rules})
+	if err != nil {
+		return Definition{}, err
+	}
+	if len(rules) > 262144 {
+		return Definition{}, errors.New("assistant instructions exceed 256 KiB")
+	}
+
 	if request == "" || len(request) > 128 {
 		return Definition{}, errors.New("invalid assistant creation request")
 	}
@@ -101,11 +117,15 @@ func (r *Registry) Create(ctx context.Context, request, name string) (Definition
 		return Definition{}, err
 	}
 	var definition Definition
-	err := storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
+	err = storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
 		var createdName string
 		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,created_name FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &createdName)
 		if err == nil {
-			if createdName != name {
+			var stored string
+			if err := tx.QueryRowContext(ctx, "SELECT binding FROM assistant_initial WHERE id=?", definition.ID).Scan(&stored); err != nil {
+				return err
+			}
+			if createdName != name || stored != binding {
 				return errors.New("conflicting assistant creation request")
 			}
 			return validateDefinition(definition)
@@ -125,6 +145,20 @@ func (r *Registry) Create(ctx context.Context, request, name string) (Definition
 			id = r.root
 		}
 		definition = Definition{id, name, 1, request}
+		var spec *core.ResolvedSpec
+		if resolve != nil {
+			spec, err = resolve()
+			if err != nil {
+				return err
+			}
+		}
+		data, err := json.Marshal(spec)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_initial VALUES(?,?,?,?)", id, binding, string(data), rules); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES (?,?,?,?,?)", id, name, 1, request, name)
 		return err
 	})
@@ -153,4 +187,21 @@ func (r *Registry) Rename(ctx context.Context, id, name string, revision uint64)
 		return tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id FROM assistant_definitions WHERE id=?", id).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID)
 	})
 	return definition, err
+}
+
+func (r *Registry) Initial(ctx context.Context, id string) (*core.ResolvedSpec, string, error) {
+	var data, rules string
+	if err := r.db.QueryRowContext(ctx, "SELECT spec,rules FROM assistant_initial WHERE id=?", id).Scan(&data, &rules); err != nil {
+		return nil, "", err
+	}
+	var spec *core.ResolvedSpec
+	if err := core.DecodeJSON([]byte(data), &spec); err != nil {
+		return nil, "", err
+	}
+	if spec != nil {
+		if err := spec.Validate(); err != nil {
+			return nil, "", err
+		}
+	}
+	return spec, rules, nil
 }
