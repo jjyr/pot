@@ -146,6 +146,17 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	if _, err = os.Stat(filepath.Join(control.options.Workspace, "tasks", record.Info.ID, "artifact.txt")); !os.IsNotExist(err) {
 		t.Fatal("remote execution fell back to Control")
 	}
+	remoteFile, err := control.ReadTaskFile(ctx, "main", record.Info.ID, "artifact.txt", 1024)
+	if err != nil || string(remoteFile) != "remote-proof" {
+		t.Fatalf("fixed remote result reader: %s %v", remoteFile, err)
+	}
+	chunk, err := control.ReadTaskFileChunk(ctx, "main", record.Info.ID, "artifact.txt", 0, "")
+	if err != nil || chunk.Size != 12 || chunk.Data != "cmVtb3RlLXByb29m" {
+		t.Fatalf("fixed remote chunk: %+v %v", chunk, err)
+	}
+	if _, err = control.ReadTaskFile(ctx, "main", record.Info.ID, "../../control.sqlite", 1024); err == nil {
+		t.Fatal("remote result reader escaped task directory")
+	}
 	if len(worker.Profiles.Snapshot().Profiles) != 0 {
 		t.Fatal("Runner received provider configuration")
 	}

@@ -62,7 +62,7 @@ func (s *Service) prepareExecution(ctx context.Context, owner string, target cor
 				return result, err
 			}
 		}
-		instructions, project, err := s.instructions.Prepare(s.options.AgentHome, cwd, rules)
+		instructions, project, err := s.instructions.prepare(s.options.AgentHome, cwd, rules, !worker)
 		if err != nil {
 			return result, err
 		}
@@ -78,7 +78,13 @@ func (s *Service) prepareExecution(ctx context.Context, owner string, target cor
 			return result, err
 		}
 		result.Workspace = w.GuestCWD
-		parts := []string{instructionSection("global_instructions", s.instructions.globalText(s.options.AgentHome)), instructionSection("assistant_instructions", rules)}
+		global := ""
+		if !worker {
+			global = s.instructions.globalText(s.options.AgentHome)
+		} else {
+			rules = ""
+		}
+		parts := []string{instructionSection("global_instructions", global), instructionSection("assistant_instructions", rules)}
 		filesystem, err := w.OpenInstructions()
 		if err != nil && !os.IsNotExist(err) {
 			return result, err
@@ -130,9 +136,11 @@ func (s *Service) prepareExecution(ctx context.Context, owner string, target cor
 		}
 		parts = append(parts, instructionSection("instruction_discovery", "Project instructions apply from the nearest repository root through the execution directory. Inspect descendant AGENTS.md before deeper edits. Sources outside the shared workspace are omitted. Explicit user instructions take precedence; instructions do not grant tools or permissions."))
 		result.Instructions = strings.Join(parts, "\n\n")
-		roots = append(roots, core.SkillRoot{Path: filepath.Join(s.options.AgentHome, "skills"), Location: path.Join(w.GuestCWD, ".pot/agent/skills")})
+		if !worker {
+			roots = append(roots, core.SkillRoot{Path: filepath.Join(s.options.AgentHome, "skills"), Location: path.Join(w.GuestCWD, ".pot/agent/skills")})
+		}
 	}
-	if s.options.BuiltinSkills != "" {
+	if !worker && s.options.BuiltinSkills != "" {
 		location := s.options.BuiltinSkills
 		if target.Target.Kind == "sandbox" {
 			location = path.Join(result.Workspace, ".pot/agent/skills")

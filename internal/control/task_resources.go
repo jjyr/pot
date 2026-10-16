@@ -17,9 +17,8 @@ import (
 )
 
 type taskResource struct {
-	Config       core.ResolvedSpec `json:"config"`
-	Instructions string            `json:"instructions"`
-	Roots        []taskSkillRoot   `json:"roots"`
+	Config core.ResolvedSpec `json:"config"`
+	Roots  []taskSkillRoot   `json:"roots"`
 }
 type taskSkillRoot struct {
 	Builtin bool              `json:"builtin"`
@@ -36,32 +35,37 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 		return tasks.Selection{}, errors.New("assistant model is not configured")
 	}
 	spec := thread.Config
-	if r.Profile != nil {
-		spec, err = s.Profiles.Resolve(*r.Profile)
+	if r.Profile != nil || r.Model != nil {
+		profileID := spec.SourceProfileID
+		if r.Profile != nil {
+			profileID = *r.Profile
+		}
+		var chosen *core.Profile
+		for _, profile := range s.Profiles.Snapshot().Profiles {
+			if profile.ID == profileID {
+				copy := profile
+				chosen = &copy
+				break
+			}
+		}
+		if chosen == nil {
+			return tasks.Selection{}, errors.New("Task Provider is unavailable")
+		}
+		model := chosen.Model
+		if r.Profile == nil {
+			model = spec.Model
+		}
+		if r.Model != nil {
+			model = strings.TrimSpace(*r.Model)
+		}
+		spec, err = s.Profiles.ResolveAssistant(AssistantSelection{ProfileID: chosen.ID, ProfileRevision: chosen.Revision, Model: model})
 		if err != nil {
 			return tasks.Selection{}, err
 		}
 	}
-	if r.Model != nil {
-		if strings.TrimSpace(*r.Model) == "" {
-			return tasks.Selection{}, errors.New("task model is empty")
-		}
-		spec.Model = *r.Model
-		if err = spec.Rehash(); err != nil {
-			return tasks.Selection{}, err
-		}
-	}
-	if r.Requirements.Desktop {
-		return tasks.Selection{}, errors.New("selected task executor does not advertise desktop requirements")
-	}
-	rules, err := c.Instructions(ctx)
-	if err != nil {
-		return tasks.Selection{}, err
-	}
-	instructions, roots, err := s.instructions.Prepare(s.options.AgentHome, s.options.Workspace, rules.Text)
-	if err != nil {
-		return tasks.Selection{}, err
-	}
+	// Only immutable Control global skills cross the execution boundary. Worker
+	// instructions and project skills are discovered at the fixed destination.
+	roots := []core.SkillRoot{{Path: filepath.Join(s.options.AgentHome, "skills")}}
 	if s.options.BuiltinSkills != "" {
 		roots = append(roots, core.SkillRoot{Path: s.options.BuiltinSkills, Builtin: true})
 	}
@@ -75,7 +79,7 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 	if err = spec.Rehash(); err != nil {
 		return tasks.Selection{}, err
 	}
-	resources := taskResource{Config: spec, Instructions: instructions, Roots: []taskSkillRoot{}}
+	resources := taskResource{Config: spec, Roots: []taskSkillRoot{}}
 	total := 0
 	for _, root := range roots {
 		tree := taskSkillRoot{Builtin: root.Builtin, Files: map[string]string{}}

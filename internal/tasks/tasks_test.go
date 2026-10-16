@@ -82,6 +82,43 @@ func fixture(t *testing.T) (*Service, *fakePort, *core.ExecutionTarget, string) 
 	t.Cleanup(func() { s.Close() })
 	return s, p, &target, path
 }
+func TestCooperativeSharedResourcesHoldOriginalMachineLease(t *testing.T) {
+	ctx := context.Background()
+	s, p, _, _ := fixture(t)
+	first, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "first", Text: "one", Resource: "shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "second", Text: "two", Resource: "shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	blocked, _ := s.Get(ctx, "assistant", second.Info.ID)
+	if p.launches != 1 || blocked.Launch != nil {
+		t.Fatal("shared task did not retain exclusive cooperative lease")
+	}
+	if _, err = s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "ordinary", Text: "ordinary"}); err != nil {
+		t.Fatal(err)
+	}
+	s.Tick(ctx)
+	if p.launches != 2 {
+		t.Fatal("cooperative lease blocked unrelated task")
+	}
+	if err = s.Stop(ctx, "assistant", first.Info.ID, "cancel"); err != nil {
+		t.Fatal(err)
+	}
+	s.Tick(ctx)
+	s.Tick(ctx)
+	if p.launches != 3 {
+		t.Fatal("settled shared task did not release cooperative lease")
+	}
+}
 func TestLostLaunchAckInspectsOriginalAndPinsCurrentDispatchPolicy(t *testing.T) {
 	ctx := context.Background()
 	s, p, target, path := fixture(t)

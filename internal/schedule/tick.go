@@ -3,10 +3,12 @@ package schedule
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/storage"
+	"github.com/jjyr/pot/internal/tasks"
 	"strings"
 )
 
@@ -91,6 +93,9 @@ func (s *Service) Tick(ctx context.Context, at int64) error {
 					result, resultErr = ParseResult(data)
 				}
 			}
+		}
+		if errors.Is(resultErr, tasks.ErrResultPending) {
+			continue
 		}
 		if err := s.complete(ctx, q, task.Info.Phase, result, resultErr, at); err != nil {
 			return err

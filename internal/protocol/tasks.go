@@ -73,6 +73,9 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
+	if t.Resource != "" && t.Resource != "shared" {
+		return fmt.Errorf("invalid cooperative task resource")
+	}
 	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > 65536 || t.MachineID != "" && !core.Identifier(t.MachineID) {
 		return fmt.Errorf("invalid task request")
 	}

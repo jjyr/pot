@@ -6,10 +6,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
 )
+
+var ErrResultPending = errors.New("original target result transport unavailable")
 
 type Selection struct {
 	Config           core.ResolvedSpec
@@ -20,12 +23,13 @@ type Selection struct {
 type ResolveModel func(context.Context, string, protocol.CreateTask) (Selection, error)
 type ResolveTarget func(context.Context, string) (core.ExecutionTarget, error)
 type Options struct {
-	ControlID     string
-	RuntimeID     string
-	Port          runner.Port
-	ResolveModel  ResolveModel
-	ResolveTarget ResolveTarget
-	MaxTasks      int
+	ControlID      string
+	RuntimeID      string
+	Port           runner.Port
+	ResolveModel   ResolveModel
+	ResolveTarget  ResolveTarget
+	ValidateTarget func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
+	MaxTasks       int
 }
 type Service struct {
 	db      *sql.DB

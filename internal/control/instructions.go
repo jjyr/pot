@@ -20,6 +20,9 @@ type InstructionSources struct {
 // cache is process-local; project read errors fail preparation rather than reuse
 // stale text. User input is never modified to carry these sections.
 func (s *InstructionSources) Prepare(agentHome, workspace, assistantRules string) (string, []core.SkillRoot, error) {
+	return s.prepare(agentHome, workspace, assistantRules, true)
+}
+func (s *InstructionSources) prepare(agentHome, workspace, assistantRules string, includeGlobal bool) (string, []core.SkillRoot, error) {
 	cwd, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		return "", nil, err
@@ -43,7 +46,12 @@ func (s *InstructionSources) Prepare(agentHome, workspace, assistantRules string
 		}
 	}
 	parts := []string{}
-	global := s.globalText(agentHome)
+	global := ""
+	if includeGlobal {
+		global = s.globalText(agentHome)
+	} else {
+		assistantRules = ""
+	}
 	add := func(name, text string) {
 		if strings.TrimSpace(text) != "" {
 			parts = append(parts, fmt.Sprintf("<%s>\n%s\n</%s>", name, text, name))
@@ -51,7 +59,10 @@ func (s *InstructionSources) Prepare(agentHome, workspace, assistantRules string
 	}
 	add("global_instructions", global)
 	add("assistant_instructions", assistantRules)
-	roots := []core.SkillRoot{{Path: filepath.Join(agentHome, "skills"), Location: filepath.Join(agentHome, "skills")}}
+	roots := []core.SkillRoot{}
+	if includeGlobal {
+		roots = append(roots, core.SkillRoot{Path: filepath.Join(agentHome, "skills"), Location: filepath.Join(agentHome, "skills")})
+	}
 	paths := []string{}
 	for current := cwd; ; current = filepath.Dir(current) {
 		paths = append(paths, current)

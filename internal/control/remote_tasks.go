@@ -11,6 +11,7 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/executor"
 	"github.com/jjyr/pot/internal/modelprotocol"
+	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/storage"
 	"io"
@@ -468,10 +469,26 @@ type executeReply struct {
 }
 
 func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, request controlplane.Request) (json.RawMessage, error) {
-	if request.Method == "machine.target" || request.Method == "machine.inventory" || request.Method == "machine.manage" {
+	if request.Method == "machine.target" || request.Method == "machine.inventory" || request.Method == "machine.manage" || request.Method == "machine.requirements" {
 		m := s.Machines.Membership()
 		if m == nil || p.RuntimeID != m.Enrollment.Control.RuntimeID || p.Epoch != m.Enrollment.Epoch {
 			return nil, controlplane.ErrUnauthorized
+		}
+		if request.Method == "machine.requirements" {
+			var q struct {
+				Target       core.ExecutionTarget      `json:"target"`
+				Requirements protocol.TaskRequirements `json:"requirements"`
+			}
+			if err := core.DecodeJSON(request.Params, &q); err != nil {
+				return nil, err
+			}
+			if q.Target.RuntimeID != s.options.RuntimeID {
+				return nil, controlplane.ErrUnauthorized
+			}
+			if err := s.validateTaskTarget(ctx, q.Target, q.Requirements); err != nil {
+				return nil, err
+			}
+			return json.RawMessage(`{}`), nil
 		}
 		if request.Method == "machine.inventory" {
 			value, err := s.localMachine(ctx)
@@ -516,7 +533,7 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 	if err != nil {
 		return nil, err
 	}
-	record, err := s.runnerBinding(ctx, p, r.Binding, request.Method == "task.checkpoint")
+	record, err := s.runnerBinding(ctx, p, r.Binding, request.Method == "task.checkpoint" || request.Method == "task.file" || request.Method == "task.file.chunk")
 	if err != nil {
 		return nil, err
 	}
@@ -526,6 +543,31 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 			return nil, errors.New("Task checkpoint missing")
 		}
 		return record.Context, nil
+	case "task.file.chunk":
+		var q protocol.FileQuery
+		if err = core.DecodeJSON(r.Data, &q); err != nil {
+			return nil, err
+		}
+		chunk, err := s.localTaskFileChunk(ctx, record.Launch.ExecutionTarget, record.Launch.TaskID, q.Path, q.Offset, q.Revision)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(chunk)
+	case "task.file":
+		var q remoteFile
+		if err = core.DecodeJSON(r.Data, &q); err != nil {
+			return nil, err
+		}
+		if q.Limit < 1 || q.Limit > 16*1024*1024 {
+			return nil, errors.New("Task file limit outside bounds")
+		}
+		data, err := (taskFiles{s}).ReadResult(ctx, record.Launch.ExecutionTarget, record.Launch.TaskID, q.Path, q.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(struct {
+			Data string `json:"data"`
+		}{base64.RawStdEncoding.EncodeToString(data)})
 	case "task.execute":
 		var q remoteExecute
 		if err = core.DecodeJSON(r.Data, &q); err != nil {
@@ -613,6 +655,12 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		return nil, errors.New("unknown destination Task callback")
 	}
 }
+
+type remoteFile struct {
+	Path  string `json:"path"`
+	Limit int64  `json:"limit"`
+}
+
 func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.Prepared, error) {
 	peer, err := s.Machines.ControlPeer()
 	if err != nil {
@@ -645,9 +693,20 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	execution.Instructions = resources.Instructions
 	execution.Role = core.Worker
-	execution.SkillResources = core.SkillResources{Roots: roots, Selection: l.Skills}
+	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
+	execution.SkillResources.Selection = l.Skills
+	for _, root := range roots {
+		if root.Builtin {
+			catalog, discoverErr := agent.DiscoverSkills(core.SkillResources{Roots: []core.SkillRoot{root}})
+			if discoverErr != nil {
+				return runner.Prepared{}, discoverErr
+			}
+			for _, skill := range catalog.Skills {
+				execution.SkillResources.ReservedNames = append(execution.SkillResources.ReservedNames, skill.Name)
+			}
+		}
+	}
 	engine, err := s.host(l.TaskID, l.Generation)
 	if err != nil {
 		return runner.Prepared{}, err

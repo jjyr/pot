@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/agent"
@@ -53,7 +54,7 @@ func (s *Service) openTasks() error {
 		return err
 	}
 	s.Runner = &runner.Executor{Journal: s.RunnerJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
-	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget})
+	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ValidateTarget: s.validateTaskTarget})
 	if err != nil {
 		return err
 	}
@@ -378,11 +379,11 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	execution, err := s.prepareExecution(ctx, l.TaskID, l.ExecutionTarget, true, resources.Instructions)
+	execution, err := s.prepareExecution(ctx, l.TaskID, l.ExecutionTarget, true, "")
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	execution.SkillResources.Roots = roots
+	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
 	execution.SkillResources.Selection = l.Skills
 	execution.SkillResources.ReservedNames = []string{}
 	for _, root := range roots {
@@ -396,7 +397,6 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 			}
 		}
 	}
-	execution.Instructions = resources.Instructions
 	execution.Role = core.Worker
 	engine, err := s.host(l.TaskID, l.Generation)
 	if err != nil {
@@ -540,7 +540,39 @@ type taskFiles struct{ s *Service }
 
 func (f taskFiles) ReadResult(ctx context.Context, target core.ExecutionTarget, task, path string, limit int64) (json.RawMessage, error) {
 	if target.RuntimeID != f.s.options.RuntimeID {
-		return nil, errors.New("fixed-target result reader unavailable")
+		var raw []byte
+		if err := f.s.Tasks.DB().QueryRowContext(ctx, "SELECT body FROM tasks WHERE id=?", task).Scan(&raw); err != nil {
+			return nil, err
+		}
+		var record tasks.Record
+		if err := core.DecodeJSON(raw, &record); err != nil {
+			return nil, err
+		}
+		if record.Launch == nil || record.Launch.ExecutionTarget != target {
+			return nil, errors.New("result target differs from original Task")
+		}
+		peer, err := f.s.Machines.Peer(target.RuntimeID)
+		if err != nil {
+			return nil, errors.Join(tasks.ErrResultPending, err)
+		}
+		var reply struct {
+			Data string `json:"data"`
+		}
+		err = f.s.remoteCall(ctx, peer, binding(*record.Launch), "task.file", "file:"+storage.ID(), remoteFile{path, limit}, &reply)
+		if err != nil {
+			if errors.Is(err, controlplane.ErrUncertain) || errors.Is(err, controlplane.ErrDisconnected) {
+				return nil, errors.Join(tasks.ErrResultPending, err)
+			}
+			return nil, err
+		}
+		data, err := base64.RawStdEncoding.DecodeString(reply.Data)
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(data)) > limit {
+			return nil, errors.New("remote Task file exceeds bound")
+		}
+		return data, nil
 	}
 	if !protocol.ValidFilePath(path) {
 		return nil, errors.New("invalid result path")

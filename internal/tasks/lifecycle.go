@@ -51,6 +51,15 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 	}
 	launchNow := false
 	if record.Launch == nil {
+		if record.Request.Resource == "shared" {
+			var busy bool
+			if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id<>? AND phase IN ('queued','running','waiting') AND json_extract(body,'$.request.resource')='shared' AND json_extract(body,'$.request.machine_id')=? AND json_extract(body,'$.launch_sent')=1)`, id, record.Request.MachineID).Scan(&busy); err != nil {
+				return err
+			}
+			if busy {
+				return nil
+			}
+		}
 		target, err := s.options.ResolveTarget(ctx, record.Request.MachineID)
 		if err != nil {
 			return s.markWaiting(ctx, assistant, id, err)
@@ -60,6 +69,11 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 		}
 		if err := target.Validate(); err != nil {
 			return err
+		}
+		if s.options.ValidateTarget != nil {
+			if err := s.options.ValidateTarget(ctx, target, record.Request.Requirements); err != nil {
+				return s.markWaiting(ctx, assistant, id, err)
+			}
 		}
 		err = s.change(ctx, assistant, id, func(_ *sql.Tx, current *Record) error {
 			if current.Launch != nil || current.Info.Phase.Scope() != "active" || current.StopMode != "" {
