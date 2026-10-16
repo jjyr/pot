@@ -15,13 +15,13 @@ import (
 )
 
 type Prepared struct {
-	Agent            *agent.Agent
-	Context          core.ExecutionContext
-	Thread           core.Thread
-	ResourceRevision string
+	Agent          *agent.Agent
+	Context        core.ExecutionContext
+	Thread         core.Thread
+	ResourceDigest string
 }
 
-// Prepare verifies/installs the launch's exact resource revision and returns only
+// Prepare synchronizes and pins resources at original execution, then returns only
 // run-bound Control/model/approval/tool ports. No local model fallback exists.
 type Prepare func(context.Context, Run) (Prepared, error)
 type Executor struct {
@@ -192,7 +192,7 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 			}
 			return execution.Result{Phase: execution.Failed, Err: cause}
 		}
-		if prepared.Agent == nil || prepared.Context.Owner != task || prepared.Context.Role != core.Worker || prepared.Thread.Owner != task || prepared.Thread.Generation != record.Launch.Generation || prepared.Context.Workspace == "" || prepared.ResourceRevision != record.Launch.ResourceRevision {
+		if prepared.Agent == nil || prepared.Context.Owner != task || prepared.Context.Role != core.Worker || prepared.Thread.Owner != task || prepared.Thread.Generation != record.Launch.Generation || prepared.Context.Workspace == "" || !digest(prepared.ResourceDigest) {
 			return rejectPrepared(fmt.Errorf("invalid fixed task execution context"))
 		}
 		if err := prepared.Thread.Config.Validate(); err != nil {
@@ -203,9 +203,25 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 		if err := check.Rehash(); err != nil || check.SpecHash != record.Launch.Config.SpecHash {
 			return rejectPrepared(fmt.Errorf("prepared task configuration changed immutable launch"))
 		}
-		for name, plugin := range prepared.Thread.Config.Params.Agent.Plugins {
-			if !plugin.Enabled || plugin.Bundle == nil || plugin.Bundle.Digest != record.Launch.PluginDigests[name] {
-				return rejectPrepared(fmt.Errorf("prepared plugin differs from launch digest"))
+		rawResources, pinned, err := e.Journal.PreparedResources(ctx, control, task, runID)
+		if err != nil || pinned != prepared.ResourceDigest {
+			return rejectPrepared(fmt.Errorf("prepared resource digest differs from original run"))
+		}
+		var pinnedConfig struct {
+			Config core.ResolvedSpec `json:"config"`
+		}
+		if err := json.Unmarshal(rawResources, &pinnedConfig); err != nil {
+			return rejectPrepared(err)
+		}
+		expected, err := core.HashJSON(pinnedConfig.Config)
+		actual, actualErr := core.HashJSON(prepared.Thread.Config)
+		if err != nil || actualErr != nil || expected != actual {
+			return rejectPrepared(fmt.Errorf("prepared configuration differs from original resource evidence"))
+		}
+		for _, name := range record.Launch.Plugins {
+			plugin, exists := prepared.Thread.Config.Params.Agent.Plugins[name]
+			if !exists || !plugin.Enabled || plugin.Bundle == nil || plugin.Bundle.Manifest.ID != name {
+				return rejectPrepared(fmt.Errorf("prepared plugin differs from selected name"))
 			}
 		}
 		if len(prepared.Thread.Config.Params.Agent.Plugins) != len(record.Launch.Plugins) {

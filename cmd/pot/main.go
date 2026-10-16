@@ -40,7 +40,11 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		if len(args) < 3 {
 			return errors.New("root requires PATH and a command")
 		}
-		args = append([]string{args[2], "-root", args[1]}, args[3:]...)
+		if args[2] == "resources" && len(args) > 3 {
+			args = append([]string{args[2], args[3], "-root", args[1]}, args[4:]...)
+		} else {
+			args = append([]string{args[2], "-root", args[1]}, args[3:]...)
+		}
 	}
 	if len(args) > 0 {
 		switch args[0] {

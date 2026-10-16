@@ -115,12 +115,11 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision, _ := core.HashJSON(map[string]any{})
 	port := &destination{runs: map[string]runner.Run{}}
 	reads := 0
 	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{ControlID: "control", RuntimeID: "machine", Port: port, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
 		reads++
-		return tasks.Selection{Config: spec, Plugins: []string{}, ResourceRevision: revision, PluginDigests: map[string]string{}}, nil
+		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
 	}, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.HostTarget("machine"), nil }})
 	if err != nil {
 		t.Fatal(err)

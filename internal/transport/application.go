@@ -20,6 +20,7 @@ import (
 )
 
 type Application struct {
+	RuntimeResources  func(context.Context, string, json.RawMessage) (any, error)
 	About             func(context.Context) (any, error)
 	Control           *control.Service
 	Desktop           http.Handler
@@ -68,6 +69,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if result, err, handled := a.resourceCall(ctx, method, u, r); handled {
 		return result, err
 	}
+	if path == "/api/v1/runtime/resources" {
+		if a.RuntimeResources == nil {
+			return nil, errors.New("Runtime resource port unavailable")
+		}
+		return a.RuntimeResources(ctx, method, r.Body)
+	}
 	if result, err, handled := a.machineCall(ctx, method, u, r); handled {
 		return result, err
 	}
@@ -90,6 +97,8 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	if method == "GET" {
 		switch path {
+		case "/api/v1/completions":
+			return s.Completions(ctx, owner, u.Query().Get("q"))
 		case "/api/v1/runtime":
 			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "control_id": a.RuntimeID, "name": a.Name, "capabilities": map[string]bool{"host": true, "sandbox": s.HasSandbox()}}, nil
 		case "/api/v1/control":
@@ -106,14 +115,24 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				if err != nil {
 					return nil, err
 				}
-				snapshot, err := c.Snapshot(ctx)
+				state, err := c.Catalogue(ctx)
 				if err != nil {
 					return nil, err
 				}
-				item["phase"] = snapshot.Agent.Phase
-				if len(snapshot.Messages) > 0 {
-					item["preview"] = snapshot.Messages[len(snapshot.Messages)-1].Text
+				item["reply_id"], item["reply_count"], item["preview"] = state.ReplyID, state.ReplyCount, state.Preview
+				item["responding"], item["running"], item["failed"], item["needs_configuration"] = state.Responding, state.Running, state.Failed, state.NeedsConfiguration
+				item["phase"] = "ready"
+				if state.NeedsConfiguration {
+					item["phase"] = "needs_configuration"
 				}
+				if state.Failed {
+					item["phase"] = "failed"
+				}
+				page, err := s.Tasks.Page(ctx, d.ID, protocol.TaskQuery{Scope: "active", Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				item["working"] = page.Counts.Active
 				items = append(items, item)
 			}
 			return items, nil

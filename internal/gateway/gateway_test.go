@@ -19,7 +19,7 @@ import (
 
 func provider(endpoint, protocol string) Provider {
 	u, _ := url.Parse(endpoint)
-	return Provider{"test", endpoint, []string{u.Hostname()}, protocol, "provider/test"}
+	return Provider{ID: "test", Endpoint: endpoint, AllowedHosts: []string{u.Hostname()}, Protocol: protocol, SecretRef: "provider/test"}
 }
 func TestForwardProtocolsNoRedirectNoRetry(t *testing.T) {
 	var second atomic.Int32

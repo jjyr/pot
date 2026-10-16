@@ -44,29 +44,30 @@ type Options struct {
 	ControlHTTPClient                                                        *http.Client
 }
 type Service struct {
-	mu              sync.Mutex
-	options         Options
-	ctx             context.Context
-	cancel          context.CancelFunc
-	Registry        *assistant.Registry
-	Providers       *gateway.Registry
-	Profiles        *ProfileStore
-	Usage           *usage.Ledger
-	Permissions     *PermissionStore
-	Operations      *Operations
-	Changes         core.Changes
-	conversations   map[string]*assistant.Conversation
-	hosts           map[string]*executor.Engine
-	hostGenerations map[string]uint64
-	instructions    InstructionSources
-	closed          bool
-	Machines        *controlplane.Directory
-	RunnerJournal   *runner.Journal
-	Runner          *runner.Executor
-	Tasks           *tasks.Service
-	Schedules       *schedule.Service
-	Mailbox         *assistant.Mailbox
-	taskLife        *taskLifecycle
+	mu                sync.Mutex
+	resourceMutations sync.Mutex
+	options           Options
+	ctx               context.Context
+	cancel            context.CancelFunc
+	Registry          *assistant.Registry
+	Providers         *gateway.Registry
+	Profiles          *ProfileStore
+	Usage             *usage.Ledger
+	Permissions       *PermissionStore
+	Operations        *Operations
+	Changes           core.Changes
+	conversations     map[string]*assistant.Conversation
+	hosts             map[string]*executor.Engine
+	hostGenerations   map[string]uint64
+	instructions      InstructionSources
+	closed            bool
+	Machines          *controlplane.Directory
+	RunnerJournal     *runner.Journal
+	Runner            *runner.Executor
+	Tasks             *tasks.Service
+	Schedules         *schedule.Service
+	Mailbox           *assistant.Mailbox
+	taskLife          *taskLifecycle
 }
 
 func Open(options Options) (*Service, error) {

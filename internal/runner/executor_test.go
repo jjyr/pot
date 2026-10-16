@@ -65,7 +65,7 @@ func TestUnknownCommandReceiptRetainsSharedExecutionCapacity(t *testing.T) {
 	}}
 	engine := &Executor{Journal: j, Executions: manager, Context: ctx, Prepare: func(_ context.Context, run Run) (Prepared, error) {
 		a := &agent.Agent{Services: model, Feedback: feedback{}, Cleanup: func(context.Context, core.ExecutionContext, bool) error { return nil }}
-		return Prepared{Agent: a, Context: core.ExecutionContext{Owner: run.Launch.TaskID, Role: core.Worker, Workspace: t.TempDir()}, Thread: core.Thread{Owner: run.Launch.TaskID, Generation: run.Launch.Generation, Config: run.Launch.Config}, ResourceRevision: run.Launch.ResourceRevision}, nil
+		return Prepared{Agent: a, Context: core.ExecutionContext{Owner: run.Launch.TaskID, Role: core.Worker, Workspace: t.TempDir()}, Thread: core.Thread{Owner: run.Launch.TaskID, Generation: run.Launch.Generation, Config: run.Launch.Config}, ResourceDigest: pinTestResources(t, j, run)}, nil
 	}}
 	result, err := engine.Execute(ctx, "control", "task", "run")
 	if result != nil || !errors.Is(err, core.ErrCleanupUnconfirmed) {
@@ -102,7 +102,7 @@ func TestExecutorUsesSharedCapacityAndJournalFeedbackWithoutResampling(t *testin
 			t.Fatal("Agent preparation bypassed shared capacity", active)
 		}
 		a := &agent.Agent{Services: model, Feedback: feedback{}, Cleanup: func(context.Context, core.ExecutionContext, bool) error { return nil }}
-		return Prepared{Agent: a, Context: core.ExecutionContext{Owner: run.Launch.TaskID, Role: core.Worker, Workspace: t.TempDir()}, Thread: core.Thread{Owner: run.Launch.TaskID, Generation: run.Launch.Generation, Config: run.Launch.Config}, ResourceRevision: run.Launch.ResourceRevision}, nil
+		return Prepared{Agent: a, Context: core.ExecutionContext{Owner: run.Launch.TaskID, Role: core.Worker, Workspace: t.TempDir()}, Thread: core.Thread{Owner: run.Launch.TaskID, Generation: run.Launch.Generation, Config: run.Launch.Config}, ResourceDigest: pinTestResources(t, j, run)}, nil
 	}
 	result, err := engine.Execute(ctx, "control", "task", "run")
 	if err != nil || result == nil || result.Outcome.Kind != "success" || result.Text != "done" {
@@ -119,4 +119,18 @@ func TestExecutorUsesSharedCapacityAndJournalFeedbackWithoutResampling(t *testin
 	if err != nil || again == nil || model.calls.Load() != 1 {
 		t.Fatal(again, err, model.calls.Load())
 	}
+}
+
+func pinTestResources(t *testing.T, j *Journal, run Run) string {
+	t.Helper()
+	_, digest, err := j.PinResources(context.Background(), run.Launch.ControlID, run.Launch.TaskID, run.Launch.RunID, testResourceBody(run))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
+func testResourceBody(run Run) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{"config": run.Launch.Config})
+	return raw
 }

@@ -21,8 +21,7 @@ func launchFixture(t *testing.T) Launch {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision, _ := core.HashJSON(map[string]any{})
-	return Launch{ControlID: "control", AssistantID: "assistant", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.HostTarget("runtime"), Config: spec, Plugins: []string{}, ResourceRevision: revision, PluginDigests: map[string]string{}, Text: "do work"}
+	return Launch{ControlID: "control", AssistantID: "assistant", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.HostTarget("runtime"), Config: spec, Plugins: []string{}, Text: "do work"}
 }
 func TestImmutableLaunchDuplicateClaimsAndPendingCommandFence(t *testing.T) {
 	ctx := context.Background()

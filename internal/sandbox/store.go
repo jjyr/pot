@@ -222,6 +222,17 @@ func (m *Manager) Create(ctx context.Context, id, name, providerID string, resou
 	if err := provider.ValidateResources(instance, resources); err != nil {
 		return Definition{}, err
 	}
+	if previous, lookupErr := m.definition(ctx, id); lookupErr == nil {
+		if previous.Retired || previous.Name != name || previous.Provider != providerID || previous.Resources != resources {
+			return Definition{}, errors.New("Sandbox ID already has another immutable definition")
+		}
+		if err := os.MkdirAll(provider.Workspace(instance), 0700); err != nil {
+			return previous, err
+		}
+		return previous, nil
+	} else if !errors.Is(lookupErr, sql.ErrNoRows) {
+		return Definition{}, lookupErr
+	}
 	definition := Definition{ID: id, Name: name, Provider: providerID, Resources: resources, ManagerEpoch: 1}
 	body, _ := json.Marshal(definition)
 	if _, err := m.db.ExecContext(ctx, "INSERT INTO sandbox_definitions(id,body) VALUES (?,?)", id, string(body)); err != nil {

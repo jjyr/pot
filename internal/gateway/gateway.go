@@ -19,6 +19,7 @@ var ErrConnection = errors.New("model provider connection failed")
 
 type Provider struct {
 	ID           string   `json:"id"`
+	APIProvider  string   `json:"api_provider,omitempty"`
 	Endpoint     string   `json:"endpoint"`
 	AllowedHosts []string `json:"allowed_hosts"`
 	Protocol     string   `json:"protocol"`
@@ -26,7 +27,7 @@ type Provider struct {
 }
 
 func (p Provider) Validate() error {
-	if p.ID == "" || p.SecretRef == "" {
+	if p.ID == "" || p.SecretRef == "" || len(p.APIProvider) > 128 || strings.ContainsAny(p.APIProvider, "\r\n") {
 		return errors.New("provider identity and secret reference are required")
 	}
 	u, err := url.Parse(p.Endpoint)

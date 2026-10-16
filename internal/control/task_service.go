@@ -58,7 +58,7 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
-	if _, err = s.Tasks.DB().Exec(`CREATE TABLE IF NOT EXISTS task_resource_snapshots(revision TEXT PRIMARY KEY,body TEXT NOT NULL);CREATE TABLE IF NOT EXISTS task_event_cache(task_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(task_id,sequence));CREATE TABLE IF NOT EXISTS task_routing(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL)`); err != nil {
+	if _, err = s.Tasks.DB().Exec(`CREATE TABLE IF NOT EXISTS task_event_cache(task_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(task_id,sequence));CREATE TABLE IF NOT EXISTS task_routing(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL)`); err != nil {
 		return err
 	}
 	s.Schedules, err = schedule.New(schedule.Options{Tasks: s.Tasks, Ready: s.taskReady, Results: taskFiles{s}})
@@ -373,13 +373,13 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	if l.ControlID != s.options.RuntimeID {
 		return s.prepareRemoteTask(ctx, r)
 	}
-	resources, err := s.taskResource(ctx, l.ResourceRevision)
+	resources, revision, err := s.prepareTaskResources(ctx, l, func() (taskResource, error) { return s.currentTaskResource(ctx, l) })
 	if err != nil {
 		return runner.Prepared{}, err
 	}
 	config := resources.Config
-	// The Runner independently verifies names/digests against the signed launch.
-	roots, err := s.installTaskSkills(ctx, resources, l.TaskID, l.ResourceRevision, l.ExecutionTarget)
+	// The Runner independently verifies selected names and its pinned resource digest.
+	roots, err := s.installTaskSkills(ctx, resources, l.TaskID, revision, l.ExecutionTarget)
 	if err != nil {
 		return runner.Prepared{}, err
 	}
@@ -417,7 +417,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		}
 		return result
 	}}
-	return runner.Prepared{Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: config}, ResourceRevision: l.ResourceRevision}, nil
+	return runner.Prepared{Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: config}, ResourceDigest: revision}, nil
 }
 
 type taskFeedback struct {

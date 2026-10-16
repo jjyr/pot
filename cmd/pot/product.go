@@ -83,7 +83,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 		if args[0] == "init" {
 			return json.NewEncoder(out).Encode(runtime.Root.Identity)
 		}
-		app := &transport.Application{Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+		app := &transport.Application{RuntimeResources: runtime.ResourceCall, Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
 		app.About = func(context.Context) (any, error) { return productinfo.Read(runtime.AssetDirectory) }
 		viewer, err := transport.DesktopHandler(ctx, runtime.Sandboxes, os.DirFS(runtime.AssetDirectory))
 		if err != nil {

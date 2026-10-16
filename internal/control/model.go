@@ -78,7 +78,7 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 	if err != nil {
 		return nil, err
 	}
-	if provider.ID == "deepseek" {
+	if provider.Protocol == "openai_chat" && provider.APIProvider == "deepseek" {
 		fields = nil
 		if err = json.Unmarshal(body, &fields); err != nil {
 			return nil, err

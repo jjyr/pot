@@ -9,6 +9,8 @@ import (
 	"github.com/jjyr/pot/internal/agent"
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/protocol"
+	"github.com/jjyr/pot/internal/resource"
+	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/tasks"
 	"io"
 	"os"
@@ -65,7 +67,61 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 			return tasks.Selection{}, err
 		}
 	}
-	// Only immutable Control global skills cross the execution boundary. Worker
+	plugins := []string{}
+	for name, plugin := range spec.Params.Agent.Plugins {
+		if plugin.Enabled {
+			plugins = append(plugins, name)
+		}
+	}
+	sort.Strings(plugins)
+	spec.Params.Agent.Plugins = map[string]core.PluginConfig{}
+	if err = spec.Rehash(); err != nil {
+		return tasks.Selection{}, err
+	}
+	return tasks.Selection{Config: spec, Plugins: plugins}, nil
+}
+func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (taskResource, error) {
+	body, _ := json.Marshal(l.Config)
+	var spec core.ResolvedSpec
+	if err := core.DecodeJSON(body, &spec); err != nil {
+		return taskResource{}, err
+	}
+	var profile *core.Profile
+	for _, candidate := range s.Profiles.Snapshot().Profiles {
+		if candidate.ID == l.Config.SourceProfileID {
+			copy := candidate
+			profile = &copy
+			break
+		}
+	}
+	if profile == nil {
+		return taskResource{}, errors.New("Task source Provider is unavailable for resource synchronization")
+	}
+	spec.Params.Agent.Plugins = map[string]core.PluginConfig{}
+	for _, name := range l.Plugins {
+		plugin, exists := profile.Params.Agent.Plugins[name]
+		if !exists || !plugin.Enabled {
+			return taskResource{}, fmt.Errorf("selected plugin %s is unavailable or disabled", name)
+		}
+		directory := filepath.Join(s.options.PluginRoot, name)
+		if plugin.Source != nil {
+			directory = *plugin.Source
+		}
+		bundle, err := resource.LoadPlugin(directory)
+		if err != nil {
+			return taskResource{}, err
+		}
+		if bundle.Manifest.ID != name {
+			return taskResource{}, errors.New("selected plugin identity changed")
+		}
+		plugin.Bundle = &bundle
+		plugin.Source = nil
+		spec.Params.Agent.Plugins[name] = plugin
+	}
+	if err := spec.Rehash(); err != nil {
+		return taskResource{}, err
+	}
+	// Only currently selected Control global skills cross the execution boundary. Worker
 	// instructions and project skills are discovered at the fixed destination.
 	roots := []core.SkillRoot{{Path: filepath.Join(s.options.AgentHome, "skills")}}
 	if s.options.BuiltinSkills != "" {
@@ -77,7 +133,7 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 		if roots[i].Builtin {
 			catalog, err := agent.DiscoverSkills(core.SkillResources{Roots: []core.SkillRoot{roots[i]}})
 			if err != nil {
-				return tasks.Selection{}, err
+				return taskResource{}, err
 			}
 			for _, skill := range catalog.Skills {
 				reserved = append(reserved, skill.Name)
@@ -85,26 +141,16 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 		}
 	}
 	selection := []string{}
-	if r.Skills != nil {
-		selection = append(selection, (*r.Skills)...)
+	if l.Skills != nil {
+		selection = append(selection, (*l.Skills)...)
 	}
 	catalog, err := agent.DiscoverSkills(core.SkillResources{Roots: roots, ReservedNames: reserved, Selection: &selection})
 	if err != nil {
-		return tasks.Selection{}, err
+		return taskResource{}, err
 	}
 	selectedPaths := map[string]bool{}
 	for _, skill := range catalog.Skills {
 		selectedPaths[filepath.Dir(skill.Location)] = true
-	}
-	enabled := map[string]core.PluginConfig{}
-	for name, p := range spec.Params.Agent.Plugins {
-		if p.Enabled {
-			enabled[name] = p
-		}
-	}
-	spec.Params.Agent.Plugins = enabled
-	if err = spec.Rehash(); err != nil {
-		return tasks.Selection{}, err
 	}
 	resources := taskResource{Config: spec, ReservedNames: reserved, Roots: []taskSkillRoot{}}
 	total := 0
@@ -115,14 +161,14 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 			continue
 		}
 		if err != nil {
-			return tasks.Selection{}, err
+			return taskResource{}, err
 		}
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return tasks.Selection{}, errors.New("skill source must be a directory without links")
+			return taskResource{}, errors.New("skill source must be a directory without links")
 		}
 		fs, err := os.OpenRoot(root.Path)
 		if err != nil {
-			return tasks.Selection{}, err
+			return taskResource{}, err
 		}
 		var walk func(string, int) error
 		walk = func(dir string, depth int) error {
@@ -189,56 +235,15 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 		err = walk(".", 0)
 		fs.Close()
 		if err != nil {
-			return tasks.Selection{}, err
+			return taskResource{}, err
 		}
 		if len(tree.Files) > 0 {
 			resources.Roots = append(resources.Roots, tree)
 		}
 	}
-	revision, err := core.HashJSON(resources)
-	if err != nil {
-		return tasks.Selection{}, err
-	}
-	raw, err := json.Marshal(resources)
-	if err != nil {
-		return tasks.Selection{}, err
-	}
-	if _, err = s.Tasks.DB().ExecContext(ctx, "INSERT INTO task_resource_snapshots(revision,body)VALUES(?,?)ON CONFLICT(revision)DO NOTHING", revision, string(raw)); err != nil {
-		return tasks.Selection{}, err
-	}
-	plugins := []string{}
-	digests := map[string]string{}
-	for name, p := range spec.Params.Agent.Plugins {
-		if p.Enabled {
-			if p.Bundle == nil {
-				return tasks.Selection{}, fmt.Errorf("plugin %s snapshot missing", name)
-			}
-			plugins = append(plugins, name)
-			digests[name] = p.Bundle.Digest
-		}
-	}
-	sort.Strings(plugins)
-	spec.Params.Agent.Plugins = map[string]core.PluginConfig{}
-	if err = spec.Rehash(); err != nil {
-		return tasks.Selection{}, err
-	}
-	return tasks.Selection{Config: spec, Plugins: plugins, ResourceRevision: revision, PluginDigests: digests}, nil
+	return resources, nil
 }
-func (s *Service) taskResource(ctx context.Context, revision string) (taskResource, error) {
-	var raw []byte
-	if err := s.Tasks.DB().QueryRowContext(ctx, "SELECT body FROM task_resource_snapshots WHERE revision=?", revision).Scan(&raw); err != nil {
-		return taskResource{}, err
-	}
-	var r taskResource
-	if err := core.DecodeJSON(raw, &r); err != nil {
-		return r, err
-	}
-	actual, err := core.HashJSON(r)
-	if err != nil || actual != revision {
-		return r, errors.New("task resource revision mismatch")
-	}
-	return r, nil
-}
+
 func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, revision string, target core.ExecutionTarget) ([]core.SkillRoot, error) {
 	roots := []core.SkillRoot{}
 	hostRoot := s.options.Workspace
@@ -304,4 +309,68 @@ func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, 
 		roots = append(roots, core.SkillRoot{Path: directory, Location: filepath.ToSlash(filepath.Join(guest, ".pot/control-resources", revision, fmt.Sprint(i))), Builtin: tree.Builtin})
 	}
 	return roots, ctx.Err()
+}
+
+func validateTaskResource(l runner.Launch, r taskResource) error {
+	if err := r.Config.Validate(); err != nil {
+		return err
+	}
+	check := r.Config
+	check.Params.Agent.Plugins = map[string]core.PluginConfig{}
+	if err := check.Rehash(); err != nil {
+		return err
+	}
+	if check.SpecHash != l.Config.SpecHash {
+		return errors.New("resource response changed fixed model configuration")
+	}
+	if len(r.Config.Params.Agent.Plugins) != len(l.Plugins) {
+		return errors.New("resource response changed selected plugin set")
+	}
+	for _, name := range l.Plugins {
+		plugin, ok := r.Config.Params.Agent.Plugins[name]
+		if !ok || !plugin.Enabled || plugin.Bundle == nil || plugin.Bundle.Manifest.ID != name {
+			return errors.New("selected plugin resource missing")
+		}
+		if err := plugin.Bundle.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (s *Service) readPreparedTaskResources(ctx context.Context, l runner.Launch) (taskResource, string, error) {
+	raw, revision, err := s.RunnerJournal.PreparedResources(ctx, l.ControlID, l.TaskID, l.RunID)
+	if err != nil {
+		return taskResource{}, "", err
+	}
+	if raw == nil {
+		return taskResource{}, "", errors.New("original Runner resources not prepared")
+	}
+	var resources taskResource
+	if err = core.DecodeJSON(raw, &resources); err != nil {
+		return resources, "", err
+	}
+	return resources, revision, validateTaskResource(l, resources)
+}
+func (s *Service) prepareTaskResources(ctx context.Context, l runner.Launch, fetch func() (taskResource, error)) (taskResource, string, error) {
+	raw, _, err := s.RunnerJournal.PreparedResources(ctx, l.ControlID, l.TaskID, l.RunID)
+	if err != nil {
+		return taskResource{}, "", err
+	}
+	if raw == nil {
+		resources, err := fetch()
+		if err != nil {
+			return taskResource{}, "", err
+		}
+		if err = validateTaskResource(l, resources); err != nil {
+			return taskResource{}, "", err
+		}
+		raw, err = json.Marshal(resources)
+		if err != nil {
+			return taskResource{}, "", err
+		}
+		if _, _, err = s.RunnerJournal.PinResources(ctx, l.ControlID, l.TaskID, l.RunID, raw); err != nil {
+			return taskResource{}, "", err
+		}
+	}
+	return s.readPreparedTaskResources(ctx, l)
 }

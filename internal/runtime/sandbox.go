@@ -98,7 +98,7 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 	}
 	config.Sandboxes = r.Sandboxes
 	config.ResolveSandbox = func(ctx context.Context) (core.ExecutionTarget, error) {
-		definition, err := r.Sandboxes.EnsureShared(ctx)
+		definition, err := r.Sandboxes.ResolveSelected(ctx)
 		if err != nil {
 			return core.ExecutionTarget{}, err
 		}

@@ -118,3 +118,43 @@ func TestModelPartialUsageAndAllowanceBeforeNetwork(t *testing.T) {
 		t.Fatal("accepted changed model")
 	}
 }
+
+func TestDeepSeekCompatibilityUsesPinnedServiceMetadataInsteadOfRouteID(t *testing.T) {
+	var thinking atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		thinking.Store(string(body["thinking"]) == `{"type":"disabled"}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n")
+	}))
+	defer server.Close()
+	service := taskResourceService(t)
+	settings := core.DefaultAgentSettings()
+	settings.Plugins = map[string]core.PluginConfig{}
+	brand := "deepseek"
+	output := uint64(128)
+	profile, err := service.Profiles.Save(context.Background(), SaveProfile{RequestID: "brand", ProfileID: "deepseek-profile", Name: "DeepSeek", Model: "deepseek-v4-flash", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "fixture", Agent: &settings, ModelSettings: &core.ModelSettings{CatalogProvider: &brand, MaxOutputTokens: &output}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := service.Profiles.Resolve(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := service.Providers.Get(context.Background(), profile.Provider)
+	if err != nil || provider.ID == "deepseek" || provider.APIProvider != "deepseek" {
+		t.Fatal(provider, err)
+	}
+	session := ModelSession{Registry: service.Providers, Usage: service.Usage, Spec: spec, Scope: "main", Turn: "turn", Generation: 1, Role: "main", Claim: func(context.Context, string) error { return nil }}
+	body, _ := json.Marshal(map[string]any{"model": spec.Model, "stream": true, "messages": []any{map[string]string{"role": "user", "content": "hello"}}, "max_tokens": 128})
+	stream, err := session.Model(context.Background(), core.ModelRequest{ID: "brand-request", Provider: spec.Provider, Model: spec.Model, Protocol: spec.GatewayProtocol, Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.ReadAll(stream)
+	stream.Close()
+	if !thinking.Load() {
+		t.Fatal("immutable generated route dropped DeepSeek wire policy")
+	}
+}

@@ -15,11 +15,9 @@ import (
 var ErrResultPending = errors.New("original target result transport unavailable")
 
 type Selection struct {
-	MachineID        string
-	Config           core.ResolvedSpec
-	Plugins          []string
-	ResourceRevision string
-	PluginDigests    map[string]string
+	MachineID string
+	Config    core.ResolvedSpec
+	Plugins   []string
 }
 type ResolveModel func(context.Context, string, protocol.CreateTask) (Selection, error)
 type ResolveTarget func(context.Context, string) (core.ExecutionTarget, error)
@@ -48,23 +46,21 @@ type Input struct {
 	Sequence  uint64 `json:"sequence"`
 }
 type Record struct {
-	SchemaVersion    uint32              `json:"schema_version"`
-	AssistantID      string              `json:"assistant_id"`
-	Info             protocol.TaskInfo   `json:"info"`
-	Request          protocol.CreateTask `json:"request"`
-	Config           core.ResolvedSpec   `json:"config"`
-	Plugins          []string            `json:"plugins"`
-	ResourceRevision string              `json:"resource_revision"`
-	PluginDigests    map[string]string   `json:"plugin_digests"`
-	RunID            string              `json:"run_id"`
-	Generation       uint64              `json:"generation"`
-	Launch           *runner.Launch      `json:"launch"`
-	LaunchSent       bool                `json:"launch_sent"`
-	StopMode         string              `json:"stop_mode"`
-	Finalizing       bool                `json:"finalizing"`
-	Error            string              `json:"error"`
-	Result           *runner.Terminal    `json:"result"`
-	Revision         uint64              `json:"revision"`
+	SchemaVersion uint32              `json:"schema_version"`
+	AssistantID   string              `json:"assistant_id"`
+	Info          protocol.TaskInfo   `json:"info"`
+	Request       protocol.CreateTask `json:"request"`
+	Config        core.ResolvedSpec   `json:"config"`
+	Plugins       []string            `json:"plugins"`
+	RunID         string              `json:"run_id"`
+	Generation    uint64              `json:"generation"`
+	Launch        *runner.Launch      `json:"launch"`
+	LaunchSent    bool                `json:"launch_sent"`
+	StopMode      string              `json:"stop_mode"`
+	Finalizing    bool                `json:"finalizing"`
+	Error         string              `json:"error"`
+	Result        *runner.Terminal    `json:"result"`
+	Revision      uint64              `json:"revision"`
 }
 type WaitTarget struct {
 	TaskID string

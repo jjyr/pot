@@ -186,9 +186,6 @@ func (s *Service) Prepare(ctx context.Context, assistant string, request protoco
 	if selection.Plugins == nil {
 		selection.Plugins = []string{}
 	}
-	if selection.PluginDigests == nil {
-		selection.PluginDigests = map[string]string{}
-	}
 	return selection, nil
 }
 func (s *Service) Create(ctx context.Context, assistant string, request protocol.CreateTask) (Record, error) {
@@ -278,12 +275,8 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 		return Record{}, err
 	}
 	plugins := append([]string{}, selection.Plugins...)
-	digests := map[string]string{}
-	for k, v := range selection.PluginDigests {
-		digests[k] = v
-	}
 	id, runID := ID(), ID()
-	probe := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: request.MachineID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.HostTarget(request.MachineID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, ResourceRevision: selection.ResourceRevision, PluginDigests: digests, Text: request.Text}
+	probe := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: request.MachineID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.HostTarget(request.MachineID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, Text: request.Text}
 	if err := probe.Validate(request.MachineID); err != nil {
 		return Record{}, err
 	}
@@ -292,7 +285,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 4, AssistantID: assistant, Info: protocol.TaskInfo{ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Resource: request.Resource, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, ResourceRevision: selection.ResourceRevision, PluginDigests: digests, RunID: runID, Generation: 1}
+	record := Record{SchemaVersion: 4, AssistantID: assistant, Info: protocol.TaskInfo{ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Resource: request.Resource, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
 	record.Info.MachineID = request.MachineID
 	if err := write(ctx, tx, &record); err != nil {
 		return Record{}, err

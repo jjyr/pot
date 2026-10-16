@@ -14,19 +14,17 @@ import (
 )
 
 type Launch struct {
-	ControlID        string               `json:"control_id" required:"true"`
-	AssistantID      string               `json:"assistant_id" required:"true"`
-	RuntimeID        string               `json:"runtime_id" required:"true"`
-	TaskID           string               `json:"task_id" required:"true"`
-	RunID            string               `json:"run_id" required:"true"`
-	Generation       uint64               `json:"generation" required:"true"`
-	ExecutionTarget  core.ExecutionTarget `json:"execution_target" required:"true"`
-	Config           core.ResolvedSpec    `json:"config" required:"true"`
-	Plugins          []string             `json:"plugins" required:"true"`
-	Skills           *[]string            `json:"skills"`
-	ResourceRevision string               `json:"resource_revision" required:"true"`
-	PluginDigests    map[string]string    `json:"plugin_digests" required:"true"`
-	Text             string               `json:"text" required:"true"`
+	ControlID       string               `json:"control_id" required:"true"`
+	AssistantID     string               `json:"assistant_id" required:"true"`
+	RuntimeID       string               `json:"runtime_id" required:"true"`
+	TaskID          string               `json:"task_id" required:"true"`
+	RunID           string               `json:"run_id" required:"true"`
+	Generation      uint64               `json:"generation" required:"true"`
+	ExecutionTarget core.ExecutionTarget `json:"execution_target" required:"true"`
+	Config          core.ResolvedSpec    `json:"config" required:"true"`
+	Plugins         []string             `json:"plugins" required:"true"`
+	Skills          *[]string            `json:"skills"`
+	Text            string               `json:"text" required:"true"`
 }
 
 func (l Launch) Validate(runtimeID string) error {
@@ -50,9 +48,6 @@ func (l Launch) Validate(runtimeID string) error {
 	if l.Config.GatewayProtocol == "unknown" || len(l.Config.Params.Agent.Plugins) != 0 {
 		return fmt.Errorf("task launch requires supported protocol and selected plugin names, without bundles")
 	}
-	if !digest(l.ResourceRevision) {
-		return fmt.Errorf("invalid immutable resource revision")
-	}
 	names := [][]string{l.Plugins}
 	if l.Skills != nil {
 		names = append(names, *l.Skills)
@@ -67,14 +62,6 @@ func (l Launch) Validate(runtimeID string) error {
 				return fmt.Errorf("invalid or duplicate resource name")
 			}
 			seen[name] = true
-		}
-	}
-	if len(l.PluginDigests) != len(l.Plugins) {
-		return fmt.Errorf("plugin digest set differs from selection")
-	}
-	for _, name := range l.Plugins {
-		if !digest(l.PluginDigests[name]) {
-			return fmt.Errorf("missing/invalid immutable plugin digest")
 		}
 	}
 	data, err := l.CanonicalBytes()

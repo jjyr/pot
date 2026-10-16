@@ -104,7 +104,7 @@ func TestTaskMachineSelectionUsesLabelsAndStableOriginalReceipt(t *testing.T) {
 		}
 		return "original", nil
 	}, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
-		return tasks.Selection{Config: spec, Plugins: []string{}, PluginDigests: map[string]string{}, ResourceRevision: strings.Repeat("a", 64)}, nil
+		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
 	}})
 	if err != nil {
 		t.Fatal(err)

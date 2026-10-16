@@ -66,8 +66,7 @@ func selection(t *testing.T) Selection {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision, _ := core.HashJSON(map[string]any{})
-	return Selection{Config: config, Plugins: []string{}, ResourceRevision: revision, PluginDigests: map[string]string{}}
+	return Selection{Config: config, Plugins: []string{}}
 }
 func fixture(t *testing.T) (*Service, *fakePort, *core.ExecutionTarget, string) {
 	t.Helper()

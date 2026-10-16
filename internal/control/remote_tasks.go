@@ -221,7 +221,7 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 	var result any
 	switch request.Method {
 	case "task.resources":
-		result, err = s.taskResource(ctx, launch.ResourceRevision)
+		result, err = s.currentTaskResource(ctx, launch)
 	case "task.ready":
 		result = map[string]bool{"ready": true}
 	case "task.steering":
@@ -359,17 +359,13 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		if _, err = runner.BindTarget(q.Call.Arguments, launch.ExecutionTarget); err != nil {
 			return nil, err
 		}
-		resources, err := s.taskResource(ctx, launch.ResourceRevision)
-		if err != nil {
-			return nil, err
-		}
 		authority, err := s.authority(ctx, peer, launch)
 		if err != nil {
 			return nil, err
 		}
 		stopDispatch := context.AfterFunc(authority.ctx, cancel)
 		defer stopDispatch()
-		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: resources.Config, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
+		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
 			var response executeReply
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -412,8 +408,11 @@ func (s *Service) authority(ctx context.Context, peer *controlplane.Peer, l runn
 	if a := state.runs[l.RunID]; a != nil && a.ctx.Err() == nil {
 		return a, nil
 	}
-	resources, err := s.taskResource(ctx, l.ResourceRevision)
-	if err != nil {
+	var resources taskResource
+	if err := s.remoteCall(ctx, peer, binding(l), "task.prepared.resources", "prepared:"+storage.ID(), nil, &resources); err != nil {
+		return nil, err
+	}
+	if err := validateTaskResource(l, resources); err != nil {
 		return nil, err
 	}
 	runctx, cancel := context.WithCancel(s.ctx)
@@ -538,6 +537,12 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		return nil, err
 	}
 	switch request.Method {
+	case "task.prepared.resources":
+		resources, _, err := s.readPreparedTaskResources(ctx, record.Launch)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(resources)
 	case "task.checkpoint":
 		if len(record.Context) == 0 {
 			return nil, errors.New("Task checkpoint missing")
@@ -597,7 +602,7 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		if !ok || q.Request.CWD != prepared.execution.Workspace {
 			return nil, errors.New("Task fixed execution namespace differs")
 		}
-		resources, err := s.taskResource(ctx, record.Launch.ResourceRevision)
+		resources, _, err := s.readPreparedTaskResources(ctx, record.Launch)
 		if err != nil {
 			return nil, err
 		}
@@ -680,22 +685,12 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 		return runner.Prepared{}, err
 	}
 	l := r.Launch
-	var resources taskResource
-	if err = s.remoteCall(ctx, peer, binding(l), "task.resources", "resources:"+l.RunID, nil, &resources); err != nil {
-		return runner.Prepared{}, err
-	}
-	revision, err := core.HashJSON(resources)
-	if err != nil || revision != l.ResourceRevision {
-		return runner.Prepared{}, errors.New("signed resource manifest differs from selected revision")
-	}
-	if err = resources.Config.Validate(); err != nil {
-		return runner.Prepared{}, err
-	}
-	raw, err := json.Marshal(resources)
+	resources, revision, err := s.prepareTaskResources(ctx, l, func() (taskResource, error) {
+		var resources taskResource
+		err := s.remoteCall(ctx, peer, binding(l), "task.resources", "resources:"+l.RunID, nil, &resources)
+		return resources, err
+	})
 	if err != nil {
-		return runner.Prepared{}, err
-	}
-	if _, err = s.Tasks.DB().ExecContext(ctx, "INSERT INTO task_resource_snapshots(revision,body)VALUES(?,?)ON CONFLICT(revision)DO NOTHING", revision, string(raw)); err != nil {
 		return runner.Prepared{}, err
 	}
 	roots, err := s.installTaskSkills(ctx, resources, l.TaskID, revision, l.ExecutionTarget)
@@ -750,7 +745,7 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 		state.mu.Unlock()
 		return err
 	}}
-	return runner.Prepared{Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: resources.Config}, ResourceRevision: revision}, nil
+	return runner.Prepared{Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: resources.Config}, ResourceDigest: revision}, nil
 }
 
 type remoteServices struct {

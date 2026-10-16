@@ -70,6 +70,11 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 		s.StartRunner()
 		s.Changes.Notify("machines")
 		return map[string]any{"role": "runner", "control": member.Enrollment.Control, "epoch": member.Enrollment.Epoch}, nil
+	case "owner_credential":
+		if s.Machines.Role() != "control" || s.options.Embedded {
+			return nil, errors.New("owner credential export requires a standalone Control")
+		}
+		return map[string]string{"runtime_id": s.options.RuntimeID, "credential": s.Machines.OwnerCredential()}, nil
 	case "create_invitation":
 		return s.Machines.Invitation(ctx, time.Hour)
 	case "remove_member":

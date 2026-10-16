@@ -136,6 +136,14 @@ func (p *ProfileStore) Save(ctx context.Context, r SaveProfile) (core.Profile, e
 	if !core.Identifier(r.RequestID) || r.Name == "" || r.Model == "" {
 		return core.Profile{}, errors.New("profile request, name and model are required")
 	}
+	if len(r.Models) > 10000 {
+		return core.Profile{}, errors.New("saved model list exceeds limit")
+	}
+	for _, model := range r.Models {
+		if strings.TrimSpace(model) == "" || len(strings.TrimSpace(model)) > 256 {
+			return core.Profile{}, errors.New("invalid saved model ID")
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	sanitized := r
@@ -233,6 +241,14 @@ func (p *ProfileStore) Save(ctx context.Context, r SaveProfile) (core.Profile, e
 	parsed, err := parseProviderHost(r.Endpoint)
 	if err != nil {
 		return core.Profile{}, err
+	}
+	if r.ModelSettings != nil && r.ModelSettings.CatalogProvider != nil {
+		provider.APIProvider = *r.ModelSettings.CatalogProvider
+	}
+	if provider.APIProvider == "" {
+		if endpoint, parseErr := url.Parse(r.Endpoint); parseErr == nil && strings.EqualFold(endpoint.Hostname(), "api.deepseek.com") {
+			provider.APIProvider = "deepseek"
+		}
 	}
 	provider.AllowedHosts = []string{parsed}
 	key := []byte(r.APIKey)
