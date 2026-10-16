@@ -39,3 +39,32 @@ func TestOldDataPreserved(t *testing.T) {
 		t.Fatal("changed old data")
 	}
 }
+
+func TestRootCanonicalizesParentAliasesAndRejectsSymlinkRoot(t *testing.T) {
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "parent-alias")
+	if err = os.Symlink(parent, alias); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(filepath.Join(alias, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if r.Path != filepath.Join(parent, "data") {
+		t.Fatalf("noncanonical ownership path: %s", r.Path)
+	}
+	if _, err = Open(r.Path); err == nil {
+		t.Fatal("canonical path bypassed the active root lock")
+	}
+	leaf := filepath.Join(t.TempDir(), "root-alias")
+	if err = os.Symlink(r.Path, leaf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Open(leaf); err == nil {
+		t.Fatal("accepted a symlink as the data root")
+	}
+}

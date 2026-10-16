@@ -51,6 +51,12 @@ func Open(path string) (*Root, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("Go data root must be a private directory")
 	}
+	// Resolve parent aliases such as macOS /tmp before deriving machine ownership
+	// and mount identities. The root itself must still be a real directory above.
+	abs, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, err
+	}
 	fd, err := syscall.Open(filepath.Join(abs, "runtime.lock"), syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
 	if err != nil {
 		return nil, err
