@@ -215,6 +215,38 @@ if args.pages:
     )
 
 
+assistant_names = (
+    [
+        "Pot",
+        "Research",
+        "Code",
+        "旅行计划",
+        "Design",
+        "Writing",
+        "Reading",
+        "Analytics",
+        "Long assistant name for layout",
+        "Assistant 10",
+        "Assistant 11",
+        "Assistant 12",
+    ]
+    if args.pages
+    else ["Pot"]
+)
+assistant_definitions = [
+    dict(
+        id="main" if i == 0 else f"assistant-{i + 1}",
+        name=name,
+        revision=1,
+        preview="Continue our conversation · 继续对话",
+    )
+    for i, name in enumerate(assistant_names)
+]
+assistant_configurations = {}
+assistant_rules = {}
+default_provider_id = "fixture-openai"
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *values, **kwargs):
         super().__init__(*values, directory=str(args.mobile_assets or product), **kwargs)
@@ -258,47 +290,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 )
             )
         elif path == "/api/v1/assistants":
-            names = (
-                [
-                    "Pot",
-                    "Research",
-                    "Code",
-                    "旅行计划",
-                    "Design",
-                    "Writing",
-                    "Reading",
-                    "Analytics",
-                    "Long assistant name for layout",
-                    "Assistant 10",
-                    "Assistant 11",
-                    "Assistant 12",
-                ]
-                if args.pages
-                else ["Pot"]
+            self.data(dict(assistants=assistant_definitions))
+        elif path == "/api/v1/agent":
+            configuration = assistant_configurations.get(owner)
+            config = (
+                dict(source_profile_id=configuration["provider_id"], model=configuration["model"])
+                if configuration
+                else active_config
             )
             self.data(
                 dict(
-                    assistants=[
-                        dict(
-                            id="main" if i == 0 else f"assistant-{i + 1}",
-                            name=name,
-                            revision=1,
-                            preview="Continue our conversation · 继续对话",
-                        )
-                        for i, name in enumerate(names)
-                    ]
+                    profiles=profiles,
+                    thread=dict(config=config),
+                    selection=configuration,
+                    default_provider_id=default_provider_id,
                 )
             )
-        elif path == "/api/v1/agent":
-            self.data(dict(profiles=profiles, thread=dict(config=active_config)))
         elif path == "/api/v1/providers":
-            self.data(dict(connections=connections, directory=providers))
+            self.data(
+                dict(
+                    connections=connections,
+                    directory=providers,
+                    default_provider_id=default_provider_id,
+                )
+            )
         elif path == "/api/v1/agent/routing":
-            self.data(dict(default_profile="fixture-openai"))
+            self.data(dict(revision=0, profile_limits={}, provider_limits={}))
         elif path == "/api/v1/usage/providers":
             self.data(dict(providers=[]))
         elif path == "/api/v1/instructions":
-            self.data(dict(text="Fixture assistant rules", revision="fixture"))
+            self.data(
+                assistant_rules.get(owner, dict(text="Fixture assistant rules", revision="fixture"))
+            )
         elif path == "/api/v1/permissions":
             self.data(dict(requests=[], grants=[]))
         elif path == "/api/v1/completions":
@@ -416,6 +439,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        global default_provider_id
         length = int(self.headers.get("Content-Length", 0))
         if length > 65536:
             self.send_error(413)
@@ -435,6 +459,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.data(
                 dict(models=["fixture-model", "fixture-model-2"], message="Fixture check passed")
             )
+        elif path == "/api/v1/providers/default":
+            default_provider_id = value["provider_id"]
+            self.data(dict(saved=True))
+        elif path == "/api/v1/assistants":
+            definition = dict(
+                id=f"assistant-{len(assistant_definitions) + 1}", name=value["name"], revision=1
+            )
+            assistant_definitions.append(definition)
+            assistant_configurations[definition["id"]] = value["configuration"]
+            assistant_rules[definition["id"]] = dict(text=value.get("text", ""), revision="created")
+            self.data(definition)
+        elif path == "/api/v1/definition":
+            definition = next(a for a in assistant_definitions if a["id"] == owner)
+            definition.update(name=value["name"], revision=definition["revision"] + 1)
+            assistant_configurations[owner] = value["configuration"]
+            rules = dict(text=value["text"], revision=str(definition["revision"]))
+            assistant_rules[owner] = rules
+            self.data(dict(definition=definition, rules=rules))
         elif path == "/api/v1/providers":
             profile = next(
                 (profile for profile in profiles if profile["id"] == value["profile_id"]), None
@@ -445,7 +487,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             profile.update(
                 name=value["name"], model=value["model"], revision=profile["revision"] + 1
             )
-            self.data(dict(accepted=True))
+            connection = next((c for c in connections if c["profile_id"] == profile["id"]), None)
+            if connection is None:
+                connection = dict(profile_id=profile["id"])
+                connections.append(connection)
+            connection.update(
+                endpoint=value["endpoint"],
+                protocol=value["protocol"],
+                has_key=True,
+                model_settings=dict(catalog_provider=value.get("catalog_provider")),
+                models=value.get("models", []),
+            )
+            self.data(dict(saved=True))
         elif path == "/api/v1/agent":
             active_config.update(
                 source_profile_id=value["profile"]["id"], model=value["profile"]["model"]

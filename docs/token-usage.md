@@ -130,7 +130,7 @@ All formats retain cache hits as input subsets and missing fields as unknown. Ne
 
 ## Provider allowances
 
-Task routing settings configure daily/weekly token allowances, zones, and automatic continuation for configured API providers.
+Task Configuration exposes daily/weekly token allowances, zones, and automatic continuation for configured API Providers independently of autonomous task model routing.
 UI retains policy zones (new policies default to Asia/Shanghai); API accepts other valid zones.
 Global/provider allowances apply together; all main/worker requests share one ledger.
 Reservation/provider attribution commit in one transaction; output cap is the smaller available allowance;

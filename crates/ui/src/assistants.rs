@@ -1,49 +1,156 @@
-//! Shared assistant selector/editor; shells provide I/O and retain drafts by owner.
-use crate::pages::Control;
+//! Assistant-owned configuration forms; Provider definitions come from the owning Space.
 use crate::{
     localization::Catalog,
-    pages::{self, Handler},
+    pages::{self, Control, Handler},
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
     Disableable,
     button::{Button, ButtonVariants},
     input::{Input, InputState, Textarea, TextareaState},
+    menu::{DropdownMenu, PopupMenuItem},
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
+
 struct Draft {
+    scope: String,
     name: Entity<InputState>,
     rules: Entity<TextareaState>,
+    model: Entity<InputState>,
+    context: Entity<InputState>,
+    output: Entity<InputState>,
+    effort: Entity<InputState>,
+    provider: String,
     revision: Value,
     rules_revision: Value,
     request_id: String,
+    instructions_open: bool,
+    parameters_open: bool,
 }
-struct Creation {
-    source: String,
-    name: Entity<InputState>,
-    request_id: String,
-    profile: Option<String>,
+fn input(value: &str, window: &mut Window, cx: &mut App) -> Entity<InputState> {
+    cx.new(|cx| InputState::new(window, cx).default_value(value))
+}
+impl Draft {
+    fn new(
+        scope: &str,
+        name: &str,
+        definition: &Value,
+        rules: &Value,
+        selection: &Value,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let rules_input = cx.new(|cx| TextareaState::new(window, cx));
+        rules_input.update(cx, |f, cx| {
+            f.set_value(rules["text"].as_str().unwrap_or(""), window, cx)
+        });
+        let number = |key: &str| {
+            selection[key]
+                .as_u64()
+                .map(|n| n.to_string())
+                .unwrap_or_default()
+        };
+        Self {
+            scope: scope.into(),
+            name: input(name, window, cx),
+            rules: rules_input,
+            model: input(selection["model"].as_str().unwrap_or(""), window, cx),
+            context: input(&number("context_window"), window, cx),
+            output: input(&number("max_output_tokens"), window, cx),
+            effort: input(
+                selection["reasoning_effort"].as_str().unwrap_or(""),
+                window,
+                cx,
+            ),
+            provider: selection["provider_id"].as_str().unwrap_or("").into(),
+            revision: definition["revision"].clone(),
+            rules_revision: rules["revision"].clone(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+            instructions_open: false,
+            parameters_open: false,
+        }
+    }
+    fn configuration(&self, cx: &App) -> Value {
+        // Keep invalid input in the request so the server rejects it rather than silently inheriting.
+        let number = |f: &Entity<InputState>| {
+            let text = f.read(cx).value();
+            if text.trim().is_empty() {
+                Value::Null
+            } else {
+                text.trim()
+                    .parse::<u64>()
+                    .map(|n| json!(n))
+                    .unwrap_or_else(|_| json!(text.to_string()))
+            }
+        };
+        json!({"provider_id":self.provider,"model":self.model.read(cx).value().to_string(),"context_window":number(&self.context),"max_output_tokens":number(&self.output),"reasoning_effort":self.effort.read(cx).value().to_string()})
+    }
+    fn values(&self, cx: &App) -> Value {
+        json!({"name":self.name.read(cx).value().to_string(),"rules":self.rules.read(cx).value().to_string(),"configuration":self.configuration(cx)})
+    }
+    fn payload(&self, owner: &str, cx: &App) -> Value {
+        json!({"owner":owner,"name":self.name.read(cx).value().to_string(),"text":self.rules.read(cx).value().to_string(),"configuration":self.configuration(cx),"request_id":self.request_id,"expected_revision":self.revision,"rules_revision":self.rules_revision})
+    }
 }
 #[derive(Default)]
 pub struct Editor {
-    creation: Option<Creation>,
-    pub advanced: bool,
+    creation: Option<Draft>,
     pub open: bool,
     pub form_only: bool,
     selected: String,
-    saved_owner: String,
+    selected_key: String,
     drafts: HashMap<String, Draft>,
 }
 pub struct View<'a> {
     pub assistants: &'a Value,
     pub current: &'a str,
     pub rules: &'a Value,
+    pub settings: &'a Value,
+    pub pending: bool,
+    pub scope: &'a str,
+}
+pub struct CreateView<'a> {
+    pub settings: &'a Value,
+    pub source: &'a str,
+    pub pending: bool,
+    pub can_close: bool,
+    pub location: Option<Div>,
 }
 impl Editor {
+    pub fn creating(&self) -> bool {
+        self.selected == "new"
+    }
     pub fn select(&mut self, owner: &str) {
         self.selected = owner.into();
         self.open = true;
+    }
+    fn draft_mut(&mut self) -> Option<&mut Draft> {
+        if self.selected == "new" {
+            self.creation.as_mut()
+        } else {
+            self.drafts.get_mut(&self.selected_key)
+        }
+    }
+    pub fn choose_provider(&mut self, value: &Value, window: &mut Window, cx: &mut App) {
+        if let Some(draft) = self.draft_mut() {
+            draft.provider = value["id"].as_str().unwrap_or("").into();
+            draft.model.update(cx, |f, cx| {
+                f.set_value(value["model"].as_str().unwrap_or(""), window, cx)
+            });
+            for field in [&draft.context, &draft.output, &draft.effort] {
+                field.update(cx, |f, cx| f.set_value("", window, cx));
+            }
+        }
+    }
+    pub fn toggle(&mut self, section: &str) {
+        if let Some(draft) = self.draft_mut() {
+            match section {
+                "instructions" => draft.instructions_open = !draft.instructions_open,
+                "parameters" => draft.parameters_open = !draft.parameters_open,
+                _ => {}
+            }
+        }
     }
     pub fn render(
         &mut self,
@@ -53,103 +160,33 @@ impl Editor {
         window: &mut Window,
         cx: &mut App,
     ) -> Div {
-        let View {
-            assistants,
-            current,
-            rules,
-        } = view;
-        let list = assistants["assistants"]
+        let owner = view.current;
+        let key = format!("{}/{}", view.scope, owner);
+        self.selected_key = key.clone();
+        if view.settings["ai_busy"] == true && !self.drafts.contains_key(&key) {
+            return div();
+        }
+        if view.rules["revision"].is_null()
+            || view.settings["active_spec"]["model"].is_null() && view.settings["ai_busy"] == true
+        {
+            return div();
+        }
+        let definition = view.assistants["assistants"]
             .as_array()
+            .into_iter()
+            .flatten()
+            .find(|d| d["id"] == owner)
             .cloned()
-            .unwrap_or_default();
-        let name = list
-            .iter()
-            .find(|d| d["id"] == current)
-            .and_then(|d| d["name"].as_str())
-            .unwrap_or("Pot");
-        let mut body = div().flex().flex_col().gap_3().p_4().child(
-            Button::new("assistant-name")
-                .ghost()
-                .label(name.to_owned())
-                .on_click(pages::on(&handler, "assistant-edit", json!(current))),
-        );
-        if !self.open {
-            return body;
-        }
-        if self.form_only {
-            body = div().flex().flex_col().gap_3().p_4();
-        }
-        if !self.form_only {
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .children(list.iter().map(|d| {
-                        Button::new(SharedString::from(format!(
-                            "assistant-{}",
-                            d["id"].as_str().unwrap_or_default()
-                        )))
-                        .ghost()
-                        .control(cx)
-                        .label(d["name"].as_str().unwrap_or_default().to_owned())
-                        .toggled(d["id"] == current)
-                        .on_click(pages::on(
-                            &handler,
-                            "assistant-select",
-                            d["id"].clone(),
-                        ))
-                    }))
-                    .child(
-                        Button::new("assistant-new")
-                            .ghost()
-                            .control(cx)
-                            .label(catalog.text("assistant.new"))
-                            .on_click(pages::on(&handler, "assistant-new", Value::Null)),
-                    ),
-            );
-        }
-        let owner = if self.selected.is_empty() {
-            current
-        } else {
-            &self.selected
-        }
-        .to_owned();
-        if owner != "new" && (owner != current || rules["revision"].is_null()) {
-            return body;
-        }
-        if !self.drafts.contains_key(&owner) {
-            let definition = list.iter().find(|d| d["id"] == owner);
-            let text = definition
-                .and_then(|d| d["name"].as_str())
-                .unwrap_or_default()
-                .to_owned();
-            let name = cx.new(|cx| InputState::new(window, cx));
-            name.update(cx, |f, cx| f.set_value(text, window, cx));
-            let field = cx.new(|cx| TextareaState::new(window, cx));
-            field.update(cx, |f, cx| {
-                f.set_value(rules["text"].as_str().unwrap_or_default(), window, cx)
-            });
-            self.drafts.insert(
-                owner.clone(),
-                Draft {
-                    name,
-                    rules: field,
-                    revision: definition
-                        .map(|d| d["revision"].clone())
-                        .unwrap_or(Value::Null),
-                    rules_revision: rules["revision"].clone(),
-                    request_id: uuid::Uuid::new_v4().to_string(),
-                },
-            );
-        }
-        let draft = &self.drafts[&owner];
-        let conflict = owner != "new"
-            && (draft.rules_revision != rules["revision"]
-                || list
-                    .iter()
-                    .find(|d| d["id"] == owner)
-                    .is_some_and(|d| draft.revision != d["revision"]));
+            .unwrap_or(Value::Null);
+        self.drafts.entry(key.clone()).or_insert_with(|| {
+            let mut selection=view.settings["selection"].clone();
+            if selection.is_null() { selection=json!({"provider_id":view.settings["active_spec"]["source_profile_id"],"model":view.settings["active_spec"]["model"]}); }
+            Draft::new(owner,definition["name"].as_str().unwrap_or("Pot"),&definition,view.rules,&selection,window,cx)
+        });
+        let draft = &self.drafts[&key];
+        let conflict = draft.revision != definition["revision"]
+            || draft.rules_revision != view.rules["revision"];
+        let mut body = div().flex().flex_col().gap_3();
         if conflict {
             body = body
                 .child(pages::hint(catalog.text("assistant.conflict"), cx))
@@ -159,68 +196,20 @@ impl Editor {
                         .label(catalog.text("assistant.reload"))
                         .on_click(pages::on(&handler, "assistant-reload", json!(owner))),
                 );
-        } else if self.saved_owner == owner {
-            body = body.child(pages::hint(catalog.text("assistant.saved"), cx));
         }
-
-        let request_id = draft.request_id.clone();
-        let save_name = draft.name.clone();
-        let save_rules = draft.rules.clone();
-        let save_revision = draft.revision.clone();
-        let save_rules_revision = draft.rules_revision.clone();
-        let save_owner = owner.clone();
-        let save_handler = handler.clone();
-
-        body = body.child(
-            pages::card(cx)
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(div().child(catalog.text("assistant.name")))
-                .child(Input::new(&draft.name).control(cx))
-                .when(owner != "new", |el| {
-                    el.child(div().child("AGENTS.md"))
-                        .child(Textarea::new(&draft.rules).h(px(220.)))
-                        .child(pages::hint(catalog.text("assistant.rules-hint"), cx))
-                })
-                .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .gap_2()
-                        .child(
-                            Button::new("assistant-save")
-                                .control(cx)
-                                .primary()
-                                .label(catalog.text("assistant.save"))
-                                .on_click(move |_, window, cx| {
-                                    save_handler(&pages::PageAction { kind: "assistant-save", value: json!({"request_id":request_id,"owner":save_owner,"name":save_name.read(cx).value().to_string(),"text":save_rules.read(cx).value().to_string(),"expected_revision":save_revision,"rules_revision":save_rules_revision}) }, window, cx);
-                                }),
-                        )
-                        .when(owner != "new", |el| {
-                            el.child(
-                                Button::new("assistant-model")
-                                    .control(cx)
-                                    .ghost()
-                                    .label(catalog.text("assistant.model"))
-                                    .on_click(pages::on(&handler, "assistant-model", json!(owner))),
-                            )
-                        })
-                        .child(
-                            Button::new("assistant-close")
-                                .control(cx)
-                                .ghost()
-                                .label(catalog.text("assistant.close"))
-                                .on_click(pages::on(&handler, "assistant-close", Value::Null)),
-                        ),
-                ),
-        );
-        body
-    }
-    pub fn choose_profile(&mut self, id: String) {
-        if let Some(draft) = self.creation.as_mut() {
-            draft.profile = Some(id);
-        }
+        body.child(render_form(
+            draft,
+            FormView {
+                owner,
+                settings: view.settings,
+                busy: view.pending || conflict,
+                can_close: true,
+                location: None,
+            },
+            catalog,
+            handler,
+            cx,
+        ))
     }
     pub fn render_create(
         &mut self,
@@ -230,94 +219,89 @@ impl Editor {
         window: &mut Window,
         cx: &mut App,
     ) -> Div {
-        if self
-            .creation
-            .as_ref()
-            .is_some_and(|draft| draft.source != view.source)
+        self.selected = "new".into();
+        if view.settings["ai_busy"] == true
+            && self
+                .creation
+                .as_ref()
+                .is_none_or(|draft| draft.scope != view.source)
         {
-            self.creation = None;
+            return div();
+        }
+        if let Some(draft) = self.creation.as_mut()
+            && draft.scope != view.source
+        {
+            draft.scope = view.source.into();
+            let provider = view.settings["profiles"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|p| p["id"] == view.settings["default_provider_id"]);
+            draft.provider = provider.and_then(|p| p["id"].as_str()).unwrap_or("").into();
+            draft.model.update(cx, |f, cx| {
+                f.set_value(
+                    provider.and_then(|p| p["model"].as_str()).unwrap_or(""),
+                    window,
+                    cx,
+                )
+            });
+            for field in [&draft.context, &draft.output, &draft.effort] {
+                field.update(cx, |f, cx| f.set_value("", window, cx));
+            }
         }
         let draft = self.creation.get_or_insert_with(|| {
-            let name = cx.new(|cx| InputState::new(window, cx));
-            name.update(cx, |f, cx| f.set_value("Pot", window, cx));
-            Creation {
-                source: view.source.into(),
-                name,
-                request_id: uuid::Uuid::new_v4().to_string(),
-                profile: None,
-            }
+            let default = view.settings["default_provider_id"].as_str().unwrap_or("");
+            let provider = view.settings["profiles"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|p| p["id"] == default);
+            let selection = provider
+                .map(|p| json!({"provider_id":p["id"],"model":p["model"]}))
+                .unwrap_or(Value::Null);
+            Draft::new(
+                view.source,
+                "Pot",
+                &Value::Null,
+                &Value::Null,
+                &selection,
+                window,
+                cx,
+            )
         });
-        let mut body = div()
+        div()
             .flex()
             .flex_col()
-            .items_center()
             .gap_4()
             .child(avatar(&draft.request_id, 56., cx))
-            .child(
-                div()
-                    .text_size(px(18.))
-                    .child(draft.name.read(cx).value().to_string()),
-            );
-        if self.advanced {
-            let selected = draft.profile.as_deref().unwrap_or(view.active_profile);
-            let mut models = div().flex().flex_wrap().gap_2();
-            for profile in view.profiles.as_array().into_iter().flatten() {
-                let Some(id) = profile["id"].as_str() else {
-                    continue;
-                };
-                models = models.child(
-                    Button::new(SharedString::from(format!("create-profile-{id}")))
-                        .ghost()
-                        .control(cx)
-                        .label(format!(
-                            "{} · {}",
-                            profile["name"].as_str().unwrap_or(""),
-                            profile["model"].as_str().unwrap_or("")
-                        ))
-                        .toggled(id == selected)
-                        .disabled(view.pending)
-                        .on_click(pages::on(&handler, "assistant-create-profile", json!(id))),
-                );
-            }
-            body = body.child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(pages::hint(catalog.text("assistant.name"), cx))
-                    .child(Input::new(&draft.name).control(cx).disabled(view.pending))
-                    .child(pages::hint(catalog.text("assistant.model"), cx))
-                    .child(models)
-                    .when_some(view.location, |el, location| el.child(location)),
-            );
-        }
-        let key = draft.request_id.clone();
-        let name = draft.name.clone();
-        let profile = draft.profile.clone();
-        let source = view.source.to_owned();
-        let save = handler.clone();
-        body.child(Button::new("assistant-create").control(cx).primary().label(catalog.text("assistant.create"))
-                .disabled(view.pending)
-                .on_click(move |_, window, cx| save(&pages::PageAction { kind: "assistant-save", value: json!({"owner":"new","request_id":key,"name":name.read(cx).value().to_string(),"profile_id":profile,"source_assistant":source}) }, window, cx)))
-            .child(Button::new("assistant-create-advanced").ghost().control(cx)
-                .label(catalog.text(if self.advanced { "assistant.fewer-settings" } else { "assistant.more-settings" }))
-                .disabled(view.pending).on_click(pages::on(&handler, "assistant-create-advanced", Value::Null)))
-            .when(view.can_close, |body| body.child(Button::new("assistant-create-close").ghost().control(cx).disabled(view.pending)
-                .label(catalog.text("assistant.close")).on_click(pages::on(&handler, "assistant-close", Value::Null))))
+            .child(render_form(
+                draft,
+                FormView {
+                    owner: "new",
+                    settings: view.settings,
+                    busy: view.pending,
+                    can_close: view.can_close,
+                    location: view.location,
+                },
+                catalog,
+                handler,
+                cx,
+            ))
     }
     pub fn editor_values(&self, cx: &App) -> Value {
         if self.selected == "new" {
-            return self.creation.as_ref().map(|draft| json!({"name":draft.name.read(cx).value().to_string(),"profile":draft.profile})).unwrap_or(Value::Null);
+            self.creation.as_ref()
+        } else {
+            self.drafts.get(&self.selected_key)
         }
-        self.drafts.get(&self.selected).map(|draft| json!({"name":draft.name.read(cx).value().to_string(),"rules":draft.rules.read(cx).value().to_string()})).unwrap_or(Value::Null)
+        .map(|d| d.values(cx))
+        .unwrap_or(Value::Null)
     }
     pub fn close(&mut self, discard: bool) {
         if discard {
-            self.drafts.remove(&self.selected);
+            self.drafts.remove(&self.selected_key);
             if self.selected == "new" {
                 self.creation = None;
-                self.advanced = false;
             }
         }
         self.open = false;
@@ -325,24 +309,255 @@ impl Editor {
     pub fn saved(&mut self, owner: &str) {
         if owner == "new" {
             self.creation = None;
-            self.advanced = false;
         }
-        self.drafts.remove(owner);
-        self.saved_owner = owner.into();
+        if self.selected == owner {
+            self.drafts.remove(&self.selected_key);
+        }
     }
     pub fn reload(&mut self, owner: &str) {
-        self.drafts.remove(owner);
-        self.saved_owner.clear();
+        if self.selected == owner {
+            self.drafts.remove(&self.selected_key);
+        }
     }
 }
-
-pub struct CreateView<'a> {
-    pub profiles: &'a Value,
-    pub active_profile: &'a str,
-    pub source: &'a str,
-    pub pending: bool,
-    pub can_close: bool,
-    pub location: Option<Div>,
+struct FormView<'a> {
+    owner: &'a str,
+    settings: &'a Value,
+    busy: bool,
+    can_close: bool,
+    location: Option<Div>,
+}
+fn render_form(
+    draft: &Draft,
+    view: FormView<'_>,
+    catalog: Catalog,
+    handler: Handler,
+    cx: &App,
+) -> Div {
+    let FormView {
+        owner,
+        settings,
+        busy,
+        can_close,
+        location,
+    } = view;
+    let providers = settings["profiles"].as_array().cloned().unwrap_or_default();
+    let provider = providers.iter().find(|p| p["id"] == draft.provider);
+    let provider_label = provider
+        .and_then(|p| p["name"].as_str())
+        .unwrap_or(catalog.text("assistant.provider"));
+    let provider_handler = handler.clone();
+    let selected = draft.provider.clone();
+    let connection = settings["connections"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["profile_id"] == draft.provider);
+    let brand = connection.and_then(|p| p["model_settings"]["catalog_provider"].as_str());
+    let mut models: Vec<String> = settings["directory"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["id"].as_str() == brand)
+        .flat_map(|p| p["models"].as_array().into_iter().flatten())
+        .filter_map(|m| m["id"].as_str().map(str::to_owned))
+        .collect();
+    if let Some(p) = provider.and_then(|p| p["model"].as_str()) {
+        models.push(p.into());
+    }
+    if let Some(connection) = connection {
+        models.extend(
+            connection["models"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m.as_str().map(str::to_owned)),
+        );
+    }
+    models.push(draft.model.read(cx).value().to_string());
+    models.retain(|s| !s.is_empty());
+    models.sort();
+    models.dedup();
+    let model_input = draft.model.clone();
+    let mut body = div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(div().child(catalog.text("assistant.name")))
+        .child(Input::new(&draft.name).control(cx).disabled(busy))
+        .when_some(location, |body, location| body.child(location))
+        .child(div().child(catalog.text("assistant.provider")))
+        .child(
+            Button::new("assistant-provider")
+                .control(cx)
+                .label(provider_label.to_owned())
+                .dropdown_caret(true)
+                .disabled(busy)
+                .dropdown_menu(move |menu, _, _| {
+                    providers.iter().fold(menu, |menu, p| {
+                        let value = json!({"id":p["id"],"model":p["model"]});
+                        menu.item(
+                            PopupMenuItem::new(p["name"].as_str().unwrap_or("").to_owned())
+                                .checked(p["id"] == selected)
+                                .on_click(pages::on(
+                                    &provider_handler,
+                                    "assistant-provider",
+                                    value,
+                                )),
+                        )
+                    })
+                }),
+        )
+        .child(div().child(catalog.text("ai.model")))
+        .child(
+            div()
+                .flex()
+                .gap_2()
+                .child(Input::new(&draft.model).control(cx).disabled(busy))
+                .child(
+                    Button::new("assistant-model-picker")
+                        .control(cx)
+                        .label(catalog.text("assistant.choose-model"))
+                        .dropdown_caret(true)
+                        .disabled(busy)
+                        .dropdown_menu(move |menu, _, _| {
+                            models.iter().fold(menu, |menu, id| {
+                                let id = id.clone();
+                                let input = model_input.clone();
+                                menu.item(PopupMenuItem::new(id.clone()).on_click(
+                                    move |_, window, cx| {
+                                        input
+                                            .update(cx, |f, cx| f.set_value(id.clone(), window, cx))
+                                    },
+                                ))
+                            })
+                        }),
+                ),
+        )
+        .child(
+            Button::new("assistant-add-provider")
+                .ghost()
+                .control(cx)
+                .label(catalog.text("assistant.add-provider"))
+                .disabled(busy)
+                .on_click(pages::on(&handler, "assistant-add-provider", Value::Null)),
+        );
+    body = body.child(
+        Button::new("assistant-parameters")
+            .ghost()
+            .control(cx)
+            .label(format!(
+                "{} {}",
+                if draft.parameters_open { "v" } else { ">" },
+                catalog.text("assistant.parameters")
+            ))
+            .on_click(pages::on(
+                &handler,
+                "assistant-disclosure",
+                json!("parameters"),
+            )),
+    );
+    if draft.parameters_open {
+        body = body.child(pages::hint(
+            catalog.text("assistant.parameter-defaults"),
+            cx,
+        ));
+        for (label, field) in [
+            ("ai.context-window", &draft.context),
+            ("ai.max-output-tokens", &draft.output),
+            ("ai.reasoning-effort", &draft.effort),
+        ] {
+            body = body
+                .child(div().child(catalog.text(label)))
+                .child(Input::new(field).control(cx).disabled(busy));
+        }
+    }
+    body = body.child(
+        Button::new("assistant-instructions")
+            .ghost()
+            .control(cx)
+            .label(format!(
+                "{} {}",
+                if draft.instructions_open { "v" } else { ">" },
+                catalog.text("assistant.instructions")
+            ))
+            .on_click(pages::on(
+                &handler,
+                "assistant-disclosure",
+                json!("instructions"),
+            )),
+    );
+    if draft.instructions_open {
+        body = body
+            .child(div().child("AGENTS.md"))
+            .child(Textarea::new(&draft.rules).h(px(220.)))
+            .child(pages::hint(catalog.text("assistant.rules-hint"), cx));
+    }
+    let payload = draft.payload(owner, cx);
+    let name = draft.name.clone();
+    let rules = draft.rules.clone();
+    let model = draft.model.clone();
+    let context = draft.context.clone();
+    let output = draft.output.clone();
+    let effort = draft.effort.clone();
+    let save = handler.clone();
+    let mut actions = div().flex().flex_wrap().gap_2();
+    if can_close {
+        actions = actions.child(
+            Button::new("assistant-close")
+                .ghost()
+                .control(cx)
+                .label(catalog.text("assistant.close"))
+                .disabled(busy)
+                .on_click(pages::on(&handler, "assistant-close", Value::Null)),
+        );
+    }
+    body.child(
+        actions.child(
+            Button::new("assistant-save")
+                .primary()
+                .control(cx)
+                .label(catalog.text(if owner == "new" {
+                    "assistant.create"
+                } else {
+                    "assistant.save"
+                }))
+                .disabled(
+                    busy || draft.provider.is_empty()
+                        || draft.model.read(cx).value().trim().is_empty(),
+                )
+                .on_click(move |_, window, cx| {
+                    let mut payload = payload.clone();
+                    payload["name"] = json!(name.read(cx).value().to_string());
+                    payload["text"] = json!(rules.read(cx).value().to_string());
+                    payload["configuration"]["model"] = json!(model.read(cx).value().to_string());
+                    for (key, field) in
+                        [("context_window", &context), ("max_output_tokens", &output)]
+                    {
+                        let text = field.read(cx).value();
+                        payload["configuration"][key] = if text.trim().is_empty() {
+                            Value::Null
+                        } else {
+                            text.trim()
+                                .parse::<u64>()
+                                .map(|n| json!(n))
+                                .unwrap_or_else(|_| json!(text.to_string()))
+                        };
+                    }
+                    payload["configuration"]["reasoning_effort"] =
+                        json!(effort.read(cx).value().to_string());
+                    save(
+                        &pages::PageAction {
+                            kind: "assistant-save",
+                            value: payload.clone(),
+                        },
+                        window,
+                        cx,
+                    );
+                }),
+        ),
+    )
 }
 pub fn avatar(key: &str, size: f32, cx: &mut App) -> Div {
     crate::avatar::default_image(key, size, cx)

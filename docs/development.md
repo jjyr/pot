@@ -18,7 +18,7 @@ mise run open
 
 The development bundle is `.local/d1/Pot.app`. `scripts/pot open` uses `.local/d1/local-runtime` (overridable with `POT_LOCAL_ROOT`); double-clicking defaults to `~/Library/Application Support/pot`. These use separate data.
 
-Configure the Main Agent in Chat or Settings → AI Configuration. pot-agent uses saved API connections. pot-agent is built into Server; Node is bundled for JavaScript tools and plugins. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
+Configure a Provider in Settings → AI Providers, then explicitly create a chat assistant with its own Provider and model. pot-agent uses saved API connections. pot-agent is built into Server; Node is bundled for JavaScript tools and plugins. Saving a connection does not send a model request, and no Sandbox must be started for configuration or chat. Execution limits are stored separately in `product/execution-limits.json`.
 
 ## Releases and Homebrew
 
@@ -66,7 +66,7 @@ mise exec -- cargo build --locked -p pot-server
 POT_LOCAL_ROOT=/tmp/pot-server POT_RUNTIME_BIND=127.0.0.1:17700 mise run server
 ```
 
-Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants, enable Host execution and define sandboxes through the resource API; enable Web UI explicitly with its fixed Control address. Enabling Control exposes AI Configuration before registration. Fresh App registries
+Server writes private bearer/boot/port data to `runtime.json` in its data directory. HTTP/SSE/MCP/PTY retain the existing Control API. Fresh standalone roots have no product resources. Create assistants, enable Host execution and define sandboxes through the resource API; enable Web UI explicitly with its fixed Control address. Enabling Control exposes AI Providers before registration. Fresh App registries
 are empty; configure AI, then explicitly create the first assistant in Chat. Pot no longer has a Terminal page. Shutdown stops background coordinators, sessions, PTYs, and SSE.
 
 App embeds Server and uses in-memory dispatch for both Rust and Swift clients. Helper runs with `--sandbox-only`. See [Standalone Server](deployment.md) for CLI installation, local OS authority and packaging.
@@ -282,9 +282,12 @@ headless Playwright CLI session. Run the browser checks in that same session:
 ```sh
 playwright-cli run-code "$(cat scripts/tests/responsive-navigation.js)"
 playwright-cli run-code "$(cat scripts/tests/responsive-layout.js)"
+playwright-cli run-code "$(cat scripts/tests/assistant-provider.js)"
 ```
 
-The scripts refuse a Runtime whose identity is not the synthetic fixture. The
+The scripts refuse a Runtime whose identity is not the synthetic fixture.
+The assistant/Provider flow writes only disposable fixture configurations and
+assistant definitions; it never sends a model request. The
 navigation checks exercise touch cancellation, menu destinations, cached assistant
 switches, per-assistant drafts, list/reading positions, editor guards and resizing.
 The layout checks capture Canvas screenshots under `output/playwright/devices/`

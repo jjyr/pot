@@ -1,7 +1,8 @@
 //! User-authored API connections. Secrets never enter profile snapshots or responses.
 use super::*;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Setup {
     request_id: String,
     expected_revision: u64,
@@ -14,8 +15,6 @@ pub struct Setup {
     profile_id: String,
     #[serde(default = "default_name")]
     name: String,
-    #[serde(default = "follow_main")]
-    follow_main: bool,
     #[serde(default)]
     max_output_tokens: Option<u64>,
     #[serde(default)]
@@ -24,6 +23,8 @@ pub struct Setup {
     catalog_provider: Option<String>,
     #[serde(default)]
     reasoning_effort: Option<String>,
+    #[serde(default)]
+    models: Vec<String>,
 }
 fn default_profile() -> String {
     "apot-default".into()
@@ -31,36 +32,72 @@ fn default_profile() -> String {
 fn default_name() -> String {
     "API".into()
 }
-fn follow_main() -> bool {
-    true
-}
 
 pub async fn get(State(s): State<Service>, h: HeaderMap) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
-    let profiles =
-        agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
+    let profiles = agent::configured_profiles(&s).map_err(internal)?;
     let mut connections = Vec::new();
     for profile in profiles {
         // Editing a connection must remain available even if refreshed metadata
         // makes a previously saved override exceed a newly advertised limit.
+        let models = saved_models(&s, &profile.id).map_err(internal)?;
         let spec = profile.resolve().map_err(internal)?;
         if spec.auth_ref.starts_with("provider:")
             && let Ok(p) = stored_provider(&s, &spec)
         {
             connections.push(json!({"profile_id": profile.id, "endpoint":p.endpoint,
-                    "model":spec.model,"protocol":p.protocol,"has_key":!p.secret_ref.is_empty(),"model_settings":profile.model_settings,"reasoning_effort":profile.params.reasoning_effort}));
+                    "name":profile.name,"default_model":spec.model,"model":spec.model,"models":models,"revision":profile.revision,"protocol":p.protocol,"has_key":!p.secret_ref.is_empty(),"model_settings":profile.model_settings,"reasoning_effort":profile.params.reasoning_effort}));
         }
     }
-    let thread = agent::current(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
-    let connection = thread.and_then(|b| {
-        connections
-            .iter()
-            .find(|c| c["profile_id"] == b.config.source_profile_id)
-            .cloned()
-    });
     Ok(Json(
-        json!({"connection":connection,"connections":connections,"directory":s.control_config.models.options(),"model_defaults":s.control_config.models.model_defaults()}),
+        json!({"connections":connections,"default_provider_id":agent::default_provider(&s).map_err(internal)?,"directory":s.control_config.models.options(),"model_defaults":s.control_config.models.model_defaults()}),
     ))
+}
+
+pub(crate) fn saved_models(s: &Service, id: &str) -> Result<Vec<String>> {
+    let owner = agent::configuration_owner(s);
+    owner
+        .conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .get(&format!("providers.models:{id}"))?
+        .map(|v| serde_json::from_str(&v).map_err(Into::into))
+        .unwrap_or_else(|| Ok(vec![]))
+}
+
+#[derive(Deserialize)]
+pub struct DefaultProvider {
+    provider_id: String,
+}
+pub async fn set_default(
+    State(s): State<Service>,
+    h: HeaderMap,
+    Json(input): Json<DefaultProvider>,
+) -> ApiResult<Json<Value>> {
+    s.authorized(&h)?;
+    let s = agent::configuration_owner(&s);
+    if !agent::configured_profiles(&s)
+        .map_err(internal)?
+        .iter()
+        .any(|p| p.id == input.provider_id)
+    {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "provider",
+            "Choose a configured Provider",
+        ));
+    }
+    s.conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .set("providers.default", &input.provider_id)
+        .map_err(internal)?;
+    s.changes().notify("settings");
+    Ok(Json(json!({"saved":true})))
 }
 
 pub async fn save(
@@ -69,6 +106,12 @@ pub async fn save(
     Json(input): Json<Setup>,
 ) -> ApiResult<Json<Value>> {
     s.authorized(&h)?;
+    let s = agent::configuration_owner(&s);
+    let mut h = h;
+    h.insert(
+        "authorization",
+        format!("Bearer {}", s.token).parse().unwrap(),
+    );
     if input.protocol == Protocol::Unknown {
         return Err(error(
             StatusCode::BAD_REQUEST,
@@ -78,6 +121,32 @@ pub async fn save(
     }
     static SAVE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = SAVE.lock().await;
+    use sha2::Digest;
+    let fingerprint: String =
+        sha2::Sha256::digest(serde_json::to_vec(&input).map_err(|e| internal(e.into()))?)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+    let receipt_key = format!("providers.save:{}", input.request_id);
+    if let Some(saved) = s
+        .conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .get(&receipt_key)
+        .map_err(internal)?
+    {
+        if saved != fingerprint {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "provider_request",
+                "Conflicting Provider save request",
+            ));
+        }
+        return Ok(Json(json!({"saved":true,"duplicate":true})));
+    }
+
     let request = uuid::Uuid::parse_str(&input.request_id).map_err(|_| {
         error(
             StatusCode::BAD_REQUEST,
@@ -113,8 +182,7 @@ pub async fn save(
     }
     let mut key = input.api_key;
     if key.is_empty() {
-        let profiles =
-            agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
+        let profiles = agent::configured_profiles(&s).map_err(internal)?;
         if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
             && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
             && previous.endpoint == input.endpoint
@@ -129,7 +197,29 @@ pub async fn save(
             "Enter an API key for this endpoint",
         ));
     }
-    let id = format!("api-{request}");
+    let previous = agent::configured_profiles(&s)
+        .map_err(internal)?
+        .into_iter()
+        .find(|p| p.id == input.profile_id);
+    if previous.as_ref().map_or(0, |p| p.revision) != input.expected_revision {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "provider_revision",
+            "Provider changed; reload before saving",
+        ));
+    }
+    let previous_route = previous
+        .as_ref()
+        .and_then(|p| p.resolve().ok())
+        .and_then(|spec| stored_provider(&s, &spec).ok());
+    let id = previous_route
+        .filter(|p| {
+            p.endpoint == input.endpoint
+                && p.protocol == input.protocol
+                && credential(&s, p).ok().as_deref() == Some(key.as_str())
+        })
+        .map(|p| p.id)
+        .unwrap_or_else(|| format!("api-{request}"));
     let next = Provider {
         id: id.clone(),
         endpoint: input.endpoint.clone(),
@@ -142,11 +232,23 @@ pub async fn save(
         max_tokens: input.max_output_tokens.unwrap_or(8192),
         ..Default::default()
     };
-    let previous = agent::profiles(&s.conversation.inner.lock().unwrap().store)
-        .map_err(internal)?
-        .into_iter()
-        .find(|p| p.id == input.profile_id);
     let mut profile = previous.unwrap_or_else(|| agent::Profile::api(&config));
+    if input.models.len() > 500
+        || input
+            .models
+            .iter()
+            .any(|m| m.is_empty() || m.len() > 256 || m.chars().any(char::is_control))
+    {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "models",
+            "Invalid Provider model IDs",
+        ));
+    }
+    let mut models = input.models;
+    models.push(input.model.clone());
+    models.sort();
+    models.dedup();
     profile.model = input.model;
     profile.params.reasoning_effort = input
         .reasoning_effort
@@ -157,7 +259,7 @@ pub async fn save(
         context_window: input.context_window,
         max_output_tokens: input.max_output_tokens,
     });
-    profile.id = input.profile_id;
+    profile.id = input.profile_id.clone();
     profile.name = input.name;
     profile.revision = input
         .expected_revision
@@ -174,8 +276,49 @@ pub async fn save(
         .map_err(internal)?
         .save(&next, key.as_bytes())
         .map_err(internal)?;
-    let settings=serde_json::from_value(json!({"profile":profile,"expected_revision":input.expected_revision,"request_id":input.request_id,"follow_main":input.follow_main,"follow_worker":false})).map_err(|e|internal(e.into()))?;
-    agent::settings::settings(State(s), h, Json(settings)).await
+    {
+        let mut inner = s.conversation.inner.lock().unwrap();
+        let mut profiles = agent::profiles(&inner.store).map_err(internal)?;
+        if profiles
+            .iter()
+            .find(|p| p.id == profile.id)
+            .map_or(0, |p| p.revision)
+            != input.expected_revision
+        {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "provider_revision",
+                "Provider changed; reload before saving",
+            ));
+        }
+        profiles.retain(|p| p.id != profile.id);
+        profiles.push(profile);
+        let default = inner.store.get("providers.default").map_err(internal)?;
+        let tx = inner
+            .store
+            .0
+            .transaction()
+            .map_err(|e| internal(e.into()))?;
+        agent::set(
+            &tx,
+            agent::PROFILES,
+            &serde_json::to_string(&profiles).map_err(|e| internal(e.into()))?,
+        )
+        .map_err(internal)?;
+        agent::set(
+            &tx,
+            &format!("providers.models:{}", input.profile_id),
+            &serde_json::to_string(&models).map_err(|e| internal(e.into()))?,
+        )
+        .map_err(internal)?;
+        if default.is_none() {
+            agent::set(&tx, "providers.default", &input.profile_id).map_err(internal)?;
+        }
+        agent::set(&tx, &receipt_key, &fingerprint).map_err(internal)?;
+        tx.commit().map_err(|e| internal(e.into()))?;
+    }
+    s.changes().notify("settings");
+    Ok(Json(json!({"saved":true})))
 }
 
 #[cfg(test)]
@@ -217,7 +360,12 @@ mod tests {
                     .find(|p| p["profile_id"] == profile_id)
                     .unwrap();
                 assert_eq!(connection["reasoning_effort"], json!(expected));
-                let spec = agent::thread(&s).unwrap().config;
+                let profile = agent::configured_profiles(&s)
+                    .unwrap()
+                    .into_iter()
+                    .find(|p| p.id == profile_id)
+                    .unwrap();
+                let spec = resolve(&s, &profile).unwrap();
                 assert_eq!(spec.params.reasoning_effort.as_deref(), expected);
                 assert_eq!(provider(&s, &spec).unwrap().endpoint, endpoint);
             }
@@ -259,89 +407,82 @@ mod tests {
             public["model_defaults"]["claude-sonnet-4-5"]["output"],
             64000
         );
-        let config = agent::thread(&s).unwrap().config;
+        let profile = agent::configured_profiles(&s)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == "custom")
+            .unwrap();
+        let config = resolve(&s, &profile).unwrap();
         assert_eq!(config.context_window, 200000);
         assert_eq!(config.params.max_output_tokens, 64000);
     }
     #[tokio::test]
-    async fn model_limits_inherit_override_clear_and_pin_execution_snapshots() {
-        let mut s = crate::tests::service();
-        let root = std::env::temp_dir().join(format!("pot-model-settings-{}", id()));
-        s.control_config = Arc::new(crate::model_config::ControlConfig::new(root.clone()));
-        let mut h = HeaderMap::new();
-        h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let request = |revision, context: Value, output: Value, follow| json!({"request_id":id(),"expected_revision":revision,"profile_id":"fixture","name":"Claude","endpoint":"https://api.anthropic.com/v1/messages","protocol":"anthropic_messages","model":"claude-sonnet-4-5","api_key":"fixture-secret","catalog_provider":"anthropic","context_window":context,"max_output_tokens":output,"follow_main":follow});
+    async fn defaults_overrides_and_provider_updates_do_not_change_existing_assistants() {
+        let s = crate::tests::service();
+        let h = crate::control::tasks::tests::headers();
+        let request = |revision, context: Value, output: Value| json!({"request_id":id(),"expected_revision":revision,"profile_id":"fixture","name":"Claude","endpoint":"https://api.anthropic.com/v1/messages","protocol":"anthropic_messages","model":"claude-sonnet-4-5","api_key":"fixture-secret","catalog_provider":"anthropic","context_window":context,"max_output_tokens":output});
         let _ = save(
             State(s.clone()),
             h.clone(),
-            Json(serde_json::from_value(request(0, Value::Null, Value::Null, true)).unwrap()),
+            Json(serde_json::from_value(request(0, Value::Null, Value::Null)).unwrap()),
         )
         .await
         .unwrap();
-        let initial = agent::thread(&s).unwrap();
-        assert_eq!(initial.config.context_window, 200000);
-        assert_eq!(initial.config.params.max_output_tokens, 64000);
+        let base = agent::configured_profiles(&s)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == "fixture")
+            .unwrap();
+        let inherited = resolve(&s, &base).unwrap();
+        assert_eq!(inherited.context_window, 200000);
+        assert_eq!(inherited.params.max_output_tokens, 64000);
+        let before = agent::current(&s.conversation.inner.lock().unwrap().store).unwrap();
         let _ = save(
             State(s.clone()),
             h.clone(),
-            Json(serde_json::from_value(request(1, json!(64000), json!(4096), false)).unwrap()),
+            Json(serde_json::from_value(request(1, json!(64000), json!(4096))).unwrap()),
         )
         .await
         .unwrap();
-        assert_eq!(agent::thread(&s).unwrap().config, initial.config);
-        let public = get(State(s.clone()), h.clone()).await.unwrap().0;
         assert_eq!(
-            public["connections"][0]["model_settings"]["context_window"],
-            64000
+            agent::current(&s.conversation.inner.lock().unwrap().store).unwrap(),
+            before
         );
+        let base = agent::configured_profiles(&s)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == "fixture")
+            .unwrap();
+        let overridden = resolve(&s, &base).unwrap();
+        assert_eq!(overridden.context_window, 64000);
+        assert_eq!(overridden.params.max_output_tokens, 4096);
         assert_eq!(
-            public["connections"][0]["model_settings"]["max_output_tokens"],
-            4096
+            overridden.provider, inherited.provider,
+            "model defaults do not reset connection quotas"
         );
-        assert!(!public.to_string().contains("fixture-secret"));
         let _ = save(
             State(s.clone()),
             h.clone(),
-            Json(serde_json::from_value(request(2, json!(64000), json!(4096), true)).unwrap()),
+            Json(serde_json::from_value(request(2, Value::Null, Value::Null)).unwrap()),
         )
         .await
         .unwrap();
-        assert_eq!(agent::thread(&s).unwrap().config.context_window, 64000);
-        let _ = save(
-            State(s.clone()),
-            h.clone(),
-            Json(serde_json::from_value(request(3, Value::Null, Value::Null, true)).unwrap()),
-        )
-        .await
-        .unwrap();
-        assert_eq!(agent::thread(&s).unwrap().config.context_window, 200000);
-        let pinned = agent::thread(&s).unwrap().config;
-        let mut catalog: Value =
-            serde_json::from_str(include_str!("../../../assets/model-directory.json")).unwrap();
-        catalog["providers"]["anthropic"]["models"]["claude-sonnet-4-5"]["limit"]["context"] =
-            json!(300000);
-        std::fs::create_dir_all(root.join("models-dev")).unwrap();
-        std::fs::write(
-            root.join("models-dev/catalog.json"),
-            serde_json::to_vec(&catalog).unwrap(),
-        )
-        .unwrap();
-        s.control_config = Arc::new(crate::model_config::ControlConfig::new(root.clone()));
-        assert_eq!(agent::thread(&s).unwrap().config, pinned);
-        agent::settings::refresh_model_defaults(&s).unwrap();
-        assert_eq!(agent::thread(&s).unwrap().config.context_window, 300000);
-        assert_eq!(pinned.context_window, 200000);
+        let base = agent::configured_profiles(&s)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == "fixture")
+            .unwrap();
+        assert_eq!(resolve(&s, &base).unwrap().context_window, 200000);
+        assert_eq!(overridden.params.max_output_tokens, 4096);
         assert!(
             save(
-                State(s.clone()),
+                State(s),
                 h,
-                Json(serde_json::from_value(request(4, json!(1000), json!(2000), true)).unwrap())
+                Json(serde_json::from_value(request(3, json!(1000), json!(2000))).unwrap())
             )
             .await
             .is_err()
         );
-        assert_eq!(agent::thread(&s).unwrap().config.context_window, 300000);
-        let _ = std::fs::remove_dir_all(root);
     }
     #[tokio::test]
     async fn connection_check_reads_metadata_only_and_does_not_mutate_profiles() {
@@ -359,33 +500,96 @@ mod tests {
         let s = crate::tests::service();
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let before = agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap();
+        let before = agent::configured_profiles(&s).unwrap();
         let response=check(State(s.clone()),h,Json(serde_json::from_value(json!({"endpoint":format!("http://localhost:{}/v1/responses", address.port()),"api_key":"check-only","protocol":"openai_responses"})).unwrap())).await.unwrap().0;
         assert_eq!(response["models"], json!(["available-model"]));
-        assert_eq!(
-            agent::profiles(&s.conversation.inner.lock().unwrap().store).unwrap(),
-            before
-        );
+        assert_eq!(agent::configured_profiles(&s).unwrap(), before);
         assert!(!response.to_string().contains("check-only"));
         host.abort();
     }
     #[tokio::test]
-    async fn saved_connections_do_not_select_chat_and_can_be_edited_while_another_is_active() {
-        let dir = std::env::temp_dir().join(format!("pot-api-connections-{}", id()));
+    async fn provider_setup_is_private_idempotent_and_never_creates_a_thread() {
+        let dir = std::env::temp_dir().join(format!("pot-provider-only-{}", id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut s = crate::tests::service();
         s.data = dir.clone();
-        s.control_config = Arc::new(crate::model_config::ControlConfig::new(s.data.clone()));
         s.workspace = dir.clone();
         s.execution = None;
-        s.api_budget = None;
-        let mut h = HeaderMap::new();
-        h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let make = |profile: &str, revision: u64, model: &str, key: &str, follow: bool| json!({"request_id":id(),"profile_id":profile,"name":profile,"expected_revision":revision,"endpoint":"https://example.com/v1/chat/completions","model":model,"protocol":"openai_chat","api_key":key,"follow_main":follow});
+        s.control_config = Arc::new(crate::model_config::ControlConfig::new(dir.clone()));
+        let h = crate::control::tasks::tests::headers();
+        let input = json!({"request_id":id(),"profile_id":"first","name":"First","expected_revision":0,"endpoint":"https://example.com/v1/responses","protocol":"openai_responses","model":"opus5.5","models":["other-model"],"api_key":"fixture-private-key"});
+        assert!(
+            save(
+                State(s.clone()),
+                HeaderMap::new(),
+                Json(serde_json::from_value(input.clone()).unwrap())
+            )
+            .await
+            .is_err()
+        );
+        for _ in 0..2 {
+            let _ = save(
+                State(s.clone()),
+                h.clone(),
+                Json(serde_json::from_value(input.clone()).unwrap()),
+            )
+            .await
+            .unwrap();
+        }
+        assert!(
+            agent::current(&s.conversation.inner.lock().unwrap().store)
+                .unwrap()
+                .is_none()
+        );
+        let public = get(State(s.clone()), h.clone()).await.unwrap().0;
+        assert_eq!(public["default_provider_id"], "first");
+        assert_eq!(public["connections"][0]["default_model"], "opus5.5");
+        assert_eq!(
+            public["connections"][0]["models"],
+            json!(["opus5.5", "other-model"])
+        );
+        assert!(!public.to_string().contains("fixture-private-key"));
+        assert_eq!(
+            std::fs::metadata(dir.join("control.sqlite"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        let mut conflict = input.clone();
+        conflict["api_key"] = json!("changed");
+        assert!(
+            save(
+                State(s.clone()),
+                h.clone(),
+                Json(serde_json::from_value(conflict).unwrap())
+            )
+            .await
+            .is_err()
+        );
+        let profile = agent::configured_profiles(&s)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == "first")
+            .unwrap();
+        assert_eq!(
+            credential(
+                &s,
+                &stored_provider(&s, &profile.resolve().unwrap()).unwrap()
+            )
+            .unwrap(),
+            "fixture-private-key"
+        );
+        let mut update = input;
+        update["request_id"] = json!(id());
+        update["expected_revision"] = json!(1);
+        update["model"] = json!("new-default");
+        update["api_key"] = json!("");
         let _ = save(
             State(s.clone()),
             h.clone(),
-            Json(serde_json::from_value(make("first", 0, "a", "private-one", false)).unwrap()),
+            Json(serde_json::from_value(update).unwrap()),
         )
         .await
         .unwrap();
@@ -394,44 +598,29 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        let _ = save(
-            State(s.clone()),
-            h.clone(),
-            Json(serde_json::from_value(make("second", 0, "b", "private-two", true)).unwrap()),
-        )
-        .await
-        .unwrap();
-        let active = agent::thread(&s).unwrap();
-        let _ = save(
-            State(s.clone()),
-            h.clone(),
-            Json(serde_json::from_value(make("first", 1, "a2", "", false)).unwrap()),
-        )
-        .await
-        .unwrap();
-        assert_eq!(agent::thread(&s).unwrap(), active);
         assert!(
-            s.conversation
-                .inner
-                .lock()
-                .unwrap()
-                .store
-                .get("agent.default.worker")
-                .unwrap()
-                .is_none()
+            set_default(
+                State(s.clone()),
+                h.clone(),
+                Json(DefaultProvider {
+                    provider_id: "missing".into()
+                })
+            )
+            .await
+            .is_err()
         );
-        let public = get(State(s.clone()), h.clone()).await.unwrap().0;
-        assert_eq!(public["connections"].as_array().unwrap().len(), 2);
-        assert_eq!(public["connection"]["profile_id"], "second");
-        assert!(!public.to_string().contains("private-"));
-        let first = agent::profiles(&s.conversation.inner.lock().unwrap().store)
-            .unwrap()
-            .into_iter()
-            .find(|p| p.id == "first")
-            .unwrap();
+        let _ = set_default(
+            State(s.clone()),
+            h,
+            Json(DefaultProvider {
+                provider_id: "first".into(),
+            }),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            credential(&s, &stored_provider(&s, &first.resolve().unwrap()).unwrap()).unwrap(),
-            "private-one"
+            agent::default_provider(&s).unwrap().as_deref(),
+            Some("first")
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -462,113 +651,6 @@ mod tests {
         }
         let unsupported=check(State(s),h,Json(serde_json::from_value(json!({"endpoint":"https://example.com/custom","api_key":"fixture","protocol":"unknown"})).unwrap())).await.unwrap().0;
         assert_eq!(unsupported["supported"], false);
-    }
-    #[tokio::test]
-    async fn api_setup_is_private_idempotent_and_does_not_need_legacy_pi() {
-        let dir = std::env::temp_dir().join(format!("pot-api-setup-{}", id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut s = crate::tests::service();
-        s.data = dir.clone();
-        s.control_config = Arc::new(crate::model_config::ControlConfig::new(s.data.clone()));
-        s.workspace = dir.clone();
-        s.execution = None;
-        s.api_budget = None;
-        let mut h = HeaderMap::new();
-        h.insert("authorization", "Bearer test-token".parse().unwrap());
-        let input = json!({"request_id":id(),"expected_revision":0,"endpoint":"https://example.com/v1/chat/completions","model":"custom-model","protocol":"openai_chat","api_key":"fixture-private-key"});
-        assert!(
-            save(
-                State(s.clone()),
-                HeaderMap::new(),
-                Json(serde_json::from_value(input.clone()).unwrap())
-            )
-            .await
-            .is_err()
-        );
-        let saved = save(
-            State(s.clone()),
-            h.clone(),
-            Json(serde_json::from_value(input.clone()).unwrap()),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert_eq!(saved["saved"], true);
-        assert_eq!(
-            save(
-                State(s.clone()),
-                h.clone(),
-                Json(serde_json::from_value(input.clone()).unwrap())
-            )
-            .await
-            .unwrap()
-            .0["duplicate"],
-            true
-        );
-        let current = agent::thread(&s).unwrap();
-        assert_eq!(current.config.model, "custom-model");
-        assert_eq!(
-            agent::execution_config_for(&s)
-                .unwrap()
-                .max_requests_per_turn,
-            100
-        );
-        assert!(
-            !serde_json::to_string(&current)
-                .unwrap()
-                .contains("fixture-private-key")
-        );
-        let public = get(State(s.clone()), h.clone()).await.unwrap().0;
-        assert_eq!(public["connection"]["has_key"], true);
-        assert!(!public.to_string().contains("fixture-private-key"));
-        assert_eq!(
-            std::fs::metadata(dir.join("control.sqlite"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-        let mut conflict = input.clone();
-        conflict["api_key"] = json!("different");
-        assert!(
-            save(
-                State(s.clone()),
-                h.clone(),
-                Json(serde_json::from_value(conflict).unwrap())
-            )
-            .await
-            .is_err()
-        );
-        let mut stale = input.clone();
-        stale["request_id"] = json!(id());
-        stale["model"] = json!("different");
-        assert!(
-            save(
-                State(s.clone()),
-                h.clone(),
-                Json(serde_json::from_value(stale).unwrap())
-            )
-            .await
-            .is_err()
-        );
-        assert_eq!(agent::thread(&s).unwrap(), current);
-        let mut update = input;
-        update["request_id"] = json!(id());
-        update["expected_revision"] = json!(1);
-        update["model"] = json!("second-model");
-        update["api_key"] = json!("");
-        let _ = save(
-            State(s.clone()),
-            h,
-            Json(serde_json::from_value(update).unwrap()),
-        )
-        .await
-        .unwrap();
-        let updated = agent::thread(&s).unwrap();
-        assert_ne!(updated.config.provider, current.config.provider);
-        assert_eq!(updated.generation, current.generation + 1);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }
 
@@ -610,8 +692,7 @@ pub async fn check(
     }
     let mut key = input.api_key;
     if key.is_empty() {
-        let profiles =
-            agent::profiles(&s.conversation.inner.lock().unwrap().store).map_err(internal)?;
+        let profiles = agent::configured_profiles(&s).map_err(internal)?;
         if let Some(profile) = profiles.iter().find(|p| p.id == input.profile_id)
             && let Ok(previous) = stored_provider(&s, &profile.resolve().map_err(internal)?)
             && previous.endpoint == input.endpoint

@@ -4,9 +4,9 @@ Control owns product commands, Thread configuration, execution target routing an
 
 ## Configuration and startup
 
-App starts Helper and Host Server independently of Linux VMs. Unconfigured Chat offers the shared AI Configuration page. pot-agent is compiled into the Host Server; Node ships in the bundle for JavaScript tools and plugins; configuration does not require a Sandbox.
+App starts Helper and Host Server independently of Linux VMs. Unconfigured Chat offers Provider setup followed by explicit assistant creation. pot-agent is compiled into the Host Server; Node ships in the bundle for JavaScript tools and plugins; configuration does not require a Sandbox.
 
-API connections are saved through `POST /api/v1/providers`, with Provider metadata and encrypted credential values in Control `product/control.sqlite` and versioned profiles in SQLite. API metadata checks are read-only and do not send model requests. Saving a connection and selecting the Main Agent are separate operations, except that first-time Chat can save both together.
+API connections are saved through `POST /api/v1/providers`, with Provider metadata and encrypted credential values in Control `product/control.sqlite` and versioned profiles in SQLite. API metadata checks are read-only and do not send model requests. Saving a connection only updates the shared Provider; assistant registration and selection are always explicit.
 
 `product/execution-limits.json` contains `request_limit`, `max_tokens`, `max_requests_per_turn` and `max_parallel_tasks`; it carries no credentials or implicit Agent selection. Default limits are 10,000 lifetime requests, 8,192 output tokens, 100 requests per turn and eight parallel tasks. Zero lifetime requests disables new requests. Output tokens accept integers up to 9,007,199,254,740,991. The per-turn request limit is 1–1,000; task concurrency accepts 1 through the platform’s `usize::MAX`. The App UI retains its 1–1,000 concurrency input range. Changing limits restarts Host backend independently of VM lifecycle.
 
@@ -57,12 +57,15 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `GET /api/v1/events?after=N` | Persisted replay, authoritative snapshot, live SSE; refetch after lag |
 | `POST /api/v1/messages` | `{request_id, conversation_id:"main", text}`; idempotent identical retries, conflicting reuse/concurrent turns rejected |
 | `POST /api/v1/turn/cancel` | `{request_id, user_message_id}`; rejects stale cancellation |
-| `GET /api/v1/providers` | Selected and saved connection metadata, no secrets |
-| `POST /api/v1/providers` | Versioned connection save; `follow_main:false` retains current selection; empty key retains only the same profile/endpoint credential |
+| `GET /api/v1/providers` | Shared Provider connections, default Provider and model metadata, no secrets |
+| `POST /api/v1/providers` | Versioned connection save; empty key retains only the same profile/endpoint credential |
+| `POST /api/v1/providers/default` | Select the configured Provider used to initialize new assistant forms |
 | `POST /api/v1/providers/check` | Bounded supported metadata/model-list GET, no inference, redirects or upstream bodies exposed |
-| `GET/POST /api/v1/agent` | Thread/profile inspection and versioned settings |
+| `GET/POST /api/v1/agent` | Shared Provider definitions, owner Thread, editable assistant selection and pending configuration |
+| `GET/POST /api/v1/assistants` | Directory and explicit creation with request ID, name, concrete `configuration` and optional instruction text |
+| `POST /api/v1/assistants/{id}/definition` | Versioned name/instructions and assistant-owned `configuration`; identical acknowledged retries are idempotent |
 | `POST /api/v1/agent/config` | Copy a profile configuration into an existing Thread at a safe turn boundary |
-| `GET/POST /api/v1/agent/routing` | Worker profile defaults, model-visible allowlist and concurrency policies |
+| `GET/POST /api/v1/agent/routing` | Provider/model concurrency policies; routing is autonomous |
 | `GET/POST /api/v1/sandboxes` | Main/operator inventory and typed lifecycle actions |
 | `GET/POST /api/v1/permissions` | Machine policy, exact Host approvals and Runtime resource budgets |
 | `POST /api/v1/execution` | Active lane `{name,call_id,args}`; fixed worker scope, durable receipts |
@@ -78,6 +81,13 @@ Bearer/boot/port are published in mode-0600 `product/runtime.json`. Browser Orig
 | `/api/v1/usage`, `/summary`, `/policy`, `/providers`, `/resume`, `/cancel` | Request/token accounting and allowance policy/recovery |
 | `/api/v1/terminals`, `/{id}/socket`, `/{id}/close` | Native/operator Sandbox PTY; no authentication command injection |
 
+Assistant `configuration` contains `provider_id` (the shared connection Profile
+ID), a concrete `model`, and optional `context_window`, `max_output_tokens` and
+`reasoning_effort`. Editing it never rewrites the Provider definition. Creation
+uses the destination Space's defaults in the form and submits the concrete
+selection. Provider saves persist their definition, model list, default identity
+and hashed request receipt together, without changing any Thread.
+
 ## Tasks, profiles and schedules
 
 Every task has a private product transcript and records its actual Host/Sandbox
@@ -87,7 +97,7 @@ keeps the task transcript, launch intent and terminal result. Guidance receipts 
 original remote run; execution Runtime restart waits for receipts and interrupts
 it; retry requires a new Task. Neither path replays external effects. Automatic completion summaries are bounded/deduplicated and wait while main is busy. Archive/search do not expand the default model context. See [Task coordination](../../docs/task-coordination.md) for guidance, messages, waiting, stopping and archive semantics.
 
-Explicit task profiles take precedence over configured worker defaults. With no explicit worker default, new tasks snapshot the active Main Agent. Saved profile changes do not rewrite existing task model settings or plugin selections. Before each execution, selected plugin names resolve to the current implementations in the owning assistant’s source Profile; Skills synchronize by name as described in [Agent context](../../docs/agent-context.md). Explicit Change Agent copies a new configuration into the same Thread at a safe turn boundary, preserving its complete context and Sandbox assignment. The configuration update and pending-update removal commit together. Events and permission requests are filtered by owner/generation/turn to reject stale updates. Provider-specific replay is retained in stored history and sent only to its original provider/model/protocol; other routes receive portable text and paired tool calls/results.
+Assistants choose task Provider/model routes autonomously, guided by their AGENTS.md and the available catalog, without a user allowlist or routing confirmation. Omitted task selection snapshots the invoking assistant's active configuration. Saved profile changes do not rewrite existing task model settings or plugin selections. Before each execution, selected plugin names resolve to the current implementations in the owning assistant’s source Profile; Skills synchronize by name as described in [Agent context](../../docs/agent-context.md). Explicit Change Agent copies a new configuration into the same Thread at a safe turn boundary, preserving its complete context and Sandbox assignment. The configuration update and pending-update removal commit together. Events and permission requests are filtered by owner/generation/turn to reject stale updates. Provider-specific replay is retained in stored history and sent only to its original provider/model/protocol; other routes receive portable text and paired tool calls/results.
 
 Schedules persist an execution target at save time; each occurrence resolves its Agent profile independently. Occurrence dispatch and deduplication are atomic, nonoverlapping and bounded; catch-up/skip, time zones and change notifications are documented in [scheduled tasks](../../docs/scheduled-tasks.md).
 

@@ -282,6 +282,7 @@ pub(crate) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
             agent::routing::resolve(
                 root,
                 spec.profile.as_deref(),
+                spec.model.as_deref(),
                 agent::routing::Source::Schedule,
                 &spec.requirements,
             )
@@ -352,6 +353,7 @@ pub(crate) fn apply(root: &Service, req: Value, at: i64) -> ApiResult<Value> {
                 agent::routing::resolve(
                     root,
                     spec.profile.as_deref(),
+                    spec.model.as_deref(),
                     agent::routing::Source::Schedule,
                     &spec.requirements,
                 )
@@ -446,6 +448,7 @@ fn launch(
             text: brief,
             resource: String::new(),
             profile: plan.info.spec.profile.clone(),
+            model: plan.info.spec.model.clone(),
             requirements: plan.info.spec.requirements.clone(),
             ..Default::default()
         },

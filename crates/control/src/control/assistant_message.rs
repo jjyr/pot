@@ -245,9 +245,9 @@ fn session(owner: &Service, message: &Envelope) -> Result<Service> {
     if agent::current(&store)?.is_none() {
         agent::select_initial(&mut store, &scope, config)?;
     }
-    {
+    if store.get("assistant.model_profile")?.is_none() {
         let inner = owner.conversation.inner.lock().unwrap();
-        for key in [agent::PROFILES, "agent.routing.v1"] {
+        for key in ["assistant.model_profile", "assistant.model_selection"] {
             if let Some(value) = inner.store.get(key)? {
                 store.set(key, &value)?;
             }

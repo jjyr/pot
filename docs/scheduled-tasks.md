@@ -34,6 +34,11 @@ Schedules require their owning Runtime to remain running. Local App Quit/sleep/s
 
 DST: choose the earlier occurrence of repeated hours and trigger once; skip nonexistent daily/weekly times for that day; reject nonexistent one-off times on save.
 
+Model selection uses optional `spec.profile` (configured Provider connection ID)
+and `spec.model`. Selection is autonomous and requires no routing approval or
+allowlist. Each occurrence resolves these fields anew; omitting both uses the
+owning assistant's active configuration. See [Task routing](task-coordination.md#autonomous-model-routing).
+
 Creation saves `spec.machine_id` (the local Runtime when omitted). Updates without
 `machine_id` preserve the selected machine. Every occurrence creates a new Task,
 which reads that machine's current execution policy at dispatch. No schedule

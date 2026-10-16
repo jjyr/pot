@@ -111,4 +111,19 @@ function editorHistory() {
   assert.equal(fixture.events[0].type, 'pot-editor-back', 'a reopened editor still guards Back past a stale entry');
   assert.equal(fixture.events[0].detail, 1);
 }
+{
+  const fixture = editorHistory();
+  fixture.api.setDepth(1);
+  fixture.api.setDepth(0);
+  let stale = false;
+  fixture.api.afterRestore(() => { stale = true; });
+  fixture.api.afterRestore(() => fixture.history.pushState({page: 'chat', assistantId: 'created'}));
+  assert.equal(fixture.history.state.potEditor.depth, 1, 'navigation waits for the editor history pop');
+  fixture.flush();
+  assert.equal(stale, false, 'only the latest navigation survives restoration');
+  assert.equal(fixture.history.state.assistantId, 'created', 'new assistant navigation survives editor closure');
+  let immediate = false;
+  fixture.api.afterRestore(() => { immediate = true; });
+  assert.equal(immediate, true, 'ordinary navigation proceeds immediately');
+}
 console.log('Web preference and editor history contracts passed');

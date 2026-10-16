@@ -262,6 +262,8 @@ pub struct CreateTask {
     #[serde(default)]
     pub profile: Option<String>,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub requirements: TaskRequirements,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection_reason: Option<String>,
@@ -376,6 +378,8 @@ pub struct ScheduleSpec {
     pub enabled: bool,
     #[serde(default)]
     pub profile: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
     #[serde(default)]
     pub requirements: TaskRequirements,
 }

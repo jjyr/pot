@@ -227,10 +227,13 @@ impl Shell {
             }
         }
         let view = self.client.view.lock().unwrap().clone();
-        let configured = self.settings_state.state["active_spec"]["model"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty());
-        let mut body = ui::content(cx).max_w(px(540.)).justify_center();
+        let configured = self.settings_state.state["profiles"]
+            .as_array()
+            .is_some_and(|p| !p.is_empty());
+        let mut body = ui::content(cx)
+            .max_w(px(540.))
+            .id("assistant-create-scroll")
+            .overflow_y_scroll();
         if configured {
             let location = Some(self.location_bar("create", cx));
             let handler = self.page_handler(cx);
@@ -248,12 +251,12 @@ impl Shell {
                 .child(
                     self.assistants_ui.render_create(
                         pot_ui::assistants::CreateView {
-                            profiles: &self.settings_state.state["profiles"],
-                            active_profile:
-                                self.settings_state.state["active_spec"]["source_profile_id"]
-                                    .as_str()
-                                    .unwrap_or(""),
-                            source: view.assistant_id(),
+                            settings: &self.settings_state.state,
+                            source: &format!(
+                                "{}/{}",
+                                view.client_mode,
+                                view.runtime["runtime_id"].as_str().unwrap_or("")
+                            ),
                             pending: view.assistant_pending,
                             can_close: view.assistants["assistants"]
                                 .as_array()
@@ -297,7 +300,7 @@ impl Shell {
                         )
                     },
                 );
-            if self.assistants_ui.open && self.assistants_ui.advanced {
+            if self.assistants_ui.open {
                 body = body.child(self.location_bar("create", cx));
             }
         }

@@ -188,6 +188,13 @@ async fn fixture(
     profile.auth_ref = "provider:mock".into();
     let spec = gateway::resolve(&s, &profile).unwrap();
     assign_new(&mut s.conversation.inner.lock().unwrap().store, spec).unwrap();
+    s.conversation
+        .inner
+        .lock()
+        .unwrap()
+        .store
+        .set(PROFILES, &serde_json::to_string(&vec![profile]).unwrap())
+        .unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let captured = Arc::new(Mutex::new(vec![]));
     let requests = captured.clone();
@@ -570,7 +577,7 @@ async fn native_agent_duplicate_tool_ids_reuse_receipts_and_reject_conflicts() {
 #[tokio::test]
 async fn native_agent_dispatches_pot_task_tools_through_shared_authorization() {
     let calls = vec![
-        json!({"id":"delegate","name":"create_task","arguments":{"text":"Research APRICOT with sources"}}),
+        json!({"id":"delegate","name":"create_task","arguments":{"text":"Research APRICOT with sources","profile":"pot-default","model":"research-model","selection_reason":"Research uses the selected model"}}),
     ];
     let (s, mut rx, server, captured) = fixture("openai_chat", calls).await;
     turn(&s, &mut rx, "delegate").await;
@@ -580,6 +587,18 @@ async fn native_agent_dispatches_pot_task_tools_through_shared_authorization() {
         .0;
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].title.contains("APRICOT"));
+    let worker = tasks::owner(&s, &tasks[0].id).unwrap();
+    assert_eq!(thread(&worker).unwrap().config.model, "research-model");
+    assert_eq!(thread(&s).unwrap().config.model, "fixture");
+    assert!(
+        crate::permissions::inspect(State(s.clone()), tasks::tests::headers())
+            .await
+            .unwrap()
+            .0["requests"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert!(captured.lock().unwrap()[1].to_string().contains("task"));
     server.abort();
     std::fs::remove_dir_all(&s.data).unwrap();

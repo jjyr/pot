@@ -578,9 +578,14 @@ fn enqueue_from(
             "Selection reason exceeds 512 characters",
         ));
     }
-    let (spec, mut routing) =
-        agent::routing::resolve(root, req.profile.as_deref(), source, &req.requirements)
-            .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
+    let (spec, mut routing) = agent::routing::resolve(
+        root,
+        req.profile.as_deref(),
+        req.model.as_deref(),
+        source,
+        &req.requirements,
+    )
+    .map_err(|e| error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string()))?;
     routing.selection_reason = req.selection_reason.clone();
     let executor_icon = crate::gateway::executor_icon(root, &spec);
     let refs = task_references(root, &req, source)?;
@@ -2886,36 +2891,9 @@ pub(crate) mod tests {
             request_id: "routed".into(),
             text: "test".into(),
             profile: Some("alternate".into()),
+            model: Some("autonomous-task-model".into()),
             ..Default::default()
         };
-        assert!(
-            create_from(
-                s.clone(),
-                headers(),
-                request.clone(),
-                agent::routing::Source::Tool
-            )
-            .await
-            .is_err()
-        );
-        assert!(s.tasks.hub.lock().unwrap().lanes.is_empty());
-        let policy = agent::routing::Policy {
-            allowed_tool_profiles: ["alternate".into()].into(),
-            ..Default::default()
-        };
-        assert!(
-            agent::routing::configure(State(s.clone()), HeaderMap::new(), Json(policy.clone()))
-                .await
-                .is_err()
-        );
-        let _ = agent::routing::configure(State(s.clone()), headers(), Json(policy.clone()))
-            .await
-            .unwrap();
-        assert!(
-            agent::routing::configure(State(s.clone()), headers(), Json(policy))
-                .await
-                .is_err()
-        );
         let task = create_from(
             s.clone(),
             headers(),
@@ -2925,7 +2903,7 @@ pub(crate) mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(task.routing.as_ref().unwrap().reason, "tool_hint");
+        assert_eq!(task.routing.as_ref().unwrap().reason, "tool_selection");
         assert_eq!(
             create_from(
                 s.clone(),
@@ -3928,7 +3906,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn new_tasks_inherit_profile_changes_but_existing_and_restored_tasks_stay_pinned() {
+    async fn new_tasks_follow_active_assistant_changes_and_existing_snapshots_stay_pinned() {
         let s = fixture();
         agent::initialize(&s).unwrap();
         let old = add(&s, "old snapshot", "").await;
@@ -3940,6 +3918,25 @@ pub(crate) mod tests {
         let _ = agent::settings::settings(State(s.clone()), headers(), Json(settings))
             .await
             .unwrap();
+        let unchanged = add(&s, "unchanged assistant default", "").await;
+        assert_eq!(
+            agent::thread(&owner(&s, &unchanged.id).unwrap())
+                .unwrap()
+                .config,
+            before
+        );
+        let _ = agent::settings::select(
+            State(s.clone()),
+            headers(),
+            Json(
+                serde_json::from_value(
+                    json!({"request_id":"select-edited","profile":"pot-default"}),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
         let new = add(&s, "new snapshot", "").await;
         assert_eq!(
             agent::thread(&owner(&s, &old.id).unwrap()).unwrap().config,

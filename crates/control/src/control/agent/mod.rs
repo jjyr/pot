@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod routing;
 pub(crate) mod runner;
+pub mod selection;
 pub mod settings;
 pub(crate) mod transcript;
 // Runtime owns threads and turn state; pot-agent executes their contexts.
@@ -8,6 +9,44 @@ mod storage;
 use crate::*;
 pub use pot_core::*;
 pub use storage::*;
+
+/// Provider definitions and capacity policy belong to Control, never an assistant copy.
+pub(crate) fn configuration_owner(s: &Service) -> Service {
+    if let Some(hub) = s
+        .agent_service
+        .resources
+        .assistants
+        .lock()
+        .unwrap()
+        .upgrade()
+    {
+        return hub.root.clone();
+    }
+    let mut owner = s.clone();
+    if let Some(store) = s
+        .control_config
+        .configuration_store
+        .lock()
+        .unwrap()
+        .upgrade()
+    {
+        owner.conversation.inner = store;
+    }
+    owner
+}
+
+pub(crate) fn configured_profiles(s: &Service) -> Result<Vec<Profile>> {
+    let owner = configuration_owner(s);
+    profiles(&owner.conversation.inner.lock().unwrap().store)
+}
+pub(crate) fn default_provider(s: &Service) -> Result<Option<String>> {
+    let owner = configuration_owner(s);
+    let inner = owner.conversation.inner.lock().unwrap();
+    if let Some(id) = inner.store.get("providers.default")? {
+        return Ok(Some(id));
+    }
+    Ok(profiles(&inner.store)?.first().map(|p| p.id.clone()))
+}
 
 /// Initialize an explicitly supplied API profile; persisted snapshots stay immutable.
 pub fn initialize(s: &Service) -> Result<()> {
@@ -61,13 +100,15 @@ pub async fn inspect(
 ) -> ApiResult<Json<Value>> {
     root.authorized(&h)?;
     initialize(&root).map_err(internal)?;
-    let profiles = profiles(&root.conversation.inner.lock().unwrap().store).map_err(internal)?;
+    let profiles = configured_profiles(&root).map_err(internal)?;
     let s = tasks::owner(&root, query.owner.as_deref().unwrap_or(&root.usage_scope))?;
     initialize(&s).map_err(internal)?;
+    let default_provider_id = default_provider(&root).map_err(internal)?;
+    let selection = selection::current_selection(&s).map_err(internal)?;
     let inner = s.conversation.inner.lock().unwrap();
     let pending = settings::pending(&inner.store).map_err(internal)?;
     Ok(Json(
-        json!({"profiles":profiles,"thread":current(&inner.store).map_err(internal)?,"pending_config":pending}),
+        json!({"profiles":profiles,"thread":current(&inner.store).map_err(internal)?,"selection":selection,"default_provider_id":default_provider_id,"pending_config":pending}),
     ))
 }
 

@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using eligible configured Profiles. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks use the selected machine's Host or shared development Sandbox according to its current policy at dispatch. Task completion closes its own processes and sessions; installed tools and files remain. Shared environment changes affect other tasks.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks use the selected machine's Host or shared development Sandbox according to its current policy at dispatch. Task completion closes its own processes and sessions; installed tools and files remain. Shared environment changes affect other tasks.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -19,7 +19,7 @@
         "profile": {
           "type": "string",
           "minLength": 1,
-          "description": "Eligible, user-allow-listed Profile ID selected for this task; omitted retains default routing. Use a real configured connection/model, not a provider name."
+          "description": "Configured Provider connection Profile ID chosen autonomously for this task. Omit to use the invoking assistant’s active configuration. No user allowlist or route confirmation is needed."
         },
         "requirements": {
           "type": "object",
@@ -55,6 +55,11 @@
         "machine_id": {
           "type": "string",
           "description": "Target machine ID. Omitted follows the current machine routing. Execution uses the machine policy at dispatch; no Sandbox selection is needed."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concrete model ID supported by the selected Provider. Omitted uses that Provider’s default model; with no Provider selection, uses the invoking assistant’s active model."
         }
       },
       "required": [
@@ -382,7 +387,7 @@
             "profile": {
               "type": "string",
               "minLength": 1,
-              "description": "Optional user-allow-listed profile hint; omitted uses the worker default."
+              "description": "Configured Provider Profile ID chosen autonomously. Omit to snapshot the owning assistant’s configuration at each trigger."
             },
             "requirements": {
               "type": "object",
@@ -406,6 +411,11 @@
             "machine_id": {
               "type": "string",
               "description": "Machine to run on. Each occurrence reads its current execution policy and creates a fresh Task. Omit on update to retain the machine."
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Concrete model supported by the selected configured Provider."
             }
           },
           "required": [

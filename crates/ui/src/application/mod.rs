@@ -165,15 +165,15 @@ impl Shell {
                     "assistant-select" => { this.client.select_assistant(event.value.as_str().unwrap_or("main").into()); this.assistants_ui.select(event.value.as_str().unwrap_or("main")); },
                     "assistant-reload" => this.assistants_ui.reload(event.value.as_str().unwrap_or("main")),
                     "assistant-close" => this.close_assistant_editor(cx),
-                    "assistant-create-advanced" => this.assistants_ui.advanced = !this.assistants_ui.advanced,
-                    "assistant-create-profile" => this.assistants_ui.choose_profile(event.value.as_str().unwrap_or("").into()),
+                    "assistant-disclosure" => this.assistants_ui.toggle(event.value.as_str().unwrap_or("")),
+                    "assistant-provider" => this.assistants_ui.choose_provider(&event.value,window,cx),
                     "machine-connections-toggle" => {
                         if this.machine_connections.open { this.editor_intents.push(serde_json::json!({"action":"editor-back"})); }
                         else { this.open_machine_editor(window, cx); }
                     },
                     "machine-command" => this.client.machine_command(event.value),
                     "assistant-save" => this.client.assistant_save(event.value),
-                    "assistant-model" => ui::command(serde_json::json!({"action":"ai-open","owner":event.value,"return_to_chat":true})),
+                    "assistant-add-provider" => ui::command(serde_json::json!({"action":"ai-open"})),
                     "permission-decision" => this.client.permission_decision(event.value),
                     "sandbox-lifecycle" => this.client.sandbox_lifecycle(event.value),
                     "native" => ui::command(event.value),
@@ -331,21 +331,16 @@ impl Shell {
             .take()
         {
             self.assistants_ui.saved(&owner);
-            self.editor_intents
-                .push(serde_json::json!({"action":"assistant-editor-saved"}));
+            self.settings_state.invalidate();
+            if owner != "new" {
+                self.editor_intents
+                    .push(serde_json::json!({"action":"assistant-editor-saved"}));
+            }
         }
         let created = self.client.view.lock().unwrap().created_assistant.take();
         if let Some(owner) = created {
-            self.client.select_assistant(owner.clone());
-            self.client.select(String::new());
-            self.assistant_list = false;
-            self.assistant_overview = false;
-            self.show_tasks = false;
-            self.assistants_ui.open = false;
-            self.assistants_ui.saved("new");
             self.editor_intents
-                .push(serde_json::json!({"action":"assistant-editor-saved"}));
-            ui::command(serde_json::json!({"action":"page","value":0}));
+                .push(serde_json::json!({"action":"assistant-editor-created","owner":owner}));
         }
         if self.assistant_list && !self.assistants_ui.open {
             let view = self.client.view.lock().unwrap().clone();
@@ -794,6 +789,7 @@ impl Shell {
         if !self.show_tasks
             && view.selected.is_empty()
             && (self.assistant_list
+                || self.assistants_ui.open && self.assistants_ui.creating()
                 || !view.assistants["assistants"]
                     .as_array()
                     .is_some_and(|a| a.iter().any(|a| a["id"] == view.assistant_id())))
@@ -808,6 +804,13 @@ impl Shell {
                     assistants: &view.assistants,
                     current: view.assistant_id(),
                     rules: &view.assistant_rules,
+                    settings: &self.settings_state.state,
+                    pending: view.assistant_pending,
+                    scope: &format!(
+                        "{}/{}",
+                        view.client_mode,
+                        view.runtime["runtime_id"].as_str().unwrap_or("")
+                    ),
                 },
                 self.catalog(),
                 handler,
@@ -1026,12 +1029,6 @@ impl Shell {
                                                 )
                                             },
                                         )
-                                    })
-                                    .when_some(task, |el, task| {
-                                        let owner = task.id.clone();
-                                        let title = task.title.clone();
-                                        el.child(Button::new("task-profile").ghost().small().label(crate::application::i18n::text("main.change-agent"))
-                                            .on_click(move |_,_,_|ui::command(serde_json::json!({"action":"task-profile","owner":owner,"title":title}))))
                                     })
                                     .when(
                                         task.is_some_and(|t| {

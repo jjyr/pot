@@ -19,6 +19,8 @@ pub struct Hub {
 }
 impl Hub {
     pub fn open(root: Service) -> Result<Self> {
+        *root.control_config.configuration_store.lock().unwrap() =
+            Arc::downgrade(&root.conversation.inner);
         let registry = Registry::open(&root.data.join("pot-v2.sqlite"), &root.usage_scope)?;
         let mailbox = pot_assistant::message::Mailbox::open(
             &root.data.join("assistant-mail.sqlite"),
@@ -225,16 +227,7 @@ impl Hub {
     fn build(&self, owner: &str) -> Result<(Service, mpsc::UnboundedReceiver<SendMessage>)> {
         let data = self.root.data.join("assistants").join(owner);
         std::fs::create_dir_all(&data)?;
-        let mut store = Store::open(&data.join("pot-v2.sqlite"))?;
-        if agent::current(&store)?.is_none() {
-            let root_inner = self.root.conversation.inner.lock().unwrap();
-            if let Some(profiles) = root_inner.store.get(agent::PROFILES)? {
-                store.set(agent::PROFILES, &profiles)?;
-            }
-            if let Some(thread) = agent::current(&root_inner.store)? {
-                agent::select_initial(&mut store, owner, thread.config)?;
-            }
-        }
+        let store = Store::open(&data.join("pot-v2.sqlite"))?;
         let token = id();
         let (events, _) = broadcast::channel(256);
         let (commands, rx) = mpsc::unbounded_channel();
@@ -280,13 +273,12 @@ impl Hub {
         Ok((service, rx))
     }
     pub fn create(&self, request: &str, name: &str) -> Result<Definition> {
-        self.create_from(request, name, "main", None)
+        self.create_with_provider(request, name, None)
     }
-    pub fn create_from(
+    fn create_with_provider(
         &self,
         request: &str,
         name: &str,
-        source: &str,
         profile: Option<&str>,
     ) -> Result<Definition> {
         let _guard = self.creation.lock().unwrap();
@@ -296,9 +288,7 @@ impl Hub {
             !request.is_empty() && request.len() <= 128,
             "Invalid request identity"
         );
-        let intent =
-            json!({"name":name,"source":source,"profile":profile.filter(|p| !p.is_empty())})
-                .to_string();
+        let intent = json!({"name":name,"profile":profile.filter(|p| !p.is_empty())}).to_string();
         let intent_key = format!("assistant.creation:{request}");
         if let Some(saved) = self
             .root
@@ -314,17 +304,19 @@ impl Hub {
         if self.definitions()?.iter().any(|d| d.request_id == request) {
             return self.registry.create(request, name);
         }
-        let source = self.service(source)?;
-        let config = if let Some(profile) = profile.filter(|id| !id.is_empty()) {
-            let profile = agent::profiles(&source.conversation.inner.lock().unwrap().store)?
+        let selected = profile
+            .map(str::to_owned)
+            .or(agent::default_provider(&self.root)?);
+        let config = if let Some(selected) = selected {
+            let profile = agent::configured_profiles(&self.root)?
                 .into_iter()
-                .find(|p| p.id == profile)
-                .ok_or_else(|| anyhow!("Profile missing"))?;
-            let spec = gateway::resolve(&source, &profile)?;
-            gateway::validate_spec(&source, &spec)?;
+                .find(|p| p.id == selected)
+                .ok_or_else(|| anyhow!("Provider missing"))?;
+            let spec = gateway::resolve(&self.root, &profile)?;
+            gateway::validate_spec(&self.root, &spec)?;
             Some(spec)
         } else {
-            agent::current(&source.conversation.inner.lock().unwrap().store)?.map(|t| t.config)
+            agent::current(&self.root.conversation.inner.lock().unwrap().store)?.map(|t| t.config)
         };
         self.root
             .conversation
@@ -338,16 +330,6 @@ impl Hub {
             // Prepare the destination from the selected assistant, before starting its loops.
             let (service, rx) = self.build(&definition.id)?;
             let mut inner = service.conversation.inner.lock().unwrap();
-            if let Some(profiles) = source
-                .conversation
-                .inner
-                .lock()
-                .unwrap()
-                .store
-                .get(agent::PROFILES)?
-            {
-                inner.store.set(agent::PROFILES, &profiles)?;
-            }
             if let Some(config) = config {
                 if agent::current(&inner.store)?.is_some() {
                     agent::assign_new(&mut inner.store, config)?;
@@ -356,6 +338,9 @@ impl Hub {
                 }
             }
             drop(inner);
+            if agent::configured(&service) {
+                service.phase(AgentPhase::Ready, None);
+            }
             self.start_prepared(&definition.id, service, rx)?;
         } else if let Some(config) = config {
             let mut inner = self.root.conversation.inner.lock().unwrap();
@@ -365,8 +350,142 @@ impl Hub {
                 agent::select_initial(&mut inner.store, &definition.id, config)?;
             }
         }
+        if agent::configured(&self.root)
+            && self.root.conversation.inner.lock().unwrap().agent.phase
+                == AgentPhase::NeedsConfiguration
+        {
+            self.root.phase(AgentPhase::Ready, None);
+        }
         self.root.changes().notify("assistants");
         Ok(definition)
+    }
+    pub fn create_configured(
+        &self,
+        request: &str,
+        name: &str,
+        configuration: &agent::selection::Selection,
+        text: &str,
+    ) -> Result<Definition> {
+        static CREATE: Mutex<()> = Mutex::new(());
+        let _guard = CREATE.lock().unwrap();
+        let key = format!("assistant.configured_creation:{request}");
+        let fingerprint =
+            json!({"name":name,"configuration":configuration,"text":text}).to_string();
+        if let Some(saved) = self
+            .root
+            .conversation
+            .inner
+            .lock()
+            .unwrap()
+            .store
+            .get(&key)?
+        {
+            let saved: Value = serde_json::from_str(&saved)?;
+            anyhow::ensure!(
+                saved["fingerprint"] == fingerprint,
+                "Conflicting assistant creation request"
+            );
+            return self
+                .definitions()?
+                .into_iter()
+                .find(|d| d.id == saved["id"])
+                .ok_or_else(|| anyhow!("Assistant unavailable"));
+        }
+        let (profile, spec) = configuration.resolve(&self.root)?;
+        let definition =
+            self.create_with_provider(request, name, Some(&configuration.provider_id))?;
+        let service = self.service(&definition.id)?;
+        let mut inner = service.conversation.inner.lock().unwrap();
+        if inner
+            .store
+            .get(&format!("assistant.configured:{request}"))?
+            .is_some()
+        {
+            return Ok(definition);
+        }
+        if agent::current(&inner.store)?.is_some() {
+            agent::assign_new(&mut inner.store, spec)?;
+        } else {
+            agent::select_initial(&mut inner.store, &definition.id, spec)?;
+        }
+        inner.store.set(
+            "assistant.model_selection",
+            &serde_json::to_string(configuration)?,
+        )?;
+        inner
+            .store
+            .set("assistant.model_profile", &serde_json::to_string(&profile)?)?;
+        let rules = pot_assistant::instructions::load(&inner.store)?;
+        pot_assistant::instructions::save(&inner.store, text, &rules.revision)?;
+        inner
+            .store
+            .set(&format!("assistant.configured:{request}"), "true")?;
+        drop(inner);
+        self.root.conversation.inner.lock().unwrap().store.set(
+            &key,
+            &json!({"fingerprint":fingerprint,"id":definition.id}).to_string(),
+        )?;
+        Ok(definition)
+    }
+    pub fn edit_configured(&self, owner: &str, args: &Value) -> Result<Value> {
+        let _guard = self.creation.lock().unwrap();
+        let service = self.service(owner)?;
+        let configuration: agent::selection::Selection =
+            serde_json::from_value(args["configuration"].clone())?;
+        let (profile, spec) = configuration.resolve(&service)?;
+        let request = args["request_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Request ID missing"))?;
+        let key = format!("assistant.edit:{request}");
+        let fingerprint = args.to_string();
+        {
+            let inner = service.conversation.inner.lock().unwrap();
+            if let Some(saved) = inner.store.get(&key)? {
+                let saved: Value = serde_json::from_str(&saved)?;
+                anyhow::ensure!(
+                    saved["fingerprint"] == fingerprint,
+                    "Conflicting assistant save request"
+                );
+                return Ok(saved["reply"].clone());
+            }
+            anyhow::ensure!(
+                agent::settings::pending(&inner.store)?.is_none(),
+                "Another configuration update is pending"
+            );
+        }
+        let reply = self.edit(
+            owner,
+            args["name"].as_str().unwrap_or(""),
+            args["expected_revision"].as_u64().unwrap_or(0),
+            args["text"].as_str().unwrap_or(""),
+            args["rules_revision"].as_str().unwrap_or(""),
+        )?;
+        {
+            let mut inner = service.conversation.inner.lock().unwrap();
+            if agent::current(&inner.store)?.is_some() {
+                agent::settings::queue(&mut inner.store, request, spec)?;
+            } else {
+                agent::select_initial(&mut inner.store, owner, spec)?;
+            }
+            inner.store.set(
+                "assistant.model_selection",
+                &serde_json::to_string(&configuration)?,
+            )?;
+            inner
+                .store
+                .set("assistant.model_profile", &serde_json::to_string(&profile)?)?;
+            inner.store.set(
+                &key,
+                &json!({"fingerprint":fingerprint,"reply":reply}).to_string(),
+            )?;
+        }
+        agent::settings::apply_pending(&service, false)?;
+        if service.conversation.inner.lock().unwrap().agent.phase == AgentPhase::NeedsConfiguration
+        {
+            service.phase(AgentPhase::Ready, None);
+        }
+        service.invalidate("settings");
+        Ok(reply)
     }
     pub fn rename(&self, owner: &str, name: &str, revision: u64) -> Result<Definition> {
         let result = self.registry.rename(owner, name, revision)?;

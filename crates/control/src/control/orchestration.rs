@@ -166,10 +166,6 @@ pub async fn invoke(
         "manage_schedule" => {
             let mut args = call.args.clone();
             args["request_id"] = json!(request_id);
-            if matches!(args["action"].as_str(), Some("create" | "update")) {
-                agent::routing::allow_hint(&s, args["spec"]["profile"].as_str())
-                    .map_err(|e| error(StatusCode::BAD_REQUEST, "profile_hint", &e.to_string()))?;
-            }
             Ok(schedules::apply(
                 schedule_owner.as_ref().unwrap(),
                 args,
@@ -192,6 +188,8 @@ pub async fn invoke(
                     profile: serde_json::from_value(call.args["profile"].clone()).map_err(|e| {
                         error(StatusCode::BAD_REQUEST, "task_profile", &e.to_string())
                     })?,
+                    model: serde_json::from_value(call.args["model"].clone())
+                        .map_err(|e| internal(e.into()))?,
                     selection_reason: serde_json::from_value(call.args["selection_reason"].clone())
                         .map_err(|e| {
                             error(StatusCode::BAD_REQUEST, "selection_reason", &e.to_string())

@@ -116,12 +116,16 @@ impl Shell {
                 i18n::text(match state["ai_screen"].as_str().unwrap_or("main") {
                     "add" => "ai.connect-agent-58",
                     "manage" => "ai.configure",
-                    "main-edit" => "ai.main-agent",
                     _ => "ui.settings",
                 })
                 .to_owned()
             }
-            Kind::Assistant => i18n::text("spaces.edit-assistant").to_owned(),
+            Kind::Assistant => i18n::text(if self.assistants_ui.creating() {
+                "assistant.new"
+            } else {
+                "spaces.edit-assistant"
+            })
+            .to_owned(),
             Kind::Machine => self.machine_connections.title(self.catalog()).to_owned(),
             Kind::Schedule => i18n::text("schedules-ui.edit-schedule").to_owned(),
         })
@@ -265,7 +269,29 @@ impl Shell {
                     .rev()
                     .take_while(|frame| frame.kind == Kind::Ai)
                     .count();
+                let id = self.settings_state.state["connection_profile_id"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned();
+                let profile = self.settings_state.state["profiles"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|p| p["id"] == id)
+                    .cloned();
                 self.finish_editor(levels, true, window, cx);
+                if self
+                    .editors
+                    .last()
+                    .is_some_and(|frame| frame.kind == Kind::Assistant)
+                    && let Some(profile) = profile
+                {
+                    self.assistants_ui.choose_provider(
+                        &json!({"id":profile["id"],"model":profile["model"]}),
+                        window,
+                        cx,
+                    );
+                }
             }
         }
         if self
@@ -287,6 +313,29 @@ impl Shell {
             }
             let mut confirmed = false;
             match event["action"].as_str() {
+                Some("assistant-editor-created") => {
+                    if self
+                        .editors
+                        .last()
+                        .is_some_and(|frame| frame.kind == Kind::Assistant)
+                    {
+                        self.finish_editor(1, true, window, cx);
+                    }
+                    if self.host["page"] == 0
+                        && self.editors.is_empty()
+                        && let Some(owner) = event["owner"].as_str()
+                    {
+                        self.client.select_assistant(owner.into());
+                        self.client.select(String::new());
+                        self.assistant_list = false;
+                        self.assistant_overview = false;
+                        self.show_tasks = false;
+                        self.assistants_ui.open = false;
+                        self.assistants_ui.saved("new");
+                        self.project_page(0);
+                    }
+                    continue;
+                }
                 Some("assistant-editor-saved") => {
                     if self
                         .editors
@@ -378,11 +427,11 @@ impl Shell {
                 if command == "section" && !self.editors.is_empty() {
                     self.finish_editor(usize::MAX, false, window, cx);
                 }
-                let enters = matches!(command, "ai-open" | "ai-new" | "ai-manage" | "task-profile")
+                let enters = matches!(command, "ai-open" | "ai-new" | "ai-manage")
                     || (command == "ai-screen" && value["screen"] != "main");
                 if enters
                     && (self.settings_state.state["ai_busy"] != true
-                        || matches!(command, "ai-open" | "task-profile"))
+                        || matches!(command, "ai-open"))
                 {
                     self.begin_editor(Kind::Ai, window, cx);
                 }
@@ -397,7 +446,7 @@ impl Shell {
                         owner,
                     );
                 }
-                if matches!(command, "ai-open" | "task-profile") {
+                if matches!(command, "ai-open") {
                     self.project_page(2);
                 }
                 if command == "ai-save-connection" {
