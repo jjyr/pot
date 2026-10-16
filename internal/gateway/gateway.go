@@ -33,12 +33,10 @@ func (p Provider) Validate() error {
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" {
 		return errors.New("invalid provider endpoint")
 	}
-	if u.Scheme != "https" {
-		ip := net.ParseIP(u.Hostname())
-		if u.Scheme != "http" || ip == nil || !ip.IsLoopback() {
-			return errors.New("provider endpoint requires HTTPS (HTTP allowed only on loopback)")
-		}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("provider endpoint requires HTTP or HTTPS")
 	}
+
 	allowed := false
 	for _, host := range p.AllowedHosts {
 		if strings.EqualFold(host, u.Hostname()) {

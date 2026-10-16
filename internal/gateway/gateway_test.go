@@ -108,9 +108,9 @@ func TestRegistryImmutableEncryptedAndPinned(t *testing.T) {
 	}
 }
 func TestValidationAndCancelledTransport(t *testing.T) {
-	p := provider("http://public.example/v1/chat/completions", "openai_chat")
+	p := provider("ftp://public.example/v1/chat/completions", "openai_chat")
 	if p.Validate() == nil {
-		t.Fatal("accepted public HTTP")
+		t.Fatal("accepted non-HTTP endpoint")
 	}
 	p = provider("https://example.com/v1/chat/completions", "openai_chat")
 	p.AllowedHosts = []string{"another.example"}

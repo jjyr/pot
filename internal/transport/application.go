@@ -12,6 +12,7 @@ import (
 	"github.com/jjyr/pot/internal/protocol"
 	"github.com/jjyr/pot/internal/storage"
 	"github.com/jjyr/pot/internal/usage"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 type Application struct {
 	Control           *control.Service
+	Desktop           http.Handler
 	RuntimeID, BootID string
 	Name              string
 }
@@ -61,9 +63,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if method == "GET" {
 		switch path {
 		case "/api/v1/runtime":
-			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "control_id": a.RuntimeID, "name": a.Name, "capabilities": map[string]bool{"host": true, "sandbox": true}}, nil
+			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "control_id": a.RuntimeID, "name": a.Name, "capabilities": map[string]bool{"host": true, "sandbox": s.HasSandbox()}}, nil
 		case "/api/v1/control":
-			return map[string]any{"id": a.RuntimeID, "name": a.Name, "runtime_id": a.RuntimeID, "connected": true}, nil
+			return map[string]any{"id": a.RuntimeID, "name": a.Name, "runtime_id": a.RuntimeID, "connected": true, "role": s.ControlRole()}, nil
 		case "/api/v1/assistants":
 			definitions, err := s.Registry.Definitions(ctx)
 			if err != nil {
@@ -139,6 +141,21 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	if method == "POST" {
 		switch path {
+		case "/api/v1/assistant-notifications":
+			var body struct {
+				After      map[string]int64 `json:"after"`
+				Initialize bool             `json:"initialize"`
+			}
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			return s.Notifications(ctx, body.After, body.Initialize)
+		case "/api/v1/providers/check":
+			var body control.CheckProvider
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			return s.Profiles.Check(ctx, body)
 		case "/api/v1/providers":
 			var body control.SaveProfile
 			if err = decode(r.Body, &body); err != nil {

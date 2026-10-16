@@ -8,11 +8,13 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/instance"
+	"github.com/jjyr/pot/internal/modeldirectory"
 	"github.com/jjyr/pot/internal/resource"
 	"github.com/jjyr/pot/internal/storage"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -24,9 +26,11 @@ type Connection struct {
 	HasKey     bool   `json:"has_key"`
 }
 type ProfileSnapshot struct {
-	Profiles          []core.Profile `json:"profiles"`
-	Connections       []Connection   `json:"connections"`
-	DefaultProviderID string         `json:"default_provider_id"`
+	Profiles          []core.Profile                   `json:"profiles"`
+	Connections       []Connection                     `json:"connections"`
+	DefaultProviderID string                           `json:"default_provider_id"`
+	Directory         []modeldirectory.ProviderOption  `json:"directory,omitempty"`
+	ModelDefaults     map[string]modeldirectory.Limits `json:"model_defaults,omitempty"`
 }
 type profileReceipt struct {
 	InputHash string       `json:"input_hash"`
@@ -41,11 +45,17 @@ type ProfileStore struct {
 	mu               sync.Mutex
 	path, pluginRoot string
 	registry         *gateway.Registry
+	directory        *modeldirectory.Directory
 	state            profileFile
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
 	p := &ProfileStore{path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}}, Requests: map[string]profileReceipt{}}}
+	directory, err := modeldirectory.Open(filepath.Join(filepath.Dir(path), "models-dev"))
+	if err != nil {
+		return nil, err
+	}
+	p.directory = directory
 	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return p, nil
@@ -72,6 +82,8 @@ func (p *ProfileStore) Snapshot() ProfileSnapshot {
 	body, _ := json.Marshal(p.state.ProfileSnapshot)
 	var result ProfileSnapshot
 	json.Unmarshal(body, &result)
+	result.Directory = p.directory.Options()
+	result.ModelDefaults = p.directory.Defaults()
 	return result
 }
 func (p *ProfileStore) Resolve(id string) (core.ResolvedSpec, error) {
@@ -82,7 +94,11 @@ func (p *ProfileStore) Resolve(id string) (core.ResolvedSpec, error) {
 	}
 	for _, profile := range p.state.Profiles {
 		if profile.ID == id {
-			spec, err := profile.Resolve()
+			resolved, err := p.directory.Apply(profile)
+			if err != nil {
+				return core.ResolvedSpec{}, err
+			}
+			spec, err := resolved.Resolve()
 			if err != nil {
 				return spec, err
 			}
@@ -189,6 +205,14 @@ func (p *ProfileStore) Save(ctx context.Context, r SaveProfile) (core.Profile, e
 		copiedPlugins[name] = plugin
 	}
 	settings.Plugins = copiedPlugins
+	if r.ReasoningEffort != nil {
+		effort := strings.TrimSpace(*r.ReasoningEffort)
+		if effort == "" {
+			r.ReasoningEffort = nil
+		} else {
+			r.ReasoningEffort = &effort
+		}
+	}
 	output := r.MaxOutputTokens
 	if output == 0 {
 		output = 4096
@@ -199,7 +223,7 @@ func (p *ProfileStore) Save(ctx context.Context, r SaveProfile) (core.Profile, e
 	}
 	routeID := storage.ID()
 	profile := core.Profile{ID: r.ProfileID, Revision: revision, Name: r.Name, Provider: routeID, Model: r.Model, AuthRef: "provider:" + routeID, ModelSettings: r.ModelSettings, Params: core.Parameters{MaxOutputTokens: output, ReasoningEffort: r.ReasoningEffort, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
-	if err := profile.Validate(); err != nil {
+	if _, err := p.directory.Apply(profile); err != nil {
 		return core.Profile{}, err
 	}
 	provider := gateway.Provider{ID: routeID, Endpoint: r.Endpoint, Protocol: r.Protocol, SecretRef: "provider/" + routeID}
@@ -294,3 +318,5 @@ func (p *ProfileStore) SetDefault(id string) error {
 	p.state = next
 	return nil
 }
+
+func (p *ProfileStore) RunMetadata(ctx context.Context) { p.directory.Run(ctx) }
