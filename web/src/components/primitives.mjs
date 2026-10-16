@@ -6,13 +6,13 @@ export function action(label, callback, {primary = false, danger = false, disabl
   const item = node('button', `control${primary ? ' primary' : ''}${danger ? ' danger' : ''}`, label);
   item.type = 'button'; item.disabled = disabled; item.onclick = callback; return item;
 }
-export function field(label, value = '', {kind = 'text', choices, help = '', required = false} = {}) {
+export function field(label, value = '', {kind = 'text', choices, help = '', required = false, placeholder = '', min, max, readOnly = false} = {}) {
   const row = node('label', 'form-row'), text = node('span', 'form-label', label), body = node('span', 'field-body');
   const input = node(choices ? 'select' : kind === 'textarea' ? 'textarea' : 'input', 'field-input');
   if (choices) for (const [value, label] of choices) { const option = node('option', '', label); option.value = value; input.append(option); }
   else if (kind !== 'textarea') input.type = kind;
   if (kind === 'checkbox') input.checked = Boolean(value); else input.value = value ?? '';
-  input.required = required; input.setAttribute('aria-label', label); body.append(input);
+  input.required = required;input.placeholder=placeholder;input.readOnly=readOnly;if(min!==undefined)input.min=min;if(max!==undefined)input.max=max; input.setAttribute('aria-label', label); body.append(input);
   if (help) body.append(node('small', 'hint', help)); row.append(text, body); return {row, input};
 }
 export function section(title, description) {

@@ -93,6 +93,10 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 		return map[string]any{"tags": r.Tags}, nil
 	case "leave":
 		err := s.Machines.Leave(ctx, func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			sub := s.RunnerJournal.Subscribe()
+			defer sub.Close()
 			runs, err := s.RunnerJournal.Runs(ctx)
 			if err != nil {
 				return err
@@ -107,7 +111,27 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 					}
 				}
 			}
-			return nil
+			for {
+				runs, err := s.RunnerJournal.Runs(ctx)
+				if err != nil {
+					return err
+				}
+				all := true
+				for _, run := range runs {
+					if !run.Phase.Ended() || !run.CleanupConfirmed {
+						all = false
+						if run.Phase == "recovery_required" {
+							return core.ErrCleanupUnconfirmed
+						}
+					}
+				}
+				if all {
+					return nil
+				}
+				if _, err = sub.Next(ctx); err != nil {
+					return core.ErrCleanupUnconfirmed
+				}
+			}
 		})
 		if err != nil {
 			return nil, err

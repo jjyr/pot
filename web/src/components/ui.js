@@ -314,7 +314,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     for (const item of items) {
       const selected = (!client.production&&item.id==='main') || selectedAssistant?.id === item.id && selectedAssistant?.space_id === item.space_id;
       const row = el('button', `assistant-row${selected ? ' is-selected' : ''}`); row.type = 'button';
-      row.append(avatar(32,item.request_id||item.id)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name', item.name);
+      row.append(avatar(32,item.request_id||item.id)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');name.append(el('span','assistant-title',item.name));
       const badge=el('span','owner-badge badge-icon');badge.title=item.space_name||t(item.space_kind==='remote'?'remote':'local');badge.append(icon(item.space_kind==='remote'?'cloud':'machines'));name.append(badge);
       labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || item.phase || ''));
       row.append(labels); row.onclick = () => client.production ? selectAssistant(item) : (directoryOpen = false, renderShell());
@@ -368,7 +368,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         bubble.replaceChildren();
         if (message.role === 'tool') {const detail=el('details','tool-details');detail.append(el('summary','',message.text.split('\n')[0].slice(0,100)),el('pre','',message.text));bubble.append(detail);}
         else if (message.role === 'system') bubble.textContent = message.text;
-        else bubble.append(renderMarkdown(message.text));
+        else {const scope=client.scope?.();bubble.append(renderMarkdown(message.text,{downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined}));}
         record.text = message.text; record.role = message.role;
         row.className = `message role-${message.role}`;
       }
@@ -433,7 +433,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
   }
   function attach() {
-    unsubscribe(); stopChanges();
+    unsubscribe();
     const receivedEpoch = epoch;
     unsubscribe = client.subscribe(value => onSnapshot(value, receivedEpoch), value => {
       if (disposed || receivedEpoch !== state.epoch) return;
@@ -441,7 +441,6 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (value === 'connected' && disconnected) { disconnected = false; loadSnapshot(true); }
       else { connection = value; updateControls(); }
     });
-    if (client.production) stopChanges = client.changes(() => {loadDirectory(false); pages.refresh(); pages.permissions();});
     loadSnapshot();
   }
   async function selectAssistant(item, initial = false) {
@@ -470,12 +469,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       }));
       if (ticket !== directoryEpoch || disposed) return;
       assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : assistants.filter(item => item.space_id === spaces[index].id).map(item => ({...item,offline:true})));
+      client.assistants=assistants;
       if (results.some(result => result.status === 'rejected')) error = t('partialOffline');
       if (selectedAssistant) selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;
       renderShell();
       if(!assistants.length){const empty=el('div','empty-chat',t('noAssistants'));const setup=el('button','control',t('setupAI'));setup.onclick=()=>navigate('settings');empty.append(document.createElement('br'),setup);messageColumn.replaceChildren(empty);}
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);return;}}
-      if (autoSelect && !selectedAssistant && assistants.length) {
+      if (!selectedAssistant && assistants.length) {
         const requested=params.get('assistant_id');const requestedSpace=params.get('space_id');
         const selected=requested?assistants.find(item=>item.id===requested&&(!requestedSpace||item.space_id===requestedSpace)):assistants[0];
         if(!selected){error=t('missingAssistant');connection='offline';updateControls();return;}
@@ -523,7 +523,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   media.addEventListener('change', mediaChanged);
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
-  renderShell(); viewportChanged(); if (client.production) loadDirectory(); else attach();
+  renderShell();viewportChanged();
+  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
   return () => {
     disposed = true; directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

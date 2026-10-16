@@ -1,3 +1,4 @@
+import {createTopicVersions} from '../state/changes.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
 export class APIError extends Error {
   constructor(status, value) { super(value?.message || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
@@ -57,6 +58,18 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     send: ({boot_id, ...body}) => request('/api/v1/messages', {method: 'POST', body}),
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
     openMain: desktop ? () => invoke('OpenMain') : undefined,
+    openDesktop: desktop ? sandboxID => invoke('OpenDesktop',sandboxID) : undefined,
+    async downloadFile(task,path,options={}) {
+      const scope={...context,...options};
+      if(desktop)return invoke('DownloadFile',task,path,scope.owner,scope.space);
+      // Check the owner-bound read before handing the binary stream to the
+      // browser download manager; avoid buffering large files in the WebView.
+      await request(`/api/v1/tasks/${encodeURIComponent(task)}/file?${new URLSearchParams({path})}`,scope);
+      const url=scopedPath(`/api/v1/tasks/${encodeURIComponent(task)}/file-download?${new URLSearchParams({path})}`,scope);
+      const link=document.createElement('a');
+      link.href=`${base}${url}`;link.download=path.split('/').at(-1);link.hidden=true;document.body.append(link);
+      try{link.click();}finally{link.remove();}
+    },
     subscribe(onSnapshot, onStatus = () => {}) {
       const scope = {...context};
       let active = true, token;
@@ -66,10 +79,14 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
           const value = event.data;
           if (value.space_id === scope.space && value.owner === scope.owner) deliver(value.snapshot);
         });
+        const stopStatus=runtimeAPI.Events.On('pot:subscription',event=>{
+          const value=event.data;
+          if(active&&value.space_id===scope.space&&value.owner===scope.owner)onStatus(value.status);
+        });
         invoke('Subscribe', scope.space, scope.owner).then(value => {
           token = value; if (!active) invoke('Unsubscribe', value).catch(() => {}); else onStatus('connected');
         }).catch(() => { if (active) onStatus('offline'); });
-        return () => { active = false; stop(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
+        return () => { active = false; stop(); stopStatus(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
       }
       const source = new EventSource(`${base}${scopedPath('/api/v1/events', scope)}`);
       source.addEventListener('snapshot', event => { try { deliver(JSON.parse(event.data)); } catch { onStatus('offline'); } });
@@ -77,11 +94,12 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       source.onerror = () => { if (active) onStatus('offline'); };
       return () => { active = false; source.close(); };
     },
-    changes(onChange) {
-      const scope = {...context};
-      if (desktop) return runtimeAPI.Events.On('pot:changed', event => { if (event.data.space_id === scope.space) onChange(event.data.topics); });
+    changes(onChange,{space=context.space}={}) {
+      const scope = {...context,space},versions=createTopicVersions();
+      const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed);};
+      if (desktop) return runtimeAPI.Events.On('pot:changed', event => { if (!scope.space||event.data.space_id === scope.space) notify(event.data.topics,event.data.space_id,event.data.boot_id||''); });
       const source = new EventSource(`${base}${scopedPath('/api/v1/changes', scope)}`);
-      const deliver = event => { try { const value = JSON.parse(event.data); onChange(value.topics || value); } catch { /* next version event reconciles */ } };
+      const deliver = event => { try { const value = JSON.parse(event.data); const id=event.lastEventId||'',separator=id.lastIndexOf(':');notify(value.topics || value,scope.space,separator<0?'':id.slice(0,separator)); } catch { /* next version event reconciles */ } };
       source.addEventListener('changed', deliver); source.addEventListener('changes', deliver); source.onmessage = deliver;
       return () => source.close();
     },

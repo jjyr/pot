@@ -322,7 +322,7 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 	if known {
 		catalog := result.Params.Agent.ModelCatalog
 		if catalog == nil {
-			catalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{}`)}
+			catalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{}`), Models: map[string]map[string]json.RawMessage{}}
 		}
 		modalities := []string{"text"}
 		if slices.Contains(m.Modalities.Input, "image") {

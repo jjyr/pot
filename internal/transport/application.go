@@ -97,12 +97,8 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			return items, nil
 		case "/api/v1/providers":
 			return s.Profiles.Snapshot(), nil
-		case "/api/v1/agent", "/api/v1/config":
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			return c.Thread(ctx)
+		case "/api/v1/agent":
+			return s.AssistantConfiguration(ctx, owner)
 		case "/api/v1/instructions":
 			c, err := conversation()
 			if err != nil {
@@ -185,52 +181,17 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			}
 			return map[string]bool{"saved": err == nil}, err
 		case "/api/v1/assistants":
-			var body struct {
-				RequestID string `json:"request_id" required:"true"`
-				Name      string `json:"name" required:"true"`
-				ProfileID string `json:"profile_id,omitempty"`
-				Text      string `json:"text,omitempty"`
-			}
+			var body control.CreateAssistant
 			if err = decode(r.Body, &body); err != nil {
 				return nil, err
 			}
-			definition, err := s.Registry.CreateConfigured(ctx, body.RequestID, body.Name, body.ProfileID, body.Text, func() (*core.ResolvedSpec, error) {
-				if body.ProfileID == "" && s.Profiles.Snapshot().DefaultProviderID == "" {
-					return nil, nil
-				}
-				spec, err := s.Profiles.Resolve(body.ProfileID)
-				return &spec, err
-			})
-			if err != nil {
-				return nil, err
-			}
-			if _, err = s.Conversation(ctx, definition.ID); err != nil {
-				return nil, err
-			}
-
-			s.Changes.Notify("assistants")
-			return definition, nil
+			return s.CreateAssistant(ctx, body)
 		case "/api/v1/agent":
-			var body struct {
-				ProfileID          string `json:"profile_id" required:"true"`
-				ExpectedGeneration uint64 `json:"expected_generation" required:"true"`
-			}
+			var body control.SaveAssistantConfiguration
 			if err = decode(r.Body, &body); err != nil {
 				return nil, err
 			}
-			spec, err := s.Profiles.Resolve(body.ProfileID)
-			if err != nil {
-				return nil, err
-			}
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			if err = c.Configure(ctx, spec, body.ExpectedGeneration); err != nil {
-				return nil, err
-			}
-			s.Changes.Notify("assistants")
-			return c.Thread(ctx)
+			return s.SaveAssistantConfiguration(ctx, owner, body)
 		case "/api/v1/instructions":
 			var body struct {
 				Text     string `json:"text" required:"true"`

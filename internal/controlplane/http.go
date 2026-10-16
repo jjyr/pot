@@ -262,6 +262,12 @@ func (c *Connector) Connect(ctx context.Context) (*Peer, error) {
 	if c.Directory == nil {
 		return nil, fmt.Errorf("Directory required")
 	}
+	c.Directory.mu.Lock()
+	leaving := c.Directory.state.Leaving
+	c.Directory.mu.Unlock()
+	if leaving {
+		return nil, fmt.Errorf("Runner is leaving; original leases require settlement")
+	}
 	m := c.Directory.Membership()
 	if m == nil || c.Directory.Role() != "runner" {
 		return nil, fmt.Errorf("enrolled Runner required")
@@ -288,7 +294,7 @@ func (c *Connector) Connect(ctx context.Context) (*Peer, error) {
 	p := newPeer(ctx, conn, c.Directory, m.Enrollment.Control, Principal{RuntimeID: m.Enrollment.Control.RuntimeID, Epoch: m.Enrollment.Epoch}, c.Handler)
 	d := c.Directory
 	d.mu.Lock()
-	if d.state.Role != "runner" || d.state.Membership == nil || *d.state.Membership != *m {
+	if d.state.Role != "runner" || d.state.Membership == nil || *d.state.Membership != *m || d.state.Leaving {
 		d.mu.Unlock()
 		p.Close()
 		return nil, ErrUnauthorized

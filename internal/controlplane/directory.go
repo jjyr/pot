@@ -37,6 +37,7 @@ type book struct {
 	Key         string                `json:"key"`
 	Owner       string                `json:"owner"`
 	Role        string                `json:"role"`
+	Leaving     bool                  `json:"leaving"`
 	LocalLabels []string              `json:"local_labels"`
 	Members     map[string]member     `json:"members"`
 	Invites     map[string]invitation `json:"invites"`
@@ -130,8 +131,18 @@ func (d *Directory) Close() error {
 	}
 	return d.db.Close()
 }
-func (d *Directory) Identity() Identity      { return d.identity }
-func (d *Directory) Role() string            { d.mu.Lock(); defer d.mu.Unlock(); return d.state.Role }
+func (d *Directory) Identity() Identity { return d.identity }
+func (d *Directory) Role() string       { d.mu.Lock(); defer d.mu.Unlock(); return d.state.Role }
+
+// OwnerAction serializes initial ownership with persisted enrollment intent.
+func (d *Directory) OwnerAction(fn func() error) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.state.Role == "runner" || d.state.Pending != nil || d.state.Leaving {
+		return fmt.Errorf("Runtime is enrolled or enrollment is pending")
+	}
+	return fn()
+}
 func (d *Directory) OwnerCredential() string { d.mu.Lock(); defer d.mu.Unlock(); return d.state.Owner }
 func (d *Directory) AuthenticateOwner(token string) bool {
 	d.mu.Lock()
@@ -427,6 +438,10 @@ func (d *Directory) Leave(ctx context.Context, settle func(context.Context) erro
 		d.mu.Unlock()
 		return fmt.Errorf("Runner membership required")
 	}
+	if err := d.update(func(b *book) error { b.Leaving = true; return nil }); err != nil {
+		d.mu.Unlock()
+		return err
+	}
 	for id, p := range d.peers {
 		p.Close()
 		delete(d.peers, id)
@@ -437,5 +452,11 @@ func (d *Directory) Leave(ctx context.Context, settle func(context.Context) erro
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.update(func(b *book) error { b.Membership = nil; b.Pending = nil; b.Role = "neutral"; return nil })
+	return d.update(func(b *book) error {
+		b.Membership = nil
+		b.Pending = nil
+		b.Role = "neutral"
+		b.Leaving = false
+		return nil
+	})
 }

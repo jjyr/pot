@@ -156,7 +156,11 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 		return nil, err
 	}
 	var conversation *assistant.Conversation
-	options := assistant.ConversationOptions{Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, MaxTurnRequests: 128}
+	intent, err := s.Registry.InitialIntent(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	options := assistant.ConversationOptions{InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, MaxTurnRequests: 128}
 	options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
 		return s.prepare(ctx, conversation, thread, request)
 	}

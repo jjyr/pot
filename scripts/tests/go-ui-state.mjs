@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, ownerKey, setDraft, settleSend} from '../../web/src/state/conversation.mjs';
-import {allowedLink} from '../../web/src/components/markdown.mjs';
+import {allowedLink,parseFileLink} from '../../web/src/components/markdown.mjs';
 import {createEnterGuard, bindComposer} from '../../web/src/components/composer.mjs';
 
 const snapshot = (overrides = {}) => ({runtime_id: 'runtime', boot_id: 'boot', owner_id: 'control/assistant', conversation_id: 'conversation', cursor: '9007199254740993', messages: [], running: false, turn_id: null, ...overrides});
@@ -92,3 +92,7 @@ console.log('Go UI state and DOM composer checks passed');
 
 assert(allowedLink('https://example.com'));
 for (const value of ['javascript:alert(1)', 'data:text/html,hello', 'file:///etc/passwd', '/api/private']) assert(!allowedLink(value));
+const task='de305d54-75b4-431b-adb2-eb6b9e546014';
+assert.deepEqual(parseFileLink(`pot-file://${task}/reports/%E6%B5%8B%E8%AF%95.txt`),{task,path:'reports/测试.txt'});
+for(const path of ['../secret','%2e%2e/secret','/etc/passwd','a//b','a/%00b','a/%5Cb','a#fragment','a?query','%FF'])assert.equal(parseFileLink(`pot-file://${task}/${path}`),null,path);
+assert.equal(parseFileLink('pot-file://not-a-task/a.txt'),null);

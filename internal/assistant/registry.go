@@ -37,7 +37,8 @@ func OpenRegistry(path, root string) (*Registry, error) {
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_registry_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),root TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assistant_definitions(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,revision INTEGER NOT NULL,request_id TEXT NOT NULL UNIQUE,created_name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_initial(id TEXT PRIMARY KEY, binding TEXT NOT NULL, spec TEXT NOT NULL,rules TEXT NOT NULL);`); err != nil {
+CREATE TABLE IF NOT EXISTS assistant_initial(id TEXT PRIMARY KEY, binding TEXT NOT NULL, spec TEXT NOT NULL,rules TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_initial_intent(id TEXT PRIMARY KEY,intent TEXT NOT NULL);`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_registry_identity VALUES (1,?)", root); err != nil {
@@ -102,7 +103,12 @@ func (r *Registry) Create(ctx context.Context, request, name string) (Definition
 // CreateConfigured binds the entire creation input before publishing identity.
 // Initial configuration is immutable and only applied to a new conversation.
 func (r *Registry) CreateConfigured(ctx context.Context, request, name, profile, rules string, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
-	binding, err := core.HashJSON([]string{name, profile, rules})
+	return r.CreateWithIntent(ctx, request, name, profile, rules, nil, resolve)
+}
+
+// CreateWithIntent binds creation intent before publishing the assistant identity.
+func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingInput, rules string, intent json.RawMessage, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
+	binding, err := core.HashJSON([]any{name, bindingInput, rules, intent})
 	if err != nil {
 		return Definition{}, err
 	}
@@ -159,6 +165,15 @@ func (r *Registry) CreateConfigured(ctx context.Context, request, name, profile,
 		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_initial VALUES(?,?,?,?)", id, binding, string(data), rules); err != nil {
 			return err
 		}
+		intentBody := string(intent)
+		if len(intent) == 0 {
+			intentBody = "null"
+		} else if !json.Valid(intent) {
+			return errors.New("invalid initial configuration intent")
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_initial_intent VALUES (?,?)", id, intentBody); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES (?,?,?,?,?)", id, name, 1, request, name)
 		return err
 	})
@@ -204,4 +219,13 @@ func (r *Registry) Initial(ctx context.Context, id string) (*core.ResolvedSpec, 
 		}
 	}
 	return spec, rules, nil
+}
+
+func (r *Registry) InitialIntent(ctx context.Context, id string) (json.RawMessage, error) {
+	var value string
+	err := r.db.QueryRowContext(ctx, "SELECT intent FROM assistant_initial_intent WHERE id=?", id).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return json.RawMessage(value), err
 }
