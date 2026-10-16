@@ -72,11 +72,17 @@ explicitly and never redirects queued work to a different Control. The App relay
 uses existing authenticated connections; only owner-authorized native requests
 can register directories, deliver envelopes or acknowledge messages.
 
-Inbox states distinguish `queued`, `processing`, `processed`, `failed` and
+Inbox states distinguish `queued`, `processing`, `waiting`, `processed`, `failed` and
 `interrupted`; Outbox states are `queued` and `delivered`. A processing attempt is
 persisted before model invocation. Restart marks incomplete attempts interrupted
 instead of replaying potentially effective tools. Failed/interrupted attempts
 fence later inputs in that local conversation; another conversation can proceed.
+Allowance exhaustion before a model request retains a `waiting` envelope only
+when the persisted checkpoint has no started model/tool or pending tool effects.
+Automatic or owner-released continuation reuses that envelope and checkpoint,
+without adding its request twice. Correspondence waits have separate scope keys;
+manual continuation validates the recipient assistant. A waiting correspondence
+fences later messages in that correspondence while other correspondences may run.
 Unknown outcomes require investigation. An unconfigured receiver retains queued
 messages. Diagnostics remain available through history. Native Chat projects the
 latest inbound peer reply for conversations initiated by its assistant; there is

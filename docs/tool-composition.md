@@ -1,6 +1,6 @@
 # Agent tools and composition
 
-pot-agent keeps tools focused on individual operations. `exec` combines calls
+`internal/agent` keeps tools focused on individual operations. `exec` combines calls
 without merging their interfaces. Model-visible interface changes require explicit
 user agreement; see the repository `AGENTS.md`.
 
@@ -31,7 +31,7 @@ or approved commands. Task semantics are in [Task coordination](task-coordinatio
 
 ## JavaScript composition
 
-`exec({code, yield_time_ms?})` runs bounded QuickJS with top-level `await`, ordinary
+`exec({code, yield_time_ms?})` runs goja in an isolated Go worker process with top-level `await`, ordinary
 JavaScript processing, `tools.NAME(args)` and `text(value)`. Only `text()` output
 enters model history; child operations remain visible in events and approval cards.
 
@@ -61,8 +61,10 @@ replay uncertain calls. Existing receipts prevent duplicate execution.
 The isolate has no direct filesystem, network, Node or process APIs. Its tools are
 limited to the current role/profile, with recursive `exec`/`wait` excluded. Each
 child call uses the ordinary dispatcher and checks the assistant’s current machine capability. Composition
-cannot broaden authority. Code, memory, output, concurrency and execution time
-are bounded; exact limits and schemas live in `crates/agent/src/orchestration.rs`.
+cannot broaden authority. Code, output, concurrency and execution time are bounded; limits and schemas live
+in `internal/composition`. Worker memory uses a 64 MiB Go runtime soft limit plus
+a sampled heap watchdog; this is not a hard per-isolate allocation cap. Crossing
+the watchdog threshold terminates the worker and retains ordinary child receipts.
 
 Old `pot_` names are not aliases. Update explicit tool filters and custom prompts.
 Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable composition.

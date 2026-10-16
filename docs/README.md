@@ -3,19 +3,18 @@
 [Architecture](architecture.md) defines the current design and distinguishes pending
 implementation. Code defines actual behavior. Issue [#39](https://github.com/jjyr/pot/issues/39)
 records the earlier distributed-runtime delivery. Issue
-[#66](https://github.com/jjyr/pot/issues/66) tracks the Go/Wails migration.
+[#66](https://github.com/jjyr/pot/issues/66) records the Go/Wails transition.
 
 | Topic | Read |
 |---|---|
 | Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
 | Build, test and release | [Development](development.md) |
-| Delivered scope and remaining work | [Development plan](development-plan.md) |
-| Temporary Go/Wails migration plan, sequencing and rules | [Go/Wails migration](migrations/go-wails.md) |
+| Current product scope and deferred platform work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
 | Native Space ownership, combined views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
-| Backend responsibilities and API contracts | [Crates](backend-crates.md), [Runtime](../crates/runtime/README.md), [Control](../crates/control/README.md) |
+| Backend responsibilities and API contracts | [Backend components](backend-components.md) |
 | Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
@@ -69,9 +68,6 @@ retained in Git history.
 
 Write documentation in English. Keep one architecture overview and one source per
 contract; link rather than repeat. Commands belong in deployment/development.
-Remove contradictions and superseded recommendations. Keep phase progress and
-validation results in the owning issue (#66 for the migration), not in a second
-repository TODO table. Do not claim pending features from fixture results.
-The user-authorized temporary migration plan may describe phases and rules;
-delete it and its links once migration is complete, after transferring lasting
-contracts into the regular documentation.
+Remove contradictions and superseded recommendations. Keep implementation progress and
+validation results in the owning issue, not in a second repository TODO table.
+Do not claim pending features from fixture results.

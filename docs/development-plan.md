@@ -1,47 +1,59 @@
-# Development plan
+# Product scope and deferred work
 
-The Go/Wails migration has a user-authorized temporary
-[plan and rules](migrations/go-wails.md). Issue
-[#66](https://github.com/jjyr/pot/issues/66) owns its progress and validation
-results. The following describes the earlier distributed-runtime delivery.
+[Architecture](architecture.md) defines the current implementation and ownership.
+Issue [#66](https://github.com/jjyr/pot/issues/66) records the Go/Wails transition;
+issue [#39](https://github.com/jjyr/pot/issues/39) records the earlier distributed
+runtime design. Implementation progress and qualification results belong in the
+owning issue, separate from these lasting product boundaries.
 
-[Issue #39](https://github.com/jjyr/pot/issues/39) owns the single phase TODO table,
-commits and acceptance gates. [Architecture](architecture.md) is the design source.
-On 2026-10-11 the user accepted the delivered scope as complete. The untested
-external checks below remain follow-up verification, not closure gates for #39.
-Changes to model-visible tool interfaces require explicit agreement. New UI flows
-must be discussed and confirmed before implementation.
+## Current scope
 
-## Delivered
+Pot uses Go for product logic. The macOS App uses Wails v3 and the system WebView;
+its main window, tray panel and browser share HTML/CSS/JavaScript components,
+visual tokens and interaction state. Linux supports standalone Control and
+execution-node processes. The browser frontend is served by an independently
+configured `web-ui-server`, bound to one explicitly selected Control. Native App
+combines its local Space with one remote Control. See
+[Shared UI](shared-ui.md), [Multi-Space UI](multi-space-ui.md) and
+[Deployment](deployment.md).
 
-- Optional resources, typed Host/Sandbox execution targets and multiple assistants.
-- Assistant-owned DB AGENTS.md, self-scoped approved edits and project context.
-- One Control with outward machine membership, isolated App modes and fixed Web UI.
-- Minimal Machines status/execution target views and optional Chat file delivery.
-- Control-owned global resources synchronized before execution, remote plugin dispatch and receipts.
+Control owns assistants, conversations, instructions, Provider credentials,
+Tasks, schedules, approvals, accounting and global resources. Destination Runners
+execute immutable assignments against fixed Host/Sandbox targets through outward
+authenticated transport. Guidance, interruption, cancellation, allowance recovery,
+result transcripts and file delivery retain their original owner/run identity.
+Unknown effects require reconciliation rather than replacement execution.
+See [Task coordination](task-coordination.md) and [Permissions](permissions.md).
 
-## Qualification
+The macOS Sandbox boundary remains Swift. JavaScript plugins and Node execution,
+Python guest services and the desktop viewer keep their existing responsibilities.
+Go tool composition uses goja. Linux Sandbox resources are separately distributed,
+versioned and verified; client packages do not silently download them. Local
+resource preparation requires explicit owner consent. See
+[Backend components](backend-components.md), [Sandbox providers](sandbox-providers.md)
+and [Resource delivery](sandbox-resources.md).
 
-Fresh destination Task Agents, Control model/budget/approval services, guidance,
-cancellation, pinned plugins, result/file reads and remote schedules are delivered.
-Actual Linux Podman, physical Linux Control/macOS Host processes, native App/Web,
-Control restart, disconnect/crash and process-suspension recovery are qualified.
-The real DeepSeek test returned the destination project's marker; Provider secrets
-remained on Control. See [production integration](validation/task-agent-production-20261011.md),
-[clients](validation/control-cross-machine-ui-20261011.md),
-[notifications](validation/control-notifications-20261011.md) and
-[final qualification](validation/control-final-qualification-20261011.md).
+The Go release uses independent data roots and new machine registration. It does
+not import earlier Rust databases or provide mixed-version interoperability.
+Existing data, images and workspaces are not implicitly deleted or adopted.
 
-External push-service/browser OS notification delivery and whole-machine sleep or
-power loss have not been exercised. Keep these verification limits explicit in
-#39; process suspension and encrypted-payload tests do not establish them.
+## Deferred platform work
 
-Global resources and exact configuration are selected by Control. Execution nodes
-run the assigned model/execution target/tools or report an error. Task results do not
-require downloads unless files are actual deliverables. No live Agent relocation,
-three-node placement, peer pairing, per-machine capability grants or resource UI
-is planned for this release.
+Linux and Windows native desktop applications, Android and iOS clients, and new
+Sandbox Providers remain outside the current platform scope. Browser layout
+continues to support the documented phone/tablet widths; that does not imply a
+native mobile client or mobile execution Provider.
 
-Remote desktop transport is deferred by user decision until its connection design
-is agreed. Neither Control relay nor direct access is selected. It is outside the
-current #39 completion scope; existing local desktop support remains available.
+Remote desktop viewing through Control remains deferred until its transport and
+connection ownership are agreed. Current native desktop viewing is restricted to
+the exact local Runtime; remote Task execution does not imply remote desktop
+transport. General native desktop automation, live Agent relocation and automatic
+machine wake-up remain outside the current execution contract.
+
+Owner-enrolled macOS VM support remains distinct from distributing installation
+media or automatically cloning prepared development templates. Automatic Sandbox
+image upgrades, mutable remote resource catalogs and platform expansion require
+separate design and release work. Each release must retain explicit platform,
+resource-distribution and external-service qualification boundaries; process-level
+recovery does not establish whole-machine power-loss behavior or operating-system
+push delivery.

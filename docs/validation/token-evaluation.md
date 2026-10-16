@@ -1,6 +1,6 @@
 # Token evaluation foundation acceptance
 
-Date: 2026-10-06. Scope: standalone deterministic evaluation and Driver service/observation extensions. The [CLI guide](../../crates/eval/README.md) defines the delivered contract; the [framework design](../token-evaluation.md) lists future modes.
+Date: 2026-10-06. Scope: standalone deterministic evaluation and Driver service/observation extensions. The [CLI guide](https://github.com/jjyr/pot/blob/6d57b31/crates/eval/README.md) defines the delivered contract; the [framework design](../token-evaluation.md) lists future modes.
 
 ## Delivered
 

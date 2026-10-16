@@ -1,6 +1,6 @@
 # Long-term Agent token evaluation (design proposal)
 
-Status: architecture accepted; deterministic foundation and DeepSeek Flash live tests delivered, 2026-10-06. This document defines the long-term framework. The standalone `pot-eval` Go CLI implements the initial deterministic runner and usage validator; bounded DeepSeek Flash live execution is available; native baseline execution and broader comparisons remain planned. See the [CLI guide](../eval/README.md). It has no Pi-specific data model and does not change product execution or billing. The [runtime contract](../crates/runtime/README.md) describes current Pot behavior.
+Status: architecture accepted; deterministic foundation and DeepSeek Flash live tests delivered, 2026-10-06. This document defines the long-term framework. The standalone `pot-eval` Go CLI implements the initial deterministic runner and usage validator; bounded DeepSeek Flash live execution is available; native baseline execution and broader comparisons remain planned. See the [CLI guide](../eval/README.md). It has no Pi-specific data model and does not change product execution or billing. The [runtime contract](architecture.md) describes current Pot behavior.
 
 ## Objective
 
@@ -12,7 +12,7 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 |---|---|
 | Scenario catalog | Versioned user turns, workspace fixtures, execution target, task assertions, resource limits and optional controlled response trace |
 | Runner | Run matrix, isolated fresh sessions/workspaces, repeats, ordering, deadlines, lifecycle and artifact collection |
-| Agent executor | Directly invoke pot-agent with Thread configuration, injected services, controls and ordered observations |
+| Agent executor | Directly invoke `internal/agent` with Thread configuration, injected services, controls and ordered observations |
 | Execution target/tool service | Prepare identical fixtures and, where supported, common tool semantics/results for controlled comparisons |
 | Usage collector | Capture provider usage or native counters and declare what scope/stages are observable |
 | Normalizer/validator | Convert observations into a versioned schema, resolve cumulative snapshots and duplicate sources, preserve missing fields and raw provenance |
@@ -20,7 +20,7 @@ Measure the tokens, cost, latency and work required to complete reproducible sce
 
 The standalone Go runner lives in `internal/eval`, with `cmd/pot-eval` as its CLI and scenarios/experiments in `eval/`. It uses `internal/core`, `internal/agent`, `internal/modelprotocol` and the real executor, without depending on Runtime, Control, product Storage or App. It owns scenario execution, immutable run records, validation, comparison and bounded experiments. Go records use schema 2; legacy records are not imported.
 
-Production invocations go through `pot-runtime-execution`; isolated engine evaluation fixtures call `pot_agent::Agent::execute` directly. Thread context belongs to the caller's Store, not to an external engine session. The Engine/Binding/NativeRef and DriverHost/SessionHandle abstractions have been removed. A future external baseline belongs in a separate evaluation command; it must not restore adapters to production execution.
+Production invocations go through `internal/execution`; isolated engine evaluation fixtures call `agent.Agent.Execute` directly. Thread context belongs to the caller's Store, not to an external engine session. The Engine/Binding/NativeRef and DriverHost/SessionHandle abstractions have been removed. A future external baseline belongs in a separate evaluation command; it must not restore adapters to production execution.
 
 ## Standalone execution services
 
@@ -103,7 +103,7 @@ CI can enforce contract tests without networking. Live regression rules require 
 The [small-budget suite](token-evaluation-next-suite.md) delivers at most five conversational turns, cache utilization, deterministic fault/retry contracts and directed serial two-child delegation, with [dated results](validation/small-budget-evaluation.md). Large-output and long/repeated-compaction tests are deferred for this increment. The broader sequence below remains long-term scope; generic experiment matrices, parallel scheduling and verified pricing are not delivered by this fixed suite.
 
 1. Create the separate `pot-eval` runner, stabilize manifests/events/usage validation and implement a scripted Agent execution plus fixtures for duplicate snapshots, partial usage, counter resets, interrupted tools and compaction retries.
-2. Define Core observations and inject standalone execution services; run pot-agent directly with a request collector. Deliver CLI commands to run cases, validate records and compare two run sets; JSONL/raw artifacts first, compact HTML report second.
+2. Define Core observations and inject standalone execution services; run `internal/agent` directly with a request collector. Deliver CLI commands to run cases, validate records and compare two run sets; JSONL/raw artifacts first, compact HTML report second.
 3. Add short-chat, single/multiple tool rounds, large output, forced/automatic repeated compaction and post-compaction continuation cases with machine-checkable outcomes.
 4. Add comparison baselines through the same execution contract. Baseline-specific tests do not change benchmark scenarios or scoring rules.
 5. Establish live baselines and regression budgets once comparable real-provider measurements exist. Keep baseline runtime revisions and case versions pinned; version report formulas separately from raw observations.

@@ -34,6 +34,7 @@ App resources and portable CLI archives include these original plain-text files:
 | `GoDependencyLicenses.txt` | Go modules linked by the packaged entry points and the Go runtime |
 | `SwiftDependencyLicenses.txt` | Retained macOS Helpers' resolved package metadata and checkout notices; macOS packages only |
 | `FrontendFontLicense.txt` | IBM Plex Sans under the SIL Open Font License |
+| `FrontendIconLicense.txt` | Retained Lucide/Feather icons under ISC/MIT terms |
 | `ModelDirectoryLicense.txt` | The models.dev catalog seed and provider artwork |
 | `node/LICENSE` | The pinned Node.js distribution and its bundled dependencies |
 | `novnc/LICENSE.txt` | The pinned noVNC distribution |

@@ -1,9 +1,9 @@
 # Sandbox command execution
 
-The Host Agent (pot-agent) calls the same role-scoped tools. Runtime validates
-arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. pot-agent also routes these same tool names to
+The Host Agent (`internal/agent`) calls the same role-scoped tools. Runtime validates
+arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. `internal/agent` also routes these same tool names to
 Host after its [permission gate](permissions.md).
-`execution_target` selects Host or a Sandbox for pot-agent. Main uses the machine execution policy and
+`execution_target` selects Host or a Sandbox for `internal/agent`. Main uses the machine execution policy and
 tasks resolve policy at dispatch and retain that context only for their current execution. File tools share the same runner implementation.
 
 ## Commands and shells
@@ -30,7 +30,7 @@ execution home, independent of a command's `workdir`.
 writable stdin support. PTY mode attaches all three streams to a controlling
 terminal, returns merged output in stdout, and defaults to 24 rows by 80 columns.
 Terminal control bytes are returned as output; the protocol does not render a
-full terminal screen. This is shared by pot-agent through Pot tools.
+full terminal screen. This is shared by `internal/agent` through Pot tools.
 
 `write_stdin` accepts `chars` or an empty poll, `close_stdin`, `interrupt`,
 `terminate`, and PTY-only `rows`/`cols` (1–1000). `interrupt` sends SIGINT to the

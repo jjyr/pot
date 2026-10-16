@@ -47,7 +47,7 @@ No installer/first-run automation is delivered. Prepare the complete platform wi
 
 ## Bootstrap and enroll
 
-Build the Host components with `mise run check:swift` and the native runner with `mise exec -- cargo build --locked -p pot-tool-executor --release`. Sign Helper with `helper/virtualization.entitlements`. App bundling includes/signs the separate Helper and places the native runner/bootstrap assets in `runtime/macos-bootstrap/`; standalone installations must include `PotMacOSHelper` in runtime resources, or configure the trusted `POT_MACOS_HELPER` path. These paths are owner configuration, never Agent arguments.
+Build the Host components with `mise run check:swift` and the native runner with `mise run build:go`. Sign Helper with `helper/virtualization.entitlements`. App bundling includes/signs the separate Helper and places the native runner/bootstrap assets in `runtime/macos-bootstrap/`; standalone installations must include `PotMacOSHelper` in runtime resources, or configure the trusted `POT_MACOS_HELPER` path. These paths are owner configuration, never Agent arguments.
 
 1. Generate per-instance assets on Host:
 
@@ -57,13 +57,13 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    This generates a dedicated CA, guest certificate/key and token; it deletes the temporary CA signing key. It neither starts a VM nor accepts OS/Xcode terms.
 
-2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `crates/sandbox-images/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `operation_prepare.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
+2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `resources/sandbox/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `operation_prepare.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
 
    ```sh
    sudo ./provision.sh STANDARD_ACCOUNT /PRIVATE/GUEST_ENROLLMENT
    ```
 
-   The broker uses Xcode's available `/usr/bin/python3` (3.9+ required), launchd and the credential-free native Rust runner. It checks the account is standard and has no sudo grants. Control keys/config/SQLite stay under root-private `/var/db/pot-executor`; child environments carry no token. Remove Guest staging assets and shut the VM down before copying its complete platform bundle.
+   The broker uses Xcode's available `/usr/bin/python3` (3.9+ required), launchd and the credential-free native Go runner. It checks the account is standard and has no sudo grants. Control keys/config/SQLite stay under root-private `/var/db/pot-executor`; child environments carry no token. Remove Guest staging assets and shut the VM down before copying its complete platform bundle.
 
 3. Place only the CA certificate and matching token in the private Host prepared bundle above. Keep guest private keys on private guest disk, never workspace or Host skill shares. Record actual OS/Xcode versions in the manifest. Start the Pot Server/App, then enroll through the owner CLI:
 

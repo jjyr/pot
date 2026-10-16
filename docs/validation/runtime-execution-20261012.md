@@ -45,5 +45,5 @@ performed. The two Linux Podman remote integration cases and the libtailscale FF
 case remain gated.
 Runtime logs are bounded diagnostics; they do not replace durable business
 receipts. Interrupted executions retain local capacity until Runtime restart.
-See [Runtime](../../crates/runtime/README.md) for the current contract and
-[deployment](../deployment.md#runtime-agent-execution) for limits and log paths.
+See [Runtime](https://github.com/jjyr/pot/blob/6d57b31/crates/runtime/README.md) for the current contract and
+[deployment](https://github.com/jjyr/pot/blob/6d57b31/docs/deployment.md#runtime-agent-execution) for the recorded limits and log paths.

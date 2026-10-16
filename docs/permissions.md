@@ -83,5 +83,4 @@ The Runtime validates the Provider's resource bounds. Disk sizing depends on the
 Provider: Podman does not enforce a disk quota; Apple disk resizing requires an
 explicit rebuild. These settings do not constrain Host processes.
 
-Sources: `crates/control/src/permissions.rs`, `crates/agent/src/permissions.rs`,
-`crates/sandbox/src/manager.rs`.
+Sources: `internal/control/permissions.go`, `internal/agent` and `internal/sandbox`.

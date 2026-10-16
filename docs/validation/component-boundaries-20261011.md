@@ -44,5 +44,5 @@ acceptance was performed for this refactor. Previous dated reports are historica
 evidence, not a new qualification of this change.
 
 General task-secret distribution and master-key rotation remain future work.
-The current invocation boundary is documented in [Runtime](../../crates/runtime/README.md).
+The current invocation boundary is documented in [Runtime](https://github.com/jjyr/pot/blob/6d57b31/crates/runtime/README.md).
 This dated report covers the component extraction, not subsequent execution-manager changes.
