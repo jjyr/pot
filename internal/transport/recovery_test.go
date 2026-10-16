@@ -30,7 +30,11 @@ func TestRecoveryOwnerAcceptsOnlyIdentityAndIntent(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "original run not found") {
 		t.Fatal("owner recovery route unavailable", err)
 	}
-	for _, path := range []string{"/api/v1/runtime/recovery", "/api/v1/tasks/task/recovery"} {
+	_, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/turn/recovery", Body: json.RawMessage(`{"action":"reconcile","user_message_id":"original","cleanup_confirmed":true}`)})
+	if err == nil || !strings.Contains(err.Error(), "cleanup_confirmed") {
+		t.Fatal("Main caller supplied cleanup accepted", err)
+	}
+	for _, path := range []string{"/api/v1/turn/recovery", "/api/v1/runtime/recovery", "/api/v1/tasks/task/recovery"} {
 		if webui.Allowed("POST", path) {
 			t.Fatal("private recovery published to browser", path)
 		}

@@ -65,6 +65,7 @@ type Conversation struct {
 	input                       chan protocol.SendMessage
 	thread                      *core.Thread
 	turn                        *savedTurn
+	recovery                    *savedTurn
 	runCancel                   context.CancelFunc
 	messages                    []protocol.Message
 	cursor                      int64
@@ -189,6 +190,21 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 	} else if exists && value == "true" {
 		c.blocked = true
 	}
+	if raw, exists, err := store.Get(context.Background(), "conversation.recovery"); err != nil {
+		stop()
+		return nil, err
+	} else if exists && raw != "null" {
+		var recovered savedTurn
+		if err := core.DecodeJSON([]byte(raw), &recovered); err != nil {
+			stop()
+			return nil, err
+		}
+		if recovered.Owner != options.Owner || thread == nil || recovered.Generation != thread.Generation || recovered.UserMessageID == "" || recovered.Request.Validate() != nil || recovered.Request.ConversationID != options.ConversationID {
+			stop()
+			return nil, errors.New("persisted recovery turn binding mismatch")
+		}
+		c.recovery = &recovered
+	}
 	if raw, exists, err := store.Get(context.Background(), "conversation.turn"); err != nil {
 		stop()
 		return nil, err
@@ -206,6 +222,7 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 		if turn.State != "waiting" {
 			c.blocked = true
 			c.lastError = errors.New("previous execution was interrupted; inspect its receipts before continuing")
+			c.recovery = &turn
 			c.turn = nil
 			if err := c.appendTurnLocked(context.Background()); err != nil {
 				stop()
@@ -344,6 +361,11 @@ func (c *Conversation) appendTurnMetadataLocked(ctx context.Context, metadata ma
 	}
 	metadata["conversation.turn"] = string(raw)
 	metadata["conversation.blocked"] = fmt.Sprint(c.blocked)
+	recoveryRaw, err := json.Marshal(c.recovery)
+	if err != nil {
+		return err
+	}
+	metadata["conversation.recovery"] = string(recoveryRaw)
 	event, err := c.store.AppendEvent(ctx, protocol.Event{Type: "turn", Turn: turn}, metadata)
 	if err != nil {
 		return err
@@ -646,7 +668,13 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		options.Execution.Role = core.Summary
 	}
 	binding := &turnFeedback{conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}
-	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
+	cleanup := func(ctx context.Context, execution core.ExecutionContext, abort bool) error {
+		if err := options.Cleanup(ctx, execution, abort); err != nil {
+			return err
+		}
+		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
+	}
+	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
 	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: request.Text}, resuming, binding.event)
 	phase := execution.Succeeded
 	if err != nil {
@@ -709,6 +737,10 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 				return err
 			}
 		}
+	}
+	if c.blocked {
+		saved := *c.turn
+		c.recovery = &saved
 	}
 	c.turn = nil
 	return c.appendTurnLocked(ctx)

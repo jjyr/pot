@@ -97,6 +97,16 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if result, err, handled := a.terminalCall(ctx, method, u, owner, r); handled {
 		return result, err
 	}
+	if path == "/api/v1/turn/recovery" {
+		if method != "POST" {
+			return nil, errors.New("POST required")
+		}
+		var command control.MainRecoveryCommand
+		if err := decode(r.Body, &command); err != nil {
+			return nil, err
+		}
+		return s.RecoverMain(ctx, owner, command)
+	}
 	if result, err, handled := a.turnControlCall(ctx, method, path, owner, r); handled {
 		return result, err
 	}
