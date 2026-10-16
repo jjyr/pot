@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/jjyr/pot/internal/core"
 )
 
 var (
@@ -47,7 +48,8 @@ func (e *UnconfirmedCleanupError) Error() string {
 	return fmt.Sprintf("composition tool cleanup unconfirmed: %v", e.Cause)
 }
 
-func (e *UnconfirmedCleanupError) Unwrap() error { return e.Cause }
+func (e *UnconfirmedCleanupError) Unwrap() error            { return e.Cause }
+func (e *UnconfirmedCleanupError) CleanupUnconfirmed() bool { return true }
 
 // Limits uses the former Rust composition limits where equivalent controls exist.
 // StackDepth is a goja call-depth bound, not the former QuickJS byte stack size.
@@ -332,6 +334,9 @@ func invoke(ctx context.Context, tool Tool, args json.RawMessage, jsonLimit int)
 	}()
 	value, err := tool(ctx, args)
 	if err != nil {
+		if core.IsCleanupUnconfirmed(err) {
+			err = &UnconfirmedCleanupError{Cause: err}
+		}
 		result.err = err
 		return result
 	}

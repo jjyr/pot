@@ -47,11 +47,13 @@ var ErrSessionEnded = errors.New("plugin session ended; explicitly start a new s
 // Session ownership (Agent/epoch), the eight-session limit and input-schema
 // validation belong to the caller's execution manager.
 type Config struct {
-	Node       string
-	Identity   string
-	Entrypoint string
-	Files      map[string]string
-	Mode       string // text or mixed, derived from model capabilities by Control
+	Node            string
+	Identity        string
+	Entrypoint      string
+	Files           map[string]string
+	Mode            string        // text or mixed, derived from model capabilities by Control
+	ExecutionTarget string        // host (default) or sandbox under a trusted Python broker
+	IdleTimeout     time.Duration // zero uses the 30-minute default
 }
 
 type Content struct {
@@ -82,12 +84,26 @@ type Client struct {
 	wait       chan error
 	directory  string
 	id, mode   string
+	target     string
+	idle       time.Duration
 	touched    time.Time
 	ended      bool
 	cleanupErr error
 }
 
 func New(config Config) (*Client, error) {
+	if config.ExecutionTarget == "" {
+		config.ExecutionTarget = "host"
+	}
+	if config.ExecutionTarget != "host" && config.ExecutionTarget != "sandbox" {
+		return nil, errors.New("invalid trusted plugin execution target")
+	}
+	if config.IdleTimeout < 0 {
+		return nil, errors.New("invalid plugin idle timeout")
+	}
+	if config.IdleTimeout == 0 {
+		config.IdleTimeout = idleTimeout
+	}
 	if config.Identity == "" || (config.Mode != "text" && config.Mode != "mixed") {
 		return nil, errors.New("plugin requires pinned identity and text/mixed mode")
 	}
@@ -151,7 +167,7 @@ func New(config Config) (*Client, error) {
 		_ = output.Close()
 		return nil, err
 	}
-	c := &Client{cmd: cmd, stdin: input, stdout: output, reader: bufio.NewReader(output), wait: make(chan error, 1), directory: directory, id: hex.EncodeToString(id), mode: config.Mode, touched: time.Now()}
+	c := &Client{cmd: cmd, stdin: input, stdout: output, reader: bufio.NewReader(output), wait: make(chan error, 1), directory: directory, id: hex.EncodeToString(id), mode: config.Mode, target: config.ExecutionTarget, idle: config.IdleTimeout, touched: time.Now()}
 	go func() { c.wait <- cmd.Wait() }()
 	ok = true
 	return c, nil
@@ -190,7 +206,7 @@ func (c *Client) Execute(ctx context.Context, tool string, input map[string]any)
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	if time.Since(c.touched) >= idleTimeout {
+	if time.Since(c.touched) >= c.idle {
 		return Result{}, errors.Join(ErrSessionEnded, c.stop(false))
 	}
 	if tool == "" || len(tool) > 64 {
@@ -208,7 +224,7 @@ func (c *Client) Execute(ctx context.Context, tool string, input map[string]any)
 	if code, ok := input["code"].(string); ok && len(code) > 32768 {
 		return Result{}, errors.New("plugin code exceeds 32 KiB")
 	}
-	request, err := json.Marshal(map[string]any{"tool": tool, "input": input, "mode": c.mode, "execution_target": "host"})
+	request, err := json.Marshal(map[string]any{"tool": tool, "input": input, "mode": c.mode, "execution_target": c.target})
 	if err != nil {
 		return Result{}, err
 	}
@@ -294,7 +310,7 @@ func (c *Client) exchange(request []byte) (Result, error) {
 }
 
 func validImage(block Content) bool {
-	if (block.MIMEType != "image/png" && block.MIMEType != "image/jpeg") || len(block.Data) == 0 || len(block.Data) > maxImage || block.Width < 1 || block.Width > 4096 || block.Height < 1 || block.Height > 4096 {
+	if (block.MIMEType != "image/png" && block.MIMEType != "image/jpeg" && block.MIMEType != "image/webp") || len(block.Data) == 0 || len(block.Data) > maxImage || block.Width < 1 || block.Width > 4096 || block.Height < 1 || block.Height > 4096 {
 		return false
 	}
 	_, err := base64.StdEncoding.Strict().DecodeString(block.Data)
@@ -349,3 +365,6 @@ func (c *Client) stop(force bool) error {
 	c.cleanupErr = errors.New("plugin process-group cleanup unconfirmed; temporary files retained")
 	return c.cleanupErr
 }
+
+// SessionID is immutable and belongs only to this package/target/mode instance.
+func (c *Client) SessionID() string { return c.id }

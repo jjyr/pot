@@ -6,6 +6,7 @@ import (
 	"github.com/jjyr/pot/internal/core"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 )
 
 func ValidFilePath(value string) bool { return len(value) <= 4096 && core.SafeRelativePath(value) }
@@ -19,7 +20,7 @@ func ParseFileLink(link string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid file link")
 	}
 	decoded, err := url.PathUnescape(encoded)
-	if err != nil || !ValidFilePath(decoded) {
+	if err != nil || !utf8.ValidString(decoded) || !ValidFilePath(decoded) {
 		return "", "", fmt.Errorf("invalid file path")
 	}
 	return strings.ToLower(task), decoded, nil

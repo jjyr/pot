@@ -6,6 +6,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/dop251/goja v0.0.0-20261014135309-2cb8274eed06
 	github.com/wailsapp/wails/v3 v3.0.0-beta.30
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.60.1
 )

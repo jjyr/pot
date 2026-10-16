@@ -1,0 +1,81 @@
+package control
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"github.com/jjyr/pot/internal/core"
+	"github.com/jjyr/pot/internal/executor"
+	"github.com/jjyr/pot/internal/modelprotocol"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func localDispatcher(t *testing.T) (*Dispatcher, core.ExecutionContext, *executor.Engine) {
+	t.Helper()
+	root := t.TempDir()
+	p, err := OpenPermissions(filepath.Join(root, "permissions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Enroll("local", "epoch")
+	p.Configure("local", MachinePolicy{"host", "allow"})
+	operations, err := OpenOperations(filepath.Join(root, "operations.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { operations.Close() })
+	s := modelSession(t, "https://example.com/v1/chat/completions")
+	engine := executor.New(executor.Options{Home: root})
+	t.Cleanup(func() { engine.Close() })
+	d := &Dispatcher{RuntimeID: "local", Owner: "assistant", Turn: "turn", Generation: 1, DefaultTarget: core.HostTarget("local"), Spec: s.Spec, Permissions: p, Operations: operations, Host: engine}
+	return d, core.ExecutionContext{Owner: "assistant", Workspace: root, Role: core.Main}, engine
+}
+func TestAuthorizedHostCommandReceiptNoDuplicateEffect(t *testing.T) {
+	d, execution, engine := localDispatcher(t)
+	call := modelprotocol.ToolCall{ID: "call-1", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf x >> effect; printf hello","login":false}`)}
+	first, err := d.Dispatch(context.Background(), execution, call, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := d.Dispatch(context.Background(), execution, call, nil)
+	if err != nil || string(first) != string(second) {
+		t.Fatal(err, string(first), string(second))
+	}
+	body, err := os.ReadFile(filepath.Join(execution.Workspace, "effect"))
+	if err != nil || string(body) != "x" {
+		t.Fatal(string(body), err)
+	}
+	rebound := call
+	rebound.Arguments = json.RawMessage(`{"cmd":"printf y >> effect","login":false}`)
+	if _, err = d.Dispatch(context.Background(), execution, rebound, nil); err == nil {
+		t.Fatal("rebound receipt")
+	}
+	foreign := execution
+	foreign.Owner = "other"
+	if _, err = d.Dispatch(context.Background(), foreign, call, nil); err == nil {
+		t.Fatal("cross-owner operation")
+	}
+	if err = engine.Drain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type uncertainEngine struct{}
+
+func (uncertainEngine) Execute(context.Context, executor.Request, func(executor.Event) error) (map[string]any, error) {
+	return nil, core.ErrCleanupUnconfirmed
+}
+func TestUncertainHostCleanupFencesNewCall(t *testing.T) {
+	d, e, _ := localDispatcher(t)
+	d.Host = uncertainEngine{}
+	call := modelprotocol.ToolCall{ID: "uncertain", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"true","login":false}`)}
+	if _, err := d.Dispatch(context.Background(), e, call, nil); !core.IsCleanupUnconfirmed(err) {
+		t.Fatal(err)
+	}
+	call.ID = "new-call"
+	if _, err := d.Dispatch(context.Background(), e, call, nil); !errors.Is(err, ErrOperationUnknown) {
+		t.Fatal(err)
+	}
+}
