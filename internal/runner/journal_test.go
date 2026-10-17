@@ -16,12 +16,12 @@ func launchFixture(t *testing.T) Launch {
 	settings := core.DefaultAgentSettings()
 	settings.Plugins = map[string]core.PluginConfig{}
 	settings.BuiltinTools = []string{}
-	profile := core.Profile{ID: "profile", Revision: 1, Name: "test", Provider: "mock", Model: "model", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	profile := core.Profile{ID: "profile", Revision: 1, Name: "test", Provider: "mock", Model: "model", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	spec, err := profile.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Launch{ControlID: "control", AssistantID: "assistant", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.HostTarget("runtime"), Config: spec, Plugins: []string{}, Text: "do work"}
+	return Launch{ControlID: "control", AssistantID: "assistant", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("runtime"), Config: spec, Plugins: []string{}, Text: "do work"}
 }
 func TestImmutableLaunchDuplicateClaimsAndPendingCommandFence(t *testing.T) {
 	ctx := context.Background()
@@ -146,24 +146,17 @@ func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 		t.Fatal(record)
 	}
 }
-func TestTargetBindingRejectsMachineHostAndSandboxSubstitution(t *testing.T) {
-	target := core.SandboxTarget("machine", "shared")
-	for _, raw := range []string{`{"cmd":"x","execution_target":"host"}`, `{"cmd":"x","execution_target":{"runtime_id":"other","target":{"kind":"sandbox","sandbox_id":"shared"}}}`, `{"cmd":"x","sandbox_id":"shared"}`} {
+func TestWorkerCannotSelectAnotherTarget(t *testing.T) {
+	target := core.RuntimeTarget("machine")
+	for _, raw := range []string{`{"execution_target":"host"}`, `{"execution_target":{"runtime_id":"other"}}`} {
 		if _, err := BindTarget(json.RawMessage(raw), target); err == nil {
-			t.Fatal(raw)
+			t.Fatal("worker retargeted execution", raw)
 		}
 	}
-	for _, raw := range []string{`{"cmd":"x"}`, `{"cmd":"x","execution_target":"sandbox:shared"}`} {
-		data, err := BindTarget(json.RawMessage(raw), target)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var value map[string]json.RawMessage
-		_ = json.Unmarshal(data, &value)
-		var restored core.ExecutionTarget
-		if err := core.DecodeJSON(value["execution_target"], &restored); err != nil || restored != target {
-			t.Fatal(restored, err)
-		}
+	raw := json.RawMessage(`{"cmd":"pwd"}`)
+	bound, err := BindTarget(raw, target)
+	if err != nil || string(bound) != string(raw) {
+		t.Fatal(string(bound), err)
 	}
 }
 

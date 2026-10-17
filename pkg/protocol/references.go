@@ -20,14 +20,7 @@ func ValidLabel(value string) bool {
 	}
 	return true
 }
-func DefaultLabels(control bool, os string) []string {
-	labels := []string{os}
-	if control {
-		labels = append(labels, "task-runner", "desktop")
-	}
-	sort.Strings(labels)
-	return labels
-}
+func DefaultLabels(os string) []string { return []string{os} }
 
 type References struct {
 	Machine *string
@@ -102,7 +95,12 @@ type MachineRoute struct {
 func SelectMachine(machines []MachineRoute, control string, refs References) (string, error) {
 	tags := refs.Tags
 	if refs.Machine == nil && len(tags) == 0 {
-		tags = []string{"task-runner"}
+		for _, machine := range machines {
+			if machine.RuntimeID == control {
+				return control, nil
+			}
+		}
+		return "", fmt.Errorf("owning Control Runtime is unavailable")
 	}
 	matches := []string{}
 	for _, m := range machines {

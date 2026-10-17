@@ -104,9 +104,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			current.Launch = &launch
 			current.LaunchSent = true
 			current.Info.ExecutionTarget = &target
-			if target.Target.Kind == "sandbox" {
-				current.Info.SandboxID = target.Target.SandboxID
-			}
+
 			current.Info.Phase = protocol.TaskRunning
 			current.Info.RemoteWaiting = false
 			current.Error = ""

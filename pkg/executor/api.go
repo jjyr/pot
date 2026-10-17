@@ -51,9 +51,8 @@ func outputEvent(id, stream, text string) Event {
 }
 
 type Options struct {
-	Home            string
-	ExecutionTarget string // host (default), or sandbox under the retained broker.
-	Node            string
+	Home string
+	Node string
 }
 
 type Engine struct {
@@ -77,9 +76,7 @@ func New(options Options) *Engine {
 	if options.Home == "" {
 		options.Home = os.Getenv("HOME")
 	}
-	if options.ExecutionTarget == "" {
-		options.ExecutionTarget = "host"
-	}
+
 	scope, cancel := context.WithCancel(context.Background())
 	return &Engine{sessions: map[string]*process{}, options: options, scope: scope, cancel: cancel}
 }
@@ -95,9 +92,7 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if e.options.ExecutionTarget != "host" && e.options.ExecutionTarget != "sandbox" {
-		return nil, errors.New("invalid trusted execution target")
-	}
+
 	if err := request.Policy.Validate(); err != nil {
 		return nil, err
 	}

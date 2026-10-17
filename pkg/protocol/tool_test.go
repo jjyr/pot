@@ -9,7 +9,7 @@ import (
 func TestToolProjectionPreservesInputOutputAndTerminalStates(t *testing.T) {
 	var tool ToolCall
 	tool.Apply(core.Update{Type: "tool_started", ID: "child", ParentID: "parent", Name: "exec_command", Args: json.RawMessage(`{"cmd":"pwd"}`), AtMS: 10})
-	target := core.HostTarget("local")
+	target := core.RuntimeTarget("local")
 	tool.Apply(core.Update{Type: "tool_state", ID: "child", Phase: "waiting_approval", Target: &target, Workdir: "/project", AtMS: 20})
 	tool.Apply(core.Update{Type: "tool_state", ID: "child", Phase: "running", AtMS: 30})
 	tool.Apply(core.Update{Type: "tool_output", ID: "child", Stream: "stdout", Text: "one", AtMS: 40})

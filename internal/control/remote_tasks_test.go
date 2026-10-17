@@ -28,7 +28,7 @@ func taskControl(t *testing.T, id, url string) *Service {
 	}
 	t.Cleanup(func() { s.Close() })
 	if url != "" {
-		if err = s.Permissions.Configure(id, MachinePolicy{"host", "allow"}); err != nil {
+		if err = s.Permissions.Configure(id, MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 			t.Fatal(err)
 		}
 		ctx := context.Background()
@@ -99,7 +99,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 		t.Fatal(err)
 	}
 	defer peer.Close()
-	if err = control.Permissions.Configure("worker", MachinePolicy{"host", "ask"}); err != nil {
+	if err = control.Permissions.Configure("worker", MachinePolicy{ExecutionAccess: "ask"}); err != nil {
 		t.Fatal(err)
 	}
 	record, err := control.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "remote-create", MachineID: "worker", Text: "Write a remote artifact"})

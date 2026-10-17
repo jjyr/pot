@@ -44,7 +44,10 @@ func TestFileLinksReferencesAndRouting(t *testing.T) {
 			t.Fatal(p)
 		}
 	}
-	machines := []MachineRoute{{"runner", []string{"linux"}}, {"control", DefaultLabels(true, "macos")}}
+	machines := []MachineRoute{{"runner", []string{"linux", "task-runner"}}, {"control", DefaultLabels("macos")}}
+	if selected, err := SelectMachine(machines, "control", References{}); err != nil || selected != "control" {
+		t.Fatal("default placement followed labels instead of the owning Control", selected, err)
+	}
 	refs, err := ParseReferences("工作 /machine:runner /tag:linux /tag:linux /skill:pdf")
 	if err != nil || len(refs.Tags) != 1 {
 		t.Fatal(refs, err)

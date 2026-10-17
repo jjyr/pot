@@ -63,9 +63,6 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
             resources / "GoDependencyLicenses.txt",
             "./cmd/pot-app",
             "./cmd/pot",
-            "./cmd/pot-tool-executor",
-            "./plugins/podman/cmd",
-            "./plugins/apple-vm/cmd",
         ],
         env=environment,
     )
@@ -96,9 +93,6 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
     )
     for executable in (
         resources / "node/bin/node",
-        resources / "plugins/apple-vm/bootstrap/pot-tool-executor",
-        resources / "plugins/apple-vm/bin/provider",
-        resources / "plugins/podman/bin/provider",
         contents / "MacOS/pot",
         binary,
     ):

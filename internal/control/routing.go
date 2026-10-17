@@ -195,34 +195,9 @@ func (s *Service) modelContext() string {
 	return "Configured Provider/model summary (bounded; may omit choices). Choose autonomously; omission uses your active route. Use get_model_catalog for complete configured choices and model facts before selecting an omitted model. Explicit user choices take precedence; unavailable routes fail visibly.\n" + string(raw)
 }
 
-func (s *Service) selectTaskMachine(ctx context.Context, machine string) (string, error) {
-	if machine != "" {
-		return machine, nil
+func (s *Service) selectTaskMachine(_ context.Context, machine string) (string, error) {
+	if machine == "" {
+		machine = s.options.RuntimeID
 	}
-	for _, label := range s.Machines.LocalLabels() {
-		if label == "task-runner" {
-			return s.options.RuntimeID, nil
-		}
-	}
-	members, err := s.Machines.Machines(ctx)
-	if err != nil {
-		return "", err
-	}
-	ids := []string{}
-	for _, member := range members {
-		if !member.Enabled {
-			continue
-		}
-		for _, label := range member.Labels {
-			if label == "task-runner" {
-				ids = append(ids, member.Identity.RuntimeID)
-				break
-			}
-		}
-	}
-	sort.Strings(ids)
-	if len(ids) == 0 {
-		return "", errors.New("no machine is labelled task-runner; select an explicit machine")
-	}
-	return ids[0], nil
+	return machine, nil
 }

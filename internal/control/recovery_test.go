@@ -22,7 +22,7 @@ import (
 func recoveryFixture(t *testing.T) (*Service, runner.Launch, Operation) {
 	t.Helper()
 	s := taskControl(t, "runtime", "")
-	l := runner.Launch{ControlID: "runtime", AssistantID: "main", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.HostTarget("runtime"), Config: taskConfig(t), Plugins: []string{}, Text: "original task"}
+	l := runner.Launch{ControlID: "runtime", AssistantID: "main", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("runtime"), Config: taskConfig(t), Plugins: []string{}, Text: "original task"}
 	ctx := context.Background()
 	if _, err := s.RunnerJournal.Accept(ctx, l); err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestRecoveryOriginalOwnerRunAndTargetCannotBeRebound(t *testing.T) {
 	record.Receipt.ID, _ = op.Key()
 	record.Receipt.InputHash, _ = core.HashJSON(op)
 	wrong := l
-	wrong.ExecutionTarget = core.SandboxTarget(l.RuntimeID, "shared")
+	wrong.ExecutionTarget = core.RuntimeTarget("other-runtime")
 	if err := validateRecoveryOperation(wrong, record); err == nil {
 		t.Fatal("target changed")
 	}
@@ -202,7 +202,7 @@ func TestRecoveryUsesSignedOriginalRunnerAndControlReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer peer.Close()
-	l := runner.Launch{ControlID: "control", AssistantID: "main", RuntimeID: "worker", TaskID: "remote-task", RunID: "original-run", Generation: 1, ExecutionTarget: core.HostTarget("worker"), Config: taskConfig(t), Plugins: []string{}, Text: "original"}
+	l := runner.Launch{ControlID: "control", AssistantID: "main", RuntimeID: "worker", TaskID: "remote-task", RunID: "original-run", Generation: 1, ExecutionTarget: core.RuntimeTarget("worker"), Config: taskConfig(t), Plugins: []string{}, Text: "original"}
 	// The Control identity record is already terminal here to keep its automatic
 	// lifecycle from racing this deliberately incomplete destination fixture.
 	task := tasks.Record{SchemaVersion: 4, AssistantID: l.AssistantID, Info: protocol.TaskInfo{ID: l.TaskID, AssistantID: l.AssistantID, MachineID: l.RuntimeID, Phase: protocol.TaskInterrupted, ExecutionTarget: &l.ExecutionTarget}, Config: l.Config, Plugins: []string{}, RunID: l.RunID, Generation: l.Generation, Launch: &l, LaunchSent: true}

@@ -10,8 +10,8 @@ import (
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
+	pluginpkg "github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/protocol"
-	"github.com/jjyr/pot/pkg/resource"
 	"io"
 	"os"
 	"path/filepath"
@@ -107,7 +107,7 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 		if plugin.Source != nil {
 			directory = *plugin.Source
 		}
-		bundle, err := resource.LoadPlugin(directory)
+		bundle, err := pluginpkg.LoadPlugin(directory)
 		if err != nil {
 			return taskResource{}, err
 		}
@@ -245,21 +245,14 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 }
 
 func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, revision string, target core.ExecutionTarget) ([]core.SkillRoot, error) {
-	roots := []core.SkillRoot{}
-	hostRoot := s.options.Workspace
-	host := filepath.Join(hostRoot, "tasks", owner)
-	guest := host
-	if target.Target.Kind == "sandbox" {
-		if s.options.Sandboxes == nil {
-			return nil, errors.New("Sandbox manager unavailable")
-		}
-		w, err := s.options.Sandboxes.WorkspacePaths(ctx, target, owner, true)
-		if err != nil {
-			return nil, err
-		}
-		hostRoot, host, guest = w.HostRoot, w.HostCWD, w.GuestCWD
+	if !target.IsLocalTo(s.options.RuntimeID) {
+		return nil, errors.New("resource installation requires destination Runtime")
 	}
-	anchor, err := os.OpenRoot(hostRoot)
+	roots := []core.SkillRoot{}
+	workspaceRoot := s.options.Workspace
+	workspace := filepath.Join(workspaceRoot, "tasks", owner)
+
+	anchor, err := os.OpenRoot(workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +262,7 @@ func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, 
 		return nil, err
 	}
 	for i, tree := range r.Roots {
-		directory := filepath.Join(host, ".pot/control-resources", revision, fmt.Sprint(i))
+		directory := filepath.Join(workspace, ".pot/control-resources", revision, fmt.Sprint(i))
 		relativeRoot := filepath.Join(relative, fmt.Sprint(i))
 		if err := anchor.MkdirAll(relativeRoot, 0700); err != nil {
 			return nil, err
@@ -306,7 +299,7 @@ func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, 
 			}
 		}
 		fs.Close()
-		roots = append(roots, core.SkillRoot{Path: directory, Location: filepath.ToSlash(filepath.Join(guest, ".pot/control-resources", revision, fmt.Sprint(i))), Builtin: tree.Builtin})
+		roots = append(roots, core.SkillRoot{Path: directory, Location: filepath.ToSlash(filepath.Join(workspace, ".pot/control-resources", revision, fmt.Sprint(i))), Builtin: tree.Builtin})
 	}
 	return roots, ctx.Err()
 }

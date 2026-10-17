@@ -11,7 +11,6 @@ import (
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
-	"github.com/jjyr/pot/pkg/sandbox"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
@@ -168,30 +167,6 @@ func agentRecoveryValue(receipt Receipt) json.RawMessage {
 	}
 	return receipt.Result
 }
-func (s *Service) inspectSandboxOperation(ctx context.Context, l runner.Launch, op Operation) (json.RawMessage, error) {
-	if s.options.Sandboxes == nil {
-		return nil, errors.New("original Sandbox Manager unavailable")
-	}
-	resources, _, err := s.readPreparedTaskResources(ctx, l)
-	if err != nil {
-		return nil, err
-	}
-	var args map[string]any
-	if err = core.DecodeJSON(op.Args, &args); err != nil {
-		return nil, err
-	}
-	checker := Dispatcher{Spec: resources.Config}
-	name, prepared, err := checker.prepare(op.Tool, args, op.Target)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(prepared)
-	if err != nil {
-		return nil, err
-	}
-	grant := sandbox.AccessGrant{Target: op.Target, Owner: op.Owner, Turn: op.Turn, ThreadGeneration: op.Generation, Policy: resources.Config.Params.Agent.Shell, Worker: op.Worker, WorkspaceOwner: op.Owner}
-	return s.options.Sandboxes.InspectPreparedReceipt(ctx, grant, op.CallID, name, raw)
-}
 
 func (s *Service) recoverRun(ctx context.Context, record runner.Run, action string) (RecoverySnapshot, error) {
 	l := record.Launch
@@ -257,14 +232,7 @@ func (s *Service) recoverRun(ctx context.Context, record runner.Run, action stri
 	}
 	for i := range operations {
 		operation := &operations[i]
-		if operation.Receipt.State != "complete" && operation.Operation.Target.Target.Kind == "sandbox" {
-			value, inspectErr := s.inspectSandboxOperation(ctx, l, operation.Operation)
-			if inspectErr == nil {
-				operation.Receipt.State = "complete"
-				operation.Receipt.Result = value
-				operation.Receipt.Error = ""
-			}
-		}
+
 		out.Receipts = append(out.Receipts, RecoveryReceipt{operation.Operation.CallID, "control_operation", operation.Receipt.State})
 		if operation.Receipt.State != "complete" {
 			out.Unresolved = append(out.Unresolved, "original operation result unavailable: "+operation.Operation.CallID)
@@ -346,12 +314,7 @@ func (s *Service) proveRecoveryCleanup(ctx context.Context, record runner.Run, i
 	if !issued {
 		return nil
 	}
-	if l.ExecutionTarget.Target.Kind == "sandbox" {
-		if s.options.Sandboxes == nil {
-			return errors.New("original Sandbox cleanup service unavailable")
-		}
-		return s.options.Sandboxes.Finish(ctx, l.TaskID)
-	}
+
 	if record.BootID != s.options.BootID {
 		return errors.New("previous-boot Host cleanup has no original proof; recovery remains fenced")
 	}

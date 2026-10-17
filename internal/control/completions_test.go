@@ -3,11 +3,9 @@ package control
 import (
 	"context"
 	"fmt"
+	"github.com/jjyr/pot/pkg/protocol"
 	"path/filepath"
 	"testing"
-
-	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution(t *testing.T) {
@@ -20,11 +18,6 @@ func TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution(t *testing
 		t.Fatal(err)
 	}
 	// Resolving metadata must never invoke tool execution or require a Provider.
-	resolutions := 0
-	s.options.ResolveSandbox = func(context.Context) (core.ExecutionTarget, error) {
-		resolutions++
-		return core.HostTarget("local"), nil
-	}
 	for i := 0; i < 60; i++ {
 		name := fmt.Sprintf("skill-%02d", i)
 		writeTaskFixture(t, filepath.Join(s.options.AgentHome, "skills", name, "SKILL.md"), "---\nname: "+name+"\ndescription: Fixture skill\n---\nInstructions")
@@ -49,14 +42,11 @@ func TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution(t *testing
 	if items := lookup("SKILL-59"); len(items) != 1 || items[0].Token != "/skill:skill-59" {
 		t.Fatal(items)
 	}
-	before := resolutions
 	if _, err := s.Completions(ctx, "unknown", ""); err == nil {
 		t.Fatal("unknown owner accepted")
 	}
 	if _, err := s.Completions(ctx, "main", "bad\nquery"); err == nil {
 		t.Fatal("multiline query accepted")
 	}
-	if resolutions != before {
-		t.Fatal("invalid request resolved resources")
-	}
+
 }

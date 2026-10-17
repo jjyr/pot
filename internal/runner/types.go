@@ -83,7 +83,7 @@ func digest(value string) bool {
 func (l Launch) CanonicalBytes() ([]byte, error) { return core.CanonicalJSON(l) }
 func (l Launch) Digest() (string, error)         { return core.HashJSON(l) }
 func (l Launch) WorkspaceScope() (string, error) {
-	data, err := core.CanonicalJSON([]any{l.ControlID, l.TaskID, l.ExecutionTarget.Target})
+	data, err := core.CanonicalJSON([]any{l.ControlID, l.TaskID, l.ExecutionTarget})
 	if err != nil {
 		return "", err
 	}

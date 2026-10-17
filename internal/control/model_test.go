@@ -39,7 +39,7 @@ func modelSession(t *testing.T, endpoint string) *ModelSession {
 	t.Cleanup(func() { ledger.Close() })
 	settings := core.DefaultAgentSettings()
 	settings.Plugins = map[string]core.PluginConfig{}
-	p := core.Profile{ID: "test", Revision: 1, Name: "test", Provider: "test", Model: "test", AuthRef: "provider:test", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	p := core.Profile{ID: "test", Revision: 1, Name: "test", Provider: "test", Model: "test", AuthRef: "provider:test", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	spec, err := p.Resolve()
 	if err != nil {
 		t.Fatal(err)

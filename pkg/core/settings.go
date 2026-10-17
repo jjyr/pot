@@ -138,7 +138,7 @@ func (p Profile) Validate() error {
 	if err := p.Params.Agent.Validate(); err != nil {
 		return err
 	}
-	if !Identifier(p.ID) || p.Revision == 0 || p.Revision > MaxSafeInteger || p.Name == "" || len(p.Name) > 256 || p.Model == "" || len(p.Model) > 256 || !Identifier(p.Provider) || p.AuthRef != "provider:"+p.Provider || p.Params.MaxOutputTokens == 0 || p.Params.MaxOutputTokens > MaxSafeInteger || p.ToolPolicy.WorkerOrchestration || !p.ToolPolicy.SummaryReadOnly || p.ToolPolicy.Unattended != "guest_vm" {
+	if !Identifier(p.ID) || p.Revision == 0 || p.Revision > MaxSafeInteger || p.Name == "" || len(p.Name) > 256 || p.Model == "" || len(p.Model) > 256 || !Identifier(p.Provider) || p.AuthRef != "provider:"+p.Provider || p.Params.MaxOutputTokens == 0 || p.Params.MaxOutputTokens > MaxSafeInteger || p.ToolPolicy.WorkerOrchestration || !p.ToolPolicy.SummaryReadOnly || p.ToolPolicy.Unattended != "runtime" {
 		return fmt.Errorf("invalid profile or credential/tool policy")
 	}
 	if p.Params.Agent.ModelCatalog != nil {

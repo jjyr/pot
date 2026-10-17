@@ -47,7 +47,7 @@ and `spec.model`. Selection is autonomous and requires no routing approval or
 allowlist. Each occurrence resolves these fields anew; omitting both uses the
 owning assistant's active configuration. See [Task routing](task-coordination.md#autonomous-model-routing).
 
-Creation saves `spec.machine_id` (resolved from the current `task-runner` machine label when omitted). Updates without
+Creation saves `spec.machine_id` (defaulting to the owning Control when omitted). Updates without
 `machine_id` preserve the selected machine. Every occurrence creates a new Task,
 which reads that machine's current execution policy at dispatch. No schedule
 selects or retains a container. Remote machine IDs restore while offline;

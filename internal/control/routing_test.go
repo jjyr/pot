@@ -78,9 +78,15 @@ func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
 		t.Fatal("routing summary is unbounded or lost configured models")
 	}
 }
-func TestTaskMachineSelectionUsesLabelsAndStableOriginalReceipt(t *testing.T) {
+func TestTaskMachineSelectionDefaultsLocalAndKeepsOriginalReceipt(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
+	if machine, err := s.selectTaskMachine(ctx, ""); err != nil || machine != "local" {
+		t.Fatal("default did not select local Runtime", machine, err)
+	}
+	if err := s.Machines.SetLabels(ctx, "local", []string{"task-runner"}); err != nil {
+		t.Fatal(err)
+	}
 	machine, err := s.selectTaskMachine(ctx, "")
 	if err != nil || machine != "local" {
 		t.Fatal(machine, err)
@@ -116,7 +122,7 @@ func taskConfig(t *testing.T) core.ResolvedSpec {
 	t.Helper()
 	settings := core.DefaultAgentSettings()
 	settings.Plugins = map[string]core.PluginConfig{}
-	profile := core.Profile{ID: "fixture", Revision: 1, Name: "Fixture", Provider: "fixture", Model: "fixture", AuthRef: "provider:fixture", Params: core.Parameters{MaxOutputTokens: 128, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	profile := core.Profile{ID: "fixture", Revision: 1, Name: "Fixture", Provider: "fixture", Model: "fixture", AuthRef: "provider:fixture", Params: core.Parameters{MaxOutputTokens: 128, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	spec, err := profile.Resolve()
 	if err != nil {
 		t.Fatal(err)

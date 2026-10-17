@@ -24,11 +24,11 @@ hooks {
       }
       ["macos"] {
         check = new Script {
-          macos = "python scripts/timed-check pre-push:macos sh -c 'mise run lint && mise run check:swift && mise run test:release'"
+          macos = "python scripts/timed-check pre-push:macos sh -c 'mise run lint && mise run test:release'"
         }
       }
       ["scripts"] {
-        check = "python scripts/timed-check pre-push:scripts sh -c 'mise run test:hooks && mise run test:executor && mise run test:skills && mise run test:operation-prepare'"
+        check = "python scripts/timed-check pre-push:scripts sh -c 'mise run test:hooks && mise run test:executor'"
       }
       ["licenses"] {
         check = "python scripts/timed-check pre-push:licenses sh -c 'mise run licenses'"

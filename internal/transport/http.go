@@ -30,18 +30,7 @@ func Handler(app *Application, token string) http.Handler {
 			writeError(w, http.StatusConflict, protocol.APIError{Code: "identity_changed", Message: "Control identity changed"})
 			return
 		}
-		if desktopPath(r.URL.Path) {
-			if app.Desktop == nil {
-				writeError(w, 503, protocol.APIError{Code: "desktop_unavailable", Message: "Desktop gateway unavailable"})
-				return
-			}
-			query := r.URL.Query()
-			query.Del("assistant_id")
-			query.Del("space_id")
-			r.URL.RawQuery = query.Encode()
-			app.Desktop.ServeHTTP(w, r)
-			return
-		}
+
 		if app.terminalSocket(w, r) {
 			return
 		}

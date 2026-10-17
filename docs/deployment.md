@@ -16,19 +16,12 @@ mise install
 mise run build:cli
 ```
 
-CLI archives include the Go executables, installed Provider packages and retained
-runtime assets. The macOS Apple VM package includes its signed Swift Helper. Linux Sandbox execution
-uses Podman on both hosts and separately prepared, verified OCI image resources. See
-[Development](development.md) for artifact layout and build options. Upgrade
-Control, Runners and App from the same revision.
-
-Linux CLI archives bundle the official GNU/Linux Node runtime and require a
-glibc-based host for JavaScript plugins. The default managed Linux Sandbox uses
-Debian 13 (`trixie-slim`) and packages the same checksum-pinned official Node
-release for its guest architecture. See [Sandbox image](sandbox-image.md) for
-base-image and package-snapshot pins. Keep Runtime data roots on a local
-filesystem supporting private Unix sockets and file locks; a Sandbox's shared
-workspace is not a Runtime data root.
+CLI archives include the target Go CLI, pinned Node, tool plugins and Skills.
+Linux Node requires a glibc-based host. Install any tools required by your selected
+plugins, including Chrome/Chromium for browser execution. Runtime creates no VMs
+or containers. Keep private data roots on a local filesystem supporting Unix
+sockets and file locks. See [Development](development.md) for packaging.
+Upgrade Control, Runners and App from the same revision.
 
 The default Go root is `~/.pot-go` on macOS and Linux. Use `-root /absolute/path`
 for an independent instance. New roots require empty directories and receive a
@@ -37,43 +30,10 @@ concurrently.
 Keep each root private and preserve its identity and secret master key across
 restarts. See [Secrets](secrets.md).
 
-Tool, Provider and resource capabilities share Plugin packages under
-`Resources/plugins/`, using one `plugin.json` manifest. Stop Runtime before
-replacing a complete package and retain catalog records referenced by existing
-Sandbox pins. Providers and image catalogs can be updated independently of Pot
-core. Missing provider packages leave those Sandbox targets unavailable, with no
-Host fallback. See [Plugin packages](plugins.md).
-
-## Linux Sandbox runtime
-
-Install Podman for the account running Pot. On macOS, use `brew install podman`;
-on Linux, install the distribution's rootless Podman packages with cgroup v2 and
-systemd support. Host-only Runtime operation does not require a running Sandbox.
-
-Both hosts use the `podman` provider and the architecture-specific OCI bundle in
-the installed Podman plugin catalog. Start/Rebuild prepares missing resources through the
-[owner download confirmation](sandbox-resources.md#consent-progress-and-cache); an arbitrary
-locally tagged image cannot replace that verified bundle. Offline provisioning
-uses `pot resources import` as documented in [resource delivery](sandbox-resources.md).
-
-On macOS, Pot creates and selects a dedicated Podman machine for its Runtime
-execution root. Its initial capacity is 4 CPUs, 8 GiB memory and 50 GiB disk.
-These machine settings are distinct from per-container CPU/memory limits, and
-there is no public machine-sizing option. Each Sandbox uses `disk_gib: 0` for
-shared managed capacity. Pot neither adopts the user's default machine nor
-reconfigures an existing shared machine to satisfy one container request.
-The first explicit prepare/start can also download the digest-pinned official
-Podman machine OS using the `applehv` backend. This is a runtime prerequisite
-separate from Pot's Debian image catalog; its transfer is not included in the
-catalog's image consent byte count. Prepare it as well for offline operation.
-
-Machine state lives under the execution root's `podman-machine` directory.
-Workspace data lives under `podman-shared`, shared into the machine at
-`/mnt/pot/shared`; product databases and tokens stay outside it. Machine shares
-also include exact trusted Skill roots and any explicit mapping roots fixed at
-first initialization. A later Host mapping outside those pinned roots fails
-explicitly; Pot does not restart sibling containers to add it.
-Lifecycle and cleanup boundaries are defined in [Providers](sandbox-providers.md).
+Tool packages live under `Resources/plugins/`, with a `plugin.json` manifest and
+explicit declared files. Stop Runtime before replacing complete packages. See
+[Plugin packages](plugins.md). Main and default Tasks use the owning Control's
+local filesystem; explicit remote Tasks use their destination Runtime.
 
 ## Standalone Control
 
@@ -191,72 +151,28 @@ membership; re-enrollment creates a new epoch. `remove_member` on Control uses
 `runtime_id`; `leave` on Runner fences reconnect and confirms original cleanup
 before removing membership. Unknown execution outcomes are not replayed.
 
-Control routes unspecified Tasks only to machines labelled `task-runner`,
-preferring its own Runtime then stable Runtime ID order. Local Controls (including
-the embedded App) start with this label. A Space must retain at least one enabled
-machine with `task-runner`: add it to another machine before removing it from
-Control. Removing the last labelled member is also rejected. Offline members
-count toward this configuration constraint; they do not guarantee availability.
-Opening a Space without any configured task runner adds the label to Control.
-Set labels explicitly:
+Control runs unspecified Tasks on its own Runtime. Select an enrolled Runner
+explicitly with `machine_id`; labels describe machines and support explicit
+filtering. Set labels through the owner API:
 
 ```sh
 pot api -root "$HOME/.pot-control" -method POST \
-  -body '{"action":"set_tags","runtime_id":"RUNNER-ID","tags":["task-runner","linux"]}' \
+  -body '{"action":"set_tags","runtime_id":"RUNNER-ID","tags":["build","linux"]}' \
   /api/v1/runtime/control
 ```
 
-Labels never grant capability. Choose each machine's Host/Sandbox policy through
-Machines or `POST /api/v1/permissions`. Host operations request review under
-`host_access: "ask"`; `allow` is an explicit machine-wide operator policy.
+Labels never grant capability or change default placement. Configure execution authorization through
+Machines or `POST /api/v1/permissions`. Operations request review under
+`execution_access: "ask"`; `allow` is an explicit machine-wide operator policy.
 
 ## Advanced local resources
 
-`GET /api/v1/runtime/resources` lists assistant definitions, Host policy,
-installed Sandbox Providers, definitions, selection and recent owner-command
-receipts. This is a native/private owner API; browser sessions cannot use it.
-
-Mutations use `POST` with a stable `request_id`, `action` and `kind`. Exact retries
-return the original response, even after intervening policy edits. A pending
-command after process failure blocks conflicting replacement and requires
-inspection rather than automatic replay.
-
-| Action | Kind | Additional fields |
-|---|---|---|
-| `create` | `assistant` | `name`, or a complete `assistant` creation request |
-| `create` | `host` | Optional `policy`; defaults to explicit Host mode with command review |
-| `create` | `sandbox` | Stable `sandbox_id`, `name`, installed `provider`, optional `resources` |
-| `select` | `sandbox` | `sandbox_id`; affects later policy-resolved executions |
-| `update` | `sandbox` | `sandbox_id`, `resources` |
-| `mappings` | `sandbox` | `sandbox_id`, explicit `mappings` list; empty clears it |
-| `start`, `stop`, `recover`, `rebuild`, `delete` | `sandbox` | `sandbox_id` |
-| `status` | `sandbox` | `sandbox_id`; read-only, no command receipt required |
-
-Creating/selecting a Sandbox does not boot it. Creation retries cannot overwrite
-another definition; retired IDs cannot be reused. Deletion checks retained Task
-artifacts, current schedule references, active leases and unresolved receipts.
-Resource and mapping updates require the Provider's stopped-state conditions.
-Remote Control commands cannot create/select a Runner's definitions; use that
-Runner's local owner socket for these operations.
-
-Example Linux definition:
-
-```json
-{
-  "request_id": "sandbox-create-1",
-  "action": "create",
-  "kind": "sandbox",
-  "sandbox_id": "development",
-  "name": "Development",
-  "provider": "podman",
-  "resources": {"cpus": 4, "memory_gib": 8, "disk_gib": 0}
-}
-```
-
-The `podman` provider is the same on macOS and Linux; prepared native macOS VMs
-use `macos.apple-virtualization`. See [Providers](sandbox-providers.md),
-[macOS Sandbox](macos-sandbox.md), [Host mappings](sandbox-image.md) and
-[resource delivery](sandbox-resources.md).
+`GET /api/v1/runtime/resources` reports assistant definitions and durable owner
+command receipts. The POST interface supports only `action: "create"`,
+`kind: "assistant"`, a stable `request_id`, and assistant creation fields.
+Machine authorization uses [Permissions](permissions.md), not resource creation.
+VM definitions, mappings, image preparation and lifecycle commands are absent.
+Unknown commands and obsolete fields fail without modifying stored data.
 
 ## Independent browser service
 

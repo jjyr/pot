@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the installed plugin packages independently of App and guest images."""
+"""Build the installed plugin packages from declared tool files."""
 
 import argparse
 from pathlib import Path

@@ -20,7 +20,7 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	s := taskResourceService(t)
-	if err := s.Permissions.Configure("local", MachinePolicy{"host", "allow"}); err != nil {
+	if err := s.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
 	var peerCalls, mainCalls atomic.Int32
@@ -133,7 +133,7 @@ func TestAssistantMailAllowanceWaitResumesSameEnvelopeWithoutMainWaitOrReplay(t 
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	s := taskResourceService(t)
-	if err := s.Permissions.Configure("local", MachinePolicy{"host", "allow"}); err != nil {
+	if err := s.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32

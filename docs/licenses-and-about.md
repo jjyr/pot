@@ -32,12 +32,10 @@ App resources and portable CLI archives include these original plain-text files:
 |---|---|
 | `LICENSE.txt` | Pot's own source |
 | `GoDependencyLicenses.txt` | Go modules linked by the packaged entry points and the Go runtime |
-| `SwiftDependencyLicenses.txt` | Native macOS VM Swift Helper dependency notices; macOS packages only |
 | `FrontendFontLicense.txt` | IBM Plex Sans under the SIL Open Font License |
 | `FrontendIconLicense.txt` | Retained Lucide/Feather and GitHub Octicons under ISC/MIT terms |
 | `ModelDirectoryLicense.txt` | The models.dev catalog seed and Lobe Icons provider artwork |
 | `node/LICENSE` | The pinned Node.js distribution and its bundled dependencies |
-| `novnc/LICENSE.txt` | The pinned noVNC distribution |
 
 `scripts/go-notices` walks the actual Go package dependency graph using
 `go list -mod=readonly -deps`, collects module-root license/notice files, and
@@ -71,20 +69,10 @@ allowlist; it does not provide arbitrary file access.
 Source-only previews can lack prepared notices. They report that the complete
 notice set is unavailable; they do not substitute the font license for the
 linked dependencies. Packaged builds include all cross-platform notice files,
-and macOS packages additionally include the Swift Helper notices.
+and all supported platforms include the same runtime notices.
 
-## Retained and guest assets
+## Retained assets
 
-JS plugins, built-in Skills, Python guest brokers and the native macOS VM Swift Helper remain in
-their existing runtimes. Their own source headers and bundled license files
-remain with the distributed assets. Brand artwork is generated from the retained
-`resources/app/PotIcon.swift` master; the Wails tray atlases use the same drawing.
-`mise run icons` regenerates native, frontend and light/dark tray artwork.
-
-Linux Sandbox images are separate resources. Their pinned recipes and package
-versions live under `plugins/podman/image/`; the image's OS packages
-and corresponding source obligations are separate from the host Go inventory.
-A resource release must retain the upstream package notices and corresponding
-source required by its pinned packages. The host About list does not claim to
-inventory all software installed inside a guest image. macOS guest media and VM
-disks remain owner-supplied and are not distributed by Pot.
+Node tool plugins, built-in Skills and frontend assets retain their own notices.
+Brand icons continue to derive from `resources/app/PotIcon.swift`; tray atlases use
+the same artwork. Runtime packages contain no guest images, VM Helper or noVNC.

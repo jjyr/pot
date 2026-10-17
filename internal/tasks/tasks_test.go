@@ -61,7 +61,7 @@ func selection(t *testing.T) Selection {
 	settings := core.DefaultAgentSettings()
 	settings.Plugins = map[string]core.PluginConfig{}
 	settings.BuiltinTools = []string{}
-	p := core.Profile{ID: "profile", Revision: 1, Name: "test", Provider: "mock", Model: "model", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	p := core.Profile{ID: "profile", Revision: 1, Name: "test", Provider: "mock", Model: "model", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	config, err := p.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func selection(t *testing.T) Selection {
 func fixture(t *testing.T) (*Service, *fakePort, *core.ExecutionTarget, string) {
 	t.Helper()
 	p := &fakePort{runs: map[string]runner.Run{}}
-	target := core.HostTarget("machine")
+	target := core.RuntimeTarget("machine")
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
 	selected := selection(t)
 	s, err := Open(path, Options{ControlID: "control", RuntimeID: "machine", Port: p, ResolveModel: func(context.Context, string, protocol.CreateTask) (Selection, error) { return selected, nil }, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return target, nil }})
@@ -125,21 +125,21 @@ func TestLostLaunchAckInspectsOriginalAndPinsCurrentDispatchPolicy(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	*target = core.SandboxTarget("machine", "shared")
+	*target = core.RuntimeTarget("machine")
 	p.lose = true
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
 	current, _ := s.Get(ctx, "assistant", record.Info.ID)
-	if p.launches != 1 || !current.Info.RemoteWaiting || current.Info.ExecutionTarget.Target.Kind != "sandbox" {
+	if p.launches != 1 || !current.Info.RemoteWaiting || current.Info.ExecutionTarget.RuntimeID != "machine" {
 		t.Fatal(current, p.launches)
 	}
-	*target = core.HostTarget("machine")
+	*target = core.RuntimeTarget("other")
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
 	current, _ = s.Get(ctx, "assistant", record.Info.ID)
-	if p.launches != 1 || current.Info.ExecutionTarget.Target.Kind != "sandbox" || current.Info.Phase != protocol.TaskRunning {
+	if p.launches != 1 || current.Info.ExecutionTarget.RuntimeID != "machine" || current.Info.Phase != protocol.TaskRunning {
 		t.Fatal(current, p.launches)
 	}
 	options := s.options

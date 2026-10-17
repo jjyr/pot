@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/resource"
+	"github.com/jjyr/pot/pkg/plugin"
 )
 
 func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
@@ -26,7 +26,7 @@ func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	bundle, err := resource.LoadPlugin("../../plugins/github")
+	bundle, err := plugin.LoadPlugin("../../plugins/github")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
 
 func counterBundle(t *testing.T) core.PluginBundle {
 	t.Helper()
-	b := core.PluginBundle{Manifest: core.PluginManifest{SchemaVersion: 2, ID: "counter", Version: "1", Contributes: core.PluginContributions{Tools: &core.PluginTools{Runtime: "node", Execution: "host_or_sandbox", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{"node"}, Tools: []json.RawMessage{json.RawMessage(`{"name":"count","description":"count","inputSchema":{"type":"object","properties":{"session_id":{"type":"string"},"reset":{"type":"boolean"}},"additionalProperties":false}}`)}}}}, Files: map[string]string{"index.mjs": "export function createPlugin({emit}) { let n=0; return {async execute(){emit({type:'text',text:String(++n)});},async dispose(){}}; }"}}
+	b := core.PluginBundle{Manifest: core.PluginManifest{SchemaVersion: 2, ID: "counter", Version: "1", Contributes: core.PluginContributions{Tools: &core.PluginTools{Runtime: "node", Execution: "runtime", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{"node"}, Tools: []json.RawMessage{json.RawMessage(`{"name":"count","description":"count","inputSchema":{"type":"object","properties":{"session_id":{"type":"string"},"reset":{"type":"boolean"}},"additionalProperties":false}}`)}}}}, Files: map[string]string{"index.mjs": "export function createPlugin({emit}) { let n=0; return {async execute(){emit({type:'text',text:String(++n)});},async dispose(){}}; }"}}
 	var err error
 	b.Digest, err = b.Hash()
 	if err != nil {

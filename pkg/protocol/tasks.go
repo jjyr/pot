@@ -36,17 +36,17 @@ type TaskInfo struct {
 	RemoteWaiting   bool                  `json:"remote_waiting"`
 	ExecutionTarget *core.ExecutionTarget `json:"execution_target"`
 	AssistantID     string                `json:"assistant_id"`
-	SandboxID       string                `json:"sandbox_id"`
-	ID              string                `json:"id"`
-	Title           string                `json:"title"`
-	Phase           TaskPhase             `json:"phase"`
-	Paused          bool                  `json:"paused,omitempty"`
-	Pending         uint64                `json:"pending"`
-	CreatedAtMS     int64                 `json:"created_at_ms"`
-	UpdatedAtMS     int64                 `json:"updated_at_ms"`
-	Resource        string                `json:"resource"`
-	Routing         *TaskRouting          `json:"routing"`
-	ExecutorIcon    string                `json:"executor_icon"`
+
+	ID           string       `json:"id"`
+	Title        string       `json:"title"`
+	Phase        TaskPhase    `json:"phase"`
+	Paused       bool         `json:"paused,omitempty"`
+	Pending      uint64       `json:"pending"`
+	CreatedAtMS  int64        `json:"created_at_ms"`
+	UpdatedAtMS  int64        `json:"updated_at_ms"`
+	Resource     string       `json:"resource"`
+	Routing      *TaskRouting `json:"routing"`
+	ExecutorIcon string       `json:"executor_icon"`
 }
 type TaskRouting struct {
 	Profile         string  `json:"profile"`

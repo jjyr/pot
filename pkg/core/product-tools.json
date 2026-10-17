@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks use the selected machine's Host or shared development Sandbox according to its current policy at dispatch. Task completion closes its own processes and sessions; installed tools and files remain. Shared environment changes affect other tasks.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks run in a separate workspace on the fixed selected Runtime. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -54,7 +54,7 @@
         },
         "machine_id": {
           "type": "string",
-          "description": "Target machine ID. Omitted follows the current machine routing. Execution uses the machine policy at dispatch; no Sandbox selection is needed."
+          "description": "Target enrolled Runtime ID. Omitted uses the owning Control. The destination is fixed for this run and never automatically replaced."
         },
         "model": {
           "type": "string",
@@ -435,7 +435,7 @@
   },
   {
     "name": "list_execution_targets",
-    "description": "Inspect authorized Host and Sandbox execution targets grouped by Runtime; does not start a Sandbox.",
+    "description": "Inspect registered Runtime destinations and their machine policies. Discovery grants no execution authority.",
     "inputSchema": {
       "type": "object",
       "properties": {},

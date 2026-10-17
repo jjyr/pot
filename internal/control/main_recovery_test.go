@@ -56,7 +56,7 @@ func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string) (
 		id := "command"
 		checkpoint.Started = &id
 		checkpoint.Pending = []m.ToolCall{{ID: id, Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"never replay"}`)}}
-		op := Operation{Owner: "main", Turn: request, Generation: 1, CallID: id, Target: core.HostTarget("runtime"), Tool: "exec_command", Args: checkpoint.Pending[0].Arguments, Worker: false}
+		op := Operation{Owner: "main", Turn: request, Generation: 1, CallID: id, Target: core.RuntimeTarget("runtime"), Tool: "exec_command", Args: checkpoint.Pending[0].Arguments, Worker: false}
 		receipt, _, e := s.Operations.Begin(ctx, op)
 		if e != nil {
 			t.Fatal(e)

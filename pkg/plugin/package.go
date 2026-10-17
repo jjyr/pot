@@ -125,7 +125,7 @@ func (p Package) Executable(name string) (string, error) {
 }
 
 // ToolBundle projects only the selected tool capability and its text files.
-// Provider binaries and resource catalogs never enter transferable Task bundles.
+// Only explicitly declared tool files enter transferable Task bundles.
 func (p Package) ToolBundle() (core.PluginBundle, error) {
 	b := core.PluginBundle{}
 	if err := p.Manifest.Validate(); err != nil {

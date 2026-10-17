@@ -20,7 +20,6 @@ import (
 	"github.com/jjyr/pot/pkg/integrations"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
-	"github.com/jjyr/pot/pkg/sandbox"
 	"github.com/jjyr/pot/pkg/storage"
 	"github.com/jjyr/pot/pkg/terminal"
 	"io"
@@ -41,13 +40,11 @@ type Options struct {
 	Keys                                                                     secrets.KeySource
 	Target                                                                   TargetDispatch
 	CleanupTarget                                                            func(context.Context, string, bool) error
-	ResolveSandbox                                                           func(context.Context) (core.ExecutionTarget, error)
-	PrepareSandboxResources                                                  func(context.Context, string) error
-	Sandboxes                                                                *sandbox.Manager
-	Embedded                                                                 bool
-	Node                                                                     string
-	ControlHTTPClient                                                        *http.Client
-	IntegrationAdapters                                                      []integrations.Adapter
+
+	Embedded            bool
+	Node                string
+	ControlHTTPClient   *http.Client
+	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
 	mu                  sync.Mutex
@@ -208,7 +205,7 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 		e = nil
 	}
 	if e == nil {
-		e = executor.New(executor.Options{Node: s.options.Node, Home: s.options.AgentHome, ExecutionTarget: "host"})
+		e = executor.New(executor.Options{Node: s.options.Node, Home: s.options.AgentHome})
 		s.hosts[owner] = e
 		if s.hostGenerations == nil {
 			s.hostGenerations = map[string]uint64{}
@@ -221,20 +218,12 @@ func (s *Service) prepare(ctx context.Context, c *assistant.Conversation, thread
 	return s.prepareFor(ctx, c, thread, request, thread.Owner)
 }
 func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thread core.Thread, request core.TurnRequest, principal string) (assistant.RunOptions, error) {
-	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
+	_, _, err := s.Permissions.Policy(s.options.RuntimeID)
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	target := core.HostTarget(s.options.RuntimeID)
-	if policy.ExecutionMode == "sandbox" {
-		if s.options.ResolveSandbox == nil {
-			return assistant.RunOptions{}, errors.New("Sandbox execution unavailable; no Host fallback")
-		}
-		target, err = s.options.ResolveSandbox(ctx)
-		if err != nil {
-			return assistant.RunOptions{}, err
-		}
-	}
+	target := core.RuntimeTarget(s.options.RuntimeID)
+
 	rules, err := c.Instructions(ctx)
 	if err != nil {
 		return assistant.RunOptions{}, err
@@ -303,8 +292,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		if err = core.DecodeJSON(definition.InputSchema, &schema); err != nil {
 			return assistant.RunOptions{}, err
 		}
-		properties := schema["properties"].(map[string]any)
-		properties["execution_target"] = core.ExecutionSelectorSchema()
+
 		definition.InputSchema, _ = json.Marshal(schema)
 		definitions = append(definitions, definition)
 	}

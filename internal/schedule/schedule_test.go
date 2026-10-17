@@ -110,7 +110,7 @@ func setup(t *testing.T) fixture {
 	settings := core.DefaultAgentSettings()
 	settings.Plugins = map[string]core.PluginConfig{}
 	settings.BuiltinTools = []string{}
-	profile := core.Profile{ID: "profile", Revision: 1, Name: "test", Provider: "mock", Model: "model", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	profile := core.Profile{ID: "profile", Revision: 1, Name: "test", Provider: "mock", Model: "model", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	spec, err := profile.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func setup(t *testing.T) fixture {
 	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{ControlID: "control", RuntimeID: "machine", Port: port, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
 		reads++
 		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
-	}, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.HostTarget("machine"), nil }})
+	}, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.RuntimeTarget("machine"), nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

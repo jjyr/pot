@@ -88,16 +88,3 @@ func TestUserServiceDefinitionsPreserveLiteralPaths(t *testing.T) {
 		t.Fatal("service directive injection accepted")
 	}
 }
-
-func TestGlobalRootReachesNestedResourceImportFlags(t *testing.T) {
-	for _, args := range [][]string{
-		{"--root", t.TempDir(), "resources", "import"},
-		{"resources", "import", "-root", t.TempDir()},
-	} {
-		var out bytes.Buffer
-		err := run(context.Background(), args, &out)
-		if err == nil || err.Error() != "explicit resource export directory required" {
-			t.Fatal(args, err)
-		}
-	}
-}

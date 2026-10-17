@@ -51,7 +51,7 @@ existing assistant location is read-only. See
 Tasks combines both Spaces, then applies status grouping, search, ordering and
 pagination to the combined list. Rows group by assistant with ownership badges;
 Space/object identity disambiguates selection. Task details route to the owning
-Control/assistant and identify the actual execution machine and Host/Sandbox.
+Control/assistant and identify the actual execution machine and working directory.
 A task created by a message recipient belongs to that recipient. Back restores
 the combined list's filters and position.
 
@@ -62,10 +62,9 @@ not imply a schedule is paused.
 Machines groups by Control membership, local first and cloud second. A remote
 execution machine joined to the local Control appears in Local. The cloud section
 shows Connect cloud when unconfigured and retains cached inventory when offline.
-Machine actions and permission changes bind to their explicit Space/assistant,
-independently of the current Chat. Resource and lifecycle writes also include
-the exact Sandbox ID. Host/Sandbox Task links filter by the full execution target.
-Native desktop viewing requires the local Space and exact local Runtime.
+Machine permission changes bind to their explicit Space and Runtime,
+independently of the current Chat. Task links filter by Runtime. Machines expose
+execution authorization without VM lifecycle, resource or guest desktop controls.
 Machine labels and membership use native operator controls; browser sessions
 cannot reach private enrollment/administration endpoints.
 

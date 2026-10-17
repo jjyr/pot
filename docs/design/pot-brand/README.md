@@ -16,7 +16,7 @@ cutouts and a simplified nose/smile without the tight curl. There are no side ha
 `resources/app/PotIcon.swift` is the single character geometry master.
 `scripts/make-icons.swift` links it to
 export the App ICNS, PNG sizes, README image, Home Screen images, menu-bar PNGs and
-Sandbox wallpaper. `scripts/make-tray-atlas.swift` exports its light/dark activity
+`scripts/make-tray-atlas.swift` exports its light/dark activity
 and badge frames for the Wails menu bar; shared navigation uses the exported PNG.
 Run `mise run icons` to regenerate everything.
 

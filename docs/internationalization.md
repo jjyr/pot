@@ -30,34 +30,3 @@ UserDefaults or a synchronized Control setting. Language selection does not
 change model prompts, execution targets, Linux application languages, stored
 timestamps or scheduling time zones. Native operating-system dialogs retain the
 system's language.
-
-## Retained desktop and Sandbox pages
-
-[`resources/app/locales`](../resources/app/locales) contains the complete retained
-catalogs for the desktop viewer and Sandbox welcome page. Stable semantic keys
-separate translated text from source. Each catalog supplies `language.name` and
-must match English keys and placeholders.
-
-`scripts/localize-web` validates these catalogs and builds
-`desktop/index.template.html` and
-`plugins/podman/image/index.template.html` into generated `index.html`,
-`i18n.js` and page-specific `locales.json`. Generated files live under
-`.local/web/{desktop,sandbox}`. `--check` validates without writing. App and guest
-image preparation copy the generated assets; rebuild the image to distribute
-changed embedded welcome pages.
-
-The retained pages discover their locale catalogs, match exact tags before
-language-base fallback and load translations before desktop initialization.
-Live viewer language updates preserve noVNC and clipboard state. The Sandbox
-welcome page reads the viewer preference through the broker's public
-`GET /api/locale`; changing it requires the viewer token and same-origin policy.
-This language endpoint neither selects an execution target nor changes guest
-application languages.
-
-Adding a language requires a complete retained catalog and translations in the
-shared frontend; adding only a catalog does not extend the current product
-picker automatically. Keep complete sentence templates, identical placeholders
-and standard spellings for brands, protocols and units. Existing generic Web Push
-notification text supports English and Chinese.
-
-See [Development](development.md) for localization and UI verification commands.

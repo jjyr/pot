@@ -81,7 +81,7 @@ func TestAgentFromExternalModule(t *testing.T) {
 			settings := core.DefaultAgentSettings()
 			settings.Plugins = map[string]core.PluginConfig{}
 			settings.BuiltinTools = []string{}
-			profile := core.Profile{ID: "external", Revision: 1, Name: "external", Provider: "mock", Model: "fixture", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+			profile := core.Profile{ID: "external", Revision: 1, Name: "external", Provider: "mock", Model: "fixture", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 			spec, err := profile.Resolve()
 			if err != nil {
 				t.Fatal(err)

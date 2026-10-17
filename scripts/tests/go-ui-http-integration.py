@@ -253,7 +253,7 @@ def run(binary, base, env, cli_command):
                 {
                     "action": "configure",
                     "machine_id": runtime["runtime_id"],
-                    "machine_policy": {"execution_mode": "host", "host_access": "allow"},
+                    "machine_policy": {"execution_access": "allow"},
                 },
             )
             start_web()
@@ -303,7 +303,7 @@ def run(binary, base, env, cli_command):
                 {
                     "action": "configure",
                     "machine_id": runtime["runtime_id"],
-                    "machine_policy": {"execution_mode": "host", "host_access": "allow"},
+                    "machine_policy": {"execution_access": "allow"},
                 },
             )
             task = api(

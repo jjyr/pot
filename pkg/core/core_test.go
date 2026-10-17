@@ -9,7 +9,7 @@ import (
 )
 
 func TestStrictTargetsAndAssignmentBinding(t *testing.T) {
-	target := HostTarget("remote")
+	target := RuntimeTarget("remote")
 	data, _ := json.Marshal(target)
 	var restored ExecutionTarget
 	if err := DecodeJSON(data, &restored); err != nil || restored != target {
@@ -24,8 +24,8 @@ func TestStrictTargetsAndAssignmentBinding(t *testing.T) {
 	if err := assignment.ValidateBinding("owner", "task", target); err != nil {
 		t.Fatal(err)
 	}
-	if err := assignment.ValidateBinding("owner", "task", SandboxTarget("remote", "host")); err == nil {
-		t.Fatal("host/sandbox aliased")
+	if err := assignment.ValidateBinding("owner", "task", RuntimeTarget("other")); err == nil {
+		t.Fatal("Runtime identity substituted")
 	}
 	if err := assignment.ValidateBinding("other", "task", target); err == nil {
 		t.Fatal("owner substituted")
@@ -68,7 +68,7 @@ func TestCatalogMergeAndResolvedChecksum(t *testing.T) {
 	}
 	settings := DefaultAgentSettings()
 	settings.Plugins = map[string]PluginConfig{}
-	p := Profile{ID: "test", Revision: 1, Name: "test", Provider: "mock", Model: "test", AuthRef: "provider:mock", Params: Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	p := Profile{ID: "test", Revision: 1, Name: "test", Provider: "mock", Model: "test", AuthRef: "provider:mock", Params: Parameters{MaxOutputTokens: 100, Agent: settings}, ToolPolicy: ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	spec, err := p.Resolve()
 	if err != nil {
 		t.Fatal(err)

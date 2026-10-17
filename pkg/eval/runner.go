@@ -302,7 +302,7 @@ func Run(ctx context.Context, s Scenario, directory string, options RunOptions) 
 	}
 	feedback := &runFeedback{file: file, runID: runID, started: time.Now()}
 	services := &captureServices{inner: options.Services, feedback: feedback, requests: []core.ModelRequest{}, scripted: options.Services == nil, responses: append([]ScriptedResponse{}, s.Responses...)}
-	engine := executor.New(executor.Options{Home: filepath.Join(directory, "home"), ExecutionTarget: "host"})
+	engine := executor.New(executor.Options{Home: filepath.Join(directory, "home")})
 	defer engine.Close()
 	definitions := append([]modelprotocol.ToolDefinition{}, options.Tools...)
 	for _, raw := range core.ExecutionTools(spec.Params.Agent.Shell) {

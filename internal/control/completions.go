@@ -42,17 +42,12 @@ func (s *Service) Completions(ctx context.Context, owner, query string) (map[str
 	for label := range tags {
 		candidates = append(candidates, protocol.Completion{Token: "/tag:" + label, Label: label, Detail: "Machine label"})
 	}
-	target := core.HostTarget(s.options.RuntimeID)
-	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
+	target := core.RuntimeTarget(s.options.RuntimeID)
+	_, _, err = s.Permissions.Policy(s.options.RuntimeID)
 	if err != nil {
 		return nil, err
 	}
-	if policy.ExecutionMode == "sandbox" && s.options.ResolveSandbox != nil {
-		target, err = s.options.ResolveSandbox(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
+
 	prepared, err := s.prepareExecution(ctx, owner, target, false, "")
 	if err != nil {
 		return nil, err

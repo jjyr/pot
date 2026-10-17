@@ -12,7 +12,7 @@ func (cleanupUnconfirmedError) CleanupUnconfirmed() bool { return true }
 var ErrCleanupUnconfirmed error = cleanupUnconfirmedError{}
 
 // IsCleanupUnconfirmed recognizes the shared sentinel and narrow external
-// markers without coupling execution, sandbox or composition implementations.
+// markers without coupling execution or composition implementations.
 func IsCleanupUnconfirmed(err error) bool {
 	if errors.Is(err, ErrCleanupUnconfirmed) {
 		return true

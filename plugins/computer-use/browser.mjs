@@ -78,7 +78,7 @@ async function close() {
   closing = finishClose();
   try { await closing; } finally { closing = undefined; }
 }
-async function open(execution_target) {
+async function open() {
   if (closing) await closing;
   if (chrome || profile) throw new Error('Browser cleanup must complete before opening another session');
   profile = await mkdtemp(join(tmpdir(), 'pot-browser-'));
@@ -90,7 +90,7 @@ async function open(execution_target) {
   ].find(path => existsSync(path));
   if (!executable) throw new Error('Chromium/Chrome unavailable in this execution target; install it or configure POT_BROWSER_EXECUTABLE');
   chrome = spawn(executable, [
-    '--headless=new', ...(execution_target === 'host' ? [] : ['--no-sandbox']), '--disable-dev-shm-usage', '--no-first-run',
+    '--headless=new', '--disable-dev-shm-usage', '--no-first-run',
     '--disable-background-networking', '--disable-sync', '--remote-debugging-pipe',
     `--user-data-dir=${profile}`, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
@@ -148,7 +148,7 @@ async function operation(args) {
   const action = args.action;
   if (action === 'open') {
     if (ownerSession) throw new Error('Browser already open; use its session_id or close it');
-    await open(args.execution_target);
+    await open();
   } else if (!ownerSession || args.session_id !== ownerSession) throw new Error('Browser session expired or foreign');
   if (action === 'close') { await close(); return { closed: true }; }
   if (action === 'navigate' || (action === 'open' && args.url)) {

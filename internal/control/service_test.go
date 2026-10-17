@@ -83,7 +83,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = service.Permissions.Configure("local", MachinePolicy{"host", "ask"}); err != nil {
+	if err = service.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "ask"}); err != nil {
 		t.Fatal(err)
 	}
 	conversation, err := service.Conversation(ctx, "main")

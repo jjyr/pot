@@ -5,7 +5,7 @@
   "contributes": {
     "tools": {
       "runtime": "node",
-      "execution": "host_or_sandbox",
+      "execution": "runtime",
       "entrypoint": "index.mjs",
       "files": [
         "index.mjs",

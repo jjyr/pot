@@ -44,11 +44,6 @@ def doctor():
     ]:
         if not shutil.which(binary):
             raise SystemExit(f"Missing {binary}; run mise install.")
-    if not shutil.which("podman"):
-        raise SystemExit(
-            "Missing Podman; install it before Linux Sandbox development. No machine is created or started by doctor."
-        )
-    run("podman", "--version")
     run("go", "version")
     run("node", "--version")
     print("Development prerequisites OK. No downloads, VM or model calls performed.")
@@ -83,8 +78,6 @@ def sources(args):
 
 def check(mode, args):
     files = sources(args)
-    if mode == "lint":
-        run("python", "scripts/localize-web", "--check")
     fix = mode == "fmt"
     if files["go"]:
         if fix:

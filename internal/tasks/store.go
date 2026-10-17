@@ -276,7 +276,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	}
 	plugins := append([]string{}, selection.Plugins...)
 	id, runID := ID(), ID()
-	probe := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: request.MachineID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.HostTarget(request.MachineID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, Text: request.Text}
+	probe := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: request.MachineID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.RuntimeTarget(request.MachineID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, Text: request.Text}
 	if err := probe.Validate(request.MachineID); err != nil {
 		return Record{}, err
 	}

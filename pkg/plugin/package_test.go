@@ -12,9 +12,7 @@ import (
 func mixedPackage(t *testing.T, root string) Package {
 	t.Helper()
 	m := core.PluginManifest{SchemaVersion: 2, ID: "mixed", Version: "1", Contributes: core.PluginContributions{
-		Tools:            &core.PluginTools{Runtime: "node", Execution: "host_or_sandbox", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{}, Tools: []json.RawMessage{json.RawMessage(`{"name":"echo","description":"echo","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}`)}},
-		SandboxProviders: []core.PluginSandboxProvider{{ID: "fixture.provider", HostOS: []string{"darwin", "linux"}, Executable: "bin/provider"}},
-		Resources:        []core.PluginResourceCatalog{{Provider: "fixture.provider", Catalog: "catalog.json"}},
+		Tools: &core.PluginTools{Runtime: "node", Execution: "runtime", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{}, Tools: []json.RawMessage{json.RawMessage(`{"name":"echo","description":"echo","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}`)}},
 	}}
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -44,35 +42,19 @@ func TestMixedPackageToolProjectionCannotCarryLocalCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(b.Files) != 1 || b.Files["index.mjs"] == "" || len(b.Manifest.Contributes.SandboxProviders) != 0 || len(b.Manifest.Contributes.Resources) != 0 {
+	if len(b.Files) != 1 || b.Files["index.mjs"] == "" {
 		t.Fatal("local capabilities leaked", b)
 	}
 	if err = b.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"provider", "catalog", "extra-file"} {
-		t.Run(kind, func(t *testing.T) {
-			forged, err := p.ToolBundle()
-			if err != nil {
-				t.Fatal(err)
-			}
-			switch kind {
-			case "provider":
-				forged.Manifest.Contributes.SandboxProviders = p.Manifest.Contributes.SandboxProviders
-			case "catalog":
-				forged.Manifest.Contributes.Resources = p.Manifest.Contributes.Resources
-			case "extra-file":
-				forged.Files["bin/provider"] = "native payload"
-			}
-			forged.Digest, err = forged.Hash()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if forged.Validate() == nil {
-				t.Fatal("forged execution bundle accepted")
-			}
-		})
+	forged, _ := p.ToolBundle()
+	forged.Files["extra.mjs"] = "unselected payload"
+	forged.Digest, _ = forged.Hash()
+	if forged.Validate() == nil {
+		t.Fatal("extra tool payload accepted")
 	}
+
 }
 
 func TestCommonDiscoveryRejectsDuplicateIdentityAndUnsafeToolFiles(t *testing.T) {

@@ -2,10 +2,9 @@
 
 Pot uses Go for product logic, Wails v3 with the system WebView for the macOS
 App, and a shared HTML/CSS/JS frontend. The main window, tray panel and browser
-use the same components, styles and state contracts. Swift provides the macOS
-VM implementation inside the Apple VM provider plugin; Linux Sandboxes use the
-same independently packaged Go Podman plugin on macOS and Linux. Node/JavaScript plugins and Python guest services retain
-their existing responsibilities. See [component boundaries](backend-components.md).
+use the same components, styles and state contracts. Go executes local commands
+and Node tool plugins. Runtime manages no VMs, containers or guest brokers.
+See [component boundaries](backend-components.md).
 Reusable Go libraries live in `pkg/`, command entry points in `cmd/`, and product
 implementation in `internal/`. [Go libraries](go-libraries.md) describes the
 independent Agent loop and complete-host embedding APIs.
@@ -22,7 +21,7 @@ macOS App: Wails windows/tray + embedded Runtime + shared frontend
                       outward signed     outward signed
                       WebSocket RPC      WebSocket RPC
                          Runner A           Runner B
-                         Host/Sandbox       Host/Sandbox
+                         local tools        local tools
 
 independent web-ui-server -> one explicitly selected Control -> browser frontend
 ```
@@ -33,7 +32,7 @@ independent web-ui-server -> one explicitly selected Control -> browser frontend
 App's local UI dispatches directly through Wails bindings, without a loopback UI
 listener. Embedded Runtime cannot enable a remote Control listener or join a
 Control. Closing a window hides it while background work continues. Quitting App shuts
-down its local executions and Helpers.
+down its local executions.
 
 A standalone root starts neutral. An explicitly configured listener enables
 Control; a joined execution Runtime becomes Runner. One root cannot hold both
@@ -63,13 +62,13 @@ login and credentials through injected account and Secrets stores. Control
 provides authentication, routing and composition. [Integrations](credentials.md)
 defines browser authorization, run-bound credential injection and direct GitHub
 CLI access. An
-assistant remains on its owning Control. Task placement selects a machine; that
-machine's policy resolves Host or Sandbox when dispatch starts. The resulting
-execution target remains fixed for the run. An unavailable target fails visibly.
+assistant remains on its owning Control. Main tools run there; new Tasks default
+to the same Runtime. An explicit machine selects an enrolled Runner. The actual
+Runtime remains fixed for the run, including receipts and file delivery. Missing
+or disconnected targets are never replaced. Labels describe machines but do not
+implicitly select a default destination or grant capabilities.
 
-Without an explicit machine, routing selects a `task-runner` label, preferring
-local Runtime then stable Runtime ID order. Labels describe routing intent and
-never grant capabilities. Model selection is independent: an explicit configured
+Model selection is independent: an explicit configured
 Provider/model takes precedence; omission snapshots the invoking assistant's
 active configuration. Saved capacity rules admit or queue that route without
 choosing another model. Existing Tasks keep their resolved specification.
@@ -112,7 +111,7 @@ Uncertain effects and unconfirmed cleanup retain admission/capacity fences.
 Models execute through Control's Gateway and usage ledger. Provider credentials
 never cross to Runner or guest tools. Remote model streams are bounded signed
 chunks with strict sequence; losing a stream read does not resample the model.
-Host approvals bind the original assistant/Task, generation, call, exact operation
+Execution approvals bind the original assistant/Task, generation, call, exact operation
 and target. Runner independently validates the signed approved operation against
 its run before execution. See [permissions](permissions.md).
 
@@ -146,28 +145,22 @@ and the last real user message before continuing. Provider cache lifetime does
 not reset section comparison. Raw HTTP/token observations, estimates and budget
 reservations remain distinct.
 
-Plugins use one package format and capability registry. Packages declare tools,
-Sandbox Providers and resource catalogs independently. `pkg/plugin` loads manifests
-and confines package paths without starting processes. Profile/Task selection
-projects only tool declarations and files; Runtime separately activates locally
-installed Provider capabilities. See [Plugin packages](plugins.md).
+Tool plugins use the package format in `pkg/plugin` and bounded Node sessions in
+`pkg/pluginhost`. Packages contain schema-2 `contributes.tools` with
+`execution: "runtime"`. Provider/resource capabilities are unsupported. Runtime
+locates tool/Skill assets independently of execution preparation. See
+[Plugin packages](plugins.md).
 
-Sandbox Providers are trusted host processes using the Sandbox-specific private
-RPC in `pkg/sandboxprovider`. Node tool sessions retain their existing protocol in
-`pkg/pluginhost`; no common communication protocol is imposed. Image recipes,
-defaults, guest bootstrap and native VM Helpers belong to the packages. Core owns
-policy, consent, verified delivery and durable execution state, without linking
-platform implementations. See [Provider protocol](sandbox-provider-protocol.md).
+All execution uses the destination Runtime service account. Default authorization
+is `ask`; allow-once binds exact call arguments, while always-allow persists for
+one enrolled machine in one Space across assistants and Tasks. Instruction edits
+retain independent review. See [Permissions](permissions.md).
 
-Sandbox definitions, selected Sandbox, VM/container lifecycle and execution scopes
-are separate. Creating/selecting a definition does not boot a guest. Main and
-Workers may share a Sandbox; task workspaces and processes are scoped separately,
-but they are not mutual security boundaries. Provider/mapping/resource changes
-and deletion obey stopped-state, active-lease, receipt and retained-reference
-checks. Unknown cleanup requires explicit recovery. On macOS, Linux containers
-share a dedicated Pot-managed Podman machine; Linux hosts use rootless local
-Podman. Container boundaries share the underlying Linux kernel. The retained
-Swift Helper owns native macOS VMs. See [Sandbox providers](sandbox-providers.md).
+Main and Task workspaces live in the destination filesystem with no mapping or
+implicit project copy. Commands use local OS paths. Process-group cleanup and
+unknown-result fences remain; this path provides no guest cgroup containment or
+VM isolation. See [Executor](executor.md). Optional VM management, automatic node
+placement and remote Main tools remain deferred under issue #74.
 
 ## Persistence and updates
 

@@ -10,7 +10,6 @@ import (
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
-	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 type MainRecoveryCommand struct {
@@ -90,14 +89,7 @@ func (s *Service) RecoverMain(ctx context.Context, owner string, q MainRecoveryC
 		if op.Owner != owner || op.Turn != state.RequestID || op.Generation != state.Generation || op.Worker || !op.Target.IsLocalTo(s.options.RuntimeID) || key != record.Receipt.ID || hash != record.Receipt.InputHash {
 			return out, errors.New("original Main operation binding changed")
 		}
-		if record.Receipt.State != "complete" && op.Target.Target.Kind == "sandbox" {
-			value, e := s.inspectMainSandboxOperation(ctx, *state, op)
-			if e == nil {
-				record.Receipt.State = "complete"
-				record.Receipt.Result = value
-				record.Receipt.Error = ""
-			}
-		}
+
 		out.Receipts = append(out.Receipts, RecoveryReceipt{ID: op.CallID, Source: "original_operation", State: record.Receipt.State})
 		if record.Receipt.State != "complete" {
 			out.Unresolved = append(out.Unresolved, "original Main operation result unavailable: "+op.CallID)
@@ -155,33 +147,14 @@ func (s *Service) RecoverMain(ctx context.Context, owner string, q MainRecoveryC
 	s.Changes.Notify("usage")
 	return out, nil
 }
-func (s *Service) inspectMainSandboxOperation(ctx context.Context, state assistant.RecoveryState, op Operation) (json.RawMessage, error) {
-	if s.options.Sandboxes == nil {
-		return nil, errors.New("original Sandbox Manager unavailable")
-	}
-	var args map[string]any
-	if err := core.DecodeJSON(op.Args, &args); err != nil {
-		return nil, err
-	}
-	checker := Dispatcher{Spec: state.Config}
-	name, prepared, err := checker.prepare(op.Tool, args, op.Target)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(prepared)
-	if err != nil {
-		return nil, err
-	}
-	grant := sandbox.AccessGrant{Target: op.Target, Owner: op.Owner, Turn: op.Turn, ThreadGeneration: op.Generation, Policy: state.Config.Params.Agent.Shell, Worker: false, WorkspaceOwner: op.Owner}
-	return s.options.Sandboxes.InspectPreparedReceipt(ctx, grant, op.CallID, name, raw)
-}
+
 func (s *Service) proveMainRecoveryCleanup(ctx context.Context, owner string, state assistant.RecoveryState, operations []OperationRecord) error {
 	if len(operations) == 0 {
 		return nil
 	}
 	hasHost := false
 	for _, record := range operations {
-		if record.Operation.Target.Target.Kind == "host" {
+		if record.Operation.Target.IsLocalTo(s.options.RuntimeID) {
 			hasHost = true
 		}
 	}
@@ -203,11 +176,7 @@ func (s *Service) proveMainRecoveryCleanup(ctx context.Context, owner string, st
 	if s.options.CleanupTarget != nil {
 		return s.options.CleanupTarget(ctx, owner, true)
 	}
-	for _, record := range operations {
-		if record.Operation.Target.Target.Kind == "sandbox" {
-			return errors.New("original Main Sandbox cleanup unavailable")
-		}
-	}
+
 	return nil
 }
 

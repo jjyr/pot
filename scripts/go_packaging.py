@@ -19,7 +19,6 @@ NODE_HASHES = {
     "linux-arm64": "724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5",
     "linux-amd64": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
 }
-NOVNC_HASH = "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6"
 WAILS_VERSION = "v3.0.0-beta.30"
 WAILS_TRAY_SOURCE_HASH = "eadc44b2c628ef6ec9c3c568792c945f14be2a412ab14174b642386e9d15809e"
 WAILS_TRAY_PATCH_HASH = "b658e13aea5f08e3a4b303c8a5b760928edaefa8f4ca6a9323766e8e8160a19c"
@@ -169,20 +168,6 @@ def node(platform):
     return target
 
 
-def novnc():
-    archive = download(
-        "https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz",
-        BUILD / "resources/novnc.tar.gz",
-        NOVNC_HASH,
-    )
-    target = BUILD / "novnc"
-    if not (target / "core/rfb.js").exists():
-        with tempfile.TemporaryDirectory(dir=BUILD) as temporary:
-            extract(archive, Path(temporary))
-            copy_tree(Path(temporary) / "noVNC-1.7.0", target)
-    return target
-
-
 def linker_flags(stripped=True):
     version = os.environ.get("POT_APP_VERSION", "0.1.0")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
@@ -217,72 +202,15 @@ def go_build(package, destination, platform, stripped=True):
     call(arguments, env={**os.environ, "GOOS": goos, "GOARCH": goarch, "CGO_ENABLED": "0"})
 
 
-def swift_helpers():
-    scratch = BUILD / "swift-build"
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
-    }
-    environment.update(
-        SWIFTPM_MODULECACHE_OVERRIDE=str(BUILD / "swift-modules"),
-        CLANG_MODULE_CACHE_PATH=str(BUILD / "clang-modules"),
-    )
-    call(
-        [
-            "swift",
-            "build",
-            "-c",
-            "release",
-            "--package-path",
-            ROOT / "plugins/apple-vm/helper",
-            "--disable-sandbox",
-            "--scratch-path",
-            scratch,
-            "--product",
-            "PotMacOSHelper",
-            "-j",
-            "4",
-        ],
-        env=environment,
-    )
-    destination = BUILD / "helper-build/release"
-    if destination.exists():
-        shutil.rmtree(destination)
-    destination.mkdir(parents=True)
-    for name in ("PotMacOSHelper",):
-        shutil.copy2(scratch / "release" / name, destination / name)
-        call(
-            [
-                "codesign",
-                "--force",
-                "--sign",
-                "-",
-                "--entitlements",
-                ROOT / "plugins/apple-vm/helper/virtualization.entitlements",
-                destination / name,
-            ]
-        )
-    (destination / "SwiftDependencyLicenses.txt").write_text(
-        "PotMacOSHelper uses Apple Foundation and Virtualization system frameworks.\n"
-        "No third-party Swift package dependencies are bundled.\n"
-    )
-    return destination
-
-
 def prepare_resources(destination, platform):
     goos, goarch = platform.split("-")
     destination.mkdir(parents=True, exist_ok=True)
-    call(["python3", ROOT / "scripts/localize-web"])
     for source, name in (
         (ROOT / "skills", "skills"),
         (ROOT / "web/src", "web"),
-        (ROOT / ".local/web/desktop", "desktop"),
-        (novnc(), "novnc"),
         (node(platform), "node"),
     ):
         copy_tree(source, destination / name)
-    copy_tree(destination / "novnc", destination / "desktop-assets")
     shutil.copy2(ROOT / "LICENSE", destination / "LICENSE.txt")
     (destination / "ModelDirectoryLicense.txt").write_text(
         "\n\n".join(
@@ -302,11 +230,6 @@ def prepare_resources(destination, platform):
         + "\n"
     )
     prepare_plugins(destination / "plugins", platform)
-    if goos == "darwin":
-        shutil.copy2(
-            destination / "plugins/apple-vm/SwiftDependencyLicenses.txt",
-            destination / "SwiftDependencyLicenses.txt",
-        )
     call(
         [
             "python3",
@@ -314,53 +237,36 @@ def prepare_resources(destination, platform):
             "--output",
             destination / "GoDependencyLicenses.txt",
             "./cmd/pot",
-            "./cmd/pot-tool-executor",
-            "./plugins/podman/cmd",
-            *(["./plugins/apple-vm/cmd"] if goos == "darwin" else []),
         ],
         env={**os.environ, "GOOS": goos, "GOARCH": goarch, "CGO_ENABLED": "0"},
     )
 
 
 def prepare_plugins(destination, platform):
-    """Package declared capabilities; never prepare an engine or guest image."""
-    goos, _ = platform.split("-")
+    """Package the exact selected tool files, without platform engines or images."""
     destination.mkdir(parents=True, exist_ok=True)
+    # These are generated package outputs, never instance disks or user data.
+    for name in ("podman", "apple-vm"):
+        retired = destination / name
+        if retired.is_dir() and not retired.is_symlink():
+            shutil.rmtree(retired)
     for source in sorted((ROOT / "plugins").iterdir()):
         manifest_path = source / "plugin.json"
         if not manifest_path.is_file():
             continue
         manifest = json.loads(manifest_path.read_text())
         contributions = manifest["contributes"]
-        providers = contributions.get("sandbox_providers", [])
-        supported = [p for p in providers if goos in p["host_os"]]
-        if providers and not supported and not contributions.get("tools"):
-            continue
+        if set(contributions) != {"tools"} or contributions["tools"]["execution"] != "runtime":
+            raise ValueError("unsupported plugin capability")
         package = destination / source.name
         if package.exists():
             shutil.rmtree(package)
         package.mkdir(parents=True)
         shutil.copy2(manifest_path, package / "plugin.json")
-        tools = contributions.get("tools")
-        if tools:
-            for name in tools["files"]:
-                target = package / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source / name, target)
-        for resource in contributions.get("resources", []):
-            name = resource["catalog"]
-            target = package / name
+        for name in contributions["tools"]["files"]:
+            relative = Path(name)
+            if relative.is_absolute() or ".." in relative.parts or (source / relative).is_symlink():
+                raise ValueError("unsafe plugin file")
+            target = package / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source / name, target)
-        for provider in supported:
-            target = package / provider["executable"]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            go_build("./plugins/" + source.name + "/cmd", target, platform)
-        if source.name == "apple-vm" and supported:
-            copy_tree(source / "bootstrap", package / "bootstrap")
-            go_build("./cmd/pot-tool-executor", package / "bootstrap/pot-tool-executor", platform)
-            helpers = swift_helpers()
-            shutil.copy2(helpers / "PotMacOSHelper", package / "bin/PotMacOSHelper")
-            shutil.copy2(
-                helpers / "SwiftDependencyLicenses.txt", package / "SwiftDependencyLicenses.txt"
-            )
+            shutil.copy2(source / relative, target)

@@ -1,87 +1,70 @@
-# Machine execution policy
+# Machine execution authorization
 
-Control owns machine policy and owner approval. The policy is machine-wide; there
-is no assistant-to-machine allowlist, Sandbox assignment or persistent
-assistant capability grant. Enrollment authorizes a machine to accept its
-Control's commands. It does not make arbitrary guest input an authorized command.
+Control owns execution authorization for each enrolled Runtime in its Space.
+Main tools execute on the owning Control; Tasks execute on their fixed Runtime.
+Execution uses the Runtime service account and its OS privileges. A workspace
+is a working directory, not a security boundary. OS privacy and administrative
+permissions remain independent.
 
-## Defaults and operations
+## Decisions and scope
 
-Each machine has `execution_mode` (`sandbox` or `host`) and `host_access` (`ask`,
-`allow`, or `deny`). New machines default to Sandbox execution and Host approval.
-Host mode with denied Host access is invalid. The UI names these choices **Run
-inside a sandbox** and **Run directly on this machine (Host)**. Selecting a mode
-does not silently grant persistent Host authority.
+New machines default to `execution_access: "ask"`. Every new command, patch or
+plugin invocation requires an exact owner decision. Approval identifies the
+assistant, Task/turn, generation, call ID, Runtime, enrollment epoch, tool and
+complete arguments. Composed tools pass through the same authorization boundary.
 
-Assistants resolve their local machine policy for each turn. Tasks resolve the
-selected machine's current policy at dispatch. A running execution retains its
-actual context; changing policy does not move a process or its files. Host access
-is checked for each subsequent operation, so tightening policy affects active
-work. Revocation does not undo effects; cancellation stops running work.
+| Decision | Effect |
+|---|---|
+| `allow_once` | Approves only the displayed call and arguments |
+| `allow_always` | Persists `execution_access: "allow"` for this machine in this Space |
+| `deny` | Rejects this call; future calls retain the current machine policy |
 
-Sandbox work does not require a separate assistant grant. Each machine owns one shared Linux development Sandbox. Assistants and Tasks
-use that environment with separate execution scopes and work directories. They
-share installed software, toolchain caches and the guest filesystem; this is not
-mutual security isolation between Tasks. Missing Sandbox support fails explicitly; there is no Host
-fallback. Host execution uses the Runtime service account, not implicit root.
-Operating-system privacy and administrative permissions remain independent.
+Persistent authorization covers all assistants, Tasks and scheduled executions
+on that machine in this Space, survives restart and never authorizes another
+machine or Space. The approval card names this scope. It also releases ordinary
+pending calls on the same machine. Owner settings can restore `ask`; pending
+approvals are invalidated and later operations must request authorization again.
+Revocation does not undo effects or stop running commands; use cancellation.
+Removing/re-enrolling a machine clears its saved grant and temporary decisions.
 
-## Exact Host approval
+Instruction edits always require independent exact review, including when the
+machine has persistent execution authorization. They offer allow-once or deny;
+`allow_always` is rejected for instruction edits.
 
-A Host request identifies its assistant, task/turn, generation, call ID, machine,
-tool and full arguments. Temporary decisions are keyed by this complete request,
-not by a work-wide Host capability. Different calls or arguments do not inherit
-approval. Approval cards show the actual operation and offer allow-once or deny;
-persistent access is configured only in machine settings.
+An allow-once shell decision approves the command, not a promise about the files
+it can affect. Arbitrary programs cannot be confined by parsing command text.
+Under `ask`, model TTY allocation and additional session input require persistent
+authorization. Output polling and cancellation remain available with executor
+session ownership checks. The user-operated native terminal is a separate owner
+interface. Unattended Tasks can wait for approval; scheduling grants no authority.
 
-For shell commands this approves the command, not a guarantee about which files
-it can affect. Arbitrary shell programs are not constrained by parsing command
-text. Single-operation Host access does not permit an interactive terminal or
-additional input into a running session; output polling and cancellation remain
-available and must pass executor session ownership checks. Persistent Host
-access allows normal interactive execution.
+## Remote execution and recovery
 
-Remote task Host requests return through authenticated Control services. Control
-resolves the same-machine Host context, authorizes the operation, and dispatches
-it through the existing signed transport and receipts. Guest code receives no
-Control credentials. Unknown results are inspected by original identity, never
-replayed as a new operation. A task's normal Sandbox context is unchanged.
-
-Instruction edits always require their own review, independently of machine policy.
-Temporary approvals are memory-only and expire with their work context/restart.
-Re-enrollment clears the old machine's policy and temporary decisions.
+Remote requests return to authenticated Control services. Runner validates the
+signed approved operation against the original run, fixed Runtime, tool, arguments
+and shell settings before executing. Model-provider credentials remain in Control.
+Operation receipts prevent duplicate effects; unknown results retain their fences
+and are inspected by original identity, never replayed on another machine.
+Temporary decisions expire with the work context or process restart.
 
 ## Persistence and owner API
 
-`permissions.json` version 4 contains `policy.machines` and machine enrollment
-epochs. Sandbox resource settings live on their execution Runtime and are reported
-through machine inventory; they are not duplicated in authorization policy.
-Unsupported permission formats are rejected.
+`permissions.json` version 5 stores `machines` and enrollment `epochs`. Each machine
+policy has exactly `execution_access` (`ask`, `allow` or owner-configured `deny`).
+Machine-level `deny` blocks execution; it is distinct from denying one approval.
+Unsupported formats fail
+without rewriting files; previous Host/Sandbox policies are not implicitly adopted.
 
-`GET /api/v1/permissions` returns machine policies and pending requests for the
-selected conversation owner. `POST` accepts `{id, action}` with `allow_once` or
-`deny`. Machine configuration uses:
+`GET /api/v1/permissions` returns machine policy and pending requests for the
+selected conversation owner. `POST` accepts `{id, action}` for the decisions above.
+Owner settings use:
 
 ```json
 {
   "action": "configure",
   "machine_id": "runtime-id",
-  "machine_policy": {
-    "execution_mode": "host",
-    "host_access": "allow"
-  }
+  "machine_policy": {"execution_access": "ask"}
 }
 ```
 
-The owner can send `sandbox_limits` (`cpus`, `memory_gib`, `disk_gib`) for the
-machine's shared Sandbox. CPU and memory apply to the environment as a whole;
-Task concurrency is configured separately. Configure machine policy and resources
-in separate requests so each write has one authority. Changes require a stopped environment
-with no active execution leases or unsettled operations and apply on next start.
-The Runtime validates the Provider's resource bounds. Disk sizing depends on the
-Provider: Podman accepts `disk_gib: 0` and does not enforce a per-container disk
-quota. Its storage uses the Linux host filesystem or the shared Podman machine
-disk on macOS. Native macOS VM disk size is fixed by the enrolled raw disk;
-resizing is rejected. These settings do not constrain Host processes.
-
-Sources: `internal/control/permissions.go`, `pkg/agent` and `pkg/sandbox`.
+Sources: `internal/control/permissions.go` and `internal/control/dispatch.go`.
