@@ -33,7 +33,7 @@ func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
 	e, r := fixture(t)
 	r.Operation = "plugin_call"
 	r.Environment = map[string]string{"GH_TOKEN": "fixture-private-token"}
-	r.Args = map[string]any{"plugin": bundle, "tool": "github_cli", "mode": "text", "input": map[string]any{"args": []any{"api", "literal; no shell expansion"}}}
+	r.Args = map[string]any{"plugin": bundle, "tool": "github", "mode": "text", "input": map[string]any{"args": []any{"api", "literal; no shell expansion"}}}
 	for range 10 {
 		result, err := e.Execute(context.Background(), r, nil)
 		raw, _ := json.Marshal(result)
