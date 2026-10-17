@@ -20,6 +20,7 @@ func (r *Runtime) prepareAssets(options Options, config *control.Options) error 
 	}
 	resources, _ = filepath.Abs(resources)
 	r.AssetDirectory = resources
+	config.SandboxDirectory = filepath.Join(resources, "sandbox")
 	if config.AgentHome == "" {
 		config.AgentHome = filepath.Join(r.Root.Path, "agent")
 	}

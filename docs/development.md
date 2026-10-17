@@ -57,11 +57,15 @@ mise run lint
 mise run check:go
 mise run test
 mise run test:executor
+mise run test:sandbox
+mise run test:sandbox-linux
 mise run test:release
 mise run test:i18n
 mise run licenses
 mise run build:linux
 ```
+
+`test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
 `check:go` verifies formatting, vet and architectural imports. `test:go` uses the
 race detector. UI tests cover owner-scoped state, drafts, IME, navigation and
@@ -100,3 +104,34 @@ bypass failed hooks. CI separates portable product and macOS packaging checks.
 
 `resources/app/PotIcon.swift` remains the vector artwork master used by icon and
 tray generation; removing the VM Helper does not remove brand generation.
+
+Paid tests require an explicit `POT_LIVE=1` in the calling process. Copy
+`.env.example` to `.env` in the current repository root and set
+`DEEPSEEK_API_KEY`; `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` default to
+`https://api.deepseek.com` and `deepseek-v4-flash`. `.env` is Git-ignored.
+Configuration is loaded only after opt-in; putting `POT_LIVE=1` in `.env` cannot
+enable paid calls. Tests locate this checkout's root because `go test` changes
+the working directory to the package directory. They never read Pi configuration
+or export credentials to child commands. Values are literal `KEY=value`
+assignments with optional single/double quotes or an `export` prefix, without
+shell/variable expansion.
+
+```sh
+POT_LIVE=1 mise exec -- go test -v ./internal/control \
+  -run '^TestDeepSeekUnsandboxLive$' -count=1 -timeout=16m
+```
+
+Prepare the pinned SDK first with `mise run test:sandbox`; override its location
+with `POT_SANDBOX_SDK` if necessary. This uses the real Agent, Control/Gateway,
+approval store and OS sandbox with synthetic files only. Six isolated scenarios
+are capped at six model requests each, 768 output tokens per response and 150
+seconds per scenario. They cover ordinary private-temp/workspace execution,
+permanent exact-command approval, owner denial and recovery without repeating a
+partial write. Two boundary scenarios give only an ordinary file-reading goal:
+a workspace symlink produces a real sandbox read denial, after which the model
+must autonomously request justified host access. The harness only approves
+synthetic reads; refusal never releases host code. It checks that approval follows
+the actual denial and
+that an owner refusal stops further execution. Run just those cases with
+`-run '^TestDeepSeekUnsandboxLive$/^boundary-'`. Default tests skip paid calls.
+Credentials are never logged.

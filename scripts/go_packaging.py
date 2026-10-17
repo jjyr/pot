@@ -199,7 +199,15 @@ def go_build(package, destination, platform, stripped=True):
     arguments = ["go", "build", "-mod=readonly", "-trimpath"]
     arguments += ["-ldflags=" + linker_flags(stripped)]
     arguments += ["-o", destination, package]
-    call(arguments, env={**os.environ, "GOOS": goos, "GOARCH": goarch, "CGO_ENABLED": "0"})
+    call(
+        arguments,
+        env={
+            **os.environ,
+            "GOOS": goos,
+            "GOARCH": goarch,
+            "CGO_ENABLED": "1" if goos == "darwin" else "0",
+        },
+    )
 
 
 def prepare_resources(destination, platform):
@@ -229,6 +237,7 @@ def prepare_resources(destination, platform):
         )
         + "\n"
     )
+    prepare_sandbox(destination / "sandbox")
     prepare_plugins(destination / "plugins", platform)
     call(
         [
@@ -270,3 +279,47 @@ def prepare_plugins(destination, platform):
             target = package / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source / relative, target)
+
+
+def prepare_sandbox(destination):
+    """Install integrity-locked SDK assets, then apply checked local extension."""
+    source = ROOT / "sandbox"
+    cached = BUILD / "sandbox-sdk"
+    stamp = cached / ".pot-lock-sha256"
+    expected = digest(source / "package-lock.json") + digest(source / "patch-sdk.mjs")
+    if not stamp.exists() or stamp.read_text() != expected:
+        cached.mkdir(parents=True, exist_ok=True)
+        for name in ("package.json", "package-lock.json"):
+            shutil.copy2(source / name, cached / name)
+        call(
+            [
+                "npm",
+                "ci",
+                "--prefix",
+                cached,
+                "--ignore-scripts",
+                "--omit=dev",
+                "--no-audit",
+                "--no-fund",
+            ]
+        )
+        call(["node", source / "patch-sdk.mjs", cached])
+        stamp.write_text(expected)
+    copy_tree(cached, destination)
+    shutil.copy2(source / "launcher.mjs", destination / "launcher.mjs")
+    notices = []
+    for manifest in sorted((cached / "node_modules").glob("**/package.json")):
+        package = json.loads(manifest.read_text())
+        license_file = next(
+            (
+                path
+                for name in ("LICENSE", "LICENSE.txt", "LICENSE.md", "license", "license.txt")
+                if (path := manifest.parent / name).is_file()
+            ),
+            None,
+        )
+        if license_file is not None:
+            notices.append(
+                f"{package.get('name', manifest.parent.name)} {package.get('version', '')}\n{license_file.read_text()}"
+            )
+    (destination / "THIRD-PARTY-NOTICES.txt").write_text("\n\n".join(notices) + "\n")

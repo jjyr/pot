@@ -25,6 +25,7 @@ __pycache__/
 .ruff_cache/
 
 # Local configuration and credentials
+# Live tests read this checkout's .env; never commit its credentials.
 .env
 .env.*
 !.env.example

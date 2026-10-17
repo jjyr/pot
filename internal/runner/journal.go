@@ -11,7 +11,7 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 type Journal struct {
 	db        *sql.DB
@@ -29,7 +29,7 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 		return nil, err
 	}
 	j := &Journal{db: db, RuntimeID: runtimeID, BootID: bootID}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS runner_schema(version INTEGER NOT NULL); INSERT INTO runner_schema SELECT 4 WHERE NOT EXISTS(SELECT 1 FROM runner_schema); CREATE TABLE IF NOT EXISTS task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_events(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,sequence)); CREATE TABLE IF NOT EXISTS run_command_inputs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,command_id)); CREATE TABLE IF NOT EXISTS run_resources(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS run_commands(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,reply TEXT,PRIMARY KEY(control_id,task_id,run_id,command_id));`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS runner_schema(version INTEGER NOT NULL); INSERT INTO runner_schema SELECT 5 WHERE NOT EXISTS(SELECT 1 FROM runner_schema); CREATE TABLE IF NOT EXISTS task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_events(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,sequence)); CREATE TABLE IF NOT EXISTS run_command_inputs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,command_id)); CREATE TABLE IF NOT EXISTS run_resources(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS run_commands(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,reply TEXT,PRIMARY KEY(control_id,task_id,run_id,command_id));`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -92,7 +92,20 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 	}
 	return j, nil
 }
-func (j *Journal) Close() error                  { return j.db.Close() }
+func (j *Journal) Close() error { return j.db.Close() }
+
+// CheckPolicyCleanup prevents a fresh Runner boot from acknowledging revocation
+// while prior execution still requires authoritative cleanup reconciliation.
+func (j *Journal) CheckPolicyCleanup(ctx context.Context) error {
+	var unknown bool
+	if err := j.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_runs WHERE phase=?) OR EXISTS(SELECT 1 FROM run_commands WHERE phase='unknown')", RecoveryRequired).Scan(&unknown); err != nil {
+		return err
+	}
+	if unknown {
+		return core.ErrCleanupUnconfirmed
+	}
+	return nil
+}
 func (j *Journal) Subscribe() *core.Subscription { return j.changes.Subscribe() }
 func (j *Journal) validateRun(run Run) error {
 	if run.SchemaVersion != SchemaVersion || !core.Identifier(run.BootID) {

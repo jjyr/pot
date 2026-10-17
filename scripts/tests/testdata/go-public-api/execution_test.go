@@ -96,7 +96,7 @@ func TestExecutorLifecycleFromExternalModule(t *testing.T) {
 	policy := executor.DefaultShellSettings()
 	policy.ShellSnapshot = false
 	policy.AllowLoginShell = false
-	request := executor.Request{ID: "external", CWD: directory, Policy: policy, Operation: "exec_command", Args: map[string]any{"cmd": "printf external", "yield_time_ms": 500}}
+	request := executor.Request{Mode: "host", ID: "external", CWD: directory, Policy: policy, Operation: "exec_command", Args: map[string]any{"cmd": "printf external", "yield_time_ms": 500}}
 	result, err := engine.Execute(context.Background(), request, nil)
 	if err != nil || result["stdout"] != "external" || result["exit_code"] != 0 {
 		t.Fatalf("command: %v %v", result, err)

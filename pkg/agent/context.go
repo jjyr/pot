@@ -204,3 +204,16 @@ func toolResultMessage(call string, raw json.RawMessage, vision bool) (m.Message
 	message.Images = images
 	return message, nil
 }
+
+// toolFailure retains structured execution diagnostics and any partial result.
+func toolFailure(raw json.RawMessage, err error) json.RawMessage {
+	value := map[string]any{}
+	_ = core.DecodeJSON(raw, &value)
+	if value == nil {
+		value = map[string]any{}
+	}
+	value["isError"] = true
+	value["error"] = err.Error()
+	result, _ := json.Marshal(value)
+	return result
+}

@@ -2,7 +2,7 @@
 
 The default-enabled `computer-use` plugin provides a persistent `cua_repl`
 JavaScript session and a dedicated headless Chromium on the fixed execution
-Runtime. Control applies exact execution authorization, including remote calls.
+Runtime. Control applies exact execution authorization, including remote calls. Protected machines sandbox the plugin and browser; Trusted machines execute directly.
 Each REPL has its own browser and temporary profile; cleanup does not close
 sibling Tasks' sessions. Native desktop automation and guest viewing are absent.
 
@@ -80,7 +80,7 @@ Closing the tab preserves JS state. End the REPL with `reset:true` and its exist
 Closing requests graceful Chromium shutdown before removing its temporary
 profile. Concurrent closes share one shutdown. A forced or unexpected browser
 exit retains the profile and reports unconfirmed cleanup; reset/disposal must
-confirm the enclosing process group or Guest cgroup has stopped before removing
+confirm the enclosing execution supervisor has confirmed cleanup before removing
 private files. Browser actions are never retried as part of shutdown.
 
 ## Plugin contract and lifecycle
@@ -99,21 +99,30 @@ metadata is unsupported.
 The machine needs Node and Chrome/Chromium; App supplies Node. Standard browser
 paths are detected, or set `POT_BROWSER_EXECUTABLE`. Chromium keeps its native
 sandbox enabled, uses inherited CDP pipes and a temporary profile. Plugin children
-receive a restricted environment without inherited model credentials. Authorization
-permits code execution with Runtime OS privileges; the JS REPL is not isolation.
+receive a restricted environment without inherited model credentials. The JS REPL is not isolation; the destination execution policy supplies the OS boundary. Unsupported Chromium/native-sandbox combinations fail rather than disabling Chromium protection or silently switching to host execution.
 Browser sessions do not adopt existing user profiles or persistent logins.
+
+The current protected backend does not support Google Chrome on macOS when its
+profile singleton IPC is blocked, or Linux Chromium when its native user-namespace
+sandbox conflicts with SRT's strict seccomp policy. Startup reports the bounded
+browser diagnostic. Do not pass `--no-sandbox`, open host IPC, or enable weaker
+nested namespace settings to hide these failures. Trusted-machine browser execution
+is an explicit owner policy with the account's ordinary host privileges.
 
 ## Verification
 
-Rebuild the Linux image with the current executor and broker; older published images do not gain plugin support automatically.
+Install current packaged Runtime assets; replacing source files does not update an existing installed package.
 
 ```sh
 mise run test
 mise run test:executor
 mise run build:go
-mise run test:browser -- --chromium /usr/bin/chromium
+mise run test:browser
+mise run test:sandbox
 ```
 
 The browser-close fixture and Go plugin-host tests cover bounded sessions,
-state, errors, ownership and process cleanup without model calls. Real browser
-interactions require an installed supported Chrome/Chromium.
+state, errors, ownership and process cleanup without model calls. The real sandbox
+suite exercises Chromium when installed, including explicit startup rejection and
+outer descendant cleanup for unsupported configurations. Successful browser/CDP
+interaction requires an installed supported Chrome/Chromium combination.

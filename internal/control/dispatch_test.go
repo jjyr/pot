@@ -71,8 +71,13 @@ func TestUncertainHostCleanupFencesNewCall(t *testing.T) {
 	d, e, _ := localDispatcher(t)
 	d.Host = uncertainEngine{}
 	call := modelprotocol.ToolCall{ID: "uncertain", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"true","login":false}`)}
-	if _, err := d.Dispatch(context.Background(), e, call, nil); !core.IsCleanupUnconfirmed(err) {
+	if raw, err := d.Dispatch(context.Background(), e, call, nil); !core.IsCleanupUnconfirmed(err) {
 		t.Fatal(err)
+	} else {
+		var result map[string]any
+		if json.Unmarshal(raw, &result) != nil || result["execution_status"] != "cleanup_unconfirmed" {
+			t.Fatal("uncertain effects reported as not started", string(raw))
+		}
 	}
 	call.ID = "new-call"
 	if _, err := d.Dispatch(context.Background(), e, call, nil); !errors.Is(err, ErrOperationUnknown) {
@@ -89,14 +94,14 @@ func TestToolsCannotRetargetAnotherRuntime(t *testing.T) {
 }
 
 func TestDispatchReportsApprovalAndActualTargetBeforeExecution(t *testing.T) {
-	for _, decision := range []string{"allow_once", "deny"} {
+	for _, decision := range []string{"allow_task", "deny"} {
 		t.Run(decision, func(t *testing.T) {
 			d, e, _ := localDispatcher(t)
 			if err := d.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "ask"}); err != nil {
 				t.Fatal(err)
 			}
 			phases := []string{}
-			call := modelprotocol.ToolCall{ID: "review", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf approved","login":false}`)}
+			call := modelprotocol.ToolCall{ID: "review", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf approved","login":false,"request_unsandboxed":true,"justification":"Access required by the execution contract test"}`)}
 			_, err := d.Dispatch(context.Background(), e, call, func(update core.Update) error {
 				if update.Type != "tool_state" {
 					return nil

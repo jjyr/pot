@@ -88,7 +88,7 @@ func (manager *compositionManager) call(name string, raw json.RawMessage, parent
 					if core.IsCleanupUnconfirmed(err) {
 						return nil, &composition.UnconfirmedCleanupError{Cause: err}
 					}
-					failure, _ := json.Marshal(map[string]any{"isError": true, "error": err.Error()})
+					failure := toolFailure(value, err)
 					if emitErr := manager.emit(core.Update{Type: "tool_finished", ID: callID, Name: toolName, Result: failure, Failed: true}); emitErr != nil {
 						return nil, emitErr
 					}

@@ -121,6 +121,9 @@ func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 	if err != nil || record.Phase != RecoveryRequired {
 		t.Fatal(record, err)
 	}
+	if err := j.CheckPolicyCleanup(ctx); !errors.Is(err, core.ErrCleanupUnconfirmed) {
+		t.Fatal("fresh boot acknowledged unconfirmed policy cleanup", err)
+	}
 	if claimed, err := j.Claim(ctx, "control", "task", "run"); err != nil || claimed {
 		t.Fatal(claimed, err)
 	}
@@ -140,6 +143,9 @@ func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 	}
 	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, nil, true); err != nil {
 		t.Fatal(err)
+	}
+	if err := j.CheckPolicyCleanup(ctx); err != nil {
+		t.Fatal("authoritative reconciliation did not clear policy fence", err)
 	}
 	record, _ = j.Inspect(ctx, "control", "task", "run")
 	if record.Phase != Interrupted || !record.CleanupConfirmed {

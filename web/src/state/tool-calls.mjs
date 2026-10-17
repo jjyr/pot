@@ -4,7 +4,7 @@ export function applyToolUpdate(tool,update){
   const at=update.at_ms||0;
   switch(update.type){
     case'tool_started':Object.assign(tool,{id:update.id,parent_id:update.parent_id||'',name:update.name,args:update.args??{},phase:'preparing',started_at_ms:at,output:[]});break;
-    case'tool_state':tool.phase=update.phase;if(update.target)tool.target=update.target;if(update.workdir)tool.workdir=update.workdir;if(update.phase==='waiting_approval'&&!tool.waiting_at_ms)tool.waiting_at_ms=at;if(update.phase==='running'&&!tool.running_at_ms)tool.running_at_ms=at;break;
+    case'tool_state':tool.phase=update.phase;if(update.execution_mode)tool.execution_mode=update.execution_mode;if(update.target)tool.target=update.target;if(update.workdir)tool.workdir=update.workdir;if(update.phase==='waiting_approval'&&!tool.waiting_at_ms)tool.waiting_at_ms=at;if(update.phase==='running'&&!tool.running_at_ms)tool.running_at_ms=at;break;
     case'tool_output':if(tool.phase==='preparing'){tool.phase='running';tool.running_at_ms=at;}tool.output??=[];if(tool.output.at(-1)?.stream===(update.stream||''))tool.output.at(-1).text+=update.text||'';else tool.output.push({stream:update.stream||'',text:update.text||''});break;
     case'tool_finished':tool.result=update.result;tool.finished_at_ms=at;if(tool.phase!=='denied')tool.phase=update.failed?'failed':'completed';break;
     case'turn_finished':tool.phase=update.outcome?.kind==='cancelled'?'stopped':'unknown';tool.finished_at_ms=at;tool.diagnostic=update.outcome?.error||'';break;

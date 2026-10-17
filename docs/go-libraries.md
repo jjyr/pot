@@ -50,8 +50,9 @@ Model codecs in `pkg/modelprotocol` do not fetch provider credentials.
 `pkg/agent` and `pkg/modelprotocol` do not link Wails, SQLite, Tailscale or the
 complete host. Agent services do not require the product's RPC interface.
 `pkg/execution` can independently provide queueing, concurrency and cancellation;
-`pkg/executor` supplies command/patch execution and process sessions. Node is
-needed only for the existing JavaScript plugins, not the Agent loop itself.
+`pkg/executor` supplies command/patch execution and process sessions. The caller must select an explicit host/sandbox/session execution mode. Sandboxed
+execution requires the pinned Node/SRT assets and process-worker integration; Node
+is also required for JavaScript plugins. The Agent loop itself does not need Node.
 
 ## Configure composition explicitly
 

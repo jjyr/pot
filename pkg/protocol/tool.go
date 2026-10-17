@@ -9,21 +9,22 @@ import (
 // ToolCall is the durable UI projection, separate from model context and receipts.
 // Output and result are deliberately independent: completion never erases a stream.
 type ToolCall struct {
-	TurnID       string                `json:"turn_id"`
-	ID           string                `json:"id"`
-	ParentID     string                `json:"parent_id,omitempty"`
-	Name         string                `json:"name"`
-	Args         json.RawMessage       `json:"args"`
-	Phase        string                `json:"phase"`
-	Target       *core.ExecutionTarget `json:"target,omitempty"`
-	Workdir      string                `json:"workdir,omitempty"`
-	StartedAtMS  int64                 `json:"started_at_ms"`
-	WaitingAtMS  int64                 `json:"waiting_at_ms,omitempty"`
-	RunningAtMS  int64                 `json:"running_at_ms,omitempty"`
-	FinishedAtMS int64                 `json:"finished_at_ms,omitempty"`
-	Output       []ToolOutput          `json:"output,omitempty"`
-	Result       json.RawMessage       `json:"result,omitempty"`
-	Diagnostic   string                `json:"diagnostic,omitempty"`
+	ExecutionMode string                `json:"execution_mode,omitempty"`
+	TurnID        string                `json:"turn_id"`
+	ID            string                `json:"id"`
+	ParentID      string                `json:"parent_id,omitempty"`
+	Name          string                `json:"name"`
+	Args          json.RawMessage       `json:"args"`
+	Phase         string                `json:"phase"`
+	Target        *core.ExecutionTarget `json:"target,omitempty"`
+	Workdir       string                `json:"workdir,omitempty"`
+	StartedAtMS   int64                 `json:"started_at_ms"`
+	WaitingAtMS   int64                 `json:"waiting_at_ms,omitempty"`
+	RunningAtMS   int64                 `json:"running_at_ms,omitempty"`
+	FinishedAtMS  int64                 `json:"finished_at_ms,omitempty"`
+	Output        []ToolOutput          `json:"output,omitempty"`
+	Result        json.RawMessage       `json:"result,omitempty"`
+	Diagnostic    string                `json:"diagnostic,omitempty"`
 }
 type ToolOutput struct {
 	Stream string `json:"stream"`
@@ -47,6 +48,9 @@ func (t ToolCall) Validate() error {
 	default:
 		return fmt.Errorf("invalid tool phase")
 	}
+	if t.ExecutionMode != "" && t.ExecutionMode != "host" && t.ExecutionMode != "sandbox" && t.ExecutionMode != "session" {
+		return fmt.Errorf("invalid execution mode")
+	}
 	if t.Target != nil {
 		return t.Target.Validate()
 	}
@@ -61,6 +65,9 @@ func (t *ToolCall) Apply(u core.Update) {
 		}
 	case "tool_state":
 		t.Phase = u.Phase
+		if u.ExecutionMode != "" {
+			t.ExecutionMode = u.ExecutionMode
+		}
 		if u.Target != nil {
 			t.Target = u.Target
 		}

@@ -370,6 +370,9 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	if err != nil {
 		return runner.Prepared{}, err
 	}
+	if err = s.addExecutionEnvironment(&execution, l.ExecutionTarget); err != nil {
+		return runner.Prepared{}, err
+	}
 	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
 	execution.SkillResources.Selection = nil
 	execution.SkillResources.ReservedNames = resources.ReservedNames

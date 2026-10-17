@@ -162,8 +162,10 @@ pot api -root "$HOME/.pot-control" -method POST \
 ```
 
 Labels never grant capability or change default placement. Configure execution authorization through
-Machines or `POST /api/v1/permissions`. Operations request review under
-`execution_access: "ask"`; `allow` is an explicit machine-wide operator policy.
+Settings → Execution permissions or `POST /api/v1/permissions` with the current
+policy revision. `execution_access: "ask"` runs ordinary work in SRT and reviews
+explicit host requests; `allow` trusts this machine and bypasses SRT. See
+[Permissions](permissions.md) for exact command rules and application state.
 
 ## Advanced local resources
 

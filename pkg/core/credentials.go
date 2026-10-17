@@ -35,6 +35,13 @@ func (b CredentialBindings) Validate() error {
 }
 
 func CredentialEnvironmentName(name string) bool {
+	if strings.HasPrefix(name, "POT_") || strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "LD_") {
+		return false
+	}
+	switch name {
+	case "PATH", "HOME", "SHELL", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONHOME":
+		return false
+	}
 	if name == "" || len(name) > 128 || strings.ContainsRune(name, '=') {
 		return false
 	}

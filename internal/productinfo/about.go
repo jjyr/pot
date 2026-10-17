@@ -48,6 +48,7 @@ func Read(directory string) (About, error) {
 		{"Frontend icons", "FrontendIconLicense.txt", true},
 		{"models.dev catalog and artwork", "ModelDirectoryLicense.txt", true},
 		{"Node.js and bundled dependencies", "node/LICENSE", true},
+		{"SRT sandbox and dependencies", "sandbox/THIRD-PARTY-NOTICES.txt", true},
 	} {
 		info, err := root.Lstat(file.path)
 		if os.IsNotExist(err) {

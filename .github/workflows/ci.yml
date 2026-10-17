@@ -45,6 +45,13 @@ jobs:
       - run: mise run check:go
       - run: mise run test
       - run: mise run test:executor
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep socat
+          # Qualification host must permit unprivileged bwrap/user namespaces.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: mise run test:sandbox
       - run: mise run test:i18n
       - run: mise run test:hooks
       - run: mise run licenses

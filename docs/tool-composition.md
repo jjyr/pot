@@ -59,7 +59,7 @@ replay uncertain calls. Existing receipts prevent duplicate execution.
 
 The isolate has no direct filesystem, network, Node or process APIs. Its tools are
 limited to the current role/profile, with recursive `exec`/`wait` excluded. Each
-child call uses the ordinary dispatcher and checks the assistant’s current machine capability. Composition
+child call uses the ordinary dispatcher and checks the current machine policy, exact command grant and selected execution mode. Composition
 cannot broaden authority. Code, output, concurrency and execution time are bounded; limits and schemas live
 in `pkg/composition`. Worker memory uses a 64 MiB Go runtime soft limit plus
 a sampled heap watchdog; this is not a hard per-isolate allocation cap. Crossing

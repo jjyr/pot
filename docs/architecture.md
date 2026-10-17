@@ -151,15 +151,16 @@ Tool plugins use the package format in `pkg/plugin` and bounded Node sessions in
 locates tool/Skill assets independently of execution preparation. See
 [Plugin packages](plugins.md).
 
-All execution uses the destination Runtime service account. Default authorization
-is `ask`; allow-once binds exact call arguments, while always-allow persists for
-one enrolled machine in one Space across assistants and Tasks. Instruction edits
-retain independent review. See [Permissions](permissions.md).
+Execution uses the destination Runtime service account. Protected machines run
+commands, patches and plugins under the pinned SRT SDK. Trusted machines execute
+directly; Blocked machines reject new work. Host command exceptions match exact
+command/context and are scoped to the current work or stored as editable permanent
+rules for one enrollment. Instruction edits retain independent exact review. See [Permissions](permissions.md).
 
 Main and Task workspaces live in the destination filesystem with no mapping or
-implicit project copy. Commands use local OS paths. Process-group cleanup and
-unknown-result fences remain; this path provides no guest cgroup containment or
-VM isolation. See [Executor](executor.md). Optional VM management, automatic node
+implicit project copy. Commands use local OS paths. A trusted supervisor drains process descendants before confirming cleanup; missing
+proof retains unknown-result fences. SRT restricts direct filesystem and Unix socket
+access while leaving network access open. It provides no VM isolation or quotas. See [Executor](executor.md). Optional VM management, automatic node
 placement and remote Main tools remain deferred under issue #74.
 
 ## Persistence and updates

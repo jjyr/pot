@@ -323,7 +323,7 @@ func Run(ctx context.Context, s Scenario, directory string, options RunOptions) 
 		if err := core.DecodeJSON(call.Arguments, &args); err != nil {
 			return nil, err
 		}
-		result, err := engine.Execute(ctx, executor.Request{ID: call.ID, Operation: call.Name, CWD: e.Workspace, Policy: spec.Params.Agent.Shell, Args: args}, func(event executor.Event) error {
+		result, err := engine.Execute(ctx, executor.Request{Mode: "host", ID: call.ID, Operation: call.Name, CWD: e.Workspace, Policy: spec.Params.Agent.Shell, Args: args}, func(event executor.Event) error {
 			return emit(core.Update{Type: "tool_output", ID: event.ToolOutput.ID, Stream: event.ToolOutput.Stream, Text: event.ToolOutput.Text})
 		})
 		if result == nil {

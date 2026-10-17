@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 type ShellSettings = core.ShellSettings
@@ -23,7 +24,17 @@ type ShellSettings = core.ShellSettings
 var DefaultShellSettings = core.DefaultShellSettings
 var ErrCleanupUnconfirmed = core.ErrCleanupUnconfirmed
 
+// PreparationError means OS sandbox setup failed before the workload started.
+// A shell's nonzero exit code, including EPERM text, is not this error.
+type PreparationError struct{ Cause error }
+
+func (e *PreparationError) Error() string { return e.Cause.Error() }
+func (e *PreparationError) Unwrap() error { return e.Cause }
+
 type Request struct {
+	Command   *CommandContext    `json:"command_context,omitempty"`
+	Mode      string             `json:"mode"`
+	Revision  uint64             `json:"revision"`
 	ID        string             `json:"id"`
 	Operation string             `json:"operation"`
 	CWD       string             `json:"cwd"`
@@ -51,8 +62,13 @@ func outputEvent(id, stream, text string) Event {
 }
 
 type Options struct {
-	Home string
-	Node string
+	ProcessWorker    []string
+	Admit            func(uint64) (func(), error)
+	Home             string
+	Node             string
+	SandboxDirectory string
+	ProtectedPaths   []string
+	PatchWorker      []string
 }
 
 type Engine struct {
@@ -93,6 +109,12 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 		return nil, err
 	}
 
+	if request.Mode == "session" && request.Operation != "write_stdin" && request.Operation != "inspect" {
+		return nil, errors.New("session authority cannot launch new operations")
+	}
+	if request.Mode != "host" && request.Mode != "sandbox" && request.Mode != "session" {
+		return nil, errors.New("execution mode must be explicitly authorized")
+	}
 	if err := request.Policy.Validate(); err != nil {
 		return nil, err
 	}
@@ -136,30 +158,73 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 	if err := validateEnvironment(request.Environment); err != nil {
 		return nil, err
 	}
+	if request.Operation == "exec_command" && request.Command != nil {
+		args := map[string]any{}
+		for k, v := range request.Args {
+			args[k] = v
+		}
+		if len(request.Command.Credentials) > 0 {
+			var refs any
+			if err := json.Unmarshal(request.Command.Credentials, &refs); err != nil {
+				return nil, err
+			}
+			args["credentials"] = refs
+		}
+		actual, err := ResolveCommandContext(request.CWD, args, request.Policy)
+		if err != nil {
+			return nil, err
+		}
+		a, _ := core.HashJSON(actual)
+		b, _ := core.HashJSON(request.Command)
+		if a != b {
+			return nil, errors.New("execution context differs from approved command")
+		}
+	}
 	if request.Operation == "inspect" {
 		return e.Inspect()
 	}
-	if err := validate(request.Operation, request.Args); err != nil {
+	if err := ValidateArguments(request.Operation, request.Args); err != nil {
 		return nil, err
 	}
 	var result map[string]any
 	switch request.Operation {
 	case "apply_patch":
 		var report string
-		report, err = ApplyPatch(request.CWD, request.Args["patch"].(string))
+		if request.Mode == "sandbox" {
+			report, err = e.sandboxPatch(ctx, request)
+		} else {
+			report, err = ApplyPatch(request.CWD, request.Args["patch"].(string))
+		}
 		result = map[string]any{"output": report}
 	case "plugin_call":
 		result, err = e.executePlugin(ctx, request)
 	default:
 		result, err = e.executeProcess(ctx, request, emit)
 	}
+	if result == nil {
+		result = map[string]any{}
+	}
+	if result["execution_mode"] == nil && request.Mode != "session" {
+		result["execution_mode"] = request.Mode
+	}
+	if err != nil {
+		result["execution_status"] = "failed"
+		var preparation *PreparationError
+		if errors.As(err, &preparation) {
+			result["execution_status"] = "preparation_failed"
+		}
+	} else if result["execution_status"] == nil {
+		result["execution_status"] = "finished"
+	}
 	if errors.Is(err, ErrCleanupUnconfirmed) {
+		result["execution_status"] = "cleanup_unconfirmed"
 		e.fenceCleanup(err)
 	}
 	return result, err
 }
 
-func validate(name string, args map[string]any) error {
+// ValidateArguments checks execution arguments without starting a process.
+func ValidateArguments(name string, args map[string]any) error {
 	if args == nil {
 		return errors.New("tool arguments must be an object")
 	}
@@ -167,7 +232,7 @@ func validate(name string, args map[string]any) error {
 	var required string
 	switch name {
 	case "exec_command":
-		fields = "cmd shell login tty workdir timeout_ms max_output_chars yield_time_ms"
+		fields = "cmd shell login tty interactive workdir timeout_ms max_output_chars yield_time_ms"
 		required = "cmd"
 	case "write_stdin":
 		fields = "session_id chars close_stdin interrupt terminate rows cols yield_time_ms max_output_chars"
@@ -189,7 +254,7 @@ func validate(name string, args map[string]any) error {
 			if _, ok := value.(string); !ok {
 				return fmt.Errorf("%s must be a string", key)
 			}
-		case "login", "tty", "close_stdin", "interrupt", "terminate":
+		case "login", "tty", "interactive", "close_stdin", "interrupt", "terminate":
 			if _, ok := value.(bool); !ok {
 				return fmt.Errorf("%s must be boolean", key)
 			}
@@ -306,4 +371,8 @@ func mergeEnvironment(base []string, extra map[string]string) []string {
 		result = append(result, name+"="+value)
 	}
 	return result
+}
+
+func (e *Engine) sandboxLauncher() sandbox.Launcher {
+	return sandbox.Launcher{Node: e.options.Node, Directory: e.options.SandboxDirectory, ProtectedPaths: e.options.ProtectedPaths}
 }

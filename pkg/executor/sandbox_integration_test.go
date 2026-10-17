@@ -1,0 +1,205 @@
+package executor
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+)
+
+func sandboxFixture(t *testing.T) (*Engine, Request) {
+	t.Helper()
+	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" {
+		t.Skip("set POT_SANDBOX_INTEGRATION=1 for real sandbox tests")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := filepath.Abs("../../sandbox")
+	if configured := os.Getenv("POT_SANDBOX_SDK"); configured != "" {
+		directory = configured
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, _ := os.Executable()
+	e, r := fixture(t)
+	e.options.Node = node
+	e.options.SandboxDirectory = directory
+	e.options.ProcessWorker = []string{worker}
+	r.Mode = "sandbox"
+	return e, r
+}
+func TestRealSandboxCommandAndPatchWorker(t *testing.T) {
+	e, r := sandboxFixture(t)
+	// Production workspaces live below the protected Control root. The workspace
+	// exception must work without exposing sibling state beneath that same root.
+	e.options.ProtectedPaths = []string{filepath.Dir(r.CWD)}
+	secret := filepath.Join(filepath.Dir(r.CWD), "control-secret")
+	if err := os.WriteFile(secret, []byte("fake-secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	probe := call(t, e, r, "exec_command", map[string]any{"cmd": "if cat " + shellQuote(secret) + "; then exit 9; fi; printf confined"})
+	if probe["exit_code"] != 0 || probe["stdout"] != "confined" {
+		t.Fatal("protected root exposure", probe)
+	}
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": "printf sandbox; printf ok > proof"})
+	if result["stdout"] != "sandbox" || result["exit_code"] != 0 {
+		t.Fatal(result)
+	}
+	result = call(t, e, r, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** Add File: patched\n+hello\n*** End Patch"})
+	if !strings.Contains(result["output"].(string), "patched") {
+		t.Fatal(result)
+	}
+	if data, err := os.ReadFile(filepath.Join(r.CWD, "patched")); err != nil || string(data) != "hello\n" {
+		t.Fatal(string(data), err)
+	}
+	if err := os.Mkdir(filepath.Join(r.CWD, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.CWD, ".git/config"), []byte("fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.Operation = "apply_patch"
+	r.Args = map[string]any{"patch": "*** Begin Patch\n*** Update File: .git/config\n@@\n-fixture\n+modified\n*** End Patch"}
+	if _, err := e.Execute(context.Background(), r, nil); err == nil {
+		t.Fatal("patch worker bypassed protected Git config")
+	}
+	if data, err := os.ReadFile(filepath.Join(r.CWD, ".git/config")); err != nil || string(data) != "fixture\n" {
+		t.Fatal("protected file changed", string(data), err)
+	}
+}
+func TestRealSandboxTTYAndInput(t *testing.T) {
+	e, r := sandboxFixture(t)
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": "test -t 0 && echo terminal; read -r value; stty size; echo received:$value", "tty": true, "yield_time_ms": 20})
+	id, ok := result["session_id"].(string)
+	if !ok {
+		t.Fatal(result)
+	}
+	result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "rows": 40, "cols": 100, "chars": "hello\n", "yield_time_ms": 1000})
+	output := result["stdout"].(string)
+	for result["session_id"] != nil {
+		next := call(t, e, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 1000})
+		output += next["stdout"].(string)
+		result = next
+	}
+	if !strings.Contains(output, "40 100") || !strings.Contains(output, "received:hello") {
+		t.Fatal(output)
+	}
+}
+func TestRealSandboxDetachedGrandchildCleanup(t *testing.T) {
+	e, r := sandboxFixture(t)
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := "import os,time\nif os.fork():\n for i in range(500):\n  if os.path.exists('detached-pid'): os._exit(0)\n  time.sleep(.01)\n os._exit(1)\nos.setsid()\nif os.fork(): os._exit(0)\nopen('detached-pid','w').write(str(os.getpid()))\ntime.sleep(90)\n"
+	encoded, _ := json.Marshal(code)
+	script := "import json; exec(json.loads(" + strconv.Quote(string(encoded)) + "))"
+	command := shellQuote(python) + " -c " + shellQuote(script)
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": command})
+	if result["exit_code"] != 0 {
+		t.Fatal(result)
+	}
+	data, err := os.ReadFile(filepath.Join(r.CWD, "detached-pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatalf("detached grandchild survived sandbox cleanup: %v", err)
+	}
+}
+func TestRealSandboxCancellationKeepsFiles(t *testing.T) {
+	e, r := sandboxFixture(t)
+	r.Operation = "exec_command"
+	r.Args = map[string]any{"cmd": "echo retained > retained; echo ready; sleep 90", "yield_time_ms": 10}
+	result, err := e.Execute(context.Background(), r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, ok := result["session_id"].(string)
+	if !ok {
+		t.Fatal(result)
+	}
+	for !strings.Contains(result["stdout"].(string), "ready") {
+		result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 100})
+	}
+	result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "terminate": true, "yield_time_ms": 1000})
+	if result["session_id"] != nil {
+		t.Fatal(result)
+	}
+	if _, err = os.Stat(filepath.Join(r.CWD, "retained")); err != nil {
+		t.Fatal("cleanup erased workspace", err)
+	}
+}
+func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
+
+func TestRealSandboxPersistentPlugin(t *testing.T) {
+	e, r := sandboxFixture(t)
+	bundle := counterBundle(t)
+	first := call(t, e, r, "plugin_call", pluginArgs(t, bundle, map[string]any{}))
+	id := first["session_id"].(string)
+	next := call(t, e, r, "plugin_call", pluginArgs(t, bundle, map[string]any{"session_id": id}))
+	raw, _ := json.Marshal(next)
+	if !strings.Contains(string(raw), `"text":"2"`) {
+		t.Fatal(string(raw))
+	}
+	call(t, e, r, "plugin_call", pluginArgs(t, bundle, map[string]any{"session_id": id, "reset": true}))
+	if err := e.Drain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A platform may reject Chromium's nested native sandbox. Qualification accepts
+// that explicit failure, but never host fallback or unconfirmed process cleanup.
+func TestRealSandboxChromiumQualification(t *testing.T) {
+	e, r := sandboxFixture(t)
+	source := os.Getenv("POT_SANDBOX_BROWSER_SOURCE")
+	if source == "" {
+		source = "../../plugins/computer-use/browser.mjs"
+	}
+	code, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(r.CWD, "browser.mjs"), code, 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("<title>Sandbox browser proof</title><button>Proof</button>"))
+	}))
+	defer server.Close()
+	url, _ := json.Marshal(server.URL)
+	script := `import {operation,close} from './browser.mjs'; try { const result=await operation({action:'open',url:` + string(url) + `,screenshot:true}); console.log('BROWSER_OK:'+result.content[0].text); await close(); } catch(e) { console.error('BROWSER_UNSUPPORTED:'+e.message); process.exitCode=42; }`
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": "node --input-type=module -e " + shellQuote(script), "yield_time_ms": 1000})
+	stdout, stderr := result["stdout"].(string), result["stderr"].(string)
+	for result["session_id"] != nil {
+		result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
+		stdout += result["stdout"].(string)
+		stderr += result["stderr"].(string)
+	}
+	if result["exit_code"] == 42 && strings.Contains(stderr, "BROWSER_UNSUPPORTED:") {
+		t.Log("Chromium rejected protected execution; no host fallback: " + stderr)
+	} else if result["exit_code"] != 0 || !strings.Contains(stdout, "Sandbox browser proof") || !strings.Contains(stdout, "Proof") {
+		t.Fatal("Chromium/CDP qualification failed", result, stdout, stderr)
+	} else {
+		t.Log("Chromium native sandbox, CDP pipe, DOM and screenshot succeeded")
+	}
+	if err = e.Drain(); err != nil {
+		t.Fatal("browser descendant cleanup unconfirmed", err)
+	}
+}

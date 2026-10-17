@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/pkg/processscope"
 	"io"
 	"os"
 	"os/exec"
@@ -46,14 +47,18 @@ var ErrSessionEnded = errors.New("plugin session ended; explicitly start a new s
 // Session ownership (Agent/epoch), the eight-session limit and input-schema
 // validation belong to the caller's execution manager.
 type Config struct {
-	Workspace   string
-	Environment map[string]string
-	Node        string
-	Identity    string
-	Entrypoint  string
-	Files       map[string]string
-	Mode        string        // text or mixed, derived from model capabilities by Control
-	IdleTimeout time.Duration // zero uses the 30-minute default
+	Markers       *processscope.Markers
+	ProcessWorker []string
+	Admit         func() (func(), error)
+	Prepare       func(context.Context, *exec.Cmd, string) (func() error, error)
+	Workspace     string
+	Environment   map[string]string
+	Node          string
+	Identity      string
+	Entrypoint    string
+	Files         map[string]string
+	Mode          string        // text or mixed, derived from model capabilities by Control
+	IdleTimeout   time.Duration // zero uses the 30-minute default
 }
 
 type Content struct {
@@ -76,18 +81,21 @@ type Result struct {
 // are Results and preserve state; transport failure, cancellation and timeout
 // invalidate the session. Nothing is retried, including after uncertain effects.
 type Client struct {
-	mu         sync.Mutex
-	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	stdout     io.ReadCloser
-	reader     *bufio.Reader
-	wait       chan error
-	directory  string
-	id, mode   string
-	idle       time.Duration
-	touched    time.Time
-	ended      bool
-	cleanupErr error
+	supervisor    *processscope.Scope
+	finishSandbox func() error
+	admit         func() (func(), error)
+	mu            sync.Mutex
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	stdout        io.ReadCloser
+	reader        *bufio.Reader
+	wait          chan error
+	directory     string
+	id, mode      string
+	idle          time.Duration
+	touched       time.Time
+	ended         bool
+	cleanupErr    error
 }
 
 func New(config Config) (*Client, error) {
@@ -125,6 +133,10 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	directory, err = filepath.EvalSymlinks(directory)
+	if err != nil {
+		return nil, err
+	}
 	ok := false
 	defer func() {
 		if !ok {
@@ -157,6 +169,19 @@ func New(config Config) (*Client, error) {
 		}
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
+
+	var finish func() error
+	if config.Prepare != nil {
+		finish, err = config.Prepare(context.Background(), cmd, directory)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		if !ok && finish != nil {
+			_ = finish()
+		}
+	}()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	input, err := cmd.StdinPipe()
 	if err != nil {
@@ -167,12 +192,43 @@ func New(config Config) (*Client, error) {
 		_ = input.Close()
 		return nil, err
 	}
+	var supervisor *processscope.Scope
+	if len(config.ProcessWorker) > 0 {
+		markers := processscope.Markers{}
+		if config.Markers != nil {
+			markers = *config.Markers
+		}
+		supervisor, err = processscope.Prepare(cmd, config.ProcessWorker, markers)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		if !ok && supervisor != nil {
+			supervisor.Abort()
+		}
+	}()
+	var release func()
+	if config.Admit != nil {
+		release, err = config.Admit()
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 	if err := cmd.Start(); err != nil {
 		_ = input.Close()
 		_ = output.Close()
 		return nil, err
 	}
-	c := &Client{cmd: cmd, stdin: input, stdout: output, reader: bufio.NewReader(output), wait: make(chan error, 1), directory: directory, id: hex.EncodeToString(id), mode: config.Mode, idle: config.IdleTimeout, touched: time.Now()}
+	if supervisor != nil {
+		if err = supervisor.Started(); err != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+			return nil, err
+		}
+	}
+	c := &Client{admit: config.Admit, supervisor: supervisor, finishSandbox: finish, cmd: cmd, stdin: input, stdout: output, reader: bufio.NewReader(output), wait: make(chan error, 1), directory: directory, id: hex.EncodeToString(id), mode: config.Mode, idle: config.IdleTimeout, touched: time.Now()}
 	go func() { c.wait <- cmd.Wait() }()
 	ok = true
 	return c, nil
@@ -260,7 +316,17 @@ func (c *Client) Execute(ctx context.Context, tool string, input map[string]any)
 }
 
 func (c *Client) exchange(request []byte) (Result, error) {
-	if _, err := c.stdin.Write(append(request, '\n')); err != nil {
+	if err := func() error {
+		if c.admit != nil {
+			release, err := c.admit()
+			if err != nil {
+				return err
+			}
+			defer release()
+		}
+		_, err := c.stdin.Write(append(request, '\n'))
+		return err
+	}(); err != nil {
 		return Result{}, err
 	}
 	// LimitReader bounds allocation even when a plugin emits an unterminated line.
@@ -338,7 +404,11 @@ func (c *Client) stop(force bool) error {
 	c.ended = true
 	_ = c.stdin.Close()
 	if force {
-		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+		if c.supervisor != nil {
+			_ = c.supervisor.Stop(c.cmd.Process.Pid)
+		} else {
+			_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+		}
 	}
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -355,9 +425,21 @@ func (c *Client) stop(force bool) error {
 		}
 	}
 	_ = c.stdout.Close()
+	if c.supervisor != nil {
+		if err := c.supervisor.Finish(); err != nil {
+			c.cleanupErr = err
+			return err
+		}
+	}
 	for range 100 {
 		err := syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 		if errors.Is(err, syscall.ESRCH) {
+			if c.finishSandbox != nil {
+				c.cleanupErr = c.finishSandbox()
+				if c.cleanupErr != nil {
+					return c.cleanupErr
+				}
+			}
 			c.cleanupErr = os.RemoveAll(c.directory)
 			return c.cleanupErr
 		}

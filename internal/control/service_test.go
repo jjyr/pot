@@ -55,7 +55,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 		call := modelCalls.Add(1)
 		var event any
 		if call == 1 {
-			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "command-1", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"printf x >> proof; printf ok","login":false}`}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]any{"prompt_tokens": 20, "completion_tokens": 5}}
+			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "command-1", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"printf x >> proof; printf ok","login":false,"request_unsandboxed":true,"justification":"Access required by the execution contract test"}`}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]any{"prompt_tokens": 20, "completion_tokens": 5}}
 		} else {
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Finished 世界"}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 30, "completion_tokens": 4}}
 		}
@@ -119,7 +119,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(workspace, "assistants", "main", "proof")); !os.IsNotExist(err) {
 		t.Fatal("command ran before approval")
 	}
-	if err = service.Permissions.Decide("main", pending[0].ID, "allow_once"); err != nil {
+	if err = service.Permissions.Decide("main", pending[0].ID, "allow_task"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := awaitConversation(t, conversation, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) > 1 })
@@ -131,7 +131,8 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 	}
 	body, err := os.ReadFile(filepath.Join(workspace, "assistants", "main", "proof"))
 	if err != nil || string(body) != "x" {
-		t.Fatal(string(body), err)
+		details, _ := json.Marshal(snapshot.Messages)
+		t.Fatal(string(body), err, string(details))
 	}
 	if err = service.Close(); err != nil {
 		t.Fatal(err)

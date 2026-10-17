@@ -9,7 +9,7 @@ import (
 
 func TestReadUsesFixedBoundedPlainTextNotices(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"LICENSE.txt", "GoDependencyLicenses.txt", "FrontendFontLicense.txt", "FrontendIconLicense.txt", "ModelDirectoryLicense.txt", "node/LICENSE"} {
+	for _, name := range []string{"LICENSE.txt", "GoDependencyLicenses.txt", "FrontendFontLicense.txt", "FrontendIconLicense.txt", "ModelDirectoryLicense.txt", "node/LICENSE", "sandbox/THIRD-PARTY-NOTICES.txt"} {
 		p := filepath.Join(root, name)
 		os.MkdirAll(filepath.Dir(p), 0700)
 		os.WriteFile(p, []byte("<script>plain text notice</script>"), 0600)
@@ -19,7 +19,7 @@ func TestReadUsesFixedBoundedPlainTextNotices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !value.NoticesAvailable || len(value.Licenses) != 6 || !strings.Contains(value.Licenses[0].Text, "<script>") {
+	if !value.NoticesAvailable || len(value.Licenses) != 7 || !strings.Contains(value.Licenses[0].Text, "<script>") {
 		t.Fatalf("notice projection %+v", value)
 	}
 	os.Remove(filepath.Join(root, "GoDependencyLicenses.txt"))

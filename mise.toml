@@ -175,3 +175,11 @@ run = "python scripts/tests/go-ui-http-integration.py"
 [tasks."test:public-api"]
 description = "Verify reusable Go libraries from an independent external module"
 run = "python scripts/tests/go-public-api.py"
+
+[tasks."test:sandbox"]
+description = "Qualify real SRT file, network, socket, PTY and cleanup boundaries"
+run = "python scripts/tests/sandbox.py"
+
+[tasks."test:sandbox-linux"]
+description = "Qualify Linux namespaces in a disposable Docker test host"
+run = "python scripts/tests/sandbox-linux.py"

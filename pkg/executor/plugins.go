@@ -5,20 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/pluginhost"
+	"github.com/jjyr/pot/pkg/processscope"
 )
 
 type pluginInstance struct {
-	client       *pluginhost.Client
-	digest, mode string
-	environment  string
-	touched      time.Time
-	idle         time.Duration
-	busy         int
+	executionMode string
+	revision      uint64
+	client        *pluginhost.Client
+	digest, mode  string
+	environment   string
+	touched       time.Time
+	idle          time.Duration
+	busy          int
 }
 type pluginSessions struct {
 	mu        sync.Mutex
@@ -151,7 +155,7 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 			p.mu.Unlock()
 			return nil, errors.New("plugin session expired; explicitly start a new REPL")
 		}
-		if instance.digest != bundle.Digest || instance.mode != mode || instance.environment != environment && input["reset"] != true {
+		if instance.executionMode != r.Mode || instance.revision != r.Revision || instance.digest != bundle.Digest || instance.mode != mode || instance.environment != environment && input["reset"] != true {
 			p.mu.Unlock()
 			return nil, errors.New("plugin session binding or credentials changed; reset the session and start a new one")
 		}
@@ -160,12 +164,35 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 			p.mu.Unlock()
 			return nil, errors.New("plugin session limit reached")
 		}
-		client, err := pluginhost.New(pluginhost.Config{Workspace: r.CWD, Environment: r.Environment, Node: e.options.Node, Identity: bundle.Digest, Entrypoint: bundle.Manifest.Contributes.Tools.Entrypoint, Files: bundle.Files, Mode: mode, IdleTimeout: idle})
+		markers := &processscope.Markers{}
+		var prepare func(context.Context, *exec.Cmd, string) (func() error, error)
+		if r.Mode == "sandbox" {
+			prepare = func(_ context.Context, cmd *exec.Cmd, bundle string) (func() error, error) {
+				cmd.Dir = r.CWD
+				launcher := e.sandboxLauncher()
+				launcher.Markers = markers
+				finish, err := launcher.Prepare(ctx, cmd, r.CWD, []string{bundle}, nil, false)
+				if err != nil {
+					return nil, &PreparationError{Cause: err}
+				}
+				return finish, nil
+			}
+		}
+		if r.Mode == "session" {
+			p.mu.Unlock()
+			return nil, errors.New("session authority cannot launch a plugin")
+		}
+		client, err := pluginhost.New(pluginhost.Config{Markers: markers, ProcessWorker: e.options.ProcessWorker, Admit: func() (func(), error) {
+			if e.options.Admit != nil {
+				return e.options.Admit(r.Revision)
+			}
+			return func() {}, nil
+		}, Prepare: prepare, Workspace: r.CWD, Environment: r.Environment, Node: e.options.Node, Identity: bundle.Digest, Entrypoint: bundle.Manifest.Contributes.Tools.Entrypoint, Files: bundle.Files, Mode: mode, IdleTimeout: idle})
 		if err != nil {
 			p.mu.Unlock()
 			return nil, err
 		}
-		instance = &pluginInstance{environment: environment, client: client, digest: bundle.Digest, mode: mode, touched: time.Now(), idle: idle}
+		instance = &pluginInstance{executionMode: r.Mode, revision: r.Revision, environment: environment, client: client, digest: bundle.Digest, mode: mode, touched: time.Now(), idle: idle}
 		session = client.SessionID()
 		p.instances[session] = instance
 	}
