@@ -23,4 +23,4 @@ opening a PR.
   pushed commit, ending in `?raw=true`, so later branch changes do not change
   the comparison. Update the URL when replacing a screenshot.
 
-Example path: `docs/pr-images/gh/service-accounts-after.png`.
+Example path: `docs/pr-images/gh/third-party-accounts-after.png`.

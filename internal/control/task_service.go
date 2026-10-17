@@ -40,11 +40,11 @@ func (s *Service) openTasks() error {
 		if err != nil {
 			return err
 		}
-		accounts, err := s.Credentials.List(s.ctx)
+		hasIntegrations, err := s.Integrations.HasState(s.ctx)
 		if err != nil {
 			return err
 		}
-		if len(definitions) != 0 || len(s.Profiles.Snapshot().Profiles) != 0 || len(accounts) != 0 {
+		if len(definitions) != 0 || len(s.Profiles.Snapshot().Profiles) != 0 || hasIntegrations {
 			return errors.New("Runtime with AI configuration cannot join as Runner; use a separate data directory")
 		}
 		return nil
@@ -401,7 +401,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Credentials: s.Credentials, Product: map[string]agent.Dispatch{}}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Credentials: s.Integrations, Product: map[string]agent.Dispatch{}}
 	feedback := &taskFeedback{s: s, launch: l}
 	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.TaskID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
@@ -416,7 +416,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		definitions = append(definitions, d)
 	}
 	loop := &agent.Agent{Services: ports, Feedback: feedback, Dispatch: dispatch.Dispatch, Tools: definitions, Composer: s.options.Composer, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
-		s.Credentials.Forget(credentialScope(l.TaskID, l.RunID, l.Generation))
+		s.Integrations.Forget(credentialScope(l.TaskID, l.RunID, l.Generation))
 		s.Permissions.Expire(l.AssistantID, l.RunID, l.Generation)
 		result := engine.Drain()
 		if s.options.CleanupTarget != nil {

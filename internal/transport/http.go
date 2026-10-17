@@ -56,7 +56,7 @@ func Handler(app *Application, token string) http.Handler {
 		if app.download(w, r) {
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		if r.Method != http.MethodGet && r.Method != http.MethodPost && !(r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/integrations/")) {
 			writeError(w, http.StatusMethodNotAllowed, protocol.APIError{Code: "method_not_allowed", Message: "method not allowed"})
 			return
 		}

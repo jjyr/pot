@@ -45,9 +45,9 @@ manifest or installation root. For example, the Podman package declares:
 
 A tool capability is declared under `contributes.tools` with `runtime`,
 `execution`, `entrypoint`, `files`, `requirements` and `tools`. Optional
-`credentials` bindings name Control service accounts to inject into the tool
+`credentials` bindings name connected services to inject into the tool
 process; `session_mode: "call"` closes the process after each invocation. See
-[Credentials](credentials.md) for caching and account ownership. The current driver
+[Credentials](credentials.md) for login, single-account ownership and caching. The current driver
 requires Node, supports `sandbox` or `host_or_sandbox`, and validates flat scalar
 and bounded string-array input schemas. See the [computer-use manifest](../plugins/computer-use/plugin.json)
 and [tool execution contract](computer-use.md#plugin-contract-and-lifecycle).

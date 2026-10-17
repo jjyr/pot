@@ -1,106 +1,144 @@
-# External-service credentials
+# Third-party integrations and credentials
 
-Control owns configured service accounts. Saving an account makes its credential
-available to every assistant and Task of that Control, including connected
-execution machines. There are no additional account grants or per-plugin approval
-rules. Different Controls retain independent accounts. The upstream token's
-permissions determine the allowed repositories and operations.
+Settings → Third-party accounts lists every supported service, including those
+not connected. GitHub is currently the only adapter. Each Control can connect one
+account per service. The list shows the username and logged-in or expired state;
+changing accounts requires logging out first. Configured accounts are available
+to every assistant and Task of that Control. Upstream permissions and branch
+protections determine the allowed operations.
 
-## Account configuration
+## Component boundary
 
-Settings → Service accounts creates, updates and deletes accounts. A service can
-have several stable account IDs and one default account. The first account becomes
-the default; choosing another default replaces it. Deleting the default selects
-the first remaining account in account-ID order. Edits and deletes check the
-account's revision to reject stale client writes. A blank token on edit keeps the
-saved value; expiration is supplied explicitly and may be omitted.
+`pkg/integrations` owns the service catalog, browser authorization sessions,
+account lifecycle and credential resolution. It imports no Control, Runtime,
+Task, Assistant or internal product packages. Hosts inject these ports:
 
-The authenticated owner API exposes:
+- `Adapter`: service descriptor, public browser challenge and authorization result.
+  Provider-specific authorization state remains private to the adapter.
+- Optional `Refresher`: exchange refresh credentials when supported by a service.
+- `AccountStore`: one record per service, revision checks and deletion tombstones.
+- `SecretStore`: immutable encrypted writes, reads and deletion.
+- `CredentialResolver`: execution callers need only scoped credential reads and
+  cache cleanup; they do not depend on authorization or persistence internals.
 
-- `GET /api/v1/credentials`: `{items: [...]}` containing account metadata only.
-- `POST /api/v1/credentials`: `service`, `account`, `name`, `default`,
-  `expected_revision`, `token` and optional RFC 3339 `expires_at`.
-- `POST /api/v1/credentials/remove`: `service`, `account`, `expected_revision`.
+The bundled `SQLAccounts` uses a caller-owned database and owns only its table.
+Control composes it over the existing `control.sqlite` and injects the existing
+[Secrets](secrets.md) component, sharing its master key. It supplies an ownership
+write gate and change notifications. Integrations requires no separate database,
+process or deployment. Other hosts can supply different stores and adapters.
 
-Metadata and immutable encrypted secret references live in `control.sqlite`.
-Values use the existing [Secrets](secrets.md) encryption and master key. Owner
-responses and change events never return values. An execution Runtime with
-configured service accounts cannot enroll as a Runner.
+```text
+UI -> authenticated API -> Integrations -> GitHub Adapter -> GitHub OAuth
+                              |   |
+                        AccountStore + SecretStore
+                              |
+Command / plugin -> CredentialResolver -> transient process environment
+```
 
-## Command and plugin access
+## Browser authorization
 
-`exec_command` accepts credential references keyed by environment variable:
+Register a GitHub OAuth App and enable **Device Flow** in its settings. Configure
+`POT_GITHUB_CLIENT_ID` on the owning Control before starting it. This is the
+application ID, not a user's token. No shared third-party application's identity
+is bundled. Without configuration, GitHub remains visible and login is disabled
+with an administrator setup message.
+
+The GitHub adapter requests `repo read:user`, obtains a device challenge, and
+opens `https://github.com/login/device` in the user's browser. Pot displays the
+one-time user code. The adapter respects GitHub's polling interval and slowdown
+responses, then fetches the authenticated user's stable ID and username before
+saving the account. This works with local or remote Controls without a public
+callback endpoint. Device codes and OAuth tokens never reach the management API.
+
+GitHub OAuth App access tokens normally have no expiration. If using an application
+configuration that issues expiring and refresh tokens, the adapter supports
+refresh exchanges; configure `POT_GITHUB_CLIENT_SECRET` when that application
+requires it. Secret configuration stays on the owning host.
+
+Login sessions are memory-only, bounded by the provider's deadline, and do not
+survive restart. One pending session is allowed per service. Cancellation, logout
+and shutdown fence late authorization results. Pending and connected integrations
+prevent the host from enrolling as an execution Runner. Logout cancels any pending
+session, clears all credential caches and deletes the local encrypted credential.
+It does not revoke the application's authorization at GitHub; users can revoke it
+in GitHub settings. Existing processes retain credentials already injected at
+startup.
+
+## Management API
+
+All routes use existing owner authentication and Space routing. There is no
+public token-read, manual-token-write, account-selection or default-account API.
+
+| Method and route | Contract |
+| --- | --- |
+| `GET /api/v1/integrations` | `{items: [...]}` containing service descriptors, status, account identity and current login session |
+| `POST /api/v1/integrations/{service}/login` | Empty JSON object; returns a login session and browser instructions |
+| `GET /api/v1/integrations/{service}/login/{id}` | Read the current login status |
+| `DELETE /api/v1/integrations/{service}/login/{id}` | Cancel the login session |
+| `DELETE /api/v1/integrations/{service}/connection` | `{expected_revision: ...}`; disconnect the current account |
+
+Service states are `disconnected`, `connected` and `expired`. Login states are
+`pending`, `succeeded`, `failed`, `expired` and `cancelled`. A session exposes only
+its ID, service, status, authorization URL, optional user code, deadline and safe
+error text. An account exposes identity, revision and optional expiration, never
+secret references or credential values. Unknown services or sessions return
+`not_found`. Connected services reject another login until logout. Stale logout
+requests cannot remove a replacement connection.
+
+## Execution credentials
+
+`exec_command` and plugin manifests bind an environment variable to a service:
 
 ```json
 {
   "cmd": "gh pr list --repo owner/repo",
-  "credentials": {
-    "GH_TOKEN": {"service": "github", "account": "personal"}
-  }
+  "credentials": {"GH_TOKEN": {"service": "github"}}
 }
 ```
 
-Omitting `account` selects the service's default account. Missing or expired
-credentials fail before starting the process. Execution destination and Host
-approval still follow [machine policy](permissions.md).
+A plugin declares the same `credentials` under `contributes.tools`. Missing or
+expired credentials fail before starting a process. The dispatcher resolves
+credentials and injects values through the authenticated execution path; the
+target does not perform a second lookup. Execution target and Host approval still
+follow [machine policy](permissions.md).
 
-A plugin declares the same `credentials` object under `contributes.tools`. The dispatcher resolves
-references for the original run and injects values into the plugin's environment.
-Packages, tool arguments, launch manifests and prepared-operation records contain
-references, never values. A tool capability
-`session_mode` of `call` closes the plugin process
-after each invocation; omission retains explicit-session behavior. Plugin schemas
-support scalars and bounded arrays of strings (256 items, 32 KiB per item).
+Credentials are decrypted on first use and cached in memory by an opaque
+execution scope. Control constructs that scope from owner, turn/run and generation.
+Concurrent misses are coalesced. Near-expiry values are reloaded up to 30 seconds
+before expiration, with a one-second minimum interval, and refreshed when the
+adapter supports it. Failed refreshes never retry an external command. Expired
+values are never injected. Scope completion, cancellation and shutdown clear
+caches. Logout and credential rotation invalidate all scopes synchronously.
 
-Credentials are decrypted on first use and cached in Control memory by execution
-owner, turn/run and generation. Concurrent misses are coalesced. The dispatcher
-reuses cached values when sending commands to their execution target; the target
-does not perform another credential lookup. Transient environment fields travel
-through the authenticated execution path and guest pipe but are excluded from
-Runner command records, Sandbox prepared inputs and guest request journals. Shell
-initialization snapshots are captured before credential injection.
+After an authentication failure, `refresh_credentials: true` rereads the selected
+credential and attempts a supported refresh. Assess permission failures separately.
+A non-expiring token revoked at GitHub is discovered by the actual command;
+logged-in UI state does not perform continuous upstream validation. When refresh
+cannot restore access, log out and log in again.
 
-Near-expiry values are reread up to 30 seconds before expiration, with a one-second
-minimum interval. Expired values are never used. Account changes synchronously
-clear caches; subsequent commands observe the new configuration without a Runner
-invalidation round trip. Execution completion, cancellation and shutdown discard
-the cache. Existing processes retain their startup environment. Persistent plugin
-sessions must be reset and restarted if credentials change.
+Transient environment fields are excluded from Runner command records, Sandbox
+prepared inputs, guest request journals and shell initialization snapshots. Plugin
+packages, tool arguments and launch manifests contain references only. Persistent
+plugin sessions must be reset if credentials change; `session_mode: call` starts a
+fresh process for each invocation.
 
-After an authentication failure, request `refresh_credentials: true` on the next
-command to reread the selected credential. The GitHub plugin exposes the same
-option. Command failures are not interpreted as authentication failures; permission
-and external-service errors must be assessed separately. Refresh never retries an
-earlier command or external write.
+## GitHub commands
 
-The current account type stores supplied tokens/PATs. Rereading a static token
-does not renew it; expired PATs must be replaced in Settings. OAuth refresh and
-GitHub App token issuance require separate service adapters.
-
-## GitHub
-
-Configure a `github` account authorized for the intended repositories. Enable the
-`github` plugin in the AI provider's plugin settings to expose `github`. It
-executes `gh` directly using `GH_TOKEN`; Control does not proxy GitHub requests.
-Arguments are an argv array without the executable:
+Enable the `github` plugin in the AI provider's plugin settings. It runs `gh`
+directly with `GH_TOKEN`; Integrations does not proxy business requests or execute
+commands. Arguments are an argv array without the executable:
 
 ```json
 {"args": ["pr", "list", "--repo", "owner/repo", "--json", "number,title"]}
 ```
 
-For HTTPS Git authentication, use the same credential reference in `exec_command`
-and a per-command credential helper:
+For HTTPS Git, use the same credential binding and a per-command helper:
 
 ```sh
 git -c credential.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' push origin HEAD
 ```
 
-This leaves global Git configuration unchanged. SSH remotes require SSH
-credentials. Branch protections remain effective. `gh` and `git` must be installed
-on the execution target; the Linux image recipe includes both, and existing images
-require an explicit rebuild/update.
-
-Processes can read their injected credentials. Avoid printing them, placing them
-in command arguments/files or persisting them with `gh auth login`. Pot does not
-audit downstream requests or revoke tokens already read by a process. Revoke
-values at the upstream provider when necessary.
+`gh` and `git` must exist on the execution target; the Linux image recipe includes
+both, and existing images require an explicit rebuild/update. SSH remotes require
+SSH credentials. Processes can read injected credentials; avoid printing them,
+putting them in command arguments/files, or persisting them with `gh auth login`.

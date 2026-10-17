@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjyr/pot/internal/credentials"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/executor"
+	"github.com/jjyr/pot/pkg/integrations"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -39,7 +39,7 @@ type Dispatcher struct {
 	Operations             *Operations
 	Host                   ToolEngine
 	Target                 TargetDispatch
-	Credentials            *credentials.Store
+	Credentials            integrations.CredentialResolver
 	Product                map[string]agent.Dispatch
 }
 
@@ -151,7 +151,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			if d.Credentials == nil {
 				err = errors.New("Control credentials are unavailable")
 			} else {
-				request.Environment, err = d.Credentials.Environment(ctx, credentialScope(d.Owner, d.Turn, d.Generation), bindings, refresh)
+				request.Environment = map[string]string{}
+				for name, ref := range bindings {
+					var value string
+					value, err = d.Credentials.Credential(ctx, credentialScope(d.Owner, d.Turn, d.Generation), ref.Service, refresh)
+					if err != nil {
+						break
+					}
+					request.Environment[name] = value
+				}
 			}
 		}
 	}

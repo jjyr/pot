@@ -245,10 +245,16 @@ than manual creation forms. See [Task coordination](task-coordination.md) and
 
 ### Settings and first connection
 
-Settings has General / AI Providers / Task Configuration tabs and an explicit
+Settings has General / AI Providers / Third-party accounts / Task Configuration tabs and an explicit
 configuration location. General exposes Language, Appearance and keyboard shortcuts;
 shortcuts start collapsed on narrow windows. Locale/theme startup and live changes
 follow [Internationalization](internationalization.md), preserving drafts.
+
+Third-party accounts lists supported services before login. Each service has one
+account: Log in opens browser authorization; a connected row shows the username,
+status and Log out. There is no account picker, default account or separate
+re-login action. Pending authorization shows a user code, browser link and Cancel.
+Expired accounts remain visible until logout. See [Integrations](credentials.md).
 
 AI Providers manages named connections, credentials, endpoints, protocols and
 concrete default models. One Provider is the Space's new-assistant default.

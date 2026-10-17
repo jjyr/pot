@@ -19,7 +19,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
 | `internal/relay` | Transport-independent assistant-message delivery; composed only by native App |
 | `internal/gateway`, `internal/secrets` | Control-owned provider HTTP routes and encrypted credential references |
-| `internal/credentials` | Control-owned service accounts and execution-scoped credential caching for direct client access |
+| `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |
 | `internal/control`, `internal/tasks`, `internal/schedule` | Product coordination, model selection, permissions, durable Tasks and schedules |
 | `internal/controlplane` | Stable signing identities, invitations, membership, outward signed WebSocket RPC |

@@ -5,16 +5,14 @@ import (
 	"strings"
 )
 
-// CredentialRef names an external-service account on the owning Control.
-// An omitted account selects the service's default account.
+// CredentialRef names the single connected account for an external service.
 type CredentialRef struct {
 	Service string `json:"service"`
-	Account string `json:"account,omitempty"`
 }
 
 func (r CredentialRef) Validate() error {
-	if !Identifier(r.Service) || len(r.Service) > 64 || r.Account != "" && (!Identifier(r.Account) || len(r.Account) > 64) {
-		return errors.New("invalid credential service or account")
+	if !Identifier(r.Service) || len(r.Service) > 64 {
+		return errors.New("invalid credential service")
 	}
 	return nil
 }

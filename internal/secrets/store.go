@@ -57,6 +57,12 @@ func Open(path string, keys KeySource) (*Store, error) {
 	return &Store{db, keys}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
+
+// Delete removes a no-longer-referenced secret, including integration logout.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM secrets WHERE id=?", id)
+	return err
+}
 func (s *Store) Put(ctx context.Context, id string, plaintext []byte) error {
 	if id == "" || len(id) > 256 || len(plaintext) > 1024*1024 {
 		return errors.New("invalid secret size or reference")

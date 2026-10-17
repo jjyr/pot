@@ -22,7 +22,7 @@ and hashes; Node and noVNC archives also have pinned checksums.
 The image includes Bash, Git, GitHub CLI (`gh`), C/C++ build tools and common native
 dependencies. GitHub plugins use the pinned Node runtime and these preinstalled
 clients; image construction checks that Node, Git and GitHub CLI can start.
-Credentials are supplied at execution time through [service accounts](credentials.md).
+Credentials are supplied at execution time through [third-party integrations](credentials.md).
 Its glibc userland supports conventional GNU/Linux Rustup/Node distributions;
 individual tools can need extra packages. Official Node matches the guest
 architecture. The Go executor is cross-compiled with CGO disabled; JavaScript

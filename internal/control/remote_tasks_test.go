@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/credentials"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
@@ -84,9 +83,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	defer model.Close()
 	control := taskControl(t, "control", model.URL)
 	worker := taskControl(t, "worker", "")
-	if _, err := control.Credentials.Save(context.Background(), credentials.SaveRequest{Service: "github", Account: "personal", Name: "Personal", Token: "remote-fixture-service-token"}); err != nil {
-		t.Fatal(err)
-	}
+	configureIntegration(t, control, "remote-fixture-service-token")
 	if err := control.Machines.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
@@ -183,8 +180,8 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			t.Fatal("credential persisted in Runner command/event journal")
 		}
 	}
-	accounts, err := worker.Credentials.List(ctx)
-	if err != nil || len(accounts) != 0 {
+	hasAccounts, err := worker.Integrations.HasState(ctx)
+	if err != nil || hasAccounts {
 		t.Fatal("Runner persisted Control service accounts", err)
 	}
 	if len(worker.Profiles.Snapshot().Profiles) != 0 {

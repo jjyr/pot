@@ -48,7 +48,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		return nil, protocol.APIError{Code: "invalid_path", Message: "invalid application path"}
 	}
 	method := strings.ToUpper(r.Method)
-	if method != "GET" && method != "POST" {
+	if method != "GET" && method != "POST" && !(method == "DELETE" && strings.HasPrefix(u.Path, "/api/v1/integrations/")) {
 		return nil, protocol.APIError{Code: "method_not_allowed", Message: "method not allowed"}
 	}
 	owner := u.Query().Get("assistant_id")
@@ -91,7 +91,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if s.Machines.Role() == "runner" && path != "/api/v1/runtime" && path != "/api/v1/control" {
 		return nil, protocol.APIError{Code: "runner_role", Message: "execution Runtime cannot own assistants or account configuration"}
 	}
-	if result, err, handled := a.credentialCall(ctx, method, path, r); handled {
+	if result, err, handled := a.integrationCall(ctx, method, path, r); handled {
 		return result, err
 	}
 	if result, err, handled := a.taskCall(ctx, method, u, owner, r); handled {

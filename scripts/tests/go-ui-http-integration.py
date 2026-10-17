@@ -364,6 +364,8 @@ def main():
     env = dict(os.environ)
     env.pop("POT_ACCESS_VAPID_KEY", None)
     env.pop("POT_ACCESS_VAPID_CONTACT", None)
+    env.pop("POT_GITHUB_CLIENT_ID", None)
+    env.pop("POT_GITHUB_CLIENT_SECRET", None)
     # Dependencies must be cached. Runtime metadata refresh cannot reach outside
     # loopback. The browser script likewise rejects non-loopback resource requests.
     env.update(
