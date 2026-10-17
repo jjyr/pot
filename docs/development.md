@@ -110,13 +110,19 @@ The explicit paid permission qualification uses the configured DeepSeek Flash fr
 
 ```sh
 POT_DEEPSEEK_LIVE=1 mise exec -- go test -v ./internal/control \
-  -run '^TestDeepSeekUnsandboxLive$' -count=1 -timeout=12m
+  -run '^TestDeepSeekUnsandboxLive$' -count=1 -timeout=16m
 ```
 
 Prepare the pinned SDK first with `mise run test:sandbox`; override its location
 with `POT_SANDBOX_SDK` if necessary. This uses the real Agent, Control/Gateway,
-approval store and OS sandbox with synthetic files only. Four isolated scenarios
+approval store and OS sandbox with synthetic files only. Six isolated scenarios
 are capped at six model requests each, 768 output tokens per response and 150
 seconds per scenario. They cover ordinary private-temp/workspace execution,
 permanent exact-command approval, owner denial and recovery without repeating a
-partial write. Default tests skip paid calls. Credentials are never logged.
+partial write. Two boundary scenarios give only an ordinary file-reading goal:
+a workspace symlink produces a real sandbox read denial, after which the model
+must autonomously request justified host access. The harness approves or denies
+only that synthetic read, checking that approval follows the actual denial and
+that an owner refusal stops further execution. Run just those cases with
+`-run '^TestDeepSeekUnsandboxLive$/^boundary-'`. Default tests skip paid calls.
+Credentials are never logged.

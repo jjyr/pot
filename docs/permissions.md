@@ -96,7 +96,12 @@ Trusted machines can run ordinary host plugin sessions. See [executor](executor.
 
 Sandbox errors do not trigger automatic host execution or command replay. Native
 filesystem denials cannot generally pause for approval. The Agent receives the
-failure, accounts for partial effects, and may request a new explicit host call.
+failure and is instructed to submit a new, narrowly scoped host request when a
+sandbox restriction blocks the user's task, accounting for partial effects first.
+An explicit user restriction against host access or approval requests takes precedence.
+A sandbox denial is distinct from an owner denial: if the owner refuses the host
+request, the Agent must stop that operation without trying another route. These
+instructions guide model behavior; Control still enforces every approval.
 
 ## Owner management and applying changes
 
