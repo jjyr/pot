@@ -19,7 +19,7 @@ async page => {
  };
  const fileTask='de305d54-75b4-431b-adb2-eb6b9e546014';
  const onError=error=>errors.push(error.message);page.on('pageerror',onError);const onDialog=dialog=>dialog.type()==='beforeunload'?dialog.accept():dialog.dismiss();page.on('dialog',onDialog);
- let definitions=[];
+ let definitions=[],failPermissions=false,permissionsUnavailable=false;
  const executionPolicy={machines:{'machine-one':{execution_access:'ask',revision:1},'machine-offline':{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}};
  await page.addInitScript(()=>{if(new URLSearchParams(location.search).get('contract')!=='ui-production')return;const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(()=>this.onopen?.({}));}close(){sources.delete(this);}};window.__potContractChanges=topics=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify(topics)}));};window.__potContractSnapshot=value=>{for(const source of sources)if(source.url.includes('/events'))source.dispatchEvent(new MessageEvent('snapshot',{data:JSON.stringify(value)}));};window.__potContractSubscriptions=()=>[...sources].filter(source=>source.url.includes('/changes')).length;});
  let rules={text:'original rules',revision:1},thread={owner:'alpha',generation:1,revision:0,pending:false,selection:{profile_id:'p',profile_revision:1,model:'test-model',context_window:null,max_output_tokens:null,reasoning_effort:null},config:{source_profile_id:'p',model:'test-model'}};
@@ -51,6 +51,7 @@ async page => {
   else if(path==='/api/v1/agent'){if(method==='POST'){const body=route.request().postDataJSON();thread={...thread,selection:body.selection,generation:thread.generation+1,revision:thread.revision+1};}value=thread;}
   else if(path==='/api/v1/instructions'){if(method==='POST')rules={...route.request().postDataJSON(),revision:2};value=rules;}
   else if(path==='/api/v1/permissions'){
+   if(method==='GET'&&permissionsUnavailable||method==='POST'&&failPermissions){await route.fulfill({status:503,json:{message:'Permission service unavailable'}});return;}
    if(method==='POST'){const b=route.request().postDataJSON(),m=b.machine_id||b.rule?.machine_id,current=executionPolicy.machines[m];
     if(b.action==='configure'){assert(b.machine_policy.revision===current.revision,'Machine save uses CAS');current.execution_access=b.machine_policy.execution_access;current.revision++;}
     else if(b.action==='save_rule'){assert(b.expected_revision===current.revision,'Rule save uses CAS');executionPolicy.rules=executionPolicy.rules.filter(r=>r.id!==b.old_id);executionPolicy.rules.push({...b.rule,id:'command-rule',updated_by:'Owner',updated_at:'2026-10-17'});current.revision++;}
@@ -129,29 +130,42 @@ async page => {
   longTaskList=true;await page.evaluate(()=>window.__potContractChanges({assistants:1,usage:3,tasks:5}));await page.getByRole('button',{name:'Extra task 18',exact:true}).waitFor();await page.waitForFunction(()=>{const node=document.querySelector('.task-list');if(!node)return false;node.scrollTop=240;return node.scrollTop>200;});await page.keyboard.press('Meta+d');await page.locator('.window-title').filter({hasText:'Machines'}).waitFor();await page.goBack();await page.getByRole('button',{name:'Task transcript proof',exact:true}).waitFor();await page.waitForFunction(()=>document.querySelector('.task-list')?.scrollTop>200);assert(!await page.getByLabel('Message',{exact:true}).count(),'Browser Back restores Tasks parent instead of replaying old Task detail');
   await page.getByRole('button',{name:'Chat',exact:true}).click();await input.waitFor({state:'visible'});await page.getByRole('button',{name:'Assistant settings',exact:true}).click();await page.getByLabel('Name',{exact:true}).fill('Browser Back draft');await page.goBack();await page.getByRole('button',{name:'Keep editing',exact:true}).click();assert(await page.getByLabel('Name',{exact:true}).inputValue()==='Browser Back draft','Browser Back dirty guard retains live editor');await page.goBack();await page.getByRole('button',{name:'Discard changes',exact:true}).click();await input.waitFor({state:'visible'});assert(await input.inputValue()==='alpha draft','Accepted browser Back restores captured Chat draft');
   await page.getByRole('button',{name:'Machines',exact:true}).click();
-  const machine=page.locator('.machine-card').filter({hasText:'Machine One'});
-  await machine.getByRole('button',{name:'Machine settings',exact:true}).click();
-  await machine.getByRole('button',{name:'Manage execution permissions',exact:true}).click();
-  const permission=()=>page.locator('.permission-machine[data-machine-id="machine-one"]');
+  const permission=()=>page.locator('.machine-card[data-machine-id="machine-one"]');
+  await permission().getByLabel('Default execution',{exact:true}).waitFor();
+  assert(!await page.getByRole('button',{name:'View tasks',exact:true}).count()&&!await page.getByRole('button',{name:'Manage execution permissions',exact:true}).count(),'Machines has no duplicate Task link or permission detour');
+  assert(!await permission().getByRole('button',{name:'Save permissions',exact:true}).isVisible(),'Clean machine policy has no save controls');
+  assert(await permission().locator('.permission-rules').evaluate(node=>!node.open),'Command permissions start collapsed');
   await permission().getByLabel('Default execution',{exact:true}).selectOption('allow');
-  await permission().getByRole('button',{name:'Save permissions',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('.permission-machine[data-machine-id="machine-one"] select')?.value==='allow');
-  assert(await page.locator('.permission-machine[data-machine-id="machine-offline"] select').inputValue()==='ask','Machine trust never crosses enrollment');
+  assert(await permission().getByText('Saving stops existing execution on this machine and clears temporary authorizations. Work is not restarted automatically.',{exact:true}).isVisible(),'Changing authority explains stopped work before saving');
+  await page.evaluate(()=>window.__potContractChanges({permissions:45}));
+  await page.waitForFunction(()=>document.querySelector('.machine-card[data-machine-id="machine-one"] select')?.value==='allow');
+  await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:'Keep editing',exact:true}).click();
+  assert(await permission().getByLabel('Default execution',{exact:true}).inputValue()==='allow','Leaving dirty permissions requires a decision and retains selection');
+  failPermissions=true;await permission().getByRole('button',{name:'Save permissions',exact:true}).click();await permission().getByText('Permission service unavailable',{exact:true}).waitFor();
+  assert(await permission().getByLabel('Default execution',{exact:true}).inputValue()==='allow','Failed saves keep the permission draft');
+  failPermissions=false;await permission().getByRole('button',{name:'Save permissions',exact:true}).click();
+  await page.waitForFunction(()=>{const card=document.querySelector('.machine-card[data-machine-id="machine-one"]');return card?.querySelector('select')?.value==='allow'&&card.querySelector('.permission-changes')?.hidden;});
+  assert(await page.locator('.machine-card[data-machine-id="machine-offline"] select').inputValue()==='ask','Machine trust never crosses enrollment');
+  assert(!await page.locator('.machine-card[data-machine-id="machine-offline"] select').isDisabled(),'Disconnected execution machine can still be configured through its online Control');
+  await permission().locator('.permission-rules>summary').click();
   await permission().getByRole('button',{name:'Add permission',exact:true}).click();
   await page.getByLabel('Exact command',{exact:true}).fill('npm test');await page.getByLabel('Working directory',{exact:true}).fill('/Projects/shop');await page.getByRole('button',{name:'Save',exact:true}).click();
   await permission().getByText('npm test',{exact:true}).waitFor();
+  assert(await permission().locator('.permission-rules').evaluate(node=>node.open),'Returning from a command editor restores expanded authorization list');
   await permission().getByRole('button',{name:'Edit',exact:true}).click();await page.getByLabel('Exact command',{exact:true}).fill('npm run lint');await page.getByLabel('Host permission',{exact:true}).selectOption('deny_host');await page.getByRole('button',{name:'Save',exact:true}).click();await permission().getByText('npm run lint',{exact:true}).waitFor();
   assert(executionPolicy.rules.length===1&&executionPolicy.rules[0].policy==='deny_host','Rule edit replaces original permission');
   await permission().getByRole('button',{name:'Remove',exact:true}).click();await permission().getByText('No permanent command permissions.',{exact:true}).waitFor();
+  await permission().getByLabel('Default execution',{exact:true}).selectOption('deny');executionPolicy.machines['machine-one'].revision++;
+  await page.evaluate(()=>window.__potContractChanges({permissions:46}));await permission().getByText('Permissions changed elsewhere. Cancel to load the latest policy before editing again.',{exact:true}).waitFor();
+  assert(await permission().getByRole('button',{name:'Save permissions',exact:true}).isDisabled(),'An external policy revision cannot overwrite an inline draft');
+  await permission().getByRole('button',{name:'Cancel',exact:true}).click();
   executionPolicy.task_grants=[{id:'task-grant',machine_id:'machine-one',turn:'run-one',context:{command:'npm test',directory:'/Projects/shop'}}];executionPolicy.application['machine-one']={revision:executionPolicy.machines['machine-one'].revision,state:'pending',error:'Runner offline'};
-  await page.evaluate(()=>window.__potContractChanges({permissions:50}));await permission().getByRole('button',{name:'Retry application',exact:true}).click();await permission().getByRole('button',{name:'Remove task authorization',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.permission-machine .permission-application'));
+  await page.evaluate(()=>window.__potContractChanges({permissions:50}));await permission().getByRole('button',{name:'Retry application',exact:true}).click();await permission().getByRole('button',{name:'Remove task authorization',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.machine-card .permission-application'));
   assert(executionPolicy.task_grants.length===0,'Active task permission can be removed');
-  await page.getByRole('button',{name:'Machines',exact:true}).click();await machine.getByRole('button',{name:'Machine settings',exact:true}).click();
-  assert(posts.some(value=>value.path==='/api/v1/permissions'&&value.body.machine_id==='machine-one'&&value.body.machine_policy.execution_access==='allow'&&value.space==='local'),'Persistent authorization binds exact machine and Space');
-  await machine.getByRole('button',{name:'View tasks',exact:true}).click();
-  await page.getByRole('button',{name:'Show all tasks',exact:true}).waitFor();
-  assert(reads.some(value=>value.path==='/api/v1/tasks/query'&&value.target&&JSON.parse(value.target).runtime_id==='machine-one'&&value.space==='local'),'Task filter retains fixed Runtime');
-  await page.getByRole('button',{name:'Show all tasks',exact:true}).click();
+  assert(posts.some(value=>value.path==='/api/v1/permissions'&&value.body.machine_id==='machine-one'&&value.body.machine_policy?.execution_access==='allow'&&value.space==='local'&&!value.owner),'Persistent authorization binds exact machine and Space, independently of the selected assistant');
+  permissionsUnavailable=true;await page.evaluate(()=>window.__potContractChanges({permissions:51}));await permission().getByText('Space unavailable. Cached permissions are read-only.',{exact:true}).waitFor();
+  assert(await permission().getByLabel('Default execution',{exact:true}).isDisabled(),'Unavailable policy service makes cached authority read-only');permissionsUnavailable=false;
+  await page.getByRole('button',{name:'Settings',exact:true}).click();assert(!await page.getByRole('button',{name:'Execution permissions',exact:true}).count(),'Settings no longer duplicates machine permissions');
   for(const name of ['Tasks','Machines','Usage','Settings']) {await page.getByRole('button',{name,exact:true}).first().click();await page.locator('.page-content').waitFor();}
   await page.getByRole('button',{name:'AI Providers',exact:true}).click();
   await page.locator('.provider-default').first().waitFor();
