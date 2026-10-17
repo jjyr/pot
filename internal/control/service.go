@@ -238,6 +238,9 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
+	if err = s.addExecutionEnvironment(&executionContext, target); err != nil {
+		return assistant.RunOptions{}, err
+	}
 	identities, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return assistant.RunOptions{}, err

@@ -234,6 +234,8 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		result = map[string]bool{"settled": err == nil}
 	case "task.resources":
 		result, err = s.currentTaskResource(ctx, launch)
+	case "task.execution_policy":
+		result, _, err = s.Permissions.Policy(launch.RuntimeID)
 	case "task.ready":
 		err = s.Tasks.ReadyGate(ctx, launch.AssistantID, launch.TaskID, launch.RunID)
 		result = map[string]bool{"ready": err == nil}
@@ -818,6 +820,11 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	if err != nil {
 		return runner.Prepared{}, err
 	}
+	var policy MachinePolicy
+	if err = s.remoteCall(ctx, peer, binding(l), "task.execution_policy", "execution-policy:"+storage.ID(), nil, &policy); err != nil {
+		return runner.Prepared{}, err
+	}
+	execution.ContextSections = append(execution.ContextSections, executionEnvironment(policy, l.ExecutionTarget, execution.Workspace))
 	execution.Role = core.Worker
 	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
 	execution.SkillResources.Selection = nil

@@ -11,7 +11,7 @@ import (
 )
 
 func hostRequest(call string) HostRequest {
-	return HostRequest{Owner: "assistant", Turn: "turn", Generation: 1, CallID: call, MachineID: "machine", EnrollmentEpoch: "epoch", Tool: "exec_command", Args: json.RawMessage(`{"cmd":"npm test","execution_mode":"host"}`), Host: true, Command: &CommandContext{Command: "npm test", Directory: "/workspace", Shell: "/bin/bash"}}
+	return HostRequest{Owner: "assistant", Turn: "turn", Generation: 1, CallID: call, MachineID: "machine", EnrollmentEpoch: "epoch", Tool: "exec_command", Args: json.RawMessage(`{"cmd":"npm test","request_unsandboxed":true,"justification":"Access required by the execution contract test"}`), Host: true, Command: &CommandContext{Command: "npm test", Directory: "/workspace", Shell: "/bin/bash"}}
 }
 func permissionFixture(t *testing.T) *PermissionStore {
 	t.Helper()

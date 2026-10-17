@@ -36,10 +36,22 @@ they do not remove broader machine trust. Machine Blocked overrides all grants.
 
 ## Approval decisions
 
-`exec_command.execution_mode: "host"` requests a host exception and
-`justification` explains why. Omission/`default` uses the machine policy and saved
-rules. Matching allow rules select host execution directly; the event/UI reports
-the actual mode. The model cannot supply sandbox profiles or change destinations.
+`exec_command.request_unsandboxed: true` requests permission to execute outside
+SRT. It requires a nonempty string `justification`, displayed in the approval.
+The reason and request flag are not part of a permanent command rule's identity.
+Omission/`false` follows machine policy and saved grants; it does not force a
+sandbox when the owner already permits host execution. Known host-only access may
+be requested directly without first running a doomed sandbox command.
+
+The model requests authority; Control selects execution mode. `execution_mode` is
+not an accepted tool input. Results/events report the actual `host`/`sandbox`
+boundary; owned process polling retains the original process mode. The model
+cannot supply sandbox profiles, upgrade a live session or change destinations.
+
+Main and Worker contexts include an `execution-environment` snapshot of the
+Control-owned destination policy, workspace and protected file/temp/network
+boundaries. This is planning information, not authorization. Every operation is
+still checked against current policy.
 
 | Decision | Scope |
 | --- | --- |

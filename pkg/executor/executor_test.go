@@ -75,6 +75,21 @@ func TestProductHostAdmissionPrecedesStartupAndSanitizesEnvironment(t *testing.T
 	}
 }
 
+func TestSandboxPreparationFailureReportsNoStartedWorkload(t *testing.T) {
+	e, r := fixture(t)
+	r.Mode = "sandbox"
+	r.Operation = "exec_command"
+	r.Args = map[string]any{"cmd": "touch should-not-exist"}
+	result, err := e.Execute(context.Background(), r, nil)
+	var preparation *PreparationError
+	if !errors.As(err, &preparation) || result["execution_mode"] != "sandbox" || result["execution_status"] != "preparation_failed" {
+		t.Fatal(result, err)
+	}
+	if _, err := os.Stat(filepath.Join(r.CWD, "should-not-exist")); !os.IsNotExist(err) {
+		t.Fatal("failed preparation ran command", err)
+	}
+}
+
 func TestHostInteractiveAuthorityDoesNotComeFromOrdinaryCommand(t *testing.T) {
 	e, r := fixture(t)
 	r.Operation = "exec_command"

@@ -347,7 +347,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 				if errors.As(callErr, &uncertain) || errors.As(callErr, &api) && api.Code == "pot_token_limit" || errors.As(callErr, &apiPointer) && apiPointer.Code == "pot_token_limit" {
 					return callErr
 				}
-				value, _ = json.Marshal(map[string]any{"isError": true, "error": callErr.Error()})
+				value = toolFailure(value, callErr)
 			}
 			message, err := toolResultMessage(call.ID, value, descriptor.Vision())
 			if err != nil {

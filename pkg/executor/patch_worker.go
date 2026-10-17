@@ -58,7 +58,7 @@ func (e *Engine) sandboxPatch(ctx context.Context, r Request) (string, error) {
 	command.Stderr = &diagnostic
 	finish, err := e.sandboxLauncher().Prepare(ctx, command, r.CWD, nil, nil, false)
 	if err != nil {
-		return "", err
+		return "", &PreparationError{Cause: err}
 	}
 	command.SysProcAttr = processGroup()
 	var release func()

@@ -56,7 +56,8 @@ Sections have stable keys and deterministic lexical ordering:
 
 | Key | Source and update behavior |
 |---|---|
-| `environment` | Caller-provided Runtime clock and execution workspace; refreshed for each execution, independently of task state |
+| `environment` | Optional caller-provided Runtime clock and execution workspace |
+| `execution-environment` | Product-provided destination machine policy/revision, workspace, private temp usage and file/network/Unix socket boundaries; snapshotted for Main and Workers, including remote Runners using Control policy |
 | `instructions` | Applicable global, assistant and project instructions; append a complete replacement on change |
 | `models` | Main-only configured routing summary; append a complete bounded replacement on change |
 | `plugins` | Enabled plugin instructions; append a complete replacement on change |
@@ -70,7 +71,10 @@ emits nothing. Earlier messages, user text,
 tool results and base instructions are not rewritten to refresh a section.
 Instruction sections remain subject to explicit user requests; reference sections
 and summaries are data and never grant execution authority. Resources and
-instructions are snapshotted for the execution, not refreshed mid-request.
+instructions are snapshotted for the execution, not refreshed mid-request. Execution
+environment snapshots never authorize an operation; dispatch rechecks current
+policy, and tool results report the actual execution mode. Tool instructions explain
+`request_unsandboxed` and partial-effect inspection before requesting new authority.
 
 The authoritative comparison baseline is reconstructed from the latest retained
 classified message for each key, including revocations. Restart, provider cache

@@ -281,6 +281,31 @@ func TestPersistenceFailurePreventsNetwork(t *testing.T) {
 		t.Fatal(err, s.calls)
 	}
 }
+
+func TestToolFailureKeepsExecutionDiagnosticsInNextModelRequest(t *testing.T) {
+	a, _, s, thread, execution := setup(t)
+	a.Tools = []m.ToolDefinition{{Name: "probe", InputSchema: json.RawMessage(`{"type":"object"}`)}}
+	a.Dispatch = func(context.Context, core.ExecutionContext, m.ToolCall, func(core.Update) error) (json.RawMessage, error) {
+		return json.RawMessage(`{"execution_mode":"sandbox","execution_status":"preparation_failed","detail":"workload did not start"}`), fmt.Errorf("sandbox unavailable")
+	}
+	s.model = func(request core.ModelRequest, index int) (string, error) {
+		if index == 0 {
+			return response("", m.ToolCall{ID: "failed-probe", Name: "probe", Arguments: json.RawMessage(`{}`)}), nil
+		}
+		for _, field := range []string{"preparation_failed", "sandbox", "workload did not start", "sandbox unavailable"} {
+			if !strings.Contains(string(request.Body), field) {
+				return "", fmt.Errorf("execution diagnostic lost: %s", field)
+			}
+		}
+		return response("reported failure"), nil
+	}
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "failure", Text: "run the probe once"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if s.calls != 2 {
+		t.Fatal("failure was replayed", s.calls)
+	}
+}
 func TestCancellationDrainsBeforeTerminalAndRetainsUncertainCheckpoint(t *testing.T) {
 	a, f, s, thread, execution := setup(t)
 	a.Tools = []m.ToolDefinition{{Name: "probe", InputSchema: json.RawMessage(`{"type":"object"}`)}}
@@ -394,6 +419,10 @@ func TestCompositionWaitStreamsWithoutRepeatingAndUsesAuthorizedDispatch(t *test
 			var result map[string]any
 			_ = json.Unmarshal([]byte(last["content"].(string)), &result)
 			outputs += result["output"].(string)
+			if id, ok := result["exec_id"].(string); ok {
+				args, _ := json.Marshal(map[string]any{"exec_id": id, "yield_time_ms": 1000})
+				return response("", m.ToolCall{ID: fmt.Sprintf("wait-call-%d", index), Name: "wait", Arguments: args}), nil
+			}
 			return response("done"), nil
 		}
 	}

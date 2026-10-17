@@ -66,7 +66,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			summaries.Add(1)
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Remote result summarized"}, "finish_reason": "stop"}}}
 		} else if workerCalls.Add(1) == 1 {
-			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "remote-command", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"test -n \"$GH_TOKEN\" && printf remote-proof > artifact.txt; printf remote-ok","login":false,"execution_mode":"host","credentials":{"GH_TOKEN":{"service":"github"}}}`}}}}, "finish_reason": "tool_calls"}}}
+			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "remote-command", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"test -n \"$GH_TOKEN\" && printf remote-proof > artifact.txt; printf remote-ok","login":false,"request_unsandboxed":true,"justification":"Access required by the execution contract test","credentials":{"GH_TOKEN":{"service":"github"}}}`}}}}, "finish_reason": "tool_calls"}}}
 		} else {
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Remote artifact complete"}, "finish_reason": "stop"}}}
 		}

@@ -24,6 +24,13 @@ type ShellSettings = core.ShellSettings
 var DefaultShellSettings = core.DefaultShellSettings
 var ErrCleanupUnconfirmed = core.ErrCleanupUnconfirmed
 
+// PreparationError means OS sandbox setup failed before the workload started.
+// A shell's nonzero exit code, including EPERM text, is not this error.
+type PreparationError struct{ Cause error }
+
+func (e *PreparationError) Error() string { return e.Cause.Error() }
+func (e *PreparationError) Unwrap() error { return e.Cause }
+
 type Request struct {
 	Command   *CommandContext    `json:"command_context,omitempty"`
 	Mode      string             `json:"mode"`
@@ -176,7 +183,7 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 	if request.Operation == "inspect" {
 		return e.Inspect()
 	}
-	if err := validate(request.Operation, request.Args); err != nil {
+	if err := ValidateArguments(request.Operation, request.Args); err != nil {
 		return nil, err
 	}
 	var result map[string]any
@@ -194,13 +201,30 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 	default:
 		result, err = e.executeProcess(ctx, request, emit)
 	}
+	if result == nil {
+		result = map[string]any{}
+	}
+	if result["execution_mode"] == nil && request.Mode != "session" {
+		result["execution_mode"] = request.Mode
+	}
+	if err != nil {
+		result["execution_status"] = "failed"
+		var preparation *PreparationError
+		if errors.As(err, &preparation) {
+			result["execution_status"] = "preparation_failed"
+		}
+	} else if result["execution_status"] == nil {
+		result["execution_status"] = "finished"
+	}
 	if errors.Is(err, ErrCleanupUnconfirmed) {
+		result["execution_status"] = "cleanup_unconfirmed"
 		e.fenceCleanup(err)
 	}
 	return result, err
 }
 
-func validate(name string, args map[string]any) error {
+// ValidateArguments checks execution arguments without starting a process.
+func ValidateArguments(name string, args map[string]any) error {
 	if args == nil {
 		return errors.New("tool arguments must be an object")
 	}

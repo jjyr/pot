@@ -44,6 +44,10 @@ outside the original process tree; cleanup does not reverse such effects.
 
 `exec_command` creates an independent command/cwd/environment. `cd` and `export`
 do not mutate later calls. Shells must be installed absolute sh/bash/zsh paths.
+Host access is requested with `request_unsandboxed:true` and a nonempty
+`justification`. Omitted/false follows owner policy and existing grants. This is
+permission intent, not a model-selected execution backend.
+
 Canonical context is resolved on the destination before approval and checked
 again against the actual request. Mode and policy revision are authenticated.
 
@@ -104,3 +108,18 @@ Uncertain outcomes retain capacity and durable receipt fences. Restart/disconnec
 never launches a replacement or moves work. Inspect the original identity and
 explicitly reconcile recovery; stopping computation does not prove external
 side effects were rolled back.
+
+## Model-visible results
+
+Execution results include `execution_mode` (`host` or `sandbox`) and
+`execution_status`. Commands report `running` with a live session or `finished`
+when settled; exit codes and stderr remain the evidence of shell success/failure.
+A nonzero exit, including a permission error, does not identify a sandbox violation.
+
+A known failure to prepare the OS sandbox reports `preparation_failed`; ordinary
+execution errors report `failed`. Validation/authorization failures before
+execution report `not_started`. Missing cleanup proof reports
+`cleanup_unconfirmed` and retains the terminal uncertainty fence rather than
+continuing the Agent. A selected boundary on a preparation failure is not evidence
+that workload code ran. Structured diagnostics and partial results survive Agent
+error conversion. Failed operations are not automatically replayed.

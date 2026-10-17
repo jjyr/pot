@@ -303,7 +303,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 		launcher.Markers = &p.markers
 		p.finishSandbox, err = launcher.Prepare(ctx, command, r.CWD, nil, nil, r.Args["tty"] == true)
 		if err != nil {
-			return "", nil, err
+			return "", nil, &PreparationError{Cause: err}
 		}
 	}
 	if len(e.options.ProcessWorker) > 0 {
@@ -630,7 +630,11 @@ waiting:
 			return nil, p.err
 		}
 	}
-	return map[string]any{"stdout": strings.ToValidUTF8(string(stdout), "�"), "stderr": strings.ToValidUTF8(string(stderr), "�"), "truncated": truncated, "exit_code": exit, "reason": reason, "session_id": session}, nil
+	status := "finished"
+	if session != nil {
+		status = "running"
+	}
+	return map[string]any{"execution_mode": p.mode, "execution_status": status, "stdout": strings.ToValidUTF8(string(stdout), "�"), "stderr": strings.ToValidUTF8(string(stderr), "�"), "truncated": truncated, "exit_code": exit, "reason": reason, "session_id": session}, nil
 }
 func completeUTF8(data []byte) int {
 	offset := 0

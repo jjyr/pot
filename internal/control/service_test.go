@@ -55,7 +55,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 		call := modelCalls.Add(1)
 		var event any
 		if call == 1 {
-			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "command-1", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"printf x >> proof; printf ok","login":false,"execution_mode":"host"}`}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]any{"prompt_tokens": 20, "completion_tokens": 5}}
+			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "command-1", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"printf x >> proof; printf ok","login":false,"request_unsandboxed":true,"justification":"Access required by the execution contract test"}`}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]any{"prompt_tokens": 20, "completion_tokens": 5}}
 		} else {
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Finished 世界"}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 30, "completion_tokens": 4}}
 		}

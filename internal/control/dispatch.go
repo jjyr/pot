@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jjyr/pot/internal/usage"
@@ -66,6 +67,32 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		}()
 	}
 	executionMode := ""
+	executionAttempted := false
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		value := map[string]any{}
+		_ = core.DecodeJSON(output, &value)
+		if value == nil {
+			value = map[string]any{}
+		}
+		value["isError"] = true
+		value["error"] = resultErr.Error()
+		if executionMode != "" && executionMode != "session" && value["execution_mode"] == nil {
+			value["execution_mode"] = executionMode
+		}
+		var uncertain *composition.UnconfirmedCleanupError
+		if core.IsCleanupUnconfirmed(resultErr) || errors.As(resultErr, &uncertain) {
+			value["execution_status"] = "cleanup_unconfirmed"
+		} else if value["execution_status"] == nil {
+			value["execution_status"] = "not_started"
+			if executionAttempted {
+				value["execution_status"] = "failed"
+			}
+		}
+		output, _ = json.Marshal(value)
+	}()
 	state := func(phase string, target *core.ExecutionTarget, workdir string) error {
 		if emit == nil {
 			return nil
@@ -87,6 +114,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		return nil, err
 	}
 	delete(args, "execution_target")
+	name, engineArgs, err := d.prepare(call.Name, args, target)
+	if err != nil {
+		return nil, err
+	}
 	cwd := execution.Workspace
 	if target.IsLocalTo(d.RuntimeID) && d.HostWorkspace != "" {
 		cwd = d.HostWorkspace
@@ -157,10 +188,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			return nil, err
 		}
 	}
-	hostRequested := args["execution_mode"] == "host"
-	if value, ok := args["execution_mode"]; ok && value != "host" && value != "default" {
-		return nil, errors.New("invalid requested execution mode")
-	}
+	hostRequested := call.Name == "exec_command" && args["request_unsandboxed"] == true
 	mode, err := d.Permissions.authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared, Command: commandContext, Host: hostRequested}, func() error { return state("waiting_approval", &target, displayCWD) })
 	if err != nil {
 		if errors.Is(err, ErrHostDenied) {
@@ -168,11 +196,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 				return nil, emitErr
 			}
 		}
-		return nil, err
-	}
-
-	name, engineArgs, err := d.prepare(call.Name, args, target)
-	if err != nil {
 		return nil, err
 	}
 	receipt, claimed, err := d.Operations.Begin(ctx, operation)
@@ -228,6 +251,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			err = errors.New("Host executor is unavailable")
 		} else {
 			var result map[string]any
+			executionAttempted = true
 			result, err = d.Host.Execute(ctx, request, func(event executor.Event) error {
 				if emit == nil {
 					return nil
@@ -239,6 +263,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			}
 		}
 	} else if d.Target != nil {
+		executionAttempted = true
 		value, err = d.Target(ctx, operation, request, emit)
 	} else {
 		err = errors.New("execution destination is unavailable; no fallback")
@@ -265,15 +290,18 @@ func (d *Dispatcher) prepare(name string, args map[string]any, target core.Execu
 	switch name {
 	case "exec_command", "write_stdin", "apply_patch":
 		if name == "exec_command" {
+			if err := validateHostAccessRequest(args); err != nil {
+				return "", nil, err
+			}
 			copyArgs := make(map[string]any, len(args))
 			for key, value := range args {
-				if key != "credentials" && key != "refresh_credentials" && key != "execution_mode" && key != "justification" {
+				if key != "credentials" && key != "refresh_credentials" && key != "request_unsandboxed" && key != "justification" {
 					copyArgs[key] = value
 				}
 			}
-			return name, copyArgs, nil
+			return name, copyArgs, executor.ValidateArguments(name, copyArgs)
 		}
-		return name, args, nil
+		return name, args, executor.ValidateArguments(name, args)
 	}
 	for _, config := range d.Spec.Params.Agent.Plugins {
 		if !config.Enabled || config.Bundle == nil {
@@ -353,4 +381,27 @@ func (d *Dispatcher) credentialBindings(name string, args map[string]any) (core.
 		}
 	}
 	return bindings, refresh, bindings.Validate()
+}
+
+func validateHostAccessRequest(args map[string]any) error {
+	request := false
+	if value, exists := args["request_unsandboxed"]; exists {
+		var ok bool
+		request, ok = value.(bool)
+		if !ok {
+			return errors.New("request_unsandboxed must be boolean")
+		}
+	}
+	justification := ""
+	if value, exists := args["justification"]; exists {
+		var ok bool
+		justification, ok = value.(string)
+		if !ok {
+			return errors.New("justification must be text")
+		}
+	}
+	if request && strings.TrimSpace(justification) == "" {
+		return errors.New("request_unsandboxed=true requires a nonempty justification")
+	}
+	return nil
 }

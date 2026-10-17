@@ -104,3 +104,19 @@ bypass failed hooks. CI separates portable product and macOS packaging checks.
 
 `resources/app/PotIcon.swift` remains the vector artwork master used by icon and
 tray generation; removing the VM Helper does not remove brand generation.
+
+The explicit paid permission qualification uses the configured DeepSeek Flash from
+`~/.pi/agent/models.json` (or `POT_PI_MODELS`) without modifying Pi configuration:
+
+```sh
+POT_DEEPSEEK_LIVE=1 mise exec -- go test -v ./internal/control \
+  -run '^TestDeepSeekUnsandboxLive$' -count=1 -timeout=12m
+```
+
+Prepare the pinned SDK first with `mise run test:sandbox`; override its location
+with `POT_SANDBOX_SDK` if necessary. This uses the real Agent, Control/Gateway,
+approval store and OS sandbox with synthetic files only. Four isolated scenarios
+are capped at six model requests each, 768 output tokens per response and 150
+seconds per scenario. They cover ordinary private-temp/workspace execution,
+permanent exact-command approval, owner denial and recovery without repeating a
+partial write. Default tests skip paid calls. Credentials are never logged.
