@@ -19,7 +19,7 @@ export function createReplyBubble(host) {
       if(signature===next)return;signature=next;
       const expanded=!!status.querySelector('details')?.open;
       status.replaceChildren();host.classList.toggle('is-failed',message.phase==='failed');
-      host.classList.toggle('is-waiting',['sending','thinking','reconnecting'].includes(message.phase));
+      host.classList.toggle('is-waiting',['sending','thinking','reconnecting','tools','approval'].includes(message.phase));
       host.classList.toggle('is-streaming',message.phase==='streaming');
       const action=(label,run)=>{const button=node('button','reply-action control',label);button.type='button';button.onclick=run;return button;};
       if(message.phase==='failed'){
@@ -32,11 +32,11 @@ export function createReplyBubble(host) {
         else if(kind==='configuration')status.append(action(t('checkAISettings'),onSettings));
       }else{
         status.removeAttribute('role');
-        if(['sending','thinking','reconnecting'].includes(message.phase)){
+        if(['sending','thinking','reconnecting','tools','approval'].includes(message.phase)){
           const line=node('div','reply-status-title');
-          if(message.phase!=='reconnecting'){const dots=node('span','waiting-dots');dots.setAttribute('aria-hidden','true');dots.append(node('i'),node('i'),node('i'));line.append(dots);}
-          else line.append(icon('cloud'));
-          line.append(node('span','',t(message.phase==='sending'?'sending':message.phase==='reconnecting'?'replyReconnecting':'working')));status.append(line);
+          if(!['reconnecting','approval'].includes(message.phase)){const dots=node('span','waiting-dots');dots.setAttribute('aria-hidden','true');dots.append(node('i'),node('i'),node('i'));line.append(dots);}
+          else line.append(icon(message.phase==='approval'?'clock':'cloud'));
+          line.append(node('span','',t(message.phase==='sending'?'sending':message.phase==='reconnecting'?'replyReconnecting':message.phase==='tools'?'tool.executing':message.phase==='approval'?'tool.awaitingApproval':'working')));status.append(line);
           if(message.phase==='reconnecting'){status.append(node('p','reply-connection-detail',t('replyStateUnknown')),action(t('reconnect'),onReconnect));}
         }else if(message.phase==='streaming'){const dot=node('span','activity-dot');dot.setAttribute('aria-label',t('working'));status.append(dot);}
         else if(message.phase==='stopped')status.append(node('span','',t('replyStopped')));

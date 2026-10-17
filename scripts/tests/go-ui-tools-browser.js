@@ -1,0 +1,71 @@
+// Playwright CLI contract test against the disposable preview. Backend routes are
+// fixtures; real Go execution, persistence and approvals have separate Go tests.
+async page => {
+ const assert=(value,message)=>{if(!value)throw Error(message);};
+ const errors=[],posts=[];const onError=error=>errors.push(error.message);page.on('pageerror',onError);
+ const at=Date.now()-2000,target={runtime_id:'dev-mac',target:{kind:'sandbox',sandbox_id:'shared'}};
+ const tool=(id,name,args,extra={})=>({id:`message-${id}`,role:'tool',text:'',status:'streaming',tool:{id,turn_id:'run-one',name,args,phase:'running',started_at_ms:at,running_at_ms:at,target,workdir:'/workspace/pot',output:[],...extra}});
+ const command=tool('call-one','exec_command',{cmd:'pwd && rg --files -g README.md',workdir:'/workspace/pot'});
+ let messages=[{id:'u',role:'user',text:'检查一下当前工作区，确认能否看到 Pot 项目。',status:'complete'},{id:'a',role:'assistant',text:'我检查一下当前工作区，确认能否看到 Pot 项目。',status:'complete',reply_to:'u'},command];
+ let revision=1,pending=[],rejectApproval=false,finished=false,taskEvents=[],showOthers=false,showTasks=false;
+ const snapshot=()=>({api_version:3,cursor:revision++,boot_id:'boot',conversation_id:'alpha',messages,turn:finished?null:{user_message_id:'u',state:'running'},agent:{phase:'ready',model:'test-model'}});
+ await page.addInitScript(()=>{const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(()=>this.onopen?.({}));}close(){sources.delete(this);}};window.__toolsSnapshot=value=>{for(const source of sources)if(source.url.includes('/events'))source.dispatchEvent(new MessageEvent('snapshot',{data:JSON.stringify(value)}));};Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.__toolCopied=text;}}});window.__toolsConnection=online=>{for(const source of sources)if(source.url.includes('/events'))(online?source.onopen:source.onerror)?.({});};window.__toolsChanges=value=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify(value)}));};});
+ const routeHandler=async route=>{
+  const url=new URL(route.request().url()),path=url.pathname;
+  if(route.request().method()==='POST'){const body=route.request().postDataJSON();posts.push({path,body,owner:url.searchParams.get('assistant_id'),space:url.searchParams.get('space_id')});if(path==='/api/v1/permissions'){if(rejectApproval){await route.fulfill({status:503,json:{message:'Decision failed; try again'}});return;}pending=[];}}
+  const data=path==='/api/v1/runtime'?{runtime_id:'test',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1},...(showOthers?[{id:'beta',name:'Other',revision:1}]:[])]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?snapshot():path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/usage/summary'?{total:{},quota:{active:false,policy:{period:'none'}}}:path==='/api/v1/tasks/query'?{items:showTasks&&url.searchParams.get('assistant_id')==='alpha'?[{id:'task-proof',title:'Tool transcript',assistant_id:'alpha',phase:'running'}]:[],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:'run-one',info:{phase:'running'},request:{text:'Verify tool transcript'}}:path==='/api/v1/tasks/task-proof/events'?{events:taskEvents,cursor:taskEvents.at(-1)?.sequence||0,has_more:false}:path==='/api/v1/tasks/task-proof/messages'?[]:{items:[]};
+  await route.fulfill({json:data});
+ };
+ const access=route=>route.fulfill({json:{authenticated:true,push_available:false}});
+ await page.route('**/access/status',access);await page.route('**/api/v1/**',routeHandler);
+ const push=async()=>{await page.evaluate(value=>window.__toolsSnapshot(value),snapshot());};
+ const call=id=>page.locator(`.tool-call[data-call-id="${id}"]`);
+ try{
+  await page.setViewportSize({width:1200,height:850});await page.goto('http://127.0.0.1:17702/?theme=light&locale=zh-CN&conversation=alpha');
+  await call('call-one').waitFor();assert(!await call('call-one').evaluate(node=>node.open),'Ordinary tools default to collapsed');
+  await call('call-one').locator(':scope > summary').focus();await page.keyboard.press('Enter');
+  await call('call-one').locator(':scope > summary').evaluate(node=>node.blur());
+  assert(await call('call-one').getByText('pwd && rg --files -g README.md',{exact:true}).count()>=1,'Actual command is visible');
+  await page.screenshot({path:'docs/pr-images/codex-tool-call-details/chat-tools-desktop-after.png'});
+  await page.setViewportSize({width:390,height:850});await page.screenshot({path:'docs/pr-images/codex-tool-call-details/chat-tools-mobile-after.png'});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.querySelector('.history').scrollWidth<=document.querySelector('.history').clientWidth),'No narrow horizontal overflow');
+  await page.setViewportSize({width:1200,height:850});
+  await call('call-one').locator('.tool-section').first().getByRole('button',{name:'复制',exact:true}).click();assert(await page.evaluate(()=>window.__toolCopied)==='pwd && rg --files -g README.md','Copy uses full actual command');
+  await page.evaluate(()=>window.__toolsConnection(false));await call('call-one').getByText('连接中断，正在确认状态',{exact:true}).waitFor();assert(await call('call-one').getAttribute('data-phase')==='running','Connection loss does not invent tool failure');await page.evaluate(()=>window.__toolsConnection(true));
+  command.tool.output=[{stream:'stdout',text:Array.from({length:70},(_,i)=>`retained line ${i}`).join('\n')}];await push();
+  const output=call('call-one').locator('.tool-section').filter({has:page.getByText('输出',{exact:true})}).locator('pre');
+  await output.getByText('retained line 0',{exact:false}).waitFor();
+  await output.evaluate(node=>{node.scrollTop=0;node.dispatchEvent(new Event('scroll'));});
+  command.tool.output[0].text+='\nnew output';await push();
+  await page.waitForFunction(()=>document.querySelector('[data-call-id="call-one"] .tool-code')&&document.querySelector('[data-call-id="call-one"]').textContent.includes('new output'));
+  assert(await call('call-one').evaluate(node=>node.open),'Streaming keeps disclosure open');assert(await output.evaluate(node=>node.scrollTop)===0,'Reading output pauses following');
+  await call('call-one').getByRole('button',{name:'回到最新输出',exact:true}).click();assert(await output.evaluate(node=>node.scrollTop>0),'Explicit latest output resumes following');
+  command.tool.output[0].text='old-content\n'+('long output '.repeat(3000))+'\nLATEST-MARKER';await push();await output.getByText('LATEST-MARKER',{exact:false}).waitFor();
+  assert(await call('call-one').getByText('显示已缩短，复制可获取完整保留内容。',{exact:true}).count()>0,'Large output is labeled');
+  command.tool.output[0].text='retained line 0\nnew output';
+  command.status='complete';command.tool.phase='completed';command.tool.finished_at_ms=at+500;command.tool.result={stdout:'final receipt',stderr:'',exit_code:0};await push();
+  await call('call-one').getByText('退出码 0',{exact:true}).waitFor();assert(await call('call-one').locator('.tool-excerpt').textContent()==='pwd && rg --files -g README.md','Result cannot overwrite title');assert(await call('call-one').textContent().then(text=>text.includes('retained line 0')),'Completion preserves stream');
+  const parent=tool('exec-one','exec',{code:'const results = await Promise.all([tools.exec_command({cmd:"pwd"}), tools.exec_command({cmd:"git status"})]);\ntext(results);'},{phase:'completed',target:null,workdir:'',result:{completed:false,exec_id:'job',output:''}}),child=tool('child-one','exec_command',{cmd:'git status'},{parent_id:'exec-one',phase:'waiting_approval',running_at_ms:0,target:{runtime_id:'dev-mac',target:{kind:'host'}}});
+  messages.push(parent,child);pending=[{id:'approval-one',request:{owner:'alpha',turn:'run-one',call_id:'child-one',machine_id:'dev-mac',tool:'exec_command',args:{cmd:'git status'}}}];await push();await page.evaluate(()=>window.__toolsChanges({permissions:2}));
+  await call('child-one').getByRole('button',{name:'允许此次操作',exact:true}).waitFor();
+  assert(await call('exec-one').evaluate(node=>node.open),'Nested approval opens parent');assert(await call('exec-one').locator('.tool-children [data-call-id="child-one"]').count()===1,'Composition child is nested exactly once');
+  assert(await page.locator('.approval-card').count()===0,'Matching approval has no duplicate full card');
+  await call('call-one').evaluate(node=>node.open=false);await call('exec-one').evaluate(node=>node.scrollIntoView({block:'start'}));
+  await page.screenshot({path:'docs/pr-images/codex-tool-call-details/nested-approval-desktop-after.png'});
+  await call('call-one').evaluate(node=>node.open=true);
+  rejectApproval=true;await call('child-one').getByRole('button',{name:'允许此次操作',exact:true}).click();await call('child-one').getByText('Decision failed; try again',{exact:true}).waitFor();assert(!await call('child-one').getByRole('button',{name:'拒绝',exact:true}).isDisabled(),'Failed decision keeps actions available');
+  rejectApproval=false;await call('child-one').getByRole('button',{name:'拒绝',exact:true}).click();assert(posts.some(post=>post.body.id==='approval-one'&&post.body.action==='deny'&&post.owner==='alpha'&&post.space==='local'),'Decision binds exact approval and scope');
+  child.tool.phase='denied';child.tool.result={isError:true,error:'Host operation denied'};child.status='failed';await push();await call('child-one').locator(':scope > summary').click();await call('child-one').getByText('Host operation denied',{exact:true}).first().waitFor();assert(!await call('child-one').evaluate(node=>node.open),'Error remains readable while collapsed');
+  messages.push(tool('session-one','exec_command',{cmd:'npm run dev'},{phase:'completed',result:{stdout:'server ready',stderr:'',exit_code:null,session_id:'process-one'}}));await push();await call('session-one').getByText('已返回会话',{exact:true}).waitFor();
+  messages.push(tool('patch-one','apply_patch',{patch:'*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch'},{phase:'completed',result:{output:'Updated a.txt'}}));await push();await call('patch-one').locator(':scope > summary').click();assert(await call('patch-one').locator('.tool-diff-add').textContent()==='+new\n','Patch preview highlights actual additions');assert(await call('patch-one').getByText('a.txt · 修改',{exact:true}).count()===1,'Patch preview lists affected files');
+  messages.push(tool('image-one','inspect_image',{path:'result.png'},{phase:'completed',result:{content:[{type:'image',mimeType:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nLsAAAAASUVORK5CYII='}]}}));await push();await call('image-one').locator(':scope > summary').click();assert(await call('image-one').locator('img').count()===1,'Supported tool image result renders inline');
+  await call('call-one').locator('.tool-raw > summary').click();await call('call-one').getByText('call-one',{exact:true}).waitFor();
+  showOthers=true;await page.evaluate(()=>window.__toolsChanges({assistants:5}));await page.locator('.assistant-row').filter({hasText:'Other'}).click();await page.locator('.assistant-row').filter({hasText:'Pot'}).click();await call('call-one').waitFor();assert(await call('call-one').evaluate(node=>node.open&&node.querySelector('.tool-raw').open),'Navigation restores scoped disclosure state');
+  // Same events feed the shared component in Task details, including terminal unknown.
+  taskEvents=[{sequence:1,event:{turn_id:'run-one',update:{type:'tool_started',id:'task-call',name:'exec_command',args:{cmd:'pwd'},at_ms:at}}},{sequence:2,event:{turn_id:'run-one',update:{type:'tool_output',id:'task-call',stream:'stdout',text:'task stream',at_ms:at+5}}},{sequence:3,event:{turn_id:'run-one',update:{type:'turn_finished',outcome:{kind:'unknown',error:'Result uncertain'},at_ms:at+10}}}];
+  showTasks=true;await page.getByRole('button',{name:'任务',exact:true}).first().click();await page.getByRole('button',{name:'Tool transcript',exact:true}).click();await call('task-call').getByText('结果待确认',{exact:true}).waitFor();await call('task-call').locator(':scope > summary').click();await call('task-call').getByText('[stdout]\ntask stream',{exact:true}).waitFor();
+  await page.setViewportSize({width:390,height:850});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Task details fit narrow viewport');
+  assert(errors.length===0,'No browser exceptions: '+errors.join('; '));
+  return {checks:'disclosure, stream preservation, scroll following, nested approvals, exact decisions, failure recovery, sessions, owner memory, narrow layout and Task rendering',posts:posts.length};
+ }finally{await page.unroute('**/api/v1/**',routeHandler);await page.unroute('**/access/status',access);page.off('pageerror',onError);}
+}

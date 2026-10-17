@@ -69,6 +69,7 @@ const (
 )
 
 type Message struct {
+	Tool           *ToolCall     `json:"tool,omitempty"`
 	ID             string        `json:"id" required:"true"`
 	ConversationID string        `json:"conversation_id" required:"true"`
 	Role           Role          `json:"role" required:"true"`
@@ -82,6 +83,14 @@ type Message struct {
 }
 
 func (m Message) Validate() error {
+	if m.Tool != nil {
+		if m.Role != Tool {
+			return fmt.Errorf("tool details require tool role")
+		}
+		if err := m.Tool.Validate(); err != nil {
+			return err
+		}
+	}
 	if !core.Identifier(m.ID) || !core.Identifier(m.ConversationID) || m.RequestID != nil && !core.Identifier(*m.RequestID) {
 		return fmt.Errorf("invalid message identity")
 	}

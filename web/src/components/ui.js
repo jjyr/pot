@@ -1,3 +1,5 @@
+import {createToolCall} from './tool-call.mjs';
+import {toolForest} from '../state/tool-calls.mjs';
 import {avatar} from './avatar.mjs';
 import {icon} from './icons.mjs';
 import {messages,translate} from '../locales/messages.mjs';
@@ -91,7 +93,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
   root.append(rail, titlebar, directory, workspace, menu, preferences);
-  const pages = client.production ? createPages({client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();},withResourceConsent:options=>liveResources?liveResources.run(options):options.work(), openChat:()=>{route='chat';directoryOpen=false;renderShell();if(!selectedAssistant)loadDirectory();}}) : null;
+  const pages = client.production ? createPages({onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();},withResourceConsent:options=>liveResources?liveResources.run(options):options.work(), openChat:()=>{route='chat';directoryOpen=false;renderShell();if(!selectedAssistant)loadDirectory();}}) : null;
   if(client.production&&client.desktop)liveResources=createLiveResourceRequests({client,host:resourceNotices,locale:()=>locale,notify:value=>{error=value;updateControls();},scope:()=>{const space=(client.spaces||[]).find(value=>value.kind==='local');return {space:space?.id,name:space?.name};},onChanged:()=>renderShell()});
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -362,7 +364,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function scrollBottom() { history.scrollTop = history.scrollHeight; latest.hidden = true; }
   history.addEventListener('scroll', () => { latest.hidden = nearBottom(); }, {passive: true});
   latest.onclick = scrollBottom;
-  const messageNodes = new Map();
+  const messageNodes = new Map(),toolMemory=new Map();
   const taskCache=new Map();let taskRefresh=0;
   async function refreshBackgroundTasks(){
     if(!client.production||!selectedAssistant)return;
@@ -376,6 +378,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
     const visibleMessages=projectChatReplies(snapshot,sending,{offline:connection==='offline'||disconnected||selectedAssistant?.offline});
     const ids = new Set(visibleMessages.map(message => message.viewKey));
+    const forest=toolForest(visibleMessages);
     for (const [id, record] of messageNodes) if (!ids.has(id)) { record.row.remove(); messageNodes.delete(id); }
     let position = 0;
     for (const message of visibleMessages) {
@@ -388,7 +391,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         messageNodes.set(message.viewKey, record);
       }
       const {row, bubble} = record;
-      if(message.role==='assistant'){
+      if(message.role==='tool'&&message.tool){
+        const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
+        if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action)});bubble.append(record.tool.element);}
+        record.tool.update(message,{approval:pages?.approvalFor(message.tool),offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
+      }else if(message.role==='assistant'){
         record.reply ||= createReplyBubble(bubble);
         const scope=client.scope?.();
         record.reply.update(message,{t,downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
@@ -397,7 +404,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         record.text=message.text;record.role=message.role;
       }else if (record.text !== message.text || record.role !== message.role) {
         bubble.replaceChildren();
-        if (message.role === 'tool') {const detail=el('details','tool-details');detail.append(el('summary','',message.text.split('\n')[0].slice(0,100)),el('pre','',message.text));bubble.append(detail);}
+        if (message.role === 'tool') bubble.append(el('pre','',message.text));
         else if (message.role === 'system') bubble.textContent = message.text;
         else {const scope=client.scope?.();bubble.append(renderMarkdown(message.text,{downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined}));}
         record.text = message.text; record.role = message.role;
@@ -413,7 +420,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         row.append(copy); record.copy = copy;
       }
       if (record.copy) {record.copy.title=t('copy');record.copy.setAttribute('aria-label',t('copy'));}
-      if (message.role==='tool'&&message.status === 'streaming' && !record.dot) {
+      if (message.role==='tool'&&!message.tool&&message.status === 'streaming' && !record.dot) {
         record.dot = el('span', 'activity-dot'); row.append(record.dot);
       } else if (message.status !== 'streaming' && record.dot) { record.dot.remove(); record.dot = null; }
       record.dot?.setAttribute('aria-label', t('working'));
@@ -421,8 +428,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         if(!record.received){record.received=el('span','guidance-received');record.received.append(icon('clock'));row.append(record.received);}record.received.title=locale==='zh-CN'?'已接收':'Received';record.received.setAttribute('aria-label',record.received.title);
       }else if(record.received){record.received.remove();record.received=null;}
 
-      if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);
-      position++;
+      const parent=message.tool&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id);
+      if(parent&&parent.children.some(entry=>entry.message.id===message.id)&&messageNodes.get(parent.message.viewKey)?.tool){messageNodes.get(parent.message.viewKey).tool.children.append(row);}
+      else {if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);position++;}
     }
     const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
     for(const [id,record]of messageNodes){if(id!==lastAssistant?.viewKey){record.tasks?.remove();record.tasks=null;}}

@@ -154,12 +154,24 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 		t.Fatalf("remote task transcript: %+v %v", transcript, err)
 	}
 	toolEvents := 0
+	states := map[string]bool{}
+	streamed := ""
 	for _, item := range transcript.Events {
+		update := item.Event.Update
+		if update.Type == "tool_state" {
+			states[update.Phase] = true
+			if update.Target == nil || update.Target.RuntimeID != "worker" {
+				t.Fatal("remote tool target missing", update)
+			}
+		}
+		if update.Type == "tool_output" {
+			streamed += update.Text
+		}
 		if item.Event.Update.Type == "tool_started" {
 			toolEvents++
 		}
 	}
-	if toolEvents != 1 {
+	if toolEvents != 1 || !states["preparing"] || !states["waiting_approval"] || !states["running"] || !strings.Contains(streamed, "remote-ok") {
 		t.Fatalf("remote transcript missing original tool: %+v", transcript)
 	}
 	chunk, err := control.ReadTaskFileChunk(ctx, "main", record.Info.ID, "artifact.txt", 0, "")

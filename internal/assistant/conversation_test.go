@@ -422,7 +422,7 @@ func TestConversationPersistsToolStreamAndFinalReceipt(t *testing.T) {
 			tool = &snapshot.Messages[i]
 		}
 	}
-	if tool == nil || tool.Status != protocol.Complete || !strings.Contains(tool.Text, "final receipt") {
+	if tool == nil || tool.Status != protocol.Complete || tool.Tool == nil || tool.Tool.Name != "fixture" || string(tool.Tool.Args) != "{}" || len(tool.Tool.Output) != 1 || tool.Tool.Output[0].Text != "streamed" || !strings.Contains(string(tool.Tool.Result), "final receipt") {
 		t.Fatal("tool result projection missing", tool)
 	}
 	raw, err := c.store.LoadContext(ctx)
