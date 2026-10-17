@@ -4,6 +4,8 @@ Usage shows overall Pot statistics, trends, and Agent/model categories over the 
 
 Each task (including archived tasks) and main chat has a usage entry. Details show cumulative usage, model consumption, and tool call rankings. Guidance continues the same task; turn IDs link records. Global usage does not list tasks.
 
+Overall Usage places the location filter in the statistics heading as a compact select. Hide it when only one Space is available; multiple Spaces offer All locations and individual Space names. Conversation Usage has no location filter. Keep heading controls in normal document flow, wrapping on narrow windows.
+
 ## Metering
 
 Go Control captures provider usage through the generic model gateway. Shared SQLite `usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, execution generation, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.

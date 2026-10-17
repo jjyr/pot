@@ -437,8 +437,17 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(item)editor.returnSchedule={...item};
   }
   async function usage(root, token) {
-    const locations=n('div','usage-location');locations.append(n('span','hint',tr('Location','位置')),segments([['all',tr('All locations','所有位置')],...(client.spaces||[]).map(space=>[space.id,space.name])],filter.usageSpace,value=>{filter.usageSpace=value;usageOffsets.clear();show('usage',{keepUsageOwner:true});}));if(!usageOwner)root.append(locations);
-    const titleRow=toolbar(n('h2','page-heading',usageOwner?tr('Lifetime usage','累计用量'):tr('Overall statistics','总体统计')));titleRow.classList.add('usage-heading');root.append(titleRow);
+    const spaces=client.spaces||[],headingActions=n('div','usage-heading-actions');
+    if(!usageOwner){
+      if(spaces.length<=1||!spaces.some(space=>space.id===filter.usageSpace))filter.usageSpace='all';
+      if(spaces.length>1){
+        const select=n('select','field-input usage-location-select');select.setAttribute('aria-label',tr('Statistics location','统计位置'));
+        for(const [value,label]of [['all',tr('All locations','所有位置')],...spaces.map(space=>[space.id,space.name])]){const option=n('option','',label);option.value=value;select.append(option);}
+        select.value=filter.usageSpace;select.title=select.selectedOptions[0].textContent;
+        select.onchange=()=>{filter.usageSpace=select.value;usageOffsets.clear();show('usage',{keepUsageOwner:true});};headingActions.append(select);
+      }
+    }
+    const titleRow=toolbar(n('h2','page-heading',usageOwner?tr('Lifetime usage','累计用量'):tr('Overall statistics','总体统计')),headingActions);titleRow.classList.add('usage-heading');root.append(titleRow);
     if(usageOwner)root.append(n('p','hint',usageOwner.name));
     const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone,scopeID=usageOwner?.scope||usageOwner?.owner||'',params={days:filter.usageDays,timezone,scope:scopeID},spaceID=usageOwner?.space||filter.usageSpace;
     root.dataset.usageScope=JSON.stringify([spaceID,scopeID,usageOwner?.owner||'']);
@@ -461,7 +470,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     for(const page of pages) {
       const value=page.value,owner={space:page.space.id,owner:usageOwner?.owner||''};
       const policy=value.quota.policy;
-      titleRow.append(action(`${tr('Usage limits','用量限制')}${pages.length>1?' · '+page.space.name:''}`,()=>policyEditor(policy,owner),{disabled:page.stale}));
+      headingActions.append(action(`${tr('Usage limits','用量限制')}${pages.length>1?' · '+page.space.name:''}`,()=>policyEditor(policy,owner),{disabled:page.stale}));
       if(value.quota?.active){const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));root.append(allowance);}
       if(usageOwner&&!usageOwner.returnTask)for(const mail of value.mail_waits||[]){const waiting=section(tr('Correspondence waiting for allowance','助手通信正在等待配额'));waiting.append(n('p','hint',mail.provider||''));const requestID=uid(),resume=action(tr('Resume correspondence','恢复助手通信'),()=>operation(resume,()=>request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,scope:mail.scope,turn:mail.turn,since:mail.since}}),()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale});waiting.append(resume);root.append(waiting);}
       if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),()=>operation(button,async()=>{if(task)return request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{...owner,method:'POST',body:{request_id:requestID,...(name==='resume'?{turn:value.waiting.turn,since:value.waiting.since}:{})}});if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}root.append(waiting);}
