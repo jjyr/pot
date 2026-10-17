@@ -18,3 +18,9 @@ Keep each tool focused on its responsibility. Update affected callers, tests and
 When implementing features or changing schemas, protocols, APIs, or configuration:
 - Update affected code, callers, tests, and documentation to the new design.
 - Do not preserve backward compatibility unless the user explicitly requests it. If the user requests compatibility, implement only the requested scope.
+
+## Pull requests
+
+- Keep PR titles and descriptions concise; explain the problem and resulting behavior.
+- Illustrate architecture changes with an ASCII diagram.
+- Include labeled before/after screenshots for UI changes.
