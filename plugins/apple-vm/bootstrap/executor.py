@@ -122,7 +122,10 @@ def execute(request):
     op, scope = request["id"], request["scope"]
     if not valid_id(op) or not valid_id(scope):
         raise ValueError("Invalid operation/scope")
-    encoded = json.dumps(request, sort_keys=True)
+    encoded = json.dumps(
+        {key: value for key, value in request.items() if key != "environment"},
+        sort_keys=True,
+    )
     with LOCK:
         row = DB.execute("SELECT input,result FROM operations WHERE id=?", (op,)).fetchone()
         if row:

@@ -255,6 +255,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	if err != nil {
 		return "", nil, err
 	}
+	command.Env = mergeEnvironment(command.Env, r.Environment)
 	p := &process{cmd: command, changed: make(chan struct{}, 1), done: make(chan struct{}), stop: make(chan struct{}), touched: time.Now(), maxOutput: int(policy.MaxOutputBytes)}
 	e.mu.Lock()
 	defer e.mu.Unlock()

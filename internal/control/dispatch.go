@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jjyr/pot/internal/credentials"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/composition"
@@ -38,6 +39,7 @@ type Dispatcher struct {
 	Operations             *Operations
 	Host                   ToolEngine
 	Target                 TargetDispatch
+	Credentials            *credentials.Store
 	Product                map[string]agent.Dispatch
 }
 
@@ -141,7 +143,25 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		cwd = d.HostWorkspace
 	}
 	request := executor.Request{ID: call.ID, Operation: name, CWD: cwd, Policy: d.Spec.Params.Agent.Shell, Args: engineArgs}
+	if name == "exec_command" || name == "plugin_call" {
+		bindings, refresh, credentialErr := d.credentialBindings(call.Name, args)
+		if credentialErr != nil {
+			err = credentialErr
+		} else if len(bindings) > 0 {
+			if d.Credentials == nil {
+				err = errors.New("Control credentials are unavailable")
+			} else {
+				request.Environment, err = d.Credentials.Environment(ctx, credentialScope(d.Owner, d.Turn, d.Generation), bindings, refresh)
+			}
+		}
+	}
 	var value json.RawMessage
+	if err != nil {
+		if persistErr := d.Operations.Complete(context.WithoutCancel(ctx), key, nil, err); persistErr != nil {
+			return nil, errors.Join(core.ErrCleanupUnconfirmed, persistErr)
+		}
+		return nil, err
+	}
 	if target.RuntimeID == d.RuntimeID && target.Target.Kind == "host" {
 		if d.Host == nil {
 			err = errors.New("Host executor is unavailable")
@@ -201,6 +221,15 @@ func (d *Dispatcher) target(selector any) (core.ExecutionTarget, error) {
 func (d *Dispatcher) prepare(name string, args map[string]any, target core.ExecutionTarget) (string, map[string]any, error) {
 	switch name {
 	case "exec_command", "write_stdin", "apply_patch":
+		if name == "exec_command" {
+			copyArgs := make(map[string]any, len(args))
+			for key, value := range args {
+				if key != "credentials" && key != "refresh_credentials" {
+					copyArgs[key] = value
+				}
+			}
+			return name, copyArgs, nil
+		}
 		return name, args, nil
 	}
 	for _, config := range d.Spec.Params.Agent.Plugins {
@@ -239,4 +268,48 @@ func (d *Dispatcher) prepare(name string, args map[string]any, target core.Execu
 		}
 	}
 	return "", nil, fmt.Errorf("tool %s is not registered for this execution", name)
+}
+
+func credentialScope(owner, turn string, generation uint64) string {
+	hash, _ := core.HashJSON([]any{owner, turn, generation})
+	return hash
+}
+func (d *Dispatcher) credentialBindings(name string, args map[string]any) (core.CredentialBindings, bool, error) {
+	bindings := core.CredentialBindings{}
+	if args["reset"] == true {
+		return bindings, false, nil
+	}
+	refresh := false
+	if value, ok := args["refresh_credentials"]; ok {
+		var valid bool
+		refresh, valid = value.(bool)
+		if !valid {
+			return nil, false, errors.New("refresh_credentials must be boolean")
+		}
+	}
+	if name == "exec_command" {
+		if value, ok := args["credentials"]; ok {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return nil, false, err
+			}
+			if err = core.DecodeJSON(raw, &bindings); err != nil {
+				return nil, false, err
+			}
+		}
+	} else {
+		for _, plugin := range d.Spec.Params.Agent.Plugins {
+			if plugin.Enabled && plugin.Bundle != nil {
+				for _, raw := range plugin.Bundle.Manifest.Contributes.Tools.Tools {
+					var tool struct {
+						Name string `json:"name"`
+					}
+					if json.Unmarshal(raw, &tool) == nil && tool.Name == name {
+						bindings = plugin.Bundle.Manifest.Contributes.Tools.Credentials
+					}
+				}
+			}
+		}
+	}
+	return bindings, refresh, bindings.Validate()
 }

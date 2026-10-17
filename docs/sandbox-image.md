@@ -19,7 +19,10 @@ and `/opt/pot/installed-packages.txt` records the installed inventory. Debian
 archive signatures remain verified. `desktop-assets.json` pins theme/font URLs
 and hashes; Node and noVNC archives also have pinned checksums.
 
-The image includes Bash, Git, C/C++ build tools and common native dependencies.
+The image includes Bash, Git, GitHub CLI (`gh`), C/C++ build tools and common native
+dependencies. GitHub plugins use the pinned Node runtime and these preinstalled
+clients; image construction checks that Node, Git and GitHub CLI can start.
+Credentials are supplied at execution time through [service accounts](credentials.md).
 Its glibc userland supports conventional GNU/Linux Rustup/Node distributions;
 individual tools can need extra packages. Official Node matches the guest
 architecture. The Go executor is cross-compiled with CGO disabled; JavaScript

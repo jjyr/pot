@@ -15,6 +15,7 @@ fontconfig
 fonts-noto-core
 fonts-noto-cjk
 fonts-noto-color-emoji
+gh
 git
 libssl-dev
 passwd

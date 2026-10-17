@@ -1,4 +1,4 @@
-// Command pot-tool-executor is the credential-free JSON-lines subprocess used by
+// Command pot-tool-executor is the JSON-lines execution subprocess used by
 // the retained Python guest brokers. Protocol stdout contains only events/results.
 package main
 
@@ -30,7 +30,7 @@ func run(ctx context.Context, args []string, input io.Reader, output io.Writer) 
 	encoder := json.NewEncoder(output)
 	encoder.SetEscapeHTML(false)
 	if len(args) == 1 && args[0] == "--capabilities" {
-		return encoder.Encode(map[string]any{"protocol_version": 1, "plugins": map[string]any{"protocol_version": 1, "runtime": "node", "requirements": []string{"node", "chromium"}}, "observation_modes": []string{"text", "mixed"}})
+		return encoder.Encode(map[string]any{"protocol_version": 1, "plugins": map[string]any{"protocol_version": 1, "runtime": "node", "requirements": []string{"node", "chromium", "git", "gh"}}, "observation_modes": []string{"text", "mixed"}})
 	}
 	if len(args) != 0 {
 		return errors.New("usage: pot-tool-executor [--capabilities]")

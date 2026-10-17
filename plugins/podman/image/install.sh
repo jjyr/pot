@@ -46,6 +46,11 @@ for tool in node npm npx corepack; do
     ln -sf "/opt/pot/node/bin/$tool" "/usr/local/bin/$tool"
   fi
 done
+# Fail the image build if the GitHub plugin's target-architecture clients cannot
+# start. Credentials are supplied at execution time, never during image creation.
+for tool in node git gh; do
+  "$tool" --version
+done
 mkdir -p /usr/share/themes /usr/local/share/fonts/adwaita
 tar xJf /opt/pot/adw-gtk3.tar.xz -C /usr/share/themes
 tar xJf /opt/pot/adwaita-fonts.tar.xz -C /usr/local/share/fonts/adwaita --strip-components=1

@@ -73,13 +73,14 @@ func (p *lifecycleDouble) Health(context.Context, Instance) (bool, error) {
 }
 func (p *lifecycleDouble) Request(ctx context.Context, instance Instance, operation string, body json.RawMessage, timeout time.Duration) (json.RawMessage, error) {
 	var request struct {
-		ID        string             `json:"id"`
-		Scope     string             `json:"scope"`
-		Operation string             `json:"operation"`
-		Tool      string             `json:"tool"`
-		CWD       string             `json:"cwd"`
-		Policy    core.ShellSettings `json:"policy"`
-		Args      map[string]any     `json:"args"`
+		ID          string             `json:"id"`
+		Scope       string             `json:"scope"`
+		Operation   string             `json:"operation"`
+		Tool        string             `json:"tool"`
+		CWD         string             `json:"cwd"`
+		Policy      core.ShellSettings `json:"policy"`
+		Args        map[string]any     `json:"args"`
+		Environment map[string]string  `json:"environment"`
 	}
 	if err := json.Unmarshal(body, &request); err != nil {
 		return nil, err
@@ -151,7 +152,7 @@ func (p *lifecycleDouble) Request(ctx context.Context, instance Instance, operat
 		request.Args["workdir"] = filepath.Join(p.Workspace(instance), strings.TrimPrefix(workdir, p.GuestWorkspace()))
 	}
 	events := []executor.Event{}
-	result, err := engine.Execute(ctx, executor.Request{ID: request.ID, Operation: request.Operation, CWD: cwd, Policy: request.Policy, Args: request.Args}, func(event executor.Event) error { events = append(events, event); return nil })
+	result, err := engine.Execute(ctx, executor.Request{ID: request.ID, Operation: request.Operation, CWD: cwd, Policy: request.Policy, Args: request.Args, Environment: request.Environment}, func(event executor.Event) error { events = append(events, event); return nil })
 	if err != nil {
 		return nil, err
 	}
@@ -439,5 +440,39 @@ func TestShutdownCancelsAndDrainsBeforeClosingProviders(t *testing.T) {
 	provider.mu.Unlock()
 	if remaining != 0 {
 		t.Fatal("provider kept live scopes")
+	}
+}
+
+func TestTransientCredentialEnvironmentAndReceiptReplay(t *testing.T) {
+	manager, provider, grant := setupManager(t, true)
+	ctx := context.Background()
+	args := json.RawMessage(`{"cmd":"test -n \"$GH_TOKEN\" && printf authenticated"}`)
+	raw, err := manager.ExecuteWithEnvironment(ctx, grant, "credential-call", "exec_command", args, map[string]string{"GH_TOKEN": "guest-fixture-private-token"}, nil)
+	if err != nil || !strings.Contains(string(raw), "authenticated") {
+		t.Fatal(string(raw), err)
+	}
+	replay, err := manager.ExecuteWithEnvironment(ctx, grant, "credential-call", "exec_command", args, map[string]string{"GH_TOKEN": "replacement"}, nil)
+	if err != nil || string(replay) != string(raw) {
+		t.Fatal("receipt replay changed", err)
+	}
+	provider.mu.Lock()
+	count := provider.executions
+	provider.mu.Unlock()
+	if count != 1 {
+		t.Fatal("credential refresh replayed command")
+	}
+	rows, err := manager.db.Query("SELECT result FROM sandbox_receipts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var body string
+		if err = rows.Scan(&body); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(body, "guest-fixture-private-token") {
+			t.Fatal("credential persisted in Sandbox receipt")
+		}
 	}
 }

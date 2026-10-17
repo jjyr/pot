@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// ValidateInput applies the deliberately small scalar-schema plugin contract.
+// ValidateInput applies the bounded scalar and string-array plugin contract.
 // It rejects undeclared fields before the retained Node host is invoked.
 func (b PluginBundle) ValidateInput(name string, input map[string]any) error {
 	if b.Manifest.Contributes.Tools == nil {
@@ -54,6 +54,26 @@ func (b PluginBundle) ValidateInput(name string, input map[string]any) error {
 		}
 		numeric, number := pluginNumber(value)
 		switch property["type"] {
+		case "array":
+			values, ok := value.([]any)
+			if !ok {
+				if stringsValue, valid := value.([]string); valid {
+					values = make([]any, len(stringsValue))
+					for i, v := range stringsValue {
+						values[i] = v
+					}
+					ok = true
+				}
+			}
+			if !ok || len(values) > 256 {
+				return fmt.Errorf("invalid plugin argument array %s", key)
+			}
+			for _, item := range values {
+				text, ok := item.(string)
+				if !ok || len(text) > 32768 {
+					return fmt.Errorf("invalid plugin array item %s", key)
+				}
+			}
 		case "string":
 			if _, ok := value.(string); !ok {
 				return fmt.Errorf("invalid plugin string %s", key)
@@ -145,12 +165,14 @@ type PluginContributions struct {
 	Resources        []PluginResourceCatalog `json:"resources,omitempty"`
 }
 type PluginTools struct {
-	Runtime      string            `json:"runtime"`
-	Execution    string            `json:"execution"`
-	Entrypoint   string            `json:"entrypoint"`
-	Files        []string          `json:"files"`
-	Requirements []string          `json:"requirements"`
-	Tools        []json.RawMessage `json:"tools"`
+	SessionMode  string             `json:"session_mode,omitempty"`
+	Credentials  CredentialBindings `json:"credentials,omitempty"`
+	Runtime      string             `json:"runtime"`
+	Execution    string             `json:"execution"`
+	Entrypoint   string             `json:"entrypoint"`
+	Files        []string           `json:"files"`
+	Requirements []string           `json:"requirements"`
+	Tools        []json.RawMessage  `json:"tools"`
 }
 type PluginSandboxProvider struct {
 	ID            string   `json:"id"`
@@ -289,6 +311,12 @@ func (b PluginBundle) Validate() error {
 	return nil
 }
 func validatePluginTools(tools PluginTools) error {
+	if err := tools.Credentials.Validate(); err != nil {
+		return err
+	}
+	if tools.SessionMode != "" && tools.SessionMode != "call" {
+		return fmt.Errorf("unsupported plugin session mode")
+	}
 	if tools.Runtime != "node" || !slices.Contains([]string{"sandbox", "host_or_sandbox"}, tools.Execution) {
 		return fmt.Errorf("invalid tool runtime or execution target")
 	}
@@ -336,7 +364,10 @@ func validatePluginTools(tools PluginTools) error {
 		}
 		for _, schema := range tool.InputSchema.Properties {
 			var property struct {
-				Type        string       `json:"type"`
+				Type  string `json:"type"`
+				Items *struct {
+					Type string `json:"type"`
+				} `json:"items,omitempty"`
 				Description string       `json:"description,omitempty"`
 				MaxLength   *uint64      `json:"maxLength,omitempty"`
 				Minimum     *json.Number `json:"minimum,omitempty"`
@@ -346,8 +377,11 @@ func validatePluginTools(tools PluginTools) error {
 			if err := DecodeJSON(schema, &property); err != nil {
 				return err
 			}
-			if !slices.Contains([]string{"string", "boolean", "integer", "number"}, property.Type) || property.MaxLength != nil && property.Type != "string" || (property.Minimum != nil || property.Maximum != nil) && !slices.Contains([]string{"integer", "number"}, property.Type) {
+			if !slices.Contains([]string{"string", "boolean", "integer", "number", "array"}, property.Type) || property.MaxLength != nil && property.Type != "string" || (property.Minimum != nil || property.Maximum != nil) && !slices.Contains([]string{"integer", "number"}, property.Type) {
 				return fmt.Errorf("unsupported plugin property")
+			}
+			if property.Type == "array" && (property.Items == nil || property.Items.Type != "string") || property.Type != "array" && property.Items != nil {
+				return fmt.Errorf("unsupported plugin array items")
 			}
 		}
 	}
