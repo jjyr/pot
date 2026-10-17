@@ -12,6 +12,10 @@ separate from these public model facts.
 `https://models.dev/api.json?type=all`, with common provider SVG marks from
 `https://models.dev/logos/{provider}.svg`. Builds do not require these endpoints.
 The snapshot's source, update command and license are recorded alongside it.
+Bundled color brand marks in `resources/provider-logos/` take precedence over
+directory marks, including cached and refreshed marks. Their source revision
+and license are retained alongside the SVGs. Other providers retain their
+directory artwork, including brands whose original marks are monochrome.
 
 Control loads the last valid `models-dev/catalog.json` under its data directory,
 or the bundled snapshot if the file is missing or invalid. Ordinary settings,
@@ -54,7 +58,8 @@ within the owning Space, while credentials stay at Control.
 The default chooser shows common providers and Custom API. More providers expands
 the remaining supported providers in place and can collapse again. Search always
 queries the entire local supported directory regardless of expansion state.
-Names, model options and marks come from the directory. Pot maps known SDK types
+Names, model options and marks come from the directory. Custom API uses the shared
+settings gear icon. Pot maps known SDK types
 to its Chat Completions, Responses, Anthropic Messages and Gemini adapters; this
 does not load or execute upstream SDKs. Providers needing unsupported adapters,
 authentication or missing endpoints are not offered as ready connections.

@@ -210,6 +210,9 @@ func (d *Directory) Options() []ProviderOption {
 			ep, protocol = models[0].Endpoint, models[0].Protocol
 		}
 		logo := d.state.Logos[id]
+		if bundled, err := resources.ProviderLogos.ReadFile("provider-logos/" + id + ".svg"); err == nil {
+			logo = string(bundled)
+		}
 		if !validLogo(logo) {
 			logo = ""
 		}

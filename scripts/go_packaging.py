@@ -284,7 +284,13 @@ def prepare_resources(destination, platform):
         copy_tree(source, destination / name)
     copy_tree(destination / "novnc", destination / "desktop-assets")
     shutil.copy2(ROOT / "LICENSE", destination / "LICENSE.txt")
-    shutil.copy2(ROOT / "resources/models-dev/LICENSE", destination / "ModelDirectoryLicense.txt")
+    (destination / "ModelDirectoryLicense.txt").write_text(
+        "\n\n".join(
+            (ROOT / "resources" / name / "LICENSE").read_text().rstrip()
+            for name in ("models-dev", "provider-logos")
+        )
+        + "\n"
+    )
     shutil.copy2(
         ROOT / "web/src/assets/IBMPlexSans-OFL.txt", destination / "FrontendFontLicense.txt"
     )
