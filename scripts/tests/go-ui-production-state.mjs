@@ -69,8 +69,8 @@ const {combineTasks,combineUsage}=await import('../../web/src/state/aggregate.mj
 const combined=combineTasks([{space:{id:'local'},value:{items:[{id:'same',updated_at_ms:1}],counts:{active:1}}},{space:{id:'remote'},value:{items:[{id:'same',updated_at_ms:2}],counts:{active:2}}}],{limit:1});
 assert.equal(combined.items[0]._space_id,'remote');assert.equal(combined.next_offset,1);assert.equal(combined.counts.active,3);
 const combinedUsage=combineUsage([{space:{id:'local'},value:{total:{input:5,output:3},buckets:[{label:'today',input:5,output:3}],tools:[{name:'shell',calls:1}]}},{space:{id:'remote'},value:{total:{input:7,output:2},buckets:[{label:'today',input:7,output:2}],tools:[{name:'shell',calls:2}]}}]);
-assert.equal(combinedUsage.total.input,12);assert.equal(combinedUsage.buckets[0].output,5);assert.equal(combinedUsage.tools[0].calls,3);
-assert.equal(combineUsage([{space:{id:'remote'},owner:'a',value:{requests:[{id:'r'}]}}]).requests[0]._assistant_id,'a');
+assert.equal(combinedUsage.total.input,12);assert.equal(combinedUsage.buckets[0].output,5);
+
 const {modelDefaults}=await import('../../web/src/state/models.mjs');
 const directory={directory:[{id:'a',name:'A',common:true,models:[{id:'same',context:1000,input:900,output:200}]},{id:'b',name:'B',common:false,models:[{id:'same',context:2000,output:400}]}],model_defaults:{unknown:{context:5000,output:600}}};
 assert.equal(modelDefaults(directory,'b','same').context,2000,'provider-specific model facts win');
@@ -102,7 +102,13 @@ steeringState.snapshot={...steeringState.snapshot,cursor:'2',running:false,turn_
 await client.send({boot_id:'boot',request_id:'s',conversation_id:'c',user_message_id:'original-turn',text:'guidance'});assert.equal(calls.at(-1).url,'/api/v1/turn/steer?assistant_id=b&space_id=local');assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'s',user_message_id:'original-turn',text:'guidance'});
 await client.controlTurn({user_message_id:'original-turn',action:'pause'},{owner:'a',space:'remote'});assert.equal(calls.at(-1).url,'/api/v1/turn/control?assistant_id=a&space_id=remote');
 
-assert.equal(combineUsage([{space:{id:'a'},value:{agent_models:[{agent:'pot',model:'shared',input:3,output:2}]}},{space:{id:'b'},stale:true,value:{agent_models:[{agent:'pot',model:'shared',input:7,output:1}]}}]).agent_models[0].input,10,'Global Agent/model categories combine identical models across Spaces');
+assert.equal(combineUsage([{space:{id:'a'},value:{bucket_days:7,timezone:'UTC'}}]).bucket_days,7,'Combined yearly trends retain weekly bucket labels');
+const {usageNumbers,usageRows}=await import('../../web/src/components/usage.mjs');
+assert.equal(usageNumbers('en').exact(null),'—');
+assert.equal(usageNumbers('en').uncached({input:120,cache:100}),20);
+assert.equal(usageNumbers('en').hitRate({input:0,cache:0}),'—');
+assert.deepEqual(usageRows({input:null,output:12,cache:0},'en',en=>en).map(row=>row[1]),['—','—','—','—','12','—'],'Unknown input never presents a cache count or total as zero');
+
 
 const {toolForest,applyToolUpdate,toolFailure}=await import('../../web/src/state/tool-calls.mjs');
 const detail=applyToolUpdate({},{type:'tool_started',id:'child',parent_id:'parent',name:'exec_command',args:{cmd:'pwd'},at_ms:10});

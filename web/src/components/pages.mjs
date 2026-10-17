@@ -1,3 +1,4 @@
+import {usageNumbers,usageRows,usageTooltip,usageTrend,createUsageList} from './usage.mjs';
 import {createToolCall} from './tool-call.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {connectProviderEditor} from './provider-connection.mjs';
@@ -19,10 +20,11 @@ import {renderExecutionPermissions} from './execution-permissions.mjs';
 export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,scheduleView=null,detailParent=false,usageOwner=null;
-  let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageOffset:0,usageSpace:'all',settingsTab:'general',taskTarget:null,taskSpace:'all'};
+  let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageSpace:'all',settingsTab:'general',taskTarget:null,taskSpace:'all'};
   let pendingApprovals=[];
-  const toolMemory=new Map();
+  const toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map();
   const cached = new Map(),spaceCache = new Map(),expandedMachines=new Set(),editorParents=[],taskDrafts=new Map(),scheduleWrites=new Map();
+  let usageRefreshTimer=null;
   let currentViewKey='',viewReady=false,approvalOwner='',shortcutOpen=null;
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
   const scope = () => client.scope();
@@ -31,7 +33,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   const list = value => Array.isArray(value) ? value : value?.items || [];
   function captureView(){if(!editor&&viewReady&&currentViewKey&&host.offsetParent)cached.set(currentViewKey,{scroll:host.scrollTop,expanded:[...host.querySelectorAll('details[data-cache-key][open]')].map(node=>node.dataset.cacheKey),scrolls:[...host.querySelectorAll('[data-scroll-key]')].map(node=>({key:node.dataset.scrollKey,top:node.scrollTop,left:node.scrollLeft}))});}
   function restoreView(key,token){currentViewKey=key;viewReady=true;requestAnimationFrame(()=>{if(!gate.current(token)||key!==currentViewKey)return;const value=cached.get(key);if(!value){host.scrollTop=0;return;}host.scrollTop=value.scroll;for(const node of host.querySelectorAll('details[data-cache-key]'))if(node.dataset.cacheKey!=='keyboard-shortcuts')node.open=value.expanded.includes(node.dataset.cacheKey);for(const node of host.querySelectorAll('[data-scroll-key]')){const saved=value.scrolls?.find(item=>item.key===node.dataset.scrollKey);if(saved){node.scrollTop=saved.top;node.scrollLeft=saved.left;}}});}
-  async function across(path, token, {spaceID='all', paginate=false,perAssistant=false,ownerID='',allModels=false}={}) {
+  async function across(path, token, {spaceID='all', paginate=false,perAssistant=false,ownerID='',errorTarget=null}={}) {
     const spaces=(client.spaces||[]).filter(space=>spaceID==='all'||space.id===spaceID);
     if(!spaces.length)throw Error(tr('Space is unavailable.','Space 不可用。'));
     const targets=spaces.flatMap(space=>perAssistant?(client.assistants||[]).filter(item=>item.space_id===space.id).map(item=>({space,owner:item.id})):[{space,owner:ownerID}]);
@@ -44,19 +46,19 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
           while(next!=null&&items.length<5000) {if(seen.has(next))throw Error('Invalid pagination cursor');seen.add(next);const url=new URL(path,location.origin);url.searchParams.set('offset',next);const page=await request(url.pathname+url.search,{owner,space:space.id,signal:token.signal});items.push(...(page.items||[]));next=page.next_offset;}
           if(next!=null)throw Error(tr('Too many records. Narrow the filter.','记录过多，请缩小筛选范围。'));value={...value,items,next_offset:null};
         }
-        if(allModels){let next=value.agent_model_next_offset,seen=new Set(),models=[...(value.agent_models||[])];while(next!=null&&models.length<5000){if(seen.has(next))throw Error('Invalid model pagination cursor');seen.add(next);const url=new URL(path,location.origin);url.searchParams.set('offset',next);const page=await request(url.pathname+url.search,{owner,space:space.id,signal:token.signal});models.push(...(page.agent_models||[]));next=page.agent_model_next_offset;}if(next!=null)throw Error(tr('Too many models. Narrow the date range.','模型过多，请缩小日期范围。'));value={...value,agent_models:models,agent_model_next_offset:null,next_offset:null};}
+
         if(gate.current(token))spaceCache.set(key,value);return {space,owner,value,stale:false};
       }catch(reason){if(reason.name==='AbortError')throw reason;const value=spaceCache.get(key);if(value)return {space,owner,value,stale:true,error:reason.message};throw Object.assign(reason,{space});}
     }));
     if(!gate.current(token))return [];
     const failed=results.filter(value=>value.status==='rejected');
     const pages=results.filter(value=>value.status==='fulfilled').map(value=>value.value);
-    if(failed.length||pages.some(page=>page.stale)) {const message=n('p','inline-error',tr('Some Spaces are unavailable; totals may be incomplete and cached rows are marked stale.','部分 Space 不可用，用量可能不完整，缓存项目标记为过期。'));host.querySelector('.page-content')?.prepend(message);}
+    if(failed.length||pages.some(page=>page.stale)) {const message=n('p','inline-error',tr('Some Spaces are unavailable; totals may be incomplete and cached rows are marked stale.','部分 Space 不可用，用量可能不完整，缓存项目标记为过期。'));(errorTarget||host.querySelector('.page-content'))?.prepend(message);}
     if(!pages.length&&targets.length)throw failed[0]?.reason||Error('No Space data');return pages;
   }
   function heading(value) {title=value; titleChanged();}
   function errorView(reason, target = host) {
-    const box=n('div','inline-error');box.setAttribute('role','alert');box.append(n('span','',reason.message || String(reason)),action(tr('Retry','重试'),()=>show(route)));target.append(box);
+    const box=n('div','inline-error');box.setAttribute('role','alert');box.append(n('span','',reason.message || String(reason)),action(tr('Retry','重试'),()=>show(route,{keepUsageOwner:!!usageOwner})));target.append(box);
   }
   function body() {const value=n('div','page-content');host.replaceChildren(value);return value;}
   function targetSummary(label){const summary=n('summary','machine-host-summary');summary.append(icon('chevron-right'),n('span','',label));return summary;}
@@ -435,36 +437,36 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(item)editor.returnSchedule={...item};
   }
   async function usage(root, token) {
-    const locations=n('div','usage-location');locations.append(n('span','hint',tr('Location','位置')),segments([['all',tr('All locations','所有位置')],...(client.spaces||[]).map(space=>[space.id,space.name])],filter.usageSpace,value=>{filter.usageSpace=value;show('usage',{keepUsageOwner:true});}));if(!usageOwner)root.append(locations);
-    const titleRow=toolbar(n('h2','page-heading',usageOwner?tr('Total usage','总用量'):tr('Overall statistics','总体统计')));titleRow.classList.add('usage-heading');root.append(titleRow);root.append(segments([7,30,90,365].map(days=>[days,days===365?tr('Last year','最近一年'):tr(`Last ${days} days`,`最近 ${days} 天`)]),filter.usageDays,days=>{filter.usageDays=days;filter.usageOffset=0;show('usage',{keepUsageOwner:true});}));
-    const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const pages=await across(`/api/v1/usage/summary?${new URLSearchParams({days:filter.usageDays,timezone,scope:usageOwner?.scope||usageOwner?.owner||'',offset:filter.usageOffset})}`,token,{spaceID:usageOwner?.space||filter.usageSpace,ownerID:usageOwner?.owner||'',allModels:!usageOwner});if(!gate.current(token))return;const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
-    if(usageOwner)root.insertBefore(n('p','hint',usageOwner.name),root.firstChild.nextSibling);
-    const compact=value=>Number(value||0)>=1000000?(Number(value)/1000000).toFixed(1)+'M':Number(value||0)>=1000?(Number(value)/1000).toFixed(1)+'K':String(Number(value||0));
-    const exact=value=>value==null?'—':Number(value).toLocaleString(locale());
-    const uncached=value=>value.input==null?null:Math.max(0,value.input-(value.cache||0));
-    const hitRate=value=>value.input>0?new Intl.NumberFormat(locale(),{style:'percent',maximumFractionDigits:1}).format((value.cache||0)/value.input):'—';
-    const breakdown=value=>`${tr('Cached input','缓存输入')} ${exact(value.cache||0)} · ${tr('Uncached input','未缓存输入')} ${exact(uncached(value))} · ${tr('Input cache hit rate','输入缓存命中率')} ${hitRate(value)}`;
-    const total=(usageOwner?data.lifetime||data.total:data.total)||{},metrics=n('div','usage-metrics'),totalCard=n('section','page-card usage-total');
-    for(const [label,value]of [[tr('Total tokens','总 token'),total.input+total.output],[tr('Input (includes cache)','输入（含缓存）'),total.input],[tr('Output','输出'),total.output]]){const item=n('div','metric');item.title=exact(value);item.append(n('span','hint',label),n('strong','',compact(value)));metrics.append(item);}totalCard.append(metrics,n('p','usage-cache-breakdown',breakdown(total)),n('p','hint',tr('Cached tokens are included in input and total tokens. These counts are not the billed cost.','缓存 token 已包含在输入和总 token 中；token 数量不代表实际费用。')),n('p','hint',`${tr('Usage records','用量记录')}: ${total.requests||0}${total.unknown?' · '+total.unknown+' '+tr('incomplete record; totals may be incomplete','条不完整记录，总量可能不完整'):''}`));root.append(totalCard);
-    const routing=data.routing_total||{},routingCard=card(tr('Main chat usage including task routing','主聊天用量（含任务路由）'));routingCard.append(n('p','usage-number',`${compact((routing.input||0)+(routing.output||0))} tokens`),n('p','hint',`${tr('Input','输入')} ${compact(routing.input)} · ${tr('Output','输出')} ${compact(routing.output)} · ${tr('Cached input','缓存输入')} ${compact(routing.cache)}`),n('p','hint',tr('Includes the entire main chat turn that delegated a task, including understanding and responding. Already included in totals; this is not a separate routing fee.','包含委派任务的整个主聊天回合（包括理解和回复），已计入总量，不单独收取路由费用。')));root.append(routingCard);
-    const models=card(tr('Agent / model usage','Agent / 模型用量'));for(const model of data.agent_models||[]){const row=n('div','usage-model-row'),line=n('div','usage-model-title');line.append(n('span','',`${model.agent==='pot'?'Pot':model.agent} · ${model.model}`),n('span','',`${compact(model.input+model.output)} tokens`));row.append(line,n('p','hint',`${tr('Input','输入')} ${compact(model.input)} · ${tr('Output','输出')} ${compact(model.output)}`),n('p','hint',`${breakdown(model)}${model.unknown?' · '+model.unknown+' '+tr('incomplete usage record','条不完整用量记录'):''}`));models.append(row);}if(!data.agent_models?.length)models.append(n('p','hint',tr('No usage records yet','暂无用量记录')));root.append(models);
-    const chart=n('div','usage-chart');chart.setAttribute('role','group');chart.setAttribute('aria-label',tr('Token usage trend','Token 用量趋势'));
-    const maximum=Math.max(1,...(data.buckets||[]).map(b=>b.input+b.output));
-    const series=[['usage-uncached',tr('Uncached input','未缓存输入'),uncached],['usage-cached',tr('Cached input','缓存输入'),value=>value.cache||0],['usage-output',tr('Output','输出'),value=>value.output||0]];
-    for(const bucket of data.buckets||[]){const column=n('div','chart-column'),bar=n('div','chart-bar');bar.style.height=`${Math.max(0,(bucket.input+bucket.output)/maximum*140)}px`;bar.title=`${bucket.range||bucket.label} · ${tr('Input','输入')} ${exact(bucket.input)} · ${tr('Output','输出')} ${exact(bucket.output)} · ${breakdown(bucket)}${bucket.unknown?' · '+bucket.unknown+' '+tr('incomplete usage record','条不完整用量记录'):''}`;bar.setAttribute('aria-label',bar.title);bar.tabIndex=0;for(const [className,,value]of series){const segment=n('span',className);segment.style.flexGrow=String(value(bucket)||0);bar.append(segment);}column.append(bar,n('small','',bucket.label));chart.append(column);}const chartCard=n('section','page-card'),legend=n('div','usage-legend');for(const [className,label]of series){const entry=n('span');entry.append(n('i',className),n('span','',label));legend.append(entry);}chartCard.append(n('p','hint',`${data.bucket_days===7?tr('Up to 7 days per bar','每条最多代表 7 天'):tr('One day per bar','每条代表一天')} · ${data.timezone||timezone} · ${tr('Today is still in progress','今天尚未结束')}`),legend,chart);root.append(chartCard);
+    const locations=n('div','usage-location');locations.append(n('span','hint',tr('Location','位置')),segments([['all',tr('All locations','所有位置')],...(client.spaces||[]).map(space=>[space.id,space.name])],filter.usageSpace,value=>{filter.usageSpace=value;usageOffsets.clear();show('usage',{keepUsageOwner:true});}));if(!usageOwner)root.append(locations);
+    const titleRow=toolbar(n('h2','page-heading',usageOwner?tr('Lifetime usage','累计用量'):tr('Overall statistics','总体统计')));titleRow.classList.add('usage-heading');root.append(titleRow);
+    if(usageOwner)root.append(n('p','hint',usageOwner.name));
+    const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone,scopeID=usageOwner?.scope||usageOwner?.owner||'',params={days:filter.usageDays,timezone,scope:scopeID},spaceID=usageOwner?.space||filter.usageSpace;
+    root.dataset.usageScope=JSON.stringify([spaceID,scopeID,usageOwner?.owner||'']);
+    if(host.querySelector('.page-content')?.dataset.usageScope!==root.dataset.usageScope&&!host.querySelector('.usage-skeleton')){const placeholder=body();placeholder.append(n('div','usage-skeleton'));placeholder.setAttribute('aria-busy','true');placeholder.setAttribute('aria-label',tr('Loading usage','正在加载用量'));}
+    const overview=across(`/api/v1/usage/summary?${new URLSearchParams(params)}`,token,{spaceID,ownerID:usageOwner?.owner||'',errorTarget:root});
+    const listsRoot=n('div','usage-lists'),jobs=[];
+    for(const space of (client.spaces||[]).filter(space=>spaceID==='all'||space.id===spaceID)){
+      const owner={space:space.id,owner:usageOwner?.owner||''},base={timezone,scope:scopeID};
+      for(const [kind,title]of [['models',usageOwner?tr('Lifetime model usage','累计模型用量'):tr('Agent / model usage','Agent / 模型用量')],...(usageOwner?[['requests',tr('Model requests','模型请求')],['tools',tr('Tool statistics','工具统计')],['compactions',tr('Context compaction','上下文压缩')]]:[])])jobs.push(createUsageList({root:listsRoot,kind,title,params:kind==='models'&&!usageOwner?params:base,owner,request,token,current:()=>gate.current(token),offsets:usageOffsets,cache:usageCache,locale:locale(),tr,spaceName:!usageOwner&&spaceID==='all'?space.name:''}));
+    }
+    const retain=host.querySelector('.page-content')?.dataset.usageScope===root.dataset.usageScope;
+    const [pages]=await Promise.all(retain?[overview,...jobs]:[overview]);if(!gate.current(token))return;
+    const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
+    const {exact,compact}=usageNumbers(locale()),total=(usageOwner?data.lifetime||data.total:data.total)||{},metrics=n('div','usage-metrics'),totalCard=n('section','page-card usage-total');
+    for(const [label,value]of [[tr('Total tokens','总 token'),total.input+total.output],[tr('Input (includes cache)','输入（含缓存）'),total.input],[tr('Output','输出'),total.output]]){const item=n('div','metric');item.append(n('span','hint',label),n('strong','',compact(value)));usageTooltip(item,{title:label,rows:usageRows(total,locale(),tr),note:tr('Cached tokens are included in input. Token counts are not billed cost.','缓存已计入输入，token 数量不代表实际费用。')});metrics.append(item);}
+    totalCard.append(metrics,n('p','usage-cache-breakdown',`${tr('Cached input','缓存输入')} ${exact(total.cache)} · ${tr('Cache hit rate','缓存命中率')} ${usageNumbers(locale()).hitRate(total)}`),n('p','hint',`${tr('Model requests','模型请求')} ${exact(total.requests||0)}${total.unknown?' · '+total.unknown+' '+tr('incomplete records','条不完整记录'):''}`));root.append(totalCard);
+    const routing=data.routing_total||{};
+    if(routing.requests){const routingCard=card(tr('Task routing turns','任务路由回合'));routingCard.append(usageTooltip(n('p','usage-number',`${compact(routing.input+routing.output)} tokens`),{title:tr('Task routing turns','任务路由回合'),rows:usageRows(routing,locale(),tr),note:tr('Includes the entire main-chat turn that delegated a task. Already included in totals.','包含委派任务的整个主聊天回合，已计入总量。')}));root.append(routingCard);}
+    const trend=usageTrend(data,{locale:locale(),tr,timezone,days:filter.usageDays,segments,onDays:days=>{filter.usageDays=days;if(!usageOwner)usageOffsets.clear();show('usage',{keepUsageOwner:true});}});root.append(trend);
     for(const page of pages) {
       const value=page.value,owner={space:page.space.id,owner:usageOwner?.owner||''};
-      const policy=value.quota?.policy||await request('/api/v1/usage/policy',{...owner,signal:token.signal});if(!gate.current(token))return;
-      if(pages.length===1)titleRow.append(action(tr('Usage limits','用量限制'),()=>policyEditor(policy,owner),{disabled:page.stale}));
-      const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));root.append(allowance);
+      const policy=value.quota.policy;
+      titleRow.append(action(`${tr('Usage limits','用量限制')}${pages.length>1?' · '+page.space.name:''}`,()=>policyEditor(policy,owner),{disabled:page.stale}));
+      if(value.quota?.active){const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));root.append(allowance);}
       if(usageOwner&&!usageOwner.returnTask)for(const mail of value.mail_waits||[]){const waiting=section(tr('Correspondence waiting for allowance','助手通信正在等待配额'));waiting.append(n('p','hint',mail.provider||''));const requestID=uid(),resume=action(tr('Resume correspondence','恢复助手通信'),()=>operation(resume,()=>request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,scope:mail.scope,turn:mail.turn,since:mail.since}}),()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale});waiting.append(resume);root.append(waiting);}
       if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),()=>operation(button,async()=>{if(task)return request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{...owner,method:'POST',body:{request_id:requestID,...(name==='resume'?{turn:value.waiting.turn,since:value.waiting.since}:{})}});if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}root.append(waiting);}
     }
-    if(usageOwner){root.append(section(tr('Model requests','模型请求')),n('p','hint',tr('Each row is one model request. A turn can make several requests. Cached input is part of total input.','每行代表一次模型请求；一个提问可能触发多次请求。缓存输入是输入总量的一部分。')),table([tr('Time','时间'),tr('Model','模型'),tr('Input','输入'),tr('Cached input','缓存输入'),tr('Uncached input','未缓存输入'),tr('Cache hit rate','缓存命中率'),tr('Output','输出'),tr('State','状态')],(data.requests||[]).map(record=>[record.label,record.model,exact(record.input),record.input==null?'—':exact(record.cache),exact(uncached(record)),hitRate(record),exact(record.output),record.state])));
-    const next=data.next_offset??data.agent_model_next_offset??data.compaction_next_offset;if(filter.usageOffset||next!=null)root.append(toolbar(action(tr('Previous page','上一页'),()=>{filter.usageOffset=Math.max(0,filter.usageOffset-20);show('usage',{keepUsageOwner:true});},{disabled:!filter.usageOffset}),action(tr('Next page','下一页'),()=>{filter.usageOffset=next;show('usage',{keepUsageOwner:true});},{disabled:next==null})));
-    root.append(section(tr('Tools','工具')),table([tr('Tool','工具'),tr('Calls','调用'),tr('Failed','失败'),tr('Duration (ms)','耗时（毫秒）')],(data.tools||[]).map(tool=>[tool.name,tool.calls,tool.failed,tool.duration_ms])));
-    root.append(section(tr('Context compaction','上下文压缩')),table([tr('Time','时间'),tr('State','状态'),tr('Before','之前'),tr('After','之后')],(data.compactions||[]).map(record=>[record.label,record.state,record.tokens_before,record.tokens_after])));}
+    root.append(listsRoot);
   }
   function policyEditor(policy,owner) {
     renderEditor(tr('Token allowance','Token 配额'),policy,[
@@ -501,27 +503,32 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   async function show(next,{keepUsageOwner=false}={}) {
     if(editor)return;
+    clearTimeout(usageRefreshTimer);usageRefreshTimer=null;
     captureView();viewReady=false;
     taskView=null;scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
     route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:'Machines',usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:'机器',usage:'用量',settings:'设置'}[next]||next));
-    const version=++pageVersion,token=gate.next(),root=body();
-    root.append(n('p','hint',tr('Loading…','正在加载…')));
-    const viewKey=JSON.stringify([next,next==='tasks'?[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset,filter.taskTarget,filter.taskSpace]:next==='usage'?[filter.usageDays,filter.usageSpace,filter.usageOffset,usageOwner]:next==='settings'?[filter.settingsTab,configurationSpace]:[]]);
-    try {root.replaceChildren();await ({settings,tasks,machines,usage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
-    catch(reason){if(gate.current(token)&&version===pageVersion&&!disposed)errorView(reason,root);}
+    const version=++pageVersion,token=gate.next(),staged=next==='usage',root=staged?n('div','page-content'):body();
+    if(!staged)root.append(n('p','hint',tr('Loading…','正在加载…')));
+    const viewKey=JSON.stringify([next,next==='tasks'?[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset,filter.taskTarget,filter.taskSpace]:next==='usage'?[filter.usageDays,filter.usageSpace,usageOwner]:next==='settings'?[filter.settingsTab,configurationSpace]:[]]);
+    try {root.replaceChildren();await ({settings,tasks,machines,usage}[next]||settings)(root,token);if(gate.current(token)){if(staged){const previous=host.querySelector('.page-content');if(previous?.dataset.usageScope===root.dataset.usageScope&&!cached.has(viewKey)&&cached.has(currentViewKey))cached.set(viewKey,cached.get(currentViewKey));host.replaceChildren(root);}restoreView(viewKey,token);}}
+    catch(reason){if(gate.current(token)&&version===pageVersion&&!disposed){if(staged){const target=host.querySelector('.page-content')||body();target.removeAttribute('aria-busy');target.querySelector('.usage-skeleton')?.remove();errorView(reason,target);viewReady=true;}else errorView(reason,root);}}
   }
-  function openUsageView(context,record=true){usageOwner={...context};route='usage';filter.usageOffset=0;if(record)history.pushState({potRoute:'usage',potScope:{space:context.space,owner:context.owner},potUsage:{...usageOwner}},'',location.href);routeChanged('usage');return show('usage',{keepUsageOwner:true});}
+  function openUsageView(context,record=true){usageOffsets.clear();usageOwner={...context};route='usage';if(record)history.pushState({potRoute:'usage',potScope:{space:context.space,owner:context.owner},potUsage:{...usageOwner}},'',location.href);routeChanged('usage');return show('usage',{keepUsageOwner:true});}
   function machineTasks(machine){filter.taskTarget={runtime_id:machine.runtime_id||machine.id};filter.taskSpace=machine._space_id;filter.taskOffset=0;filter.taskTab='tasks';route='tasks';routeChanged('tasks');history.pushState({potRoute:'tasks',potScope:scope()},'',location.href);return show('tasks');}
   const popstate=async event=>{
     if(!editor)return false;if(event.state?.potEditor===editor.id)return true;
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
   };
   const beforeUnload=event=>{if([...(editor?[editor]:[]),...editorParents].some(value=>value.session.dirty||value.session.pending)){event.preventDefault();event.returnValue='';}};
+  function refreshUsage(){
+    if(usageRefreshTimer!=null)return;
+    usageRefreshTimer=setTimeout(()=>{usageRefreshTimer=null;if(disposed||editor||route!=='usage'||!host.offsetParent)return;if(!viewReady||host.querySelector('.usage-list[aria-busy]')){refreshUsage();return;}show('usage',{keepUsageOwner:!!usageOwner});},150);
+  }
   const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
   return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalHost.replaceChildren();},approvalFor,decideApproval,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
     showProviders(){filter.settingsTab='providers';return show('settings');},
-    refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
-    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent){if(route==='usage')refreshUsage();else show(route,{keepUsageOwner:!!usageOwner});}},
+    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;clearTimeout(usageRefreshTimer);gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }
