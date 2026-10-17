@@ -192,7 +192,13 @@ membership; re-enrollment creates a new epoch. `remove_member` on Control uses
 before removing membership. Unknown execution outcomes are not replayed.
 
 Control routes unspecified Tasks only to machines labelled `task-runner`,
-preferring its own Runtime then stable Runtime ID order. Set labels explicitly:
+preferring its own Runtime then stable Runtime ID order. Local Controls (including
+the embedded App) start with this label. A Space must retain at least one enabled
+machine with `task-runner`: add it to another machine before removing it from
+Control. Removing the last labelled member is also rejected. Offline members
+count toward this configuration constraint; they do not guarantee availability.
+Opening a Space without any configured task runner adds the label to Control.
+Set labels explicitly:
 
 ```sh
 pot api -root "$HOME/.pot-control" -method POST \

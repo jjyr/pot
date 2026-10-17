@@ -12,6 +12,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/storage"
 	"runtime"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -44,6 +45,21 @@ type book struct {
 	Membership  *Membership           `json:"membership,omitempty"`
 	Pending     *pendingJoin          `json:"pending,omitempty"`
 }
+
+// Offline members still count: this is a routing configuration invariant, not
+// an availability guarantee. Revoked members cannot receive new Tasks.
+func (b *book) hasTaskRunner() bool {
+	if slices.Contains(b.LocalLabels, "task-runner") {
+		return true
+	}
+	for _, m := range b.Members {
+		if m.Machine.Enabled && slices.Contains(m.Machine.Labels, "task-runner") {
+			return true
+		}
+	}
+	return false
+}
+
 type pendingJoin struct {
 	Origin  string      `json:"origin"`
 	Control Identity    `json:"control"`
@@ -80,7 +96,7 @@ func Open(path string, options Options) (*Directory, error) {
 			if e != nil {
 				return e
 			}
-			d.state = book{Version: 1, RuntimeID: options.RuntimeID, Key: base64.RawURLEncoding.EncodeToString(key), Owner: secret(), Role: "neutral", Members: map[string]member{}, Invites: map[string]invitation{}, LocalLabels: []string{"local", runtime.GOOS}}
+			d.state = book{Version: 1, RuntimeID: options.RuntimeID, Key: base64.RawURLEncoding.EncodeToString(key), Owner: secret(), Role: "neutral", Members: map[string]member{}, Invites: map[string]invitation{}, LocalLabels: []string{"local", runtime.GOOS, "task-runner"}}
 			raw, err = json.Marshal(d.state)
 			if err != nil {
 				return err
@@ -118,6 +134,16 @@ func Open(path string, options Options) (*Directory, error) {
 			return fail(fmt.Errorf("invalid saved membership"))
 		}
 		if _, err := labels(m.Machine.Labels); err != nil {
+			return fail(err)
+		}
+	}
+	// Supply the local default only when the Space has no configured runner.
+	// A deliberately removed local label stays removed when another member owns it.
+	if d.state.Role != "runner" && !d.state.hasTaskRunner() {
+		if err := d.update(func(b *book) error {
+			b.LocalLabels = append(b.LocalLabels, "task-runner")
+			return nil
+		}); err != nil {
 			return fail(err)
 		}
 	}
@@ -160,6 +186,9 @@ func (d *Directory) update(fn func(*book) error) error {
 	}
 	if err = fn(&next); err != nil {
 		return err
+	}
+	if next.Role != "runner" && !next.hasTaskRunner() {
+		return fmt.Errorf("Space must retain at least one enabled machine labelled task-runner")
 	}
 	raw, err = json.Marshal(next)
 	if err != nil {
@@ -457,6 +486,9 @@ func (d *Directory) Leave(ctx context.Context, settle func(context.Context) erro
 		b.Pending = nil
 		b.Role = "neutral"
 		b.Leaving = false
+		if !b.hasTaskRunner() {
+			b.LocalLabels = append(b.LocalLabels, "task-runner")
+		}
 		return nil
 	})
 }

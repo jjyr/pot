@@ -81,12 +81,6 @@ func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
 func TestTaskMachineSelectionUsesLabelsAndStableOriginalReceipt(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
-	if _, err := s.selectTaskMachine(ctx, ""); err == nil {
-		t.Fatal("unlabelled local Runtime silently became Task runner")
-	}
-	if err := s.Machines.SetLabels(ctx, "local", []string{"task-runner"}); err != nil {
-		t.Fatal(err)
-	}
 	machine, err := s.selectTaskMachine(ctx, "")
 	if err != nil || machine != "local" {
 		t.Fatal(machine, err)
