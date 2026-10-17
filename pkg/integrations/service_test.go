@@ -296,3 +296,61 @@ func TestAdditionalServiceUsesSameLifecycle(t *testing.T) {
 		t.Fatal("service states coupled", items)
 	}
 }
+
+type startingAdapter struct{ started, stopped chan struct{} }
+
+func (a startingAdapter) Descriptor() Descriptor {
+	return Descriptor{ID: "github", Name: "GitHub", LoginAvailable: true}
+}
+func (a startingAdapter) Begin(ctx context.Context) (Challenge, error) {
+	close(a.started)
+	<-ctx.Done()
+	close(a.stopped)
+	return Challenge{}, ctx.Err()
+}
+func (a startingAdapter) Authorize(context.Context, Challenge) (Grant, error) {
+	return Grant{}, errors.New("authorization must not start")
+}
+func TestCancellationDuringChallengeRequest(t *testing.T) {
+	for _, closeService := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cancel", true: "shutdown"}[closeService], func(t *testing.T) {
+			original, _, secrets, db := fixture(t)
+			original.Close()
+			accounts, _ := NewSQLAccounts(db)
+			adapter := startingAdapter{make(chan struct{}), make(chan struct{})}
+			s, err := New(Options{Accounts: accounts, Secrets: secrets, Adapters: []Adapter{adapter}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			ctx := context.Background()
+			finished := make(chan error, 1)
+			go func() { _, err := s.BeginLogin(ctx, "github"); finished <- err }()
+			<-adapter.started
+			if closeService {
+				s.Close()
+			} else {
+				items, err := s.List(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = s.CancelLogin(ctx, "github", items[0].Login.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case <-adapter.stopped:
+			case <-time.After(time.Second):
+				t.Fatal("challenge request survived cancellation")
+			}
+			select {
+			case err := <-finished:
+				if err == nil {
+					t.Fatal("cancelled challenge accepted")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("login request did not finish")
+			}
+		})
+	}
+}
