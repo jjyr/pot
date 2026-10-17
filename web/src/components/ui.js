@@ -1,5 +1,5 @@
 import {icon} from './icons.mjs';
-import {messages} from '../locales/messages.mjs';
+import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, ownerKey, setDraft, settleSend, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
 import {renderMarkdown} from './markdown.mjs';
@@ -61,7 +61,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
   const positions = new Map(), cachedSnapshots = new Map();
-  const t = key => messages[locale][key] || key;
+  const t = key => translate(locale,key);
   root.replaceChildren();
   root.className = `pot-app surface-${surface === 'tray' ? 'tray' : 'main'}`;
   const rail = el('nav', 'feature-rail');
@@ -266,7 +266,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderShell() {
     markVisibleRead();
     if(route!=='chat')completions?.reset();
-    window.potErrors?.setTranslator(key=>messages[locale][key]||messages.en[key]||key);
+    window.potErrors?.setTranslator(t);
     document.documentElement.dataset.theme = theme;
     document.documentElement.lang = locale;
     const narrow = media.matches && surface !== 'tray';

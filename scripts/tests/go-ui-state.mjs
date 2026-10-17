@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, ownerKey, setDraft, settleSend} from '../../web/src/state/conversation.mjs';
 import {allowedLink,parseFileLink} from '../../web/src/components/markdown.mjs';
 import {createEnterGuard, bindComposer} from '../../web/src/components/composer.mjs';
+import {messages,translate} from '../../web/src/locales/messages.mjs';
+
+for(const [locale,catalog] of Object.entries(messages)){
+  assert.deepEqual(Object.keys(catalog).sort(),Object.keys(messages.en).sort(),`Shared translation keys: ${locale}`);
+  for(const [key,value] of Object.entries(catalog))assert.ok(typeof value==='string'&&value.trim(),`Empty shared translation: ${locale}/${key}`);
+}
+assert.equal(translate('zh-CN','integrations.login'),'登录');
+assert.equal(translate('en','integrations.login'),'Log in');
+assert.equal(translate('unsupported','integrations.login'),'Log in','Unknown locales fall back to English');
+assert.equal(translate('zh-CN','missing.translation'),'missing.translation','Unknown keys remain visible for diagnosis');
 
 const snapshot = (overrides = {}) => ({runtime_id: 'runtime', boot_id: 'boot', owner_id: 'control/assistant', conversation_id: 'conversation', cursor: '9007199254740993', messages: [], running: false, turn_id: null, ...overrides});
 const state = createConversationState();
