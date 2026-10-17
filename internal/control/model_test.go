@@ -130,11 +130,9 @@ func TestDeepSeekCompatibilityUsesPinnedServiceMetadataInsteadOfRouteID(t *testi
 	}))
 	defer server.Close()
 	service := taskResourceService(t)
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
 	brand := "deepseek"
 	output := uint64(128)
-	profile, err := service.Profiles.Save(context.Background(), SaveProfile{RequestID: "brand", ProfileID: "deepseek-profile", Name: "DeepSeek", Model: "deepseek-v4-flash", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "fixture", Agent: &settings, ModelSettings: &core.ModelSettings{CatalogProvider: &brand, MaxOutputTokens: &output}})
+	profile, err := service.Profiles.Save(context.Background(), SaveProfile{RequestID: "brand", ProfileID: "deepseek-profile", Name: "DeepSeek", Model: "deepseek-v4-flash", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "fixture", ModelSettings: &core.ModelSettings{CatalogProvider: &brand, MaxOutputTokens: &output}})
 	if err != nil {
 		t.Fatal(err)
 	}

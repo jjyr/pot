@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/usage"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -59,11 +58,7 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 	}
 	defer s.Close()
 	s.Registry.Create(ctx, "create", "Pot")
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
-	settings.BuiltinTools = []string{"exec_command"}
-	settings.AutoCompact = false
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "task-key", Agent: &settings, MaxOutputTokens: 100})
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "task-key", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}

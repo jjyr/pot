@@ -6,7 +6,6 @@ import (
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/webui"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 	"net/http"
@@ -36,11 +35,7 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 	defer runtime.Close()
 	s := runtime.Control
 	s.Registry.Create(ctx, "create", "Files")
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
-	settings.BuiltinTools = []string{}
-	settings.AutoCompact = false
-	profile, err := s.Profiles.Save(ctx, control.SaveProfile{RequestID: "model", Name: "Model", Model: "fixture", Endpoint: model.URL, Protocol: "openai_chat", APIKey: "isolated", Agent: &settings, MaxOutputTokens: 100})
+	profile, err := s.Profiles.Save(ctx, control.SaveProfile{RequestID: "model", Name: "Model", Model: "fixture", Endpoint: model.URL, Protocol: "openai_chat", APIKey: "isolated", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}

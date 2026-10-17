@@ -9,7 +9,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
 	"github.com/jjyr/pot/pkg/modeldirectory"
-	"github.com/jjyr/pot/pkg/resource"
+	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/storage"
 	"net/url"
 	"os"
@@ -72,13 +72,52 @@ func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*Profile
 	if p.state.Version != 1 || p.state.Requests == nil {
 		return nil, errors.New("unsupported profile store")
 	}
-	for _, profile := range p.state.Profiles {
+	settings, err := p.defaultAgentSettings()
+	if err != nil {
+		return nil, err
+	}
+	for i := range p.state.Profiles {
+		profile := &p.state.Profiles[i]
+		// Connection records cannot retain old assistant instructions or tool filters.
+		// Model intent and already persisted execution snapshots remain independent.
+		defaults := settings
+		defaults.ModelCatalog = profile.Params.Agent.ModelCatalog
+		if profile.ModelSettings == nil {
+			defaults.ContextWindow = profile.Params.Agent.ContextWindow
+		}
+		profile.Params.Agent = defaults
 		if err = profile.Validate(); err != nil {
 			return nil, err
 		}
 	}
 	return p, nil
 }
+
+// defaultAgentSettings discovers tool capabilities only. Installed Sandbox Providers
+// and resource catalogs never enter model execution snapshots or tool selection.
+func (p *ProfileStore) defaultAgentSettings() (core.AgentSettings, error) {
+	settings := core.DefaultAgentSettings()
+	if p.pluginRoot == "" {
+		return settings, nil
+	}
+	packages, err := plugin.Discover(p.pluginRoot)
+	if err != nil {
+		return settings, err
+	}
+	for _, installed := range packages {
+		if installed.Manifest.Contributes.Tools == nil {
+			continue
+		}
+		bundle, err := installed.ToolBundle()
+		if err != nil {
+			return settings, err
+		}
+		root := installed.Root
+		settings.Plugins[installed.Manifest.ID] = core.PluginConfig{Enabled: true, Source: &root, Bundle: &bundle}
+	}
+	return settings, nil
+}
+
 func (p *ProfileStore) Snapshot() ProfileSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -127,7 +166,6 @@ type SaveProfile struct {
 	Endpoint         string              `json:"endpoint"`
 	Protocol         string              `json:"protocol"`
 	APIKey           string              `json:"api_key"`
-	Agent            *core.AgentSettings `json:"agent,omitempty"`
 	MaxOutputTokens  uint64              `json:"max_output_tokens"`
 	ReasoningEffort  *string             `json:"reasoning_effort"`
 	ModelSettings    *core.ModelSettings `json:"model_settings,omitempty"`
@@ -200,31 +238,10 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 	if !core.Identifier(r.ProfileID) {
 		return core.Profile{}, errors.New("invalid profile identity")
 	}
-	settings := core.DefaultAgentSettings()
-	if index >= 0 {
-		settings = previous.Params.Agent
+	settings, err := p.defaultAgentSettings()
+	if err != nil {
+		return core.Profile{}, err
 	}
-	if r.Agent != nil {
-		settings = *r.Agent
-	}
-	// Pin configured bundles before saving a resolved configuration. A new run uses
-	// this snapshot; changes on disk never mutate an already running Agent.
-	copiedPlugins := map[string]core.PluginConfig{}
-	for name, plugin := range settings.Plugins {
-		if plugin.Enabled {
-			directory := filepath.Join(p.pluginRoot, name)
-			if plugin.Source != nil {
-				directory = *plugin.Source
-			}
-			bundle, err := resource.LoadPlugin(directory)
-			if err != nil {
-				return core.Profile{}, err
-			}
-			plugin.Bundle = &bundle
-		}
-		copiedPlugins[name] = plugin
-	}
-	settings.Plugins = copiedPlugins
 	if r.ReasoningEffort != nil {
 		effort := strings.TrimSpace(*r.ReasoningEffort)
 		if effort == "" {

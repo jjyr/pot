@@ -39,12 +39,10 @@ func configurationService(t *testing.T) (*Service, core.Profile) {
 	}
 	t.Cleanup(func() { service.Close() })
 	service.Profiles.directory = fixtureDirectory(t, 128000)
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
 	effort := "low"
 	catalog := "fixture"
 	window, output := uint64(60000), uint64(2000)
-	profile, err := service.Profiles.Save(context.Background(), SaveProfile{RequestID: "provider", Name: "Provider", Model: "first", Endpoint: "https://fixture.invalid/v1/chat/completions", Protocol: "openai_chat", APIKey: "isolated-key", Agent: &settings, ReasoningEffort: &effort, ModelSettings: &core.ModelSettings{CatalogProvider: &catalog, ContextWindow: &window, MaxOutputTokens: &output}})
+	profile, err := service.Profiles.Save(context.Background(), SaveProfile{RequestID: "provider", Name: "Provider", Model: "first", Endpoint: "https://fixture.invalid/v1/chat/completions", Protocol: "openai_chat", APIKey: "isolated-key", ReasoningEffort: &effort, ModelSettings: &core.ModelSettings{CatalogProvider: &catalog, ContextWindow: &window, MaxOutputTokens: &output}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +117,8 @@ func TestModelDefaultsRefreshOnlySameProfileRevisionAndExplicitOverridesSurvive(
 	service.Profiles.state.Profiles[0].Revision++
 	service.Profiles.mu.Unlock()
 	fresh, err = service.refreshAssistantConfiguration(ctx, thread, intent)
-	if err != nil || fresh != nil {
-		t.Fatal("updated Provider revision silently adopted", fresh, err)
+	if err != nil || fresh == nil || fresh.ContextWindow != initial.ContextWindow || fresh.SourceProfileRevision != initial.SourceProfileRevision {
+		t.Fatal("updated Provider model configuration silently adopted", fresh, err)
 	}
 }
 func TestCreationBindsFullSelectionAndNeverReappliesOnRetry(t *testing.T) {

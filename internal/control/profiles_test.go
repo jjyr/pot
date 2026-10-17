@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/secrets"
-	"github.com/jjyr/pot/pkg/core"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,9 +24,7 @@ func TestProfilesPinRoutesAndReconcileOriginalResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
-	request := SaveProfile{RequestID: "request", ProfileID: "profile", Name: "A", Model: "model", Endpoint: "https://api.example.com", Protocol: "openai_chat", APIKey: "private-token", Agent: &settings}
+	request := SaveProfile{RequestID: "request", ProfileID: "profile", Name: "A", Model: "model", Endpoint: "https://api.example.com", Protocol: "openai_chat", APIKey: "private-token"}
 	first, err := p.Save(ctx, request)
 	if err != nil {
 		t.Fatal(err)

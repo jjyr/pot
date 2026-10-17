@@ -55,7 +55,7 @@ type AgentSettings struct {
 }
 
 func DefaultAgentSettings() AgentSettings {
-	return AgentSettings{Plugins: map[string]PluginConfig{"computer-use": {Enabled: true}}, ContextWindow: 32768, AutoCompact: true, UseProviderUsage: true, ContextReserve: 4096, BuiltinTools: []string{"exec_command", "write_stdin", "apply_patch", "exec", "wait"}, RequestTimeoutMS: 180000, Shell: DefaultShellSettings()}
+	return AgentSettings{Plugins: map[string]PluginConfig{}, ContextWindow: 32768, AutoCompact: true, UseProviderUsage: true, ContextReserve: 4096, BuiltinTools: []string{"exec_command", "write_stdin", "apply_patch", "exec", "wait"}, RequestTimeoutMS: 180000, Shell: DefaultShellSettings()}
 }
 func (s *AgentSettings) UnmarshalJSON(data []byte) error {
 	type plain AgentSettings

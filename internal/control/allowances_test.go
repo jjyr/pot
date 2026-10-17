@@ -3,16 +3,13 @@ package control
 import (
 	"context"
 	"github.com/jjyr/pot/internal/usage"
-	"github.com/jjyr/pot/pkg/core"
 	"testing"
 )
 
 func TestConfiguredProviderAllowancesRetainCASAndEnforceOriginalRoute(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "provider", ProfileID: "profile", Name: "Fixture", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", Agent: &settings, MaxOutputTokens: 20})
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "provider", ProfileID: "profile", Name: "Fixture", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 20})
 	if err != nil {
 		t.Fatal(err)
 	}

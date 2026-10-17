@@ -206,7 +206,7 @@ h1, h2, p { margin: 0; }
 textarea.field-input { resize: vertical; min-height: 180px; line-height: 1.5; }
 input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px; margin: 5px 0; }
 .editor-form { max-width: 704px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; }
-.editor-fields { flex: 1; }.editor-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 16px 0; position: sticky; bottom: -32px; background: var(--canvas); border-top: 1px solid var(--divider); margin-top: 24px; }
+.editor-fields { flex: 1; }.editor-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 16px 0; position: sticky; bottom: 0; background: var(--canvas); border-top: 1px solid var(--divider); margin-top: 24px; }
 .inline-error { color: var(--danger); overflow-wrap: anywhere; display: flex; gap: 12px; align-items: center; margin: 12px 0; }
 .success-text { color: var(--success); font-size: 12px; }
 .list-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--divider); }
@@ -220,7 +220,7 @@ input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px
 .approval-host { width: 100%; max-height: 40%; overflow: auto; padding: 0 var(--page-inset); }.approval-host:empty { display: none; }.approval-card { max-width: 760px; margin: 12px auto; padding: 16px; border: 1px solid var(--input-border); border-radius: 10px; background: var(--surface); }.approval-card>.control { margin-right: 8px; }
 .title-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }.desktop-frame { border: 0; width: 100%; min-height: 60vh; }.startup-error { padding: 32px; display: flex; gap: 16px; flex-direction: column; align-items: start; }
 @media(max-width:899px){.form-row { grid-template-columns: minmax(0,1fr); gap: 6px; }.page-host{padding-top:24px;}}
-@media(max-width:719px){.page-host{padding-top:16px;}.editor-actions{flex-wrap:wrap;bottom:-24px;}.editor-actions .primary{width:100%;}.field-input,.control{font-size:16px;}.title-meta{display:none;}.usage-metrics{gap:16px;}.list-row{align-items:flex-start;}}
+@media(max-width:719px){.page-host{padding-top:16px;}.editor-actions{flex-wrap:wrap;bottom:0;}.editor-actions .primary{width:100%;}.field-input,.control{font-size:16px;}.title-meta{display:none;}.usage-metrics{gap:16px;}.list-row{align-items:flex-start;}}
 @media(pointer:coarse){.field-input,.control{min-height:44px;font-size:16px;}}
 .access-setup { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }.access-setup form { width: min(100%,400px); display: flex; flex-direction: column; gap: 20px; }.access-setup h1 { font-size: 24px; font-weight: 600; }.access-setup label { display: flex; flex-direction: column; gap: 8px; }
 .message-body ol { margin: 12px 0; padding-left: 24px; }.message-body blockquote { margin: 12px 0; padding-left: 16px; border-left: 3px solid var(--input-border); color: var(--muted); }.message-body hr { border: 0; border-top: 1px solid var(--divider); margin: 20px 0; }.message-body .markdown-table { max-width: 100%; overflow-x: auto; margin: 12px 0; }.markdown-table table { border-collapse: collapse; }.markdown-table td,.markdown-table th { padding: 6px 12px; border: 1px solid var(--divider); }.message-body li>input[type='checkbox']{margin:0 8px 0 0;}.role-tool .tool-details{max-width:100%;width:100%;}.role-tool summary{color:var(--muted);cursor:pointer;font-size:13px;}.role-tool pre{white-space:pre-wrap;overflow-wrap:anywhere;}
@@ -320,3 +320,5 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .integration-code{font-size:20px;letter-spacing:2px;font-weight:600;user-select:all}
 .integration-authorization>a{text-decoration:none}
 @media(max-width:719px){.integration-authorization{padding-left:0}.integration-row{gap:14px}.integration-status,.integration-identity{font-size:14px}}
+
+.editor-fields>.avatar{display:block;margin-bottom:24px}.provider-key-link{align-self:flex-start;color:var(--primary);font-size:13px;text-decoration:none}

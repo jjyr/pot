@@ -214,7 +214,24 @@ func (s *Service) refreshAssistantConfiguration(ctx context.Context, current cor
 		}
 	}
 	if !sameRevision {
-		return nil, nil
+		// Keep the original model selection while adopting product tool defaults
+		// only at a fresh turn boundary, including older Provider revisions.
+		settings, err := s.Profiles.defaultAgentSettings()
+		if err != nil {
+			return nil, err
+		}
+		next := current.Config
+		next.Params.Agent.BuiltinTools = settings.BuiltinTools
+		next.Params.Agent.AllowedTools = nil
+		next.Params.Agent.Plugins = settings.Plugins
+		for name, configured := range next.Params.Agent.Plugins {
+			configured.Source = nil
+			next.Params.Agent.Plugins[name] = configured
+		}
+		if err := next.Rehash(); err != nil {
+			return nil, err
+		}
+		return &next, nil
 	}
 	next, err := s.Profiles.ResolveAssistant(selection)
 	if err != nil {
